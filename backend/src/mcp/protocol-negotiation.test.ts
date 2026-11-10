@@ -122,6 +122,11 @@ describe('MCP endpoint protocol negotiation (2026-07-28)', () => {
   test('work-note writes fail closed when this stateless endpoint cannot ask for approval', async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'kory-mcp-work-note-approval-'));
     try {
+      saveNotesAgentPermissions(projectRoot, {
+        preset: 'custom',
+        tools: { ...DEFAULT_NOTE_TOOL_PERMISSIONS, record_work_note: 'ask' },
+        overrides: { record_work_note: 'ask' },
+      });
       const result = (await handleMcpRequest(
         {
           jsonrpc: '2.0',
@@ -148,6 +153,7 @@ describe('MCP endpoint protocol negotiation (2026-07-28)', () => {
       saveNotesAgentPermissions(projectRoot, {
         preset: 'custom',
         tools: { ...DEFAULT_NOTE_TOOL_PERMISSIONS, record_work_note: 'block' },
+        overrides: { record_work_note: 'block' },
       });
       const result = (await handleMcpRequest(
         { jsonrpc: '2.0', id: 13, method: 'tools/list', params: {} },

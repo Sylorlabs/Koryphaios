@@ -1,4 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { unlink } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type {
@@ -619,7 +622,7 @@ type TranscriptionRequest = { audioBase64?: string; mimeType?: string; language?
 
 type AudioInput = { bytes: Uint8Array<ArrayBuffer>; mimeType: string; extension: string };
 
-function decodeAudio(request: TranscriptionRequest): AudioInput {
+async function decodeAudio(request: TranscriptionRequest): Promise<AudioInput> {
   if (!request.audioBase64) throw new ValidationError('Recorded audio is required');
   const bytes = Uint8Array.from(Buffer.from(request.audioBase64, 'base64'));
   if (!bytes.length || bytes.length > 25 * 1024 * 1024)
@@ -632,6 +635,31 @@ function decodeAudio(request: TranscriptionRequest): AudioInput {
       : mimeType.includes('wav')
         ? 'wav'
         : 'webm';
+
+  // MediaRecorder produces WebM without a duration element, which some
+  // transcription backends cannot parse. Normalize such clips to MP3 via
+  // ffmpeg so the payload carries proper container metadata.
+  if (mimeType.includes('webm')) {
+    const id = randomUUID();
+    const inputPath = join(tmpdir(), `kory-voice-${id}.webm`);
+    const outputPath = join(tmpdir(), `kory-voice-${id}.mp3`);
+    try {
+      await writeFile(inputPath, bytes);
+      execFileSync(
+        'ffmpeg',
+        ['-y', '-i', inputPath, '-vn', '-ar', '16000', '-ac', '1', '-b:a', '64k', outputPath],
+        { stdio: 'ignore' },
+      );
+      const outBytes = await readFile(outputPath);
+      return { bytes: new Uint8Array(outBytes), mimeType: 'audio/mpeg', extension: 'mp3' };
+    } catch {
+      // Fall back to the original payload if ffmpeg is unavailable or fails.
+    } finally {
+      await unlink(inputPath).catch(() => {});
+      await unlink(outputPath).catch(() => {});
+    }
+  }
+
   return { bytes, mimeType, extension };
 }
 
@@ -780,7 +808,7 @@ async function transcribeAssemblyAI(
 export async function transcribeRecording(
   request: TranscriptionRequest,
 ): Promise<TranscriptionResult> {
-  const audio = decodeAudio(request);
+  const audio = await decodeAudio(request);
   const settings = await loadVoiceSettings();
   const { provider, modelId } = settings.input;
   if (provider === KORY_LOCAL_PROVIDER)

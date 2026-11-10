@@ -98,7 +98,8 @@ export const createChecklistTool: Tool = {
       scope: {
         type: 'string',
         enum: SCOPES,
-        description: 'Visibility; default workspace (visible in every chat)',
+        description:
+          'Visibility; defaults to session (this chat). workspace is visible in every chat',
       },
     },
     required: ['title'],
@@ -108,7 +109,7 @@ export const createChecklistTool: Tool = {
     const input = call.input as Record<string, unknown>;
     const title = typeof input.title === 'string' ? input.title.trim() : '';
     if (!title) return { ...fail(call, 'title is required'), durationMs: Date.now() - start };
-    const scope = (input.scope ?? 'workspace') as ChecklistScope;
+    const scope = (input.scope ?? (ctx.sessionId ? 'session' : 'workspace')) as ChecklistScope;
     try {
       const checklist = await getContext().checklists.create({
         title,

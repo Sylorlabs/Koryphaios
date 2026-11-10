@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { getPromptCacheUsageSummary, initCreditDb, recordUsage } from './db';
+import { getPromptCacheUsageSummary, getUsageEventsSince, initCreditDb, recordUsage } from './db';
 
 describe('durable prompt cache usage accounting', () => {
   test('persists cache read/write tokens and net savings by provider', () => {
@@ -41,6 +41,20 @@ describe('durable prompt cache usage accounting', () => {
       savingsUsd: 0.01,
       averageTtftMs: 120,
       averageLatencyMs: 900,
+    });
+  });
+
+  test('retains exact run revision provenance for usage events', () => {
+    const root = mkdtempSync(join(tmpdir(), 'kory-run-usage-'));
+    initCreditDb(root);
+    recordUsage('gpt-5.6', 'openai', 100, 10, 0.01, {
+      sessionId: 'session-1',
+      runRef: { sessionId: 'session-1', runId: 'run-1', revision: 4 },
+    });
+    expect(getUsageEventsSince(0).at(-1)?.runRef).toEqual({
+      sessionId: 'session-1',
+      runId: 'run-1',
+      revision: 4,
     });
   });
 });

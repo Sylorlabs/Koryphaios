@@ -10,9 +10,10 @@
 // adapter was enabled from that signal; it is not an authentication verdict.
 
 import { existsSync } from 'node:fs';
-import { join, delimiter } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { join } from 'node:path';
+import { execFile, spawnSync } from 'node:child_process';
 import type { ProviderName } from '@koryphaios/shared';
+import { locateWorkBuddyDesktopApp } from './workbuddy-desktop-runtime';
 import {
   detectClaudeCodeLogin,
   detectCodexCLILogin,
@@ -28,16 +29,35 @@ import {
   createCursorCLIAuthMarker,
   detectDevinCLILogin,
   createDevinCLIAuthMarker,
+  createWorkBuddyDesktopAuthMarker,
   detectKimiCodeCLILogin,
   discoverFreebuffAccounts,
   createFreebuffCLIAuthMarker,
+  detectOmnirushCLILogin,
+  createOmnirushCLIAuthMarker,
+  detectCodeBuddyCLILogin,
+  createCodeBuddyCLIAuthMarker,
+  detectOpenCodeCLILogin,
+  createOpenCodeCLIAuthMarker,
 } from './auth-utils';
 import { discoverCliAccounts } from './cli-accounts';
 import { createKimiCodeAuthMarker, createKimiCodeCliMarker } from './kimicode-auth';
+import { executableSuffixes, findOnPath, isWindows } from '../runtime/platform';
 
 export interface AgentCliStatus {
   /** Stable id for the CLI. */
-  id: 'claude' | 'codex' | 'antigravity' | 'grok' | 'cursor' | 'devin' | 'kimi' | 'freebuff';
+  id:
+    | 'claude'
+    | 'codex'
+    | 'antigravity'
+    | 'grok'
+    | 'codebuddy'
+    | 'cursor'
+    | 'devin'
+    | 'kimi'
+    | 'freebuff'
+    | 'omnirush'
+    | 'opencode';
   displayName: string;
   /** Candidate binary names looked up on PATH. */
   binaries: string[];
@@ -77,16 +97,7 @@ export interface AgentCliStatus {
 
 /** Locate an executable on PATH without spawning a process. */
 export function whichBinary(name: string): string | null {
-  const PATH = process.env.PATH ?? '';
-  const exts = process.platform === 'win32' ? ['', '.exe', '.cmd', '.bat'] : [''];
-  for (const dir of PATH.split(delimiter)) {
-    if (!dir) continue;
-    for (const ext of exts) {
-      const full = join(dir, name + ext);
-      if (existsSync(full)) return full;
-    }
-  }
-  return null;
+  return findOnPath(name);
 }
 
 function firstInstalled(binaries: string[]): string | null {
@@ -118,7 +129,7 @@ export function probeCliVersion(binary: string, provider: ProviderName): boolean
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: CLI_PROBE_TIMEOUT_MS,
       encoding: 'utf8',
-      shell: process.platform === 'win32',
+      shell: isWindows(),
     });
     return result.status === 0 && (result.stdout?.trim().length ?? 0) > 0;
   } catch (err: unknown) {
@@ -126,7 +137,9 @@ export function probeCliVersion(binary: string, provider: ProviderName): boolean
   }
 }
 
-export function probeCliConnection(binary: string, provider: ProviderName): boolean {
+/** Explicit verification may contact the account backend. Keep it asynchronous
+ * so a slow CLI cannot stall health checks or unrelated HTTP requests. */
+export function probeCliConnection(binary: string, provider: ProviderName): Promise<boolean> {
   const args =
     provider === 'claude'
       ? ['auth', 'status', '--json']
@@ -136,28 +149,39 @@ export function probeCliConnection(binary: string, provider: ProviderName): bool
           ? ['auth', 'status']
           : provider === 'grok' || provider === 'antigravity'
             ? ['models']
-            : cliVersionArgs(provider);
-  try {
-    const result = spawnSync(binary, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      timeout: CLI_PROBE_TIMEOUT_MS,
-      encoding: 'utf8',
-      shell: process.platform === 'win32',
-    });
-    if (result.status !== 0) return false;
-    const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`.trim();
-    if (!output || /not authenticated|not logged in|logged out/i.test(output)) return false;
-    if (provider === 'claude') {
-      try {
-        return JSON.parse(result.stdout || '{}').loggedIn === true;
-      } catch {
-        return false;
-      }
-    }
-    return true;
-  } catch {
-    return false;
-  }
+            : provider === 'omnirush'
+              ? ['whoami']
+              : provider === 'opencode'
+                ? ['models']
+                : cliVersionArgs(provider);
+  return new Promise((resolve) => {
+    const child = execFile(
+      binary,
+      args,
+      {
+        timeout: CLI_PROBE_TIMEOUT_MS,
+        maxBuffer: 1024 * 1024,
+        encoding: 'utf8',
+        shell: isWindows(),
+      },
+      (error, stdout, stderr) => {
+        if (error) return resolve(false);
+        const output = `${stdout}\n${stderr}`.trim();
+        if (!output || /not authenticated|not logged in|logged out/i.test(output)) {
+          return resolve(false);
+        }
+        if (provider === 'claude') {
+          try {
+            return resolve(JSON.parse(stdout || '{}').loggedIn === true);
+          } catch {
+            return resolve(false);
+          }
+        }
+        resolve(true);
+      },
+    );
+    child.stdin?.end();
+  });
 }
 
 /**
@@ -171,33 +195,42 @@ export function canAutoEnable(provider: ProviderName): boolean {
   switch (provider) {
     case 'claude': {
       const bin = whichBinary('claude');
-      return !!bin && detectClaudeCodeLogin() && probeCliConnection(bin, provider);
+      return !!bin && detectClaudeCodeLogin();
     }
     case 'codex': {
       const bin = whichBinary('codex');
       return (
         !!bin &&
         (detectCodexCLILogin() ||
-          discoverCliAccounts().some((account) => account.provider === 'codex')) &&
-        probeCliConnection(bin, provider)
+          discoverCliAccounts().some((account) => account.provider === 'codex'))
       );
     }
     case 'antigravity': {
       const bin = whichBinary('agy');
-      return !!bin && detectAntigravityCLILogin() && probeCliConnection(bin, provider);
+      return !!bin && detectAntigravityCLILogin();
     }
     case 'grok': {
       // Grok Build subscription CLI — installed + logged in (subscription or xAI key).
       const bin = whichBinary('grok');
-      return !!bin && detectGrokCLILogin() && probeCliConnection(bin, provider);
+      return !!bin && detectGrokCLILogin();
     }
+    case 'codebuddy': {
+      // CodeBuddy subscription CLI — installed + logged in (subscription or key).
+      const bin = whichBinary('codebuddy');
+      return !!bin && detectCodeBuddyCLILogin();
+    }
+    case 'workbuddy-desktop':
+      // The WorkBuddy AI desktop app is the whole configuration: its runtime
+      // owns the login, so there is no credential to detect. Installed means
+      // ready — no token, no login step in Koryphaios.
+      return locateWorkBuddyDesktopApp() !== null;
     case 'cursor': {
       const bin = whichBinary('cursor-agent');
-      return !!bin && detectCursorCLILogin() && probeCliConnection(bin, provider);
+      return !!bin && detectCursorCLILogin();
     }
     case 'devin': {
       const bin = whichBinary('devin');
-      return !!bin && detectDevinCLILogin() && probeCliConnection(bin, provider);
+      return !!bin && detectDevinCLILogin();
     }
     case 'kimicode':
       // The kimi CLI owns its own OAuth session. Koryphaios reads the stored
@@ -216,8 +249,15 @@ export function canAutoEnable(provider: ProviderName): boolean {
       // Docker's Linux tmux/bwrap, not nonexistent host tmux/bwrap binaries.
       // As for other CLIs, this is detection, never an authentication verdict.
       return discoverFreebuffAccounts().some(
-        (account) => !!whichBinary('freebuff') || existsSync(join(account.profileDir, 'freebuff')),
+        (account) =>
+          !!whichBinary('freebuff') ||
+          executableSuffixes().some((suffix) => existsSync(join(account.profileDir, `freebuff${suffix}`))),
       );
+    case 'omnirush':
+      return !!whichBinary('omnirush') && detectOmnirushCLILogin();
+    case 'opencode':
+      // OpenCode subscription CLI — installed + logged in (~/.local/share/opencode/auth.json).
+      return !!whichBinary('opencode') && detectOpenCodeCLILogin();
     default:
       return false;
   }
@@ -243,6 +283,8 @@ export function cliAutoEnableCreds(
     case 'grok':
       // The CLI owns the real token; the marker just signals "use the CLI harness".
       return { authToken: createGrokCLIAuthMarker() };
+    case 'codebuddy':
+      return { authToken: createCodeBuddyCLIAuthMarker() };
     case 'cursor':
       return { authToken: createCursorCLIAuthMarker() };
     case 'devin':
@@ -263,6 +305,17 @@ export function cliAutoEnableCreds(
       // The CLI's credentials file owns the real token; the marker just
       // signals "use the SDK harness".
       return { authToken: createFreebuffCLIAuthMarker() };
+    case 'omnirush':
+      return { authToken: createOmnirushCLIAuthMarker() };
+    case 'opencode':
+      // The CLI owns the real token; the marker just signals "use the CLI harness".
+      return { authToken: createOpenCodeCLIAuthMarker() };
+    case 'workbuddy-desktop':
+      // No credential exists to detect: the marker only says "the desktop app
+      // is installed, route turns through its runtime".
+      return locateWorkBuddyDesktopApp()
+        ? { authToken: createWorkBuddyDesktopAuthMarker() }
+        : null;
     default:
       return null;
   }
@@ -319,6 +372,19 @@ export function detectAgentClis(): AgentCliStatus[] {
         : 'Antigravity CLI is installed but not configured.',
     loggedOutNote: 'No Antigravity login material detected — run "agy login".',
     docsUrl: 'https://antigravity.google/docs/cli-getting-started',
+  });
+
+  // ── CodeBuddy → `codebuddy` provider (its own CLI harness, like Claude Code / Codex). ──
+  const codebuddyLogin = detectCodeBuddyCLILogin();
+  const codebuddy = mk('codebuddy', 'CodeBuddy', ['codebuddy'], 'codebuddy', {
+    loggedIn: codebuddyLogin,
+    authSource: codebuddyLogin ? '~/.codebuddy' : null,
+    autoEnabled: canAutoEnable('codebuddy'),
+    workingNote:
+      'CodeBuddy login material detected. Chat is routed through the CLI; the model catalog is read from the installed CLI product files.',
+    loggedOutNote:
+      'No CodeBuddy login material detected — complete the interactive `codebuddy` login. The international endpoint (www.codebuddy.ai) is currently banned upstream; run `CODEBUDDY_COPILOT_INTERNET_ENVIRONMENT=internal codebuddy`.',
+    docsUrl: 'https://copilot.tencent.com',
   });
 
   // ── Grok Build → `grok` provider (its own CLI harness, like Claude Code / Codex). ──
@@ -397,7 +463,30 @@ export function detectAgentClis(): AgentCliStatus[] {
     docsUrl: 'https://github.com/CodebuffAI/codebuff',
   });
 
-  return [claude, codex, antigravity, grok, cursor, devin, kimi, freebuff];
+  const omnirushLogin = detectOmnirushCLILogin();
+  const omnirush = mk('omnirush', 'Omnirush CLI', ['omnirush'], 'omnirush', {
+    loggedIn: omnirushLogin,
+    authSource: omnirushLogin ? '~/.omnirush/auth.json' : null,
+    autoEnabled: canAutoEnable('omnirush'),
+    workingNote:
+      'Omnirush login material detected. Chat is routed through the installed CLI; model, context, and thinking metadata are read from the CLI at runtime.',
+    loggedOutNote: 'No Omnirush login material detected — run "omnirush login" in your terminal.',
+    docsUrl: 'https://omnirush.ai/omnirush',
+  });
+
+  const opencodeLogin = detectOpenCodeCLILogin();
+  const opencode = mk('opencode', 'OpenCode', ['opencode'], 'opencode', {
+    loggedIn: opencodeLogin,
+    authSource: opencodeLogin ? '~/.local/share/opencode/auth.json' : null,
+    autoEnabled: canAutoEnable('opencode'),
+    workingNote:
+      'OpenCode login material detected. Chat is routed through the installed CLI (ACP); the model catalog and context windows come from the CLI\'s own authenticated catalog. Account access is verified only when the CLI runs.',
+    loggedOutNote:
+      'No OpenCode login material detected — run "opencode auth login" in your terminal, then click Auth again.',
+    docsUrl: 'https://opencode.ai/docs/cli/',
+  });
+
+  return [claude, codex, antigravity, codebuddy, grok, cursor, devin, kimi, freebuff, omnirush, opencode];
 }
 
 function mk(

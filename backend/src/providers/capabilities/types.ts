@@ -179,6 +179,23 @@ export interface CapabilityAdapter {
   readonly defaultBaseUrl: string;
   /** Whether a base URL alone (no key) is sufficient configuration. */
   readonly endpointAuthOnly?: boolean;
+  /**
+   * Generation options this adapter actually forwards upstream.
+   *
+   * The UI must not offer a control the adapter will silently drop, and it must
+   * not hide one the provider honours. Declared here, next to the request path
+   * that consumes them, so a picker never learns provider names.
+   */
+  readonly requestOptions?: {
+    /** Forwards a sound/audio toggle for generated media. */
+    audio?: boolean;
+    /** Forwards a resolution preset. */
+    resolution?: boolean;
+    /** Forwards a negative prompt. */
+    negativePrompt?: boolean;
+    /** Takes a bare seconds value ("5") instead of a suffixed one ("5s"). */
+    durationSeconds?: boolean;
+  };
   verify(config: ResolvedCapabilityConfig, signal?: AbortSignal): Promise<CapabilityVerifyResult>;
   listModels?(
     config: ResolvedCapabilityConfig,

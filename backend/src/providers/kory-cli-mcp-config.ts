@@ -19,6 +19,7 @@ export function buildKoryCliMcpConfig(
 
   const port = process.env.KORYPHAIOS_PORT ?? '3001';
   const host = process.env.KORYPHAIOS_HOST ?? '127.0.0.1';
+  const backendUrl = process.env.KORY_BACKEND_URL?.trim() || `http://${host}:${port}`;
   const grant = ctx.bridgeGrantLease
     ? ctx.bridgeGrantLease.grant(['mcp:catalog', 'mcp:execute'])
     : getKoryBridgeGrant(ctx.sessionId, ctx.role, ['mcp:catalog', 'mcp:execute']);
@@ -32,7 +33,7 @@ export function buildKoryCliMcpConfig(
         provider,
       ],
       env: {
-        KORY_BACKEND_URL: `http://${host}:${port}`,
+        KORY_BACKEND_URL: backendUrl,
         KORY_BRIDGE_AUTH_FILE: grant.path,
       },
       transport: 'stdio',
@@ -49,6 +50,7 @@ export function serializeKoryMcpServers(
       command: server.command,
       args: server.args,
       env: server.env ?? {},
+      ...(server.transport === 'stdio' ? { type: 'stdio' } : { type: server.transport }),
     };
   }
   return { mcpServers };

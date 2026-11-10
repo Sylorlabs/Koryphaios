@@ -1769,6 +1769,157 @@ export const MIGRATIONS: Migration[] = [
       DROP TABLE IF EXISTS video_history;
     `,
   },
+  {
+    version: '0050',
+    description: 'Add optional presentation icons to notes',
+    up: `ALTER TABLE notes ADD COLUMN icon TEXT;`,
+    down: ``,
+  },
+  {
+    version: '0051',
+    description: 'Add mutable per-agent steering queues',
+    up: `
+      CREATE TABLE IF NOT EXISTS agent_steering_commands (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        content TEXT NOT NULL,
+        model TEXT,
+        reasoning_level TEXT,
+        status TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        started_at INTEGER,
+        finished_at INTEGER,
+        error TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_agent_steering_queue
+        ON agent_steering_commands(session_id, agent_id, status, position);
+      CREATE INDEX IF NOT EXISTS idx_agent_steering_recent
+        ON agent_steering_commands(session_id, agent_id, updated_at);
+    `,
+    down: `
+      DROP INDEX IF EXISTS idx_agent_steering_recent;
+      DROP INDEX IF EXISTS idx_agent_steering_queue;
+      DROP TABLE IF EXISTS agent_steering_commands;
+    `,
+  },
+  {
+    version: '0052',
+    description: 'Allow steering queue recovery for non-durable worker fixtures',
+    up: `
+      ALTER TABLE agent_steering_commands RENAME TO agent_steering_commands_old;
+      CREATE TABLE agent_steering_commands (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        content TEXT NOT NULL,
+        model TEXT,
+        reasoning_level TEXT,
+        status TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        started_at INTEGER,
+        finished_at INTEGER,
+        error TEXT
+      );
+      INSERT INTO agent_steering_commands SELECT * FROM agent_steering_commands_old;
+      DROP TABLE agent_steering_commands_old;
+      CREATE INDEX IF NOT EXISTS idx_agent_steering_queue
+        ON agent_steering_commands(session_id, agent_id, status, position);
+      CREATE INDEX IF NOT EXISTS idx_agent_steering_recent
+        ON agent_steering_commands(session_id, agent_id, updated_at);
+    `,
+    down: ``,
+  },
+  {
+    version: '0053',
+    description: 'Add durable project identities and icon metadata',
+    up: `
+      CREATE TABLE IF NOT EXISTS project_identities (
+        id TEXT PRIMARY KEY,
+        identity_key TEXT NOT NULL UNIQUE,
+        root_path TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        icon TEXT NOT NULL,
+        revision INTEGER NOT NULL DEFAULT 1,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_project_identities_updated
+        ON project_identities(updated_at DESC);
+    `,
+    down: `
+      DROP INDEX IF EXISTS idx_project_identities_updated;
+      DROP TABLE IF EXISTS project_identities;
+    `,
+  },
+  {
+    version: '0054',
+    description: 'Add neutral project roots and repository identities',
+    up: `
+      CREATE TABLE IF NOT EXISTS source_control_repositories (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        canonical_path TEXT NOT NULL UNIQUE,
+        identity_key TEXT NOT NULL UNIQUE,
+        remote TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS project_roots (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        canonical_path TEXT NOT NULL,
+        label TEXT NOT NULL,
+        access TEXT NOT NULL,
+        source_control_kind TEXT NOT NULL,
+        repository_id TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(project_id, canonical_path),
+        FOREIGN KEY(repository_id) REFERENCES source_control_repositories(id) ON DELETE SET NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_project_roots_project ON project_roots(project_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_project_roots_repository ON project_roots(repository_id);
+    `,
+    down: `
+      DROP INDEX IF EXISTS idx_project_roots_repository;
+      DROP INDEX IF EXISTS idx_project_roots_project;
+      DROP TABLE IF EXISTS project_roots;
+      DROP TABLE IF EXISTS source_control_repositories;
+    `,
+  },
+  {
+    version: '0055',
+    description: 'Persist remote protocol operation receipts',
+    up: `
+      CREATE TABLE IF NOT EXISTS remote_operations (
+        command_id TEXT PRIMARY KEY,
+        operation_id TEXT NOT NULL,
+        target TEXT NOT NULL,
+        state TEXT NOT NULL,
+        cursor INTEGER NOT NULL,
+        payload_hash TEXT NOT NULL,
+        issued_at INTEGER NOT NULL,
+        accepted_at INTEGER,
+        completed_at INTEGER,
+        error TEXT,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_remote_operations_operation
+        ON remote_operations(operation_id, cursor);
+      CREATE INDEX IF NOT EXISTS idx_remote_operations_state
+        ON remote_operations(state, updated_at);
+    `,
+    down: `
+      DROP INDEX IF EXISTS idx_remote_operations_state;
+      DROP INDEX IF EXISTS idx_remote_operations_operation;
+      DROP TABLE IF EXISTS remote_operations;
+    `,
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────────────
@@ -2853,6 +3004,34 @@ export class MigrationRunner {
     `);
   }
 
+  private applyProcessSupervisorMigration(migration: Migration): void {
+    // The supervisor can have created this table before the migration ledger
+    // was introduced. CREATE TABLE IF NOT EXISTS does not repair that legacy
+    // table, so add the lifecycle contract one column at a time before the
+    // migration postcondition is checked. Existing process rows are preserved.
+    this.db.exec(this.transactionBody(migration.up));
+    this.addColumnIfMissing(
+      'supervised_processes',
+      'command_replayable',
+      'INTEGER NOT NULL DEFAULT 0',
+    );
+    this.addColumnIfMissing(
+      'supervised_processes',
+      'provenance',
+      "TEXT NOT NULL DEFAULT 'legacy-unknown'",
+    );
+    this.addColumnIfMissing(
+      'supervised_processes',
+      'supervision',
+      "TEXT NOT NULL DEFAULT 'legacy-unknown'",
+    );
+    this.addColumnIfMissing('supervised_processes', 'is_background', 'INTEGER NOT NULL DEFAULT 0');
+    this.addColumnIfMissing('supervised_processes', 'terminal_reason', 'TEXT');
+    this.addColumnIfMissing('supervised_processes', 'terminal_error', 'TEXT');
+    this.addColumnIfMissing('supervised_processes', 'stdout_snapshot', 'TEXT');
+    this.addColumnIfMissing('supervised_processes', 'stderr_snapshot', 'TEXT');
+  }
+
   private foreignKeyDirectives(sql: string): Array<'ON' | 'OFF'> {
     return Array.from(sql.matchAll(/PRAGMA\s+foreign_keys\s*=\s*(ON|OFF)\s*;/gi)).map(
       (match) => match[1]!.toUpperCase() as 'ON' | 'OFF',
@@ -3159,6 +3338,8 @@ export class MigrationRunner {
         `);
       } else if (migration.version === '0037') {
         this.applyContinuationProcessMigration();
+      } else if (migration.version === '0040') {
+        this.applyProcessSupervisorMigration(migration);
       } else {
         this.db.exec(this.transactionBody(migration.up));
       }

@@ -54,11 +54,10 @@ export function cliAccountCommandLabel(
 // suffixed sibling homes are intentionally included: users commonly isolate
 // work/personal subscriptions with wrappers such as CODEX_HOME=~/.codex2.
 //
-// Freebuff and Jules are deliberately not listed here because their profile
-// layouts do not follow this generic $HOME-prefix scheme. Freebuff accounts
+// Freebuff is deliberately not listed here because its profile
+// layout does not follow this generic $HOME-prefix scheme. Freebuff accounts
 // are discovered by discoverFreebuffAccounts() under ~/.config/manicode* and
-// its PTY usage is surfaced from Kory-owned provider events; Jules remains an
-// approval-required provider detected through auth-utils.
+// its PTY usage is surfaced from Kory-owned provider events.
 const PROFILE_DEFINITIONS: ProfileDefinition[] = [
   { provider: 'codex', command: 'codex', directoryPrefix: '.codex', authFiles: ['auth.json'] },
   {
@@ -68,6 +67,12 @@ const PROFILE_DEFINITIONS: ProfileDefinition[] = [
     authFiles: ['.credentials.json'],
   },
   { provider: 'grok', command: 'grok', directoryPrefix: '.grok', authFiles: ['auth.json'] },
+  {
+    provider: 'codebuddy',
+    command: 'codebuddy',
+    directoryPrefix: '.codebuddy',
+    authFiles: ['settings.json', 'auth.json', 'user-state.json'],
+  },
   {
     provider: 'cursor',
     command: 'cursor-agent',

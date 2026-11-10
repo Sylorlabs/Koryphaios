@@ -184,6 +184,9 @@ export const replicateAdapter: CapabilityAdapter = {
   provider: 'replicate',
   capabilities: ['image', 'video', 'audio'],
   defaultBaseUrl: BASE_URL,
+  // Per-model inputs are forwarded as they are present: resolution, negative
+  // prompt and `generate_audio` are all supported by the video presets.
+  requestOptions: { audio: true, resolution: true, negativePrompt: true, durationSeconds: true },
 
   async verify(config, signal): Promise<CapabilityVerifyResult> {
     try {

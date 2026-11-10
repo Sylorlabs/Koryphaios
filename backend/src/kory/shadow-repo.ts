@@ -52,6 +52,7 @@ import { randomUUID } from 'node:crypto';
 import { delimiter, dirname, join, resolve, relative } from 'node:path';
 import { GitExecutor } from './git-executor';
 import { koryLog } from '../logger';
+import { canonicalizePath, isUnix, isWindows } from '../runtime/platform';
 
 /** Refs that belong to the checkpoint system and should live in the shadow repo. */
 const SHADOW_REF_PREFIXES = [
@@ -254,7 +255,7 @@ export class ShadowRepo {
         // Windows rejects paths longer than MAX_PATH (260) by default. Shadow
         // ref paths like refs/kory/checkpoints/<sha256>/<timestamp-sha256>
         // routinely exceed that limit, so enable long paths on Windows.
-        if (process.platform === 'win32') {
+        if (isWindows()) {
           shadowConfigEntries.push(['core.longpaths', 'true']);
         }
         for (const [key, value] of shadowConfigEntries) {
@@ -304,13 +305,15 @@ export class ShadowRepo {
       throw new ShadowRepoError(`No Git repository found at ${workingDirectory}`);
     }
     const lockRoot = join(context.commonGitDir, LOCK_DIRECTORY_NAME);
-    if (existsSync(lockRoot)) {
-      const lockRootStat = lstatSync(lockRoot);
-      if (lockRootStat.isSymbolicLink() || !lockRootStat.isDirectory()) {
-        throw new ShadowRepoError(`Unsafe checkpoint lock directory: ${lockRoot}`);
-      }
-    } else {
+    try {
       mkdirSync(lockRoot, { mode: 0o700 });
+    } catch (error) {
+      // Another process may have created the shared lock root concurrently.
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    }
+    const lockRootStat = lstatSync(lockRoot);
+    if (lockRootStat.isSymbolicLink() || !lockRootStat.isDirectory()) {
+      throw new ShadowRepoError(`Unsafe checkpoint lock directory: ${lockRoot}`);
     }
     const lockPath = join(lockRoot, LOCK_NAME);
     const release = await this.acquireDirectoryLock(lockPath, purpose);
@@ -388,11 +391,9 @@ export class ShadowRepo {
     // resolution (GetFinalPathNameByHandleW). On other platforms, use the
     // default realpathSync to avoid macOS /var → /private/var resolution
     // differences with the native version.
-    const canonicalResolve =
-      process.platform === 'win32' ? (realpathSync.native ?? realpathSync) : realpathSync;
     try {
-      commonGitDir = canonicalResolve(commonGitDir);
-      gitDir = canonicalResolve(gitDir);
+      commonGitDir = canonicalizePath(commonGitDir);
+      gitDir = canonicalizePath(gitDir);
     } catch {
       return null;
     }
@@ -402,7 +403,7 @@ export class ShadowRepo {
     // that would cause legacyShadows to contain duplicate entries.
     let canonicalRoot = root;
     try {
-      canonicalRoot = canonicalResolve(root);
+      canonicalRoot = canonicalizePath(root);
     } catch {
       // root always exists at this point; fall back to resolved path
     }
@@ -663,7 +664,7 @@ export class ShadowRepo {
       renameSync(temporary, path);
       // Directory fsync is not supported on Windows (EPERM) and is a
       // best-effort durability hint, not a correctness requirement.
-      if (process.platform !== 'win32') {
+      if (isUnix()) {
         const parent = openSync(dirname(path), 'r');
         try {
           fsyncSync(parent);

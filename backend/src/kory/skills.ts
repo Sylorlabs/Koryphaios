@@ -588,8 +588,24 @@ export function explicitSkillPinsFromPrompt(
   return unique(pins);
 }
 
+// Only authored phrases are cached, never prompt decisions or mutable skill
+// revisions. Bound both entry count and input size for imported/local metadata.
+const phraseTokenCache = new Map<string, readonly string[]>();
+function phraseTokensFor(phrase: string): readonly string[] {
+  const cached = phraseTokenCache.get(phrase);
+  if (cached) return cached;
+  const tokens = normalizeSkillTokens(phrase);
+  if (phrase.length <= 2_048) {
+    if (phraseTokenCache.size >= 8_192) {
+      phraseTokenCache.delete(phraseTokenCache.keys().next().value!);
+    }
+    phraseTokenCache.set(phrase, tokens);
+  }
+  return tokens;
+}
+
 function containsTokenPhrase(tokens: string[], phrase: string): boolean {
-  const phraseTokens = normalizeSkillTokens(phrase);
+  const phraseTokens = phraseTokensFor(phrase);
   if (phraseTokens.length === 0 || phraseTokens.length > tokens.length) return false;
   return tokens.some(
     (_token, start) =>
@@ -656,7 +672,7 @@ function isConceptualExplanationOnlyTask(prompt: string, contract?: TaskContract
 const NEGATION_TOKENS = new Set(['avoid', 'excluding', 'exclude', 'never', 'no', 'not', 'without']);
 
 function phraseStarts(tokens: string[], phrase: string): number[] {
-  const phraseTokens = normalizeSkillTokens(phrase);
+  const phraseTokens = phraseTokensFor(phrase);
   if (phraseTokens.length === 0 || phraseTokens.length > tokens.length) return [];
   const starts: number[] = [];
   for (let start = 0; start + phraseTokens.length <= tokens.length; start += 1) {
@@ -671,7 +687,7 @@ function phraseStarts(tokens: string[], phrase: string): number[] {
  * explicitly rejected technology branch.
  */
 function isPhraseNegated(tokens: string[], phrase: string): boolean {
-  const phraseLength = normalizeSkillTokens(phrase).length;
+  const phraseLength = phraseTokensFor(phrase).length;
   const occurrences = phraseStarts(tokens, phrase);
   return (
     occurrences.length > 0 &&
@@ -943,7 +959,25 @@ export function collectSkillEvidence(
       'accessibility',
       'screen reader',
       'keyboard access',
-    ])
+    ]) ||
+    // Requests for equivalent access across input or output channels may
+    // describe the barriers and alternatives without saying "accessibility".
+    (hasAnyPhrase(promptTokens, ['design', 'define', 'specify', 'requirements', 'alternatives']) &&
+      hasAnyPhrase(promptTokens, [
+        'non speech',
+        'speech output',
+        'assistive input',
+        'keyboard only',
+      ]) &&
+      hasAnyPhrase(promptTokens, [
+        'equivalent',
+        'alternative',
+        'alternatives',
+        'recoverable',
+        'recovery',
+        'remap',
+        'remaps',
+      ]))
       ? ['accessibility']
       : []),
     ...(hasAnyPhrase(promptTokens, [
@@ -965,7 +999,7 @@ export function collectSkillEvidence(
     ])
       ? ['statistical-inference']
       : []),
-    ...(hasAnyPhrase(promptTokens, ['visualize', 'visualization', 'chart', 'plot'])
+    ...(hasAnyPositivePhrase(promptTokens, ['visualize', 'visualization', 'chart', 'plot'])
       ? ['data-visualization']
       : []),
     ...(hasAnyPhrase(promptTokens, [
@@ -1214,6 +1248,39 @@ const BASE_SKILL_DEFINITIONS: SkillDefinition[] = [
     should: ['verify this implementation'],
     shouldNot: ['tell me a joke'],
     evidence: ['Exact check results'],
+  },
+  {
+    name: 'critic-auto-selection',
+    description:
+      'Help the manager decide whether to ask for independent Critic review in Auto mode.',
+    domains: ['verification'],
+    kinds: [
+      'question',
+      'research-docs',
+      'bug',
+      'mechanical-edit',
+      'refactor',
+      'feature',
+      'ui',
+      'security-infra',
+    ],
+    instructions:
+      'As manager in Critic Auto mode, decide whether this proposed response needs an independent review. Call request_critic_review with a concrete reason when another model could catch a material error, omission, unsupported claim, or risk. Do not call it for a trivial readiness check, a brief acknowledgement, or merely because the user says test. If the answer is straightforward and low risk, do not call it. Always and Off modes are separate user choices. After your turn finishes, the host asks whether you want a Critic. Declining skips review, including changes and delegated work. Accepting requires you to choose an enabled Critic model, preferring one different from the manager and builders. A request during work records a concern but does not replace this final decision.',
+    should: ['decide whether an answer needs independent review'],
+    shouldNot: ['ask for review of a simple readiness check'],
+    evidence: ['Reasoned review choice with a specific concern when requesting review'],
+  },
+  {
+    name: 'critic-review',
+    description:
+      'Independently assess a proposed answer or artifact against the request and evidence.',
+    domains: ['verification'],
+    kinds: ['bug', 'mechanical-edit', 'refactor', 'feature', 'ui', 'security-infra'],
+    instructions:
+      'Review the actual proposed response, artifact, and available evidence against the user’s request. Identify unsupported claims, material omissions, correctness risks, and whether independent checks are proportionate. Do not request a review solely because the user mentions testing or asks for a trivial readiness check. Report exact findings and evidence; do not treat skill delivery or the producer’s confidence as proof.',
+    should: ['independently review this implementation'],
+    shouldNot: ['acknowledge that the model is ready'],
+    evidence: ['Request-to-evidence assessment', 'Specific actionable findings or supported pass'],
   },
   {
     name: 'security-review',
@@ -2304,22 +2371,20 @@ export function seedDefaultSkills(): void {
 /**
  * Directory in the tracked repo where file-based Koryphaios skills live.
  *
- * The primary candidate is `<PROJECT_ROOT>/skills` (the packaged app's data
- * directory). When that does not exist — e.g. in the isolated test runner,
- * which redirects PROJECT_ROOT to a temporary KORYPHAIOS_DATA_DIR — fall back
- * to the source-relative location so bundled file-based skills (Codex-only
- * resources like skill-installer) remain discoverable.
+ * Source-relative resources are authoritative in a source checkout. PROJECT_ROOT
+ * may be a writable data directory containing personal skills, so its files must
+ * not shadow bundled defaults. Packaged builds without source resources retain
+ * the explicit `<PROJECT_ROOT>/skills` asset location; neither path infers HOME.
  */
 const fileBasedSkillsRoot = (): string => {
-  const primary = join(PROJECT_ROOT, 'skills');
-  if (existsSync(primary)) return primary;
   const sourceRelative = join(import.meta.dir, '..', '..', '..', 'skills');
   if (existsSync(sourceRelative)) return sourceRelative;
-  return primary;
+  return join(PROJECT_ROOT, 'skills');
 };
 
 /** Read the bundled SKILL.md content for a file-based skill. Returns null if not found. */
 function readBundledSkillContent(name: string): string | null {
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/.test(name)) return null;
   const path = join(fileBasedSkillsRoot(), name, 'SKILL.md');
   if (!existsSync(path)) return null;
   return readFileSync(path, 'utf8');
@@ -3287,6 +3352,26 @@ function evidenceMatch(skill: SkillRevision, evidence?: SkillEvidence): string[]
  * Evaluate trigger metadata using token/phrase boundaries. The returned reason
  * records only the signal that actually selected the skill.
  */
+function isClosedAccessibilityVerificationTask(prompt: string): boolean {
+  const text = routingRelevantText(prompt);
+  const settledDesign =
+    /\b(?:design|requirements?|test matrix)\b[\s\S]{0,100}\b(?:was|were|is|are|has|have)\s+(?:already\s+)?(?:been\s+)?(?:approved|frozen|signed[ -]off)\b/iu.test(
+      text,
+    ) ||
+    /\b(?:requirements?|design)\s+(?:are|is)\s+(?:already\s+)?frozen\b/iu.test(text) ||
+    /\b(?:no\s+new\s+design\s+(?:is\s+)?requested|without\s+(?:changing|modifying)\s+(?:the\s+)?design|evidence\s+validation\s+only)\b/iu.test(
+      text,
+    );
+  const verificationWork =
+    /\b(?:run|execute|review|capture|measure|validate|verify|issue|correct|document|report)\b[\s\S]{0,210}\b(?:screen[ -]reader|acceptance\s+tests?|tests?|transcripts?|verification|verdict|observed|measurements?|failures?|provenance|test\s+report)\b/iu.test(
+      text,
+    );
+  // When interaction design is already settled, the requested work belongs to
+  // the evidence and verification specialist. Mixed new-design and test tasks
+  // still select accessibility practice as a direct design owner.
+  return settledDesign && verificationWork;
+}
+
 export function evaluateSkillTrigger(
   skill: SkillRevision,
   prompt: string,
@@ -3294,20 +3379,63 @@ export function evaluateSkillTrigger(
   targetMedium?: string,
   evidence?: SkillEvidence,
 ): SkillTriggerDecision {
+  return evaluatePreparedSkillTrigger(
+    skill,
+    prepareSkillTriggerPrompt(prompt, contract),
+    contract,
+    targetMedium,
+    evidence,
+  );
+}
+
+/** One prompt analysis per resolution; no cross-request scope/contract cache. */
+function prepareSkillTriggerPrompt(prompt: string, contract?: TaskContract) {
   const relevantPrompt = routingRelevantText(prompt);
   const promptTokens = normalizeSkillTokens(relevantPrompt);
   const clauses = routingClauses(relevantPrompt).map(normalizeSkillTokens);
+  const phraseDecisions = new Map<string, boolean>();
   const positivePhrase = (term: string) => {
+    const cached = phraseDecisions.get(term);
+    if (cached !== undefined) return cached;
     // A final explicit scope restriction governs an earlier background mention.
     // A later affirmative request can still supersede an earlier prohibition.
     const matching = clauses.filter((tokens) => containsTokenPhrase(tokens, term));
     const latest = matching.at(-1);
-    return Boolean(latest && !isPhraseNegated(latest, term));
+    const positive = Boolean(latest && !isPhraseNegated(latest, term));
+    phraseDecisions.set(term, positive);
+    return positive;
   };
+  return {
+    promptTokens,
+    promptWords: new Set(
+      promptTokens.filter((word) => word.length > 2 && !TRIGGER_STOP_WORDS.has(word)),
+    ),
+    positivePhrase,
+    closedAccessibilityVerification: isClosedAccessibilityVerificationTask(prompt),
+    conceptualExplanationOnly: isConceptualExplanationOnlyTask(prompt, contract),
+    suppliedArtifactOnly: isSuppliedArtifactOnlyTask(prompt),
+  };
+}
+
+function evaluatePreparedSkillTrigger(
+  skill: SkillRevision,
+  prepared: ReturnType<typeof prepareSkillTriggerPrompt>,
+  contract?: TaskContract,
+  targetMedium?: string,
+  evidence?: SkillEvidence,
+): SkillTriggerDecision {
+  const { promptTokens, promptWords, positivePhrase } = prepared;
   if (skill.name === 'task-routing') {
     return { matched: true, reason: 'Universal task-routing contract', evidenceUsed: [] };
   }
-  if (isConceptualExplanationOnlyTask(prompt, contract)) {
+  if (skill.name === 'accessibility-practice' && prepared.closedAccessibilityVerification) {
+    return {
+      matched: false,
+      reason: 'Rejected: approved accessibility design is awaiting verification evidence only',
+      evidenceUsed: ['scope:verification-only'],
+    };
+  }
+  if (prepared.conceptualExplanationOnly) {
     return {
       matched: false,
       reason: 'Rejected: conceptual explanation only; no procedural specialty is requested',
@@ -3315,7 +3443,7 @@ export function evaluateSkillTrigger(
     };
   }
   if (
-    isSuppliedArtifactOnlyTask(prompt) &&
+    prepared.suppliedArtifactOnly &&
     (skill.metadata.domains.includes('code') || skill.metadata.broader.includes('implementation'))
   ) {
     return {
@@ -3369,13 +3497,10 @@ export function evaluateSkillTrigger(
   // documentation. Reject exact embedded cases and very high-coverage
   // paraphrases before a narrower activation phrase inside the negative case
   // can win (for example, "CDN cache ... remains unchanged").
-  const promptWords = new Set(
-    promptTokens.filter((word) => word.length > 2 && !TRIGGER_STOP_WORDS.has(word)),
-  );
   const negativeExample = skill.metadata.shouldNotTrigger.find((example) => {
     if (containsTokenPhrase(promptTokens, example)) return true;
     const exampleWords = unique(
-      normalizeSkillTokens(example).filter(
+      phraseTokensFor(example).filter(
         (word) => word.length > 2 && !TRIGGER_STOP_WORDS.has(word),
       ),
     );
@@ -3456,7 +3581,7 @@ export function evaluateSkillTrigger(
     // as "task", "request", or "engineering" route unrelated specialties.
     if (isGeneratedRoutingFrameExample(example)) continue;
     const exampleWords = unique(
-      normalizeSkillTokens(example).filter(
+      phraseTokensFor(example).filter(
         (word) => word.length > 2 && !TRIGGER_STOP_WORDS.has(word),
       ),
     );
@@ -4000,7 +4125,12 @@ function renderResolvedSkillSection(selected: ResolvedSkill[]): {
   const skillText = selected.length
     ? selected.map(({ promptText }) => promptText).join('')
     : 'No local skills were selected.';
-  const promptText = `## Active local skills\nManifest: ${JSON.stringify(manifest)}\nManifest sha256: ${manifestHash}\n${skillText}`;
+  // Individual skill headers already identify the selected name, version,
+  // source and representation. Reprinting the full machine-readable manifest
+  // here duplicates several thousand characters, crowding out the mandatory
+  // authored instructions. Keep its complete hash in the prompt; the complete
+  // manifest remains available in the resolver/compiled execution metadata.
+  const promptText = `## Active local skills\nManifest: ${manifest.length} ordered skills; identities in the headers below\nManifest sha256: ${manifestHash}\n${skillText}`;
   const itemCost = selected.reduce((sum, item) => sum + item.contextCost, 0);
   return {
     promptText,
@@ -4012,7 +4142,13 @@ function renderResolvedSkillSection(selected: ResolvedSkill[]): {
 
 function requiredCoreSkillNames(contract: TaskContract): string[] {
   const mutationTask = !['question', 'research-docs'].includes(contract.taskKind);
-  return ['task-routing', ...(mutationTask ? ['testing-engineering', 'verification'] : [])];
+  return [
+    'task-routing',
+    ...(mutationTask ? ['testing-engineering', 'verification'] : []),
+    // Diagnosis is essential for a bug task. A medium-specific UI hierarchy
+    // should not consume the budget and crowd out its root-cause discipline.
+    ...(contract.taskKind === 'bug' ? ['debugging'] : []),
+  ];
 }
 
 export function resolveSkills(
@@ -4025,6 +4161,10 @@ export function resolveSkills(
     collisionChoices?: Record<string, SkillSource>;
     targetMedium?: string;
     contextBudget?: number;
+    /** Authored per-skill budgets are useful diagnostics when a user has
+     * explicitly enabled skill-context limiting. They are otherwise metadata,
+     * and should not produce a warning on every turn. */
+    warnOnAuthoredBudgetOverflow?: boolean;
     skillRevisions?: readonly SkillRevision[];
     activePaths?: string[];
   } = {},
@@ -4081,6 +4221,7 @@ export function resolveSkills(
   );
   const hierarchyErrors = hierarchyValidation.errors;
   const directDecisions = new Map<string, SkillTriggerDecision>();
+  const preparedPrompt = prepareSkillTriggerPrompt(prompt, contract);
   for (const skill of candidates) {
     if (removed.has(skill.name)) {
       candidateRejections.set(skill.name, 'Rejected: removed explicitly for this task');
@@ -4098,7 +4239,13 @@ export function resolveSkills(
       candidateRejections.set(skill.name, 'Rejected: skill requires explicit user invocation');
       continue;
     }
-    const decision = evaluateSkillTrigger(skill, prompt, contract, options.targetMedium, evidence);
+    const decision = evaluatePreparedSkillTrigger(
+      skill,
+      preparedPrompt,
+      contract,
+      options.targetMedium,
+      evidence,
+    );
     if (decision.matched) directDecisions.set(skill.name, decision);
     else candidateRejections.set(skill.name, decision.reason ?? 'Rejected: no trigger matched');
   }
@@ -4336,10 +4483,13 @@ export function resolveSkills(
     const variants = representations.get(skill.name)!;
     includedNames.add(skill.name);
     chosenRepresentation.set(skill.name, 'minimal');
-    if (variants.minimal.cost > skill.metadata.contextBudget) {
+    if (
+      (options.warnOnAuthoredBudgetOverflow ?? options.contextBudget !== undefined) &&
+      variants.minimal.cost > skill.metadata.contextBudget
+    ) {
       minimalOverSkillBudget.set(
         skill.name,
-        `${skill.name} minimal guidance is ${variants.minimal.cost} characters, above its authored ${skill.metadata.contextBudget}-character contextBudget (advisory only; this turn's budget is ${contextBudget})`,
+        `${skill.name} minimal guidance is ${variants.minimal.cost} characters, above its authored ${skill.metadata.contextBudget}-character contextBudget (advisory only)`,
       );
     }
   }
@@ -4814,8 +4964,6 @@ export function saveAgentMergedSkillDraft(
 
 /** Get the bundled SKILL.md content for a skill (file-based or TypeScript-defined). */
 export function getBundledSkillContent(name: string): string | null {
-  const fileBased = readBundledSkillContent(name);
-  if (fileBased) return fileBased;
   const definition = BUNDLED_SKILL_DEFINITIONS.find((item) => item.name === name);
-  return definition ? template(definition) : null;
+  return definition ? template(definition) : readBundledSkillContent(name);
 }

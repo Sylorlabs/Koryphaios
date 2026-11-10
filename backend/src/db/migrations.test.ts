@@ -273,6 +273,79 @@ describe('database migration repairs', () => {
     ).toBeNull();
   });
 
+  test('repairs an existing pre-contract process table before ledgering 0040', async () => {
+    const database = new Database(':memory:');
+    openDatabases.push(database);
+    createRunMigrationBase(database);
+    const runner = new MigrationRunner(database);
+    await runner.applyMigration(migration('0032'));
+    await runner.applyMigration(migration('0033'));
+    database.exec(`
+      CREATE TABLE supervised_processes (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        command TEXT NOT NULL,
+        cwd TEXT NOT NULL,
+        pid INTEGER NOT NULL,
+        session_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'starting',
+        exit_code INTEGER,
+        signal TEXT,
+        restart_count INTEGER DEFAULT 0,
+        last_restart_at INTEGER,
+        max_restarts INTEGER DEFAULT 3,
+        restart_policy TEXT DEFAULT 'on-failure',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        ended_at INTEGER,
+        metadata TEXT
+      );
+      INSERT INTO supervised_processes (
+        id, name, command, cwd, pid, session_id, created_at, updated_at
+      ) VALUES ('legacy-process', 'old watcher', 'worker --legacy', '/tmp', 17, 'session-1', 10, 10);
+    `);
+
+    await runner.applyMigration(migration('0037'));
+    expect(await runner.applyMigration(migration('0040'))).toBe(true);
+
+    const columns = database
+      .query<{ name: string }, []>('PRAGMA table_info(supervised_processes)')
+      .all()
+      .map(({ name }) => name);
+    expect(columns).toEqual(
+      expect.arrayContaining([
+        'command_replayable',
+        'provenance',
+        'supervision',
+        'is_background',
+        'terminal_reason',
+        'terminal_error',
+        'stdout_snapshot',
+        'stderr_snapshot',
+      ]),
+    );
+    expect(
+      database
+        .query(
+          `SELECT id, name, command, command_replayable, provenance, supervision, is_background
+           FROM supervised_processes WHERE id = 'legacy-process'`,
+        )
+        .get(),
+    ).toEqual({
+      id: 'legacy-process',
+      name: 'old watcher',
+      command: 'worker --legacy',
+      command_replayable: 0,
+      provenance: 'legacy-unknown',
+      supervision: 'legacy-unknown',
+      is_background: 0,
+    });
+    expect(
+      database.query("SELECT version FROM _migrations WHERE version = '0040'").get(),
+    ).toBeTruthy();
+    expect(await runner.applyMigration(migration('0040'))).toBe(false);
+  });
+
   test('finishes an unledgered 0038 without replacing a pending restart handoff', async () => {
     const database = new Database(':memory:');
     openDatabases.push(database);

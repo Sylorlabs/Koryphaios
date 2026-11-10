@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { normalizeReasoningLevel } from '@koryphaios/shared';
 import {
   canResumeAntigravityConversation,
+  fingerprintAntigravityContext,
   collapseAgyReasoningTiers,
   matchAgyModel,
   modelDefFromCliName,
@@ -49,11 +50,31 @@ describe('Antigravity model capabilities', () => {
     expect(normalizeReasoningLevel('antigravity', 'antigravity-gemini-flash', 'auto')).toBe('auto');
   });
 
-  it('never resumes a native transcript for nonlinear response regeneration', () => {
-    const cached = { conversationId: 'agy-old', providerConversationRevision: 7 };
+  it('fingerprints model, tools, workspace, and system context for conversation continuity', () => {
+    const base = {
+      model: 'model-a',
+      systemPrompt: 'system',
+      workingDirectory: '/workspace/project',
+      tools: [{ name: 'kory__read_file', description: 'Read files', inputSchema: { type: 'object' } }],
+    };
+    const fingerprint = fingerprintAntigravityContext(base);
+    expect(fingerprintAntigravityContext({ ...base, model: 'model-b' })).not.toBe(fingerprint);
+    expect(fingerprintAntigravityContext({ ...base, systemPrompt: 'changed' })).not.toBe(fingerprint);
+    expect(fingerprintAntigravityContext({ ...base, workingDirectory: '/workspace/other' })).not.toBe(fingerprint);
+    expect(fingerprintAntigravityContext({ ...base, tools: [] })).not.toBe(fingerprint);
+  });
+
+  it('resumes only when history, context, and freshness all match', () => {
+    const cached = {
+      conversationId: 'agy-old',
+      providerConversationRevision: 7,
+      contextFingerprint: 'context-a',
+    };
+    expect(canResumeAntigravityConversation(cached, 7, false, 'context-a')).toBe(true);
     expect(canResumeAntigravityConversation(cached, 7, false)).toBe(true);
-    expect(canResumeAntigravityConversation(cached, 8, false)).toBe(false);
-    expect(canResumeAntigravityConversation(cached, 7, true)).toBe(false);
+    expect(canResumeAntigravityConversation(cached, 8, false, 'context-a')).toBe(false);
+    expect(canResumeAntigravityConversation(cached, 7, false, 'context-b')).toBe(false);
+    expect(canResumeAntigravityConversation(cached, 7, true, 'context-a')).toBe(false);
   });
 });
 

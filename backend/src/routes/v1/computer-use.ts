@@ -5,6 +5,7 @@ import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 import { getRequestProjectRoot } from '../../runtime/request-project';
 import { loadAgentSettings, saveAgentSettings } from '../../agent-settings';
 import { createComputerPlatformAdapter } from '../../computer-use/platform';
+import { computerScreenshots } from '../../computer-use/screenshots';
 import {
   computerUsePendingCount,
   stopComputerUse,
@@ -16,6 +17,18 @@ export function createComputerUseRoutes(
   adapter: ComputerPlatformAdapter = createComputerPlatformAdapter(),
 ) {
   return new Elysia({ prefix: '/api/v1/computer-use' })
+    .get('/screenshots/:id', ({ request, params, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      const sessionId = new URL(request.url).searchParams.get('sessionId') ?? '';
+      const bytes = computerScreenshots.get(sessionId, params.id);
+      if (!bytes) {
+        set.status = 404;
+        return { ok: false, error: 'Screenshot expired or unavailable' };
+      }
+      return new Response(Buffer.from(bytes), { headers: {
+        'Content-Type': 'image/png', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
+      } });
+    })
     .get('/status', async ({ request, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       try {

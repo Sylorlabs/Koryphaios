@@ -12,6 +12,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createSessionWorkspace } from '../kory/session-workspace';
+import { isMac } from '../runtime/platform';
 import { osSandboxEnabled, spawnSandboxed } from '../security/os-sandbox';
 import { BashTool } from './bash';
 import {
@@ -334,7 +335,7 @@ describe('owned chat mandatory write boundary', () => {
       try {
         const result = await execute('bash', { command: 'git status --short' });
         expect(result.isError, result.output).toBe(false);
-        if (process.platform === 'darwin') {
+        if (isMac()) {
           const neighboringState = await execute('bash', {
             command: `cat ${quote(join(source, 'baseline.txt'))}`,
           });
@@ -366,7 +367,7 @@ describe('owned chat mandatory write boundary', () => {
         });
         expect(worktree.isError, worktree.output).toBe(false);
         expect(existsSync(join(checkout, '.trees', 'delegated', 'baseline.txt'))).toBe(true);
-        if (process.platform === 'darwin') {
+        if (isMac()) {
           const siblingState = await execute('bash', {
             command: `cat ${quote(join(sibling, 'baseline.txt'))}`,
           });

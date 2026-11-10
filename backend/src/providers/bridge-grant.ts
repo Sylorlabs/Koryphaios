@@ -23,6 +23,7 @@ import { lstatSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { ChildProcess } from 'node:child_process';
 import { createPrivateCliTextArtifact, type PrivateCliArtifact } from './private-cli-transport';
+import { hasPosixPermissionBits } from '../runtime/platform';
 
 export type BridgeGrantAudience = 'mcp' | 'hook';
 export type BridgeGrantAction =
@@ -51,6 +52,7 @@ interface BridgeGrantRecord extends Omit<BridgeGrantFilePayload, 'secret'> {
   secret: Buffer;
   artifact: PrivateCliArtifact;
   usedNonces: Map<string, number>;
+  abortController: AbortController;
 }
 
 export interface BridgeGrantHandle {
@@ -68,6 +70,8 @@ export interface VerifiedBridgeGrant {
   role: string;
   audience: BridgeGrantAudience;
   action: BridgeGrantAction;
+  /** Aborts immediately when the owning turn lease or session revokes this grant. */
+  signal: AbortSignal;
 }
 
 const GRANT_LIFETIME_MS = 10 * 60 * 1000;
@@ -192,6 +196,7 @@ export function getKoryBridgeGrant(
     secret,
     artifact,
     usedNonces: new Map(),
+    abortController: new AbortController(),
   };
   grants.set(grantId, record);
   return { grantId, path: artifact.path, directory: artifact.directory, expiresAt };
@@ -205,18 +210,17 @@ function readGrantFile(path: string): BridgeGrantFilePayload {
   // passed to writeFileSync/mkdirSync, so the group/other bit checks below
   // would always fail on Windows. Skip them there; the symlink and type
   // checks still apply, and the directory is under a process-private root.
-  const isWindows = process.platform === 'win32';
   if (
     !fileStat.isFile() ||
     fileStat.isSymbolicLink() ||
-    (!isWindows && (fileStat.mode & 0o077) !== 0)
+    (hasPosixPermissionBits() && (fileStat.mode & 0o077) !== 0)
   ) {
     throw new Error('Bridge grant file permissions are unsafe');
   }
   if (
     !parentStat.isDirectory() ||
     parentStat.isSymbolicLink() ||
-    (!isWindows && (parentStat.mode & 0o077) !== 0)
+    (hasPosixPermissionBits() && (parentStat.mode & 0o077) !== 0)
   ) {
     throw new Error('Bridge grant directory permissions are unsafe');
   }
@@ -341,6 +345,7 @@ export function verifySignedBridgeRequest(
     workspaceRoot: grant.workspaceRoot,
     audience,
     action,
+    signal: grant.abortController.signal,
   };
 }
 
@@ -348,6 +353,7 @@ export function revokeKoryBridgeGrantsForSession(sessionId: string): void {
   for (const [grantId, grant] of grants) {
     if (grant.sessionId !== sessionId) continue;
     grants.delete(grantId);
+    grant.abortController.abort();
     grant.artifact.cleanup();
   }
 }
@@ -357,6 +363,7 @@ function revokeKoryBridgeGrantIds(grantIds: ReadonlySet<string>): void {
     const grant = grants.get(grantId);
     if (!grant) continue;
     grants.delete(grantId);
+    grant.abortController.abort();
     grant.artifact.cleanup();
   }
 }

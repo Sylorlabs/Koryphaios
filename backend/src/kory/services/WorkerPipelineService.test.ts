@@ -145,7 +145,7 @@ describe('resolveGateStrictness', () => {
       'ui',
       'security-infra',
     ] as const) {
-      expect(resolveGateStrictness(kind, 'off')).toBe('strict');
+      expect(resolveGateStrictness(kind, 'off')).toBe('off');
       expect(resolveGateStrictness(kind, 'advisory')).toBe('strict');
     }
   });

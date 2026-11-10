@@ -81,6 +81,8 @@ export function normalizeCustomProviderBaseUrl(value: string): string {
 
   parsed.search = '';
   parsed.hash = '';
+  // Normalize path syntax only. A similarly named host is not authority to
+  // forward this provider's key to a different origin.
   let pathname = parsed.pathname.replace(/\/+$/, '');
   for (const terminalPath of TERMINAL_API_PATHS) {
     if (terminalPath.test(pathname)) {
@@ -872,13 +874,12 @@ export class CustomProvider implements Provider {
     }
     const seen = new Set<string>();
     const merged: ModelDef[] = [];
-    // Live discovery is route truth: verified context windows, display names,
-    // and reasoning tiers reported by the endpoint itself. Declared ids only
-    // backfill models the live catalog no longer reports (saved-unverified
-    // endpoints, or a failed refresh) — they must never shadow live metadata
-    // with the generic placeholder, or sessions compact against a foreign
-    // window and die on the route's real limit.
-    for (const m of [...live, ...declared]) {
+    // Live metadata wins for ids reported by the endpoint, while manually
+    // declared ids remain routable when the endpoint does not enumerate them.
+    // This preserves explicit user configuration without allowing generic
+    // placeholders to overwrite verified catalog metadata.
+    const source = [...live, ...declared];
+    for (const m of source) {
       if (seen.has(m.id)) continue;
       seen.add(m.id);
       merged.push(m);
@@ -899,6 +900,13 @@ export class CustomProvider implements Provider {
 
   getModelDiscoveryError(): string | undefined {
     return this.inner.getModelDiscoveryError?.();
+  }
+
+  getModelDiscoveryHttpStatus(): number | undefined {
+    const inner = this.inner as Provider & {
+      getModelDiscoveryHttpStatus?: () => number | undefined;
+    };
+    return inner.getModelDiscoveryHttpStatus?.();
   }
 
   streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {

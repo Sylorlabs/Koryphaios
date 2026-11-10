@@ -33,7 +33,7 @@ import {
   roleToPermissionMode,
   sandboxToScopes,
 } from './cli-bridge';
-import { koryToolWhitelistForRole } from './cli-bridges';
+import { koryToolWhitelistForContext, KORY_CUSTOM_MCP_NOTE } from './cli-bridges';
 import { getDevinCapabilitiesAsync, type DevinCapabilities } from './devin-capabilities';
 import type { ProviderEvent } from './types';
 import { buildKoryCliMcpConfig } from './kory-cli-mcp-config';
@@ -42,6 +42,7 @@ import { providerLog } from '../logger';
 import { createPrivateCliTextArtifact } from './private-cli-transport';
 import { ensureManagedCliDirectory, writeManagedCliFile } from './managed-cli-storage';
 import type { SkillRevision } from '../kory/skills';
+import { recordedToolIdentity, recordedToolInput, recordedToolName } from './recorded-tool';
 
 /** Total char budget for Devin-bridge skill manifests (minimal entries + spillover note). */
 const DEVIN_SKILL_MANIFEST_BUDGET = 15_000;
@@ -61,12 +62,15 @@ interface DevinTrajectoryJson {
     message?: string;
     reasoning_content?: string;
     tool_calls?: Array<{
+      tool_call_id?: string;
+      id?: string;
       function_name?: string;
       name?: string;
-      arguments?: Record<string, unknown>;
+      function?: { name?: string; arguments?: Record<string, unknown> | string };
+      arguments?: Record<string, unknown> | string;
       input?: Record<string, unknown>;
     }>;
-    observation?: { results?: Array<{ content?: string }> };
+    observation?: { results?: Array<{ source_call_id?: string; tool_call_id?: string; content?: string; isError?: boolean; is_error?: boolean }> };
     model_name?: string;
     generation_model?: string;
     extra?: { generation_model?: string; telemetry?: Record<string, unknown> };
@@ -140,10 +144,10 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
     // Disable ALL native Devin tools. The CLI should only use kory__ MCP tools
     // exposed via the .devin/config.json mcpServers. We list the kory__ tool
     // names as allowed_tools so Devin's agent-config parser pre-approves them.
-    const allowedTools = koryToolWhitelistForRole(ctx.role);
+    const allowedTools = koryToolWhitelistForContext(ctx);
 
     return {
-      systemInstructions,
+      systemInstructions: [...systemInstructions, KORY_CUSTOM_MCP_NOTE],
       allowedTools,
       permissions: scopes,
       extensions: koryProvenanceExtensions(ctx),
@@ -365,6 +369,13 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
       );
       return { trajectory: { steps: [] }, events: [] };
     }
+    const resultsByCall = new Map(
+      (data.steps ?? []).flatMap((step) => step.observation?.results ?? [])
+        .flatMap((result) => {
+          const id = result.source_call_id ?? result.tool_call_id;
+          return id ? [[id, result] as const] : [];
+        }),
+    );
     const trajectory: CliTrajectory = {
       schemaVersion: data.schema_version,
       sessionId: data.session_id,
@@ -382,11 +393,21 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
             message: typeof s.message === 'string' ? s.message : undefined,
             reasoning: typeof s.reasoning_content === 'string' ? s.reasoning_content : undefined,
             toolCalls: Array.isArray(s.tool_calls)
-              ? s.tool_calls.map((c) => ({
-                  name: c.function_name ?? c.name ?? 'tool',
-                  input: (c.arguments ?? c.input ?? {}) as Record<string, unknown>,
-                  output: s.observation?.results?.map((r) => r.content ?? '').join('\n'),
-                }))
+              ? s.tool_calls.map((c) => {
+                  const id = c.tool_call_id ?? c.id;
+                  const single = s.tool_calls?.length === 1 && s.observation?.results?.length === 1
+                    ? s.observation.results[0] : undefined;
+                  const result = (id ? resultsByCall.get(id) : undefined)
+                    ?? (single && !single.source_call_id && !single.tool_call_id ? single : undefined);
+                  const tool = recordedToolIdentity(
+                    recordedToolName(c as Record<string, unknown>),
+                    recordedToolInput(c.arguments ?? c.input ?? c.function?.arguments),
+                  );
+                  return {
+                    id, name: tool.name ?? '', input: tool.input, output: result?.content,
+                    isError: result?.isError === true || result?.is_error === true,
+                  };
+                })
               : undefined,
             modelName: s.model_name,
             generationModel: s.generation_model ?? s.extra?.generation_model,
@@ -418,9 +439,11 @@ export function trajectoryToEvents(t: CliTrajectory): ProviderEvent[] {
     for (const call of step.toolCalls ?? []) {
       events.push({
         type: 'tool_executed',
-        toolName: call.name,
+        toolCallId: call.id,
+        toolName: call.name || undefined,
         toolInput: JSON.stringify(call.input),
         toolOutput: (call.output ?? '').slice(0, 8_000),
+        isError: call.isError === true,
       });
     }
     if (step.message?.trim()) {

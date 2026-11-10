@@ -25,6 +25,12 @@ import { serveMcp } from './mcp/koryphaios-mcp-endpoint';
 import { getDb } from './db';
 import { shutdownAllBrokers } from './pubsub';
 import { getRequestProjectRoot } from './runtime/request-project';
+import { startRemoteInstanceHost, stopRemoteInstanceHost } from './remote-instance';
+import { deviceService } from './devices/service';
+import { setDeviceWorkbenchHandler } from './devices/workbench';
+import { isContainedBy } from './runtime/platform';
+import { recordRequestPeer } from './auth/request-peer';
+import { deviceRoutes } from './routes/v1/devices';
 
 // Routes
 import { sessionRoutes } from './routes/v1/sessions';
@@ -36,7 +42,6 @@ import { agentSettingsRoutes } from './routes/v1/agent-settings';
 import { createComputerUseRoutes } from './routes/v1/computer-use';
 import { gitRoutes } from './routes/v1/git';
 import { memoryRoutes } from './routes/v1/memory';
-import { modeRoutes } from './routes/v1/mode';
 import { spendRoutes } from './routes/v1/spend';
 import { spendCapsRoutes } from './routes/v1/spend-caps';
 import { billingRoutes } from './routes/v1/billing';
@@ -56,6 +61,8 @@ import { usageRoutes } from './routes/v1/usage';
 import { feedRoutes } from './routes/v1/feed';
 import { agentMessageRoutes } from './routes/v1/agent-messages';
 import { appearanceRoutes } from './routes/v1/appearance';
+import { desktopUiRoutes } from './routes/v1/desktop-ui';
+import { cliChatImportRoutes } from './routes/v1/cli-chat-import';
 import { errorHandlingMiddleware, errorHandler } from './middleware/error-handling';
 
 const SERVER_STARTED_AT = Date.now();
@@ -97,12 +104,12 @@ const baseApp = new Elysia()
   .use(messageRoutes)
   .use(providerRoutes)
   .use(collaborationRoutes)
+  .use(deviceRoutes)
   .use(authRoutes)
   .use(agentSettingsRoutes)
   .use(createComputerUseRoutes())
   .use(gitRoutes)
   .use(memoryRoutes)
-  .use(modeRoutes)
   .use(spendRoutes)
   .use(spendCapsRoutes)
   .use(billingRoutes)
@@ -120,7 +127,9 @@ const baseApp = new Elysia()
   .use(videoRoutes)
   .use(usageRoutes)
   .use(agentMessageRoutes)
-  .use(appearanceRoutes);
+  .use(appearanceRoutes)
+  .use(desktopUiRoutes)
+  .use(cliChatImportRoutes);
 
 export type App = typeof baseApp;
 
@@ -181,6 +190,11 @@ async function main() {
   const ctx = await bootstrap();
   setContext(ctx);
   const { config, kory, providers, sessions, messages, wsManager, runs } = ctx;
+
+  // The VPS mode is explicit and fail-closed: a headless instance must never
+  // appear healthy while its relay host was not actually established.
+  await startRemoteInstanceHost();
+  void deviceService.initialize().catch((error) => serverLog.error({ error }, 'Device linking initialization failed'));
 
   // Default to 127.0.0.1 for local-only security. A network-exposed server
   // keeps the normal per-client rate limit below; a desktop loopback server
@@ -270,8 +284,9 @@ async function main() {
       set.status = 404;
       return { ok: false, error: 'Not Found' };
     });
+  setDeviceWorkbenchHandler((request) => runningApp.handle(request));
 
-  // ─── Start Server ───────────────────────────────────────────────────────────
+  // ─── Start Server ───────────────────────────────────────────────────
 
   // Bind directly to the requested port. The old code pre-probed the port
   // with a throwaway TCP server and then asked Bun to bind — a TOCTOU race
@@ -341,6 +356,7 @@ async function main() {
 
     // 2. API Routes
     if (url.pathname.startsWith('/api')) {
+      recordRequestPeer(req, srv.requestIP(req)?.address ?? null);
       return runningApp.handle(req);
     }
 
@@ -381,7 +397,7 @@ async function main() {
     } catch {
       resolvedBuildDir = frontendBuildDir;
     }
-    if (!resolvedFilePath.startsWith(resolvedBuildDir)) {
+    if (!isContainedBy(resolvedBuildDir, resolvedFilePath)) {
       return new Response('Forbidden', { status: 403 });
     }
 
@@ -400,10 +416,13 @@ async function main() {
     return new Response('Not Found', { status: 404 });
   };
 
+  const REQUEST_IDLE_TIMEOUT_S = 60;
+
   const startServer = (port: number): Server<WSClientData> =>
     Bun.serve<WSClientData>({
       port,
       hostname: serverConfig.host,
+      idleTimeout: REQUEST_IDLE_TIMEOUT_S,
       websocket: createWebSocketHandlers({ wsManager, sessions, kory, providers, runs }),
       async fetch(req, srv) {
         return fetchHandler(req, srv);
@@ -451,7 +470,10 @@ async function main() {
     serverLog.warn({ err }, 'Failed to write active port file');
   }
 
-  serverLog.info({ host: serverConfig.host, port: actualPort }, 'Server running');
+  serverLog.info(
+    { host: serverConfig.host, port: actualPort, startupMs: Math.round(process.uptime() * 1000) },
+    'Server running',
+  );
 
   function clearActivePortFile() {
     try {
@@ -466,7 +488,7 @@ async function main() {
     }
   }
 
-  // ─── Graceful Shutdown ──────────────────────────────────────────────────
+  // ─── Graceful Shutdown ──────────────────────────────────────────────
   let shutdownPromise: Promise<void> | null = null;
   async function gracefulShutdown(signal: string) {
     if (shutdownPromise) return shutdownPromise;
@@ -483,6 +505,8 @@ async function main() {
       await runs.recoverInterruptedRuns();
       await runs.drainOutbox();
       runs.stopOutboxPump();
+      await stopRemoteInstanceHost();
+      deviceService.stop();
       shutdownAllBrokers();
       // Dispose the local auth manager so its session-cleanup interval is
       // cleared and the master key buffer is zeroed before exit.

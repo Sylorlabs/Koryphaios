@@ -1,5 +1,5 @@
 /**
- * Freebuff's supported free-tier surface is its Ink TUI, not @codebuff/sdk.
+ * Freebuff's supported free-tier surface is its OpenTUI, not @codebuff/sdk.
  * This adapter drives that real TUI through tmux (a real PTY), gives it a
  * disposable checkout, and installs Kory's authenticated MCP bridge in the
  * project-local .agents/mcp.json understood by Freebuff.
@@ -10,7 +10,7 @@
  * ToolRegistry/permission-policy.ts.
  */
 
-import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
+import type { FreebuffBalance, ModelDef, ProviderConfig } from '@koryphaios/shared';
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { materializeFreebuffCredentials } from './freebuff-credentials';
@@ -21,6 +21,7 @@ import { providerLog } from '../logger';
 import {
   createFreebuffTurnRuntime,
   getFreebuffRuntimeStatus,
+  getFreebuffRuntimeCatalog,
   refreshFreebuffRuntimeStatus,
 } from './freebuff-runtime';
 import { prepareFreebuffBridge } from './freebuff-bridge-runtime';
@@ -30,7 +31,7 @@ import { getCliBridge } from './cli-bridges';
 import { serializeKoryMcpServers } from './kory-cli-mcp-config';
 import { ensureManagedCliDirectory, writeManagedCliFile } from './managed-cli-storage';
 import { createGenericModel } from './models';
-import { discoverFreebuffAccounts, type FreebuffAccount } from './auth-utils';
+import { discoverFreebuffAccounts, freebuffConfigDir, type FreebuffAccount } from './auth-utils';
 import {
   discoverFreebuffBundledCatalog,
   buildFreebuffTurnSettings,
@@ -38,8 +39,12 @@ import {
   FREEBUFF_CLI_DEFAULT_MODEL_ID,
   type FreebuffBundledCatalog,
 } from './freebuff-bundled-catalog';
+import { getFreebuffModelCatalog } from './freebuff-model-catalog';
+import { getFreebuffAccountSnapshot } from './freebuff-account';
 import type { Provider, ProviderEvent, ProviderMessage, StreamRequest } from './types';
 import { userConfirmedImageInput } from './attachment-admission';
+import { recordedToolIdentity, recordedToolInput, recordedToolName } from './recorded-tool';
+import { executableSuffixes, findOnPath } from '../runtime/platform';
 
 const ACCOUNT_PREFIX = 'freebuff-account:';
 const MAX_RUNTIME_MS = 9 * 60_000;
@@ -98,10 +103,12 @@ export function freebuffUsageFromLogRow(
 }
 
 function nativeFreebuffBinary(profileDir?: string): string | null {
-  const candidates = [
-    profileDir ? join(profileDir, 'freebuff') : '',
-    join(homedir(), '.config', 'manicode', 'freebuff'),
-  ].filter(Boolean);
+  const profileCandidates = [profileDir, freebuffConfigDir()]
+    .filter((value): value is string => !!value)
+    .flatMap((directory) =>
+      executableSuffixes().map((suffix) => join(directory, `freebuff${suffix}`)),
+    );
+  const candidates = [...profileCandidates, findOnPath('freebuff') ?? ''].filter(Boolean);
   return candidates.find((candidate) => existsSync(candidate)) ?? null;
 }
 
@@ -290,6 +297,20 @@ export async function readFreebuffLogRows(
 type FreebuffTurnRuntime = Awaited<ReturnType<typeof createFreebuffTurnRuntime>>;
 type FreebuffTmux = (args: string[]) => Promise<string>;
 
+/** tmux -p is conditional on the pane's bracketed-paste flag. OpenTUI's
+ * negotiated terminal state is not always visible to a detached tmux server.
+ * Send one explicit paste frame so multiline input cannot become keystrokes.
+ */
+export async function pasteFreebuffBuffer(
+  tmux: FreebuffTmux,
+  session: string,
+  buffer: string,
+): Promise<void> {
+  await tmux(['send-keys', '-l', '-t', session, '\x1b[200~']);
+  await tmux(['paste-buffer', '-d', '-b', buffer, '-t', session]);
+  await tmux(['send-keys', '-l', '-t', session, '\x1b[201~']);
+}
+
 /** Only adapter-owned messages may reach diagnostics; panes and child errors can contain secrets. */
 class FreebuffPtyError extends Error {}
 
@@ -323,10 +344,27 @@ export function freebuffStartupState(pane: string): FreebuffStartupState {
     )
   )
     return 'login';
-  // A banner or a long pane is NOT input readiness. This is 0.2.12's actual composer placeholder.
+  // A banner or a long pane is NOT input readiness. This is 0.2.16's actual composer placeholder.
   if (/enter a coding task or \/ for commands/i.test(screen)) return 'ready';
   if (/start coding for free|press enter to continue/i.test(screen)) return 'welcome';
   return 'waiting';
+}
+
+/** Turn a native account-limit screen into an actionable provider error instead
+ * of waiting for the MCP readiness deadline and reporting a misleading bridge
+ * failure. */
+export function freebuffAccountLimitError(pane: string): string | null {
+  return /(?:not enough|insufficient|no) freebucks?/i.test(pane)
+    ? 'Freebuff has no Freebucks available for this request. Add Freebucks or choose a currently free model, then retry.'
+    : null;
+}
+
+/** Some paid/account models show a native confirmation after the prompt has
+ * been accepted. It is a TUI action, not an MCP approval, so the PTY driver
+ * must acknowledge this exact prompt before waiting for the bridge process. */
+export function freebuffNeedsSessionConfirmation(pane: string): boolean {
+  const screen = pane.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+  return /enter\s*:\s*confirm\s+and\s+send/i.test(screen);
 }
 
 /** Trust is limited to the generated .agents directory, never a user checkout. */
@@ -372,6 +410,45 @@ export async function waitForFreebuffStartup(
   throw new FreebuffPtyError('Freebuff TUI did not reach its input-ready state');
 }
 
+/** OpenTUI processes bracketed paste asynchronously. Enter sent immediately
+ * after tmux paste-buffer can submit the old empty composer and lose the turn.
+ * Long pastes become native text attachments; short ones populate the composer.
+ * Wait for the CLI's own receipt evidence before sending the submission key.
+ */
+export function freebuffPromptReady(pane: string, prompt: string): boolean {
+  const screen = pane.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+  if (prompt.length > 2_000) {
+    // The toast can expire or sit above a clipped footer. The persistent
+    // native text card also renders the exact count followed by "chars".
+    return new RegExp(`(?:^|\\D)${prompt.length}chars(?:$|\\D)`).test(screen.replace(/[,\s]/g, ''));
+  }
+  // OpenTUI wraps inside a bordered composer rather than terminal autowrap,
+  // so capture-pane -J retains the border between pieces of the same word.
+  const compact = (value: string) => value.replace(/[\s\u2500-\u257f]/g, '');
+  const suffix = compact(prompt.trim().slice(-32));
+  return suffix.length > 0 && compact(screen).includes(suffix);
+}
+
+export async function waitForFreebuffPromptReady(
+  tmux: FreebuffTmux,
+  session: string,
+  prompt: string,
+  signal?: AbortSignal,
+  timeoutMs = 15_000,
+): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    checkAbort(signal);
+    const pane = await tmux(['capture-pane', '-p', '-J', '-t', session]);
+    if (freebuffPromptReady(pane, prompt)) return;
+    if (['login', 'trust'].includes(freebuffStartupState(pane))) {
+      throw new FreebuffPtyError('Freebuff could not accept the prompt in its logged-in composer');
+    }
+    await waitForFreebuffPoll(100, signal);
+  }
+  throw new FreebuffPtyError('Freebuff TUI did not acknowledge the pasted prompt');
+}
+
 async function waitForFreebuffImageReady(
   tmux: FreebuffTmux,
   session: string,
@@ -397,16 +474,66 @@ async function waitForFreebuffImageReady(
   throw new FreebuffPtyError('Freebuff TUI did not finish attaching an image');
 }
 
+function freebuffRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function freebuffText(value: unknown): string | null {
+  if (typeof value === 'string' && value.trim()) return value;
+  if (Array.isArray(value)) {
+    const text = value
+      .map((item) => freebuffText(item))
+      .filter((item): item is string => item !== null)
+      .join('');
+    return text.trim() ? text : null;
+  }
+  if (!freebuffRecord(value)) return null;
+  for (const key of ['text', 'content', 'message', 'fullResponse']) {
+    const text = freebuffText(value[key]);
+    if (text) return text;
+  }
+  return null;
+}
+
+/** Extract the text-bearing shapes emitted by the native CLI log. */
+export function freebuffResponseFromLogRow(row: Record<string, unknown>): string | null {
+  const data = freebuffRecord(row.data) ? row.data : row;
+  for (const key of ['fullResponse', 'lastMessage']) {
+    const text = freebuffText(data[key]);
+    if (text) return text;
+  }
+  const allMessages = data.allMessages;
+  if (Array.isArray(allMessages)) {
+    for (const message of [...allMessages].reverse()) {
+      if (!freebuffRecord(message)) continue;
+      const role = typeof message.role === 'string' ? message.role.toLowerCase() : '';
+      if (role && !['assistant', 'model', 'agent'].includes(role)) continue;
+      const text = freebuffText(message);
+      if (text) return text;
+    }
+  }
+  const structured = freebuffText(data.structuredOutput);
+  return structured;
+}
+
 /** Nested agents commonly set shouldEndTurn. Only the main prompt owns turn completion. */
 export function freebuffCompletionFromLogRow(
   row: Record<string, unknown>,
+  hasResponseEvidence = false,
 ): 'pending' | 'success' | 'error' {
   if (row.msg !== 'Main prompt finished') return 'pending';
   const data =
     row.data && typeof row.data === 'object' ? (row.data as Record<string, unknown>) : {};
-  return ['lastMessage', 'allMessages', 'structuredOutput'].includes(String(data.outputType))
-    ? 'success'
-    : 'error';
+  const hasOutputType = typeof data.outputType === 'string' && data.outputType.trim().length > 0;
+  const outputType = String(data.outputType ?? '')
+    .replace(/[_-]/g, '')
+    .toLowerCase();
+  if (['lastmessage', 'allmessages', 'structuredoutput'].includes(outputType)) return 'success';
+  if (hasOutputType) return 'error';
+  // Some native builds omit outputType on a successful completion. Existing
+  // main-agent response evidence is sufficient to distinguish that case from
+  // a genuinely empty or failed turn without accepting an empty completion.
+  return hasResponseEvidence ? 'success' : 'error';
 }
 
 function catalogRevision(
@@ -419,7 +546,8 @@ function catalogRevision(
         const binary = findBinary(account.profileDir);
         if (!binary) throw new Error('missing binary');
         const metadata = statSync(binary);
-        return `${account.id}:${binary}:${metadata.dev}:${metadata.ino}:${metadata.size}:${metadata.mtimeMs}`;
+        const credentials = statSync(join(account.profileDir, 'credentials.json'));
+        return `${account.id}:${binary}:${metadata.dev}:${metadata.ino}:${metadata.size}:${metadata.mtimeMs}:${credentials.ino}:${credentials.size}:${credentials.mtimeMs}`;
       })
       .join('|');
   } catch {
@@ -431,18 +559,28 @@ function accountCatalogModels(
   account: FreebuffAccount,
   catalog: FreebuffBundledCatalog,
   multipleAccounts: boolean,
+  prices?: Record<string, number>,
 ): ModelDef[] {
   const encodedProfile = Buffer.from(account.profileDir).toString('base64url');
-  return catalog.models.map(({ id, name, multimodal, contextWindow }) => {
+  return catalog.models.map(({ id, name, multimodal, contextWindow, reasoningLevels }) => {
     const model = createGenericModel(
       multipleAccounts ? `${ACCOUNT_PREFIX}${encodedProfile}:${id}` : id,
       'freebuff',
     );
     model.name = multipleAccounts ? `${name} (${account.label})` : name;
     model.apiModelId = id;
+    let freebuckCost = prices?.[id] ?? prices?.[id.replace(/^freebuff\/catalog-/, '')];
+    if (typeof freebuckCost !== 'number' && prices && typeof name === 'string' && name.length > 0) {
+      freebuckCost = matchPriceByName(name, prices);
+    }
+    if (typeof freebuckCost === 'number') model.freebuckCost = freebuckCost;
     model.accountId = account.id;
     model.supportsAttachments = multimodal;
     model.vision = multimodal;
+    if (reasoningLevels?.length) {
+      model.canReason = true;
+      model.reasoningLevels = [...reasoningLevels];
+    }
     if (contextWindow && contextWindow >= 1_024) {
       model.contextWindow = contextWindow;
       model.contextVerified = true;
@@ -451,10 +589,35 @@ function accountCatalogModels(
   });
 }
 
+function normalizeKey(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+function matchPriceByName(displayName: string, prices: Record<string, number>): number | undefined {
+  const normalized = normalizeKey(displayName);
+  let match: number | undefined;
+  let matches = 0;
+  for (const [key, price] of Object.entries(prices)) {
+    const normalizedKey = normalizeKey(key);
+    if (normalizedKey.includes(normalized) || normalized.includes(normalizedKey)) {
+      matches++;
+      match = price;
+    }
+  }
+  return matches === 1 ? match : undefined;
+}
+
 const freebuffDependencies = {
   discoverAccounts: discoverFreebuffAccounts,
   findBinary: nativeFreebuffBinary,
-  discoverCatalog: discoverFreebuffBundledCatalog,
+  discoverCatalog: async (binary: string): Promise<FreebuffBundledCatalog> => {
+    if (getFreebuffRuntimeStatus().kind === 'docker') {
+      const catalog = getFreebuffRuntimeCatalog();
+      if (!catalog) throw new Error('Freebuff execution catalog is not qualified');
+      return catalog;
+    }
+    return discoverFreebuffBundledCatalog(binary);
+  },
+  discoverAccountCatalog: getFreebuffModelCatalog,
   runtimeStatus: getFreebuffRuntimeStatus,
   refreshRuntimeStatus: refreshFreebuffRuntimeStatus,
   createRuntime: createFreebuffTurnRuntime,
@@ -475,6 +638,53 @@ const freebuffDependencies = {
 /** Injectable boundary for credential-free lifecycle tests; production uses only these safe defaults. */
 export type FreebuffProviderDependencies = typeof freebuffDependencies;
 
+/** Call and result evidence can arrive in separate log rows or polls. */
+export function freebuffToolEvents(
+  data: Record<string, unknown>,
+  calls: Map<string, Record<string, unknown>>,
+  results: Map<string, Record<string, unknown>>,
+  emitted: Set<string>,
+): ProviderEvent[] {
+  for (const [key, destination] of [
+    ['toolCalls', calls],
+    ['toolResults', results],
+  ] as const) {
+    for (const value of Array.isArray(data[key]) ? data[key] : []) {
+      if (!value || typeof value !== 'object') continue;
+      const record = value as Record<string, unknown>;
+      const id = typeof record.toolCallId === 'string' ? record.toolCallId : '';
+      if (id && !emitted.has(id)) destination.set(id, record);
+    }
+  }
+  const events: ProviderEvent[] = [];
+  for (const [id, call] of calls) {
+    const result = results.get(id);
+    if (!result) continue;
+    const tool = recordedToolIdentity(
+      recordedToolName(call) ?? recordedToolName(result),
+      recordedToolInput(call.input),
+    );
+    events.push({
+      type: 'tool_executed',
+      toolCallId: id,
+      // Keep native sandbox provenance in the internal namespace. The UI
+      // strips only this prefix when displaying the actual tool identifier.
+      toolName: tool.name
+        ? tool.name.startsWith('kory__')
+          ? tool.name
+          : `freebuff_sandbox__${tool.name}`
+        : undefined,
+      toolInput: JSON.stringify(tool.input),
+      toolOutput: stringifyToolResult(result.content ?? ''),
+      isError: result.isError === true,
+    });
+    emitted.add(id);
+    calls.delete(id);
+    results.delete(id);
+  }
+  return events;
+}
+
 export class FreebuffProvider implements Provider {
   readonly imageInputTransport = 'native' as const;
   readonly name = 'freebuff' as const;
@@ -482,6 +692,8 @@ export class FreebuffProvider implements Provider {
   private modelDiscoveryError: string | undefined;
   private refreshInFlight: Promise<ModelDef[]> | null = null;
   private loadedCatalogRevision: string | null = null;
+  private lastCatalogAttempt = 0;
+  private modelHandles = new Map<string, Map<string, string>>();
 
   private readonly deps: FreebuffProviderDependencies;
 
@@ -520,6 +732,7 @@ export class FreebuffProvider implements Provider {
       // A replaced CLI executable invalidates its old model capabilities
       // immediately. Do not display a stale menu while the new binary is read.
       this.models = [];
+      this.modelHandles.clear();
       void this.refreshModels(true);
     }
     return this.models;
@@ -533,11 +746,17 @@ export class FreebuffProvider implements Provider {
     if (this.refreshInFlight) return this.refreshInFlight;
     const accounts = this.deps.discoverAccounts();
     const revision = catalogRevision(accounts, this.deps.findBinary);
-    if (!forceRefresh && revision && revision === this.loadedCatalogRevision) {
+    if (
+      !forceRefresh &&
+      revision &&
+      revision === this.loadedCatalogRevision &&
+      Date.now() - this.lastCatalogAttempt < 5 * 60_000
+    ) {
       return Promise.resolve(this.models);
     }
     if (accounts.length === 0) {
       this.models = [];
+      this.modelHandles.clear();
       this.loadedCatalogRevision = null;
       this.modelDiscoveryError =
         'Freebuff CLI is not signed in. Run "freebuff login" and reconnect.';
@@ -545,6 +764,7 @@ export class FreebuffProvider implements Provider {
     }
     if (!revision) {
       this.models = [];
+      this.modelHandles.clear();
       this.loadedCatalogRevision = null;
       this.modelDiscoveryError =
         'Freebuff executable was not found for the signed-in CLI account. Reinstall Freebuff and reconnect.';
@@ -555,14 +775,35 @@ export class FreebuffProvider implements Provider {
       accounts.map(async (account) => {
         const binary = this.deps.findBinary(account.profileDir);
         if (!binary) throw new Error('Freebuff executable is missing for an account');
-        return {
-          account,
-          catalog: await this.deps.discoverCatalog(binary),
-        };
+        const catalog = await this.deps.discoverCatalog(binary);
+        const qualifiedRuntime = this.deps.runtimeStatus();
+        if (
+          qualifiedRuntime.available &&
+          qualifiedRuntime.version &&
+          catalog.cliVersion !== qualifiedRuntime.version
+        )
+          return { account, catalog };
+        if (catalog.selectionMode !== 'cli-managed') return { account, catalog };
+        try {
+          const live = await this.deps.discoverAccountCatalog(account.profileDir, forceRefresh);
+          const accountSnapshot = await getFreebuffAccountSnapshot(
+            account.profileDir,
+            forceRefresh,
+          );
+          return {
+            account,
+            catalog: { ...catalog, models: [...catalog.models, ...live.models] },
+            handles: new Map(live.models.map((model) => [model.id, model.handle])),
+            prices: accountSnapshot.hours?.prices,
+          };
+        } catch {
+          return { account, catalog, accountCatalogFailed: true };
+        }
       }),
     )
       .then((results) => {
         const failures: string[] = [];
+        const handles = new Map<string, Map<string, string>>();
         const loaded = results.flatMap((result) => {
           if (result.status === 'rejected') {
             failures.push('An installed CLI catalog could not be read');
@@ -579,21 +820,30 @@ export class FreebuffProvider implements Provider {
             );
             return [];
           }
+          if (result.value.accountCatalogFailed)
+            failures.push(
+              'Account models could not be refreshed; check the CLI login and refresh models',
+            );
+          if (result.value.handles) handles.set(result.value.account.id, result.value.handles);
           return accountCatalogModels(
             result.value.account,
             result.value.catalog,
             accounts.length > 1,
+            result.value.prices,
           );
         });
         const currentRevision = catalogRevision(accounts, this.deps.findBinary);
         if (currentRevision !== revision) {
           this.models = [];
           this.loadedCatalogRevision = null;
+          this.modelHandles.clear();
           this.modelDiscoveryError =
             'Freebuff changed while its model catalog was being read. Refresh model discovery.';
           return [];
         }
         this.models = loaded;
+        this.modelHandles = handles;
+        this.lastCatalogAttempt = Date.now(); // Negative-cache discovery failures too.
         this.loadedCatalogRevision = revision;
         this.modelDiscoveryError =
           loaded.length === 0
@@ -610,7 +860,7 @@ export class FreebuffProvider implements Provider {
               vision: model.supportsAttachments === true,
             })),
           },
-          'Loaded model and vision capabilities from installed Freebuff catalog',
+          'Loaded Freebuff CLI and account model capabilities',
         );
         return loaded;
       })
@@ -663,25 +913,24 @@ export class FreebuffProvider implements Provider {
       // accounts whose catalogs were discovered before the async probe finished.
       const availableModels = await this.refreshModels(true);
       const requestedSelection = parseModelSelection(request.model);
+      const accounts = this.deps.discoverAccounts();
+      const selectedAccount = requestedSelection.profileDir
+        ? accounts.find(
+            (account) => resolve(account.profileDir) === resolve(requestedSelection.profileDir!),
+          )
+        : accounts[0];
       if (
         !availableModels.some(
           (model) =>
             model.apiModelId === requestedSelection.modelId &&
-            (!requestedSelection.profileDir ||
-              model.accountId ===
-                this.deps
-                  .discoverAccounts()
-                  .find(
-                    (account) =>
-                      resolve(account.profileDir) === resolve(requestedSelection.profileDir!),
-                  )?.id),
+            model.accountId === selectedAccount?.id,
         )
       ) {
         yield {
           type: 'error',
           error:
             this.modelDiscoveryError ??
-            'The selected model is not in the installed CLI catalog. Refresh models or choose another model.',
+            'The selected model is not available in this Freebuff account catalog. Refresh models or choose another model.',
         };
         return;
       }
@@ -714,16 +963,30 @@ export class FreebuffProvider implements Provider {
         return;
       }
 
-      const selection = parseModelSelection(request.model);
-      const account = selection.profileDir
-        ? this.deps
-            .discoverAccounts()
-            .find((item) => resolve(item.profileDir) === resolve(selection.profileDir!))
-        : this.deps.discoverAccounts()[0];
+      const selection = requestedSelection;
+      const account = selectedAccount;
       if (!account) {
         yield {
           type: 'error',
           error: 'Freebuff CLI account no longer exists. Run "freebuff login" and reconnect.',
+        };
+        return;
+      }
+      // Capture private evidence for this turn before another refresh can replace
+      // the account map. Never send opaque handles to the CLI settings or UI.
+      const expectedModel =
+        this.modelHandles.get(account.id)?.get(selection.modelId) ?? selection.modelId;
+      const selectedModelDef = availableModels.find(
+        (model) => model.apiModelId === selection.modelId && model.accountId === account.id,
+      );
+      if (
+        request.reasoningLevel &&
+        selectedModelDef?.reasoningLevels?.length &&
+        !selectedModelDef.reasoningLevels.includes(request.reasoningLevel)
+      ) {
+        yield {
+          type: 'error',
+          error: 'The selected Freebuff model does not support this reasoning level.',
         };
         return;
       }
@@ -766,7 +1029,15 @@ export class FreebuffProvider implements Provider {
         : {};
       writeManagedCliFile(
         settingsTarget,
-        JSON.stringify(buildFreebuffTurnSettings(settings, selection.modelId)),
+        JSON.stringify(
+          buildFreebuffTurnSettings(
+            settings,
+            selection.modelId,
+            selectedModelDef?.reasoningLevels?.includes(request.reasoningLevel ?? '')
+              ? request.reasoningLevel
+              : undefined,
+          ),
+        ),
       );
 
       const role = request.harnessRole ?? 'manager';
@@ -873,12 +1144,13 @@ export class FreebuffProvider implements Provider {
         // mismatch between host and bubblewrap mount prefixes.
         writeManagedCliFile(pathInput, basename(imagePath));
         await tmux(['load-buffer', '-b', buffer, pathInput]);
-        await tmux(['paste-buffer', '-p', '-d', '-b', buffer, '-t', session]);
+        await pasteFreebuffBuffer(tmux, session, buffer);
         const filename = basename(imagePath);
         await waitForFreebuffImageReady(tmux, session, filename, signal);
       }
       await tmux(['load-buffer', '-b', buffer, promptPath]);
-      await tmux(['paste-buffer', '-p', '-d', '-b', buffer, '-t', session]);
+      await pasteFreebuffBuffer(tmux, session, buffer);
+      await waitForFreebuffPromptReady(tmux, session, transportPrompt, signal);
       await tmux(['send-keys', '-t', session, 'Enter']);
 
       // The modern CLI can lazily discover MCP tools while constructing the
@@ -887,18 +1159,28 @@ export class FreebuffProvider implements Provider {
       // No completion/content is published until this additional proof exists.
       phase = 'CLI MCP startup';
       const bridgeStartedAt = Date.now();
+      let sessionConfirmationSent = false;
       while (!existsSync(prepared.readyPath)) {
         checkAbort(signal);
-        if (Date.now() - bridgeStartedAt > 30_000) {
+        if (Date.now() - bridgeStartedAt > 90_000) {
           throw new FreebuffPtyError('Freebuff TUI did not load the Kory MCP bridge');
         }
         await tmux(['has-session', '-t', session]);
+        const pane = await tmux(['capture-pane', '-p', '-J', '-t', session]);
+        const accountLimit = freebuffAccountLimitError(pane);
+        if (accountLimit) throw new FreebuffPtyError(accountLimit);
+        if (!sessionConfirmationSent && freebuffNeedsSessionConfirmation(pane)) {
+          await tmux(['send-keys', '-t', session, 'Enter']);
+          sessionConfirmationSent = true;
+        }
         await waitForFreebuffPoll(250, signal);
       }
 
       const logsRoot = join(runHome, '.config', 'manicode', 'projects');
       const offsets = new Map<string, number>();
       const emittedTools = new Set<string>();
+      const pendingToolCalls = new Map<string, Record<string, unknown>>();
+      const pendingToolResults = new Map<string, Record<string, unknown>>();
       phase = 'turn completion';
       let selectedModel: string | null = null;
       const usageByModel = new Map<string, number[]>();
@@ -923,6 +1205,10 @@ export class FreebuffProvider implements Provider {
             checkAbort(signal);
             throw new FreebuffPtyError('Freebuff TUI exited before producing a completion event');
           }
+          const accountLimit = freebuffAccountLimitError(
+            await tmux(['capture-pane', '-p', '-J', '-t', session]),
+          );
+          if (accountLimit) throw new FreebuffPtyError(accountLimit);
         }
         const rows = await this.deps.readLogRows(runtime, logsRoot, offsets);
         checkAbort(signal);
@@ -941,17 +1227,19 @@ export class FreebuffProvider implements Provider {
           if (rootModel) {
             if (
               selection.modelId !== FREEBUFF_CLI_DEFAULT_MODEL_ID &&
-              rootModel !== selection.modelId
+              rootModel !== expectedModel
             ) {
+              const observedModel = [...(this.modelHandles.get(account.id)?.entries() ?? [])].find(
+                ([, handle]) => handle === rootModel,
+              )?.[0];
               throw new FreebuffPtyError(
-                'Freebuff CLI did not use the requested model; refresh models and reconnect',
+                observedModel
+                  ? `Freebuff CLI used ${observedModel} instead of the requested model. The CLI may have applied an account fallback; refresh models and reconnect.`
+                  : 'Freebuff CLI did not use the requested model; refresh models and reconnect',
               );
             }
             selectedModel = rootModel;
           }
-          const completion = freebuffCompletionFromLogRow(row);
-          if (completion === 'error')
-            throw new FreebuffPtyError('Freebuff main prompt returned an error or no output');
           if (msg === '[send-message] Sending message with sdk run config') {
             const runConfig =
               data.runConfig && typeof data.runConfig === 'object'
@@ -965,38 +1253,19 @@ export class FreebuffProvider implements Provider {
             }
             if (contentBlockCount === imagePaths.length) verifiedImageCount = true;
           }
-          const response =
-            rootModel && typeof data.fullResponse === 'string' ? data.fullResponse : '';
-          if (response.trim()) {
+          const isRootResponse = rootModel !== null || data.agentId === 'main-agent';
+          const response = isRootResponse ? freebuffResponseFromLogRow(row) : null;
+          if (response?.trim()) {
             emittedContent = true;
             yield { type: 'content_delta', content: response };
           }
-          const calls = Array.isArray(data.toolCalls) ? data.toolCalls : [];
-          const results = Array.isArray(data.toolResults) ? data.toolResults : [];
-          for (const rawCall of calls) {
-            if (!rawCall || typeof rawCall !== 'object') continue;
-            const call = rawCall as Record<string, unknown>;
-            const callId = String(call.toolCallId ?? '');
-            if (!callId || emittedTools.has(callId)) continue;
-            emittedTools.add(callId);
-            const result = results.find(
-              (item) =>
-                item &&
-                typeof item === 'object' &&
-                String((item as Record<string, unknown>).toolCallId ?? '') === callId,
-            ) as Record<string, unknown> | undefined;
-            const rawToolName = String(call.toolName ?? 'freebuff_tool');
-            yield {
-              type: 'tool_executed',
-              toolCallId: callId,
-              toolName: rawToolName.startsWith('kory__')
-                ? rawToolName
-                : `freebuff_sandbox__${rawToolName}`,
-              toolInput: stringifyToolResult(call.input ?? {}),
-              toolOutput: stringifyToolResult(result?.content ?? ''),
-              isError: Boolean(result?.isError),
-            };
-          }
+          const completion = freebuffCompletionFromLogRow(
+            row,
+            emittedContent && selectedModel !== null,
+          );
+          if (completion === 'error')
+            throw new FreebuffPtyError('Freebuff main prompt returned an error or no output');
+          yield* freebuffToolEvents(data, pendingToolCalls, pendingToolResults, emittedTools);
           if (completion === 'success') complete = true;
         }
         if (!complete) await waitForFreebuffPoll(250, signal);

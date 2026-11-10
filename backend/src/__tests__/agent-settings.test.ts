@@ -8,6 +8,7 @@ import {
   loadAgentSettingsForSession,
   mergeAgentSettings,
   mergeSandboxSettings,
+  saveAgentSettings,
   readPreferences,
   rememberExplicitPreference,
 } from '../agent-settings';
@@ -32,7 +33,7 @@ describe('autonomy limits', () => {
 
   it('persists only recognized composer permission modes', () => {
     expect(DEFAULT_AGENT_SETTINGS.permissionMode).toBe('guarded');
-    for (const permissionMode of ['yolo', 'guarded', 'edits', 'ask', 'plan', 'custom'] as const) {
+    for (const permissionMode of ['yolo', 'guarded', 'edits', 'ask', 'custom'] as const) {
       expect(mergeAgentSettings(DEFAULT_AGENT_SETTINGS, { permissionMode }).permissionMode).toBe(
         permissionMode,
       );
@@ -40,6 +41,19 @@ describe('autonomy limits', () => {
     expect(
       mergeAgentSettings(DEFAULT_AGENT_SETTINGS, { permissionMode: 'unsafe-value' }).permissionMode,
     ).toBe('guarded');
+  });
+
+  it('does not restore legacy plan as a permission preset', () => {
+    const root = mkdtempSync(join(tmpdir(), 'kory-settings-plan-'));
+    try {
+      writeFileSync(
+        join(root, 'koryphaios.json'),
+        JSON.stringify({ agentSettings: { permissionMode: 'plan' } }),
+      );
+      expect(loadAgentSettings(root).permissionMode).toBe('guarded');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('are off by default and do not constrain agent instructions', () => {
@@ -298,6 +312,39 @@ describe('pruning default migration', () => {
 });
 
 describe('per-chat agent overrides', () => {
+  it('defaults to Auto, persists it, and preserves explicit legacy choices', () => {
+    const root = mkdtempSync(join(tmpdir(), 'kory-critic-mode-'));
+    try {
+      for (const [config, expected] of [
+        [{}, 'auto'],
+        [{ enableCritic: false }, 'off'],
+        [{ enableCritic: true }, 'always'],
+        [{ agentSettings: { criticGateEnabled: false } }, 'off'],
+        [{ agentSettings: { criticGateEnabled: true } }, 'always'],
+        [{ enableCritic: false, agentSettings: { criticMode: 'auto', criticGateEnabled: false } }, 'auto'],
+      ] as const) {
+        writeFileSync(join(root, 'koryphaios.json'), JSON.stringify(config));
+        const settings = loadAgentSettings(root);
+        expect(settings.criticMode).toBe(expected);
+        expect(settings.criticGateEnabled).toBe(expected !== 'off');
+      }
+      const settings = mergeAgentSettings(loadAgentSettings(root), { criticMode: 'auto' });
+      saveAgentSettings(root, settings);
+      expect(loadAgentSettings(root).criticMode).toBe('auto');
+      expect(JSON.parse(readFileSync(join(root, 'koryphaios.json'), 'utf8')).agentSettings.criticMode).toBe('auto');
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('resolves mode patches and chat legacy overrides without overriding other chats', () => {
+    const auto = mergeAgentSettings(DEFAULT_AGENT_SETTINGS, { criticMode: 'auto' });
+    expect(mergeAgentSettings(auto, { criticMode: 'invalid' }).criticMode).toBe('auto');
+    expect(mergeAgentSettings(auto, { criticGateEnabled: true }).criticMode).toBe('always');
+    expect(mergeAgentSettings(auto, { criticMode: 'off', criticGateEnabled: true }).criticGateEnabled).toBe(false);
+    expect(applySessionAgentOverrides(auto, { criticGateEnabled: false }).criticMode).toBe('off');
+    expect(applySessionAgentOverrides(auto, { criticMode: 'always' }).criticMode).toBe('always');
+    expect(applySessionAgentOverrides(auto, {}).criticMode).toBe('auto');
+    expect(auto.criticMode).toBe('auto');
+  });
   it('layers a chat approval preset over the workspace default without touching it', () => {
     const project = { ...DEFAULT_AGENT_SETTINGS, permissionMode: 'guarded' as const };
     const overridden = applySessionAgentOverrides(project, { permissionMode: 'yolo' });

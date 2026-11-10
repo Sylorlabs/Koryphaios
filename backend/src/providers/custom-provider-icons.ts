@@ -4,6 +4,12 @@ import { lstat, mkdir, open, rename, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { PROJECT_ROOT } from '../runtime/paths';
 import { ensureSecureDir } from '../security/fs-permissions';
+import {
+  hasHardLinks,
+  hasPosixPermissionBits,
+  hasUnexpectedOwner,
+  isUnix,
+} from '../runtime/platform';
 
 export const CUSTOM_PROVIDER_ICON_SIZE = 256;
 export const CUSTOM_PROVIDER_ICON_MAX_BYTES = 1024 * 1024;
@@ -260,14 +266,14 @@ async function assertRealOwnedDirectory(path: string): Promise<void> {
   if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
     throw new Error('Custom provider icon storage contains an unsafe directory');
   }
-  const currentUid = process.getuid?.();
-  if (process.platform !== 'win32' && currentUid !== undefined && metadata.uid !== currentUid) {
+  if (hasUnexpectedOwner(metadata)) {
     throw new Error('Custom provider icon storage has an unexpected owner');
   }
 }
 
 async function syncDirectory(path: string): Promise<void> {
-  if (process.platform === 'win32') return;
+  // Windows cannot open a directory handle for read, so there is nothing to sync.
+  if (!isUnix()) return;
   const noFollow = constants.O_NOFOLLOW ?? 0;
   const directoryOnly = constants.O_DIRECTORY ?? 0;
   const handle = await open(path, constants.O_RDONLY | noFollow | directoryOnly);
@@ -287,7 +293,7 @@ async function writePrivateFile(path: string, content: Uint8Array | string): Pro
   );
   try {
     await handle.writeFile(content);
-    if (process.platform !== 'win32') await handle.chmod(0o600);
+    if (hasPosixPermissionBits()) await handle.chmod(0o600);
     await handle.sync();
   } finally {
     await handle.close();
@@ -299,11 +305,10 @@ async function readPrivateFile(path: string, maxBytes: number): Promise<Buffer> 
   const handle = await open(path, constants.O_RDONLY | noFollow);
   try {
     const metadata = await handle.stat();
-    const currentUid = process.getuid?.();
     if (
       !metadata.isFile() ||
-      (process.platform !== 'win32' && metadata.nlink !== 1) ||
-      (process.platform !== 'win32' && currentUid !== undefined && metadata.uid !== currentUid) ||
+      hasHardLinks(metadata) ||
+      hasUnexpectedOwner(metadata) ||
       metadata.size < 1 ||
       metadata.size > maxBytes
     ) {

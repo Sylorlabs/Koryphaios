@@ -93,6 +93,8 @@ export interface MessageDisplayProjection {
   activeMessageId: string | null;
   conversationRevision: number;
   providerConversationRevision: number;
+  hasMore: boolean;
+  oldestMessageId: string | null;
 }
 
 export interface SetConversationBoundaryOptions {
@@ -148,7 +150,11 @@ export interface CompactionCommit {
   checkpointTokens: number;
 }
 
-function parseStoredContent(raw: string): { text: string; attachments: MessageAttachment[] } {
+function parseStoredContent(raw: string): {
+  text: string;
+  attachments: MessageAttachment[];
+  reasoningContent?: string;
+} {
   try {
     const blocks = JSON.parse(raw);
     if (!Array.isArray(blocks)) return { text: raw, attachments: [] };
@@ -159,12 +165,16 @@ function parseStoredContent(raw: string): { text: string; attachments: MessageAt
         typeof block.data === 'string' &&
         typeof block.name === 'string',
     );
+    const thinking = blocks.filter(
+      (block) => block?.type === 'thinking' && typeof block.thinking === 'string',
+    );
     return {
       text: blocks
         .filter((block) => block?.type === 'text' || typeof block?.text === 'string')
         .map((block) => block.text ?? '')
         .join(''),
       attachments,
+      reasoningContent: thinking.length ? thinking.map((block) => block.thinking).join('') : undefined,
     };
   } catch (err: unknown) {
     serverLog.debug(
@@ -175,8 +185,13 @@ function parseStoredContent(raw: string): { text: string; attachments: MessageAt
   }
 }
 
-function serializeStoredContent(content: string, attachments: MessageAttachment[] = []): string {
+function serializeStoredContent(
+  content: string,
+  attachments: MessageAttachment[] = [],
+  reasoningContent?: string,
+): string {
   return JSON.stringify([
+    ...(reasoningContent !== undefined ? [{ type: 'thinking', thinking: reasoningContent }] : []),
     { type: 'text', text: content },
     ...attachments.map((attachment) => {
       if (attachment.mimeType) return attachment;
@@ -204,6 +219,7 @@ function toStoredMessage(m: DbMessage): StoredMessage {
     sessionId: m.sessionId,
     role: m.role as StoredMessage['role'],
     content: stored.text,
+    reasoningContent: stored.reasoningContent,
     attachments: stored.attachments.length > 0 ? stored.attachments : undefined,
     model: m.model ?? undefined,
     provider: m.provider ?? undefined,
@@ -382,10 +398,14 @@ export class MessageStore implements IMessageStore {
     limit: number,
     order: 'oldest' | 'newest',
     contextRevision?: number,
+    olderThanMessageId?: string,
   ): string[] {
     const boundedLimit = normalizedLimit(limit);
     if (boundedLimit === 0) return [];
     const contextFilter = contextRevision === undefined ? '' : 'AND context_revision = ?';
+    const olderFilter = olderThanMessageId
+      ? `AND depth > COALESCE((SELECT depth FROM active_lineage WHERE id = ?), ${MAX_ACTIVE_LINEAGE_DEPTH})`
+      : '';
     const statement = getDb().query(`
       WITH RECURSIVE active_lineage(
         id, parent_message_id, context_revision, depth, visited
@@ -418,7 +438,7 @@ export class MessageStore implements IMessageStore {
       )
       SELECT id
       FROM active_lineage
-      WHERE 1 = 1 ${contextFilter}
+      WHERE 1 = 1 ${contextFilter} ${olderFilter}
       ORDER BY depth ${order === 'oldest' ? 'DESC' : 'ASC'}
       LIMIT ?
     `);
@@ -426,6 +446,16 @@ export class MessageStore implements IMessageStore {
       contextRevision === undefined
         ? [sessionId, sessionId, MAX_ACTIVE_LINEAGE_DEPTH - 1, boundedLimit]
         : [sessionId, sessionId, MAX_ACTIVE_LINEAGE_DEPTH - 1, contextRevision, boundedLimit];
+    if (olderThanMessageId) {
+      // The cursor is part of the recursive result, so bind it after the CTE
+      // inputs and before the page limit. Keep this separate from the common
+      // path to make the positional SQL bindings obvious.
+      const cursorBindings =
+        contextRevision === undefined
+          ? [sessionId, sessionId, MAX_ACTIVE_LINEAGE_DEPTH - 1, olderThanMessageId, boundedLimit]
+          : [sessionId, sessionId, MAX_ACTIVE_LINEAGE_DEPTH - 1, contextRevision, olderThanMessageId, boundedLimit];
+      return (statement.all(...cursorBindings) as Array<{ id: string }>).map((row) => row.id);
+    }
     return (statement.all(...bindings) as Array<{ id: string }>).map((row) => row.id);
   }
 
@@ -455,7 +485,7 @@ export class MessageStore implements IMessageStore {
   }
 
   async addIdempotent(sessionId: string, msg: StoredMessage): Promise<'inserted' | 'existing'> {
-    const expectedContent = serializeStoredContent(msg.content, msg.attachments);
+    const expectedContent = serializeStoredContent(msg.content, msg.attachments, msg.reasoningContent);
     const assertExistingMatches = async (): Promise<boolean> => {
       const [row] = await db.select().from(messages).where(eq(messages.id, msg.id)).limit(1);
       if (!row) return false;
@@ -495,7 +525,7 @@ export class MessageStore implements IMessageStore {
     msg: StoredMessage,
     expected: MessageAppendBoundary,
   ): Promise<'inserted' | 'existing'> {
-    const content = serializeStoredContent(msg.content, msg.attachments);
+    const content = serializeStoredContent(msg.content, msg.attachments, msg.reasoningContent);
     const tokensIn = msg.tokensIn ?? 0;
     const tokensOut = msg.tokensOut ?? 0;
     const cost = msg.cost ?? 0;
@@ -617,7 +647,7 @@ export class MessageStore implements IMessageStore {
           id: msg.id,
           sessionId,
           role: msg.role,
-          content: serializeStoredContent(msg.content, msg.attachments),
+          content: serializeStoredContent(msg.content, msg.attachments, msg.reasoningContent),
           model: msg.model ?? null,
           provider: msg.provider ?? null,
           tokensIn: msgTokensIn,
@@ -655,6 +685,10 @@ export class MessageStore implements IMessageStore {
 
   private getDisplayMessagesSync(sessionId: string, limit = 1000): StoredMessage[] {
     const active = this.getAllSync(sessionId, limit);
+    return this.getDisplayMessagesFromActive(active, sessionId);
+  }
+
+  private getDisplayMessagesFromActive(active: StoredMessage[], sessionId: string): StoredMessage[] {
     const activeIds = new Set(active.map((message) => message.id));
     const activeProjection = active.map((message) => ({
       ...message,
@@ -689,12 +723,37 @@ export class MessageStore implements IMessageStore {
   }
 
   /** Read display rows and their compare-and-swap boundary from one SQLite snapshot. */
-  async getDisplayProjection(sessionId: string, limit = 1000): Promise<MessageDisplayProjection> {
+  async getDisplayProjection(
+    sessionId: string,
+    limit = 1000,
+    options: { beforeMessageId?: string } = {},
+  ): Promise<MessageDisplayProjection> {
+    return this.getDisplayProjectionPage(sessionId, limit, options);
+  }
+
+  async getDisplayProjectionPage(
+    sessionId: string,
+    limit = 1000,
+    options: { beforeMessageId?: string } = {},
+  ): Promise<MessageDisplayProjection> {
     return db.transaction((tx) => {
       // Bun SQLite transactions are synchronous. Keep the entire projection
       // on the stack until commit; an async callback would commit at its first
       // await and pair rows with a boundary from another generation.
-      const projectedMessages = this.getDisplayMessagesSync(sessionId, limit);
+      const boundedLimit = normalizedLimit(limit);
+      const activeIds = this.getActiveLineageIds(
+        sessionId,
+        boundedLimit + 1,
+        options.beforeMessageId ? 'oldest' : 'newest',
+        undefined,
+        options.beforeMessageId,
+      );
+      const hasMore = activeIds.length > boundedLimit;
+      const pageIds = activeIds.slice(0, boundedLimit);
+      const active = this.getMessagesByActiveIds(
+        options.beforeMessageId ? pageIds : pageIds.reverse(),
+      ).map((message) => ({ ...message, isActiveBranch: true }));
+      const projectedMessages = this.getDisplayMessagesFromActive(active, sessionId);
       const [session] = tx
         .select({
           activeMessageId: sessions.activeMessageId,
@@ -711,6 +770,8 @@ export class MessageStore implements IMessageStore {
         activeMessageId: session.activeMessageId,
         conversationRevision: session.conversationRevision ?? 0,
         providerConversationRevision: session.providerConversationRevision ?? 0,
+        hasMore,
+        oldestMessageId: active[0]?.id ?? null,
       };
     });
   }
@@ -1454,7 +1515,7 @@ export class MessageStore implements IMessageStore {
           id: message.id,
           sessionId: reservation.sessionId,
           role: 'assistant',
-          content: serializeStoredContent(message.content, message.attachments),
+          content: serializeStoredContent(message.content, message.attachments, message.reasoningContent),
           model: message.model ?? null,
           provider: message.provider ?? null,
           tokensIn: msgTokensIn,
@@ -1504,7 +1565,7 @@ export class MessageStore implements IMessageStore {
       const stored = parseStoredContent(pivot.content);
       tx
         .update(messages)
-        .set({ content: serializeStoredContent(content, stored.attachments) })
+        .set({ content: serializeStoredContent(content, stored.attachments, stored.reasoningContent) })
         .where(and(eq(messages.id, messageId), eq(messages.sessionId, sessionId)))
         .run();
       writeActiveBoundary(tx, {

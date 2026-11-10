@@ -109,6 +109,16 @@ export const MEMORY_CONFIG = {
   HARD_MAX_DOCUMENT_SIZE: 5_000_000,
 } as const;
 
+/** Display the resolved persistence scope without exposing machine-local paths. */
+export function getMemoryScope(projectRoot: string): {
+  kind: 'project' | 'workspace';
+  name: string;
+} {
+  const sourceRoot = sessionSettingsRoot(projectRoot);
+  const root = resolveMemoryRoot(sourceRoot);
+  return { kind: root === sourceRoot ? 'project' : 'workspace', name: basename(root) };
+}
+
 // ============================================================================
 // Types
 // ============================================================================

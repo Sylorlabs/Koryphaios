@@ -1,8 +1,8 @@
 // Hoplite provider — hybrid async coding agent (API-key verified).
 //
-// Like Google Jules, Hoplite is an async agent control plane, not an LLM
-// inference API. Unlike Jules, it is not cloud-only: a thread either runs in a
-// Hoplite cloud sandbox or on a local Codex/Claude agent bound to one of the
+// Hoplite is an async agent control plane, not an LLM inference API. It is not
+// cloud-only: a thread either runs in a Hoplite cloud sandbox or on a local
+// Codex/Claude agent bound to one of the
 // caller's machines (`executionTarget.kind: 'local'`), and either way it
 // produces threads and pull requests. The organization API key (hop_…) is fully
 // verifiable in Settings and the platform model catalog is exposed for
@@ -14,8 +14,8 @@ import { type Provider, type ProviderEvent, type StreamRequest } from './types';
 import { HOPLITE_MODELS } from './hoplite-models';
 
 /**
- * Why this adapter refuses to stream: delegation into Hoplite would need the
- * same approval-capable remote workflow Jules requires. The API key itself is
+ * Why this adapter refuses to stream: delegation into Hoplite would need
+ * an approval-capable remote workflow. The API key itself is
  * verified in Settings against the live /api/projects catalog.
  */
 export const HOPLITE_DELEGATION_NOT_AVAILABLE =

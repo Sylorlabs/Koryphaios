@@ -27,6 +27,15 @@ describe('custom provider onboarding hardening', () => {
     );
   });
 
+  test('never substitutes a different AgentRouter origin during normalization', () => {
+    expect(normalizeCustomProviderBaseUrl('https://agentrouter.org/v1')).toBe(
+      'https://agentrouter.org/v1',
+    );
+    expect(normalizeCustomProviderBaseUrl('https://co.agentrouter.org/v1')).toBe(
+      'https://co.agentrouter.org/v1',
+    );
+  });
+
   test('probes the staged OpenAI-compatible catalog with the real bearer shape', async () => {
     let capturedUrl = '';
     let capturedAuthorization: string | null = null;
@@ -52,6 +61,33 @@ describe('custom provider onboarding hardening', () => {
     });
     expect(capturedUrl).toBe('https://seekai.cc/v1/models');
     expect(capturedAuthorization).toBe('Bearer sk-valid');
+  });
+
+  test('removes and re-adds models when a live custom catalog changes', async () => {
+    let models = ['first-model'];
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ data: models.map((id) => ({ id })) }), {
+        headers: { 'content-type': 'application/json' },
+      })) as typeof fetch;
+
+    const provider = new CustomProvider({
+      name: 'custom:catalog-reconciliation',
+      custom: true,
+      kind: 'openai',
+      baseUrl: 'https://gateway.example/v1',
+      disabled: false,
+    });
+
+    await provider.refreshModels?.(true);
+    expect(provider.listModels().map((model) => model.id)).toEqual(['first-model']);
+
+    models = [];
+    await provider.refreshModels?.(true);
+    expect(provider.listModels()).toEqual([]);
+
+    models = ['second-model'];
+    await provider.refreshModels?.(true);
+    expect(provider.listModels().map((model) => model.id)).toEqual(['second-model']);
   });
 
   test('falls back to /v1/models when a version-less Anthropic base serves HTML at /models', async () => {

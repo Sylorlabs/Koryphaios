@@ -401,12 +401,26 @@ describe('provider request contracts', () => {
   });
 
   test('Replicate forwards selected video resolution and synchronized audio', async () => {
-    const seen = await capture('replicate', 'video', () => Response.json({
-      id: 'clip-1', status: 'succeeded', output: 'data:video/mp4;base64,Y2xpcA==',
-    }), { options: { resolution: '720p', sound: true, duration: '5s', aspectRatio: '16:9' } });
-    expect(JSON.parse(String(seen.init?.body))).toEqual({ input: {
-      prompt: 'a test prompt', resolution: '720p', generate_audio: true, duration: '5s', aspect_ratio: '16:9',
-    } });
+    const seen = await capture(
+      'replicate',
+      'video',
+      () =>
+        Response.json({
+          id: 'clip-1',
+          status: 'succeeded',
+          output: 'data:video/mp4;base64,Y2xpcA==',
+        }),
+      { options: { resolution: '720p', sound: true, duration: '5s', aspectRatio: '16:9' } },
+    );
+    expect(JSON.parse(String(seen.init?.body))).toEqual({
+      input: {
+        prompt: 'a test prompt',
+        resolution: '720p',
+        generate_audio: true,
+        duration: '5s',
+        aspect_ratio: '16:9',
+      },
+    });
   });
 
   test('Kling posts to the Singapore host by default', () => {

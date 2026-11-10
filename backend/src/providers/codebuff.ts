@@ -1,18 +1,12 @@
 /** Official Codebuff API-key provider using @codebuff/sdk. */
 
 import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
-import { CodebuffClient, type PrintModeEvent } from '@codebuff/sdk';
+import type { PrintModeEvent } from '@codebuff/sdk';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createGenericModel } from './models';
 import type { Provider, ProviderEvent, StreamRequest } from './types';
-import {
-  buildKoryToolContext,
-  buildOverrideTools,
-  buildPrompt,
-  translateSdkEvent,
-} from './freebuff';
 
 export const CODEBUFF_BASE_AGENT = 'codebuff/base@0.0.16';
 
@@ -64,9 +58,15 @@ export class CodebuffProvider implements Provider {
       };
       return;
     }
+    // The SDK and its tool helpers have a large import graph. Catalog/status
+    // reads need neither; load them only when an actual Codebuff turn begins.
+    const [
+      { CodebuffClient },
+      { buildKoryToolContext, buildOverrideTools, buildPrompt, translateSdkEvent },
+    ] = await Promise.all([import('@codebuff/sdk'), import('./freebuff')]);
     const cwd = request.workingDirectory?.trim() || process.cwd();
     const role = request.harnessRole ?? 'manager';
-    const interactionMode = request.permissionMode === 'plan' ? 'plan' : 'act';
+    const interactionMode = request.interactionMode ?? 'act';
     const toolContext = await buildKoryToolContext(
       request.sessionId,
       cwd,

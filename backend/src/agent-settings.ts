@@ -13,6 +13,7 @@ import {
   defaultComputerUseSettings,
   type ComputerUseSettings,
   type SessionAgentOverrides,
+  resolveCriticMode,
 } from '@koryphaios/shared';
 import { mergeComputerUseSettings, normalizeComputerUseSettings } from './computer-use/settings';
 import { MIN_SKILL_CONTEXT_BUDGET } from './kory/skills';
@@ -40,7 +41,9 @@ export const AGENT_SETTINGS_CONFIG = {
 // ============================================================================
 
 export interface AgentSettings {
-  /** Independent, deny-dominant desktop policy; off by default even in YOLO. */
+  /** Auto selects consequential work for independent review; always reviews every eligible response. */
+  criticMode: import('@koryphaios/shared').CriticMode;
+  /** Independent, deny-dominant desktop policy; available by default even in YOLO. */
   computerUse: ComputerUseSettings;
   /** Rule enforcement level - always applied, but critic can be strict/moderate/lenient */
   ruleEnforcementLevel: 'strict' | 'moderate' | 'lenient';
@@ -56,13 +59,14 @@ export interface AgentSettings {
   allowExternalPaths: boolean;
 
   /** Per-category model allowlist for the manager's routing. Key = worker
-   *  domain ('general' | 'frontend' | 'backend' | 'review' | 'test' | 'critic'
-   *  | 'ui'); value = model ids the manager may pick for that category.
+   *  domain ('general' | 'ui' | 'frontend' | 'backend' | 'review' | 'test'
+   *  | 'critic'); value = provider:model identities the manager may pick for
+   *  that category.
    *  Empty/missing = all available models allowed. */
   managerModelAccess: Record<string, string[]>;
 
   /** Per-group user notes injected into the manager's system prompt —
-   *  standing guidance keyed by category (general, frontend, backend, etc.). */
+   *  standing guidance keyed by category (general, ui, backend, etc.). */
   managerNotes: Record<string, string>;
 
   /** Critic gate enabled - critic reviews all changes */
@@ -168,9 +172,8 @@ export interface AgentSettings {
    */
   skillContextBudget: number | null;
 
-  /** Composer permission preset. Plan remains supported for persisted legacy
-   *  sessions even though the composer exposes planning as a separate mode. */
-  permissionMode: 'yolo' | 'guarded' | 'edits' | 'ask' | 'plan' | 'custom';
+  /** Composer approval preset. Planning is a separate per-session interaction mode. */
+  permissionMode: 'yolo' | 'guarded' | 'edits' | 'ask' | 'custom';
 
   /** When true, approval thresholds (files/lines) are enforced before
    *  destructive tool calls. When false, the agent is unconstrained. */
@@ -184,9 +187,10 @@ export interface AgentSettings {
   sandbox: SandboxSettings;
 
   /** Sub-agent (worker) approval policy.
-   *  - 'manager' → workers inherit the manager's permission preset (default)
+   *  - 'manager' → Guarded workers can be reviewed by the manager; other
+   *    presets use their normal user-facing policy (default)
    *  - 'user'    → every worker tool action prompts the user before running
-   *  - 'auto'    → workers run with no approval prompts or sandbox (YOLO-equivalent) */
+   *  - 'auto'    → workers run with no approval prompts (YOLO-equivalent) */
   subAgentApproval: 'manager' | 'user' | 'auto';
 
   /** Tool names that always bypass approval prompts, regardless of
@@ -244,6 +248,7 @@ export const DEFAULT_SANDBOX_SETTINGS: SandboxSettings = {
 };
 
 export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
+  criticMode: 'auto',
   computerUse: defaultComputerUseSettings(),
   ruleEnforcementLevel: 'strict',
   agentExecutionMode: 'auto',
@@ -523,14 +528,33 @@ export function loadAgentSettings(projectRoot: string): AgentSettings {
 
   // agentSettings in koryphaios.json is the new source of truth
   const persistedSettings = config.agentSettings as Partial<AgentSettings> | undefined;
+  const legacyPlanPermission =
+    isPlainRecord(config.agentSettings) && config.agentSettings.permissionMode === 'plan';
 
   // Backward compatibility: enableCritic in koryphaios.json maps to criticGateEnabled
   const enableCritic = config.enableCritic as boolean | undefined;
 
+  const criticMode = resolveCriticMode(
+    persistedSettings,
+    typeof enableCritic === 'boolean' ? (enableCritic ? 'always' : 'off') : 'auto',
+  );
+  const persistedPermissionMode =
+    persistedSettings?.permissionMode === 'yolo' ||
+    persistedSettings?.permissionMode === 'guarded' ||
+    persistedSettings?.permissionMode === 'edits' ||
+    persistedSettings?.permissionMode === 'ask' ||
+    persistedSettings?.permissionMode === 'custom'
+      ? persistedSettings.permissionMode
+      : DEFAULT_AGENT_SETTINGS.permissionMode;
   const merged: AgentSettings = {
     ...DEFAULT_AGENT_SETTINGS,
     ...(enableCritic !== undefined && { criticGateEnabled: enableCritic }),
     ...persistedSettings,
+    // `plan` was formerly persisted as a permission preset. Treat old files as
+    // Guarded while planning is now selected through interactionMode.
+    permissionMode: persistedPermissionMode,
+    criticMode,
+    criticGateEnabled: criticMode !== 'off',
     sandbox: mergeSandboxSettings(DEFAULT_AGENT_SETTINGS.sandbox, persistedSettings?.sandbox),
     computerUse: effectiveComputerPolicy(
       projectRoot,
@@ -538,7 +562,7 @@ export function loadAgentSettings(projectRoot: string): AgentSettings {
     ),
   };
 
-  let migrated = false;
+  let migrated = legacyPlanPermission;
   if (persistedSettings?.contextKeepRecentTurns === LEGACY_CONTEXT_KEEP_RECENT_TURNS) {
     merged.contextKeepRecentTurns = DEFAULT_AGENT_SETTINGS.contextKeepRecentTurns;
     migrated = true;
@@ -553,6 +577,7 @@ export function loadAgentSettings(projectRoot: string): AgentSettings {
         ...config,
         agentSettings: {
           ...(persistedSettings ?? {}),
+          ...(legacyPlanPermission ? { permissionMode: merged.permissionMode } : {}),
           contextKeepRecentTurns: merged.contextKeepRecentTurns,
           contextPruneMinChars: merged.contextPruneMinChars,
         },
@@ -579,6 +604,8 @@ export function applySessionAgentOverrides(
   if (typeof overrides.criticGateEnabled === 'boolean') {
     next.criticGateEnabled = overrides.criticGateEnabled;
   }
+  next.criticMode = resolveCriticMode(overrides, resolveCriticMode(settings));
+  next.criticGateEnabled = next.criticMode !== 'off';
   return next;
 }
 
@@ -663,6 +690,7 @@ export function mergeSandboxSettings(
 }
 
 const SETTING_ENUMS: Partial<Record<keyof AgentSettings, readonly string[]>> = {
+  criticMode: ['auto', 'always', 'off'],
   ruleEnforcementLevel: ['strict', 'moderate', 'lenient'],
   agentExecutionMode: ['auto', 'single', 'multi'],
   gateStrictness: ['strict', 'advisory', 'off'],
@@ -674,7 +702,7 @@ const SETTING_ENUMS: Partial<Record<keyof AgentSettings, readonly string[]>> = {
   skillLearningMode: ['human-only', 'propose-then-verify', 'automatic'],
   localWebSearch: ['off', 'on', 'fallback'],
   promptCacheKeepaliveMode: ['economic', 'always', 'off'],
-  permissionMode: ['yolo', 'guarded', 'edits', 'ask', 'plan', 'custom'],
+  permissionMode: ['yolo', 'guarded', 'edits', 'ask', 'custom'],
   subAgentApproval: ['manager', 'user', 'auto'],
 };
 
@@ -823,6 +851,8 @@ export function mergeAgentSettings(current: AgentSettings, patch: unknown): Agen
     }
     if (typeof value === typeof expected) next[key] = value;
   }
+  next.criticMode = resolveCriticMode(patch as Partial<AgentSettings>, resolveCriticMode(current));
+  next.criticGateEnabled = next.criticMode !== 'off';
   return next as unknown as AgentSettings;
 }
 
@@ -847,7 +877,7 @@ export function saveAgentSettings(projectRoot: string, settings: AgentSettings):
   settings.updatedAt = Date.now();
 
   // Update both for compatibility
-  config.enableCritic = settings.criticGateEnabled;
+  config.enableCritic = settings.criticMode !== 'off';
   config.agentSettings = settings;
 
   saveKoryphaiosConfig(projectRoot, config);
@@ -866,7 +896,7 @@ export function resetAgentSettings(projectRoot: string): AgentSettings {
   };
   stopComputerUse();
 
-  config.enableCritic = settings.criticGateEnabled;
+  config.enableCritic = settings.criticMode !== 'off';
   config.agentSettings = settings;
 
   saveKoryphaiosConfig(projectRoot, config);
@@ -1285,7 +1315,11 @@ function generateEnforcementMessage(settings: AgentSettings): string {
   ];
 
   if (settings.criticGateEnabled) {
-    messages.push('3. CRITIC WILL REVIEW and may BLOCK violations');
+    messages.push(
+      settings.criticMode === 'auto'
+        ? '3. CRITIC AUTO asks the finishing manager or worker whether to invoke a Critic. Declining skips review. Accepting lets the agent choose an enabled Critic model, preferring a different model from the manager and builders.'
+        : '3. CRITIC WILL REVIEW and may BLOCK violations',
+    );
   }
 
   if (settings.criticEnforcesPreferences) {

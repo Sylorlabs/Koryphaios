@@ -122,6 +122,10 @@ describe('normalizeReasoningLevel (pass-through)', () => {
     expect(normalizeReasoningLevel('antigravity', 'gemini-2.5-pro', 'auto')).toBe('auto');
   });
 
+  test('preserves provider-specific reasoning state tokens', () => {
+    expect(normalizeReasoningLevel('omnirush', 'custom-reasoner', 'Deep-Plus')).toBe('Deep-Plus');
+  });
+
   test('returns undefined for adaptive', () => {
     expect(normalizeReasoningLevel('openai', 'gpt-5', 'adaptive')).toBeUndefined();
   });

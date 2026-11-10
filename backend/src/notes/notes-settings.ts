@@ -6,6 +6,7 @@ import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { serverLog } from '../logger';
 import {
+  effectiveNotePermission,
   DEFAULT_NOTES_AGENT_PERMISSIONS,
   DEFAULT_NOTES_SETTINGS,
   CONTEXT_BUDGET_MAX_TOKENS,
@@ -236,6 +237,33 @@ export function buildNotesNetworkSystemHint(projectRoot: string): string {
   if (!visible.length) return '';
   const enabled = new Set<string>(visible);
   const usage = [
+    ...NOTE_TOOL_DEFINITIONS.filter(
+      (tool) =>
+        ![
+          'read_note',
+          'search_notes',
+          'list_notes',
+          'recall_notes',
+          'retrieve_note_context',
+          'get_note_backlinks',
+          'get_note_graph_summary',
+          'get_note_properties',
+          'query_note_base',
+          'render_note',
+          'record_work_note',
+          'create_note',
+          'set_note_property',
+          'update_note',
+          'delete_note',
+          'link_notes',
+          'unlink_notes',
+          'propose_note_relationship',
+          'review_note_relationship',
+        ].includes(tool.name),
+    ).map((tool) => [
+      tool.name,
+      `${tool.name}: ${tool.description}; use the authoritative tool schema and expected revisions for writes`,
+    ]),
     ['list_notes', 'list_notes({folderPath?}) -> discover titles and IDs; never loads bodies'],
     ['search_notes', 'search_notes({query}) -> locate relevant notes and short matches'],
     [
@@ -301,7 +329,7 @@ export function buildNotesNetworkSystemHint(projectRoot: string): string {
     ],
     [
       'review_note_relationship',
-      'review_note_relationship({fromId,toId,status,expectedRevision}) -> accept/reject a pending proposal only with a separate human approval; acceptance refuses stale endpoint evidence',
+      'review_note_relationship({fromId,toId,status,expectedRevision}) -> accept/reject a pending proposal according to its dedicated review permission; acceptance refuses stale endpoint evidence',
     ],
   ]
     .filter(([name]) => enabled.has(name))
@@ -317,7 +345,7 @@ export function buildNotesNetworkSystemHint(projectRoot: string): string {
 export function checkNoteToolPermission(
   toolName: string,
   projectRoot: string,
-  options?: { yoloMode?: boolean },
+  options?: { yoloMode?: boolean; mode?: string },
 ): NoteToolPermissionCheck {
   if (!isNoteToolName(toolName)) {
     return {
@@ -337,14 +365,13 @@ export function checkNoteToolPermission(
     };
   }
 
-  const { tools } = loadNotesAgentPermissions(projectRoot);
-  let level = tools[toolName];
-  let reason = `Notes permission for ${toolName}`;
-
-  if (options?.yoloMode && level === 'ask') {
-    level = 'auto';
-    reason = 'YOLO mode — auto-approving note tool';
-  }
+  const permissions = loadNotesAgentPermissions(projectRoot);
+  const level = effectiveNotePermission(
+    permissions,
+    toolName,
+    options?.mode ?? (options?.yoloMode ? 'yolo' : undefined),
+  );
+  const reason = `Notes permission for ${toolName}: ${level}`;
 
   return {
     allowed: level !== 'block',

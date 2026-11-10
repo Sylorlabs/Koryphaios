@@ -98,6 +98,35 @@ afterEach(() => {
 });
 
 describe('manager context pruning', () => {
+  test('worker/critic pruning stubs older bulky tool results without breaking message pairs', async () => {
+    const dir = createDir();
+    const manager = createManager(dir);
+    try {
+      const thread = {
+        messages: [
+          { role: 'user', content: 'IMMUTABLE TASK CONTRACT: keep this objective' },
+          { role: 'assistant', content: 'I will inspect the repository.' },
+          { role: 'tool', tool_call_id: 'old', content: 'x'.repeat(2_000) },
+          { role: 'assistant', content: 'The old inspection is complete.' },
+          { role: 'assistant', content: 'I am checking the next file.' },
+          { role: 'assistant', content: 'The next file is consistent.' },
+          { role: 'tool', tool_call_id: 'recent', content: 'y'.repeat(2_000) },
+          { role: 'assistant', content: 'The recent inspection is complete.' },
+        ],
+      };
+      const removed = (manager as unknown as {
+        pruneAgentThreadContext(value: typeof thread, keepRecent?: number): number;
+      }).pruneAgentThreadContext(thread, 4);
+
+      expect(removed).toBe(1);
+      expect(thread.messages[0]?.content).toContain('IMMUTABLE TASK CONTRACT');
+      expect(thread.messages[2]?.content).toContain('Earlier tool output pruned');
+      expect(thread.messages[6]?.content).toBe('y'.repeat(2_000));
+    } finally {
+      manager.shutdown();
+    }
+  });
+
   test('reclaims a tool output whose ORIGINAL size blew the live-context bound', async () => {
     // The 30k dispatch cap already truncated the live content, so a bound
     // measured against the live content could never fire and an enormous

@@ -168,9 +168,13 @@ describe('KoryManager session mutation barrier', () => {
       internal.runLifecycle.cancelCurrent = cancelCurrent;
       internal.runLifecycle.finish = finish;
 
-      await manager.cancelSessionWorkers('session-owned');
+      const cancellation = manager.cancelSessionWorkers('session-owned');
+      await Promise.resolve();
       timeline.push('partial-response-persisted');
       await internal.runLifecycle.finish({}, 'cancel', 'cancelled');
+      internal.managerAbortBySession.delete('session-owned');
+      internal.sessionRunClaims.delete('session-owned');
+      await cancellation;
 
       expect(controller.signal.aborted).toBe(true);
       expect(cancelCurrent).not.toHaveBeenCalled();

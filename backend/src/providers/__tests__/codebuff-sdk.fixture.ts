@@ -69,6 +69,17 @@ mock.module('../../context', () => ({
     },
   }),
 }));
+mock.module('../../tools/approval-queue', () => ({
+  waitForToolApproval: async (
+    _ctx: unknown,
+    _call: unknown,
+    question: string,
+    options: string[],
+  ) => {
+    const { getContext } = await import('../../context');
+    return getContext().kory.requestToolApproval('host-session', question, options);
+  },
+}));
 mock.module('@codebuff/sdk', () => ({
   CodebuffClient: class {
     constructor(options: CodebuffClientOptions) {
@@ -105,7 +116,7 @@ for await (const event of provider.streamResponse({
   sessionId: 'host-session',
   workingDirectory: process.env.PROJECT_ROOT,
   harnessRole: 'worker',
-  permissionMode: scenario === 'plan' ? 'plan' : undefined,
+  interactionMode: scenario === 'plan' ? 'plan' : undefined,
   messages: [{ role: 'user', content: 'Hello' }],
   systemPrompt: 'Host instructions',
   signal,

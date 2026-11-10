@@ -165,10 +165,18 @@ describe('context-window projection', () => {
   });
 
   test('audio and video bytes never leak into text summarizer transcripts', () => {
-    const chunks = chunkProjectionTranscript([{ role: 'user', content: [
-      { type: 'audio', mediaMimeType: 'audio/wav', mediaData: 'A'.repeat(100_000) },
-      { type: 'video', mediaMimeType: 'video/mp4', mediaData: 'B'.repeat(100_000) },
-    ] }], 10_000);
+    const chunks = chunkProjectionTranscript(
+      [
+        {
+          role: 'user',
+          content: [
+            { type: 'audio', mediaMimeType: 'audio/wav', mediaData: 'A'.repeat(100_000) },
+            { type: 'video', mediaMimeType: 'video/mp4', mediaData: 'B'.repeat(100_000) },
+          ],
+        },
+      ],
+      10_000,
+    );
     expect(chunks.join('\n')).toContain('audio/wav attachment retained in canonical history');
     expect(chunks.join('\n')).toContain('video/mp4 attachment retained in canonical history');
     expect(chunks.join('\n')).not.toContain('A'.repeat(100));

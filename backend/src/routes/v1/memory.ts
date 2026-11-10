@@ -20,6 +20,7 @@ import {
   initializeSessionMemory,
   initializeRules,
   DEFAULT_MEMORY_SETTINGS,
+  getMemoryScope,
   listProjectMemoryDocuments,
   createProjectMemoryDocument,
   readProjectMemoryDocument,
@@ -149,9 +150,11 @@ export const memoryRoutes = new Elysia({ prefix: '/api/memory' })
   // Project Memory
   .get('/project', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
+    const root = getRequestProjectRoot(request);
     return {
       ok: true,
-      data: publicFile(readProjectMemory(getRequestProjectRoot(request)), 'project'),
+      data: publicFile(readProjectMemory(root), 'project'),
+      scope: getMemoryScope(root),
     };
   })
   .put(

@@ -98,9 +98,7 @@ function base64Url(bytes: Buffer): string {
   return bytes.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-export async function startFakeOAuthMcp(
-  options: FakeOAuthMcpOptions = {},
-): Promise<FakeOAuthMcp> {
+export async function startFakeOAuthMcp(options: FakeOAuthMcpOptions = {}): Promise<FakeOAuthMcp> {
   const recorded: RecordedCall[] = [];
   const issuedClients = new Map<string, IssuedClient>();
   const validAccessTokens = new Set<string>();
@@ -176,13 +174,9 @@ export async function startFakeOAuthMcp(
     });
 
   const unauthorized = (): Response =>
-    json(
-      { error: 'invalid_token', error_description: 'Missing or invalid access token' },
-      401,
-      {
-        'WWW-Authenticate': `Bearer realm="OAuth", resource_metadata="${origin()}/.well-known/oauth-protected-resource${mcpPath}", error="invalid_token"`,
-      },
-    );
+    json({ error: 'invalid_token', error_description: 'Missing or invalid access token' }, 401, {
+      'WWW-Authenticate': `Bearer realm="OAuth", resource_metadata="${origin()}/.well-known/oauth-protected-resource${mcpPath}", error="invalid_token"`,
+    });
 
   const guardUserAgent = (req: Request): boolean => {
     const userAgent = req.headers.get('user-agent');
@@ -383,7 +377,10 @@ export async function startFakeOAuthMcp(
 
         const resolvedAuth = resolveClientAuth(req, form);
         if (!resolvedAuth.ok) {
-          return json({ error: resolvedAuth.error, error_description: resolvedAuth.description }, 400);
+          return json(
+            { error: resolvedAuth.error, error_description: resolvedAuth.description },
+            400,
+          );
         }
         const client = issuedClients.get(resolvedAuth.clientId);
         if (!client) return json({ error: 'invalid_client' }, 400);
@@ -404,7 +401,10 @@ export async function startFakeOAuthMcp(
         }
 
         if (form.grant_type === 'authorization_code') {
-          if (options.enforceRedirectUri && !client.redirectUris.includes(form.redirect_uri ?? '')) {
+          if (
+            options.enforceRedirectUri &&
+            !client.redirectUris.includes(form.redirect_uri ?? '')
+          ) {
             return json({ error: 'invalid_grant' }, 400);
           }
           const stored = challengeByCode.get(form.code ?? '');
@@ -412,7 +412,9 @@ export async function startFakeOAuthMcp(
             return json({ error: 'invalid_grant', error_description: 'unknown code' }, 400);
           }
           const expected = base64Url(
-            createHash('sha256').update(form.code_verifier ?? '').digest(),
+            createHash('sha256')
+              .update(form.code_verifier ?? '')
+              .digest(),
           );
           if (stored !== expected) {
             return json({ error: 'invalid_grant', error_description: 'PKCE mismatch' }, 400);

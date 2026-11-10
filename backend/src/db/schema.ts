@@ -586,6 +586,31 @@ export const agentMessages = sqliteTable('agent_messages', {
   answeredAt: integer('answered_at', { mode: 'timestamp' }),
 });
 
+export const agentSteeringCommands = sqliteTable(
+  'agent_steering_commands',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id').notNull(),
+    agentId: text('agent_id').notNull(),
+    content: text('content').notNull(),
+    model: text('model'),
+    reasoningLevel: text('reasoning_level'),
+    status: text('status', {
+      enum: ['queued', 'dispatching', 'running', 'completed', 'cancelled', 'failed'],
+    }).notNull(),
+    position: integer('position').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+    startedAt: integer('started_at', { mode: 'timestamp' }),
+    finishedAt: integer('finished_at', { mode: 'timestamp' }),
+    error: text('error'),
+  },
+  (t) => ({
+    queue: index('idx_agent_steering_queue').on(t.sessionId, t.agentId, t.status, t.position),
+    recent: index('idx_agent_steering_recent').on(t.sessionId, t.agentId, t.updatedAt),
+  }),
+);
+
 // ============================================================================
 // Collaboration Tables
 // ============================================================================
@@ -764,6 +789,18 @@ export const workspaceNavigation = sqliteTable('workspace_navigation', {
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 });
 
+/** Durable identity and presentation metadata for a canonical project root. */
+export const projectIdentities = sqliteTable('project_identities', {
+  id: text('id').primaryKey(),
+  identityKey: text('identity_key').notNull().unique(),
+  rootPath: text('root_path').notNull().unique(),
+  name: text('name').notNull(),
+  icon: text('icon').notNull(),
+  revision: integer('revision').notNull().default(1),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+});
+
 export const modelSettings = sqliteTable(
   'model_settings',
   {
@@ -823,6 +860,7 @@ export const notes = sqliteTable('notes', {
   pinned: integer('pinned').notNull().default(0), // boolean 0/1
   includeInContext: integer('include_in_context').notNull().default(0), // auto-inject into agent context
   format: text('format').notNull().default('markdown'), // 'markdown' | 'html' — html renders in the sandboxed preview
+  icon: text('icon'), // JSON presentation metadata; independent of document content/revisions
   projectRoot: text('project_root'), // null means a legacy note owned by the launch project
   revision: integer('revision').notNull().default(1),
   /** Soft-deleted notes stay recoverable with their links and attachments. */

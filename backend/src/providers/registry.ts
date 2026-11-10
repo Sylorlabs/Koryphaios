@@ -16,14 +16,18 @@ import {
   GEMINI_V1_BASE,
   PROVIDER_BASE_URLS,
   VERTEX_EXPRESS_VERIFY_URL,
+  safeEndpointUrl,
 } from './api-endpoints';
 import { AnthropicProvider } from './anthropic';
 import {
   OpenAIProvider,
   GroqProvider,
   OpenRouterProvider,
+  AgentRouterProvider,
   UnoRouterProvider,
   ExperientialLabsProvider,
+  VyceAIProvider,
+  RespanProvider,
   XAIProvider,
   AzureProvider,
 } from './openai';
@@ -43,8 +47,17 @@ import { CodexAuthProvider } from './codex-auth';
 import { getManagedCodexAppServer } from './codex-app-server';
 import { ClaudeCodeProvider } from './claude-code';
 import { GrokBuildProvider } from './grok-build';
+import { CodeBuddyProvider } from './codebuddy';
+import { WorkBuddyDesktopProvider } from './workbuddy-desktop';
+import {
+  locateWorkBuddyDesktopApp,
+  resolveWorkBuddyDesktopRuntime,
+} from './workbuddy-desktop-runtime';
 import { FreebuffProvider } from './freebuff-cli';
-import { refreshFreebuffRuntimeStatus } from './freebuff-runtime';
+import { OmnirushCliProvider } from './omnirush-cli';
+import { OpenCodeCliProvider } from './opencode-cli';
+import { FREEBUFF_CLI_DEFAULT_MODEL_ID } from './freebuff-bundled-catalog';
+import { ensureFreebuffRuntimeReady } from './freebuff-runtime';
 import { CodebuffProvider } from './codebuff';
 import { AntigravityProvider } from './antigravity';
 import { CursorProvider } from './cursor';
@@ -52,8 +65,6 @@ import { DevinProvider } from './devin';
 import { ClineProvider } from './cline';
 import { KiloCodeProvider } from './kilo-cli';
 import { CommandCodeProvider } from './command-code';
-import { JulesProvider } from './jules';
-import { JULES_APPROVAL_REQUIRED_ERROR } from './jules-runner';
 import { HopliteProvider } from './hoplite';
 import { BedrockProvider } from './bedrock';
 import { hasAwsCredentialSource } from './aws-credential-scan';
@@ -65,7 +76,6 @@ import {
   githubModelsHeaders,
   parseGitHubModelsCatalog,
 } from './github-models';
-import { ChatbaseProvider } from './chatbase';
 import { NOTION_API_VERSION, NOTION_BASE_URL, NotionProvider } from './notion';
 import { CustomProvider, normalizeCustomProviderBaseUrl, probeCustomProvider } from './custom';
 import { getWireAdapter } from './wire-adapters/registry';
@@ -74,9 +84,12 @@ import {
   detectCodexCLILogin,
   detectClaudeCodeLogin,
   detectGrokCLILogin,
+  detectCodeBuddyCLILogin,
   detectAntigravityCLILogin,
   detectCursorCLILogin,
   detectDevinCLILogin,
+  detectOmnirushCLILogin,
+  detectOpenCodeCLILogin,
   discoverFreebuffAccounts,
 } from './auth-utils';
 import { cliAutoEnableCreds, probeCliConnection, whichBinary } from './cli-detection';
@@ -123,11 +136,12 @@ import {
   waitForProviderRetry,
 } from './provider-retry';
 import { verifyRuntimeCompletion } from './runtime-verification';
-import { getCatalogRefreshScheduler } from './catalog-refresh';
+import { catalogRefreshTier, getCatalogRefreshScheduler } from './catalog-refresh';
 import { PROJECT_ROOT } from '../runtime/paths';
 import { syncProviderConfigsToConfig } from '../runtime/config';
 import { enforceChatProviderIsolation } from './chat-isolation';
 import { withBridgeWorkspace } from './bridge-grant';
+import { currentProviderExecutionScope } from './execution-scope';
 
 function safeVerificationHttpError(
   status: number,
@@ -144,17 +158,20 @@ function safeVerificationHttpError(
 const CLI_HARNESS_PROVIDERS = new Set<ProviderName>([
   'claude',
   'codex',
+  'codebuddy',
   'grok',
   'antigravity',
   'cursor',
   'devin',
   'freebuff',
+  'omnirush',
+  'opencode',
 ]);
 
 // CLI harness providers that use a managed app-server instead of a CLI binary
 // on PATH. They get the 'local' deployment but don't go through the standard
 // cliAutoEnableCreds flow.
-const MANAGED_CLI_PROVIDERS = new Set<ProviderName>(['codex-auth']);
+const MANAGED_CLI_PROVIDERS = new Set<ProviderName>(['codex-auth', 'workbuddy-desktop']);
 
 const LOCAL_PROVIDER_KEYS = new Set<ProviderName>(['local', 'ollama', 'lmstudio', 'llamacpp']);
 
@@ -220,10 +237,7 @@ function unsupportedChatReason(name: ProviderName): string | undefined {
 }
 
 function unavailableProviderReason(name: ProviderName): string | undefined {
-  return (
-    (DEDICATED_CAPABILITY_PROVIDER_NAMES.has(name) ? undefined : unsupportedChatReason(name)) ??
-    (name === 'jules' ? JULES_APPROVAL_REQUIRED_ERROR : undefined)
-  );
+  return DEDICATED_CAPABILITY_PROVIDER_NAMES.has(name) ? undefined : unsupportedChatReason(name);
 }
 
 function inferProviderDeployment(
@@ -254,6 +268,16 @@ interface CircuitState {
 
 type ProviderConnectionState = 'verified' | 'detected' | 'unknown' | 'failed';
 type ProviderVerificationScope = 'credential' | 'account' | 'endpoint' | 'catalog' | 'runtime';
+
+/** Outcome of one provider's user-requested refresh. `skipped` means the
+ *  request was coalesced into an in-flight refresh or hit the cooldown; the UI
+ *  treats that as a no-op rather than an error. */
+export type ProviderRefreshResult = {
+  name: ProviderName;
+  skipped?: 'in_flight' | 'cooldown';
+  verification?: ProviderVerificationResult;
+  status?: ReturnType<ProviderRegistry['getStatus']>[number];
+};
 
 type ProviderVerificationResult = {
   /** The configuration/probe was accepted. This is not itself a verification verdict. */
@@ -291,6 +315,7 @@ function generateProviderLabel(name: string): string {
     aistudio: 'Google AI Studio',
     huggingface: 'HuggingFace',
     ollamacloud: 'Ollama Cloud',
+    opencode: 'OpenCode',
     opencodezen: 'OpenCode Zen',
     opencodego: 'OpenCode Go',
     blackforestlabs: 'Black Forest Labs',
@@ -315,8 +340,8 @@ function generateProviderLabel(name: string): string {
     fal: 'Fal',
     luma: 'Luma',
     poe: 'Poe',
-    workbuddy: 'Work Buddy',
-    autoclaw: 'AutoClaw',
+    workbuddy: 'WorkBuddy',
+    'workbuddy-desktop': 'WorkBuddy Desktop',
     moark: 'Moark',
     wandb: 'Weights & Biases',
     submodel: 'SubModel',
@@ -377,11 +402,11 @@ function generateProviderLabel(name: string): string {
     llamacpp: 'Llama.cpp',
     deepseek: 'DeepSeek',
     claude: 'Claude Code',
-    jules: 'Google Jules',
     hoplite: 'Hoplite',
     azurecognitive: 'Azure Cognitive',
     sapai: 'SAP AI',
     gitlab: 'GitLab Duo',
+    omnirush: 'Omnirush',
   };
   if (SPECIAL[name]) return SPECIAL[name];
 
@@ -415,6 +440,15 @@ const CIRCUIT_TIMEOUT = 60_000; // 1 minute
  * never hang the connect request (verification already proved the endpoint,
  * and background discovery keeps going).
  */
+/**
+ * Minimum gap between two user-requested refreshes of the SAME provider.
+ *
+ * A CLI-backed refresh spawns a subprocess with a multi-second probe timeout, so
+ * an impatient double-click must coalesce rather than queue a second spawn. Ten
+ * seconds is below the threshold of noticing but well above any duplicate click.
+ */
+const MANUAL_PROVIDER_REFRESH_COOLDOWN_MS = 10_000;
+
 const CONNECT_CATALOG_TIMEOUT_MS = 15_000;
 
 /**
@@ -475,6 +509,11 @@ const PROVIDER_FACTORIES: Partial<Record<ProviderName, ProviderFactory>> = {
   'codex-auth': (c) => new CodexAuthProvider(c),
   // Grok Build subscription — runs the official `grok` CLI harness (no direct API calls).
   grok: (c) => new GrokBuildProvider(c),
+  // CodeBuddy subscription — runs the official `codebuddy` CLI harness.
+  codebuddy: (c) => new CodeBuddyProvider(c),
+  // WorkBuddy AI desktop app — runs the app's own host runtime (bundled CLI
+  // in --serve mode inside the installed app), not the standalone CLI.
+  'workbuddy-desktop': (c) => new WorkBuddyDesktopProvider(c),
   // Antigravity subscription — runs the official `agy` CLI harness (no direct API calls).
   antigravity: (c) => new AntigravityProvider(c),
   // Cursor subscription — runs the official `cursor-agent` CLI harness (no API key).
@@ -485,25 +524,31 @@ const PROVIDER_FACTORIES: Partial<Record<ProviderName, ProviderFactory>> = {
   cline: (c) => (c.apiKey || c.authToken ? new ClineProvider(c) : null),
   // Freebuff — real TUI driven through a sandboxed tmux PTY + Kory MCP.
   freebuff: (c) => new FreebuffProvider(c),
+  // Omnirush — official local CLI harness; the CLI owns auth and model metadata.
+  omnirush: (c) => new OmnirushCliProvider(c),
+  // OpenCode — official `opencode` CLI driven over ACP; the CLI owns auth, the
+  // live model catalog (with real context limits), and streaming.
+  opencode: (c) => new OpenCodeCliProvider(c),
   codebuff: (c) => (c.apiKey ? new CodebuffProvider(c) : null),
   // Kilo Code AI Gateway — OpenAI-compatible, API key auth.
-  chatbase: (c) => new ChatbaseProvider(c),
   // Notion Agent APIs — PAT auth, Custom Agents are the models.
   notion: (c) => (c.apiKey ? new NotionProvider(c) : null),
   kilocode: (c) => new KiloCodeProvider(c),
   // Command Code Provider API — OpenAI and Anthropic formats on one key.
   commandcode: (c) => new CommandCodeProvider(c),
-  // Visible as approval-required; this adapter cannot mutate remote state.
-  jules: (c) => new JulesProvider(c),
   // Hoplite — cloud async agent whose organization key is verifiable today;
   // live delegation is not wired, so the adapter stays inert without a key.
   hoplite: (c) => (c.apiKey ? new HopliteProvider(c) : null),
   kimicode: (c) => new KimiCodeProvider(c),
   openrouter: (c) => new OpenRouterProvider(c),
+  agentrouter: (c) => new AgentRouterProvider(c),
   // UnoRouter — open-source OpenAI-compatible gateway (Bearer auth, /v1/models).
   unorouter: (c) => new UnoRouterProvider(c),
   // Experiential Labs — open-source AI gateway (Bearer auth, /v1/models).
   experientiallabs: (c) => new ExperientialLabsProvider(c),
+  // Vyce AI — documented OpenAI-compatible /v1 gateway with Bearer auth.
+  vyceai: (c) => (c.apiKey || c.authToken ? new VyceAIProvider(c) : null),
+  respan: (c) => (c.apiKey || c.authToken ? new RespanProvider(c) : null),
   // OpenCode Go is dual-protocol — OpenCodeGoProvider dispatches per-model.
   opencodego: (c) => new OpenCodeGoProvider(c),
   groq: (c) => new GroqProvider(c),
@@ -571,6 +616,11 @@ class ProviderRegistry {
   private cliAutoConnectInFlight: Promise<void> | null = null;
   private cliAutoConnectCheckedAt = 0;
   private modelCatalogRefreshInFlight: Promise<void> | null = null;
+
+  /** Per-provider guard for the user-facing Refresh button, so repeated clicks
+   *  cannot stack CLI spawns or overlapping verification probes. */
+  private providerRefreshInFlight = new Map<ProviderName, Promise<ProviderRefreshResult>>();
+  private providerRefreshLastAt = new Map<ProviderName, number>();
   /** IDs of user-defined custom providers (e.g. "custom:my-llm"). */
   private customProviderIds = new Set<ProviderName>();
   /** Capability-based model selection — replaces blind first-match fallback. */
@@ -581,7 +631,7 @@ class ProviderRegistry {
     // Let resolveTrustedContextWindow consult live-discovered model defs
     // (context windows the provider API / CLI reported itself).
     registerLiveModelResolver((modelId, provider) => {
-      const p = this.providers.get(provider);
+      const p = this.get(provider);
       if (!p) return undefined;
       try {
         return p
@@ -590,6 +640,7 @@ class ProviderRegistry {
             (m) =>
               m.id === modelId ||
               m.apiModelId === modelId ||
+              m.name === modelId ||
               m.realModelId === modelId ||
               m.aliases?.includes(modelId),
           );
@@ -626,12 +677,16 @@ class ProviderRegistry {
 
   /** Get a specific provider by name. */
   get(name: ProviderName): Provider | undefined {
+    const scope = currentProviderExecutionScope();
+    if (scope) return scope.providers.get(name);
     return this.providers.get(name);
   }
 
   /** Get adapters with enough local configuration to attempt work. */
   getAvailable(): Provider[] {
-    return [...this.providers.values()].filter((p) => p.isAvailable());
+    return [...(currentProviderExecutionScope()?.providers ?? this.providers).values()].filter(
+      (p) => p.isAvailable(),
+    );
   }
 
   /** Check if circuit breaker is open for a provider */
@@ -702,7 +757,10 @@ class ProviderRegistry {
     providerAvailable: boolean,
   ): boolean {
     if (providerAvailable) return true;
-    if (!config || config.disabled) return false;
+    if (!config) return false;
+    // A disabled, unverified API-key provider can still have a saved key for
+    // retry. Presence is not authentication and must not enable the adapter.
+    if (config.disabled) return !!config.apiKey?.trim();
     if (config.custom) return !!config.baseUrl?.trim();
     const authMode = this.authModeFor(name);
     if (authMode === 'env_auth') {
@@ -810,10 +868,18 @@ class ProviderRegistry {
     verifiedAt?: number;
     verificationScope?: ProviderVerificationScope;
     verificationError?: string;
+    endpointUrl?: string;
+    modelCatalogUrl?: string;
+    modelDiscoveryHttpStatus?: number;
     models: string[];
     allAvailableModels: ReturnType<Provider['listModels']>;
+    modelCatalogAuthoritative?: boolean;
     selectedModels: string[];
     hideModelSelector: boolean;
+    /** Selected effective context budget; undefined means the maximum tier. */
+    contextWindow?: number;
+    /** Real context tiers reported by this provider's live model catalog. */
+    contextWindowOptions: number[];
     authMode: ProviderAuthMode;
     supportsApiKey: boolean;
     supportsAuthToken: boolean;
@@ -836,6 +902,29 @@ class ProviderRegistry {
     description?: string;
     credentialUrl?: string;
   }> {
+    const scope = currentProviderExecutionScope();
+    if (scope)
+      return [...scope.providers.values()].map((provider) => ({
+        name: provider.name,
+        enabled: !provider.config.disabled,
+        authenticated: provider.isAvailable(),
+        adapterAvailable: provider.isAvailable(),
+        credentialDetected: true,
+        connectionState: provider.isAvailable() ? ('verified' as const) : ('unavailable' as const),
+        models: provider.listModels().map((model) => model.id),
+        allAvailableModels: provider.listModels(),
+        selectedModels: provider.listModels().map((model) => model.id),
+        hideModelSelector: false,
+        contextWindowOptions: Array.from(
+          new Set(provider.listModels().flatMap((model) => model.contextWindowOptions ?? [])),
+        ).sort((a, b) => a - b),
+        authMode: 'api_key' as const,
+        supportsApiKey: false,
+        supportsAuthToken: false,
+        requiresBaseUrl: false,
+        circuitOpen: false,
+        label: provider.config.label ?? String(provider.name),
+      }));
     const names = this.getVisibleProviderNames();
     // A status read means the user is looking at the provider surface (Settings,
     // the model picker, the composer). That counts as activity for the adaptive
@@ -853,10 +942,16 @@ class ProviderRegistry {
       verifiedAt?: number;
       verificationScope?: ProviderVerificationScope;
       verificationError?: string;
+      endpointUrl?: string;
+      modelCatalogUrl?: string;
+      modelDiscoveryHttpStatus?: number;
       models: string[];
       allAvailableModels: ReturnType<Provider['listModels']>;
+      modelCatalogAuthoritative?: boolean;
       selectedModels: string[];
       hideModelSelector: boolean;
+      contextWindow?: number;
+      contextWindowOptions: number[];
       authMode: ProviderAuthMode;
       supportsApiKey: boolean;
       supportsAuthToken: boolean;
@@ -903,14 +998,40 @@ class ProviderRegistry {
         }
       }
 
-      const selectedModels = config?.selectedModels ?? [];
+      // Before account-owned Freebuff catalogs existed, the provider persisted
+      // its CLI-default sentinel as the only selected model. That sentinel is
+      // a selection policy, not an entitlement restriction: once account rows
+      // are available, treating it as an explicit filter hides every real
+      // Freebuff model from the main picker. Preserve explicit multi-model
+      // selections, but expand this legacy default-only state to the catalog.
+      const configuredSelectedModels = config?.selectedModels ?? [];
+      const selectedModels =
+        name === 'freebuff' &&
+        configuredSelectedModels.length === 1 &&
+        configuredSelectedModels[0] === FREEBUFF_CLI_DEFAULT_MODEL_ID &&
+        allModels.some((model) => model.apiModelId?.startsWith('freebuff/catalog-'))
+          ? []
+          : configuredSelectedModels;
       const hideModelSelector = config?.hideModelSelector ?? false;
+      // Only real tiers reported by a provider's own catalog can appear in the
+      // context selector. A generated ladder would offer budgets the CLI does
+      // not accept.
+      const contextWindowOptions = Array.from(
+        new Set(allModels.flatMap((model) => model.contextWindowOptions ?? [])),
+      ).sort((a, b) => a - b);
       const providerUnavailableReason = unavailableProviderReason(name);
+      // A failed background refresh keeps the last good catalog (see
+      // refreshModelsInBackground), so a stale discovery error must not be
+      // shown while the provider still reports models — that is exactly the
+      // "Connected · 23/23 models enabled" alongside "No models were
+      // reported" contradiction. Discovery trouble is surfaced only when
+      // there is actually nothing to offer.
+      const discoveryFailure = provider?.getModelDiscoveryError?.();
       const modelDiscoveryError =
         providerUnavailableReason ??
-        provider?.getModelDiscoveryError?.() ??
         (isEnabled && isProviderAvailable && !hideModelSelector && allModels.length === 0
-          ? 'No models were reported by this configured provider. Refresh discovery or check its account and CLI/API authentication.'
+          ? (discoveryFailure ??
+            'No models were reported by this configured provider. Refresh discovery or check its account and CLI/API authentication.')
           : undefined);
 
       const enabledModels =
@@ -970,6 +1091,10 @@ class ProviderRegistry {
         : undefined;
 
       const display = getProviderDisplay(name);
+      const endpointUrl = safeEndpointUrl(config?.baseUrl ?? providerDefaultBaseUrl(name));
+      const modelCatalogUrl = endpointUrl ? `${endpointUrl}/models` : undefined;
+      const discoveryStatus = provider as
+        (Provider & { getModelDiscoveryHttpStatus?: () => number | undefined }) | undefined;
       const inferredDeployment = inferProviderDeployment(
         name,
         authMode,
@@ -992,10 +1117,20 @@ class ProviderRegistry {
           }),
         ...(verification?.state === 'verified' && { verifiedAt: verification.checkedAt }),
         ...(verification?.error && { verificationError: verification.error }),
+        ...(endpointUrl && { endpointUrl }),
+        ...(modelCatalogUrl && { modelCatalogUrl }),
+        ...(discoveryStatus?.getModelDiscoveryHttpStatus && {
+          modelDiscoveryHttpStatus: discoveryStatus.getModelDiscoveryHttpStatus(),
+        }),
         models: enabledModels,
         allAvailableModels: allModels,
+        ...(provider?.isModelCatalogAuthoritative?.() === true
+          ? { modelCatalogAuthoritative: true }
+          : {}),
         selectedModels,
         hideModelSelector,
+        ...(config?.contextWindow !== undefined ? { contextWindow: config.contextWindow } : {}),
+        contextWindowOptions,
         authMode,
         supportsApiKey:
           !blocksChatConfiguration &&
@@ -1029,7 +1164,6 @@ class ProviderRegistry {
         ...(display?.iconPath && { iconPath: display.iconPath }),
         deployment: inferredDeployment,
         execution: providerExecutionCapabilities(String(name), inferredDeployment),
-        ...(display?.description && { description: display.description }),
         ...(display?.credentialUrl && { credentialUrl: display.credentialUrl }),
         ...(baseUrlPlaceholder && { baseUrlPlaceholder }),
         // Remote providers (served by another machine) carry an agentic flag so
@@ -1057,6 +1191,12 @@ class ProviderRegistry {
 
   private async refreshModelCatalogsInternal(): Promise<void> {
     const refreshes: Promise<unknown>[] = [];
+    // Subprocess-backed catalogs are refreshed one at a time. Fanning these out
+    // together started every installed CLI at once — a single manual refresh
+    // could launch a dozen processes on the user's machine, each with its own
+    // multi-second probe timeout. Cheap HTTP catalogs stay fully parallel, since
+    // one GET each cannot exhaust the machine.
+    const cliBacked: Provider[] = [];
     const names = this.getVisibleProviderNames();
 
     for (const name of names) {
@@ -1072,6 +1212,10 @@ class ProviderRegistry {
       const isCustom = config?.custom === true || this.customProviderIds.has(name);
       if (isCustom && this.verificationRecords.get(name)?.state === 'failed') continue;
 
+      if (catalogRefreshTier(name) === 'cli') {
+        cliBacked.push(provider);
+        continue;
+      }
       try {
         const result = provider.refreshModels?.(true);
         if (result && typeof (result as Promise<unknown>).then === 'function') {
@@ -1089,6 +1233,17 @@ class ProviderRegistry {
 
     if (refreshes.length > 0) {
       await Promise.allSettled(refreshes);
+    }
+
+    for (const provider of cliBacked) {
+      try {
+        await provider.refreshModels?.(true);
+      } catch (err: unknown) {
+        serverLog.debug(
+          { err: err instanceof Error ? err.message : String(err), provider: provider.name },
+          'CLI provider catalog refresh failed (non-fatal)',
+        );
+      }
     }
 
     // A manual refresh already paid for the catalogs it covered. Tell the
@@ -1137,6 +1292,71 @@ class ProviderRegistry {
         'Provider model refresh failed (non-fatal)',
       );
     }
+  }
+
+  /**
+   * One provider's user-requested refresh: re-check it with the provider and
+   * reload its model catalog.
+   *
+   * This is the per-provider counterpart to the all-provider paths, and it is
+   * deliberately cheap by default: `verifyConnection` performs a real
+   * configuration/catalog probe against the provider, which is enough to
+   * confirm the credential still works. `runtimeCheck` additionally spends a
+   * real generation, which is opt-in because it costs tokens.
+   *
+   * Coalesced per provider and rate-limited, because a CLI-backed refresh spawns
+   * a subprocess and a held-down button would otherwise queue them up.
+   */
+  async refreshProviderAndVerify(
+    name: ProviderName,
+    options: { runtimeCheck?: boolean; now?: number } = {},
+  ): Promise<ProviderRefreshResult> {
+    const existing = this.providerRefreshInFlight.get(name);
+    if (existing) return existing;
+
+    // One clock for both the check and the recorded timestamp. Reading the wall
+    // clock again at completion made the two disagree, so a caller supplying an
+    // injected clock could be refused by a cooldown it never entered.
+    const now = options.now ?? Date.now();
+    const last = this.providerRefreshLastAt.get(name) ?? 0;
+    if (last > 0 && now - last < MANUAL_PROVIDER_REFRESH_COOLDOWN_MS) {
+      return { skipped: 'cooldown', name };
+    }
+    this.providerRefreshLastAt.set(name, now);
+
+    const run = (async (): Promise<ProviderRefreshResult> => {
+      // A previously open circuit would otherwise block the very probe the user
+      // asked for.
+      this.circuitStates.delete(name);
+      this.clearKeyInvalid?.(name);
+
+      let verification: ProviderVerificationResult | undefined;
+      try {
+        verification = await this.verifyConnection(name, undefined, {
+          runtimeCheck: options.runtimeCheck === true,
+        });
+      } catch (err: unknown) {
+        verification = {
+          success: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+
+      // Refresh regardless of the verification verdict: a provider can be
+      // reachable for its catalog while the credential probe failed, and the
+      // user explicitly asked for fresh lists.
+      await this.refreshModelCatalog(name);
+      // Stop the background scheduler from immediately repeating this work.
+      getCatalogRefreshScheduler()?.noteManualRefresh();
+
+      const status = this.getStatus().find((entry) => entry.name === name);
+      return { name, verification, status };
+    })().finally(() => {
+      this.providerRefreshInFlight.delete(name);
+    });
+
+    this.providerRefreshInFlight.set(name, run);
+    return run;
   }
 
   /** All provider types that can be added (for "Add provider" UI). Not filtered by auth. */
@@ -1303,6 +1523,19 @@ class ProviderRegistry {
 
   /** Resolve the provider that should handle a model. */
   resolveProvider(modelId: string, preferredProvider?: ProviderName): Provider | undefined {
+    const scope = currentProviderExecutionScope();
+    if (scope) {
+      const candidates = preferredProvider
+        ? [scope.providers.get(preferredProvider)]
+        : [...scope.providers.values()];
+      return candidates.find(
+        (provider) =>
+          provider?.isAvailable() &&
+          provider
+            .listModels()
+            .some((model) => model.id === modelId || model.aliases?.includes(modelId)),
+      );
+    }
     const modelDef = resolveModel(modelId);
 
     if (modelDef) {
@@ -1334,6 +1567,13 @@ class ProviderRegistry {
    *  the original first-match behavior if the capability registry returns
    *  nothing (e.g. all providers have open circuit breakers). */
   getFirstAvailableRouting(): { model: string; provider: ProviderName } | undefined {
+    if (currentProviderExecutionScope()) {
+      for (const provider of this.getAvailable()) {
+        const model = provider.listModels()[0];
+        if (model) return { model: model.id, provider: provider.name };
+      }
+      return undefined;
+    }
     // Try capability-based selection first — picks the best model by tier,
     // context window, and capabilities rather than insertion order.
     const capability = this.capabilityRegistry?.findBestModel({
@@ -1357,6 +1597,11 @@ class ProviderRegistry {
     preferredProvider?: ProviderName,
     fallbackChain: string[] = [],
   ): AsyncGenerator<ProviderEvent> {
+    const scope = currentProviderExecutionScope();
+    if (scope && request.sessionId !== scope.sessionId) {
+      yield { type: 'error', error: 'Device provider credentials belong to a different chat.' };
+      return;
+    }
     const chain = [request.model, ...fallbackChain];
     // A real completion is the strongest activity signal available: the user is
     // actively using this provider, so its catalog should not be sitting on an
@@ -1367,7 +1612,11 @@ class ProviderRegistry {
       const currentModel = chain[i];
       const provider = this.resolveProvider(currentModel, i === 0 ? preferredProvider : undefined);
       if (request.requiredProvider && provider?.name !== request.requiredProvider) {
-        yield { type: 'error', error: 'The authorized provider is unavailable. Remote inference cannot use a different provider.' };
+        yield {
+          type: 'error',
+          error:
+            'The authorized provider is unavailable. Remote inference cannot use a different provider.',
+        };
         return;
       }
 
@@ -1425,7 +1674,8 @@ class ProviderRegistry {
           let accTokensCacheWrite: number | undefined;
           let accBillingTokensIn: number | undefined;
           let accBillingTokensOut: number | undefined;
-          let accBillingUsageSamples: ProviderEvent['billingUsageSamples'];
+          let accReportedCostUsd: number | undefined;
+      let accBillingUsageSamples: ProviderEvent['billingUsageSamples'];
           let usageAccountId: string | undefined;
           // A yielded error event the loop chose to suppress for a same-model
           // retry (set instead of surfacing it to the caller).
@@ -1514,6 +1764,7 @@ class ProviderRegistry {
                 }
               }
               if (event.type === 'usage_update') {
+            if (event.reportedCostUsd !== undefined) accReportedCostUsd = event.reportedCostUsd;
                 if (typeof event.tokensIn === 'number') accTokensIn = event.tokensIn;
                 if (typeof event.tokensOut === 'number') accTokensOut = event.tokensOut;
                 if (typeof event.tokensCache === 'number') {
@@ -1636,6 +1887,7 @@ class ProviderRegistry {
                     sessionId: request.sessionId,
                   },
                   {
+                    reportedCostUsd: accReportedCostUsd,
                     cacheReadTokens: accTokensCacheRead,
                     cacheWriteTokens: accTokensCacheWrite,
                     ttftMs,
@@ -1879,7 +2131,7 @@ class ProviderRegistry {
                 'No Claude Code login material was detected. Run "claude login" in your terminal, then check again.',
             };
           }
-          if (!probeCliConnection(claudeBin, 'claude')) {
+          if (!(await probeCliConnection(claudeBin, 'claude'))) {
             return {
               success: true,
               state: 'detected',
@@ -1904,12 +2156,61 @@ class ProviderRegistry {
                 'No Grok Build login material was detected. Install the grok CLI, run "grok login", then check again.',
             };
           }
-          if (!probeCliConnection(grokBin, 'grok')) {
+          if (!(await probeCliConnection(grokBin, 'grok'))) {
             return {
               success: true,
               state: 'detected',
               error:
                 'Grok Build CLI was found on PATH with login material but did not pass its connection probe. The local login may be expired, unavailable, or the CLI installation may be broken.',
+            };
+          }
+          return { success: true, state: 'verified' };
+        }
+        case 'codebuddy': {
+          const cbBin = whichBinary('codebuddy');
+          if (!cbBin) {
+            return {
+              success: false,
+              error: 'CodeBuddy CLI (codebuddy) was not found on PATH. Install it, then reconnect.',
+            };
+          }
+          if (!detectCodeBuddyCLILogin()) {
+            return {
+              success: false,
+              error:
+                'No CodeBuddy login material was detected. Complete the interactive `codebuddy` login, then check again.',
+            };
+          }
+          if (!(await probeCliConnection(cbBin, 'codebuddy'))) {
+            return {
+              success: true,
+              state: 'detected',
+              error:
+                'CodeBuddy CLI was found on PATH with login material but did not pass its connection probe. The local login may be expired, unavailable, or the CLI installation may be broken.',
+            };
+          }
+          return { success: true, state: 'verified' };
+        }
+        case 'workbuddy-desktop': {
+          // The desktop app owns its auth. Installing it IS the verification:
+          // there is no token or key to check, and the runtime either attaches
+          // to the running app or starts the app's bundled runtime itself.
+          const app = locateWorkBuddyDesktopApp();
+          if (!app) {
+            return {
+              success: false,
+              error:
+                'WorkBuddy AI is not installed. Install the desktop app (or set ' +
+                'WORKBUDDY_DESKTOP_APP_PATH to its install root), then check again.',
+            };
+          }
+          const wbRuntime = resolveWorkBuddyDesktopRuntime(app);
+          if (!wbRuntime) {
+            return {
+              success: false,
+              error:
+                'WorkBuddy AI is installed but its bundled runtime is missing. ' +
+                'Reinstall the desktop app, then check again.',
             };
           }
           return { success: true, state: 'verified' };
@@ -1929,7 +2230,7 @@ class ProviderRegistry {
                 'No Antigravity login material was detected. Install agy, run "agy login", then check again.',
             };
           }
-          if (!probeCliConnection(agyBin, 'antigravity')) {
+          if (!(await probeCliConnection(agyBin, 'antigravity'))) {
             return {
               success: true,
               state: 'detected',
@@ -1956,7 +2257,7 @@ class ProviderRegistry {
                 'No Cursor login material was detected. Install cursor-agent, run "cursor-agent login", then check again.',
             };
           }
-          if (!probeCliConnection(cursorBin, 'cursor')) {
+          if (!(await probeCliConnection(cursorBin, 'cursor'))) {
             return {
               success: true,
               state: 'detected',
@@ -1981,7 +2282,7 @@ class ProviderRegistry {
                 'No Devin login material was detected. Install devin, run "devin auth login", then check again.',
             };
           }
-          if (!probeCliConnection(devinBin, 'devin')) {
+          if (!(await probeCliConnection(devinBin, 'devin'))) {
             return {
               success: true,
               state: 'detected',
@@ -2001,7 +2302,7 @@ class ProviderRegistry {
                 'Freebuff CLI login material was not found. Run "freebuff login" in your terminal, then reconnect.',
             };
           }
-          const isolation = await refreshFreebuffRuntimeStatus(true);
+          const isolation = await ensureFreebuffRuntimeReady();
           if (!isolation.available) {
             return {
               success: false,
@@ -2016,19 +2317,80 @@ class ProviderRegistry {
             disabled: false,
           });
           const models = await runtime.refreshModels(true);
-          if (!runtime.isAvailable() || !models.length) {
+          if (!runtime.isAvailable()) {
             return {
               success: false,
               error:
                 runtime.getModelDiscoveryError() ??
-                'Freebuff native CLI executable or model selection is unavailable.',
+                'Freebuff native CLI executable or login is unavailable.',
             };
+          }
+          // Authentication belongs to the CLI account/runtime, not to the
+          // optional entitlement catalog. Keep a valid login connected when a
+          // catalog request is temporarily unavailable; the model picker can
+          // show the discovery error and retry independently.
+          if (
+            !runtime.getModelDiscoveryError() &&
+            models.some((model) => model.apiModelId?.startsWith('freebuff/catalog-'))
+          ) {
+            return { success: true, state: 'verified', scope: 'catalog' };
           }
           return {
             success: true,
-            state: 'detected',
-            error: `Freebuff CLI setup and ${isolation.kind === 'docker' ? 'Docker/Linux' : 'native Linux'} bubblewrap isolation passed readiness checks. The CLI owns model selection; account/model access is verified only by an actual Freebuff turn.`,
+            state: 'verified',
+            scope: 'account',
           };
+        }
+        case 'omnirush': {
+          const omnirushBin = whichBinary('omnirush');
+          if (!omnirushBin) {
+            return {
+              success: false,
+              error: 'Omnirush CLI (omnirush) was not found on PATH. Install it, then reconnect.',
+            };
+          }
+          if (!detectOmnirushCLILogin()) {
+            return {
+              success: false,
+              error:
+                'No Omnirush login material was detected. Run `omnirush login` in your terminal, then check again.',
+            };
+          }
+          if (!(await probeCliConnection(omnirushBin, 'omnirush'))) {
+            return {
+              success: true,
+              state: 'detected',
+              error:
+                'Omnirush CLI was found on PATH with login material but its `whoami` probe failed. The session may be expired or the CLI may be unable to reach Omnirush.',
+            };
+          }
+          return { success: true, state: 'verified' };
+        }
+        case 'opencode': {
+          const opencodeBin = whichBinary('opencode');
+          if (!opencodeBin) {
+            return {
+              success: false,
+              error:
+                'OpenCode CLI (opencode) was not found on PATH. Install it from https://opencode.ai, then reconnect.',
+            };
+          }
+          if (!detectOpenCodeCLILogin()) {
+            return {
+              success: false,
+              error:
+                'No OpenCode login material was detected. Run "opencode auth login" in your terminal, then check again.',
+            };
+          }
+          if (!(await probeCliConnection(opencodeBin, 'opencode'))) {
+            return {
+              success: true,
+              state: 'detected',
+              error:
+                'OpenCode CLI was found on PATH with login material but its `models` probe failed. The CLI may be unable to reach its catalog; the login may be expired or the installation broken.',
+            };
+          }
+          return { success: true, state: 'verified' };
         }
         case 'codebuff': {
           if (!apiKey) return { success: false, error: 'Missing Codebuff API key' };
@@ -2045,8 +2407,7 @@ class ProviderRegistry {
         case 'hoplite': {
           // Hoplite is a cloud async-agent control plane, not a chat API. Its
           // organization-scoped key is proven against the live project catalog
-          // (/api/projects); delegation itself is a later release. Unlike Jules,
-          // a valid key really does verify here.
+          // (/api/projects); delegation itself is a later release.
           if (!apiKey) return { success: false, error: 'Missing Hoplite API key' };
           const response = await fetch('https://api.hoplite.sh/api/projects', {
             headers: {
@@ -2186,12 +2547,6 @@ class ProviderRegistry {
             'openai',
           );
         }
-        case 'chatbase': {
-          if (!apiKey) return { success: false, error: 'Chatbase requires an API key' };
-          return this.verifyCapabilityGet('https://www.chatbase.co/api/v2/agents', {
-            Authorization: `Bearer ${apiKey}`,
-          });
-        }
         case 'notion': {
           if (!apiKey)
             return { success: false, error: 'Notion requires a Personal Access Token (PAT)' };
@@ -2227,6 +2582,14 @@ class ProviderRegistry {
             },
             'openai',
           );
+        case 'vyceai': {
+          if (!apiKey) return { success: false, error: 'Vyce AI requires an API key' };
+          const base = (baseUrl || PROVIDER_BASE_URLS.vyceai || 'https://vyceai.com/v1').replace(
+            /\/+$/,
+            '',
+          );
+          return this.verifyBearerGet(`${base}/models`, apiKey);
+        }
         case 'github-models': {
           const token = apiKey || authToken;
           if (!token) return { success: false, error: 'Missing GitHub token' };
@@ -2268,13 +2631,6 @@ class ProviderRegistry {
           // (an invalid key returns 401 gateway_error on every endpoint).
           return this.verifyBearerGet(
             'https://tokenhub-intl.tencentcloudmaas.com/v1/models',
-            apiKey,
-          );
-        case 'autoclaw':
-          // Local AutoClaw gateway: GET /v1/models is the cheap loopback probe
-          // for the bearer token from ~/.openclaw-autoclaw/.gateway-token.
-          return this.verifyBearerGet(
-            `${(baseUrl || 'http://127.0.0.1:18789/v1').replace(/\/+$/, '')}/models`,
             apiKey,
           );
         case 'groq':
@@ -2379,7 +2735,7 @@ class ProviderRegistry {
                 'No Codex CLI login material was detected. Run "codex login" in your terminal, then check again.',
             };
           }
-          if (!probeCliConnection(codexBin, 'codex')) {
+          if (!(await probeCliConnection(codexBin, 'codex'))) {
             return {
               success: true,
               state: 'detected',
@@ -2506,7 +2862,7 @@ class ProviderRegistry {
           // silently produced "Unsupported provider" for every built-in
           // OpenAI-compatible provider whose default URL is known.
           const effectiveBase = baseUrl?.trim() || defaultBase;
-          const effectiveApiKey = apiKey || authToken;
+          const effectiveApiKey = apiKey?.trim() || authToken?.trim();
 
           // Universal OpenAI-compatible verification
           if (effectiveBase && effectiveApiKey) {
@@ -2537,10 +2893,14 @@ class ProviderRegistry {
       awsSessionToken?: string;
       selectedModels?: string[];
       hideModelSelector?: boolean;
+      contextWindow?: number;
     },
-    options: { fullCheck?: boolean } = {},
-  ): Promise<{ success: boolean; error?: string }> {
+    options: { fullCheck?: boolean; preferenceOnly?: boolean } = {},
+  ): Promise<{ success: boolean; error?: string; credentialsRetained?: boolean }> {
     try {
+      if (!this.getVisibleProviderNames().includes(name)) {
+        return { success: false, error: 'Unknown provider' };
+      }
       const unavailableReason = unavailableProviderReason(name);
       if (unavailableReason) return { success: false, error: unavailableReason };
 
@@ -2639,11 +2999,45 @@ class ProviderRegistry {
       // Without it that button was a no-op for API-key providers — it re-saved
       // the previous verdict, so a provider stuck on 'failed' stayed failed
       // forever no matter how many times the user clicked it.
-      if (connectionChanged || CLI_HARNESS_PROVIDERS.has(name) || options.fullCheck) {
+      if (
+        !options.preferenceOnly &&
+        (connectionChanged ||
+          existing?.disabled ||
+          CLI_HARNESS_PROVIDERS.has(name) ||
+          options.fullCheck)
+      ) {
         const verification = await this.verifyConnection(name, nextConnection, {
           runtimeCheck: options.fullCheck === true,
         });
-        if (!verification.success) return verification;
+        if (!verification.success) {
+          // Retain only an explicitly submitted API key for an inactive provider.
+          // Never overwrite a working connection on failed rotation, or persist
+          // ambient/CLI credentials. The authenticated route owns disk writes;
+          // registry tests and transient registries must not mutate real stores.
+          if (
+            !credentials.apiKey?.trim() ||
+            (existing && !existing.disabled) ||
+            !['api_key', 'api_key_or_auth'].includes(this.authModeFor(name))
+          )
+            return verification;
+          const failedConfig: ProviderConfig = {
+            ...existing,
+            name,
+            apiKey: resolvedApiKey,
+            authToken: resolvedAuthToken,
+            baseUrl: resolvedBaseUrl,
+            deployment: resolvedDeployment,
+            awsRegion: resolvedAwsRegion,
+            awsSessionToken: resolvedAwsSessionToken,
+            lastVerifiedAt: undefined,
+            lastVerificationScope: undefined,
+            lastVerificationState: undefined,
+            disabled: true,
+          };
+          this.providerConfigs.set(name, failedConfig);
+          this.providers.delete(name);
+          return { ...verification, credentialsRetained: true };
+        }
         acceptedState = verification.state ?? 'verified';
         acceptedScope = verification.scope ?? this.verificationScopeFor(name);
       }
@@ -2679,6 +3073,14 @@ class ProviderRegistry {
         awsSessionToken: resolvedAwsSessionToken,
         selectedModels: credentials.selectedModels ?? existing?.selectedModels,
         hideModelSelector: credentials.hideModelSelector ?? existing?.hideModelSelector,
+        contextWindow:
+          credentials.contextWindow === 0
+            ? undefined // restore the maximum tier
+            : typeof credentials.contextWindow === 'number' &&
+                Number.isSafeInteger(credentials.contextWindow) &&
+                credentials.contextWindow > 0
+              ? credentials.contextWindow
+              : existing?.contextWindow,
         lastVerifiedAt: verifiedAt,
         lastVerificationScope: verificationScope,
         lastVerificationState: verificationState,
@@ -2690,31 +3092,39 @@ class ProviderRegistry {
 
       const provider = this.createProvider(name, providerConfig);
       if (provider) {
-        // Wait for the live model catalog on explicit connect so the model
-        // picker shows the provider's real models immediately — no restart
-        // needed. Previously only Codex awaited here (and without forcing a
-        // refresh), so every other provider returned success with an empty
-        // catalog while background discovery was still in flight, and the
-        // frontend's immediate status reload rendered zero models. Guarded by
-        // a timeout so a slow catalog can never hang connect: verification
-        // already passed, and the background refresh keeps going.
-        const catalogRefresh = provider.refreshModels?.(true);
-        if (catalogRefresh && typeof (catalogRefresh as Promise<unknown>).then === 'function') {
-          let timer: ReturnType<typeof setTimeout> | undefined;
-          try {
-            await Promise.race([
-              catalogRefresh as Promise<unknown>,
-              new Promise((resolve) => {
-                timer = setTimeout(resolve, CONNECT_CATALOG_TIMEOUT_MS);
-              }),
-            ]);
-          } catch (err: unknown) {
-            providerLog.debug(
-              { provider: name, err: err instanceof Error ? err.message : String(err) },
-              'Connect-time model catalog refresh failed; background discovery continues',
-            );
-          } finally {
-            if (timer) clearTimeout(timer);
+        // A preference-only update (Manage Models) must not re-run catalog
+        // discovery. The selection is already based on the catalog displayed
+        // in the dialog, and CLI-backed discovery can take long enough to make
+        // Done appear unresponsive. Normal connects still warm the catalog so
+        // the picker is populated immediately; background/manual refreshes
+        // handle later catalog changes.
+        if (!options.preferenceOnly) {
+          // Wait for the live model catalog on explicit connect so the model
+          // picker shows the provider's real models immediately — no restart
+          // needed. Previously only Codex awaited here (and without forcing a
+          // refresh), so every other provider returned success with an empty
+          // catalog while background discovery was still in flight, and the
+          // frontend's immediate status reload rendered zero models. Guarded by
+          // a timeout so a slow catalog can never hang connect: verification
+          // already passed, and the background refresh keeps going.
+          const catalogRefresh = provider.refreshModels?.(true);
+          if (catalogRefresh && typeof (catalogRefresh as Promise<unknown>).then === 'function') {
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            try {
+              await Promise.race([
+                catalogRefresh as Promise<unknown>,
+                new Promise((resolve) => {
+                  timer = setTimeout(resolve, CONNECT_CATALOG_TIMEOUT_MS);
+                }),
+              ]);
+            } catch (err: unknown) {
+              providerLog.debug(
+                { provider: name, err: err instanceof Error ? err.message : String(err) },
+                'Connect-time model catalog refresh failed; background discovery continues',
+              );
+            } finally {
+              if (timer) clearTimeout(timer);
+            }
           }
         }
         this.providers.set(name, provider);
@@ -2777,7 +3187,10 @@ class ProviderRegistry {
 
     if (authMode === 'auth_only') {
       const hasAuth = !!(authToken || existing?.authToken);
-      if (!hasAuth) {
+      // Managed local runtimes own their auth: the desktop app / app-server
+      // holds the login, so "Connect" is a detection step, never a token
+      // entry. Only genuinely token-based auth_only providers require one.
+      if (!hasAuth && !MANAGED_CLI_PROVIDERS.has(name)) {
         return { success: false, error: 'authToken is required' };
       }
     }
@@ -2984,13 +3397,17 @@ class ProviderRegistry {
     // Retired TokenRouter hosts (the dead .me domain and the wrong .io default
     // older versions may have persisted) count as "no explicit override" so the
     // canonical default applies. Explicit user URLs on live hosts still win.
-    const normalizedUserBaseUrl = userConfig?.baseUrl?.replace(/\/+$/, '');
+    let normalizedUserBaseUrl = userConfig?.baseUrl?.replace(/\/+$/, '');
+    const canonicalCustomBaseUrl =
+      false && normalizedUserBaseUrl
+        ? normalizedUserBaseUrl
+        : userConfig?.baseUrl ?? undefined;
     const userBaseUrl =
       name === 'tokenrouter' &&
       (normalizedUserBaseUrl === 'https://tokenrouter.me/v1' ||
         normalizedUserBaseUrl === 'https://api.tokenrouter.io/v1')
         ? undefined
-        : userConfig?.baseUrl;
+        : canonicalCustomBaseUrl;
 
     const providerConfig: ProviderConfig = {
       name,
@@ -3012,6 +3429,7 @@ class ProviderRegistry {
       awsSessionToken: userConfig?.awsSessionToken,
       selectedModels: userConfig?.selectedModels ?? [],
       hideModelSelector: userConfig?.hideModelSelector ?? false,
+      contextWindow: userConfig?.contextWindow,
       lastVerifiedAt: userConfig?.lastVerifiedAt,
       lastVerificationScope: userConfig?.lastVerificationScope,
       lastVerificationState: userConfig?.lastVerificationState,

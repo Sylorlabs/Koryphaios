@@ -352,6 +352,18 @@ export class ClineProvider extends OpenAIProvider {
     const vision = modalities.includes('image');
     const acceptsFiles = modalities.includes('file');
     const acceptsAudio = modalities.includes('audio');
+    // Output modalities are Cline's own statement of what the model produces.
+    // They gate the image/video surfaces, so they are carried as reported and
+    // never inferred from an id.
+    const outputModalities = Array.isArray(row?.architecture?.output_modalities)
+      ? [
+          ...new Set(
+            (row.architecture?.output_modalities as unknown[]).map((modality) =>
+              String(modality).trim().toLowerCase(),
+            ),
+          ),
+        ].filter(Boolean)
+      : [];
     const tools = supported.has('tools');
     const streaming = supported.size === 0 || !supported.has('stream');
 
@@ -401,6 +413,7 @@ export class ClineProvider extends OpenAIProvider {
       ...(outPerM !== undefined ? { costPerMOutputTokens: outPerM } : {}),
       ...(cachePerM !== undefined ? { costPerMInputCached: cachePerM } : {}),
       ...(this.clineFreeModels.has(id) ? { tier: 'cheap' as const } : {}),
+      ...(outputModalities.length > 0 ? { outputModalities } : {}),
     };
   }
 
@@ -443,6 +456,17 @@ export class ClineProvider extends OpenAIProvider {
       return;
     }
     if (CLINE_TOGGLE_REASONING_MODELS.has(apiModelId)) {
+      if (effort === 'off') params.include_reasoning = false;
+      else if (effort === 'on') params.include_reasoning = true;
+      return;
+    }
+    // The public Cline catalog can expose an off/on ladder for a newly
+    // published model before the generated @cline/llms snapshot is refreshed.
+    // ModelDef preserves that live evidence, so honor it on a warm adapter.
+    if (
+      options.modelDef?.reasoningLevels?.includes('off') &&
+      options.modelDef.reasoningLevels.includes('on')
+    ) {
       if (effort === 'off') params.include_reasoning = false;
       else if (effort === 'on') params.include_reasoning = true;
     }

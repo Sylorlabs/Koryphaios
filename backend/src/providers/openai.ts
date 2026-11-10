@@ -23,7 +23,11 @@ import {
   mergeModelLists,
   modelFromRemoteId,
 } from './model-list-cache';
-import { providerStreamFailure } from './provider-diagnostics';
+import {
+  providerStreamFailure,
+  safeProviderDiagnostic,
+  safeProviderFailureMessage,
+} from './provider-diagnostics';
 import { withOpenRouterAttribution } from './api-endpoints';
 import {
   canonicalizeProviderTools,
@@ -35,6 +39,8 @@ import {
 import { promptCacheMaintenance } from './cache-maintenance';
 import { promptCacheDiagnostics } from './cache-fabric';
 import { resolvePricing } from '../pricing';
+import { normalizeToolArguments } from './tool-arguments';
+import { AnthropicProvider } from './anthropic';
 
 export class OpenAIProvider implements Provider {
   readonly imageInputTransport = 'native' as const;
@@ -49,19 +55,34 @@ export class OpenAIProvider implements Provider {
   protected get client(): OpenAI {
     if (!this._client) {
       const apiKey = this.config.apiKey || this.config.authToken;
-      const defaultHeaders: Record<string, string | null> = { ...(this.config.headers ?? {}) };
+      const defaultHeaders: Record<string, string | null> = {
+        ...(this.name === 'openrouter' ? withOpenRouterAttribution() : {}),
+        ...(this.config.headers ?? {}),
+      };
       // The OpenAI SDK requires a constructor key and otherwise turns the
       // placeholder into a real Authorization header. Keyless local/custom
       // endpoints must receive no fabricated credential at all.
       if (!apiKey && this.config.custom) defaultHeaders.Authorization = null;
       this._client = new OpenAI({
         apiKey: apiKey || 'placeholder',
+        // Selected provider config owns auth/account scope, never SDK env defaults.
+        organization: null,
+        project: null,
         baseURL: this.baseUrl ?? this.config.baseUrl,
         defaultHeaders,
-        fetch: createUsageInterceptingFetch(globalThis.fetch),
+        fetch: createUsageInterceptingFetch(this.requestFetch()),
+        timeout: 1_800_000,
       });
     }
     return this._client;
+  }
+
+  protected requestFetch(): typeof fetch {
+    return globalThis.fetch;
+  }
+
+  protected modelDiscoveryAuthenticationAction(): string {
+    return 'Reconnect the provider and retry model discovery.';
   }
 
   isAvailable(): boolean {
@@ -89,10 +110,15 @@ export class OpenAIProvider implements Provider {
   private cachedModels: ModelDef[] | null = null;
   private lastFetch = 0;
   private refreshInProgress: Promise<void> | null = null;
+  private modelCatalogAuthoritative = false;
+  private modelDiscoveryError: string | undefined;
+  private modelDiscoveryHttpStatus: number | undefined;
 
   refreshModels(forceRefresh = false): Promise<void> {
     if (!forceRefresh) return Promise.resolve();
-    this.cachedModels = null;
+    // Keep the last provider-reported catalog visible while a manual refresh
+    // is in flight. A transient /models failure must not make the selected
+    // model lose its trusted context or reasoning controls.
     this.lastFetch = 0;
     return this.refreshModelsInBackground(this.getModelCatalogFallback());
   }
@@ -115,7 +141,11 @@ export class OpenAIProvider implements Provider {
    * hand-maintained catalog's.
    */
   protected enrichDiscoveredModel(raw: unknown, def: ModelDef): ModelDef {
-    return enrichFromRemoteMetadata(raw, def);
+    const enriched = enrichFromRemoteMetadata(raw, def);
+    // Reflection's Chat Completions contract accepts text only.
+    return this.name === 'beam'
+      ? { ...enriched, vision: false, supportsAttachments: false }
+      : enriched;
   }
 
   private getModelIdFromRemote(raw: unknown): string | undefined {
@@ -176,25 +206,38 @@ export class OpenAIProvider implements Provider {
             this.enrichDiscoveredModel(model, modelFromRemoteId(id, this.name, fallback)),
           );
         }
-        if (discovered.length > 0) {
-          this.cachedModels = applyModelsDevMetadata(
-            this.name,
-            mergeModelLists(fallback, discovered),
-            modelsDevKeysFor(this.name, this.config.kind),
-          );
-          providerLog.debug(
-            { provider: this.name, count: this.cachedModels.length },
-            'Model list refreshed from provider API',
-          );
-        }
+        this.cachedModels = applyModelsDevMetadata(
+          this.name,
+          mergeModelLists(fallback, discovered),
+          modelsDevKeysFor(this.name, this.config.kind),
+        );
+        this.modelCatalogAuthoritative = true;
+        this.modelDiscoveryError = undefined;
+        this.modelDiscoveryHttpStatus = undefined;
+        providerLog.debug(
+          { provider: this.name, count: this.cachedModels.length },
+          'Model list refreshed from provider API',
+        );
         this.lastFetch = Date.now();
       } catch (err) {
         // Cache failures for the normal discovery TTL too. Otherwise every
-        // status render triggers another failing /models request.
+        // status render triggers another failing /models request. A previous
+        // successful catalog remains available when this was a refresh.
         this.lastFetch = Date.now();
+        const errorStatus =
+          err && typeof err === 'object' && 'status' in err && typeof err.status === 'number'
+            ? err.status
+            : undefined;
+        const diagnostic = safeProviderDiagnostic(this.name, 'http', err, {
+          ...(errorStatus !== undefined ? { status: errorStatus } : {}),
+        });
+        this.modelDiscoveryHttpStatus = diagnostic.status;
+        this.modelDiscoveryError = safeProviderFailureMessage(this.name, diagnostic, {
+          authenticationAction: this.modelDiscoveryAuthenticationAction(),
+        });
         providerLog.debug(
-          { provider: this.name, err: err instanceof Error ? err.message : String(err) },
-          'Model list refresh failed; leaving catalog empty rather than exposing a fallback list',
+          { provider: this.name, diagnostic },
+          'Model list refresh failed; keeping the last provider catalog',
         );
       } finally {
         this.refreshInProgress = null;
@@ -202,6 +245,21 @@ export class OpenAIProvider implements Provider {
     })();
 
     return this.refreshInProgress;
+  }
+
+  isModelCatalogAuthoritative(): boolean {
+    // Built-in OpenAI-family adapters may intentionally merge a provider
+    // response with a small compatibility fallback. Custom endpoints have no
+    // such entitlement fallback, so their successful response is authoritative.
+    return this.config.custom === true && this.modelCatalogAuthoritative;
+  }
+
+  getModelDiscoveryError(): string | undefined {
+    return this.modelDiscoveryError;
+  }
+
+  getModelDiscoveryHttpStatus(): number | undefined {
+    return this.modelDiscoveryHttpStatus;
   }
 
   /**
@@ -251,6 +309,19 @@ export class OpenAIProvider implements Provider {
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
+    // Reflection requires the original reasoning on every assistant turn.
+    // Never fabricate it for imported history or a reasoning-less upstream turn.
+    if (
+      this.name === 'beam' &&
+      request.messages.some((msg) => msg.role === 'assistant' && !msg.reasoningContent?.trim())
+    ) {
+      yield {
+        type: 'error',
+        error:
+          'Beam requires the original reasoning for every prior assistant message. This history is missing reasoning; start a new chat or retry the affected turn.',
+      };
+      return;
+    }
     let messages = this.convertMessages(request);
     const userConfirmedImages = userConfirmedImageInput(this, request);
 
@@ -263,7 +334,10 @@ export class OpenAIProvider implements Provider {
         this.listModels().find((m) => m.id === request.model || m.apiModelId === request.model) ??
         resolveModel(request.model);
       const supportsVision = liveDef?.vision === true || liveDef?.supportsAttachments === true;
-      if (liveDef?.vision === false && !supportsVision && !userConfirmedImages) {
+      // Gwarden's gateway cannot process image parts at all, so always strip them
+      // for that provider regardless of the model's reported vision capability.
+      const forceStrip = this.name === 'gwarden';
+      if ((liveDef?.vision === false || forceStrip) && !userConfirmedImages) {
         messages = stripImageParts(messages);
         providerLog.debug(
           { provider: this.name, model: request.model },
@@ -349,8 +423,15 @@ export class OpenAIProvider implements Provider {
       model: modelDef?.apiModelId ?? request.model,
       messages: this.name === 'openrouter' ? markOpenRouterTailCacheBreakpoint(messages) : messages,
       stream: true,
-      stream_options: { include_usage: true },
-      ...(request.maxTokens && { max_completion_tokens: request.maxTokens }),
+      // Gwarden's gateway rejects `stream_options` (and only accepts the
+      // legacy `max_tokens` field), so never send them for that provider.
+      ...(this.name !== 'gwarden' && { stream_options: { include_usage: true } }),
+      // Gwarden rejects extra parameters; send only the core request fields.
+      ...(this.name === 'gwarden'
+        ? { max_tokens: request.maxTokens && request.maxTokens > 0 ? request.maxTokens : 4096 }
+        : request.maxTokens
+          ? { max_completion_tokens: request.maxTokens }
+          : {}),
       ...(request.temperature !== undefined && { temperature: request.temperature }),
       ...(tools?.length && { tools }),
     };
@@ -423,18 +504,24 @@ export class OpenAIProvider implements Provider {
       (params as unknown as Record<string, unknown>).service_tier = 'priority';
     }
 
+    // Gwarden rejects reasoning controls; never send them for that provider.
+    if (this.name !== 'gwarden') {
     // Only send reasoning_effort if model + selected level supports it.
     this.applyReasoningControls(params as unknown as Record<string, unknown>, {
       canReason,
       effort: reasoningEffort,
-      supported: supportedEfforts,
+      supported: this.name === 'beam' ? new Set(liveDef?.reasoningLevels ?? []) : supportedEfforts,
       modelDef: liveDef,
       requestModel: modelDef?.apiModelId ?? request.model,
     });
+    }
 
     try {
       // Apply 60-second hard timeout to prevent indefinite hangs
-      const timeoutSignal = withTimeoutSignal(request.signal, 60_000);
+      // Match the global task timeout (30 min) instead of a 60s hard cap so
+      // long reasoning/model generations are not aborted mid-stream. The global
+      // task timeout in manager.ts still bounds the overall run.
+      const timeoutSignal = withTimeoutSignal(request.signal, 1_800_000);
       const createStream = () =>
         this.client.chat.completions.create(params, { signal: timeoutSignal });
       let stream: Awaited<ReturnType<typeof createStream>>;
@@ -444,13 +531,13 @@ export class OpenAIProvider implements Provider {
           modelName: request.model,
         });
       } catch (err) {
+        // A vision rejection is about the attachment, not about a parameter Kory
+        // added: the degrade ladder below must not retry it, or a confirmed-image
+        // failure would be repeated once per optional parameter.
+        const visionRejection = isVisionRejectionError(err);
         // Some models reject images only at request time (metadata absent or
         // wrong). Degrade gracefully: drop the images, note it, retry once.
-        if (
-          !userConfirmedImages &&
-          messagesContainImages(params.messages) &&
-          isVisionRejectionError(err)
-        ) {
+        if (!userConfirmedImages && messagesContainImages(params.messages) && visionRejection) {
           providerLog.warn(
             { provider: this.name, model: request.model },
             'Model rejected image input — retrying without attachments',
@@ -475,19 +562,115 @@ export class OpenAIProvider implements Provider {
             providerName: this.name,
             modelName: request.model,
           });
+        } else if (
+          !visionRejection &&
+          isParameterRejectionError(err) &&
+          (params as unknown as Record<string, unknown>).stream_options !== undefined
+        ) {
+          // A gateway fronting an upstream that rejects `stream_options` fails the
+          // whole turn even though only usage accounting is affected. Drop it and
+          // retry once: token counts fall back to the estimate, the answer still
+          // streams.
+          providerLog.warn(
+            { provider: this.name, model: request.model },
+            'Provider rejected stream_options — retrying without usage streaming',
+          );
+          delete (params as unknown as Record<string, unknown>).stream_options;
+          stream = await withRetry(createStream, {
+            providerName: this.name,
+            modelName: request.model,
+          });
+        } else if (
+          !visionRejection &&
+          isParameterRejectionError(err) &&
+          typeof (params as unknown as Record<string, unknown>).max_completion_tokens === 'number'
+        ) {
+          // Older OpenAI-compatible proxies only accept the legacy field name.
+          providerLog.warn(
+            { provider: this.name, model: request.model },
+            'Provider rejected max_completion_tokens — retrying with max_tokens',
+          );
+          const mutableParams = params as unknown as Record<string, unknown>;
+          const limit = mutableParams.max_completion_tokens;
+          delete mutableParams.max_completion_tokens;
+          mutableParams.max_tokens = limit;
+          stream = await withRetry(createStream, {
+            providerName: this.name,
+            modelName: request.model,
+          });
         } else {
           throw err;
         }
       }
 
-      const toolCallBuffers = new Map<number, { id: string; name: string; args: string }>();
+      const toolCallBuffers = new Map<
+        number,
+        { id: string; name: string; args: string; started: boolean; sent: number }
+      >();
+      let lastToolIndex: number | undefined;
       let observedPromptTokens: number | undefined;
       let observedCacheReadTokens = 0;
       let observedCacheWriteTokens = 0;
 
       let sawFinishReason = false;
 
+      // Gwarden's gateway does not reliably stream: a request with stream:true
+      // comes back as a single JSON completion (or an empty stream). Treat a
+      // non-iterable completion as a one-shot response so the turn still gets
+      // its content instead of an empty reply.
+      const streamIterable = stream as unknown as {
+        [Symbol.asyncIterator]?: () => AsyncIterator<unknown>;
+      };
+      if (typeof streamIterable?.[Symbol.asyncIterator] !== 'function') {
+        const completion = stream as unknown as {
+          choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }>;
+          usage?: { prompt_tokens?: number; completion_tokens?: number };
+        };
+        const msgContent = completion.choices?.[0]?.message?.content;
+        const text =
+          typeof msgContent === 'string'
+            ? msgContent
+            : Array.isArray(msgContent)
+              ? msgContent.map((p) => (typeof p === 'string' ? p : p?.text ?? '')).join('')
+              : '';
+        if (text) yield { type: 'content_delta', content: text };
+        yield { type: 'complete', finishReason: 'stop' };
+        return;
+      }
+
       for await (const chunk of stream) {
+        // A gateway can answer 200 OK and then send an error frame instead of
+        // deltas. Reading only `choices` left the loop with nothing to consume,
+        // so the turn ended without a completion and looked like a stall.
+        // Gwarden (and some other gateways) carry the error text under a
+        // top-level `message` or inside the first choice's delta instead of an
+        // `error` field, so check those too.
+        const chunkRecord = chunk as {
+          error?: unknown;
+          message?: unknown;
+          choices?: Array<{ delta?: { content?: string } }>;
+        };
+        let streamError: unknown = chunkRecord.error;
+        if (!streamError && typeof chunkRecord.message === 'string' && /error/i.test(chunkRecord.message)) {
+          streamError = chunkRecord.message;
+        }
+        const firstDeltaContent = chunkRecord.choices?.[0]?.delta?.content;
+        if (
+          !streamError &&
+          typeof firstDeltaContent === 'string' &&
+          /^Error:/i.test(firstDeltaContent.trim())
+        ) {
+          streamError = firstDeltaContent;
+        }
+        if (streamError) {
+          const failure = providerStreamFailure(this.name, 'stream', streamError);
+          providerLog.error(
+            { ...failure.diagnostic, model: request.model },
+            'Provider sent an in-stream error',
+          );
+          yield failure.event;
+          return;
+        }
         const choice = chunk.choices?.[0];
 
         // Usage is NOT always on a trailing usage-only chunk. Some providers
@@ -514,6 +697,14 @@ export class OpenAIProvider implements Provider {
             : undefined;
           yield {
             type: 'usage_update',
+            ...(() => {
+              const reportedCost = (chunk.usage as { cost?: unknown })?.cost;
+              return typeof reportedCost === 'number' &&
+                Number.isFinite(reportedCost) &&
+                reportedCost >= 0
+                ? { reportedCostUsd: reportedCost }
+                : {};
+            })(),
             // prompt_tokens already includes cached tokens — omit tokensCache
             // so context occupancy isn't double counted downstream.
             tokensIn: chunk.usage.prompt_tokens,
@@ -535,9 +726,21 @@ export class OpenAIProvider implements Provider {
 
         const delta = choice.delta;
 
-        // Content streaming
-        if (delta?.content) {
-          yield { type: 'content_delta', content: delta.content };
+        // Content streaming. Some OpenAI-compatible gateways (Gwarden among
+        // them) ship the answer under a legacy `text` field or a non-streaming
+        // `message.content` shape instead of `delta.content`, so fall back to
+        // those before declaring the turn empty.
+        let contentCandidate = delta?.content;
+        // (debug removed)
+        if (Array.isArray(contentCandidate)) {
+          contentCandidate = contentCandidate
+            .map((part) =>
+              typeof part === 'string' ? part : (part as { text?: string })?.text ?? '',
+            )
+            .join('');
+        }
+        if (contentCandidate) {
+          yield { type: 'content_delta', content: contentCandidate as string };
         }
 
         // Reasoning content. OpenAI-family providers stream it as
@@ -551,33 +754,53 @@ export class OpenAIProvider implements Provider {
           yield { type: 'thinking_delta', thinking: reasoningContent };
         }
 
-        // Tool call streaming
+        // Tool call streaming. Gateways differ in ways the SDK type does not
+        // describe, so the buffer is normalized instead of trusted:
+        //   - `index` may be omitted on continuation chunks (every later chunk
+        //     would open a second, id-less buffer and its arguments are lost);
+        //   - a proxy that stitches two upstream turns may reuse an index for a
+        //     different call id, so deltas arrived for an id that never started;
+        //   - arguments may arrive before the id/name they belong to.
         if (delta?.tool_calls) {
           for (const tc of delta.tool_calls) {
-            const idx = tc.index;
-            if (!toolCallBuffers.has(idx)) {
-              toolCallBuffers.set(idx, {
-                id: tc.id ?? '',
-                name: tc.function?.name ?? '',
-                args: '',
-              });
-              yield {
-                type: 'tool_use_start',
-                toolCallId: tc.id,
-                toolName: tc.function?.name,
-              };
+            const idx = typeof tc.index === 'number' ? tc.index : (lastToolIndex ?? 0);
+            lastToolIndex = idx;
+            let buf = toolCallBuffers.get(idx);
+            if (!buf) {
+              buf = { id: '', name: '', args: '', started: false, sent: 0 };
+              toolCallBuffers.set(idx, buf);
             }
 
-            const buf = toolCallBuffers.get(idx)!;
+            if (tc.id && buf.id && tc.id !== buf.id && buf.started) {
+              // Different call on a reused index: close the running one first so
+              // its arguments are not silently replaced by the next call's.
+              yield {
+                type: 'tool_use_stop',
+                toolCallId: buf.id,
+                toolName: buf.name,
+                toolInput: serializeToolArguments(buf.args),
+              } as ProviderEvent;
+              buf = { id: tc.id, name: tc.function?.name ?? '', args: '', started: false, sent: 0 };
+              toolCallBuffers.set(idx, buf);
+            }
+
             if (tc.id) buf.id = tc.id;
             if (tc.function?.name) buf.name = tc.function.name;
-            if (tc.function?.arguments) {
-              buf.args += tc.function.arguments;
+            if (tc.function?.arguments) buf.args += tc.function.arguments;
+            if (!buf.started && buf.id && buf.name) {
+              buf.started = true;
+              yield { type: 'tool_use_start', toolCallId: buf.id, toolName: buf.name };
+            }
+            // `sent` records how much of the buffer the runtime already has, so
+            // arguments that arrived before the call was announced still stream.
+            if (buf.started && buf.args.length > buf.sent) {
+              const nextArgs = buf.args.slice(buf.sent);
+              buf.sent = buf.args.length;
               yield {
                 type: 'tool_use_delta',
                 toolCallId: buf.id,
                 toolName: buf.name,
-                toolInput: tc.function.arguments,
+                toolInput: nextArgs,
               };
             }
           }
@@ -593,6 +816,14 @@ export class OpenAIProvider implements Provider {
             finishReason: this.mapFinishReason(choice.finish_reason),
           };
         }
+      }
+
+      // Some OpenAI compatible gateways close a clean stream without a final
+      // finish_reason. Close complete tool calls so the turn runtime does not
+      // retain them as pending forever.
+      if (!sawFinishReason && toolCallBuffers.size > 0) {
+        yield* this.flushToolCalls(toolCallBuffers);
+        yield { type: 'complete', finishReason: 'tool_use' };
       }
 
       const apiModel = modelDef?.apiModelId ?? request.model;
@@ -683,14 +914,18 @@ export class OpenAIProvider implements Provider {
   }
 
   private *flushToolCalls(
-    toolCallBuffers: Map<number, { id: string; name: string; args: string }>,
+    toolCallBuffers: Map<
+      number,
+      { id: string; name: string; args: string; started: boolean; sent: number }
+    >,
   ) {
     for (const [, buf] of toolCallBuffers) {
+      if (!buf.started || !buf.id || !buf.name) continue;
       yield {
         type: 'tool_use_stop',
         toolCallId: buf.id,
         toolName: buf.name,
-        toolInput: buf.args,
+        toolInput: serializeToolArguments(buf.args),
       } as ProviderEvent;
     }
     toolCallBuffers.clear();
@@ -736,6 +971,10 @@ export class OpenAIProvider implements Provider {
 
     for (const msg of request.messages) {
       if (msg.role === 'system') continue;
+      const reasoning =
+        this.name === 'beam' && msg.role === 'assistant'
+          ? { reasoning_content: msg.reasoningContent }
+          : {};
 
       if (typeof msg.content === 'string') {
         if (msg.role === 'tool') {
@@ -747,6 +986,7 @@ export class OpenAIProvider implements Provider {
         } else if (msg.role === 'assistant' && msg.tool_calls?.length) {
           result.push({
             role: 'assistant',
+            ...reasoning,
             content: msg.content || null,
             tool_calls: msg.tool_calls.map((tc) => ({
               id: tc.id,
@@ -757,14 +997,14 @@ export class OpenAIProvider implements Provider {
         } else if (msg.role === 'user') {
           result.push({ role: 'user', content: msg.content });
         } else {
-          result.push({ role: 'assistant', content: msg.content });
+          result.push({ role: 'assistant', content: msg.content, ...reasoning });
         }
         continue;
       }
 
       const blocks = msg.content as ProviderContentBlock[];
       if (msg.role === 'assistant') {
-        result.push(this.mapAssistantMessage(blocks));
+        result.push({ ...this.mapAssistantMessage(blocks), ...reasoning });
       } else if (msg.role === 'user') {
         this.mapUserMessage(blocks, result);
       }
@@ -902,6 +1142,22 @@ function isVisionRejectionError(err: unknown): boolean {
   return /image|vision|multimodal|image_url/i.test(msg);
 }
 
+/**
+ * Hand the runtime a JSON object even when the upstream truncated or mangled the
+ * streamed arguments. The tool's own schema validation stays authoritative; this
+ * only stops a malformed payload from aborting the whole turn.
+ */
+function serializeToolArguments(raw: string): string {
+  const normalized = normalizeToolArguments(raw);
+  if (!normalized.recovered) {
+    providerLog.warn(
+      { bytes: raw.length },
+      'Provider streamed unusable tool arguments — sending an empty object',
+    );
+  }
+  return JSON.stringify(normalized.input);
+}
+
 /** Extract an HTTP status from an OpenAI SDK `APIError`-shaped rejection. */
 function rejectionStatus(err: unknown): number | undefined {
   if (!err || typeof err !== 'object') return undefined;
@@ -923,6 +1179,7 @@ export function isParameterRejectionError(err: unknown): boolean {
   const status = rejectionStatus(err);
   if (status === 400 || status === 422) return true;
   const msg = err instanceof Error ? err.message : String(err);
+  if (/Error:\s*The request is invalid\.?\s*Please check the parameters/i.test(msg)) return true;
   return /reasoning[_ ]?effort|include[_ ]reasoning|unsupported[_ ](?:parameter|value|field)|unexpected[_ ](?:keyword|argument)|extra[_ ](?:inputs|fields)|unknown[_ ](?:parameter|field|argument)|unrecognized[_ ](?:parameter|argument|keyword)|not (?:a )?supported (?:parameter|argument|for this model)/i.test(
     msg,
   );
@@ -985,31 +1242,66 @@ export class OpenRouterProvider extends OpenAIProvider {
   constructor(config: ProviderConfig) {
     super(config, 'openrouter', 'https://openrouter.ai/api/v1');
   }
+}
 
-  /**
-   * OpenRouter requires app-attribution headers (`HTTP-Referer`,
-   * `X-OpenRouter-Title`, `X-OpenRouter-Categories`) to identify the calling
-   * harness as agentic. Without them, OpenRouter may refuse to route to
-   * certain models. Merge the attribution defaults under any user-configured
-   * headers so explicit overrides always win.
-   */
-  protected override get client(): OpenAI {
-    if (!this._client) {
-      const apiKey = this.config.apiKey || this.config.authToken;
-      this._client = new OpenAI({
-        apiKey: apiKey || 'placeholder',
-        baseURL: this.baseUrl ?? this.config.baseUrl,
-        defaultHeaders: withOpenRouterAttribution(this.config.headers),
-        fetch: createUsageInterceptingFetch(globalThis.fetch),
-      });
+/**
+ * AgentRouter provides OpenAI Chat Completions and a separate Anthropic Messages
+ * surface on the chosen gateway origin. Keep the credential scoped to that
+ * origin when dispatching a Claude model; do not fall through to Anthropic's
+ * public API or use the wrong protocol for that model family.
+ */
+export class AgentRouterProvider extends OpenAIProvider {
+  constructor(config: ProviderConfig) {
+    super(config, 'agentrouter', config.baseUrl || 'https://agentrouter.org/v1');
+  }
+
+  override async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
+    if (!/^claude(?:[-/]|$)/i.test(request.model)) {
+      yield* super.streamResponse(request);
+      return;
     }
-    return this._client;
+
+    const baseUrl = this.config.baseUrl || 'https://agentrouter.org/v1';
+    const anthropicBase = baseUrl.replace(/\/v1\/?$/, '').replace(/\/$/, '');
+    const provider = new AnthropicProvider(
+      {
+        ...this.config,
+        apiKey: undefined,
+        authToken: this.config.apiKey || this.config.authToken,
+        baseUrl: anthropicBase,
+        // An OpenAI-specific Authorization override must not displace the
+        // selected gateway token on the Anthropic-compatible surface.
+        headers: undefined,
+      },
+      'agentrouter',
+    );
+    yield* provider.streamResponse(request);
   }
 }
 
 export class XAIProvider extends OpenAIProvider {
   constructor(config: ProviderConfig) {
     super(config, 'xai', 'https://api.x.ai/v1');
+  }
+}
+
+/**
+ * Vyce AI documents the standard OpenAI SDK contract at https://vyceai.com/v1.
+ * Keep a named adapter so its endpoint cannot drift into a similarly named
+ * gateway, while retaining the shared message, tool, usage, and retry logic.
+ */
+export class VyceAIProvider extends OpenAIProvider {
+  constructor(config: ProviderConfig) {
+    super(config, 'vyceai', 'https://vyceai.com/v1');
+  }
+}
+
+// Respan — OpenAI-compatible AI gateway (https://api.respan.ai). One Respan
+// key routes to many upstream models; base URL carries /v1 so /models and
+// /chat/completions both resolve to the OpenAI-shaped endpoints.
+export class RespanProvider extends OpenAIProvider {
+  constructor(config: ProviderConfig) {
+    super(config, 'respan', 'https://api.respan.ai/api/v1');
   }
 }
 
@@ -1359,6 +1651,8 @@ export class AzureProvider extends OpenAIProvider {
         );
       }
       this._client = new AzureOpenAI({
+        organization: null,
+        project: null,
         // AzureOpenAI sends `api-key` only for apiKey. Microsoft Entra tokens
         // must use azureADTokenProvider so the SDK emits `Authorization:
         // Bearer ...`; treating a bearer token as apiKey silently produces the

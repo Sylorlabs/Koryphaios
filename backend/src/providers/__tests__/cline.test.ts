@@ -314,6 +314,22 @@ describe('ClineProvider reasoning', () => {
     expect(send('high')).toEqual({});
   });
 
+  it('maps a live off/on ladder before the generated catalog is refreshed', () => {
+    const p = provider();
+    const params: Record<string, unknown> = {};
+    (p as never as { applyReasoningControls: Function }).applyReasoningControls(params, {
+      canReason: true,
+      effort: 'off',
+      supported: new Set(['off', 'on']),
+      modelDef: {
+        apiModelId: 'nvidia/nemotron-3.5-lightning:free',
+        reasoningLevels: ['off', 'on'],
+      } as never,
+      requestModel: 'nvidia/nemotron-3.5-lightning:free',
+    });
+    expect(params).toEqual({ include_reasoning: false });
+  });
+
   it('never sends a reasoning control for a model with no declared ladder', () => {
     const p = provider();
     const params: Record<string, unknown> = {};

@@ -1,5 +1,5 @@
 // Shared in-band text-protocol tool calling for proprietary agent APIs that
-// have no native function-calling contract (Chatbase, Notion, …).
+// have no native function-calling contract (Notion, …).
 //
 // When the manager supplies tool definitions, the flattened prompt carries a
 // tool manifest plus a strict reply protocol, and the adapter parses the

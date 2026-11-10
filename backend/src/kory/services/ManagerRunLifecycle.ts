@@ -1,4 +1,9 @@
-import type { KoryAskUserPayload, SessionRunActivePhase } from '@koryphaios/shared';
+import type {
+  KoryAskUserPayload,
+  RunRevisionRef,
+  SessionRunActivePhase,
+  SessionRunSnapshot,
+} from '@koryphaios/shared';
 import type { SessionRunCoordinator } from '../../runs/session-run-coordinator';
 import type {
   BeginSessionTurnCommandInput,
@@ -14,6 +19,11 @@ interface ManagerRunLease {
   revision: number;
   phase: string;
   processIds?: string[];
+}
+
+interface TerminalDecision {
+  outcome: 'complete' | 'fail' | 'cancel';
+  reason: string;
 }
 
 declare const managerRunHandleBrand: unique symbol;
@@ -70,6 +80,7 @@ export class ManagerRunLifecycle {
   private detached = false;
   private readonly leases = new Map<string, ManagerRunLease>();
   private readonly tails = new Map<string, Promise<void>>();
+  private readonly deferredTerminals = new Map<string, { decision?: TerminalDecision }>();
 
   constructor(private readonly runs?: SessionRunCoordinator) {}
 
@@ -130,7 +141,13 @@ export class ManagerRunLifecycle {
       // An agent membership change is a durable lifecycle fact even when the
       // provider phase itself stays the same (for example, a worker starts
       // while the manager remains in tool_calling).
-      if (!lease || (lease.phase === phase && activeAgentIds === undefined)) return;
+      if (
+        !lease ||
+        this.deferredTerminals.get(handle.runId)?.decision ||
+        (lease.phase === phase && activeAgentIds === undefined)
+      ) {
+        return;
+      }
       if (!this.runs) {
         this.updateLocalLease(handle, { phase });
         return;
@@ -145,6 +162,12 @@ export class ManagerRunLifecycle {
       );
       this.remember(snapshot);
     });
+  }
+
+  /** Return the exact lifecycle revision owned by this still-live handle. */
+  runRef(handle: ManagerRunHandle): RunRevisionRef {
+    const lease = this.requireOwnedLease(handle);
+    return { sessionId: handle.sessionId, runId: handle.runId, revision: lease.revision };
   }
 
   waitForQuestion(
@@ -259,6 +282,36 @@ export class ManagerRunLifecycle {
     return this.runs?.listProcessWaits() ?? [];
   }
 
+  /**
+   * The execution owner may decide its outcome deep in a nested stack, before
+   * awaited finally blocks finish. Keep both the durable snapshot and outbox
+   * live until that owner has cleaned up and released its admission claim.
+   * The first decision wins, just as an already-committed terminal did before.
+   */
+  deferTerminal(handle: ManagerRunHandle): () => Promise<SessionRunSnapshot | undefined> {
+    this.requireOwnedLease(handle);
+    if (this.deferredTerminals.has(handle.runId)) {
+      throw new Error(`Manager run ${handle.runId} already has a terminal owner`);
+    }
+    const pending: { decision?: TerminalDecision } = {};
+    this.deferredTerminals.set(handle.runId, pending);
+    let settlement: Promise<SessionRunSnapshot | undefined> | undefined;
+    return () => {
+      settlement ??= this.serialized(handle.sessionId, async () => {
+        if (this.deferredTerminals.get(handle.runId) !== pending) return;
+        this.deferredTerminals.delete(handle.runId);
+        if (this.detached || !this.ownedLease(handle)) return;
+        if (pending.decision) {
+          return this.commitTerminal(handle, pending.decision);
+        }
+        // A parked process wait remains live and retains its continuation lease.
+        const snapshot = this.runs?.get(handle.sessionId);
+        return snapshot?.runId === handle.runId ? snapshot : undefined;
+      });
+      return settlement;
+    };
+  }
+
   finish(
     handle: ManagerRunHandle,
     outcome: 'complete' | 'fail' | 'cancel',
@@ -266,21 +319,29 @@ export class ManagerRunLifecycle {
   ): Promise<void> {
     return this.serialized(handle.sessionId, async () => {
       if (this.detached) return;
-      const lease = this.ownedLease(handle);
-      if (!lease) return;
-      if (!this.runs) {
-        this.releaseHandle(handle);
-        return;
-      }
-      if (outcome === 'complete') {
-        await this.runs.complete(handle.sessionId, handle.runId, lease.revision, reason);
-      } else if (outcome === 'fail') {
-        await this.runs.fail(handle.sessionId, handle.runId, lease.revision, reason);
+      if (!this.ownedLease(handle)) return;
+      const pending = this.deferredTerminals.get(handle.runId);
+      if (pending) {
+        pending.decision ??= { outcome, reason };
       } else {
-        await this.runs.cancel(handle.sessionId, handle.runId, lease.revision, reason);
+        await this.commitTerminal(handle, { outcome, reason });
       }
-      this.releaseHandle(handle);
     });
+  }
+
+  private async commitTerminal(
+    handle: ManagerRunHandle,
+    { outcome, reason }: TerminalDecision,
+  ): Promise<SessionRunSnapshot | undefined> {
+    const lease = this.requireOwnedLease(handle);
+    const snapshot = await this.runs?.[outcome](
+      handle.sessionId,
+      handle.runId,
+      lease.revision,
+      reason,
+    );
+    this.releaseHandle(handle);
+    return snapshot;
   }
 
   /** Explicit user cancellation may target a durable wait after restart. */
@@ -309,6 +370,8 @@ export class ManagerRunLifecycle {
   }
 
   forget(sessionId: string): void {
+    const lease = this.leases.get(sessionId);
+    if (lease) this.deferredTerminals.delete(lease.runId);
     this.leases.delete(sessionId);
   }
 
@@ -320,6 +383,7 @@ export class ManagerRunLifecycle {
   /** Stop all process-local writers before restart/shutdown reconciliation. */
   detach(): void {
     this.detached = true;
+    this.deferredTerminals.clear();
     this.leases.clear();
   }
 

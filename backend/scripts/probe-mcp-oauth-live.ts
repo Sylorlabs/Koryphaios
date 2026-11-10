@@ -13,7 +13,11 @@
  * driven far enough to learn its authorization and token endpoints.
  */
 
-import { discoverProtectedResource, discoverAuthorizationServer, parseWwwAuthenticate } from '../src/mcp/oauth';
+import {
+  discoverProtectedResource,
+  discoverAuthorizationServer,
+  parseWwwAuthenticate,
+} from '../src/mcp/oauth';
 
 interface Target {
   label: string;

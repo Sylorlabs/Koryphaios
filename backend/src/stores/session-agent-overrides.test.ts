@@ -44,6 +44,7 @@ describe('per-session agent overrides', () => {
 
   test('rejects unknown or ill-typed override values', () => {
     expect(sanitizeSessionAgentOverrides({ permissionMode: 'everything-goes' })).toBeUndefined();
+    expect(sanitizeSessionAgentOverrides({ permissionMode: 'plan' })).toBeUndefined();
     expect(sanitizeSessionAgentOverrides({ agentExecutionMode: 7 })).toBeUndefined();
     expect(sanitizeSessionAgentOverrides({ criticGateEnabled: 'yes' })).toBeUndefined();
     expect(sanitizeSessionAgentOverrides('yolo')).toBeUndefined();

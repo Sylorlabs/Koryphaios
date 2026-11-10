@@ -27,18 +27,38 @@ function redact(text: string, secrets: readonly string[], final = true): string 
     /-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z ]+ )?PRIVATE KEY-----/g,
   ]) {
     text = text.replace(pattern, (match, offset: number, original: string) =>
-      !final && offset + match.length === original.length ? match : '[redacted]');
+      !final && offset + match.length === original.length ? match : '[redacted]',
+    );
   }
-  return text.replace(/((?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|client[_-]?secret)["'\s]*[:=]["'\s]*)[^\s,"'<>]+/gi,
+  return text.replace(
+    /((?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|client[_-]?secret)["'\s]*[:=]["'\s]*)[^\s,"'<>]+/gi,
     (match, prefix: string, offset: number, original: string) =>
-      !final && offset + match.length === original.length ? match : `${prefix}[redacted]`);
+      !final && offset + match.length === original.length ? match : `${prefix}[redacted]`,
+  );
 }
 
 const PUBLIC_FIELDS = [
-  'content', 'thinking', 'thinkingTokens', 'toolCallId', 'toolName', 'toolInput',
-  'tokensIn', 'tokensOut', 'tokensCache', 'tokensCacheRead', 'tokensCacheWrite',
-  'estimated', 'billingTokensIn', 'billingTokensOut', 'finishReason',
-  'filePath', 'fileContent', 'fileOldContent', 'fileOperation', 'toolOutput', 'isError',
+  'content',
+  'thinking',
+  'thinkingTokens',
+  'toolCallId',
+  'toolName',
+  'toolInput',
+  'tokensIn',
+  'tokensOut',
+  'tokensCache',
+  'tokensCacheRead',
+  'tokensCacheWrite',
+  'estimated',
+  'billingTokensIn',
+  'billingTokensOut',
+  'finishReason',
+  'filePath',
+  'fileContent',
+  'fileOldContent',
+  'fileOperation',
+  'toolOutput',
+  'isError',
 ] as const;
 const STREAM_FIELDS = ['content', 'thinking', 'toolInput'] as const;
 
@@ -49,7 +69,10 @@ export async function* protectRemoteEvents(
   source: AsyncIterable<ProviderEvent>,
   secrets: readonly string[],
 ): AsyncGenerator<ProviderEvent> {
-  const tails = new Map<string, { event: ProviderEvent; field: typeof STREAM_FIELDS[number]; text: string }>();
+  const tails = new Map<
+    string,
+    { event: ProviderEvent; field: (typeof STREAM_FIELDS)[number]; text: string }
+  >();
   const hold = Math.max(512, ...secrets.map((value) => value.length));
   function flush(toolCallId?: string): ProviderEvent[] {
     const events: ProviderEvent[] = [];
@@ -74,7 +97,8 @@ export async function* protectRemoteEvents(
       if (typeof value === 'string') (out as any)[field] = redact(value, secrets);
       else if (typeof value === 'number' || typeof value === 'boolean') (out as any)[field] = value;
     }
-    if (event.type === 'error') out.error = 'Remote model failed. The host can check its provider diagnostics.';
+    if (event.type === 'error')
+      out.error = 'Remote model failed. The host can check its provider diagnostics.';
     if (['content_delta', 'thinking_delta', 'tool_use_delta'].includes(event.type)) {
       for (const field of STREAM_FIELDS) {
         if (typeof event[field] !== 'string') continue;
@@ -86,14 +110,21 @@ export async function* protectRemoteEvents(
         let cut = Math.max(0, safe.length - hold);
         // Token-shaped credentials can exceed the usual tail length. Hold the
         // entire unfinished token, not just its last 512 characters.
-        const trailingCredential = safe.match(/\b(?:Bearer\s+[^\s"'<>]+|(?:sk|xai|rk|gsk|ghp|gho|github_pat)[-_][A-Za-z0-9_-]*|AIza[A-Za-z0-9_-]*|eyJ[A-Za-z0-9_.-]*|(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|client[_-]?secret)["'\s]*[:=]["'\s]*[^\s,"'<>]*)$/i);
+        const trailingCredential = safe.match(
+          /\b(?:Bearer\s+[^\s"'<>]+|(?:sk|xai|rk|gsk|ghp|gho|github_pat)[-_][A-Za-z0-9_-]*|AIza[A-Za-z0-9_-]*|eyJ[A-Za-z0-9_.-]*|(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|client[_-]?secret)["'\s]*[:=]["'\s]*[^\s,"'<>]*)$/i,
+        );
         if (trailingCredential?.index !== undefined) cut = Math.min(cut, trailingCredential.index);
         const privateKeyStart = safe.indexOf('-----BEGIN ');
         if (privateKeyStart >= 0 && safe.includes('PRIVATE KEY-----', privateKeyStart))
           cut = Math.min(cut, privateKeyStart);
-        if (safe.length - cut > 64 * 1024) throw new Error('Remote output credential buffer exceeded');
+        if (safe.length - cut > 64 * 1024)
+          throw new Error('Remote output credential buffer exceeded');
         out[field] = safe.slice(0, cut);
-        tails.set(key, { event: { type: event.type, ...(out.toolCallId && { toolCallId: out.toolCallId }) }, field, text: safe.slice(cut) });
+        tails.set(key, {
+          event: { type: event.type, ...(out.toolCallId && { toolCallId: out.toolCallId }) },
+          field,
+          text: safe.slice(cut),
+        });
       }
       if (!STREAM_FIELDS.some((field) => out[field])) continue;
     }

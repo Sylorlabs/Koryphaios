@@ -155,9 +155,7 @@ describe('sandbox runner (native OS wrap)', () => {
       '.local/share': join(root, '.local/share'),
     });
     // The configDirs shorthand alone would NOT have produced that path.
-    const shorthand = buildSoftJail({ PATH: process.env.PATH ?? '' }, [
-      join(root, '.local/share'),
-    ]);
+    const shorthand = buildSoftJail({ PATH: process.env.PATH ?? '' }, [join(root, '.local/share')]);
     try {
       expect(existsSync(join(jail.env.HOME!, '.local/share'))).toBe(true);
       expect(jail.env.HOME).not.toBe(process.env.HOME);

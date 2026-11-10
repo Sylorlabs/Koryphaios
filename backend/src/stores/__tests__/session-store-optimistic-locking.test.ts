@@ -14,7 +14,7 @@
 // routes/v1/__tests__/providers.test.ts.
 
 import { describe, test, expect, beforeEach, afterEach, afterAll } from 'bun:test';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, realpathSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -31,8 +31,6 @@ await reopenDatabase(tempDbPath);
 // temp-file drizzle instance.
 const { SessionStore } = await import('../session-store');
 const { MessageStore } = await import('../message-store');
-const { getJulesSessionMeta, setJulesSessionMeta, clearJulesSessionMeta } =
-  await import('../../providers/jules-session-store');
 
 afterAll(async () => {
   // Restore the shared `db` singleton to its original path so subsequent
@@ -58,7 +56,7 @@ afterAll(async () => {
 describe('SessionStore optimistic locking (expectedVersion)', () => {
   let store: InstanceType<typeof SessionStore>;
 
-  test('ordinary chats persist distinct execution repositories while retaining the same source identity', async () => {
+  test('ordinary chats use the selected folder directly without creating execution repositories', async () => {
     const source = join(tempDir, 'source');
     mkdirSync(source, { recursive: true });
     writeFileSync(join(source, 'draft.txt'), 'source unchanged');
@@ -68,14 +66,13 @@ describe('SessionStore optimistic locking (expectedVersion)', () => {
     ]);
     expect(a.workingDirectory).toBe(source);
     expect(b.workingDirectory).toBe(source);
-    expect(a.gitWorkspace?.isolation).toBe('independent-repository');
-    expect(a.gitWorkspace?.path).not.toBe(b.gitWorkspace?.path);
-    writeFileSync(join(a.gitWorkspace!.path, 'draft.txt'), 'A only');
-    expect(readFileSync(join(b.gitWorkspace!.path, 'draft.txt'), 'utf8')).toBe('source unchanged');
-    expect(readFileSync(join(source, 'draft.txt'), 'utf8')).toBe('source unchanged');
+    expect(a.gitWorkspace).toBeUndefined();
+    expect(b.gitWorkspace).toBeUndefined();
+    expect(a.workingDirectory).toBe(source);
+    expect(b.workingDirectory).toBe(source);
+    writeFileSync(join(source, 'draft.txt'), 'A only');
+    expect(readFileSync(join(source, 'draft.txt'), 'utf8')).toBe('A only');
     expect((await new SessionStore().get(a.id))?.gitWorkspace).toEqual(a.gitWorkspace);
-    const { sessionWorkspaceOwnership } = await import('../../kory/session-workspace');
-    expect(sessionWorkspaceOwnership(a.gitWorkspace!.path)?.sourceRoot).toBe(realpathSync(source));
   });
 
   beforeEach(async () => {
@@ -219,32 +216,6 @@ describe('SessionStore optimistic locking (expectedVersion)', () => {
     expect(current?.agentOverrides).toBeUndefined();
   });
 
-  test('provider continuity updates cannot erase a concurrent Git binding or settings update', async () => {
-    const created = await store.create('local-user', 'Provider continuity');
-    const gitWorkspace = {
-      path: join(tempDir, 'checkout'),
-      repositoryPath: join(tempDir, 'source'),
-      branch: 'chat-main',
-      baseCommit: 'a'.repeat(40),
-      isolation: 'independent-repository' as const,
-    };
-    const meta = { sessionId: 'jules-test-session', updatedAt: Date.now() };
-    await Promise.all([
-      store.update(created.id, { gitWorkspace }),
-      setJulesSessionMeta(created.id, meta),
-    ]);
-    expect((await store.get(created.id))?.gitWorkspace).toEqual(gitWorkspace);
-    expect(await getJulesSessionMeta(created.id)).toEqual(meta);
-    await Promise.all([
-      store.update(created.id, { interactionMode: 'plan' }),
-      clearJulesSessionMeta(created.id),
-    ]);
-    const current = await store.get(created.id);
-    expect(current?.gitWorkspace).toEqual(gitWorkspace);
-    expect(current?.interactionMode).toBe('plan');
-    expect(await getJulesSessionMeta(created.id)).toBeUndefined();
-  });
-
   test('metadata updates preserve unknown keys and stale writes leave the binding intact', async () => {
     const created = await store.create();
     const metadata = { extension: { enabled: true }, gitWorkspace: { path: 'persisted-checkout' } };
@@ -270,9 +241,6 @@ describe('SessionStore optimistic locking (expectedVersion)', () => {
       getDb().run('UPDATE sessions SET metadata = ? WHERE id = ?', [metadata, created.id]);
       const updated = await store.update(created.id, { interactionMode: 'plan' });
       expect(updated?.interactionMode).toBe('plan');
-      const meta = { sessionId: 'jules-recovery', updatedAt: 123 };
-      await setJulesSessionMeta(created.id, meta);
-      expect(await getJulesSessionMeta(created.id)).toEqual(meta);
       expect((await store.get(created.id))?.interactionMode).toBe('plan');
     }
   });

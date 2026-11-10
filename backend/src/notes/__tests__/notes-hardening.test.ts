@@ -59,6 +59,19 @@ afterAll(() => {
 });
 
 describe('long-form Notes hardening', () => {
+  test('keeps skill packages and supporting references out of the project Notes collection', async () => {
+    const project = join(fixtureRoot, 'skill-separation');
+    mkdirSync(join(project, 'skills', 'ui-review', 'references'), { recursive: true });
+    mkdirSync(join(project, 'docs'), { recursive: true });
+    writeFileSync(join(project, 'skills', 'ui-review', 'SKILL.md'), '# UI review instructions');
+    writeFileSync(join(project, 'skills', 'ui-review', 'references', 'checklist.md'), '# Skill reference');
+    writeFileSync(join(project, 'docs', 'skills-guide.md'), '# Ordinary project documentation');
+    await syncProjectDocuments(project);
+    const collection = await listNotes(undefined, project);
+    expect(collection.map((note) => note.sourcePath)).toEqual(['docs/skills-guide.md']);
+    expect(existsSync(join(project, 'skills', 'ui-review', 'SKILL.md'))).toBe(true);
+  });
+
   test('isolates plain notes by authenticated project scope', async () => {
     const first = await createNote(
       { title: 'Shared title', content: 'first project body' },

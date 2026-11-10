@@ -644,7 +644,7 @@ export class GoalDriveService {
       }
       if (!(await this.waitUntilSessionIdle(execution.sessionId, goalId))) return;
 
-      const policy = goalProviderPolicy(execution.provider, execution.remotePlanApproved === true);
+      const policy = goalProviderPolicy(execution.provider);
       if (!policy.allowed) {
         const paused = await this.goals.transitionActiveAttempt(goalId, attemptId, {
           status: 'paused',

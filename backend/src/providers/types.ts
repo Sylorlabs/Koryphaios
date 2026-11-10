@@ -20,6 +20,8 @@ export type ProviderEventType =
   | 'tool_use_delta'
   | 'tool_use_stop'
   | 'usage_update'
+  /** The provider is still alive but temporarily queued for capacity. */
+  | 'waiting'
   // Emitted by AGENTIC providers (CLI harnesses like claude-code) that execute their own
   // tools internally. Unlike tool_use_*, these are already-done actions to DISPLAY, not to
   // execute — the manager surfaces them (live file preview / tool feed) without re-running.
@@ -38,6 +40,8 @@ export interface ProviderEvent {
   toolCallId?: string;
   toolName?: string;
   toolInput?: string;
+  /** Actual USD charge returned by the provider, including an explicit zero. */
+  reportedCostUsd?: number;
   tokensIn?: number;
   tokensOut?: number;
   /** True when tokensIn is cumulative across the turn's internal provider
@@ -61,6 +65,8 @@ export interface ProviderEvent {
   }>;
   /** Limits of the provider evidence behind this usage sample. */
   usagePrecision?: 'provider-reported' | 'input-context-only';
+  /** Human-readable provider wait reason, such as a CLI seat queue. */
+  waitingReason?: string;
   // Cached prompt tokens NOT already counted in tokensIn (Anthropic-style
   // usage, where input_tokens excludes cache reads/writes). Consumers add
   // tokensIn + tokensCache to get real context occupancy. Providers whose
@@ -130,6 +136,8 @@ export interface ProviderToolCall {
 export interface ProviderMessage {
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string | ProviderContentBlock[];
+  /** Assistant reasoning returned by the provider, verbatim. Never synthesize missing reasoning. */
+  reasoningContent?: string;
   /** Required for role "tool": ID of the tool call this result belongs to. */
   tool_call_id?: string;
   /** Required when following messages have role "tool": assistant must include tool_calls. */
@@ -178,7 +186,7 @@ export interface StreamRequest {
   signal?: AbortSignal;
   /** Project working directory — agentic CLI providers (claude-code) run + edit files here. */
   workingDirectory?: string;
-  /** Koryphaios session id — used by cloud providers (Jules) for session continuity. */
+  /** Koryphaios session id — used for provider conversation continuity and tool grants. */
   sessionId?: string;
   /** Persisted generation of any provider-owned native transcript for this session. */
   providerConversationRevision?: number;
@@ -188,12 +196,17 @@ export interface StreamRequest {
    *  so the host confines it (OS jail + tool gating). Absent for local turns
    *  (full access). See SandboxPolicy. */
   sandbox?: import('@koryphaios/shared').SandboxPolicy;
+  /** Qualification-only provider control: refuse all native tools and run the
+   * request in the provider's private inference workspace. */
+  nativeToolsDisabled?: boolean;
   /** Harness-owned role. Native providers translate this into real CLI tool policy. */
   harnessRole?: 'manager' | 'worker' | 'critic';
+  /** Planning is an interaction mode, independent of the approval preset. */
+  interactionMode?: 'act' | 'plan';
   /** Host-owned permission preset. Native CLI harnesses must not silently
    *  execute outside this policy. Non-YOLO turns run native tools read-only
    *  and route mutations through Kory's approval-gated tool bridge. */
-  permissionMode?: 'yolo' | 'guarded' | 'edits' | 'ask' | 'plan' | 'custom';
+  permissionMode?: 'yolo' | 'guarded' | 'edits' | 'ask' | 'custom';
   /** Versioned prompt/task provenance; providers transport but never invent these values. */
   promptManifestHash?: string;
   taskContractHash?: string;
@@ -238,6 +251,14 @@ export interface PromptCachePlan {
 export interface Provider {
   readonly name: ProviderName;
   readonly config: ProviderConfig;
+  /**
+   * Whether nonlinear regeneration can be served from the supplied messages
+   * instead of a provider-owned transcript. Adapters that send the complete
+   * message list on every request are fresh by construction. Stateful adapters
+   * must clear their cached conversation when forceFreshConversation is set.
+   * An explicit false fails regeneration closed rather than using stale context.
+   */
+  readonly supportsFreshConversation?: boolean;
   /** Adapter transport, independent of the selected model's vision capability.
    * A user can correct model metadata, but cannot add a missing transport. */
   readonly imageInputTransport?: 'native' | 'file' | 'none';
@@ -258,6 +279,9 @@ export interface Provider {
 
   /** Why live model discovery is unavailable. Never substitute guessed models. */
   getModelDiscoveryError?: () => string | undefined;
+
+  /** True after a successful provider catalog response, including an empty one. */
+  isModelCatalogAuthoritative?: () => boolean;
 
   /** Native CLI commands exposed by this provider when available. */
   getCliCommands?: () => CliCommand[];

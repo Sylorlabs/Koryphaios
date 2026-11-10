@@ -1,0 +1,200 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 56;
+	objects = {
+		51FFF4BA381D216B401A72C2 /* ref-KoryApp.swift */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = Sources/KoryApp.swift;
+			sourceTree = "<group>";
+		};
+		F0326D4857E75F1A8FA469A8 /* build-KoryApp.swift */ = {
+			isa = PBXBuildFile;
+			fileRef = 51FFF4BA381D216B401A72C2;
+		};
+		CABA5E080C5A0C8C314A1FAA /* ref-NavigationSupport.swift */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = Sources/NavigationSupport.swift;
+			sourceTree = "<group>";
+		};
+		3D366870F974D0E414532431 /* build-NavigationSupport.swift */ = {
+			isa = PBXBuildFile;
+			fileRef = CABA5E080C5A0C8C314A1FAA;
+		};
+		7A7FA3AA76BE2588F3F1456D /* ref-DocumentSupport.swift */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = Sources/DocumentSupport.swift;
+			sourceTree = "<group>";
+		};
+		D28B8AA6940CF42F723DD68C /* build-DocumentSupport.swift */ = {
+			isa = PBXBuildFile;
+			fileRef = 7A7FA3AA76BE2588F3F1456D;
+		};
+		4C3568A39D26E9AE940AE438 /* ref-DetailFeature.swift */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = Sources/DetailFeature.swift;
+			sourceTree = "<group>";
+		};
+		F9E0EBA19FA8875E981CC48B /* build-DetailFeature.swift */ = {
+			isa = PBXBuildFile;
+			fileRef = 4C3568A39D26E9AE940AE438;
+		};
+		9DD167DE2E1052EF49DFDC72 /* ref-DocumentFeature.swift */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = Sources/DocumentFeature.swift;
+			sourceTree = "<group>";
+		};
+		204A00E8C489FA3FA2AC7F15 /* build-DocumentFeature.swift */ = {
+			isa = PBXBuildFile;
+			fileRef = 9DD167DE2E1052EF49DFDC72;
+		};
+		4637183AFBE4547D1EF4E8EE /* ref-IOSNativeUITests.swift */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = evaluator/IOSNativeUITests.swift;
+			sourceTree = "<group>";
+		};
+		6D2935FEF08DC0C28512AE95 /* build-IOSNativeUITests.swift */ = {
+			isa = PBXBuildFile;
+			fileRef = 4637183AFBE4547D1EF4E8EE;
+		};
+		46679FF7CE346B087D27B0AD /* product-app */ = {
+			isa = PBXFileReference;
+			explicitFileType = wrapper.application;
+			path = KoryIOSFixture.app;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		0A38CEA02BC1685C2C6E804D /* product-uitests */ = {
+			isa = PBXFileReference;
+			explicitFileType = wrapper.cfbundle;
+			path = KoryIOSUITests.xctest;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		35EE4ECFA0FC797AF1A68E83 /* main-group */ = {
+			isa = PBXGroup;
+			children = (
+				51FFF4BA381D216B401A72C2,
+				CABA5E080C5A0C8C314A1FAA,
+				7A7FA3AA76BE2588F3F1456D,
+				4C3568A39D26E9AE940AE438,
+				9DD167DE2E1052EF49DFDC72,
+				4637183AFBE4547D1EF4E8EE,
+				A9750FD21149D113278AF75E,
+			);
+			sourceTree = "<group>";
+		};
+		A9750FD21149D113278AF75E /* products-group */ = {
+			isa = PBXGroup;
+			children = (46679FF7CE346B087D27B0AD, 0A38CEA02BC1685C2C6E804D);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		F67C39DA43EB1D7262080709 /* sources-app */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F0326D4857E75F1A8FA469A8,
+				3D366870F974D0E414532431,
+				D28B8AA6940CF42F723DD68C,
+				F9E0EBA19FA8875E981CC48B,
+				204A00E8C489FA3FA2AC7F15,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		3D3D5B9BF841661EA2E89945 /* sources-uitests */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6D2935FEF08DC0C28512AE95,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		99E93033BB9DFB668F786010 /* test-proxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 3B1DAC4CBEFC1556F177D1BB;
+			proxyType = 1;
+			remoteGlobalIDString = 3D479FEA0CFD47E392D564C2;
+			remoteInfo = KoryIOSFixture;
+		};
+		0B56E4E783D3036D1E110312 /* test-dependency */ = {
+			isa = PBXTargetDependency;
+			target = 3D479FEA0CFD47E392D564C2;
+			targetProxy = 99E93033BB9DFB668F786010;
+		};
+		3D479FEA0CFD47E392D564C2 /* target-app */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 76FFB895DFF36D606FAB4ADD;
+			buildPhases = (F67C39DA43EB1D7262080709);
+			buildRules = ();
+			dependencies = ();
+			name = KoryIOSFixture;
+			productName = KoryIOSFixture;
+			productReference = 46679FF7CE346B087D27B0AD;
+			productType = "com.apple.product-type.application";
+		};
+		90B231B590C735A0E06EB3C4 /* target-uitests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FC4165B6BB1760398573C152;
+			buildPhases = (3D3D5B9BF841661EA2E89945);
+			buildRules = ();
+			dependencies = (0B56E4E783D3036D1E110312);
+			name = KoryIOSUITests;
+			productName = KoryIOSUITests;
+			productReference = 0A38CEA02BC1685C2C6E804D;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		B7F7229823F412F59A97DCE3 /* config-project */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = { SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 18.0; TARGETED_DEVICE_FAMILY = "1,2"; ALWAYS_SEARCH_USER_PATHS = NO; };
+			name = Debug;
+		};
+		185DF22238446F6E4C1BE76E /* config-list-project */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (B7F7229823F412F59A97DCE3);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E835AA29F0964DEB07AE6531 /* config-app */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = { PRODUCT_NAME = KoryIOSFixture; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = evaluator/Info.plist; PRODUCT_BUNDLE_IDENTIFIER = com.kory.iosfixture; SUPPORTED_PLATFORMS = iphonesimulator; SWIFT_VERSION = 5.0; CODE_SIGNING_ALLOWED = NO; };
+			name = Debug;
+		};
+		76FFB895DFF36D606FAB4ADD /* config-list-app */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (E835AA29F0964DEB07AE6531);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E507A6C76747C4DD16A38421 /* config-uitests */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = { PRODUCT_NAME = KoryIOSUITests; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = com.kory.iosfixture.tests; SUPPORTED_PLATFORMS = iphonesimulator; SWIFT_VERSION = 5.0; TEST_TARGET_NAME = KoryIOSFixture; CODE_SIGNING_ALLOWED = NO; };
+			name = Debug;
+		};
+		FC4165B6BB1760398573C152 /* config-list-uitests */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (E507A6C76747C4DD16A38421);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		3B1DAC4CBEFC1556F177D1BB /* project */ = {
+			isa = PBXProject;
+			attributes = { LastUpgradeCheck = 2700; };
+			buildConfigurationList = 185DF22238446F6E4C1BE76E;
+			compatibilityVersion = "Xcode 16.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			mainGroup = 35EE4ECFA0FC797AF1A68E83;
+			productRefGroup = A9750FD21149D113278AF75E;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (3D479FEA0CFD47E392D564C2, 90B231B590C735A0E06EB3C4);
+		};
+	};
+	rootObject = 3B1DAC4CBEFC1556F177D1BB;
+}

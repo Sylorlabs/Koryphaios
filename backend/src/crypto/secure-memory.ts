@@ -3,6 +3,7 @@
 
 import { randomBytes } from 'crypto';
 import { serverLog } from '../logger';
+import { isLinux, isMac, isWindows } from '../runtime/platform';
 
 /**
  * Secure buffer that attempts to lock memory and securely wipe on cleanup
@@ -237,11 +238,11 @@ export class SecureKeyStorage {
 
     try {
       // Try platform-specific storage first
-      if (process.platform === 'darwin') {
+      if (isMac()) {
         await this.storeMacOS(prefixedKey, data);
-      } else if (process.platform === 'linux') {
+      } else if (isLinux()) {
         await this.storeLinux(prefixedKey, data);
-      } else if (process.platform === 'win32') {
+      } else if (isWindows()) {
         await this.storeWindows(prefixedKey, data);
       } else {
         throw new Error('Unsupported platform for secure storage');
@@ -259,11 +260,11 @@ export class SecureKeyStorage {
     const prefixedKey = SecureKeyStorage.KEY_PREFIX + keyId;
 
     try {
-      if (process.platform === 'darwin') {
+      if (isMac()) {
         return await this.retrieveMacOS(prefixedKey);
-      } else if (process.platform === 'linux') {
+      } else if (isLinux()) {
         return await this.retrieveLinux(prefixedKey);
-      } else if (process.platform === 'win32') {
+      } else if (isWindows()) {
         return await this.retrieveWindows(prefixedKey);
       }
     } catch (err) {
@@ -280,11 +281,11 @@ export class SecureKeyStorage {
     const prefixedKey = SecureKeyStorage.KEY_PREFIX + keyId;
 
     try {
-      if (process.platform === 'darwin') {
+      if (isMac()) {
         await this.deleteMacOS(prefixedKey);
-      } else if (process.platform === 'linux') {
+      } else if (isLinux()) {
         await this.deleteLinux(prefixedKey);
-      } else if (process.platform === 'win32') {
+      } else if (isWindows()) {
         await this.deleteWindows(prefixedKey);
       }
     } catch (err) {

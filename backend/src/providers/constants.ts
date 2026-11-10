@@ -90,6 +90,12 @@ export const OPENCODE_DEFAULT_BASE_URL: Partial<Record<string, string>> = {
   openrouter: 'https://openrouter.ai/api/v1',
   unorouter: 'https://api.unorouter.com/v1',
   experientiallabs: 'https://api.experientiallabs.ai/v1',
+  tokenharbor: 'https://tokenharbor.ai/v1',
+  logfare: 'https://logfare.ai/v1',
+  apinex: 'https://api.apinex.bond/v1',
+  gwarden: 'https://gwarden.su/v1',
+  vyceai: 'https://vyceai.com/v1',
+  respan: 'https://api.respan.ai/api/v1',
   tokenrouter: 'https://api.tokenrouter.com/v1',
   digitalocean: 'https://inference.do-ai.run/v1',
   xai: 'https://api.x.ai/v1',
@@ -105,8 +111,6 @@ export const OPENCODE_DEFAULT_BASE_URL: Partial<Record<string, string>> = {
   llama: 'https://api.llama.com/compat/v1',
   poe: 'https://api.poe.com/v1',
   workbuddy: 'https://tokenhub-intl.tencentcloudmaas.com/v1',
-  // AutoClaw desktop gateway — loopback-only local OpenAI-compatible host.
-  autoclaw: 'http://127.0.0.1:18789/v1',
 };
 
 /**
@@ -139,7 +143,6 @@ export const BASE_URL_PLACEHOLDERS: Partial<Record<string, string>> = {
   kimicode: 'https://api.kimi.com/coding/v1',
   workbuddy:
     'https://tokenhub-intl.tencentcloudmaas.com/v1 (default; China: https://tokenhub.tencentcloudmaas.com/v1)',
-  autoclaw: 'http://127.0.0.1:18789/v1 (local AutoClaw gateway; loopback only)',
   gitlab:
     'https://gitlab.com/api/v4 (or your self-managed instance, e.g. https://gitlab.example.com)',
 };

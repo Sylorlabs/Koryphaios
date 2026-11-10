@@ -188,7 +188,7 @@ export async function handleMcpRequest(
         const permissionPolicy = resolveToolPermissionPolicy(settings, 'act');
         if (isNoteToolName(name)) {
           const notePermission = checkNoteToolPermission(name, workingDirectory, {
-            yoloMode: permissionPolicy.mode === 'yolo',
+            mode: permissionPolicy.mode,
           });
           if (!notePermission.allowed || notePermission.requiresApproval) {
             return rpcResult(

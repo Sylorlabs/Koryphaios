@@ -36,6 +36,7 @@ import { appendBoundedProviderFrames } from './bounded-provider-stream';
 import { createKoryBridgeGrantLease } from './bridge-grant';
 import { buildProviderCliEnv } from './cli-environment';
 import { readAllCodexModelsCaches, enrichCodexModelsWithCliCache } from './codex-models-cache';
+import { recordedToolInput, recordedToolName, recordedToolOutput } from './recorded-tool';
 
 const CODEX_TIMEOUT_MS = 300_000;
 const CODEX_MODEL_LIST_TIMEOUT_MS = 15_000;
@@ -396,7 +397,7 @@ export function extractKoryToolEnvelope(
  *  CLI version (server_name/tool_name/arguments vs server/tool/input), so
  *  every field has fallbacks. Returns null when this is not an MCP item. */
 function describeMcpItem(item: Record<string, unknown> | undefined): {
-  name: string;
+  name: string | undefined;
   input: string;
   output: string;
   isError: boolean;
@@ -406,15 +407,16 @@ function describeMcpItem(item: Record<string, unknown> | undefined): {
   const record = item as Record<string, unknown>;
   const server =
     asText(record.server_name) ?? asText(record.server) ?? asText(record.server_label) ?? 'server';
-  const tool = asText(record.tool_name) ?? asText(record.tool) ?? asText(record.name) ?? 'tool';
-  const name = tool.startsWith('mcp__') ? tool : `mcp__${server}__${tool}`;
+  const tool = recordedToolName(record) ?? recordedToolName({ name: record.tool });
+  const name = tool ? tool.startsWith('mcp__') ? tool : `mcp__${server}__${tool}` : undefined;
   const inputValue = record.arguments ?? record.input ?? record.parameters;
   const outputValue = record.result ?? record.output ?? record.response ?? record.error;
+  const result = outputValue && typeof outputValue === 'object' ? outputValue as Record<string, unknown> : {};
   return {
     name,
-    input: typeof inputValue === 'string' ? inputValue : JSON.stringify(inputValue ?? {}),
-    output: String(outputValue ?? '').slice(0, 4_000),
-    isError: record.status === 'error' || record.is_error === true || record.error != null,
+    input: JSON.stringify(recordedToolInput(inputValue)),
+    output: recordedToolOutput(outputValue).slice(0, 4_000),
+    isError: record.status === 'error' || record.is_error === true || record.error != null || result.isError === true,
   };
 }
 
@@ -458,16 +460,10 @@ function describeNativeToolItem(
   toolName: string,
   item: Record<string, unknown>,
 ): { toolName: string; toolInput: string; toolOutput: string } {
-  const inputValue =
-    item.command ??
-    item.query ??
-    item.path ??
-    item.file ??
-    item.input ??
-    item.arguments ??
-    item.items ??
-    item.changes ??
-    {};
+  const inputValue = { ...recordedToolInput(item.input ?? item.arguments) };
+  for (const key of ['command', 'query', 'path', 'file', 'items', 'changes']) {
+    if (item[key] !== undefined) inputValue[key] = item[key];
+  }
   const outputValue =
     item.aggregated_output ??
     item.output ??
@@ -480,7 +476,7 @@ function describeNativeToolItem(
     typeof outputValue === 'string' ? outputValue : JSON.stringify(outputValue ?? '');
   return {
     toolName,
-    toolInput: typeof inputValue === 'string' ? inputValue : JSON.stringify(inputValue ?? {}),
+    toolInput: JSON.stringify(inputValue),
     toolOutput: String(outputText ?? '').slice(0, 4_000),
   };
 }
@@ -562,7 +558,7 @@ export function codexJsonEvents(
   } else if (event.type === 'item.completed' && item?.type === 'command_execution') {
     events.push({
       type: 'tool_executed',
-      toolName: 'codex_command',
+      toolName: recordedToolName(item) ?? 'command_execution',
       toolInput: JSON.stringify({ command: item.command ?? '' }),
       toolOutput: String(item.aggregated_output ?? item.output ?? '').slice(0, 4_000),
       isError: item.exit_code != null && item.exit_code !== 0,
@@ -579,7 +575,7 @@ export function codexJsonEvents(
     // Native tool items with no dedicated branch. Previously these were
     // silently dropped, so the Thought narration described actions that had
     // no visible tool row — tool calls appeared to render as thinking.
-    const native = describeNativeToolItem(`codex_${item.type}`, item);
+    const native = describeNativeToolItem(recordedToolName(item) ?? String(item.type), item);
     events.push({
       type: 'tool_executed',
       toolName: native.toolName,

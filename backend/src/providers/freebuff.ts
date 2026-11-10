@@ -79,7 +79,6 @@ import {
 import { z } from 'zod';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 import { providerLog } from '../logger';
 import { isModelListCacheFresh, enrichFromRemoteMetadata } from './model-list-cache';
 import { createGenericModel } from './models';
@@ -97,9 +96,14 @@ import {
   discoverFreebuffAccounts,
   type FreebuffAccount,
 } from './auth-utils';
+import { freebuffConfigDir } from './auth-utils';
 import { getCliBridge, FREEBUFF_HARNESS_NOTE } from './cli-bridges';
 import { getContext } from '../context';
-import { resolveToolPermissionPolicy } from '../tools/permission-policy';
+import {
+  resolveSubAgentPermissionPolicy,
+  resolveToolPermissionPolicy,
+} from '../tools/permission-policy';
+import { waitForToolApproval } from '../tools/approval-queue';
 import { loadAgentSettingsForSession } from '../agent-settings';
 import { wsBroker } from '../pubsub';
 import type { WSMessage } from '@koryphaios/shared';
@@ -202,7 +206,7 @@ let modelDiscoveryError: string | undefined;
 
 function readFreebuffDefaultModel(): string | null {
   try {
-    const path = join(homedir(), '.config', 'manicode', 'settings.json');
+    const path = join(freebuffConfigDir(), 'settings.json');
     const data = JSON.parse(readFileSync(path, 'utf-8')) as {
       freebuffModel?: string;
     };
@@ -537,7 +541,7 @@ export class FreebuffProvider implements Provider {
     const sessionId = request.sessionId ?? `freebuff-${Date.now()}`;
     const harnessRole = request.harnessRole ?? 'manager';
     const interactionMode: 'act' | 'plan' =
-      harnessRole === 'critic' || request.permissionMode === 'plan' ? 'plan' : 'act';
+      request.interactionMode ?? (harnessRole === 'critic' ? 'plan' : 'act');
 
     // Build the Kory ToolContext that every overridden tool will dispatch
     // through. This mirrors how the KoryManager builds contexts for its own
@@ -701,7 +705,10 @@ export async function buildKoryToolContext(
   const ctx = getContext();
   // Session-scoped: this chat's own approval preset, not the workspace default.
   const settings = loadAgentSettingsForSession(cwd, sessionId);
-  const permissionPolicy = resolveToolPermissionPolicy(settings, interactionMode);
+  const permissionPolicy =
+    role === 'worker' && interactionMode === 'act'
+      ? resolveSubAgentPermissionPolicy(settings, settings.subAgentApproval)
+      : resolveToolPermissionPolicy(settings, interactionMode);
 
   // Resolve the active goal/item for this session (if any) so tool calls
   // are attributed correctly in the change log.
@@ -723,6 +730,11 @@ export async function buildKoryToolContext(
   return {
     sessionId,
     agentId: `${activeProvider}:${role}`,
+    agentName: role === 'worker' ? 'Worker agent' : role === 'manager' ? 'Kory' : 'Critic',
+    callerRole: role,
+    ...(role === 'manager'
+      ? { renameSession: (title: string) => ctx.kory.renameSession(sessionId, title) }
+      : {}),
     activeProvider,
     activeModel: request.model,
     reasoningLevel: request.reasoningLevel,
@@ -736,6 +748,10 @@ export async function buildKoryToolContext(
     signal: request.signal,
     waitForUserInput: (question: string, options: string[]) =>
       ctx.kory.requestToolApproval(sessionId, question, options),
+    ...(role === 'worker' &&
+    !(settings.subAgentApproval === 'manager' && settings.permissionMode === 'guarded')
+      ? { waitForToolApproval }
+      : {}),
     recordChange: (change) => {
       ctx.kory.recordChange?.(sessionId, change);
     },

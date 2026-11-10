@@ -7,6 +7,9 @@ import { Database } from 'bun:sqlite';
 import { join } from 'node:path';
 import { serverLog } from '../logger';
 import { ensureSecureDir, hardenFilePermissions } from '../security/fs-permissions';
+import type { RunRevisionRef } from '@koryphaios/shared';
+
+export type CostSource = 'legacy' | 'provider-rate' | 'openrouter-equivalent' | 'models.dev' | (string & {});
 
 let db: Database | null = null;
 let databasePath: string | null = null;
@@ -33,6 +36,8 @@ export function initCreditDb(dataDir: string): void {
       provider TEXT NOT NULL,
       account_id TEXT,
       session_id TEXT,
+      run_id TEXT,
+      run_revision INTEGER,
       tokens_in INTEGER NOT NULL DEFAULT 0,
       tokens_out INTEGER NOT NULL DEFAULT 0,
       cache_read_tokens INTEGER NOT NULL DEFAULT 0,
@@ -50,12 +55,15 @@ export function initCreditDb(dataDir: string): void {
   for (const sql of [
     'ALTER TABLE credit_usage ADD COLUMN account_id TEXT',
     'ALTER TABLE credit_usage ADD COLUMN session_id TEXT',
+    'ALTER TABLE credit_usage ADD COLUMN run_id TEXT',
+    'ALTER TABLE credit_usage ADD COLUMN run_revision INTEGER',
     'ALTER TABLE credit_usage ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0',
     'ALTER TABLE credit_usage ADD COLUMN cache_write_tokens INTEGER NOT NULL DEFAULT 0',
     'ALTER TABLE credit_usage ADD COLUMN cache_savings_usd REAL NOT NULL DEFAULT 0',
     'ALTER TABLE credit_usage ADD COLUMN ttft_ms REAL',
     'ALTER TABLE credit_usage ADD COLUMN latency_ms REAL',
     'ALTER TABLE credit_usage ADD COLUMN cost_known INTEGER NOT NULL DEFAULT 0',
+    "ALTER TABLE credit_usage ADD COLUMN cost_source TEXT NOT NULL DEFAULT 'legacy'",
   ]) {
     try {
       db.exec(sql);
@@ -113,7 +121,7 @@ export function recordUsage(
   tokensIn: number,
   tokensOut: number,
   costUsd: number,
-  attribution?: { accountId?: string; sessionId?: string },
+  attribution?: { accountId?: string; sessionId?: string; runRef?: RunRevisionRef },
   cacheUsage?: {
     costKnown?: boolean;
     cacheReadTokens?: number;
@@ -126,16 +134,18 @@ export function recordUsage(
   const d = getCreditDb();
   d.run(
     `INSERT INTO credit_usage (
-      ts, model, provider, account_id, session_id, tokens_in, tokens_out,
+      ts, model, provider, account_id, session_id, run_id, run_revision, tokens_in, tokens_out,
       cache_read_tokens, cache_write_tokens, cache_savings_usd, ttft_ms, latency_ms, cost_usd,
       cost_known
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       Date.now(),
       model,
       provider,
       attribution?.accountId ?? null,
       attribution?.sessionId ?? null,
+      attribution?.runRef?.runId ?? null,
+      attribution?.runRef?.revision ?? null,
       tokensIn,
       tokensOut,
       Math.max(0, Math.floor(cacheUsage?.cacheReadTokens ?? 0)),
@@ -211,6 +221,77 @@ export function getUsageCostBreakdown(sessionId?: string): UsageCostBreakdownRow
   }));
 }
 
+export interface CreditUsageEventRow {
+  costSource?: CostSource;
+  ts: number;
+  sessionId: string | null;
+  provider: string;
+  model: string;
+  tokensIn: number;
+  tokensOut: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  cacheSavingsUsd: number;
+  costUsd: number;
+  costKnown: boolean;
+  runRef?: RunRevisionRef;
+}
+
+/** Time-stamped usage events for windowed cost and token analytics. */
+export function getUsageEventsSince(since = 0): CreditUsageEventRow[] {
+  const d = getCreditDb();
+  return d
+    .query<
+      {
+        ts: number;
+        session_id: string | null;
+        provider: string;
+        model: string;
+        tokens_in: number;
+        tokens_out: number;
+        cache_read_tokens: number;
+        cache_write_tokens: number;
+        cache_savings_usd: number;
+        cost_usd: number;
+        cost_known: number;
+        cost_source: CostSource;
+        run_id: string | null;
+        run_revision: number | null;
+      },
+      [number]
+    >(
+      `SELECT ts, session_id, provider, model, tokens_in, tokens_out,
+               cache_read_tokens, cache_write_tokens, cache_savings_usd, cost_usd, cost_known,
+               run_id, run_revision
+       FROM credit_usage
+       WHERE ts >= ? AND (tokens_in > 0 OR tokens_out > 0)
+       ORDER BY ts ASC`,
+    )
+    .all(Math.max(0, Math.floor(since)))
+    .map((row) => ({
+      ts: row.ts,
+      sessionId: row.session_id,
+      provider: row.provider,
+      model: row.model,
+      tokensIn: row.tokens_in ?? 0,
+      tokensOut: row.tokens_out ?? 0,
+      cacheReadTokens: row.cache_read_tokens ?? 0,
+      cacheWriteTokens: row.cache_write_tokens ?? 0,
+      cacheSavingsUsd: row.cache_savings_usd ?? 0,
+      costUsd: row.cost_usd ?? 0,
+      costKnown: (row.cost_known ?? 0) === 1,
+      ...(row.run_id && row.session_id && Number.isSafeInteger(row.run_revision)
+        ? {
+            runRef: {
+              sessionId: row.session_id,
+              runId: row.run_id,
+              revision: row.run_revision as number,
+            },
+          }
+        : {}),
+    }));
+}
+
 export interface UnknownCostUsageRow {
   id: number;
   provider: string;
@@ -239,8 +320,8 @@ export function getUnknownCostUsage(limit = 1_000): UnknownCostUsageRow[] {
     >(
       `SELECT id, provider, model, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens
        FROM credit_usage
-       WHERE cost_known = 0 AND (tokens_in > 0 OR tokens_out > 0)
-       ORDER BY ts DESC LIMIT ?`,
+       WHERE (cost_known = 0 OR cost_source = 'legacy') AND (tokens_in > 0 OR tokens_out > 0)
+       ORDER BY CASE WHEN cost_source = 'legacy' THEN 0 ELSE 1 END, ts DESC LIMIT ?`,
     )
     .all(safeLimit)
     .map((row) => ({
@@ -254,10 +335,10 @@ export function getUnknownCostUsage(limit = 1_000): UnknownCostUsageRow[] {
     }));
 }
 
-export function setUsageKnownCost(id: number, costUsd: number, cacheSavingsUsd = 0): void {
+export function setUsageKnownCost(id: number, costUsd: number, cacheSavingsUsd = 0, costSource: CostSource = 'provider-rate'): void {
   getCreditDb().run(
-    `UPDATE credit_usage SET cost_usd = ?, cost_known = 1, cache_savings_usd = ? WHERE id = ?`,
-    [costUsd, cacheSavingsUsd, id],
+    `UPDATE credit_usage SET cost_usd = ?, cost_known = 1, cache_savings_usd = ?, cost_source = ? WHERE id = ?`,
+    [costUsd, cacheSavingsUsd, costSource, id],
   );
 }
 
@@ -475,15 +556,20 @@ export function getLocalTotalsByProvider(): Array<{
 export function getUsageSamplesByProvider(
   provider: string,
   since: number,
+  attribution?: { accountId: string; includeUnattributed?: boolean },
 ): Array<{ ts: number; model: string; tokensIn: number; tokensOut: number }> {
   const d = getCreditDb();
   return d
-    .query<{ ts: number; model: string; tokens_in: number; tokens_out: number }, [string, number]>(
+    .query<
+      { ts: number; model: string; tokens_in: number; tokens_out: number },
+      [string, number, string | null, number]
+    >(
       `SELECT ts, model, tokens_in, tokens_out FROM credit_usage
-       WHERE provider = ? AND ts >= ? AND (tokens_in > 0 OR tokens_out > 0)
+        WHERE provider = ? AND ts >= ? AND (tokens_in > 0 OR tokens_out > 0)
+        AND (? IS NULL OR account_id = ?3 OR (? = 1 AND account_id IS NULL))
        ORDER BY ts`,
     )
-    .all(provider, since)
+    .all(provider, since, attribution?.accountId ?? null, attribution?.includeUnattributed ? 1 : 0)
     .map((r) => ({
       ts: r.ts,
       model: r.model,

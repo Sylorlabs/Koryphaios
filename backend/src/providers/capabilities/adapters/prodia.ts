@@ -141,6 +141,9 @@ export const prodiaAdapter: CapabilityAdapter = {
   provider: 'prodia',
   capabilities: ['image', 'video'],
   defaultBaseUrl: BASE_URL,
+  // `generate` sends a negative prompt, seed, duration and aspect ratio; it has
+  // no resolution preset and no audio toggle.
+  requestOptions: { negativePrompt: true },
 
   async verify(config, signal): Promise<CapabilityVerifyResult> {
     try {

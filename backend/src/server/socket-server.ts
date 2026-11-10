@@ -3,6 +3,7 @@ import { existsSync, unlinkSync, chmodSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { PROJECT_ROOT } from '../runtime/paths';
 import { serverLog } from '../logger';
+import { isWindows } from '../runtime/platform';
 
 export interface SocketInfo {
   readonly path: string;
@@ -11,7 +12,7 @@ export interface SocketInfo {
 }
 
 export function getSocketPath(projectRoot: string, name = 'koryphaios'): SocketInfo {
-  if (process.platform === 'win32') {
+  if (isWindows()) {
     return {
       path: `\\\\.\\pipe\\${name}`,
       type: 'tcp_fallback',
@@ -30,7 +31,7 @@ export function getSocketPath(projectRoot: string, name = 'koryphaios'): SocketI
 }
 
 export function cleanupExistingSocket(socketPath: string): void {
-  if (process.platform === 'win32') return;
+  if (isWindows()) return;
   try {
     if (existsSync(socketPath)) {
       unlinkSync(socketPath);
@@ -41,7 +42,7 @@ export function cleanupExistingSocket(socketPath: string): void {
 }
 
 export function restrictSocketPermissions(socketPath: string): void {
-  if (process.platform === 'win32') return;
+  if (isWindows()) return;
   try {
     chmodSync(socketPath, 0o600);
   } catch (err) {

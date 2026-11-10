@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync 
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { serverLog } from '../logger';
+import { canonicalizePath } from '../runtime/platform';
 import type { ProviderContentBlock } from './types';
 import {
   createPrivateCliBinaryArtifact,
@@ -59,7 +60,12 @@ export function materializeCliImage(
       serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'cli-attachments: cached file missing — writing new copy');
       writeFileSync(path, bytes, { mode: 0o600, flag: 'wx' });
     }
-    return path;
+    try {
+      return canonicalizePath(path);
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'cli-attachments: canonicalization failed');
+      return path;
+    }
   } catch (err: unknown) {
     serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'cli-attachments: image materialization failed');
     return null;
@@ -81,7 +87,7 @@ export function renderCliContent(content: string | ProviderContentBlock[]): stri
       const path = materializeCliImage(block.imageData, block.imageMimeType);
       parts.push(
         path
-          ? `[Image attachment: ${path}. Inspect this image with your available image/file tool before answering.]`
+          ? `[Image attachment: ${path}. View it with kory__view_image: call call_mcp_tool with ServerName="kory", ToolName="kory__view_image", and Arguments.path="${path}" before answering.]`
           : '[Image attachment unavailable: missing, invalid, or larger than 10 MB.]',
       );
     }
@@ -129,8 +135,14 @@ export function createCliAttachmentScope(): CliAttachmentScope {
         extensionForMime(mimeType),
       );
       artifacts.push(artifact);
-      pathsByContent.set(key, artifact.path);
-      return artifact.path;
+      let canonical = artifact.path;
+      try {
+        canonical = canonicalizePath(artifact.path);
+      } catch (err: unknown) {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'cli-attachments: canonicalization failed');
+      }
+      pathsByContent.set(key, canonical);
+      return canonical;
     } catch {
       return null;
     }
@@ -151,7 +163,7 @@ export function createCliAttachmentScope(): CliAttachmentScope {
         const path = materializeImage(block.imageData, block.imageMimeType);
         parts.push(
           path
-            ? `[Image attachment: ${path}. Inspect this image with your available image/file tool before answering.]`
+            ? `[Image attachment: ${path}. View it with kory__view_image: call call_mcp_tool with ServerName="kory", ToolName="kory__view_image", and Arguments.path="${path}" before answering.]`
             : '[Image attachment unavailable: missing, invalid, or larger than 10 MB.]',
         );
       }

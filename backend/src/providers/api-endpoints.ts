@@ -30,11 +30,17 @@ export const PROVIDER_BASE_URLS: Partial<Record<ProviderName, string>> = {
   moonshot: 'https://api.moonshot.ai/v1',
   groq: 'https://api.groq.com/openai/v1',
   openrouter: 'https://openrouter.ai/api/v1',
+  agentrouter: 'https://agentrouter.org/v1',
   unorouter: 'https://api.unorouter.com/v1',
   experientiallabs: 'https://api.experientiallabs.ai/v1',
+  tokenharbor: 'https://tokenharbor.ai/v1',
+  logfare: 'https://logfare.ai/v1',
+  apinex: 'https://api.apinex.bond/v1',
+  gwarden: 'https://gwarden.su/v1',
+  vyceai: 'https://vyceai.com/v1',
+  respan: 'https://api.respan.ai/api/v1',
   poe: 'https://api.poe.com/v1',
   workbuddy: 'https://tokenhub-intl.tencentcloudmaas.com/v1',
-  autoclaw: 'http://127.0.0.1:18789/v1',
   xai: 'https://api.x.ai/v1',
   // Hoplite is an async-agent control plane, not an OpenAI-compatible chat
   // host: its verification probe is the authenticated project catalog, not a
@@ -65,6 +71,22 @@ export function maskApiKey(key: string | undefined | null): string {
   const trimmed = key.trim();
   if (trimmed.length <= 8) return '***';
   return trimmed.slice(0, 4) + '...' + trimmed.slice(-4);
+}
+
+/** Return a display-safe endpoint without credentials, query strings, or fragments. */
+export function safeEndpointUrl(value: string | undefined | null): string | undefined {
+  if (!value?.trim()) return undefined;
+  try {
+    const url = new URL(value.trim());
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined;
+    url.username = '';
+    url.password = '';
+    url.search = '';
+    url.hash = '';
+    return url.toString().replace(/\/$/, '');
+  } catch {
+    return undefined;
+  }
 }
 
 export type AuthHeaderKind =
@@ -133,14 +155,20 @@ export function buildAuthHeaders(
     case 'groq':
     case 'xai':
     case 'openrouter':
+    case 'agentrouter':
     case 'unorouter':
     case 'experientiallabs':
+    case 'tokenharbor':
+    case 'logfare':
+    case 'apinex':
+    case 'gwarden':
+    case 'vyceai':
+    case 'respan':
     case 'poe':
     case 'deepseek':
     case 'moonshot':
     case 'mistral':
     case 'workbuddy':
-    case 'autoclaw':
       if (token) headers['Authorization'] = `Bearer ${token}`;
       if (provider === 'openrouter') {
         Object.assign(headers, withOpenRouterAttribution());
@@ -196,14 +224,20 @@ export function getVerifyUrl(
     case 'groq':
     case 'xai':
     case 'openrouter':
+    case 'agentrouter':
     case 'unorouter':
     case 'experientiallabs':
+    case 'tokenharbor':
+    case 'logfare':
+    case 'apinex':
+    case 'gwarden':
+    case 'vyceai':
+    case 'respan':
     case 'poe':
     case 'deepseek':
     case 'moonshot':
     case 'mistral':
     case 'workbuddy':
-    case 'autoclaw':
       return `${base.replace(/\/?$/, '')}/models`;
     case 'google':
     case 'aistudio': {

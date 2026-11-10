@@ -153,8 +153,10 @@ export class RemoteProvider implements Provider {
         reasoningLevel: request.reasoningLevel,
         ...imageOverride,
         harnessRole: request.harnessRole,
+        interactionMode: request.interactionMode,
         promptManifestHash: request.promptManifestHash,
         taskContractHash: request.taskContractHash,
+        forceFreshConversation: request.forceFreshConversation,
         agentic: false,
       };
       yield* relayGuestClient.requestInference(payload, request.signal);
@@ -203,8 +205,10 @@ export class RemoteProvider implements Provider {
       reasoningLevel: request.reasoningLevel,
       ...imageOverride,
       harnessRole: request.harnessRole,
+      interactionMode: request.interactionMode,
       promptManifestHash: request.promptManifestHash,
       taskContractHash: request.taskContractHash,
+      forceFreshConversation: request.forceFreshConversation,
       agentic: true,
       projectSync,
     };

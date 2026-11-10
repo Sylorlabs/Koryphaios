@@ -155,10 +155,6 @@ export function loadConfig(projectRoot: string): BackendConfig {
       modifyGitignore: fileConfig.workspace?.modifyGitignore ?? WORKSPACE.DEFAULT_MODIFY_GITIGNORE,
       sandbox: fileConfig.workspace?.sandbox ?? WORKSPACE.DEFAULT_SANDBOX_MODE,
     },
-    mode:
-      fileConfig.mode ??
-      (process.env.KORYPHAIOS_MODE as 'beginner' | 'advanced' | undefined) ??
-      'beginner',
     enableCritic: fileConfig.enableCritic,
     agentSettings: fileConfig.agentSettings,
   };
@@ -166,46 +162,6 @@ export function loadConfig(projectRoot: string): BackendConfig {
   validateConfig(config);
 
   return config as BackendConfig;
-}
-
-/**
- * Sync UI mode back to koryphaios.json atomically.
- */
-export function syncModeToConfig(projectRoot: string, mode: 'beginner' | 'advanced'): void {
-  const configPath = join(projectRoot, 'koryphaios.json');
-
-  if (!existsSync(configPath)) {
-    return;
-  }
-
-  const tempPath = `${configPath}.${process.pid}.tmp`;
-
-  try {
-    const content = readFileSync(configPath, 'utf-8');
-    const config = JSON.parse(content);
-
-    config.mode = mode;
-
-    // Track global update
-    const updatedAt = Date.now();
-    config.updatedAt = updatedAt;
-
-    writeFileSync(tempPath, JSON.stringify(config, null, 2), 'utf-8');
-    renameSync(tempPath, configPath);
-
-    serverLog.info({ mode, updatedAt }, 'Synced mode to koryphaios.json atomically');
-
-    // Broadcast update via WebSocket broker
-    wsBroker.publish('custom', {
-      type: 'system.config_updated',
-      payload: { source: 'mode-sync', mode, updatedAt },
-      timestamp: updatedAt,
-      sessionId: 'global',
-      agentId: 'system',
-    });
-  } catch (err) {
-    serverLog.warn({ err }, 'Failed to sync mode to koryphaios.json');
-  }
 }
 
 /**
@@ -226,7 +182,7 @@ export function syncAgentSettingsToConfig(projectRoot: string, settings: AgentSe
     const config = JSON.parse(content);
 
     // Update both for compatibility
-    config.enableCritic = settings.criticGateEnabled;
+    config.enableCritic = settings.criticMode !== 'off';
     config.agentSettings = settings;
 
     // Track global update

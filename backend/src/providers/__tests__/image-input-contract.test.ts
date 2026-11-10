@@ -9,8 +9,6 @@ import { GrokBuildProvider } from '../grok-build';
 import { CodebuffProvider } from '../codebuff';
 import { GitLabProvider } from '../gitlab';
 import { NotionProvider } from '../notion';
-import { ChatbaseProvider } from '../chatbase';
-import { JulesProvider } from '../jules';
 import { HopliteProvider } from '../hoplite';
 import { ProviderRegistry } from '../registry';
 import { OpenAICompatiblePlugin } from '../plugin/openai-compatible';
@@ -231,26 +229,42 @@ describe('image capability correction across SDK provider identities', () => {
     },
   );
 
-  test.each([false, true])('Gemini retains audio/video bytes and never retries as text (rejection=%s)', async (reject) => {
-    const provider = new GoogleProvider(config('google'));
-    const bodies = installTransport('google', reject);
-    const events: ProviderEvent[] = [];
-    for await (const event of provider.streamResponse({
-      model: 'gemini-2.5-flash', systemPrompt: '',
-      messages: [{ role: 'user', content: [
-        { type: 'text', text: 'Describe the clip and transcribe the recording.' },
-        { type: 'video', mediaData: 'Y2xpcA==', mediaMimeType: 'video/mp4' },
-        { type: 'audio', mediaData: 'c3BlZWNo', mediaMimeType: 'audio/mpeg' },
-      ] }],
-    })) events.push(event);
-    expect(bodies).toHaveLength(1);
-    expect(bodies[0]).toMatchObject({ contents: [{ parts: [
-      { text: 'Describe the clip and transcribe the recording.' },
-      { inlineData: { data: 'Y2xpcA==', mimeType: 'video/mp4' } },
-      { inlineData: { data: 'c3BlZWNo', mimeType: 'audio/mpeg' } },
-    ] }] });
-    expect(events.some((event) => event.type === 'error')).toBe(reject);
-  });
+  test.each([false, true])(
+    'Gemini retains audio/video bytes and never retries as text (rejection=%s)',
+    async (reject) => {
+      const provider = new GoogleProvider(config('google'));
+      const bodies = installTransport('google', reject);
+      const events: ProviderEvent[] = [];
+      for await (const event of provider.streamResponse({
+        model: 'gemini-2.5-flash',
+        systemPrompt: '',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Describe the clip and transcribe the recording.' },
+              { type: 'video', mediaData: 'Y2xpcA==', mediaMimeType: 'video/mp4' },
+              { type: 'audio', mediaData: 'c3BlZWNo', mediaMimeType: 'audio/mpeg' },
+            ],
+          },
+        ],
+      }))
+        events.push(event);
+      expect(bodies).toHaveLength(1);
+      expect(bodies[0]).toMatchObject({
+        contents: [
+          {
+            parts: [
+              { text: 'Describe the clip and transcribe the recording.' },
+              { inlineData: { data: 'Y2xpcA==', mimeType: 'video/mp4' } },
+              { inlineData: { data: 'c3BlZWNo', mimeType: 'audio/mpeg' } },
+            ],
+          },
+        ],
+      });
+      expect(events.some((event) => event.type === 'error')).toBe(reject);
+    },
+  );
 });
 
 describe('image transport is independent of model metadata', () => {
@@ -261,8 +275,6 @@ describe('image transport is independent of model metadata', () => {
     CodebuffProvider,
     GitLabProvider,
     NotionProvider,
-    ChatbaseProvider,
-    JulesProvider,
     HopliteProvider,
   ];
   test.each(textOnlyProviders)(

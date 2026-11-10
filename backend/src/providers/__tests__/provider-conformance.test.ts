@@ -15,7 +15,6 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import type { ProviderConfig, ProviderName } from '@koryphaios/shared';
 import { ANTHROPIC_VERSION, PROVIDER_BASE_URLS, VERTEX_EXPRESS_VERIFY_URL } from '../api-endpoints';
 import { providerDefaultBaseUrl } from '../constants';
-import { CHATBASE_BASE_URL } from '../chatbase';
 import { GITLAB_DUO_BASE_URL } from '../gitlab';
 import { NOTION_BASE_URL } from '../notion';
 import { CLI_ADAPTER_COMPATIBILITY, getCliAdapterCompatibility } from '../cli-compatibility';
@@ -64,14 +63,12 @@ const OTHER_EXTERNAL = new Set<ProviderName>([
 
 const EXPLICITLY_UNAVAILABLE = new Set<ProviderName>([
   ...UNSUPPORTED_CHAT_PROVIDER_NAMES,
-  'jules',
   // Hoplite is an async-agent control plane: its adapter fails closed for chat
   // (empty model list, isAvailable false) even though its key verifies.
   'hoplite',
 ]);
 
 const DEDICATED = new Set<ProviderName>([
-  'chatbase',
   'notion',
   'anthropic',
   'google',
@@ -177,18 +174,6 @@ async function syntheticFetch(input: RequestInfo | URL, init?: RequestInit): Pro
       deploymentUrl:
         'https://synthetic-deployment.inference.ai.us10.hana.ondemand.com/v2/inference/deployments/synthetic-deployment',
     });
-  }
-
-  if (
-    request.method === 'POST' &&
-    request.url === `${CHATBASE_BASE_URL}/agents/synthetic-agent/chat`
-  ) {
-    return eventStream([
-      'data: {"type":"start","messageId":"synthetic-message"}\n\n',
-      `data: ${JSON.stringify({ type: 'text-delta', id: 'text-1', delta: MARKER })}\n\n`,
-      'data: {"type":"finish","finishReason":"stop","messageMetadata":{"conversationId":"synthetic-conversation","usage":{"credits":2}}}\n\n',
-      'data: [DONE]\n\n',
-    ]);
   }
 
   if (request.method === 'POST' && request.url === `${NOTION_BASE_URL}/agents/query`) {
@@ -298,7 +283,6 @@ function configFor(name: ProviderName): ProviderConfig {
     return { ...base, authToken: TEST_KEY, baseUrl: canonicalFamilyBase(name) };
   }
   if (name === 'bedrock') return base;
-  if (name === 'chatbase') return { ...base, apiKey: TEST_KEY, baseUrl: CHATBASE_BASE_URL };
   return { ...base, apiKey: TEST_KEY, baseUrl: canonicalFamilyBase(name) };
 }
 
@@ -474,40 +458,6 @@ describe('provider synthetic request-shape conformance', () => {
       });
     }
   }, 120_000);
-
-  it('uses Chatbase v2 agent chat with a scalar message and UIMessage SSE', async () => {
-    expect(evidence.get('chatbase')?.kind).toBe('dedicated-shape');
-    expect(runtimeDefaultConfig(registry, 'chatbase').baseUrl?.replace(/\/+$/, '')).toBe(
-      CHATBASE_BASE_URL,
-    );
-    const provider = createProvider(registry, 'chatbase');
-    expect(provider).not.toBeNull();
-    const start = captured.length;
-    const result = await drive(provider!, 'synthetic-agent');
-    const requests = requestsSince(start).filter((request) => request.method === 'POST');
-    expect(result.error).toBeUndefined();
-    expect(result.text).toBe(MARKER);
-    expect(result.events.filter((event) => event.type === 'complete')).toEqual([
-      { type: 'complete', finishReason: 'stop' },
-    ]);
-    // Credits are billing units, not input/output token counts.
-    expect(result.events.some((event) => event.type === 'usage_update')).toBe(false);
-    expect(requests).toHaveLength(1);
-    expect(requests[0].url).toBe(`${CHATBASE_BASE_URL}/agents/synthetic-agent/chat`);
-    expect(requests[0].headers.get('authorization')).toBe(`Bearer ${TEST_KEY}`);
-    expect(requests[0].headers.get('content-type')).toBe('application/json');
-    expect(requests[0].body).toEqual({
-      message:
-        '[System Instructions]: Synthetic request-shape fixture\n\nUser: Return the canned marker.',
-      stream: true,
-    });
-    evidence.set('chatbase', {
-      provider: 'chatbase',
-      kind: 'dedicated-shape',
-      evidence:
-        '/api/v2/agents/{agentId}/chat + scalar message + UIMessage SSE (synthetic); HTTP errors in chatbase-conformance.test.ts',
-    });
-  });
 
   it('uses Notion agent sessions with a PAT and parses the session SSE turn', async () => {
     expect(evidence.get('notion')?.kind).toBe('dedicated-shape');
@@ -761,7 +711,6 @@ describe('provider synthetic request-shape conformance', () => {
       expect(evidence.get(name)?.kind).toBe('external-suite');
     }
     expect(evidence.get('bedrock')?.evidence).toContain('SDK-specific');
-    expect(evidence.get('jules')?.kind).toBe('unavailable');
     expect(evidence.get('hoplite')?.kind).toBe('unavailable');
   });
 

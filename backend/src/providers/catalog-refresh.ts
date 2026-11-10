@@ -72,24 +72,37 @@ const CLI_BACKED_PROVIDERS: ReadonlySet<ProviderName> = new Set([
   'codex',
   'codex-auth',
   'grok',
+  'codebuddy',
   'antigravity',
   'cursor',
   'devin',
+  'omnirush',
+  'opencode',
 ]);
 
-/** Keyless public catalog endpoints, plus localhost servers. */
+/** Keyless public catalog endpoints, localhost servers, and cheap authenticated
+ * read-only catalogs (no subprocess or generation). */
 const CHEAP_CATALOG_PROVIDERS: ReadonlySet<ProviderName> = new Set([
+  'beam',
   'cline',
   'github-models',
   'local',
   'ollama',
   'llamacpp',
   'lmstudio',
+  'freebuff',
 ]);
 
 export function catalogRefreshTier(name: ProviderName): CatalogRefreshTier {
   if (CLI_BACKED_PROVIDERS.has(name)) return 'cli';
   if (CHEAP_CATALOG_PROVIDERS.has(name)) return 'cheap';
+  // A user-defined OpenAI-compatible endpoint costs exactly what `local` /
+  // `ollama` / `lmstudio` cost: one unauthenticated or bearer GET /models. It
+  // is also the catalog most likely to change underneath the user — they are
+  // the ones pointing Koryphaios at a new model server. Polling it 6x less
+  // often than those identical-cost peers was the wrong trade, and it is why
+  // newly added models took up to an hour to appear.
+  if (name.startsWith('custom:')) return 'cheap';
   return 'hourly';
 }
 
@@ -116,6 +129,15 @@ const TICK_MS = 60_000;
 const MAX_REFRESHES_PER_TICK = 3;
 /** Jitter spread, so many clients do not poll a provider on the same second. */
 const JITTER_RATIO = 0.1;
+/**
+ * How stale a cheap catalog may be when the user becomes active.
+ *
+ * Matches the adapters' own model-list TTL (5 min). Cheap means "one HTTP GET",
+ * so this cannot cost meaningful CPU; it exists so a model added to a custom
+ * endpoint shows up when the user returns rather than on the next 10-minute tick.
+ */
+const ACTIVITY_REFRESH_INTERVAL_MS = 5 * 60_000;
+
 /** Coalescing window for activity-driven catch-up refreshes. */
 const CATCH_UP_DEBOUNCE_MS = 5_000;
 
@@ -416,7 +438,17 @@ export class CatalogRefreshScheduler {
         // Normal ticks honour idle adaptation. A catch-up tick fires only for
         // providers already past their base cadence, so returning from a long
         // idle period refreshes what is genuinely stale and nothing else.
-        const due = catchUp ? schedule.dueAt <= now : schedule.nextAttemptAt <= now;
+        //
+        // Cheap sources get a tighter bar because their own adapter TTL is 5
+        // minutes: if the user just became active and a cheap catalog is older
+        // than that, refreshing costs one HTTP GET and makes the new model
+        // visible now instead of up to ten minutes from now. Deliberately not
+        // extended to the cli tier, where a catch-up would spawn a process.
+        const due = catchUp
+          ? schedule.dueAt <= now ||
+            (schedule.tier === 'cheap' &&
+              schedule.lastAttemptAt + ACTIVITY_REFRESH_INTERVAL_MS <= now)
+          : schedule.nextAttemptAt <= now;
         if (!due) continue;
         if (suppressed) continue;
 
@@ -503,9 +535,7 @@ export class CatalogRefreshScheduler {
       // signal available here.
       schedule.consecutiveFailures += 1;
       schedule.failureBackoffMs = Math.min(
-        schedule.failureBackoffMs > 0
-          ? schedule.failureBackoffMs * 2
-          : FAILURE_BACKOFF_BASE_MS,
+        schedule.failureBackoffMs > 0 ? schedule.failureBackoffMs * 2 : FAILURE_BACKOFF_BASE_MS,
         FAILURE_BACKOFF_MAX_MS,
       );
       schedule.lastOutcome = 'failed';

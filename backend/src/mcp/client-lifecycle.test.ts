@@ -246,7 +246,7 @@ describe('MCP stdio framing and lifecycle', () => {
   );
 
   test.skipIf(!BUN_STDIO_PIPES_AVAILABLE)(
-    'MCP manager refuses same-name servers from a different project scope',
+    'MCP manager keeps same-name servers independent across project scopes',
     async () => {
       const projectA = mkdtempSync(join(tmpdir(), 'kory-mcp-scope-a-'));
       const projectB = mkdtempSync(join(tmpdir(), 'kory-mcp-scope-b-'));
@@ -261,10 +261,9 @@ describe('MCP stdio framing and lifecycle', () => {
       try {
         await manager.connectServer(config, projectA);
         expect(manager.listServers(projectA)).toHaveLength(1);
-        await expect(manager.connectServer(config, projectB)).rejects.toThrow(
-          'already active for another project',
-        );
-        expect(manager.listServers(projectB)).toHaveLength(0);
+        await manager.connectServer(config, projectB);
+        expect(manager.listServers(projectB)).toHaveLength(1);
+        expect(manager.getClient(config.name, projectA)).not.toBe(manager.getClient(config.name, projectB));
       } finally {
         await manager.shutdown();
         rmSync(projectA, { recursive: true, force: true });

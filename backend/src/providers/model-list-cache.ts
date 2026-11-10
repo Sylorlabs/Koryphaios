@@ -1,3 +1,4 @@
+import { recordProviderModelPricing } from '../pricing';
 import type { ModelDef, ProviderName } from '@koryphaios/shared';
 import { createGenericModel } from './models';
 
@@ -39,6 +40,9 @@ export function mergeModelLists(fallback: ModelDef[], discovered: ModelDef[]): M
         ...(remote.maxOutputTokens > 0 ? { maxOutputTokens: remote.maxOutputTokens } : {}),
         ...(remote.vision !== undefined ? { vision: remote.vision } : {}),
         ...(remote.reasoningLevels?.length ? { reasoningLevels: remote.reasoningLevels } : {}),
+        ...(remote.outputModalities?.length
+          ? { outputModalities: remote.outputModalities }
+          : {}),
       });
     } else {
       merged.push(catalog);
@@ -51,6 +55,13 @@ export function mergeModelLists(fallback: ModelDef[], discovered: ModelDef[]): M
 function firstPositive(...values: unknown[]): number | undefined {
   for (const v of values) {
     if (typeof v === 'number' && Number.isFinite(v) && v > 0) return v;
+    if (typeof v !== 'string') continue;
+    const match = v.trim().match(/^(\d+(?:\.\d+)?)\s*([kKmM])?(?:\s+context)?$/);
+    if (!match) continue;
+    const amount = Number(match[1]);
+    const multiplier = match[2]?.toLowerCase() === 'm' ? 1_000_000 : match[2] ? 1_000 : 1;
+    const parsed = amount * multiplier;
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
   }
   return undefined;
 }
@@ -92,19 +103,25 @@ function firstStringArray(...values: unknown[]): string[] | undefined {
 export function enrichFromRemoteMetadata(raw: unknown, def: ModelDef): ModelDef {
   if (!raw || typeof raw !== 'object') return def;
   const r = raw as Record<string, unknown>;
+  recordProviderModelPricing(def.provider, def.apiModelId ?? def.id, raw);
   const caps = (r.capabilities ?? {}) as Record<string, unknown>;
   const limits = (caps.limits ?? {}) as Record<string, unknown>;
   const supports = (caps.supports ?? {}) as Record<string, unknown>;
   const topProvider = (r.top_provider ?? {}) as Record<string, unknown>;
+  const architecture = (r.architecture ?? {}) as Record<string, unknown>;
+  const modalities = (r.modalities ?? {}) as Record<string, unknown>;
 
   const ctx = firstPositive(
     r.context_length,
     r.context_window,
     r.max_context_length,
+    r.max_context_tokens,
+    r.max_input_tokens,
     limits.max_context_window_tokens,
   );
   const maxOut = firstPositive(
     r.max_output_tokens,
+    r.max_completion_tokens,
     limits.max_output_tokens,
     topProvider.max_completion_tokens,
   );
@@ -115,7 +132,24 @@ export function enrichFromRemoteMetadata(raw: unknown, def: ModelDef): ModelDef 
         ? (r.name as string).trim()
         : undefined;
   const vision = typeof supports.vision === 'boolean' ? (supports.vision as boolean) : undefined;
-  const reasoning = firstBoolean(r.reasoning, supports.reasoning, caps.reasoning);
+  // Output modalities, only when the provider states them: OpenRouter sends
+  // `architecture.output_modalities`, models.dev sends `modalities.output`, and
+  // other OpenAI-compatible gateways send a flat `output_modalities`. Never
+  // inferred from the model name — the image and video pickers rely on this
+  // being provider-stated truth.
+  const outputModalities = firstStringArray(
+    architecture.output_modalities,
+    r.output_modalities,
+    modalities.output,
+  );
+  const reasoning = firstBoolean(
+    r.reasoning,
+    r.supports_reasoning,
+    supports.reasoning,
+    supports.supports_reasoning,
+    caps.reasoning,
+    caps.supports_reasoning,
+  );
   // Discrete reasoning effort tiers, when the provider's own catalog reports
   // them (e.g. gateways mirroring the models.dev `reasoning_options` shape or
   // a plain `reasoning_levels` array). Never invented — absent means unknown.
@@ -123,10 +157,19 @@ export function enrichFromRemoteMetadata(raw: unknown, def: ModelDef): ModelDef 
     ? (r.reasoning_options as Array<{ type?: unknown; values?: unknown }>)
     : undefined;
   const effortValues = reasoningOptions?.find((o) => o?.type === 'effort')?.values;
+  // Reflection reports its exact effort ladder in a nested reasoning object.
+  const nestedReasoning =
+    r.reasoning && typeof r.reasoning === 'object'
+      ? (r.reasoning as Record<string, unknown>)
+      : undefined;
+  const nestedEfforts = firstStringArray(nestedReasoning?.supported_efforts);
   const reasoningLevels = firstStringArray(
+    nestedEfforts,
     r.reasoning_levels,
     r.supported_reasoning_efforts,
     r.reasoning_efforts,
+    r.supported_reasoning_levels,
+    caps.supported_reasoning_efforts,
     Array.isArray(effortValues) ? effortValues : undefined,
   );
 
@@ -136,7 +179,8 @@ export function enrichFromRemoteMetadata(raw: unknown, def: ModelDef): ModelDef 
     !displayName &&
     vision === undefined &&
     reasoning === undefined &&
-    reasoningLevels === undefined
+    reasoningLevels === undefined &&
+    outputModalities === undefined
   ) {
     return def;
   }
@@ -145,11 +189,16 @@ export function enrichFromRemoteMetadata(raw: unknown, def: ModelDef): ModelDef 
     ...(displayName ? { name: displayName } : {}),
     ...(ctx !== undefined ? { contextWindow: ctx, contextVerified: true } : {}),
     ...(maxOut !== undefined ? { maxOutputTokens: maxOut } : {}),
-    ...(reasoning !== undefined ? { canReason: reasoning } : {}),
+    ...(reasoning !== undefined
+      ? { canReason: reasoning }
+      : nestedEfforts?.length
+        ? { canReason: true }
+        : {}),
     ...(reasoningLevels !== undefined ? { reasoningLevels } : {}),
     ...(vision !== undefined
       ? { vision, supportsAttachments: def.supportsAttachments || vision }
       : {}),
+    ...(outputModalities !== undefined ? { outputModalities } : {}),
   };
 }
 

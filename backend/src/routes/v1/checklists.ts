@@ -61,7 +61,9 @@ export const checklistRoutes = new Elysia({ prefix: '/api/checklists' })
       const checklist = await asConflict(() =>
         getContext().checklists.create({
           title: body.title,
-          scope: (body.scope ?? 'workspace') as ChecklistScope,
+          // Left undefined so the store scopes a checklist created inside a
+          // chat to that chat, and only falls back to workspace without one.
+          scope: body.scope as ChecklistScope | undefined,
           projectPath: body.projectPath,
           sessionId: body.sessionId,
           items: body.items,

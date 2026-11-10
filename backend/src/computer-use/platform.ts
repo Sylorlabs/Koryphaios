@@ -14,10 +14,13 @@ import type {
 import { MACOS_HELPER_SOURCE } from './platform-macos';
 import { WINDOWS_HELPER_SOURCE } from './platform-windows';
 import { LINUX_HELPER_SOURCE } from './platform-linux';
+import { hostOS, isUnix } from '../runtime/platform';
+import { NativeComputerController } from './native-controller';
 
 const MAX_OUTPUT = 24 * 1024 * 1024;
 const ACTIONS = new Set([
   'discover',
+  'listElements',
   'observe',
   'click',
   'doubleClick',
@@ -61,6 +64,7 @@ function target(value: unknown): ComputerTarget {
     windowId: value.windowId,
     pid: value.pid as number,
     title: value.title,
+    ...(value.scope === 'desktop' || value.scope === 'window' ? { scope: value.scope } : {}),
   };
 }
 function sameTarget(a: ComputerTarget, b: ComputerTarget): boolean {
@@ -88,6 +92,7 @@ function environment(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): NodeJS.
     'DBUS_SESSION_BUS_ADDRESS',
     'WAYLAND_DISPLAY',
     'XDG_SESSION_TYPE',
+    'DEVELOPER_DIR',
   ]) {
     if (env[name] !== undefined) result[name] = env[name];
   }
@@ -112,7 +117,7 @@ export async function runComputerHelper(
     const child = spawn(command, args, {
       shell: false,
       windowsHide: true,
-      detached: process.platform !== 'win32',
+      detached: isUnix(),
       cwd: workingDirectory,
       env,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -124,7 +129,7 @@ export async function runComputerHelper(
     const kill = (error: Error) => {
       failure ??= error;
       try {
-        if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, 'SIGKILL');
+        if (isUnix() && child.pid) process.kill(-child.pid, 'SIGKILL');
         else child.kill('SIGKILL');
       } catch {
         child.kill('SIGKILL');
@@ -164,6 +169,7 @@ export async function runComputerHelper(
 function nativeInvoker(platform: NodeJS.Platform, originalEnv: NodeJS.ProcessEnv) {
   const env = environment(originalEnv, platform);
   let prepared: Promise<{ command: string; args: string[]; cwd: string }> | undefined;
+  let controller: NativeComputerController | undefined;
   async function prepare(signal?: AbortSignal) {
     const directory = await mkdtemp(join(tmpdir(), 'kory-computer-'));
     await chmod(directory, 0o700);
@@ -242,6 +248,10 @@ function nativeInvoker(platform: NodeJS.Platform, originalEnv: NodeJS.ProcessEnv
       },
     );
     signal?.throwIfAborted();
+    if (platform === 'darwin') {
+      controller ??= new NativeComputerController(helper, env);
+      return controller.request(request, signal);
+    }
     const result = await runComputerHelper(
       helper.command,
       helper.args,
@@ -263,7 +273,7 @@ let defaultNativeInvoker: ReturnType<typeof nativeInvoker> | undefined;
 export function createComputerPlatformAdapter(
   options: ComputerPlatformOptions = {},
 ): ComputerPlatformAdapter {
-  const platform = options.platform ?? process.platform;
+  const platform = options.platform ?? hostOS();
   const env = options.env ?? process.env;
   const invoke =
     options.invoke ??
@@ -323,6 +333,8 @@ export function createComputerPlatformAdapter(
           available: response.available,
           capabilities: response.available ? response.capabilities : [],
           limitations: response.limitations,
+          ...(Array.isArray(response.actions) && response.actions.every((a) => typeof a === 'string' && ACTIONS.has(a))
+            ? { actions: response.actions } : {}),
         } as ComputerPlatformStatus;
       } catch (error) {
         return {
@@ -337,31 +349,20 @@ export function createComputerPlatformAdapter(
       signal?.throwIfAborted();
       if (!object(action) || !ACTIONS.has(action.kind)) throw new Error('Invalid computer action');
       if (action.kind === 'discover') return { targets: await discover(signal) };
-      if (
-        action.kind === 'key' ||
-        action.kind === 'scroll' ||
-        action.kind === 'doubleClick' ||
-        action.kind === 'move' ||
-        action.kind === 'drag' ||
-        action.kind === 'wait' ||
-        (action.kind === 'type' && platform !== 'darwin') ||
-        (action.kind === 'click' && platform === 'linux')
-      ) {
-        throw new Error(
-          `Computer ${action.kind} is unsupported on ${platform}; global input fallback is disabled`,
-        );
-      }
+      if (action.kind === 'wait') throw new Error('Wait is handled by the tool boundary');
       const requested = target(action.target);
-      if (
-        action.kind === 'click' &&
-        (!Number.isFinite(action.x) ||
-          !Number.isFinite(action.y) ||
-          action.x < 0 ||
-          action.y < 0 ||
-          action.x > 8192 ||
-          action.y > 8192)
-      )
-        throw new Error('Invalid window-relative click coordinates');
+      if (action.kind === 'click' || action.kind === 'doubleClick' || action.kind === 'move') {
+        if (
+          !action.elementId &&
+          (!Number.isFinite(action.x) ||
+            !Number.isFinite(action.y) ||
+            action.x! < 0 ||
+            action.y! < 0 ||
+            action.x! > 8192 ||
+            action.y! > 8192)
+        )
+          throw new Error('Invalid window-relative coordinates');
+      }
       if (
         action.kind === 'type' &&
         (typeof action.text !== 'string' ||
@@ -373,12 +374,28 @@ export function createComputerPlatformAdapter(
       if (!current) throw new Error('Target identity changed or window is no longer available');
       // Reconstruct requests: unknown fields, display labels and toJSON hooks never become native instructions.
       const request: ComputerAction =
-        action.kind === 'click'
-          ? { kind: 'click', target: current, x: action.x, y: action.y }
-          : action.kind === 'type'
-            ? { kind: 'type', target: current, text: action.text }
-            : { kind: action.kind, target: current };
+        action.kind === 'listElements'
+          ? { kind: 'listElements', target: current }
+          : action.kind === 'click'
+            ? { kind: 'click', target: current, ...(action.elementId ? { elementId: action.elementId } : {}), ...(action.x !== undefined ? { x: action.x, y: action.y } : {}), ...(action.button ? { button: action.button } : {}) }
+            : action.kind === 'doubleClick'
+              ? { kind: 'doubleClick', target: current, ...(action.elementId ? { elementId: action.elementId } : {}), ...(action.x !== undefined ? { x: action.x, y: action.y } : {}) }
+              : action.kind === 'move'
+                ? { kind: 'move', target: current, ...(action.elementId ? { elementId: action.elementId } : {}), ...(action.x !== undefined ? { x: action.x, y: action.y } : {}) }
+                : action.kind === 'drag'
+                  ? { kind: 'drag', target: current, ...(action.elementId ? { elementId: action.elementId } : {}), path: action.path }
+                  : action.kind === 'type'
+                    ? { kind: 'type', target: current, ...(action.elementId ? { elementId: action.elementId } : {}), text: action.text }
+                    : action.kind === 'key'
+                      ? { kind: 'key', target: current, ...(action.elementId ? { elementId: action.elementId } : {}), key: action.key }
+                      : action.kind === 'scroll'
+                        ? { kind: 'scroll', target: current, ...(action.elementId ? { elementId: action.elementId } : {}), delta: action.delta }
+                        : { kind: action.kind, target: current };
       const response = await call(request, signal);
+      if (action.kind === 'listElements') {
+        if (!Array.isArray(response.elements)) throw new Error('Invalid native element response');
+        return { elements: response.elements as ComputerActionResult['elements'] };
+      }
       if (action.kind === 'observe') {
         if (
           typeof response.imageBase64 !== 'string' ||

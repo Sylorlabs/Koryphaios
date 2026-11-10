@@ -167,7 +167,10 @@ export class ChecklistStore {
   }): Promise<Checklist> {
     const title = cleanText(input.title, MAX_CHECKLIST_TITLE);
     if (!title) throw new Error('Checklists require a title');
-    const scope = input.scope ?? 'workspace';
+    // A checklist started inside a chat belongs to that chat. Defaulting to
+    // workspace instead made every plan drafted in one chat show up in all of
+    // them, because workspace scope is reachable from every chat by design.
+    const scope = input.scope ?? (input.sessionId?.trim() ? 'session' : 'workspace');
     if (!SCOPES.has(scope)) throw new Error('Invalid checklist scope');
     if (scope === 'project' && !input.projectPath?.trim())
       throw new Error('Project checklists require a project directory');

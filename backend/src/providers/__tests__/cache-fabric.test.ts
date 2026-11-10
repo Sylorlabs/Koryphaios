@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   PromptCacheDiagnosticsRegistry,
+  PROMPT_CACHE_DIAGNOSTIC_KEY_LIMIT,
   createCacheLane,
   evaluateCacheWarmthEconomics,
   explainCacheTransition,
@@ -80,6 +81,26 @@ describe('cache fabric lanes', () => {
     expect(r.observe(a).state).toBe('cold');
     expect(r.observe(b).state).toBe('cold');
     expect(r.observe(a)).toMatchObject({ state: 'workspace-warm-candidate', reasons: [] });
+  });
+  test('bounds session-derived diagnostic maps', () => {
+    const r = new PromptCacheDiagnosticsRegistry();
+    for (let index = 0; index < PROMPT_CACHE_DIAGNOSTIC_KEY_LIMIT + 128; index++) {
+      r.observe(
+        createCacheLane({
+          ...base,
+          sessionId: `session-${index}`,
+          model: `model-${index}`,
+        }),
+      );
+    }
+    const internal = r as unknown as {
+      previousBySlot: Map<string, unknown>;
+      routeSeen: Map<string, unknown>;
+      warmStreakBySlot: Map<string, unknown>;
+    };
+    expect(internal.previousBySlot.size).toBeLessThanOrEqual(PROMPT_CACHE_DIAGNOSTIC_KEY_LIMIT);
+    expect(internal.routeSeen.size).toBeLessThanOrEqual(PROMPT_CACHE_DIAGNOSTIC_KEY_LIMIT);
+    expect(internal.warmStreakBySlot.size).toBeLessThanOrEqual(PROMPT_CACHE_DIAGNOSTIC_KEY_LIMIT);
   });
   test('distinguishes confirmed warm hits from provider-side cache rewrites', () => {
     const r = new PromptCacheDiagnosticsRegistry();

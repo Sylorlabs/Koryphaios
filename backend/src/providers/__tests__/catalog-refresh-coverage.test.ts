@@ -97,9 +97,9 @@ describe('scheduler coverage of every provider', () => {
         .sort();
 
       // codebuff pins one documented store agent, gitlab's server picks Duo per
-      // request, hoplite ships a fixed table with no catalog endpoint, and jules
-      // is approval-gated. Each already explains itself to the user.
-      expect(noHook).toEqual(['codebuff', 'gitlab', 'hoplite', 'jules']);
+      // request, and hoplite ships a fixed table with no catalog endpoint.
+      // Each already explains itself to the user.
+      expect(noHook).toEqual(['codebuff', 'gitlab', 'hoplite']);
       for (const name of noHook) {
         expect(providers.get(name)?.getModelDiscoveryError?.()).toBeTruthy();
       }

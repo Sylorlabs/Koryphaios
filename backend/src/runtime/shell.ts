@@ -20,7 +20,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { delimiter, join } from 'node:path';
+import { findOnPath, isWindows } from './platform';
 
 export interface ShellInfo {
   /** The shell binary to spawn. */
@@ -33,20 +33,6 @@ export interface ShellInfo {
 
 let cached: ShellInfo | undefined;
 
-/** Locate an executable on PATH without spawning a process. */
-function which(bin: string): string | null {
-  const PATH = process.env.PATH ?? '';
-  const exts = process.platform === 'win32' ? ['', '.exe', '.cmd', '.bat'] : [''];
-  for (const dir of PATH.split(delimiter)) {
-    if (!dir) continue;
-    for (const ext of exts) {
-      const full = join(dir, bin + ext);
-      if (existsSync(full)) return full;
-    }
-  }
-  return null;
-}
-
 /**
  * Resolve the shell for cross-platform command execution. The result is cached
  * for the process lifetime.
@@ -54,9 +40,9 @@ function which(bin: string): string | null {
 export function resolveShell(): ShellInfo {
   if (cached) return cached;
 
-  if (process.platform === 'win32') {
+  if (isWindows()) {
     // Try bash first (Git for Windows, WSL, MSYS2 all put it on PATH).
-    const bashPath = which('bash');
+    const bashPath = findOnPath('bash');
     if (bashPath) {
       cached = { command: bashPath, args: ['-c'], isBash: true };
       return cached;
@@ -68,13 +54,13 @@ export function resolveShell(): ShellInfo {
   }
 
   // Unix: prefer bash, fall back to sh.
-  const bashPath = which('bash') ?? '/bin/bash';
+  const bashPath = findOnPath('bash') ?? '/bin/bash';
   if (existsSync(bashPath)) {
     cached = { command: bashPath, args: ['-c'], isBash: true };
     return cached;
   }
 
-  const shPath = which('sh') ?? '/bin/sh';
+  const shPath = findOnPath('sh') ?? '/bin/sh';
   cached = { command: shPath, args: ['-c'], isBash: false };
   return cached;
 }
@@ -87,7 +73,7 @@ export function resolveShell(): ShellInfo {
 export function requireBash(): ShellInfo {
   const shell = resolveShell();
   if (!shell.isBash) {
-    if (process.platform === 'win32') {
+    if (isWindows()) {
       throw new Error(
         'bash was not found on PATH. The shell tool requires bash. ' +
           'Install Git for Windows (https://git-scm.com/download/win) or WSL, ' +

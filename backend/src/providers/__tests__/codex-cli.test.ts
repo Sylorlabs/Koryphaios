@@ -133,8 +133,8 @@ describe('Codex CLI Kory control-plane bridge', () => {
     expect(file.events).toEqual([
       {
         type: 'tool_executed',
-        toolName: 'codex_file_change',
-        toolInput: 'src/a.ts',
+        toolName: 'file_change',
+        toolInput: '{"path":"src/a.ts"}',
         toolOutput: '+x',
         isError: false,
       },
@@ -144,7 +144,7 @@ describe('Codex CLI Kory control-plane bridge', () => {
       { type: 'item.completed', item: { type: 'web_search', query: 'codex jsonl' } },
       [],
     );
-    expect(search.events[0]).toMatchObject({ type: 'tool_executed', toolName: 'codex_web_search' });
+    expect(search.events[0]).toMatchObject({ type: 'tool_executed', toolName: 'web_search', toolInput: '{"query":"codex jsonl"}' });
 
     const todos = codexJsonEvents(
       {
@@ -153,7 +153,7 @@ describe('Codex CLI Kory control-plane bridge', () => {
       },
       [],
     );
-    expect(todos.events[0]).toMatchObject({ type: 'tool_executed', toolName: 'codex_todo_list' });
+    expect(todos.events[0]).toMatchObject({ type: 'tool_executed', toolName: 'todo_list' });
   });
 
   it('emits nothing for empty reasoning items', () => {

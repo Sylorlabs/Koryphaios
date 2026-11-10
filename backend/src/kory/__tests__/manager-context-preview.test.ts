@@ -184,14 +184,9 @@ describe('KoryManager model context preview provenance', () => {
       expect(await getContextArchive()!.getLastUsage('completed-boundary')).toMatchObject({
         activeMessageId: 'assistant-final',
         contextRevision: 7,
-        // The dispatch estimate carries output 0; the completed snapshot
-        // patches in the exact provider-reported tokensOut.
+        // Output stays provider-reported; input categories are reconciled
+        // to the actual request instead of retaining tokenizer variance.
         breakdown: {
-          system: 10_000,
-          memory: 2_000,
-          skills: 1_500,
-          tools: 8_000,
-          chat: 40_000,
           output: 3_000,
         },
       });
@@ -202,14 +197,12 @@ describe('KoryManager model context preview provenance', () => {
         usageKnown: true,
         cachedInputTokens: 30_000,
         breakdown: {
-          system: 10_000,
-          memory: 2_000,
-          skills: 1_500,
-          tools: 8_000,
-          chat: 40_000,
           output: 3_000,
         },
       });
+      const saved = (await getContextArchive()!.getLastUsage('completed-boundary'))!;
+      expect(Object.values(saved.breakdown!).reduce((sum, tokens) => sum + tokens, 0)).toBe(saved.used);
+      expect(saved.breakdown?.cliHarness).toBeUndefined();
     } finally {
       manager.shutdown();
     }

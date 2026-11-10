@@ -9,7 +9,17 @@
  */
 
 export type NativeCliProvider =
-  'claude' | 'codex' | 'cursor' | 'devin' | 'antigravity' | 'grok' | 'freebuff';
+  | 'claude'
+  | 'codex'
+  | 'cursor'
+  | 'devin'
+  | 'antigravity'
+  | 'grok'
+  | 'freebuff'
+  | 'omnirush'
+  | 'codebuddy'
+  | 'workbuddy-desktop'
+  | 'opencode';
 
 const PROCESS_ENV_KEYS = [
   // Executable discovery and Windows process startup.
@@ -106,9 +116,70 @@ const PROVIDER_ENV_KEYS: Record<NativeCliProvider, readonly string[]> = {
     'XDG_RUNTIME_DIR',
   ],
   grok: ['GROK_CODE_XAI_API_KEY', 'XAI_API_KEY', 'GROK_HOME'],
+  // CODEBUDDY_CONFIG_DIR controls configuration, not the separate HOME-relative
+  // CodeBuddyExtension auth store. Preserve the user's product endpoint choice.
+  codebuddy: [
+    'CODEBUDDY_CONFIG_DIR',
+    'CODEBUDDY_API_KEY',
+    'CODEBUDDY_COPILOT_INTERNET_ENVIRONMENT',
+    'ACC_PRODUCT_CONFIG_PATH',
+  ],
+  // The WorkBuddy Desktop runtime is the app's own bundled CLI started in
+  // --serve mode. It authenticates through the shared CodeBuddy login state
+  // (CODEBUDDY_HOME / CODEBUDDY_API_KEY) while WORKBUDDY_CONFIG_DIR carries
+  // the desktop app's user settings context (--setting-sources user).
+  'workbuddy-desktop': [
+    'CODEBUDDY_HOME',
+    'CODEBUDDY_API_KEY',
+    'CODEBUDDY_COPILOT_INTERNET_ENVIRONMENT',
+    'WORKBUDDY_CONFIG_DIR',
+    'CODEBUDDY_CONFIG_DIR',
+    'ACC_PRODUCT_CONFIG_PATH',
+    'WORKBUDDY_DESKTOP_APP_PATH',
+  ],
   // Authentication is copied into the PTY adapter's private HOME. Never pass
   // the Freebuff credential through process.env.
   freebuff: [],
+  // Omnirush authentication remains in the CLI-owned OMNIRUSH_DIR/auth.json.
+  // Never copy a bearer token into the child environment.
+  // opencode resolves its config, credentials, state, and session db under the
+  // user's HOME (~/.config/opencode, ~/.local/share/opencode, ~/.local/state/opencode,
+  // ~/.cache/opencode). Koryphaios must not copy any ambient provider keys into the
+  // child: the CLI is the sole credential authority, and the caller passes the real
+  // HOME explicitly as an override. No provider-specific keys are allowlisted.
+  opencode: [],
+  omnirush: [
+    'OMNIRUSH_DIR',
+    'OMNIRUSH_AGENT_DIR',
+    'OMNIRUSH_AUTO_UPDATE',
+    'OMNIRUSH_UPDATE_DELEGATED',
+    'OMNIRUSH_OPENCODE_BIN',
+    'OMNIRUSH_OPENCODE_CWD',
+    'OMNIRUSH_PACKAGE_ROOT',
+    'OMNIRUSH_CODING_AGENT_DIR',
+    'OMNIRUSH_ENGINE_VERSION',
+    'OMNIRUSH_VERSION',
+    'OMNIRUSH_GATEWAY_URL',
+    'OMNIRUSH_ORIGIN',
+    'OMNIRUSH_PROJECT_CONFIG_DIR',
+    'OMNIRUSH_BOX_BIN_DIR',
+    'OMNIRUSH_BOX_HOME',
+    'OMNIRUSH_INSTALL_LOG',
+    // The normal Claude engine starts its managed Linux sandbox through the
+    // host container runtime. Pass only the endpoint, never the Docker config
+    // or registry credentials; the provider resolves the active endpoint from
+    // the host context when the child HOME is private.
+    'DOCKER_HOST',
+    // The current Omnirush 2.x launcher removes inline config from the
+    // provider-locked child environment. Omnirush's project-config gate is the
+    // supported way for a per-turn OpenCode plugin to load, so the provider
+    // opts into its disposable project workspace explicitly.
+    'OMNIRUSH_PROJECT_CODE',
+    'OPENCODE_CONFIG_CONTENT',
+    'PI_CODING_AGENT_DIR',
+    'PI_OFFLINE',
+    'PI_TELEMETRY',
+  ],
 };
 
 function allowedKeysFor(provider: NativeCliProvider): ReadonlySet<string> {
@@ -161,4 +232,6 @@ export const PROVIDER_CLI_SECRET_KEYS_FOR_TESTING = Object.freeze({
   devin: 'COGNITION_API_KEY',
   antigravity: 'ANTIGRAVITY_API_KEY',
   grok: 'GROK_CODE_XAI_API_KEY',
+  codebuddy: 'CODEBUDDY_API_KEY',
+  'workbuddy-desktop': 'CODEBUDDY_API_KEY',
 } satisfies Partial<Record<NativeCliProvider, string>>);

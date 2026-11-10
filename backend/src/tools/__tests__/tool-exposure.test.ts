@@ -87,7 +87,7 @@ describe('manager tool exposure', () => {
 
 describe('stubbed call recovery', () => {
   const strict: Tool = {
-    name: 'create_note',
+    name: 'create_resource',
     description: 'create a note',
     role: 'manager',
     inputSchema: {
@@ -121,7 +121,7 @@ describe('stubbed call recovery', () => {
     registry.register(strict);
     const result = await registry.execute(ctx(true), {
       id: '1',
-      name: 'create_note',
+      name: 'create_resource',
       input: { title: 'a' },
     });
     expect(result.isError).toBe(false);
@@ -133,14 +133,14 @@ describe('stubbed call recovery', () => {
     registry.register(strict);
     const result = await registry.execute(ctx(true), {
       id: '2',
-      name: 'create_note',
+      name: 'create_resource',
       input: { wrong: 'guess' },
     });
     expect(result.isError).toBe(true);
     // The whole point: no discovery call is needed, the fix is in the result.
     expect(result.output).toContain('"required"');
     expect(result.output).toContain('"title"');
-    expect(result.output).toContain('create_note');
+    expect(result.output).toContain('create_resource');
   });
 
   test('validation is off unless the turn opts in', async () => {
@@ -148,7 +148,7 @@ describe('stubbed call recovery', () => {
     registry.register(strict);
     const result = await registry.execute(ctx(false), {
       id: '3',
-      name: 'create_note',
+      name: 'create_resource',
       input: { wrong: 'guess' },
     });
     expect(result.isError).toBe(false);
@@ -159,7 +159,7 @@ describe('stubbed call recovery', () => {
     registry.register(strict);
     const result = await registry.execute(
       { ...ctx(true), callerRole: 'worker' },
-      { id: '4', name: 'create_note', input: { wrong: 'guess' } },
+      { id: '4', name: 'create_resource', input: { wrong: 'guess' } },
     );
     expect(result.isError).toBe(true);
     expect(result.output).toContain('not available to the worker role');

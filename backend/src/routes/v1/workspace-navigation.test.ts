@@ -6,10 +6,11 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { tmpdir, homedir } from 'node:os';
+import { dirname, join } from 'node:path';
 
 const isolatedRoot = mkdtempSync(join(tmpdir(), 'kory-workspace-routes-'));
 chmodSync(isolatedRoot, 0o700);
@@ -180,5 +181,96 @@ describe('workspace navigation routes', () => {
     );
     expect(response.status).toBe(200);
     expect((await response.json()) as unknown).toEqual({ ok: true, data: ['only-here.txt'] });
+  });
+
+  test('allocates explicit source-control roots and preserves non-Git state', async () => {
+    const project = join(workspaceRoot, 'beta');
+    const docs = join(project, 'docs');
+    mkdirSync(docs, { recursive: true });
+    const headers = {
+      'content-type': 'application/json',
+      'x-koryphaios-project': project,
+    };
+    const created = await app.handle(
+      request('/api/workspace/source-control/roots', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          path: docs,
+          label: 'Docs',
+          access: 'read-only',
+          sourceControl: 'none',
+        }),
+      }),
+    );
+    expect(created.status).toBe(200);
+    expect((await created.json()) as unknown).toMatchObject({
+      ok: true,
+      data: { path: canonical(docs), access: 'read-only', sourceControl: 'none' },
+    });
+    const roots = await app.handle(request('/api/workspace/source-control/roots', { headers }));
+    const rootsBody = (await roots.json()) as {
+      ok: boolean;
+      data: Array<Record<string, unknown>>;
+    };
+    expect(rootsBody.ok).toBe(true);
+    expect(rootsBody.data).toContainEqual({
+      id: expect.any(String),
+      projectId: expect.any(String),
+      path: canonical(docs),
+      label: 'Docs',
+      access: 'read-only',
+      sourceControl: 'none',
+    });
+  });
+
+  test('browses and creates folders only inside shared host locations', async () => {
+    await app.handle(
+      request('/api/workspace/open', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ root: workspaceRoot }),
+      }),
+    );
+
+    const outside = join(isolatedRoot, 'outside');
+    mkdirSync(outside, { recursive: true });
+    const escape = join(workspaceRoot, 'escape');
+    symlinkSync(outside, escape, 'dir');
+
+    const browse = await app.handle(
+      request(`/api/workspace/directories?path=${encodeURIComponent(workspaceRoot)}`),
+    );
+    expect(browse.status).toBe(200);
+    const listing = (await browse.json()) as {
+      ok: boolean;
+      data: { path: string; directories: Array<{ name: string; path: string }> };
+    };
+    expect(listing.data.path).toBe(canonicalWorkspaceRoot);
+    expect(listing.data.directories.some((entry) => entry.name === 'escape')).toBe(false);
+
+    const created = await app.handle(
+      request('/api/workspace/directories', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ parentPath: workspaceRoot, name: 'Mobile Project' }),
+      }),
+    );
+    expect(created.status).toBe(200);
+    expect((await created.json()) as unknown).toEqual({
+      ok: true,
+      data: {
+        path: join(canonicalWorkspaceRoot, 'Mobile_Project'),
+        name: 'Mobile_Project',
+      },
+    });
+
+    // The home directory is always a browse root, so a temp directory is not a
+    // reliable "outside" probe: the isolated test runner sets TMPDIR under it.
+    // The parent of home is outside every root the route exposes.
+    const denied = await app.handle(
+      request(`/api/workspace/directories?path=${encodeURIComponent(dirname(homedir()))}`),
+    );
+    expect(denied.status).toBe(400);
   });
 });

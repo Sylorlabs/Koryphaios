@@ -3,7 +3,12 @@ import { collaborationManager } from '../collaboration/manager';
 import { RelayJoinError } from '../collaboration/join-code';
 import { requireLocalRouteAuth } from '../auth/local-route-auth';
 import { getContext } from '../context';
-import { AuthenticationError, ConfigurationError, NotFoundError, ValidationError } from '../errors/types';
+import {
+  AuthenticationError,
+  ConfigurationError,
+  NotFoundError,
+  ValidationError,
+} from '../errors/types';
 import type { CollaborationAccessTier, SandboxPolicy } from '@koryphaios/shared';
 
 export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
@@ -31,7 +36,12 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
       if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
       // Body shape is validated by the Elysia schema below; cast bridges the
       // inferred route type to the local handler contract.
-      const input = body as { sessionId: string; ownerId?: string; workspacePaths?: string[]; hostName?: string };
+      const input = body as {
+        sessionId: string;
+        ownerId?: string;
+        workspacePaths?: string[];
+        hostName?: string;
+      };
       const result = await collaborationManager.hostSession(
         input.sessionId,
         input.ownerId || 'local-user',
@@ -239,7 +249,9 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
         tierId?: string;
       };
       await collaborationManager.hydrateRuntimeForSession(id);
-      const pending = collaborationManager.getPendingJoins(id).find((join) => join.guestId === guestId);
+      const pending = collaborationManager
+        .getPendingJoins(id)
+        .find((join) => join.guestId === guestId);
       if (!pending) throw new NotFoundError('Pending guest join', guestId);
       return { ok: true, data: collaborationManager.resolveJoin(guestId, approved, tierId) };
     },
@@ -303,18 +315,27 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
     const { modelSharingStatus } = await import('../collaboration/model-sharing');
     return { ok: true, data: modelSharingStatus() };
   })
-  .post('/providers/sharing/start', async ({ request, body, set }) => {
-    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
-    const { startModelSharing } = await import('../collaboration/model-sharing');
-    try {
-      return { ok: true, data: await startModelSharing(body.hostName || 'Host') };
-    } catch (error) {
-      if (error instanceof ValidationError || error instanceof RelayJoinError) throw error;
-      set.status = 503;
-      return { ok: false, error: error instanceof ConfigurationError
-        ? error.message : 'Could not connect to the model-sharing relay. Try again in a moment.' };
-    }
-  }, { body: t.Object({ hostName: t.Optional(t.String({ maxLength: 80 })) }) })
+  .post(
+    '/providers/sharing/start',
+    async ({ request, body, set }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+      const { startModelSharing } = await import('../collaboration/model-sharing');
+      try {
+        return { ok: true, data: await startModelSharing(body.hostName || 'Host') };
+      } catch (error) {
+        if (error instanceof ValidationError || error instanceof RelayJoinError) throw error;
+        set.status = 503;
+        return {
+          ok: false,
+          error:
+            error instanceof ConfigurationError
+              ? error.message
+              : 'Could not connect to the model-sharing relay. Try again in a moment.',
+        };
+      }
+    },
+    { body: t.Object({ hostName: t.Optional(t.String({ maxLength: 80 })) }) },
+  )
   .post('/providers/sharing/stop', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
     const { stopModelSharing } = await import('../collaboration/model-sharing');
@@ -323,7 +344,10 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
       return { ok: true };
     } catch {
       set.status = 503;
-      return { ok: false, error: 'Could not revoke model sharing. Check the relay connection and try again.' };
+      return {
+        ok: false,
+        error: 'Could not revoke model sharing. Check the relay connection and try again.',
+      };
     }
   })
   .get('/providers/shared', async ({ request }) => {
@@ -342,19 +366,38 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
         // Show the complete provider catalog. An unavailable provider remains
         // visible (and explains why it cannot be shared) rather than vanishing
         // from the user's mental model of what Koryphaios supports.
-        candidates: status.map((p) => ({
-          provider: p.name,
-          label: p.label ?? p.name,
-          modelCount: p.allAvailableModels.length || p.models.length,
-          models: p.allAvailableModels.map((model) => ({ id: model.id, name: model.name })),
-           available: p.adapterAvailable && p.enabled && !isAgenticProvider(p.name) && !p.name.startsWith('remote-'),
-           ...(isAgenticProvider(p.name) || p.name.startsWith('remote-') ? {
-             sharingBlockedReason: 'Native agents are unavailable for model-code sharing: host tool execution has no verified inference-only contract.',
-           } : {}),
-          // CLI harnesses run on the host and see the guest's files.
-          agentic: isAgenticProvider(p.name),
-          ...classifyProviderShare(p.name),
-        })),
+        candidates: status.map((p) => {
+          // Share the models this user actually kept enabled for themselves.
+          // Offering the full discovered catalog would invite sharing a model
+          // the user deliberately disabled (or cannot use) locally, and the
+          // selection only seeds the panel once — a later explicit choice in
+          // Team access is persisted and never re-synced from here.
+          const catalog = new Map(p.allAvailableModels.map((model) => [model.id, model]));
+          const enabledModels = p.models.flatMap((id) => {
+            const model = catalog.get(id);
+            return model ? [{ id: model.id, name: model.name }] : [];
+          });
+          return {
+            provider: p.name,
+            label: p.label ?? p.name,
+            modelCount: enabledModels.length,
+            models: enabledModels,
+            available:
+              p.adapterAvailable &&
+              p.enabled &&
+              !isAgenticProvider(p.name) &&
+              !p.name.startsWith('remote-'),
+            ...(isAgenticProvider(p.name) || p.name.startsWith('remote-')
+              ? {
+                  sharingBlockedReason:
+                    'Native agents are unavailable for model-code sharing: host tool execution has no verified inference-only contract.',
+                }
+              : {}),
+            // CLI harnesses run on the host and see the guest's files.
+            agentic: isAgenticProvider(p.name),
+            ...classifyProviderShare(p.name),
+          };
+        }),
       },
     };
   })
@@ -418,7 +461,10 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
       // Body shape is validated by the Elysia schema below.
       const input = body as { joinCode: string; name?: string };
       try {
-        const result = await connectToProviderHost(input.joinCode, input.name || 'Koryphaios client');
+        const result = await connectToProviderHost(
+          input.joinCode,
+          input.name || 'Koryphaios client',
+        );
         return { ok: true, data: result };
       } catch (error) {
         if (!(error instanceof RelayJoinError)) throw error;

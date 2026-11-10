@@ -9,10 +9,7 @@
 
 import { Elysia, t } from 'elysia';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
-import {
-  FEATURED_MCP_SERVERS,
-  type McpAuthRequirement,
-} from '../../mcp/featured-registry';
+import { FEATURED_MCP_SERVERS, type McpAuthRequirement } from '../../mcp/featured-registry';
 import { serverLog } from '../../logger';
 
 const REGISTRY_BASE_URL = 'https://registry.modelcontextprotocol.io';

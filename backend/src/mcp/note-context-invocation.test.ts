@@ -90,7 +90,10 @@ describe('Note Network native and MCP invocation', () => {
         let prompts = 0;
         const ctx = context({
           callerRole,
-          permissionPolicy: { ...context().permissionPolicy!, mode },
+          permissionPolicy:
+            mode === 'plan'
+              ? { ...context().permissionPolicy!, mode: 'ask', interactionMode: 'plan' }
+              : { ...context().permissionPolicy!, mode },
           waitForUserInput: async () => {
             prompts++;
             return 'Reject';

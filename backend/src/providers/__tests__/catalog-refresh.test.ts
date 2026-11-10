@@ -129,8 +129,34 @@ describe('catalog refresh tiers', () => {
     }
   });
 
+  it('treats custom providers as cheap, matching their real cost', () => {
+    // A custom OpenAI-compatible endpoint is one GET /models — identical to
+    // ollama/lmstudio/local. Leaving it in the hourly tier meant a newly added
+    // model took up to an hour to appear on the cheapest possible source.
+    for (const name of ['custom:lmstudio', 'custom:my-llm', 'custom:openrouter-proxy']) {
+      expect(catalogRefreshTier(name as never)).toBe('cheap');
+    }
+  });
+
+  it('does not promote a custom provider above a real CLI', () => {
+    // The custom id prefix must not shadow the subprocess tier: a custom
+    // provider is never cli-backed, and the CLI providers must stay 'cli' so
+    // they keep idle suspension and the burst cap.
+    expect(catalogRefreshTier('custom:claude')).toBe('cheap');
+    expect(catalogRefreshTier('claude')).toBe('cli');
+  });
+
   it('treats subprocess-backed discovery as its own tier', () => {
-    for (const name of ['claude', 'codex', 'codex-auth', 'cursor', 'antigravity', 'devin', 'grok']) {
+    for (const name of [
+      'claude',
+      'codex',
+      'codex-auth',
+      'cursor',
+      'antigravity',
+      'devin',
+      'grok',
+      'opencode',
+    ]) {
       expect(catalogRefreshTier(name)).toBe('cli');
     }
   });
@@ -145,7 +171,11 @@ describe('CatalogRefreshScheduler cadence', () => {
     provider.onRefresh = () => {
       provider.models = [def('gpt-5', 'openai')];
     };
-    const scheduler = makeScheduler(fakeRegistry([provider]), () => T0, (c) => changed.push(c));
+    const scheduler = makeScheduler(
+      fakeRegistry([provider]),
+      () => T0,
+      (c) => changed.push(c),
+    );
 
     await tick(scheduler, T0);
     expect(provider.refreshCount).toBe(1);
@@ -270,6 +300,43 @@ describe('CatalogRefreshScheduler idle adaptation', () => {
     // Returning to the app triggers the activity catch-up tick, which is the
     // path that unblocks suspended CLI discovery.
     await tick(scheduler, T0 + 60_000, { catchUp: true });
+    expect(provider.refreshCount).toBe(1);
+  });
+
+  it('refreshes a cheap catalog sooner than its cadence once the user is active', async () => {
+    // The point of the tighter bar: a model added to a cheap/custom endpoint
+    // shows up on the next activity rather than up to 10 minutes later. Cheap
+    // means one HTTP GET, so this cannot cost the user anything meaningful.
+    const provider = new FakeProvider('custom:my-llm');
+    provider.onRefresh = () => {
+      provider.models = [def('new-model', 'custom:my-llm')];
+    };
+    let now = T0;
+    const scheduler = makeScheduler(fakeRegistry([provider]), () => now);
+    await tick(scheduler, now);
+    expect(provider.refreshCount).toBe(1);
+
+    // 6 minutes later: inside the 10-minute cadence but past the 5-minute
+    // activity bar, so an activity tick must refresh it.
+    now = T0 + 6 * 60_000;
+    await tick(scheduler, now, { catchUp: true });
+    expect(provider.refreshCount).toBe(2);
+  });
+
+  it('does not let an activity tick spawn a CLI-backed catalog early', async () => {
+    // The activity bar is deliberately cheap-tier only. A subprocess-backed
+    // provider must still wait for its real cadence, or every status render
+    // would launch the user's CLI.
+    const provider = new FakeProvider('claude');
+    provider.onRefresh = () => {
+      provider.models = [def('sonnet', 'claude')];
+    };
+    let now = T0;
+    const scheduler = makeScheduler(fakeRegistry([provider]), () => now);
+    await tick(scheduler, now);
+    expect(provider.refreshCount).toBe(1);
+    now = T0 + 6 * 60_000;
+    await tick(scheduler, now, { catchUp: true });
     expect(provider.refreshCount).toBe(1);
   });
 
@@ -413,7 +480,11 @@ describe('CatalogRefreshScheduler bookkeeping', () => {
     };
     const changed: ProviderName[][] = [];
     let now = T0;
-    const scheduler = makeScheduler(fakeRegistry([provider]), () => now, (c) => changed.push(c));
+    const scheduler = makeScheduler(
+      fakeRegistry([provider]),
+      () => now,
+      (c) => changed.push(c),
+    );
 
     await tick(scheduler, now);
     expect(changed).toEqual([['ollama']]);
@@ -433,9 +504,13 @@ describe('CatalogRefreshScheduler bookkeeping', () => {
     let now = T0;
     // The real callback reads provider status, which is itself an activity
     // signal and schedules a catch-up tick. Model that feedback loop here.
-    const scheduler = makeScheduler(fakeRegistry([provider]), () => now, () => {
-      scheduler.noteActivity();
-    });
+    const scheduler = makeScheduler(
+      fakeRegistry([provider]),
+      () => now,
+      () => {
+        scheduler.noteActivity();
+      },
+    );
 
     await tick(scheduler, now);
     expect(provider.refreshCount).toBe(1);
@@ -457,7 +532,11 @@ describe('CatalogRefreshScheduler bookkeeping', () => {
     provider.models = [def('llama3', 'ollama')];
     const changed: ProviderName[][] = [];
     let now = T0;
-    const scheduler = makeScheduler(fakeRegistry([provider]), () => now, (c) => changed.push(c));
+    const scheduler = makeScheduler(
+      fakeRegistry([provider]),
+      () => now,
+      (c) => changed.push(c),
+    );
 
     await tick(scheduler, now);
     expect(changed).toHaveLength(0);
@@ -568,11 +647,21 @@ describe('jitter', () => {
       provider.models = [def('llama3', 'ollama')];
     };
 
-    const early = makeScheduler(fakeRegistry([provider]), () => T0, undefined, () => 0);
+    const early = makeScheduler(
+      fakeRegistry([provider]),
+      () => T0,
+      undefined,
+      () => 0,
+    );
     await tick(early, T0);
     const earlyNext = early.getStatus().providers[0].nextAttemptAt - T0;
 
-    const late = makeScheduler(fakeRegistry([provider]), () => T0, undefined, () => 1);
+    const late = makeScheduler(
+      fakeRegistry([provider]),
+      () => T0,
+      undefined,
+      () => 1,
+    );
     await tick(late, T0);
     const lateNext = late.getStatus().providers[0].nextAttemptAt - T0;
 

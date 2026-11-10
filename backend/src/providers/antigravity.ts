@@ -29,6 +29,7 @@
 
 import type { ProviderConfig, ModelDef, ModelQuota } from '@koryphaios/shared';
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   readFileSync,
   readdirSync,
@@ -41,7 +42,7 @@ import {
   mkdtempSync,
   rmSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import {
   type Provider,
@@ -57,7 +58,7 @@ import {
   inferenceSandboxPolicy,
   wrapCommand,
 } from '../collaboration/sandbox-runner';
-import { getCliBridge, getKoryphaiosAntigravityHome } from './cli-bridges';
+import { getCliBridge, getKoryphaiosAntigravityHome, KORY_CUSTOM_MCP_NOTE } from './cli-bridges';
 import { buildAntigravityHooks, buildAntigravitySettings } from './antigravity-permissions';
 import {
   fetchAntigravityQuota,
@@ -85,10 +86,19 @@ import {
 import { buildProviderCliEnv } from './cli-environment';
 import { getSafeSubprocessEnv } from '../runtime/safe-env';
 import { applyModelsDevMetadata } from './models-dev';
+import { currentProviderExecutionScope } from './execution-scope';
+import { createIdleAbortSignal } from './utils';
 
-const AGY_TIMEOUT_MS = 300_000;
+const AGY_IDLE_TIMEOUT_MS = 300_000;
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
 const LOG_POLL_INTERVAL_MS = 150;
+/** Minimum gap between catalog probes after one produced nothing.
+ *  Without this the freshness timestamp is never advanced on failure, so every
+ *  single `listModels()` — which `getStatus()` calls per provider — retries a
+ *  subprocess. A signed-out or broken CLI must cost one attempt per
+ *  cooldown, not one per status render. */
+const MODELS_PROBE_FAILURE_COOLDOWN_MS = 60_000;
+
 /** Budget for the read-only `agy models` discovery probe. It authenticates
  *  (keychain/D-Bus unlock) and then calls Google's account backend, so it needs
  *  the same allowance as `agy --print /usage`. */
@@ -103,22 +113,131 @@ const AGY_MODELS_PROBE_TIMEOUT_MS = 8_000;
 interface AntigravityConversationCacheEntry {
   conversationId: string;
   providerConversationRevision: number;
+  contextFingerprint: string;
 }
 
+const MAX_CACHED_ANTIGRAVITY_CONVERSATIONS = 256;
 const sessionConversations = new Map<string, AntigravityConversationCacheEntry>();
+
+export function fingerprintAntigravityContext(
+  request: Pick<
+    StreamRequest,
+    'systemPrompt' | 'workingDirectory' | 'model' | 'reasoningLevel' | 'tools'
+  >,
+): string {
+  const tools = [...(request.tools ?? [])]
+    .map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        systemPrompt: request.systemPrompt ?? '',
+        workingDirectory: request.workingDirectory ?? '',
+        model: request.model,
+        reasoningLevel: request.reasoningLevel ?? '',
+        tools,
+      }),
+    )
+    .digest('hex');
+}
+
+function rememberAntigravityConversation(
+  key: string,
+  entry: AntigravityConversationCacheEntry,
+): void {
+  // Map insertion order provides bounded FIFO eviction without an unbounded per-session leak.
+  sessionConversations.delete(key);
+  sessionConversations.set(key, entry);
+  while (sessionConversations.size > MAX_CACHED_ANTIGRAVITY_CONVERSATIONS) {
+    const oldest = sessionConversations.keys().next();
+    if (oldest.done) break;
+    sessionConversations.delete(oldest.value);
+  }
+}
+
+function conversationCacheKey(sessionId: string, role: StreamRequest['harnessRole']): string {
+  return `${sessionId}\0${role ?? 'manager'}`;
+}
 
 export function canResumeAntigravityConversation(
   cached: AntigravityConversationCacheEntry | undefined,
   providerConversationRevision: number,
   forceFreshConversation = false,
+  contextFingerprint?: string,
 ): boolean {
   return (
     !forceFreshConversation &&
     cached !== undefined &&
-    cached.providerConversationRevision === providerConversationRevision
+    cached.providerConversationRevision === providerConversationRevision &&
+    (contextFingerprint === undefined || cached.contextFingerprint === contextFingerprint)
   );
 }
 let cachedPrivatePromptFileSupport: boolean | undefined;
+
+export interface AntigravityMcpProbeInput {
+  runtime: string;
+  script: string;
+  env: Record<string, string>;
+  timeoutMs?: number;
+}
+
+/**
+ * Verify the authenticated Kory MCP process before starting agy.
+ *
+ * agy can start successfully while its stdio MCP child has failed to load.
+ * In that state the model falls back to native `run_command` and Kory only
+ * sees repeated hook denials. A short catalog probe turns that silent loss of
+ * the tool surface into an explicit, fail-closed provider error.
+ */
+export async function probeAntigravityMcpBridge(
+  input: AntigravityMcpProbeInput,
+): Promise<{ ok: true; toolCount: number } | { ok: false; reason: string }> {
+  let child: ReturnType<typeof spawn> | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    child = spawn(input.runtime, [input.script, '--provider', 'antigravity', '--probe'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...getSafeSubprocessEnv(), ...input.env },
+    });
+    const stdout = await new Promise<{ code: number | null; text: string }>((resolve, reject) => {
+      let text = '';
+      child!.stdout?.setEncoding('utf8');
+      child!.stdout?.on('data', (chunk) => {
+        text += String(chunk);
+      });
+      child!.once('error', reject);
+      child!.once('close', (code) => resolve({ code, text }));
+      timer = setTimeout(() => {
+        child?.kill('SIGTERM');
+        setTimeout(() => {
+          if (child?.exitCode === null) child.kill('SIGKILL');
+        }, 500).unref?.();
+      }, input.timeoutMs ?? 35_000);
+      timer.unref?.();
+    });
+    if (stdout.code !== 0)
+      return { ok: false, reason: 'bridge authorization or catalog request failed' };
+    const line = stdout.text
+      .split('\n')
+      .map((value) => value.trim())
+      .find((value) => value.length > 0);
+    if (!line) return { ok: false, reason: 'bridge returned no readiness receipt' };
+    const receipt = JSON.parse(line) as { ready?: unknown; toolCount?: unknown };
+    if (receipt.ready !== true || typeof receipt.toolCount !== 'number' || receipt.toolCount < 1) {
+      return { ok: false, reason: 'bridge returned an invalid or empty tool catalog' };
+    }
+    return { ok: true, toolCount: receipt.toolCount };
+  } catch {
+    return { ok: false, reason: 'bridge probe timed out or failed' };
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (child && child.exitCode === null) child.kill('SIGTERM');
+  }
+}
 
 export function antigravityHelpSupportsPrivatePromptFile(help: string): boolean {
   return /(?:^|\s)--(?:prompt-file|input-format|output-format)(?:\s|=|<)/m.test(help);
@@ -160,14 +279,19 @@ function supportsPrivateTransport(bin: string): boolean {
 }
 
 /** Data roots holding agy conversations/transcripts. The child runs with
- *  ANTIGRAVITY_HOME/HOME pointed at the isolated managed home, so Kory-spawned
+ *  GEMINI_DIR pointed at the isolated managed config, so Kory-spawned
  *  turns land there — not under the real login home. Scan both (isolated
  *  first) so Kory-created turns are found while the user's own agy usage
  *  stays visible too. */
 function agyDataRoots(): string[] {
-  const isolated = join(getKoryphaiosAntigravityHome(), '.gemini', 'antigravity-cli');
+  const baseHome = getKoryphaiosAntigravityHome();
+  const isolated = join(baseHome, '.gemini', 'antigravity-cli');
+  const subHomes = ['worker', 'critic', 'coder', 'research-only'].map((scope) =>
+    join(baseHome, scope, '.gemini', 'antigravity-cli'),
+  );
+  if (currentProviderExecutionScope()?.antigravityHome) return [isolated, ...subHomes];
   const real = join(homedir(), '.gemini', 'antigravity-cli');
-  return isolated === real ? [real] : [isolated, real];
+  return isolated === real ? [real, ...subHomes] : [isolated, ...subHomes, real];
 }
 
 function agyConvDirs(): string[] {
@@ -210,8 +334,14 @@ function listConversationIds(): Set<string> {
  *  user's OWN concurrently-running agy conversation: our just-spawned process
  *  is the one actively writing, so its db is the freshest new one. */
 function detectNewConversation(before: Set<string>): string | null {
+  // A conversation another Kory chat already owns must never be adopted by
+  // this one: its transcript would be tailed into the wrong chat (leaked tool
+  // calls, out-of-place output).
+  const claimed = new Set<string>();
+  for (const entry of sessionConversations.values()) claimed.add(entry.conversationId);
   let best: string | null = null;
   let bestMtime = -1;
+  let candidates = 0;
   for (const dir of agyConvDirs()) {
     let files: string[];
     try {
@@ -222,9 +352,10 @@ function detectNewConversation(before: Set<string>): string | null {
     for (const f of files) {
       if (!f.endsWith('.db')) continue;
       const id = f.slice(0, -3);
-      if (before.has(id)) continue;
+      if (before.has(id) || claimed.has(id)) continue;
       try {
         const mt = statSync(join(dir, f)).mtimeMs;
+        candidates += 1;
         if (mt > bestMtime) {
           bestMtime = mt;
           best = id;
@@ -238,13 +369,17 @@ function detectNewConversation(before: Set<string>): string | null {
       }
     }
   }
-  return best;
+  // Several unclaimed new conversations means a concurrent chat (or the user's
+  // own agy) is starting too, so mtime cannot say which is ours. Refuse to
+  // guess: the stream-json `conversation_id` is the authoritative source.
+  return candidates === 1 ? best : null;
 }
 
 // ── Dynamic model cache ────────────────────────────────────────────────────────
 
 let cachedModels: ModelDef[] | null = null;
 let cachedModelsAt = 0;
+let lastModelsProbeAt = 0;
 let modelsFetchInProgress = false;
 let modelsFetchPromise: Promise<ModelDef[]> | null = null;
 /** Live per-group quota from the agy CLI's `/usage` command, keyed by group
@@ -265,15 +400,19 @@ let cachedQuotaGroups: AntigravityQuotaGroup[] | null = null;
  *  with an empty model catalog.
  *
  *  Discovery is a pure read (`agy models` lists the account's model slugs and
- *  writes nothing Koryphaios depends on), so running it under the real, safe
- *  environment is both correct and side-effect free. The credential itself is
- *  never read or copied by Koryphaios: agy reads it, in its own process, from
- *  the keychain it already uses interactively. This mirrors
- *  `fetchAntigravityQuotaGroups` in antigravity-quota.ts and
- *  `probeCliConnection` in cli-detection.ts, which both already probe agy with
- *  the real environment. */
+ *  writes nothing Koryphaios depends on), so running it under the same managed
+ *  HOME as a turn is side-effect free and cannot refresh the host keychain.
+ *  The credential itself is never read or copied by Koryphaios: agy reads the
+ *  staged/link-only CLI record from the managed GEMINI_DIR. */
 function agyDiscoveryEnv(): NodeJS.ProcessEnv {
-  return getSafeSubprocessEnv();
+  const home = getKoryphaiosAntigravityHome();
+  return {
+    ...getSafeSubprocessEnv(),
+    HOME: home,
+    USERPROFILE: home,
+    ANTIGRAVITY_HOME: home,
+    GEMINI_DIR: join(home, '.gemini'),
+  };
 }
 
 function buildAntigravityModels(
@@ -317,14 +456,43 @@ function buildAntigravityModels(
  *  Returns a promise so `ProviderRegistry.refreshModelCatalogsInternal` awaits
  *  the real fetch instead of returning before the catalog lands — previously
  *  this returned void, so a forced refresh served a still-empty list. */
-function refreshModelsInBackground(): Promise<ModelDef[]> {
+function refreshModelsInBackground(forceRefresh = false): Promise<ModelDef[]> {
   if (modelsFetchInProgress) return modelsFetchPromise ?? Promise.resolve(cachedModels ?? []);
   const bin = whichBinary('agy');
   if (!bin) return Promise.resolve(cachedModels ?? []);
 
+  if (!forceRefresh && Date.now() - lastModelsProbeAt < MODELS_PROBE_FAILURE_COOLDOWN_MS) {
+    return Promise.resolve(cachedModels ?? []);
+  }
+  lastModelsProbeAt = Date.now();
   modelsFetchInProgress = true;
-  modelsFetchPromise = Promise.all([fetchAgyModels(bin), fetchAntigravityQuotaGroups()])
-    .then(([models, groups]) => {
+  void fetchAntigravityQuotaGroups()
+    .then((groups) => {
+      if (!groups || !cachedModels) return;
+      const quotaMap = new Map<string, ModelQuota>();
+      for (const group of groups) {
+        if (group.buckets.length === 0) continue;
+        const binding = group.buckets.reduce((min, bucket) =>
+          bucket.remainingFraction < min.remainingFraction ? bucket : min,
+        );
+        quotaMap.set(group.name, {
+          remainingFraction: binding.remainingFraction,
+          resetTime: binding.resetTime ? Date.parse(binding.resetTime) : 0,
+        });
+      }
+      cachedQuotaGroups = groups;
+      cachedQuota = quotaMap;
+      cachedModels = mergeQuotaIntoModels(cachedModels, quotaMap);
+    })
+    .catch((err) => {
+      providerLog.debug({ provider: 'antigravity', err }, 'Antigravity quota discovery failed');
+    });
+
+  // Model availability is independent of quota enrichment. Resolve this
+  // promise as soon as `agy models` returns so explicit refreshes can populate
+  // the picker without waiting for a second account/usage request.
+  modelsFetchPromise = fetchAgyModels(bin)
+    .then((models) => {
       if (models.length === 0) {
         providerLog.warn(
           { provider: 'antigravity' },
@@ -332,23 +500,7 @@ function refreshModelsInBackground(): Promise<ModelDef[]> {
         );
         return cachedModels ?? [];
       }
-      cachedQuotaGroups = groups;
-      const quotaMap = new Map<string, ModelQuota>();
-      if (groups) {
-        for (const g of groups) {
-          const buckets = g.buckets;
-          if (buckets.length === 0) continue;
-          const binding = buckets.reduce((min, b) =>
-            b.remainingFraction < min.remainingFraction ? b : min,
-          );
-          quotaMap.set(g.name, {
-            remainingFraction: binding.remainingFraction,
-            resetTime: binding.resetTime ? Date.parse(binding.resetTime) : 0,
-          });
-        }
-      }
-      cachedQuota = quotaMap;
-      cachedModels = buildAntigravityModels(models, quotaMap);
+      cachedModels = buildAntigravityModels(models, cachedQuota);
       cachedModelsAt = Date.now();
       providerLog.debug(
         { provider: 'antigravity', models: cachedModels.length },
@@ -362,6 +514,7 @@ function refreshModelsInBackground(): Promise<ModelDef[]> {
       return cachedModels ?? [];
     })
     .finally(() => {
+      lastModelsProbeAt = Date.now();
       modelsFetchInProgress = false;
       modelsFetchPromise = null;
     });
@@ -386,30 +539,6 @@ function mergeQuotaIntoModels(
     const q = groupName ? quota.get(groupName) : undefined;
     return q ? { ...m, quota: q } : m;
   });
-}
-
-function tryFetchAgyModelsSync(): ModelDef[] | null {
-  const bin = whichBinary('agy');
-  if (!bin) return null;
-  try {
-    const result = spawnSync(bin, ['models'], {
-      encoding: 'utf8',
-      // The probe hits Google's account backend to enumerate the subscription's
-      // model slugs. Budget it like `agy --print /usage` does; a cold keychain
-      // unlock plus the round trip regularly exceeds 4s.
-      timeout: AGY_MODELS_PROBE_TIMEOUT_MS,
-      stdio: ['ignore', 'pipe', 'ignore'],
-      env: agyDiscoveryEnv(),
-    });
-    const out = (result.stdout ?? '').toString();
-    const lines = out
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean);
-    return lines.length === 0 ? [] : lines.map(modelDefFromCliName);
-  } catch {
-    return null;
-  }
 }
 
 async function fetchAgyModels(bin: string): Promise<ModelDef[]> {
@@ -437,12 +566,12 @@ async function fetchAgyModels(bin: string): Promise<ModelDef[]> {
       clearTimeout(timer);
       reject(err);
     });
-    child.once('exit', () => {
+    child.once('exit', (code) => {
       const lines = out
         .split('\n')
         .map((l) => l.trim())
         .filter(Boolean);
-      resolve(lines.length === 0 ? [] : lines.map(modelDefFromCliName));
+      finish(code === 0 ? lines.map(modelDefFromCliName) : []);
     });
   });
 }
@@ -694,6 +823,11 @@ export function parseAntigravityStreamLine(line: string): ProviderEvent[] {
           type: 'usage_update',
           tokensIn: Number(usage.input_tokens ?? 0),
           tokensOut: Number(usage.output_tokens ?? 0),
+          // The terminal result is a turn usage receipt, not a last-request
+          // context snapshot. Internal tool steps can process the same prefix
+          // repeatedly. Preserve accounting, but never assert exact live
+          // occupancy or trigger compaction from these totals.
+          estimated: true,
           tokensCache: Number(usage.cache_read_tokens ?? 0),
           tokensCacheRead: Number(usage.cache_read_tokens ?? 0),
         });
@@ -794,8 +928,9 @@ function parseLogChunk(chunk: string, debug = false): ParsedLogEvents {
           events.push({ type: 'content_delta', content: part.text });
           gotContent = true;
         } else if (part.functionCall) {
-          const name = part.functionCall.name ?? 'tool';
+          const rawName = part.functionCall.name ?? 'tool';
           const args = (part.functionCall.args ?? {}) as Record<string, unknown>;
+          const { name, input } = normalizeRecordedMcpCall(rawName, args);
           const fileEvent = tryEmitFileEdit(name, args);
           if (fileEvent) {
             events.push(fileEvent);
@@ -803,7 +938,7 @@ function parseLogChunk(chunk: string, debug = false): ParsedLogEvents {
             events.push({
               type: 'tool_executed',
               toolName: name,
-              toolInput: JSON.stringify(args),
+              toolInput: JSON.stringify(input),
             });
           }
         }
@@ -830,6 +965,12 @@ export class AntigravityProvider implements Provider {
 
   isAvailable(): boolean {
     if (this.config.disabled) return false;
+    const staged = currentProviderExecutionScope()?.antigravityHome;
+    if (staged)
+      return (
+        !!whichBinary('agy') &&
+        existsSync(join(staged, '.gemini', 'antigravity-cli', 'antigravity-oauth-token'))
+      );
     const available = !!this.config.authToken || detectAntigravityCLILogin();
     if (available && Date.now() - cachedModelsAt > MODELS_CACHE_TTL_MS) {
       void refreshModelsInBackground();
@@ -838,16 +979,14 @@ export class AntigravityProvider implements Provider {
   }
 
   listModels(): ModelDef[] {
-    if (cachedModels && Date.now() - cachedModelsAt < MODELS_CACHE_TTL_MS) {
+    const staged = currentProviderExecutionScope()?.antigravityModels;
+    if (staged) return staged;
+    const now = Date.now();
+    if (cachedModels && now - cachedModelsAt < MODELS_CACHE_TTL_MS) {
       return cachedModels;
     }
-    if (cachedModels && cachedModels.length > 0) return cachedModels;
-    const sync = tryFetchAgyModelsSync();
-    if (sync && sync.length > 0) {
-      cachedModels = buildAntigravityModels(sync, cachedQuota);
-      cachedModelsAt = Date.now();
-      return cachedModels;
-    }
+    // Cold and stale reads are projections, never synchronous CLI probes. The
+    // shared refresh coalesces discovery and negative-caches failed attempts.
     void refreshModelsInBackground();
     return cachedModels ?? [];
   }
@@ -857,7 +996,12 @@ export class AntigravityProvider implements Provider {
    *  for it; the registry only awaits thenables. */
   refreshModels(): Promise<ModelDef[]> {
     cachedModelsAt = 0;
-    return refreshModelsInBackground();
+    // This public method is itself an explicit refresh request, including when
+    // called directly by provider tests or future integrations without an
+    // argument. Never let the negative-cache cooldown turn that request into a
+    // silent no-op.
+    lastModelsProbeAt = 0;
+    return refreshModelsInBackground(true);
   }
 
   /** Live per-group quota from the agy CLI's `/usage` command, keyed by group
@@ -896,6 +1040,13 @@ export class AntigravityProvider implements Provider {
     );
   }
 
+  /** The window Koryphaios has for the model this turn resolves to, or 0 when
+   *  the catalog has not reported one. Only used to budget the prompt. */
+  private contextWindowForModel(modelId: string): number {
+    const window = matchAgyModel(this.listModels(), modelId)?.model.contextWindow ?? 0;
+    return Number.isFinite(window) && window > 0 ? window : 0;
+  }
+
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
     const researchOnly = request.capabilityProfile === 'research-only';
     const bin = whichBinary('agy');
@@ -919,44 +1070,82 @@ export class AntigravityProvider implements Provider {
     // one — then only the NEW turn is sent (agy holds the prior history), which
     // avoids a fresh agentic session re-exploring the workspace every message.
     const providerConversationRevision = request.providerConversationRevision ?? 0;
-    const cachedConversation = request.sessionId
-      ? sessionConversations.get(request.sessionId)
-      : undefined;
+    const contextFingerprint = fingerprintAntigravityContext(request);
+    // Critic and worker threads share the Kory session id but have independent
+    // prompts. Only the manager owns resumable native conversation state.
+    const conversationRole = request.harnessRole ?? 'manager';
+    const canResumeNativeConversation = !researchOnly && conversationRole === 'manager';
+    const conversationKey = request.sessionId
+      ? conversationCacheKey(request.sessionId, conversationRole)
+      : '';
+    const cachedConversation =
+      canResumeNativeConversation && request.sessionId
+        ? sessionConversations.get(conversationKey)
+        : undefined;
     let convId =
-      !researchOnly &&
+      canResumeNativeConversation &&
       canResumeAntigravityConversation(
         cachedConversation,
         providerConversationRevision,
         request.forceFreshConversation,
+        contextFingerprint,
       )
         ? cachedConversation!.conversationId
         : undefined;
     if (
       request.sessionId &&
       cachedConversation &&
-      !request.forceFreshConversation &&
-      cachedConversation.providerConversationRevision !== providerConversationRevision
+      (request.forceFreshConversation ||
+        cachedConversation.providerConversationRevision !== providerConversationRevision ||
+        cachedConversation.contextFingerprint !== contextFingerprint)
     ) {
-      sessionConversations.delete(request.sessionId);
+      sessionConversations.delete(conversationKey);
     }
     if (convId && !agyConvDb(convId)) {
       // agy pruned it — start a fresh conversation with full history.
-      if (request.sessionId) sessionConversations.delete(request.sessionId);
+      if (request.sessionId) sessionConversations.delete(conversationKey);
       convId = undefined;
     }
     const convsBefore = convId ? null : listConversationIds();
     const rememberSessionConversation = (conversationId: string): void => {
-      if (researchOnly || request.forceFreshConversation || !request.sessionId) return;
-      sessionConversations.set(request.sessionId, {
+      if (!canResumeNativeConversation || !request.sessionId) return;
+      rememberAntigravityConversation(conversationKey, {
         conversationId,
         providerConversationRevision,
+        contextFingerprint,
       });
     };
 
     const attachmentScope = createCliAttachmentScope();
-    const prompt = convId
-      ? buildTurnPrompt(request.messages, attachmentScope)
-      : buildPrompt(request.systemPrompt, request.messages, attachmentScope);
+    // agy's own standing prompt is already inside the window before this
+    // prompt arrives; budget only what is left so the CLI is never handed a
+    // turn it cannot hold.
+    const promptContextWindow = this.contextWindowForModel(request.model);
+    const promptBudget = antigravityPromptBudget(promptContextWindow);
+    let prompt = convId
+      ? buildAntigravityTurnPrompt(request.messages, attachmentScope, promptBudget)
+      : buildAntigravityPrompt(
+          request.systemPrompt,
+          request.messages,
+          attachmentScope,
+          promptBudget,
+        );
+    if (convId && !prompt.trim()) {
+      // A stale native transcript can end at the last assistant turn. Restart
+      // with Kory's authoritative history instead of sending an empty frame.
+      providerLog.warn(
+        { provider: 'antigravity', sessionId: request.sessionId },
+        'Antigravity native conversation had no fresh prompt; restarting it',
+      );
+      if (request.sessionId) sessionConversations.delete(conversationKey);
+      convId = undefined;
+      prompt = buildAntigravityPrompt(
+        request.systemPrompt,
+        request.messages,
+        attachmentScope,
+        promptBudget,
+      );
+    }
     if (!prompt.trim()) {
       attachmentScope.cleanup();
       yield { type: 'error', error: 'Antigravity: empty prompt' };
@@ -981,6 +1170,7 @@ export class AntigravityProvider implements Provider {
     // Writing these before each turn ensures the CLI discovers the kory__ tool
     // catalog, the PreToolUse enforcement layer, and Kory's session rules.
     const agyBridge = getCliBridge('antigravity');
+    const bridgeRuntime = process.env.KORY_MCP_BRIDGE_COMMAND || process.execPath;
     const bridgeGrantLease =
       !researchOnly && request.sessionId
         ? createKoryBridgeGrantLease(request.sessionId, request.harnessRole ?? 'manager')
@@ -997,11 +1187,15 @@ export class AntigravityProvider implements Provider {
     };
     const agyHome = researchOnly
       ? join(getKoryphaiosAntigravityHome(), 'research-only')
-      : getKoryphaiosAntigravityHome();
+      : getKoryphaiosAntigravityHome(conversationRole !== 'manager' ? conversationRole : undefined);
     const bridgeGrantDirectory =
       !researchOnly && bridgeCtx.sessionId
         ? bridgeGrantLease!.grant(['mcp:catalog', 'mcp:execute']).directory
         : null;
+    const bridgeGrantDirectories = new Set<string>(
+      bridgeGrantDirectory ? [bridgeGrantDirectory] : [],
+    );
+    let turnHookAuthFile: string | undefined;
     const researchRoot = researchOnly
       ? mkdtempSync(join(tmpdir(), 'kory-web-research-agy-'))
       : null;
@@ -1021,6 +1215,8 @@ export class AntigravityProvider implements Provider {
         const settingsPath = join(agyHome, '.gemini', 'antigravity-cli', 'settings.json');
         const settingsDir = join(agyHome, '.gemini', 'antigravity-cli');
         ensureManagedCliDirectory(settingsDir);
+        ensureManagedCliDirectory(join(settingsDir, 'mcp'));
+        ensureManagedCliDirectory(join(settingsDir, 'brain'));
         let existingSettings: Record<string, unknown> = {};
         if (existsSync(settingsPath)) {
           healManagedCliFile(settingsPath);
@@ -1032,7 +1228,10 @@ export class AntigravityProvider implements Provider {
         }
         // Koryphaios owns the permission-bearing keys; unrelated user settings
         // in the staged home (theme, trusted workspaces) are preserved.
-        const enforced = buildAntigravitySettings({ workspacePath: cwd });
+        const enforced = buildAntigravitySettings({
+          workspacePath: cwd,
+          antigravityHome: agyHome,
+        });
         writeManagedCliFile(
           settingsPath,
           JSON.stringify({ ...existingSettings, ...enforced }, null, 2),
@@ -1051,17 +1250,25 @@ export class AntigravityProvider implements Provider {
         const hooksDir = join(agyHome, '.gemini', 'config');
         ensureManagedCliDirectory(hooksDir);
         const hooksPath = join(hooksDir, 'hooks.json');
+        const hookGrant = bridgeGrantLease!.grant(['hook:pre-tool', 'mcp:catalog', 'mcp:execute']);
+        turnHookAuthFile = hookGrant.path;
+        bridgeGrantDirectories.add(hookGrant.directory);
         if (existsSync(hooksPath)) healManagedCliFile(hooksPath);
         writeManagedCliFile(
           hooksPath,
           buildAntigravityHooks({
             hookScript,
-            authFile: bridgeGrantLease!.grant(['hook:pre-tool']).path,
+            authFile: hookGrant.path,
+            runtime: bridgeRuntime,
+            backendUrl: process.env.KORY_BACKEND_URL,
           }),
         );
       } catch (enforcementErr) {
         attachmentScope.cleanup();
         promptArtifact.cleanup();
+        logArtifact.cleanup();
+        bridgeGrantLease?.cleanup();
+        if (researchRoot) rmSync(researchRoot, { recursive: true, force: true });
         yield {
           type: 'error',
           error:
@@ -1079,29 +1286,56 @@ export class AntigravityProvider implements Provider {
         // .claude.json (nor .agents/mcp.json), which is why the kory__ catalog
         // never used to appear. `agy mcp list` reports servers from this file.
         const mcpConfigs = agyBridge?.buildMcpConfig(bridgeCtx);
-        if (mcpConfigs && mcpConfigs.length > 0) {
-          const mcpConfigDir = join(agyHome, '.gemini', 'config');
-          ensureManagedCliDirectory(mcpConfigDir);
-          const mcpConfigPath = join(mcpConfigDir, 'mcp_config.json');
-          if (existsSync(mcpConfigPath)) healManagedCliFile(mcpConfigPath);
-          let existing: { mcpServers?: Record<string, unknown> } = {};
-          if (existsSync(mcpConfigPath)) {
-            try {
-              existing = JSON.parse(readFileSync(mcpConfigPath, 'utf-8'));
-            } catch {
-              existing = {};
-            }
-          }
-          existing.mcpServers = existing.mcpServers ?? {};
-          for (const srv of mcpConfigs) {
-            existing.mcpServers[srv.name] = {
-              command: srv.command,
-              args: srv.args,
-              env: srv.env,
-            };
-          }
-          writeManagedCliFile(mcpConfigPath, JSON.stringify(existing, null, 2));
+        const koryMcp = mcpConfigs?.find((server) => server.name === 'kory');
+        if (!koryMcp) {
+          throw new Error('Required kory MCP server configuration is unavailable');
         }
+        const mcpServers = mcpConfigs ?? [koryMcp];
+        const mcpConfigDir = join(agyHome, '.gemini', 'config');
+        ensureManagedCliDirectory(mcpConfigDir);
+        const mcpConfigPath = join(mcpConfigDir, 'mcp_config.json');
+        if (existsSync(mcpConfigPath)) healManagedCliFile(mcpConfigPath);
+        let existing: { mcpServers?: Record<string, unknown> } = {};
+        if (existsSync(mcpConfigPath)) {
+          const parsed: unknown = JSON.parse(readFileSync(mcpConfigPath, 'utf-8'));
+          if (
+            !parsed ||
+            typeof parsed !== 'object' ||
+            Array.isArray(parsed) ||
+            ('mcpServers' in parsed &&
+              (!parsed.mcpServers ||
+                typeof parsed.mcpServers !== 'object' ||
+                Array.isArray(parsed.mcpServers)))
+          ) {
+            throw new Error('Existing Antigravity MCP config has an invalid shape');
+          }
+          existing = parsed as { mcpServers?: Record<string, unknown> };
+        }
+        existing.mcpServers = existing.mcpServers ?? {};
+        for (const srv of mcpServers) {
+          const authFile = srv.env?.KORY_BRIDGE_AUTH_FILE;
+          if (authFile) bridgeGrantDirectories.add(dirname(authFile));
+          existing.mcpServers[srv.name] = {
+            // agy accepts stdio servers only when the transport is explicit;
+            // without this field it silently leaves the server out of the
+            // tool surface and the model falls back to native RunCommand.
+            type: srv.transport,
+            command: srv.command,
+            args: srv.args,
+            env: srv.env,
+          };
+        }
+        writeManagedCliFile(mcpConfigPath, JSON.stringify(existing, null, 2));
+
+        const bridgeProbe = await probeAntigravityMcpBridge({
+          runtime: koryMcp.command,
+          script: koryMcp.args[0] ?? '',
+          env: koryMcp.env ?? {},
+        });
+        if (!bridgeProbe.ok) {
+          throw new Error(`Kory MCP bridge preflight failed: ${bridgeProbe.reason}`);
+        }
+
         // Rules: write AGENTS.md with the Kory session rules.
         const ruleFiles = agyBridge?.buildRules(bridgeCtx);
         if (ruleFiles) {
@@ -1110,10 +1344,21 @@ export class AntigravityProvider implements Provider {
           }
         }
       } catch (wiringErr) {
-        providerLog.warn(
+        attachmentScope.cleanup();
+        promptArtifact.cleanup();
+        logArtifact.cleanup();
+        bridgeGrantLease?.cleanup();
+        if (researchRoot) rmSync(researchRoot, { recursive: true, force: true });
+        providerLog.error(
           { err: wiringErr, provider: 'antigravity' },
-          'Failed to wire kory MCP/rules for Antigravity',
+          'Antigravity Kory MCP wiring failed closed',
         );
+        yield {
+          type: 'error',
+          error:
+            'Antigravity: refusing to start the turn because Kory MCP tools could not be wired into the CLI.',
+        };
+        return;
       }
     }
 
@@ -1150,6 +1395,7 @@ export class AntigravityProvider implements Provider {
       // The soft jail replaces HOME. agy resolves auth, permissions, hooks and
       // MCP via GEMINI_DIR, so keep that root on the prepared managed config.
       GEMINI_DIR: join(agyHome, '.gemini'),
+      ...(turnHookAuthFile ? { KORY_BRIDGE_AUTH_FILE: turnHookAuthFile } : {}),
       ...(userBus
         ? {
             DBUS_SESSION_BUS_ADDRESS: userBus.address,
@@ -1179,12 +1425,17 @@ export class AntigravityProvider implements Provider {
           configDirs: [
             agyHome,
             ...(jail?.env.HOME ? [jail.env.HOME] : []),
-            ...(bridgeGrantDirectory ? [bridgeGrantDirectory] : []),
+            ...bridgeGrantDirectories,
             promptArtifact.directory,
             logArtifact.directory,
             ...attachmentScope.artifacts.map((artifact) => artifact.directory),
           ],
-          readonlyConfigDirs: existsSync(realGeminiDir) ? [realGeminiDir] : [],
+          readonlyConfigDirs: [
+            ...(existsSync(realGeminiDir) ? [realGeminiDir] : []),
+            ...(bridgeRuntime.startsWith('/') && existsSync(bridgeRuntime)
+              ? [dirname(bridgeRuntime)]
+              : []),
+          ],
           sockets: userBus ? [userBus.socket] : [],
           // The CLI child is the inference transport — it must reach the
           // model endpoint. See inferenceSandboxPolicy.
@@ -1192,9 +1443,13 @@ export class AntigravityProvider implements Provider {
         })
       : { command: bin, args };
     assertPrivateValuesAbsentFromArgv(wrapped.args, [prompt, request.systemPrompt]);
-    // agy's OS-keyring login also depends on HOME. Keep it on the managed
-    // home; the soft jail still supplies scrubbed env and private temp/XDG
-    // roots, and the OS sandbox confines both writable config trees.
+    // Keep HOME aligned with GEMINI_DIR after the soft-jail environment is
+    // constructed. agy resolves OAuth refresh/storage through HOME-relative
+    // state even when GEMINI_DIR is explicit; restoring the user's real HOME
+    // makes the CLI reach for the host keychain on every turn and can surface
+    // the macOS "keychain cannot be found to store antigravity" dialog. The
+    // managed home contains the staged/link-only CLI credential and is the only
+    // writable config root exposed to the child.
     const agyEnv = { ...(jail?.env ?? baseEnv), HOME: agyHome, USERPROFILE: agyHome };
     const child = spawnWithPrivateArtifactCleanup(
       () =>
@@ -1219,9 +1474,26 @@ export class AntigravityProvider implements Provider {
       }) + '\n';
     child.stdin.end(streamInputPayload, 'utf8');
 
+    let resolveAbort: (() => void) | undefined;
+    const abortPromise = new Promise<void>((resolve) => {
+      resolveAbort = resolve;
+    });
+    let abortHandled = false;
     const onAbort = () => {
+      if (abortHandled) return;
+      abortHandled = true;
+      resolveAbort?.();
+      bridgeGrantLease?.cleanup();
       try {
         child.kill('SIGTERM');
+        const killEscalation = setTimeout(() => {
+          try {
+            if (child.exitCode === null) child.kill('SIGKILL');
+          } catch {
+            /* already gone */
+          }
+        }, 500);
+        killEscalation.unref?.();
       } catch (err: unknown) {
         providerLog.debug(
           { err: err instanceof Error ? err.message : String(err) },
@@ -1231,19 +1503,42 @@ export class AntigravityProvider implements Provider {
       }
     };
     request.signal?.addEventListener('abort', onAbort, { once: true });
+    if (request.signal?.aborted) onAbort();
     child.once('close', () => {
       jail?.cleanup();
       if (researchRoot) rmSync(researchRoot, { recursive: true, force: true });
     });
 
-    const timeout = setTimeout(() => {
-      providerLog.warn({ provider: 'antigravity' }, 'Antigravity harness timed out — killing CLI');
+    // Agentic turns may legitimately run for longer than five minutes. Only
+    // expire after a full window without provider events, never elapsed time.
+    // Stderr diagnostics alone do not prove reasoning or tool progress.
+    const idle = createIdleAbortSignal(AGY_IDLE_TIMEOUT_MS);
+    const onIdleTimeout = () => {
+      providerLog.warn({ provider: 'antigravity' }, 'Antigravity harness idle timeout — killing CLI');
       onAbort();
-    }, AGY_TIMEOUT_MS);
-    timeout.unref?.();
+    };
+    idle.signal.addEventListener('abort', onIdleTimeout, { once: true });
+    let processFinished = false;
+    /** Refresh the idle deadline only for meaningful provider activity. */
+    const activeEvent = (event: ProviderEvent): ProviderEvent => {
+      if (!processFinished && event.type !== 'error' && event.type !== 'complete') idle.reset();
+      return event;
+    };
 
     let stdout = '';
     let stderr = '';
+    // agy's usage receipt is a turn total, not live occupancy, so Koryphaios
+    // never uses it for accounting or compaction. It is still the only evidence
+    // that the CLI's own native transcript has reached the edge of the window —
+    // at that point resuming it again would overflow the turn, so the next turn
+    // replays Kory's authoritative (budgeted) history instead.
+    let nativeConversationExhausted = false;
+    const observeAntigravityReceipt = (event: ProviderEvent): void => {
+      if (event.type !== 'usage_update' || promptContextWindow <= 0) return;
+      if ((event.tokensIn ?? 0) >= promptContextWindow * AGY_NATIVE_CONVERSATION_RESTART_RATIO) {
+        nativeConversationExhausted = true;
+      }
+    };
     // Live stdout queue: agy --print writes progressively — stream each chunk
     // the moment it lands instead of dumping the whole reply at exit.
     let stdoutLineBuffer = '';
@@ -1266,6 +1561,9 @@ export class AntigravityProvider implements Provider {
     let streamError: ProviderEvent | undefined;
     // Primary live source: agy's own brain transcript (responses + tools).
     const transcriptTail = newTranscriptTail(() => stdout, convId);
+    // stream-json owns response text. Transcript/SSE copies can arrive before
+    // or after stdout, so substring deduplication cannot make them authoritative.
+    transcriptTail.includeResponseText = false;
     // Reasoning source: the trajectory store (proto field 20.3 of model steps).
     const trajectoryTail = newTrajectoryTail(convId);
     // Thinking from the SSE log is the primary reasoning stream; the trajectory
@@ -1330,10 +1628,9 @@ export class AntigravityProvider implements Provider {
         const newChunk = full.slice(logOffset);
         if (!newChunk) return [];
         logOffset = full.length;
-        const { events, gotContent } = parseLogChunk(newChunk);
-        if (gotContent) totalContentEvents++;
+        const { events } = parseLogChunk(newChunk);
         sseThinkingEvents += events.filter((e) => e.type === 'thinking_delta').length;
-        return events;
+        return events.filter((event) => event.type !== 'content_delta');
       } catch (err: unknown) {
         providerLog.debug(
           { err: err instanceof Error ? err.message : String(err) },
@@ -1344,98 +1641,143 @@ export class AntigravityProvider implements Provider {
     };
 
     // Poll while agy runs, yielding events as they arrive.
-    while (true) {
-      const result = await Promise.race([
-        exitPromise.then((code) => ({ done: true as const, code })),
-        new Promise<{ done: false }>((res) =>
-          setTimeout(() => res({ done: false }), LOG_POLL_INTERVAL_MS),
-        ),
-      ]);
-
-      rememberConversation();
-      const stdoutEvents = drainStdout();
-      if (stdoutEvents.length > 0) emittedStdout = true;
-      for (const event of stdoutEvents) {
-        if (event.type === 'error') {
-          streamError ??= event;
-          continue;
+    try {
+      while (true) {
+        if (request.signal?.aborted) {
+          onAbort();
+          return;
         }
-        if (event.type === 'content_delta') totalContentEvents++;
-        yield event;
-      }
-      for (const event of drainLog()) yield event;
-      if (sseThinkingEvents === 0) {
-        for (const event of drainTrajectoryThinking(trajectoryTail)) yield event;
-      }
-      for (const event of drainTranscript(transcriptTail)) {
-        if (event.type === 'content_delta') totalContentEvents++;
-        yield event;
-      }
+        const result = await Promise.race([
+          exitPromise.then((code) => ({ done: true as const, code })),
+          abortPromise.then(() => ({ done: true as const, code: -1 })),
+          new Promise<{ done: false }>((res) =>
+            setTimeout(() => res({ done: false }), LOG_POLL_INTERVAL_MS),
+          ),
+        ]);
+        if (request.signal?.aborted) {
+          onAbort();
+          return;
+        }
 
-      if (result.done) {
-        const finalStdoutEvents = drainStdout(true);
-        if (finalStdoutEvents.length > 0) emittedStdout = true;
-        for (const event of finalStdoutEvents) {
+        rememberConversation();
+        const stdoutEvents = drainStdout();
+        if (stdoutEvents.length > 0) emittedStdout = true;
+        for (const event of stdoutEvents) {
           if (event.type === 'error') {
             streamError ??= event;
             continue;
           }
           if (event.type === 'content_delta') totalContentEvents++;
-          yield event;
+          observeAntigravityReceipt(event);
+          yield activeEvent(event);
         }
-        // Drain any final log/transcript bytes written before shutdown.
-        for (const event of drainLog()) yield event;
-        // The transcript's final lines can land marginally after exit.
-        await new Promise((r) => setTimeout(r, 400));
-        rememberConversation();
+        for (const event of drainLog()) yield activeEvent(event);
         if (sseThinkingEvents === 0) {
-          for (const event of drainTrajectoryThinking(trajectoryTail)) yield event;
+          for (const event of drainTrajectoryThinking(trajectoryTail)) yield activeEvent(event);
         }
         for (const event of drainTranscript(transcriptTail)) {
           if (event.type === 'content_delta') totalContentEvents++;
-          yield event;
+          yield activeEvent(event);
         }
-        clearTimeout(timeout);
-        request.signal?.removeEventListener('abort', onAbort);
 
-        logArtifact.cleanup();
+        if (result.done) {
+          processFinished = true;
+          idle.clear();
+          if (request.signal?.aborted) {
+            onAbort();
+            return;
+          }
+          const finalStdoutEvents = drainStdout(true);
+          if (finalStdoutEvents.length > 0) emittedStdout = true;
+          for (const event of finalStdoutEvents) {
+            if (event.type === 'error') {
+              streamError ??= event;
+              continue;
+            }
+            if (event.type === 'content_delta') totalContentEvents++;
+            observeAntigravityReceipt(event);
+            yield activeEvent(event);
+          }
+          // Drain any final log/transcript bytes written before shutdown.
+          for (const event of drainLog()) yield activeEvent(event);
+          // The transcript's final lines can land marginally after exit.
+          await new Promise((r) => setTimeout(r, 400));
+          if (request.signal?.aborted) {
+            onAbort();
+            return;
+          }
+          rememberConversation();
+          if (sseThinkingEvents === 0) {
+            for (const event of drainTrajectoryThinking(trajectoryTail)) yield activeEvent(event);
+          }
+          for (const event of drainTranscript(transcriptTail)) {
+            if (event.type === 'content_delta') totalContentEvents++;
+            yield activeEvent(event);
+          }
 
-        if (request.signal?.aborted) return;
+          if (idle.signal.aborted) {
+            yield {
+              type: 'error',
+              error: 'Antigravity idle timeout: no provider activity for five minutes.',
+              errorTransient: true,
+            };
+            return;
+          }
 
-        if (streamError) {
-          yield streamError;
+          if (streamError) {
+            yield streamError;
+            return;
+          }
+
+          if (result.code === -1) {
+            yield { type: 'error', error: 'Antigravity: failed to launch the agy CLI process.' };
+            return;
+          }
+
+          const text = stdout.trim();
+          if (result.code !== 0 && totalContentEvents === 0) {
+            const failure = providerStreamFailure('antigravity', 'stderr', stderr, {
+              exitCode: result.code,
+            });
+            providerLog.warn(failure.diagnostic, 'Antigravity CLI exited unsuccessfully');
+            yield {
+              ...failure.event,
+              error: safeProviderFailureMessage('antigravity', failure.diagnostic, {
+                authenticationAction: 'Run "agy auth", then reconnect.',
+              }),
+            };
+            return;
+          }
+
+          // Last resort: nothing streamed at all but stdout has text (shouldn't
+          // happen — kept as a safety net).
+          if (totalContentEvents === 0 && !emittedStdout && text) {
+            yield* chunkText(text);
+          }
+
+          if (nativeConversationExhausted && convId && request.sessionId && !researchOnly) {
+            sessionConversations.delete(conversationKey);
+            providerLog.warn(
+              {
+                provider: 'antigravity',
+                sessionId: request.sessionId,
+                contextWindow: promptContextWindow,
+              },
+              'Antigravity conversation reached the CLI context ceiling; the next turn starts a fresh native conversation',
+            );
+          }
+
+          yield { type: 'complete', finishReason: 'end_turn' };
           return;
         }
-
-        if (result.code === -1) {
-          yield { type: 'error', error: 'Antigravity: failed to launch the agy CLI process.' };
-          return;
-        }
-
-        const text = stdout.trim();
-        if (result.code !== 0 && totalContentEvents === 0) {
-          const failure = providerStreamFailure('antigravity', 'stderr', stderr, {
-            exitCode: result.code,
-          });
-          providerLog.warn(failure.diagnostic, 'Antigravity CLI exited unsuccessfully');
-          yield {
-            ...failure.event,
-            error: safeProviderFailureMessage('antigravity', failure.diagnostic, {
-              authenticationAction: 'Run "agy auth", then reconnect.',
-            }),
-          };
-          return;
-        }
-
-        // Last resort: nothing streamed at all but stdout has text (shouldn't
-        // happen — kept as a safety net).
-        if (totalContentEvents === 0 && !emittedStdout && text) {
-          yield* chunkText(text);
-        }
-
-        yield { type: 'complete', finishReason: 'end_turn' };
-        return;
       }
+    } finally {
+      idle.clear();
+      idle.signal.removeEventListener('abort', onIdleTimeout);
+      request.signal?.removeEventListener('abort', onAbort);
+      if (child.exitCode === null) onAbort();
+      logArtifact.cleanup();
+      bridgeGrantLease?.cleanup();
     }
   }
 }
@@ -1605,36 +1947,8 @@ function drainTrajectoryThinking(state: TrajectoryTailState): ProviderEvent[] {
     const f = agyConvDb(state.convId);
     if (f) dbs = [f];
   } else {
-    try {
-      dbs = agyConvDirs()
-        .flatMap((dir) => {
-          try {
-            return readdirSync(dir)
-              .filter((f) => f.endsWith('.db'))
-              .map((f) => join(dir, f));
-          } catch {
-            return [];
-          }
-        })
-        .filter((f) => {
-          if (state.finalizedIdx.has(f)) return true;
-          try {
-            return statSync(f).mtimeMs >= state.spawnedAt - 2_000;
-          } catch (err: unknown) {
-            providerLog.debug(
-              { err: err instanceof Error ? err.message : String(err) },
-              'stat failed for conversation db',
-            );
-            return false;
-          }
-        });
-    } catch (err: unknown) {
-      providerLog.debug(
-        { err: err instanceof Error ? err.message : String(err) },
-        'failed to list conversation dbs',
-      );
-      return events;
-    }
+    // Same cross-chat leak as findLiveTranscripts: never guess by mtime.
+    return events;
   }
   for (const file of dbs) {
     try {
@@ -1694,8 +2008,11 @@ const AGY_TOOL_TYPES = new Set([
 interface TranscriptTailState {
   /** byte offsets per transcript file */
   offsets: Map<string, number>;
+  /** Planner calls awaiting their result steps, kept separately per file. */
+  pendingTools: Map<string, AntigravityTranscriptToolCall[]>;
   spawnedAt: number;
   emittedContent: boolean;
+  includeResponseText?: boolean;
   /** Known agy conversation id — when set, only its transcript is tailed. */
   convId?: string;
   /** Live stdout text so far — used to skip transcript responses the user
@@ -1714,6 +2031,7 @@ function transcriptPath(convId: string): string {
 function newTranscriptTail(stdoutSoFar: () => string, convId?: string): TranscriptTailState {
   const state: TranscriptTailState = {
     offsets: new Map(),
+    pendingTools: new Map(),
     spawnedAt: Date.now(),
     emittedContent: false,
     convId,
@@ -1741,32 +2059,119 @@ function findLiveTranscripts(state: TranscriptTailState): string[] {
     const f = transcriptPath(state.convId);
     return existsSync(f) ? [f] : [];
   }
-  const out: string[] = [];
-  for (const brainDir of agyBrainDirs()) {
-    let ids: string[];
-    try {
-      ids = readdirSync(brainDir);
-    } catch (err: unknown) {
-      providerLog.debug(
-        { err: err instanceof Error ? err.message : String(err) },
-        'brain dir absent — older agy or different install',
-      );
-      continue;
-    }
-    for (const id of ids) {
-      const f = join(brainDir, id, '.system_generated', 'logs', 'transcript_full.jsonl');
-      try {
-        if (state.offsets.has(f) || statSync(f).mtimeMs >= state.spawnedAt - 2_000) out.push(f);
-      } catch (err: unknown) {
-        providerLog.debug(
-          { err: err instanceof Error ? err.message : String(err) },
-          'no transcript in this brain dir',
-        );
-        /* no transcript in this brain dir */
-      }
+  // Without this run's conversation id there is no way to tell its transcript
+  // from another chat's (the managed brain dir is shared by every Kory chat),
+  // so tailing by mtime leaked foreign tool calls into this chat. Wait for the
+  // id from stream-json or new-conversation detection instead.
+  return [];
+}
+
+interface AntigravityTranscriptToolCall {
+  name: string;
+  args?: Record<string, unknown>;
+}
+
+interface AntigravityTranscriptRow {
+  type?: string;
+  source?: string;
+  content?: string;
+  created_at?: string;
+  status?: string;
+  error?: string;
+  tool_calls?: AntigravityTranscriptToolCall[];
+}
+
+function recordedMcpField(
+  input: Record<string, unknown>,
+  ...keys: string[]
+): string | Record<string, unknown> | undefined {
+  for (const key of keys) {
+    const value = input[key];
+    if (
+      typeof value === 'string' ||
+      (value && typeof value === 'object' && !Array.isArray(value))
+    ) {
+      return value as string | Record<string, unknown>;
     }
   }
-  return out;
+  return undefined;
+}
+
+function normalizeRecordedMcpCall(
+  name: string,
+  input: Record<string, unknown>,
+): { name: string; input: Record<string, unknown> } {
+  if (name.toLowerCase() !== 'call_mcp_tool') return { name, input };
+  const destinationValue = recordedMcpField(input, 'tool_name', 'toolName', 'ToolName');
+  const serverValue = recordedMcpField(input, 'server_name', 'serverName', 'ServerName');
+  const destination = typeof destinationValue === 'string' ? destinationValue : undefined;
+  const server = typeof serverValue === 'string' ? serverValue : undefined;
+  const nested = recordedMcpField(input, 'arguments', 'Arguments', 'args', 'Args');
+  let normalizedInput = input;
+  if (typeof nested === 'string') {
+    try {
+      const parsed = JSON.parse(nested) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        normalizedInput = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Preserve the dispatch envelope when an upstream CLI records malformed JSON.
+    }
+  } else if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+    normalizedInput = nested;
+  }
+  return {
+    name: destination ? (server ? `mcp__${server}__${destination}` : destination) : name,
+    input: destination ? normalizedInput : input,
+  };
+}
+
+/** agy records names/arguments on the planner row, then writes the result as
+ *  a separate step (including GENERIC for denied native tools and MCP calls).
+ *  Pair these before emitting so the UI receives the actual tool, not the
+ *  transcript's internal step classification. The queue survives tail polls. */
+export function parseAntigravityTranscriptTools(
+  row: AntigravityTranscriptRow,
+  pending: AntigravityTranscriptToolCall[],
+): ProviderEvent[] {
+  const kind = row.type ?? '';
+  if (kind === 'PLANNER_RESPONSE') {
+    pending.push(
+      ...(row.tool_calls ?? []).filter(
+        (call) => typeof call.name === 'string' && call.name.length > 0,
+      ),
+    );
+    return [];
+  }
+  if (!AGY_TOOL_TYPES.has(kind)) return [];
+
+  const namedMatch = pending.findIndex((call) => call.name.toLowerCase() === kind.toLowerCase());
+  // CODE_ACTION and other classifications need not share the function's name.
+  const matched = namedMatch >= 0 ? namedMatch : pending.length > 0 ? 0 : -1;
+  const call = matched >= 0 ? pending.splice(matched, 1)[0] : undefined;
+  const output = (row.content || row.error || '').trim();
+  if (!output && !call) return [];
+  const isError = row.status === 'ERROR' || !!row.error;
+  // A generic error without a preceding call has no trustworthy name. Keep
+  // its reason visible rather than inventing a tool called "generic".
+  if (kind === 'GENERIC' && !call) {
+    return isError ? [{ type: 'error', error: output.slice(0, 4_000) }] : [];
+  }
+  let name = call?.name ?? kind.toLowerCase();
+  let input = call?.args ?? {};
+  // Show the destination tool for MCP dispatch, not just the dispatcher.
+  // Use the standard CLI MCP namespace so server identity survives the stream
+  // event, archive, and reload without being mixed into tool arguments.
+  ({ name, input } = normalizeRecordedMcpCall(name, input));
+  return [
+    {
+      type: 'tool_executed',
+      toolName: name,
+      toolInput: JSON.stringify(input),
+      toolOutput: output.slice(0, 4_000),
+      isError,
+    },
+  ];
 }
 
 /** Read new complete lines from a transcript, mapped to provider events. */
@@ -1793,15 +2198,16 @@ function drainTranscript(state: TranscriptTailState): ProviderEvent[] {
         const trimmed = line.trim();
         if (!trimmed) continue;
         try {
-          const row = JSON.parse(trimmed) as {
-            type?: string;
-            source?: string;
-            content?: string;
-            created_at?: string;
-          };
+          const row = JSON.parse(trimmed) as AntigravityTranscriptRow;
+          let pending = state.pendingTools.get(file);
+          if (!pending) {
+            pending = [];
+            state.pendingTools.set(file, pending);
+          }
+          events.push(...parseAntigravityTranscriptTools(row, pending));
           const kind = row.type ?? '';
           const content = (row.content ?? '').trim();
-          if (kind === 'PLANNER_RESPONSE' && content) {
+          if (kind === 'PLANNER_RESPONSE' && content && state.includeResponseText !== false) {
             // The FINAL response is also printed to stdout (already streamed
             // live) — only surface transcript responses the user hasn't seen.
             const probe = content.slice(0, 200);
@@ -1819,13 +2225,6 @@ function drainTranscript(state: TranscriptTailState): ProviderEvent[] {
               toolInput: '{}',
               toolOutput: content.slice(0, 4_000),
               isError: true,
-            });
-          } else if (AGY_TOOL_TYPES.has(kind) && content) {
-            events.push({
-              type: 'tool_executed',
-              toolName: kind.toLowerCase(),
-              toolInput: '{}',
-              toolOutput: content.slice(0, 4_000),
             });
           }
           // USER_INPUT / EPHEMERAL_MESSAGE / SYSTEM_MESSAGE / CHECKPOINT /
@@ -1856,14 +2255,151 @@ const HARNESS_SYSTEM_NOTE =
   'to other agents yourself; if work should be parallelized or delegated, say so in your ' +
   'response and Koryphaios will dispatch its own worker agents. Do not start background ' +
   'tasks that require a later notification: complete the requested work in this turn and ' +
-  'always finish with a concise user-facing answer.';
+  'always finish with a concise user-facing answer. Use the supplied kory MCP server and ' +
+  'its kory__ tools for every file read, search, edit, command, web request, and session ' +
+  'action. Do not use native run_command, view_file, write_to_file, or other host tools ' +
+  'on project files: they are denied by the Kory permission gate (view_file is allowed ' +
+  'only for reading lazy MCP tool schemas under .gemini/antigravity-cli/mcp/ and step ' +
+  'outputs under .gemini/antigravity-cli/brain/). Never retry a refused native call and ' +
+  'never call a kory__ name as if it were a native tool. Use the single ' +
+  'call_mcp_tool dispatcher with ServerName="kory", ToolName set to the exact kory__ ' +
+  'name, and Arguments set to the tool arguments. Core kory__ tool schemas: ' +
+  'kory__read_file({ path, startLine?, endLine? }), ' +
+  'kory__write_file({ path, content }), ' +
+  'kory__edit_file({ path, old_str, new_str }), ' +
+  'kory__grep({ pattern, path?, glob? }), ' +
+  'kory__glob({ pattern, path? }), ' +
+  'kory__ls({ path, depth? }), ' +
+  'kory__bash({ command, timeout? }), ' +
+  'kory__delegate_to_worker({ task, domain? }), ' +
+  'kory__ask_user({ question, options? }). ' +
+  KORY_CUSTOM_MCP_NOTE;
 
-function buildPrompt(
+// ── Prompt budget ────────────────────────────────────────────────────────────
+// agy's own context is not free. Its native system prompt, native tool
+// surface, MCP registration and the AGENTS.md rules file are all in the window
+// before Kory's first user turn, and Kory can neither see nor shrink that
+// prefix. Budgeting against the raw model window therefore overstates what the
+// CLI can actually accept: a session Koryphaios believes "fits" still overflows
+// agy, and the turn dies instead of answering. Reserve the prefix explicitly and
+// bound the replayed history by what is left.
+
+/** Share of the window agy's own prompt occupies. Deliberately generous — the
+ *  MCP tool surface is the bulk of it and grows with the catalog. */
+export const AGY_STANDING_OVERHEAD_RATIO = 0.25;
+export const AGY_STANDING_OVERHEAD_FLOOR_TOKENS = 8_000;
+export const AGY_STANDING_OVERHEAD_CEILING_TOKENS = 48_000;
+/** Room for the reply, which agy draws from the same window. */
+export const AGY_OUTPUT_RESERVE_TOKENS = 8_192;
+/** Below this a window cannot hold the harness note plus one turn usefully. */
+const AGY_MIN_BUDGETABLE_WINDOW_TOKENS = 16_000;
+/** Usage receipts at or above this share of the window mean the native agy
+ *  transcript itself is at the edge, so the next turn starts over. */
+export const AGY_NATIVE_CONVERSATION_RESTART_RATIO = 0.95;
+const AGY_PROMPT_CHARS_PER_TOKEN = 4;
+const AGY_MIN_TRUNCATED_BLOCK_CHARS = 512;
+const AGY_ELISION_LABEL = '[Koryphaios]';
+
+/** How much of the model window Koryphaios may spend on the prompt itself. */
+export interface AgyPromptBudget {
+  contextWindow: number;
+  /** Tokens reserved for agy's own standing prompt and tool surface. */
+  standingOverheadTokens: number;
+  inputBudgetTokens: number;
+  inputBudgetChars: number;
+}
+
+/** Undefined when the catalog has not reported a usable window — the caller
+ *  then sends the full prompt rather than guessing a limit. */
+export function antigravityPromptBudget(
+  contextWindow: number | undefined,
+): AgyPromptBudget | undefined {
+  if (!contextWindow || !Number.isFinite(contextWindow)) return undefined;
+  if (contextWindow < AGY_MIN_BUDGETABLE_WINDOW_TOKENS) return undefined;
+  const standingOverheadTokens = Math.min(
+    AGY_STANDING_OVERHEAD_CEILING_TOKENS,
+    Math.max(
+      AGY_STANDING_OVERHEAD_FLOOR_TOKENS,
+      Math.floor(contextWindow * AGY_STANDING_OVERHEAD_RATIO),
+    ),
+  );
+  const inputBudgetTokens = Math.max(
+    2_000,
+    contextWindow - standingOverheadTokens - AGY_OUTPUT_RESERVE_TOKENS,
+  );
+  return {
+    contextWindow,
+    standingOverheadTokens,
+    inputBudgetTokens,
+    inputBudgetChars: inputBudgetTokens * AGY_PROMPT_CHARS_PER_TOKEN,
+  };
+}
+
+function truncateAntigravityBlock(block: string, maxChars: number): string {
+  if (block.length <= maxChars) return block;
+  const marker = '\n\n[… truncated by Koryphaios to fit the Antigravity context window …]\n\n';
+  const room = maxChars - marker.length;
+  if (room <= 0) return '';
+  const head = Math.floor(room * 0.6);
+  const tail = room - head;
+  return `${block.slice(0, head)}${marker}${block.slice(block.length - tail)}`;
+}
+
+/** Join the instruction header with the replayed turns, dropping the oldest
+ *  turns when the CLI cannot hold them. The header is instructions, not
+ *  history, so it is never trimmed — an agent without its policy fails worse
+ *  than an agent without its oldest turns. */
+export function fitAntigravityPrompt(
+  header: string,
+  blocks: readonly string[],
+  budget?: AgyPromptBudget,
+): string {
+  if (!budget) return [header, ...blocks].filter(Boolean).join('\n\n');
+  if (header.length >= budget.inputBudgetChars) {
+    providerLog.warn(
+      {
+        provider: 'antigravity',
+        headerChars: header.length,
+        inputBudgetChars: budget.inputBudgetChars,
+        contextWindow: budget.contextWindow,
+      },
+      'Antigravity system prompt alone exceeds the model window; history omitted',
+    );
+    return header;
+  }
+  let remaining = budget.inputBudgetChars - header.length;
+  const kept: string[] = [];
+  for (let index = blocks.length - 1; index >= 0; index -= 1) {
+    const block = blocks[index]!;
+    const cost = block.length + 2;
+    if (cost <= remaining) {
+      kept.unshift(block);
+      remaining -= cost;
+      continue;
+    }
+    // The newest turn alone can exceed the budget (a tool result that dumped a
+    // large file). Keep a head/tail slice of that one instead of sending
+    // nothing; the tail usually carries the verdict or exit status.
+    if (kept.length === 0 && remaining > AGY_MIN_TRUNCATED_BLOCK_CHARS) {
+      const shortened = truncateAntigravityBlock(block, remaining);
+      if (shortened) kept.unshift(shortened);
+    }
+    break;
+  }
+  const elided = blocks.length - kept.length;
+  if (elided === 0) return [header, ...kept].filter(Boolean).join('\n\n');
+  const marker =
+    `${AGY_ELISION_LABEL} ${elided} earlier message${elided === 1 ? '' : 's'} omitted to fit ` +
+    'the Antigravity CLI context window. Ask for a specific earlier detail if you need it again.';
+  return [header, marker, ...kept].filter(Boolean).join('\n\n');
+}
+
+export function buildAntigravityPrompt(
   systemPrompt: string | undefined,
   messages: ProviderMessage[],
   attachments: CliAttachmentScope,
+  budget?: AgyPromptBudget,
 ): string {
-  const lines: string[] = [];
   // Use the AntigravityCliBridge's harness note for consistency (Phase 1).
   const agyBridge = getCliBridge('antigravity');
   const bridgeConfig = agyBridge?.buildAgentConfig({
@@ -1875,43 +2411,52 @@ function buildPrompt(
     tools: [],
   });
   const harnessNote = bridgeConfig?.systemInstructions?.[1] ?? HARNESS_SYSTEM_NOTE;
-  lines.push(systemPrompt?.trim() ? `${systemPrompt.trim()}\n\n${harnessNote}` : harnessNote, '');
-  const turns = messages.filter((m) => m.role !== 'system');
-
-  if (turns.length === 1 && turns[0].role === 'user' && lines.length === 0) {
-    return attachments.renderContent(turns[0].content);
-  }
-
-  for (const m of turns) {
+  const header = systemPrompt?.trim() ? `${systemPrompt.trim()}\n\n${harnessNote}` : harnessNote;
+  const blocks: string[] = [];
+  // In-band system messages carry host continuations (including Critic repair
+  // instructions). They are distinct from the top-level systemPrompt.
+  for (const m of messages) {
     const text = attachments.renderContent(m.content);
     if (!text.trim()) continue;
-    const label = m.role === 'assistant' ? 'Assistant' : m.role === 'tool' ? 'Tool result' : 'User';
-    lines.push(`${label}: ${text}`);
+    const label =
+      m.role === 'system'
+        ? 'System'
+        : m.role === 'assistant'
+          ? 'Assistant'
+          : m.role === 'tool'
+            ? 'Tool result'
+            : 'User';
+    blocks.push(`${label}: ${text}`);
   }
-  return lines.join('\n\n');
+  return fitAntigravityPrompt(header, blocks, budget);
 }
 
 /** Prompt for a resumed conversation: only the turns since the last assistant
  *  reply — agy already holds the earlier history in its own conversation. */
-function buildTurnPrompt(messages: ProviderMessage[], attachments: CliAttachmentScope): string {
-  const turns = messages.filter((m) => m.role !== 'system');
+export function buildAntigravityTurnPrompt(
+  messages: ProviderMessage[],
+  attachments: CliAttachmentScope,
+  budget?: AgyPromptBudget,
+): string {
   let start = 0;
-  for (let i = turns.length - 1; i >= 0; i--) {
-    if (turns[i].role === 'assistant') {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'assistant') {
       start = i + 1;
       break;
     }
   }
-  const fresh = turns.slice(start);
+  // Slice before rendering: dropping system messages here discarded the only
+  // new input after a Critic rejection and produced "Antigravity: empty prompt".
+  const fresh = messages.slice(start);
   if (fresh.length === 1 && fresh[0].role === 'user')
-    return attachments.renderContent(fresh[0].content);
-  return fresh
+    return fitAntigravityPrompt('', [attachments.renderContent(fresh[0].content)], budget);
+  const blocks = fresh
     .map((m) => {
       const text = attachments.renderContent(m.content);
       if (!text.trim()) return '';
-      const label = m.role === 'tool' ? 'Tool result' : 'User';
+      const label = m.role === 'system' ? 'System' : m.role === 'tool' ? 'Tool result' : 'User';
       return `${label}: ${text}`;
     })
-    .filter(Boolean)
-    .join('\n\n');
+    .filter(Boolean);
+  return fitAntigravityPrompt('', blocks, budget);
 }

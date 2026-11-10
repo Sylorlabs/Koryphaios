@@ -11,7 +11,13 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { isAbsolute, join, normalize, sep } from 'node:path';
+import { isAbsolute, join, normalize } from 'node:path';
+import {
+  hasUnexpectedMode,
+  hasUnexpectedOwner,
+  hostOS,
+  isContainedBy,
+} from '../runtime/platform';
 
 /**
  * Verified against native Freebuff 0.2.12 (npm launcher 0.0.173):
@@ -206,6 +212,22 @@ function readKeychainToken(
   });
 }
 
+/** Narrow read-only account probes share the CLI's exact credential resolver.
+ * The token stays within the callback and is never returned as account data.
+ */
+export async function withFreebuffAuthToken<T>(
+  profileDir: string,
+  use: (token: string) => Promise<T>,
+  signal?: AbortSignal,
+  dependencies: FreebuffCredentialDependencies = { platform: hostOS(), execFile },
+): Promise<T> {
+  if (signal?.aborted) throw new Error('Freebuff account probe cancelled.');
+  const value = readRecord(profileDir);
+  const token = value.authToken ?? (await readKeychainToken(profileDir, dependencies, signal));
+  if (signal?.aborted) throw new Error('Freebuff account probe cancelled.');
+  return use(token);
+}
+
 function privateDirectory(path: string, create: boolean): void {
   if (create) {
     try {
@@ -217,8 +239,8 @@ function privateDirectory(path: string, create: boolean): void {
   const stat = lstatSync(path);
   if (
     !stat.isDirectory() ||
-    (stat.mode & 0o077) !== 0 ||
-    (typeof process.getuid === 'function' && stat.uid !== process.getuid())
+    hasUnexpectedMode(stat, 0o700) ||
+    hasUnexpectedOwner(stat)
   )
     throw new Error('unsafe private directory');
 }
@@ -251,8 +273,8 @@ export async function materializeFreebuffCredentials(
     const targetRoot = realpathSync(options.runHome);
     if (
       sourceRoot === targetRoot ||
-      targetRoot.startsWith(sourceRoot + sep) ||
-      sourceRoot.startsWith(targetRoot + sep)
+      isContainedBy(sourceRoot, targetRoot) ||
+      isContainedBy(targetRoot, sourceRoot)
     )
       throw new Error();
     privateDirectory(join(options.runHome, '.config'), true);

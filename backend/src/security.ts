@@ -88,13 +88,12 @@ export function validateBashCommand(command: string): { safe: boolean; reason?: 
   }
 
   // Block writes to system directories
-  const systemDirs =
-    process.platform === 'darwin'
-      ? // macOS: SSV-protected System volume, system-wide Library, system
-        // binaries, and config. /etc → /private/etc symlink, both blocked.
-        ['/System', '/Library', '/usr/sbin', '/sbin', '/private/etc', '/etc', '/bin']
-      : // Linux: boot, sysfs/procfs, system binaries
-        ['/boot', '/sys', '/proc/sys', '/usr/sbin', '/sbin'];
+  const systemDirs = isMac()
+    ? // macOS: SSV-protected System volume, system-wide Library, system
+      // binaries, and config. /etc → /private/etc symlink, both blocked.
+      ['/System', '/Library', '/usr/sbin', '/sbin', '/private/etc', '/etc', '/bin']
+    : // Linux: boot, sysfs/procfs, system binaries
+      ['/boot', '/sys', '/proc/sys', '/usr/sbin', '/sbin'];
   for (const dir of systemDirs) {
     if (trimmed.includes(`> ${dir}`) || trimmed.includes(`>> ${dir}`)) {
       return { safe: false, reason: `Blocked: writing to system directory ${dir}` };
@@ -505,6 +504,7 @@ export function validatePathAccess(
 // ─── Envelope Encryption Integration ────────────────────────────────────────
 
 import { EnvelopeEncryption, createKMSProviderFromEnv } from './crypto';
+import { isMac } from './runtime/platform';
 
 let envelopeEncryption: EnvelopeEncryption | null = null;
 

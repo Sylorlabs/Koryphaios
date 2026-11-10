@@ -1,12 +1,12 @@
 import type { Session as SharedSession, SessionAgentOverrides } from '@koryphaios/shared';
+import { isCriticMode } from '@koryphaios/shared';
 import { nanoid } from 'nanoid';
 import { ID, SESSION } from '../constants';
 import { db, sessions, type Session as DbSession } from '../db';
 import { eq, and, desc, isNotNull, isNull, sql } from 'drizzle-orm';
 import { serverLog } from '../logger';
-import { createSessionWorkspace, sessionWorkspaceOwnership } from '../kory/session-workspace';
 
-const PERMISSION_MODES = ['yolo', 'guarded', 'edits', 'ask', 'plan', 'custom'] as const;
+const PERMISSION_MODES = ['yolo', 'guarded', 'edits', 'ask', 'custom'] as const;
 const AGENT_EXECUTION_MODES = ['auto', 'single', 'multi'] as const;
 
 /** Keep only known, well-typed override fields so a hand-edited metadata blob
@@ -15,6 +15,7 @@ export function sanitizeSessionAgentOverrides(value: unknown): SessionAgentOverr
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const raw = value as Record<string, unknown>;
   const overrides: SessionAgentOverrides = {};
+  if (isCriticMode(raw.criticMode)) overrides.criticMode = raw.criticMode;
   if (
     typeof raw.permissionMode === 'string' &&
     (PERMISSION_MODES as readonly string[]).includes(raw.permissionMode)
@@ -119,17 +120,9 @@ export class SessionStore implements ISessionStore {
     const parent = argc >= 3 ? parentId : argc === 2 ? undefined : titleOrTitle;
 
     const id = nanoid(ID.SESSION_ID_LENGTH);
-    // All project-backed chats isolate by default, including callers that do
-    // not use the revision picker. A picker-created workspace is already new.
-    if (
-      workingDirectory &&
-      !(
-        gitWorkspace?.isolation === 'independent-repository' &&
-        sessionWorkspaceOwnership(gitWorkspace.path)
-      )
-    ) {
-      gitWorkspace = await createSessionWorkspace(workingDirectory);
-    }
+    // Ordinary folder chats work directly in the selected folder. Only an
+    // explicit revision choice supplies a separate Git workspace; opening a
+    // local folder must never scan or copy its contents into chat storage.
     const now = new Date();
 
     const [session] = await db

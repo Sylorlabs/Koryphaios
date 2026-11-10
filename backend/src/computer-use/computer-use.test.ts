@@ -60,6 +60,7 @@ function fixture(initial = settings()) {
       platform: 'test',
       available: true,
       capabilities: ['discover', 'observe', 'interact', 'manageWindows'],
+      actions: ['discover', 'listElements', 'observe', 'click'],
       limitations: [],
     }),
     execute: async (action) => {
@@ -95,11 +96,11 @@ function fixture(initial = settings()) {
 }
 
 describe('computer settings', () => {
-  it('is off by default and deep patches do not erase other gates', () => {
+  it('is available by default and deep patches do not erase other gates', () => {
     const merged = mergeAgentSettings(DEFAULT_AGENT_SETTINGS, {
       computerUse: { enabled: true, byTier: { yolo: { observe: 'allow' } } },
     });
-    expect(DEFAULT_AGENT_SETTINGS.computerUse.enabled).toBe(false);
+    expect(DEFAULT_AGENT_SETTINGS.computerUse.enabled).toBe(true);
     expect(merged.computerUse.byTier.yolo.observe).toBe('allow');
     expect(merged.computerUse.byTier.yolo.interact).toBe('allow');
     expect(merged.computerUse.byRole.critic.interact).toBe('block');
@@ -178,10 +179,10 @@ describe('computer policy', () => {
     expect(decideComputerPermission(policy, 'yolo', 'manager', 'observe', 'other')).toBe('block');
     expect(decideComputerPermission(policy, 'yolo', 'manager', 'discover')).toBe('allow');
   });
-  it('lets configured Plan/Critic actions ask or allow, while reserved capabilities remain unavailable', () => {
+  it('lets configured Ask/Critic actions ask or allow, while reserved capabilities remain unavailable', () => {
     const policy = settings().computerUse;
     for (const capability of ['interact', 'manageWindows'] as const) {
-      expect(decideComputerPermission(policy, 'plan', 'manager', capability, target.appId)).toBe(
+      expect(decideComputerPermission(policy, 'ask', 'manager', capability, target.appId)).toBe(
         'allow',
       );
       expect(decideComputerPermission(policy, 'yolo', 'critic', capability, target.appId)).toBe(
@@ -266,11 +267,11 @@ describe('computer tools', () => {
     ).toBe(true);
     expect(f.calls.every((call) => call.kind === 'discover')).toBe(true);
   });
-  it('uses the Plan action policy and asks rather than applying a hidden hard block', async () => {
+  it('uses the planning interaction policy and asks rather than applying a hidden hard block', async () => {
     const f = fixture();
     const result = await f.run('computer_click', {
       ...ctx,
-      permissionPolicy: { mode: 'plan' } as ToolContext['permissionPolicy'],
+      permissionPolicy: { mode: 'guarded', interactionMode: 'plan' } as ToolContext['permissionPolicy'],
       waitForUserInput: async () => 'Allow once',
     });
     expect(result.isError).toBe(false);
@@ -287,6 +288,38 @@ describe('computer tools', () => {
       { mimeType: 'image/png', data: 'cG5n' },
     ]);
     expect(result.output).not.toContain('cG5n');
+    const receipt = JSON.parse(result.output).computerUse;
+    expect(receipt).toMatchObject({
+      version: 1,
+      action: 'computer_observe',
+      status: 'completed',
+      target,
+      screenshot: { id: expect.any(String), expiresAt: expect.any(Number) },
+    });
+  });
+  it('uses short-lived semantic element IDs before coordinate fallbacks', async () => {
+    const f = fixture();
+    f.adapter.execute = async (action) => {
+      f.calls.push(action);
+      if (action.kind === 'discover') return { targets: [target] };
+      if (action.kind === 'listElements')
+        return {
+          elements: [{ elementId: 'element-1', role: 'button', name: 'Save', x: 4, y: 5, width: 20, height: 20, enabled: true, actions: ['press'] }],
+        };
+      return { text: 'pressed' };
+    };
+    const listed = await f.run('computer_list_elements', ctx, {
+      appId: target.appId,
+      windowId: target.windowId,
+    });
+    expect(listed.isError).toBe(false);
+    const pressed = await f.run('computer_click', ctx, {
+      appId: target.appId,
+      windowId: target.windowId,
+      elementId: 'element-1',
+    });
+    expect(pressed.isError).toBe(false);
+    expect(f.calls.at(-1)).toMatchObject({ kind: 'click', elementId: 'element-1', target });
   });
   it('binds approval to immutable arguments even if the original call object changes', async () => {
     const initial = settings();

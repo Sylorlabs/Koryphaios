@@ -91,6 +91,9 @@ export const lumaAdapter: CapabilityAdapter = {
   provider: 'luma',
   capabilities: ['video', 'image'],
   defaultBaseUrl: BASE_URL,
+  // `generate` sends aspect_ratio/resolution/duration; it has no negative
+  // prompt or audio field on the Dream Machine surface.
+  requestOptions: { resolution: true },
 
   async verify(config, signal): Promise<CapabilityVerifyResult> {
     try {

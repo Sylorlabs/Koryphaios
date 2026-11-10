@@ -76,6 +76,7 @@ function eventText(event: NotionSessionEventRecord): string {
 export class NotionProvider implements Provider {
   readonly imageInputTransport = 'none' as const;
   readonly name: ProviderName = 'notion';
+  readonly supportsFreshConversation = true;
   readonly config: ProviderConfig;
 
   private catalog: ModelDef[] = [];
@@ -230,6 +231,12 @@ export class NotionProvider implements Provider {
     const tools: ProviderToolDef[] = request.tools ?? [];
     const toolProtocol = tools.length > 0 ? buildToolProtocol(tools) : undefined;
     const message = flattenMessages(request.systemPrompt, request.messages, toolProtocol);
+
+    // Regeneration must not append the replayed prompt to Notion's old
+    // server-side session. The flattened request is the complete fresh context.
+    if (request.forceFreshConversation && request.sessionId) {
+      this.korySessionToNotionSession.delete(request.sessionId);
+    }
 
     // Continue the server-side conversation only when Notion itself issued
     // the session id; a foreign id would 404, in which case we restart fresh.
@@ -636,7 +643,7 @@ function flattenMessages(
     parts.push(`${label}: ${text}`);
   }
   // The protocol is appended LAST so it is the most recent instruction the
-  // agent sees, mirroring the Chatbase adapter's recency lever.
+  // agent sees, mirroring the adapter's recency lever.
   if (toolProtocol) {
     parts.push(toolProtocol);
   }

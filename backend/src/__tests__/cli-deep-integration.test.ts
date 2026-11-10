@@ -253,7 +253,7 @@ describe('Hooks config generation', () => {
     delete process.env.KORY_HOOK_BRIDGE_SCRIPT;
   });
 
-  test('Antigravity hooks file uses agy\'s schema and decision vocabulary', () => {
+  test("Antigravity hooks file uses agy's schema and decision vocabulary", () => {
     const hooks = JSON.parse(
       buildAntigravityHooks({
         hookScript: '/path/to/kory-hook-bridge.ts',

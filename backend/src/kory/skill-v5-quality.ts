@@ -211,7 +211,11 @@ function isGenericTaskFixture(
   ) {
     return true;
   }
-  if (task.falsifiableChecks.some((check) => check.assertion.trim() === '1.')) return true;
+  const evidenceLabels = new Set(task.requiredEvidence.map((label) => label.trim().toLowerCase()));
+  if (task.falsifiableChecks.some((check) =>
+    check.assertion.trim() === '1.' ||
+    evidenceLabels.has(check.assertion.trim().toLowerCase())
+  )) return true;
   return false;
 }
 

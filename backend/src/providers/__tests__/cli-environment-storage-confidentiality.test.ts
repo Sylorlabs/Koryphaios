@@ -41,6 +41,8 @@ const CONFIG_KEYS: Record<NativeCliProvider, string> = {
   devin: 'DEVIN_CONFIG_DIR',
   antigravity: 'HOME',
   grok: 'GROK_HOME',
+  codebuddy: 'CODEBUDDY_CONFIG_DIR',
+  'workbuddy-desktop': 'CODEBUDDY_HOME',
 };
 
 function mode(path: string): number {
@@ -69,6 +71,7 @@ describe('provider CLI environment confidentiality', () => {
     };
 
     for (const provider of PROVIDERS) {
+      const secretKey = PROVIDER_CLI_SECRET_KEYS_FOR_TESTING[provider];
       for (const [family, key] of Object.entries(PROVIDER_CLI_SECRET_KEYS_FOR_TESTING)) {
         source[key] = `synthetic-${family}-secret`;
       }
@@ -81,16 +84,22 @@ describe('provider CLI environment confidentiality', () => {
         { [CONFIG_KEYS[provider]]: `/private/${provider}-home` },
         source,
       );
-      expect(env[PROVIDER_CLI_SECRET_KEYS_FOR_TESTING[provider]]).toBe(
-        `synthetic-${provider}-secret`,
-      );
+      // Two providers can legitimately share one secret env key (codebuddy and
+      // workbuddy-desktop both authenticate the same CLI through
+      // CODEBUDDY_API_KEY). The expected value is whatever the source ended up
+      // holding for the shared key after the loop above, and providers sharing
+      // the tested provider's key cannot be expected to see it absent.
+      const sharesSecretKey = (other: NativeCliProvider) =>
+        other !== provider &&
+        PROVIDER_CLI_SECRET_KEYS_FOR_TESTING[other] === secretKey;
+      expect(env[secretKey]).toBe(source[secretKey]);
       expect(env[CONFIG_KEYS[provider]]).toBe(`/private/${provider}-home`);
       expect(env.KORY_BACKEND_URL).toBe('http://127.0.0.1:3001');
       expect(env.KORY_BRIDGE_AUTH_FILE).toBe('/private/synthetic-grant.json');
       expect(env.KORY_CLI_ENV_SENTINEL).toBeUndefined();
 
       for (const otherProvider of PROVIDERS) {
-        if (otherProvider === provider) continue;
+        if (otherProvider === provider || sharesSecretKey(otherProvider)) continue;
         expect(env[PROVIDER_CLI_SECRET_KEYS_FOR_TESTING[otherProvider]]).toBeUndefined();
       }
 
@@ -102,11 +111,9 @@ describe('provider CLI environment confidentiality', () => {
       expect(fakeChild.status).toBe(0);
       const observed = JSON.parse(fakeChild.stdout) as NodeJS.ProcessEnv;
       expect(observed.KORY_CLI_ENV_SENTINEL).toBeUndefined();
-      expect(observed[PROVIDER_CLI_SECRET_KEYS_FOR_TESTING[provider]]).toBe(
-        `synthetic-${provider}-secret`,
-      );
+      expect(observed[secretKey]).toBe(source[secretKey]);
       for (const otherProvider of PROVIDERS) {
-        if (otherProvider === provider) continue;
+        if (otherProvider === provider || sharesSecretKey(otherProvider)) continue;
         expect(observed[PROVIDER_CLI_SECRET_KEYS_FOR_TESTING[otherProvider]]).toBeUndefined();
       }
     }

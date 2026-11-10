@@ -152,40 +152,40 @@ describe('ManageMcpServerTool', () => {
     }
   });
 
-  test('add action is blocked in plan mode', async () => {
+  test('add action is blocked in planning interaction', async () => {
     const tool = new ManageMcpServerTool();
     const ctx = makeCtx({
-      permissionPolicy: { mode: 'plan' } as ToolContext['permissionPolicy'],
+      permissionPolicy: { mode: 'guarded', interactionMode: 'plan' } as ToolContext['permissionPolicy'],
     });
     const result = await tool.run(
       ctx,
       makeCall({ action: 'add', name: 'test', type: 'stdio', command: 'node' }),
     );
     expect(result.isError).toBe(true);
-    expect(result.output).toContain('plan mode');
+    expect(result.output).toContain('planning mode');
   });
 
-  test('update action is blocked in plan mode', async () => {
+  test('update action is blocked in planning interaction', async () => {
     const tool = new ManageMcpServerTool();
     const ctx = makeCtx({
-      permissionPolicy: { mode: 'plan' } as ToolContext['permissionPolicy'],
+      permissionPolicy: { mode: 'guarded', interactionMode: 'plan' } as ToolContext['permissionPolicy'],
     });
     const result = await tool.run(
       ctx,
       makeCall({ action: 'update', name: 'test', type: 'stdio', command: 'node' }),
     );
     expect(result.isError).toBe(true);
-    expect(result.output).toContain('plan mode');
+    expect(result.output).toContain('planning mode');
   });
 
-  test('remove action is blocked in plan mode', async () => {
+  test('remove action is blocked in planning interaction', async () => {
     const tool = new ManageMcpServerTool();
     const ctx = makeCtx({
-      permissionPolicy: { mode: 'plan' } as ToolContext['permissionPolicy'],
+      permissionPolicy: { mode: 'guarded', interactionMode: 'plan' } as ToolContext['permissionPolicy'],
     });
     const result = await tool.run(ctx, makeCall({ action: 'remove', name: 'test' }));
     expect(result.isError).toBe(true);
-    expect(result.output).toContain('plan mode');
+    expect(result.output).toContain('planning mode');
   });
 
   test('add action requires name', async () => {

@@ -141,7 +141,6 @@ const sanitizeExecution = (execution: GoalExecutionConfig): GoalExecutionConfig 
   instructions: execution.instructions
     ? redactSecretsInText(execution.instructions, 4_000).trim()
     : undefined,
-  remotePlanApproved: execution.remotePlanApproved === true,
 });
 
 /**
@@ -436,7 +435,6 @@ function model(row: typeof goals.$inferSelect): Goal {
           typeof executionJson.value.instructions === 'string'
             ? executionJson.value.instructions
             : undefined,
-        remotePlanApproved: executionJson.value.remotePlanApproved === true,
       })
     : undefined;
   const scope = GOAL_SCOPES.has(row.scope as GoalScope)

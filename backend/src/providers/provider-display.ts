@@ -36,6 +36,20 @@ Local target — runs a local agent (Codex or Claude) against your checkout in \
 Live delegation into Hoplite is not wired in this release; the API key is verified in Settings.`;
 
 export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>> = {
+  beam: {
+    label: 'Reflection AI',
+    iconPath: '/provider-icons/reflection.svg',
+    deployment: 'api',
+    credentialUrl: 'https://platform.reflection.ai/api-keys',
+    description:
+      'Reflection AI text models through OpenAI-compatible Chat Completions and Models endpoints.',
+  },
+  agentrouter: {
+    label: 'AgentRouter',
+    deployment: 'api',
+    credentialUrl: 'https://agentrouter.org',
+    description: 'OpenAI-compatible Chat Completions and Anthropic-compatible Claude Messages through the selected AgentRouter gateway.',
+  },
   commandcode: {
     label: 'Command Code',
     iconPath: '/provider-icons/commandcode-color.svg',
@@ -56,12 +70,56 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
     credentialUrl: 'https://unorouter.com/en/docs/platform/quickstart',
     description: 'Open-source OpenAI-compatible gateway — one key for 200+ models.',
   },
+  respan: {
+    label: 'Respan',
+    iconPath: '/provider-icons/respan.svg',
+    deployment: 'api',
+    credentialUrl: 'https://platform.respan.ai/platform/gateway/api-keys',
+    description: 'Respan AI gateway — one key for 2000+ models with built-in observability.',
+  },
   experientiallabs: {
     label: 'Experiential Labs',
     iconPath: '/provider-icons/experientiallabs-color.svg',
     deployment: 'api',
     credentialUrl: 'https://platform.experientiallabs.ai/',
     description: 'Open-source AI gateway — one key for hosted, BYOK, and local models.',
+  },
+  tokenharbor: {
+    label: 'Token Harbor',
+    // Official monochrome anchor mark from tokenharbor.ai/logo.svg.
+    iconPath: '/provider-icons/tokenharbor.svg',
+    deployment: 'api',
+    credentialUrl: 'https://tokenharbor.ai/dashboard/api-keys',
+    description:
+      'OpenAI- and Anthropic-compatible gateway — one thk_live_ key for GPT, Claude, Gemini, DeepSeek and more, with per-token pricing and automatic failover.',
+  },
+  logfare: {
+    label: 'Logfare',
+    // Official Logfare mark (logfare.ai/static/img/favicon.png).
+    iconPath: '/provider-icons/logfare-color.png',
+    deployment: 'api',
+    credentialUrl: 'https://logfare.ai/register',
+    description:
+      'Free community-run OpenAI-compatible inference. Requests are logged for internal research datasets in exchange for no-cost access; use `logfare/auto` to route across the catalog.',
+  },
+  gwarden: {
+    label: 'Gwarden AI',
+    // Official mark from gwarden.su/logo.png — the icon the vendor itself
+    // declares via `<link rel="icon">`, shipped unmodified.
+    iconPath: '/provider-icons/gwarden-color.png',
+    deployment: 'api',
+    credentialUrl: 'https://gwarden.su/dashboard',
+    description:
+      'Unified gateway speaking the OpenAI, Anthropic and Responses APIs on one key — 96 models across Claude, GPT, Gemini, Grok, Kimi, DeepSeek and GLM. The public /v1/models catalog reports each model’s own context and output limits.',
+  },
+  apinex: {
+    label: 'APInex',
+    // Official APInex brand mark (apinex.bond/brand/mark.png).
+    iconPath: '/provider-icons/apinex-color.png',
+    deployment: 'api',
+    credentialUrl: 'https://apinex.bond/login',
+    description:
+      'OpenAI-compatible gateway on one prepaid token balance — chat models plus web research, X/Twitter and voice tools through the same key.',
   },
   digitalocean: {
     label: 'DigitalOcean Inference',
@@ -109,6 +167,22 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
     deployment: 'local',
     description:
       'CLI only. Runs the official grok CLI on your machine. Install grok, run "grok login", then click Auth — no API key or token entry needed.',
+  },
+  opencode: {
+    label: 'OpenCode',
+    iconPath: '/provider-icons/lobehub/opencode.svg',
+    deployment: 'local',
+    credentialUrl: 'https://opencode.ai/auth',
+    description:
+      'CLI only. Runs the official opencode CLI on your machine over ACP. Install opencode, run "opencode auth login", then click Auth — credentials stay in the CLI. Models and context windows come from the CLI\'s own authenticated catalog; host actions run through Koryphaios\'s approval-gated tool bridge.',
+  },
+  codebuddy: {
+    label: 'CodeBuddy',
+    // The official CodeBuddy brand mark, copied from the installed CLI package.
+    iconPath: '/provider-icons/codebuddy-color.png',
+    deployment: 'local',
+    description:
+      "Runs Tencent's official CodeBuddy CLI harness with your CLI login. Credentials stay CLI-owned; the model catalog comes from the installed CLI product files.",
   },
   cohere: {
     label: 'Cohere',
@@ -256,14 +330,6 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
     description:
       'Poe API gateway. Paste an API key from poe.com/api_key; Koryphaios sends it only to https://api.poe.com/v1.',
   },
-  chatbase: {
-    label: 'Chatbase',
-    iconPath: '/provider-icons/chatbase-color.svg',
-    deployment: 'api',
-    credentialUrl: 'https://www.chatbase.co/dashboard',
-    description:
-      'Chatbase agent API. Connect with your Chatbase API key to interact with your custom trained knowledge-base agents.',
-  },
   notion: {
     label: 'Notion',
     iconPath: '/provider-icons/lobehub/notion.svg',
@@ -273,12 +339,29 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
       'Notion Agent APIs. Connect with a Personal Access Token (PAT) from the Notion Developer portal to chat with the Custom Agents your token can reach.',
   },
   workbuddy: {
-    label: 'Work Buddy',
-    iconPath: '/provider-icons/workbuddy.svg',
+    label: 'WorkBuddy',
+    iconPath: '/provider-icons/workbuddy-color.png',
     deployment: 'api',
     description:
       'Work Buddy (workbuddy.ai) API keys are issued by Tencent TokenHub. Koryphaios sends the key only to https://tokenhub-intl.tencentcloudmaas.com/v1. Create a key at https://console.cloud.tencent.com/tokenhub/apikey.',
     credentialUrl: 'https://console.cloud.tencent.com/tokenhub/apikey',
+  },
+  'workbuddy-desktop': {
+    label: 'WorkBuddy Desktop',
+    // The official WorkBuddy brand mark — shared with the WorkBuddy cloud
+    // provider so both surfaces read as the same product, but the label is
+    // distinct ("WorkBuddy Desktop" vs "WorkBuddy") to avoid confusion.
+    iconPath: '/provider-icons/workbuddy-color.png',
+    deployment: 'local',
+    description:
+      'Runs the WorkBuddy AI desktop app installed on this machine. That is the ' +
+      'entire setup: no API key, no token, no login step. Koryphaios hosts the ' +
+      'runtime inside the running app so turns inherit its sign-in and limits, ' +
+      'and falls back to the bundled runtime when the app is closed. ' +
+      'WORKBUDDY_DESKTOP_APP_PATH is only needed for a non-standard install location.',
+    managerHint:
+      'Install WorkBuddy AI and it is ready. kory__ MCP tools (context, notes, ' +
+      'delegation) are injected into every turn automatically.',
   },
   autoclaw: {
     label: 'AutoClaw',

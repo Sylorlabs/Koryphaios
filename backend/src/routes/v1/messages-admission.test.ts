@@ -37,6 +37,7 @@ function context(input: {
   messages: Record<string, unknown>;
   kory: Record<string, unknown>;
   sessions?: Record<string, unknown>;
+  wsManager?: Record<string, unknown>;
 }) {
   setContext({
     sessions: input.sessions ?? {
@@ -48,7 +49,7 @@ function context(input: {
       generateSessionTitle: async () => undefined,
       ...input.kory,
     },
-    wsManager: { broadcast: () => undefined, broadcastToSession: () => undefined },
+    wsManager: input.wsManager ?? { broadcast: () => undefined, broadcastToSession: () => undefined },
   } as never);
 }
 
@@ -431,6 +432,62 @@ describe('message turn admission', () => {
       imageInputMode: 'reject',
     });
     expect(rejectSessionTurn).not.toHaveBeenCalled();
+  });
+
+  test('does not publish a system error when an admitted turn rejects with its user cancellation reason', async () => {
+    const controller = new AbortController();
+    const events: Array<{ type: string; payload: Record<string, unknown> }> = [];
+    const dispatchAdmittedTask = mock(async () => {
+      controller.abort(new DOMException('Stopped by user', 'AbortError'));
+      throw controller.signal.reason;
+    });
+    context({
+      messages: { add: async () => undefined },
+      kory: {
+        reserveSessionTurn: async () => ({ ...admission(), signal: controller.signal }),
+        dispatchAdmittedTask,
+        rejectSessionTurn: async () => undefined,
+      },
+      wsManager: {
+        broadcastToSession: (_sessionId: string, event: { type: string; payload: Record<string, unknown> }) => {
+          events.push(event);
+        },
+      },
+    });
+
+    const response = await app.handle(request({ sessionId: 'session-1', content: 'Continue after stop' }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(response.status).toBe(200);
+    expect(dispatchAdmittedTask).toHaveBeenCalledTimes(1);
+    expect(events.some((event) => event.type === 'system.error')).toBe(false);
+  });
+
+  test('continues to publish genuine admitted turn failures', async () => {
+    const failure = new Error('Provider request failed');
+    const events: Array<{ type: string; payload: Record<string, unknown> }> = [];
+    context({
+      messages: { add: async () => undefined },
+      kory: {
+        reserveSessionTurn: async () => admission(),
+        dispatchAdmittedTask: async () => { throw failure; },
+        rejectSessionTurn: async () => undefined,
+      },
+      wsManager: {
+        broadcastToSession: (_sessionId: string, event: { type: string; payload: Record<string, unknown> }) => {
+          events.push(event);
+        },
+      },
+    });
+
+    const response = await app.handle(request({ sessionId: 'session-1', content: 'Report real errors' }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(response.status).toBe(200);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'system.error',
+      payload: expect.objectContaining({ error: 'Provider request failed', sessionId: 'session-1' }),
+    }));
   });
 
   test('rejects the reserved run when user-message persistence fails', async () => {

@@ -71,21 +71,35 @@ export class RelayGuestClient {
       if (process.env.RELAY_URL) modelSharingRelayUrl(process.env.RELAY_URL);
       const resolved = await resolveRelayJoinCode(codeOrUrl.trim());
       if (resolved.tierId !== 'models')
-        throw new RelayJoinError('This is a team-session code. Enter a model-sharing code instead.', 'WRONG_SHARING_CODE', 400);
+        throw new RelayJoinError(
+          'This is a team-session code. Enter a model-sharing code instead.',
+          'WRONG_SHARING_CODE',
+          400,
+        );
       inviteUrl = modelSharingRelayUrl(resolved.inviteUrl);
     }
     const token =
       inviteUrl.searchParams.get('token') || inviteUrl.hash.replace(/^#?token=/, '') || '';
     if (!token || token.length > 8192)
-      throw new RelayJoinError('Not a valid model-sharing invitation.', 'INVALID_MODEL_INVITE', 400);
+      throw new RelayJoinError(
+        'Not a valid model-sharing invitation.',
+        'INVALID_MODEL_INVITE',
+        400,
+      );
     const wsBase = `${inviteUrl.origin.replace(/^http/, 'ws')}/ws`;
     const url = `${wsBase}?token=${encodeURIComponent(token)}&name=${encodeURIComponent(displayName)}`;
 
     await new Promise<void>((resolve, reject) => {
       const ws = new WebSocket(url);
       this.ws = ws;
-      this.connectedResolve = () => { clearTimeout(timeout); resolve(); };
-      this.connectedReject = (error) => { clearTimeout(timeout); reject(error); };
+      this.connectedResolve = () => {
+        clearTimeout(timeout);
+        resolve();
+      };
+      this.connectedReject = (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      };
       const timeout = setTimeout(() => {
         ws.close();
         reject(new Error('Relay guest connection timed out'));
@@ -94,7 +108,9 @@ export class RelayGuestClient {
       ws.addEventListener('open', () => {
         log.info('Connected to host relay as provider client');
       });
-      ws.addEventListener('message', (e) => { if (this.ws === ws) this.handleMessage(String(e.data)); });
+      ws.addEventListener('message', (e) => {
+        if (this.ws === ws) this.handleMessage(String(e.data));
+      });
       ws.addEventListener('error', () => {
         if (this.ws !== ws) return;
         clearTimeout(timeout);
@@ -119,7 +135,10 @@ export class RelayGuestClient {
     try {
       msg = JSON.parse(raw);
     } catch (err: unknown) {
-      log.debug({ err: err instanceof Error ? err.message : String(err) }, 'Malformed relay guest frame; skipping');
+      log.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Malformed relay guest frame; skipping',
+      );
       return;
     }
     if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return;
@@ -134,21 +153,37 @@ export class RelayGuestClient {
         }
         this.catalog = catalog;
         if (this.requireModelOnly && this.catalog?.providers)
-          this.catalog = { hostName: this.catalog.hostName, providers: this.catalog.providers.filter((provider) => !provider.agentic) };
+          this.catalog = {
+            hostName: this.catalog.hostName,
+            providers: this.catalog.providers.filter((provider) => !provider.agentic),
+          };
         for (const fn of this.catalogListeners) {
           try {
             fn(this.catalog);
           } catch (err: unknown) {
             // A single misbehaving catalog listener must not break fan-out.
-            log.debug({ err: err instanceof Error ? err.message : String(err) }, 'Catalog listener threw; continuing');
+            log.debug(
+              { err: err instanceof Error ? err.message : String(err) },
+              'Catalog listener threw; continuing',
+            );
           }
         }
         return;
       }
       case 'init': {
-        const tier = msg.tier as { id?: string; permissions?: { useRemoteProviders?: boolean } } | undefined;
-        if (this.requireModelOnly && (tier?.id !== 'models' || tier.permissions?.useRemoteProviders !== true)) {
-          this.connectedReject?.(new RelayJoinError('This invitation does not grant model-only access.', 'WRONG_MODEL_INVITE', 400));
+        const tier = msg.tier as
+          { id?: string; permissions?: { useRemoteProviders?: boolean } } | undefined;
+        if (
+          this.requireModelOnly &&
+          (tier?.id !== 'models' || tier.permissions?.useRemoteProviders !== true)
+        ) {
+          this.connectedReject?.(
+            new RelayJoinError(
+              'This invitation does not grant model-only access.',
+              'WRONG_MODEL_INVITE',
+              400,
+            ),
+          );
           this.disconnect();
           return;
         }
@@ -159,7 +194,11 @@ export class RelayGuestClient {
       case 'inference-event': {
         const stream = this.streams.get(String(msg.requestId));
         const event = msg.event as ProviderEvent | undefined;
-        if (this.requireModelOnly && event && ['file_edit', 'tool_executed', 'cli_commands'].includes(event.type)) {
+        if (
+          this.requireModelOnly &&
+          event &&
+          ['file_edit', 'tool_executed', 'cli_commands'].includes(event.type)
+        ) {
           stream?.fail('The remote host sent a host-tool event on an inference-only connection.');
           return;
         }
@@ -177,7 +216,8 @@ export class RelayGuestClient {
         return;
       }
       case 'host-disconnected': {
-        for (const stream of this.streams.values()) stream.fail('The model-sharing host disconnected.');
+        for (const stream of this.streams.values())
+          stream.fail('The model-sharing host disconnected.');
         this.streams.clear();
         return;
       }
@@ -227,7 +267,10 @@ export class RelayGuestClient {
         this.send({ type: 'inference-cancel', requestId });
       } catch (err: unknown) {
         // Connection already closed; the cancel can't be delivered.
-        log.debug({ err: err instanceof Error ? err.message : String(err), requestId }, 'Inference cancel send failed; connection already gone');
+        log.debug(
+          { err: err instanceof Error ? err.message : String(err), requestId },
+          'Inference cancel send failed; connection already gone',
+        );
       }
       failure = 'Cancelled';
       finished = true;

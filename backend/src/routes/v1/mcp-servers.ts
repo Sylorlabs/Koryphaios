@@ -133,7 +133,7 @@ export const mcpServerRoutes = new Elysia({ prefix: '/api/v1/mcp-servers' })
     },
     { body: mcpServerBodySchema },
   )
-  // Update an existing MCP server (full replace).
+  // Update an existing MCP server (preserve omitted settings and secret keys).
   .put(
     '/:name',
     async ({ request, set, params, body }) => {

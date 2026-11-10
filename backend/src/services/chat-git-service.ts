@@ -3,6 +3,7 @@ import type { ChatGitSwitchRequest } from '@koryphaios/shared';
 import { getContext } from '../context';
 import { ConflictError, NotFoundError, ValidationError } from '../errors/types';
 import { ChatGit } from '../kory/chat-git';
+import { canonicalizePath } from '../runtime/platform';
 import { processSupervisor } from '../process-supervisor/supervisor';
 import { withSessionRecoveryGuard } from '../routes/v1/session-recovery-guard';
 import { getSessionReview } from '../stores/session-review-store';
@@ -28,11 +29,16 @@ export async function chatGitForSession(sessionId: string) {
     throw new ConflictError('Recover this archived chat before accessing its Git workspace.');
   const directory = await kory.resolveSessionWorkingDirectoryPublic(sessionId);
   const session = await sessions.get(sessionId);
-  if (!session?.gitWorkspace || session.archivedAt !== undefined)
+  if (!session || session.archivedAt !== undefined)
     throw new ConflictError('This chat’s workspace changed. Refresh and try again.');
-  if (realpathSync(session.gitWorkspace.path) !== realpathSync(directory))
+  const boundDirectory = session.gitWorkspace?.path ?? session.workingDirectory;
+  if (!boundDirectory || canonicalizePath(boundDirectory) !== canonicalizePath(directory))
     throw new ConflictError('The chat workspace binding changed.');
-  return { session, git: new ChatGit(directory), directory };
+  return {
+    session,
+    git: new ChatGit(directory, undefined, { allowInPlace: !session.gitWorkspace }),
+    directory,
+  };
 }
 
 /** UI Git writes share the same workspace/worker barriers as revision switching. */
@@ -101,13 +107,15 @@ export async function switchChatGit(
           );
         agent?.signal?.throwIfAborted();
         const selection = await git.switch(input, agent?.signal);
-        const updated = await sessions.update(
-          sessionId,
-          {
-            gitWorkspace: { ...session.gitWorkspace!, selection },
-          },
-          session.version,
-        );
+        const updated = session.gitWorkspace
+          ? await sessions.update(
+              sessionId,
+              {
+                gitWorkspace: { ...session.gitWorkspace, selection },
+              },
+              session.version,
+            )
+          : session;
         if (!updated)
           throw new ConflictError(
             `Git switched this chat to ${selection.branch}, but its metadata changed concurrently. Refresh Git state before continuing; no checkout was discarded.`,

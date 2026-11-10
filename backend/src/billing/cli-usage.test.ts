@@ -99,7 +99,6 @@ describe('CLI_API_PROVIDER_MAP', () => {
     expect(CLI_API_PROVIDER_MAP['kimicode']).toBe('kimicode');
     expect(CLI_API_PROVIDER_MAP['kilocode']).toBe('kilocode');
     expect(CLI_API_PROVIDER_MAP['freebuff']).toBe('openrouter');
-    expect(CLI_API_PROVIDER_MAP['jules']).toBe('google');
   });
 
   test('every CLI provider in the map has a non-empty value', () => {

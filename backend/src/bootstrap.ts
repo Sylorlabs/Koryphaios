@@ -6,7 +6,6 @@
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { ProviderRegistry } from './providers';
-import { registerLiveModelResolver } from './providers/models';
 import { ToolRegistry } from './tools';
 import { KoryManager } from './kory/manager';
 import { SessionStore } from './stores/session-store';
@@ -43,16 +42,20 @@ import {
   WebSearchTool,
   WebFetchTool,
   AskUserTool,
+  RenameSessionTool,
   AskManagerTool,
   DelegateToWorkerTool,
+  ManageReviewAgentsTool,
+  ManageAgentsTool,
   SendAgentMessageTool,
   RequestManagerRelayTool,
   ListAgentMessagesTool,
-  DelegateToJulesTool,
   MCPDetectErrorsTool,
   MCPAnalyzeErrorTool,
   MCPSuggestFixesTool,
   ManageMcpServerTool,
+  ListMcpToolsTool,
+  InvokeMcpTool,
   FetchContextTool,
   PruneContextTool,
   LoadSkillDetailTool,
@@ -64,17 +67,16 @@ import {
 } from './tools';
 import { initMCP } from './mcp/client';
 import { serverLog } from './logger';
-import { applyModeIntegration } from './kory/manager-mode-integration';
 import { initWSBroker } from './ws/broker';
 import { WSManager } from './ws/ws-manager';
 import { loadPlugins } from './server/plugins';
 import { setContext, type AppContext } from './context';
-import { getModeManager } from './mode';
 import { TimeTravelService } from './services/timetravel';
 import { startBackgroundCleanup } from './memory/background-cleanup';
 import { startCatalogRefresh } from './providers/catalog-refresh';
 import { GoalDriveService } from './kory/goal-drive-service';
 import { SANDBOX_PRESETS } from '@koryphaios/shared';
+import { ListLinkedDevicesTool, ControlLinkedDeviceTool } from './tools/devices';
 import { cliResearchBoundary, hasResearchCitation } from './providers/cli-research';
 import { createPromptCachePlan } from './providers/prompt-cache';
 import { initEnforcedSpendCapsTable } from './security/spend-caps-enforced';
@@ -83,6 +85,16 @@ import { SessionRunStore } from './runs/session-run-store';
 import { SessionRunCoordinator } from './runs/session-run-coordinator';
 
 export async function bootstrap(): Promise<AppContext> {
+  const startedAt = performance.now();
+  let phaseStartedAt = startedAt;
+  const finishPhase = (phase: string) => {
+    const now = performance.now();
+    serverLog.info(
+      { phase, durationMs: Math.round(now - phaseStartedAt), elapsedMs: Math.round(now - startedAt) },
+      'Backend startup phase completed',
+    );
+    phaseStartedAt = now;
+  };
   // Load environment and validate
   loadEnvFromProject(PROJECT_ROOT);
   validateEnvironment();
@@ -119,8 +131,7 @@ export async function bootstrap(): Promise<AppContext> {
 
   const config = loadConfig(PROJECT_ROOT);
 
-  // Initialize ModeManager early with config mode
-  getModeManager({ mode: config.mode });
+  finishPhase('configuration');
 
   // Initialize DB, Supervisor, and CreditAccountant
   await initDb();
@@ -133,45 +144,25 @@ export async function bootstrap(): Promise<AppContext> {
   // Reconcile any crash-interrupted delete before providers, Goal recovery,
   // process supervision, WebSockets, or HTTP readiness can revive the session.
   await recoverInterruptedSessionErasures();
+  finishPhase('database-and-erasure-recovery');
 
   // Initialize Encryption
   await initEncryption();
+  finishPhase('encryption');
 
   // Providers & Tools
   const providers = new ProviderRegistry(config);
   await providers.initializeEncryptedCredentials();
-
-  // Wire live model metadata (CLI/API-discovered context windows, verified
-  // flags) into context resolution — designed for this but never registered,
-  // which left every CLI model's context window "unknown".
-  registerLiveModelResolver((modelId, providerName) => {
-    try {
-      const p = providers.get(providerName);
-      if (!p?.listModels) return undefined;
-      return p
-        .listModels()
-        .find(
-          (m) =>
-            m.id === modelId ||
-            m.apiModelId === modelId ||
-            m.name === modelId ||
-            m.aliases?.includes(modelId),
-        );
-    } catch (err: unknown) {
-      serverLog.debug(
-        { provider: providerName, modelId, err: err instanceof Error ? err.message : String(err) },
-        'Live model resolver lookup failed',
-      );
-      return undefined;
-    }
-  });
+  finishPhase('providers');
 
   const tools = await initTools(providers);
+  finishPhase('tools');
 
   // MCP Connections
   // Scope MCP clients — and their OAuth grants — to the same project root the
   // settings API resolves, so a token stored via the UI is found at connect time.
   const mcpManager = await initMCP(config, tools, PROJECT_ROOT);
+  finishPhase('mcp-connections');
 
   // Stores & Core
   const sessions = new SessionStore();
@@ -214,7 +205,6 @@ export async function bootstrap(): Promise<AppContext> {
     timeTravel,
     runs,
   );
-  applyModeIntegration(kory);
 
   const goalDriver = new GoalDriveService(goals, sessions, kory, wsManager);
 
@@ -237,6 +227,7 @@ export async function bootstrap(): Promise<AppContext> {
 
   setContext(context);
   configureAgentMail({ kory, sessions });
+  finishPhase('session-runtime');
   // Kory subscribed during construction; initialize only after the WebSocket
   // broker and AppContext exist so restart-recovery terminal events can be
   // surfaced and drained without racing bootstrap dependencies.
@@ -255,6 +246,7 @@ export async function bootstrap(): Promise<AppContext> {
     serverLog.info(recoveredQuestionHandoffs, 'Reconciled durable answered-question handoffs');
   }
   await goalDriver.recover();
+  finishPhase('process-and-goal-recovery');
   startBackgroundCleanup(kory, wsManager);
   // Keep enabled providers' model catalogs warm in the background. Cadence is
   // per-provider by discovery cost and stretches when the user is idle, so new
@@ -277,6 +269,7 @@ export async function bootstrap(): Promise<AppContext> {
       }
     },
   });
+  finishPhase('background-services');
   return context;
 }
 
@@ -299,7 +292,7 @@ async function initEncryption() {
   }
 }
 
-import { registerGitTools, registerCheckpointTools } from './tools';
+import { registerGitTools, registerCheckpointTools, RequestCriticReviewTool } from './tools';
 import { CreateGoalTool, UpdateGoalTool, EditGoalChecklistTool } from './tools/goals';
 import { noteTools } from './tools/notes';
 import { createComputerUseTools } from './computer-use/tools';
@@ -310,6 +303,8 @@ import { configureAgentMail } from './kory/services/agent-mail-service';
 export async function initTools(providers: ProviderRegistry) {
   const tools = new ToolRegistry();
   const defaultTools = [
+    new ListLinkedDevicesTool(),
+    new ControlLinkedDeviceTool(),
     ...createComputerUseTools(),
     new BashTool(),
     new ShellManageTool(),
@@ -371,7 +366,7 @@ export async function initTools(providers: ProviderRegistry) {
             signal: context.signal,
             sessionId: `${context.sessionId}:web-search:${providerName}`,
             harnessRole: 'critic',
-            permissionMode: 'plan',
+            interactionMode: 'plan',
             sandbox: researchSandbox,
             capabilityProfile: 'research-only',
             promptCache: createPromptCachePlan({
@@ -408,16 +403,21 @@ export async function initTools(providers: ProviderRegistry) {
     }),
     new WebFetchTool(),
     new AskUserTool(),
+    new RequestCriticReviewTool(),
+    new RenameSessionTool(),
     new AskManagerTool(),
     new DelegateToWorkerTool(),
+    new ManageReviewAgentsTool(),
+    new ManageAgentsTool(),
     new SendAgentMessageTool(),
     new RequestManagerRelayTool(),
     new ListAgentMessagesTool(),
-    new DelegateToJulesTool(),
     new MCPDetectErrorsTool(),
     new MCPAnalyzeErrorTool(),
     new MCPSuggestFixesTool(),
     new ManageMcpServerTool(),
+    new ListMcpToolsTool(tools),
+    new InvokeMcpTool(tools),
     new FetchContextTool(),
     new PruneContextTool(),
     new CreateGoalTool(),

@@ -6,6 +6,7 @@ export interface FreebuffBundledModel {
   multimodal: boolean;
   /** Full model window used by this exact installed Freebuff build. */
   contextWindow?: number;
+  reasoningLevels?: string[];
 }
 
 export interface FreebuffBundledCatalog {
@@ -17,6 +18,13 @@ export interface FreebuffBundledCatalog {
 
 /** A selection policy, NOT an upstream model ID or a claim of account access. */
 export const FREEBUFF_CLI_DEFAULT_MODEL_ID = 'freebuff/cli-default';
+/** Kory routing ID wrapping the CLI's stable picker key, never its opaque handle. */
+export const FREEBUFF_CATALOG_MODEL_PREFIX = 'freebuff/catalog-';
+export function freebuffCatalogKeyFromModelId(modelId: string): string | null {
+  if (!modelId.startsWith(FREEBUFF_CATALOG_MODEL_PREFIX)) return null;
+  const key = modelId.slice(FREEBUFF_CATALOG_MODEL_PREFIX.length);
+  return /^[a-z0-9][a-z0-9-]{1,63}$/.test(key) ? key : null;
+}
 
 // 0.2.12 embeds this public catalog protocol but holds the fetched catalog only
 // in memory. Older static picker objects still exist as fallback implementation
@@ -30,6 +38,20 @@ const DYNAMIC_CATALOG_ANCHORS = [
   'freebuffModelKey',
   'freebuffCatalogReasoningEfforts',
 ];
+
+/** Credential-free inspection inside the execution sandbox. Only public protocol
+ * markers/version leave it, not executable contents or any account data. */
+export const FREEBUFF_DYNAMIC_CATALOG_PROBE = `
+const { readFileSync } = require('node:fs');
+const bytes = readFileSync(process.argv[1]);
+const anchors = ${JSON.stringify(DYNAMIC_CATALOG_ANCHORS)};
+const start = bytes.indexOf('CODEBUFF_CLI_VERSION:"');
+const version = start < 0 ? null : bytes.subarray(start, start + 128).toString('latin1')
+  .match(/CODEBUFF_CLI_VERSION:"(\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]+)?)"/)?.[1];
+if (!version || !anchors.every(anchor => bytes.includes(Buffer.from(anchor))))
+  throw Error('Unrecognized Freebuff execution catalog protocol');
+process.stdout.write('CODEBUFF_CLI_VERSION:' + JSON.stringify(version) + ';' + anchors.join(';'));
+`;
 
 const VERSION_ANCHOR = 'CODEBUFF_CLI_VERSION:"';
 const ACCESS_TIER_ANCHOR = '!=="limited")return ';
@@ -348,8 +370,8 @@ function findCatalogRegion(bundle: Buffer): {
  * in the installed Freebuff executable. The parser intentionally recognizes
  * Freebuff's catalog semantics (full/limited access tier function plus model
  * objects) instead of treating every provider/model string in the binary as a
- * selectable model. Modern builds instead expose an honest CLI-managed default;
- * only the authenticated CLI can resolve its dynamic account catalog and handle.
+ * selectable model. Modern builds identify the dynamic protocol; account models
+ * are discovered separately through the authenticated catalog endpoint.
  */
 export function parseFreebuffBundledCatalog(bundle: Uint8Array): FreebuffBundledCatalog {
   const buffer = Buffer.isBuffer(bundle) ? bundle : Buffer.from(bundle);
@@ -445,13 +467,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * with mode 0600 and delete it at turn cleanup. No settings values are logged.
  *
  * No model setting is synthesized for CLI default: the CLI owns migration,
- * account availability, recommendation and stale-handle recovery. Legacy explicit
- * selection is retained for the old bundled picker only; the caller must check
+ * account availability, recommendation and stale-handle recovery. Modern explicit
+ * selections use the CLI's stable key setter and remove the legacy picker value;
+ * leaving that old value beside the modern key makes the native TUI silently
+ * select the legacy model. The migration stamp remains CLI-owned state.
+ * Legacy selections use its old bundled picker setter.
+ * The caller must check
  * that selection against its discovered catalog before calling this function.
  */
 export function buildFreebuffTurnSettings(
   source: unknown,
   selectedModel: string,
+  reasoningLevel?: string,
 ): Record<string, unknown> {
   if (!isRecord(source)) throw new Error('Freebuff settings must be a JSON object');
   if (source.byokConnection !== undefined && source.byokConnection !== null) {
@@ -459,7 +486,11 @@ export function buildFreebuffTurnSettings(
       'Freebuff BYOK selection cannot be transported by this CLI adapter; select a Freebuff-managed model in the CLI first',
     );
   }
-  if (selectedModel !== FREEBUFF_CLI_DEFAULT_MODEL_ID && !MODEL_ID_PATTERN.test(selectedModel)) {
+  const catalogKey = freebuffCatalogKeyFromModelId(selectedModel);
+  if (
+    (selectedModel.startsWith(FREEBUFF_CATALOG_MODEL_PREFIX) && !catalogKey) ||
+    (selectedModel !== FREEBUFF_CLI_DEFAULT_MODEL_ID && !MODEL_ID_PATTERN.test(selectedModel))
+  ) {
     throw new Error('Freebuff model selection is invalid');
   }
   const settings: Record<string, unknown> = {};
@@ -484,7 +515,20 @@ export function buildFreebuffTurnSettings(
     // Copy without normalizing keys/efforts or sharing mutable profile state.
     settings[key] = Object.fromEntries(Object.entries(value));
   }
-  if (selectedModel !== FREEBUFF_CLI_DEFAULT_MODEL_ID) {
+  if (catalogKey) {
+    // The native TUI gives the legacy picker value precedence when both are
+    // present, silently selecting a different model. Keep the explicit modern
+    // key authoritative by removing only that legacy picker value; the
+    // migration stamp is still needed by the CLI's catalog resolver.
+    settings.freebuffModelKey = catalogKey;
+    delete settings.freebuffModel;
+    if (reasoningLevel !== undefined) {
+      settings.freebuffCatalogReasoningEfforts = {
+        ...(settings.freebuffCatalogReasoningEfforts as Record<string, string> | undefined),
+        [catalogKey]: reasoningLevel,
+      };
+    }
+  } else if (selectedModel !== FREEBUFF_CLI_DEFAULT_MODEL_ID) {
     settings.freebuffModel = selectedModel;
     // This is the CLI's own legacy set-selection behavior. Leaving a modern
     // key here would silently override the explicitly requested legacy model.

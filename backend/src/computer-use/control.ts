@@ -1,10 +1,17 @@
 /** One physical desktop: serialize across sessions, tools and adapter instances. */
 let tail: Promise<unknown> = Promise.resolve();
 const pending = new Set<AbortController>();
+const stopListeners = new Set<() => void>();
+
+export function onComputerUseStop(listener: () => void): () => void {
+  stopListeners.add(listener);
+  return () => stopListeners.delete(listener);
+}
 
 export function stopComputerUse(reason = 'Computer use stopped or permissions revoked'): number {
   const count = pending.size;
   for (const controller of pending) controller.abort(new Error(reason));
+  for (const listener of stopListeners) listener();
   return count;
 }
 

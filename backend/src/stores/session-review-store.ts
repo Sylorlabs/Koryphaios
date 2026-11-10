@@ -1,4 +1,5 @@
 import type { ChangeSummary } from '@koryphaios/shared';
+import { createHash } from 'node:crypto';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { db, sessionChanges } from '../db';
@@ -30,6 +31,8 @@ export type SessionReviewRollback =
 export interface DurableSessionReview {
   version: 1;
   reviewId: string;
+  /** Identifies the exact publication, including identical metadata republished later. */
+  reviewRevision: string;
   sessionId: string;
   status: SessionReviewStatus;
   changes: ChangeSummary[];
@@ -114,6 +117,8 @@ function parseReview(
     if (
       value.version !== 1 ||
       typeof value.reviewId !== 'string' ||
+      (value.reviewRevision !== undefined &&
+        (typeof value.reviewRevision !== 'string' || value.reviewRevision.length === 0)) ||
       typeof value.sessionId !== 'string' ||
       value.status !== status ||
       !Array.isArray(value.changes) ||
@@ -125,7 +130,12 @@ function parseReview(
     ) {
       return null;
     }
-    return value as DurableSessionReview;
+    // Existing rows remain readable without an eager migration. Their exact
+    // stored bytes identify the observed snapshot until its next publication.
+    return {
+      ...value,
+      reviewRevision: value.reviewRevision ?? `legacy:${createHash('sha256').update(changeData).digest('hex')}`,
+    } as DurableSessionReview;
   } catch (error) {
     serverLog.debug(
       { error: error instanceof Error ? error.message : String(error) },
@@ -153,6 +163,9 @@ async function latestReview(
       ),
     )
     .orderBy(desc(sessionChanges.createdAt));
+  if (statuses.length === 2 && statuses.includes('pending') && statuses.includes('rejecting') && rows.length > 1) {
+    throw new Error('Multiple unresolved change reviews require manual recovery before a decision can be applied.');
+  }
   for (const row of rows) {
     const review = parseReview(row.changeType, row.changeData);
     if (review) return review;
@@ -161,8 +174,9 @@ async function latestReview(
 }
 
 /** Return only a review the UI may still act on. */
-export function getPendingSessionReview(sessionId: string): Promise<DurableSessionReview | null> {
-  return latestReview(sessionId, ['pending']);
+export async function getPendingSessionReview(sessionId: string): Promise<DurableSessionReview | null> {
+  const review = await latestReview(sessionId, ['pending', 'rejecting']);
+  return review?.status === 'pending' ? review : null;
 }
 
 /** Durable current projection for a completed/in-progress review when needed for diagnostics. */
@@ -180,55 +194,53 @@ export async function ensurePendingSessionReview(
   input: PendingSessionReviewInput,
   now = Date.now(),
 ): Promise<DurableSessionReview> {
-  const existing = await getPendingSessionReview(input.sessionId);
-  if (existing) {
-    const refreshed: DurableSessionReview = {
+  // Bun SQLite transactions are synchronous. Take the writer reservation
+  // before looking up the row so concurrent first publications cannot both
+  // observe absence, including publications from different host processes.
+  return db.transaction((tx) => {
+    const rows = tx.select().from(sessionChanges).where(and(
+      eq(sessionChanges.sessionId, input.sessionId),
+      inArray(sessionChanges.changeType, [REVIEW_PENDING, REVIEW_REJECTING]),
+    )).all();
+    if (rows.length > 1) {
+      throw new Error('Multiple unresolved change reviews require manual recovery before publication.');
+    }
+    const row = rows[0];
+    const existing = row ? parseReview(row.changeType, row.changeData) : null;
+    if (row && !existing) throw new Error('The stored change review is malformed and requires recovery.');
+    if (existing?.status === 'rejecting') return existing;
+    const review: DurableSessionReview = existing ? {
       ...existing,
+      reviewRevision: nanoid(24),
       changes: input.changes.map((change) => ({ ...change })),
-      // Do not overwrite a verified review project with a later session-level
-      // default. A changed project root means the current review can no longer
-      // be safely rejected, so preserve the original binding for the response
-      // gate to verify.
-      projectRoot: existing.projectRoot,
+      // Preserve the first root and rollback baseline throughout a review.
+      updatedAt: now,
+    } : {
+      version: 1,
+      reviewId: nanoid(16),
+      reviewRevision: nanoid(24),
+      sessionId: input.sessionId,
+      status: 'pending',
+      changes: input.changes.map((change) => ({ ...change })),
+      projectRoot: input.projectRoot,
+      rollback: { ...input.rollback },
+      createdAt: now,
       updatedAt: now,
     };
-    const [updated] = await db
-      .update(sessionChanges)
-      .set({ changeData: JSON.stringify(refreshed) })
-      .where(
-        and(
-          eq(sessionChanges.id, existing.reviewId),
-          eq(sessionChanges.changeType, REVIEW_PENDING),
-        ),
-      )
-      .returning();
-    if (updated) return refreshed;
-    // Another backend moved the review while this manager was preparing its
-    // projection. Never create a second actionable review in that race.
-    const current = await getSessionReview(input.sessionId);
-    if (current) return current;
-    throw new Error('The pending session review changed while it was being updated');
-  }
-
-  const review: DurableSessionReview = {
-    version: 1,
-    reviewId: nanoid(16),
-    sessionId: input.sessionId,
-    status: 'pending',
-    changes: input.changes.map((change) => ({ ...change })),
-    projectRoot: input.projectRoot,
-    rollback: input.rollback,
-    createdAt: now,
-    updatedAt: now,
-  };
-  await db.insert(sessionChanges).values({
-    id: review.reviewId,
-    sessionId: review.sessionId,
-    changeType: REVIEW_PENDING,
-    changeData: JSON.stringify(review),
-    createdAt: new Date(now),
-  });
-  return review;
+    if (row) {
+      tx.update(sessionChanges).set({ changeData: JSON.stringify(review) })
+        .where(eq(sessionChanges.id, row.id)).run();
+    } else {
+      tx.insert(sessionChanges).values({
+        id: review.reviewId,
+        sessionId: review.sessionId,
+        changeType: REVIEW_PENDING,
+        changeData: JSON.stringify(review),
+        createdAt: new Date(now),
+      }).run();
+    }
+    return review;
+  }, { behavior: 'immediate' });
 }
 
 async function transitionReview(
@@ -238,28 +250,34 @@ async function transitionReview(
   now: number,
   resolutionReason?: string,
 ): Promise<DurableSessionReview | null> {
-  const updated: DurableSessionReview = {
-    ...review,
-    status: next,
-    updatedAt: now,
-    ...(next === 'accepted' || next === 'rejected' || next === 'terminalized'
-      ? { resolvedAt: now, ...(resolutionReason ? { resolutionReason } : {}) }
-      : {}),
-  };
-  const [row] = await db
-    .update(sessionChanges)
-    .set({
-      changeType: changeTypeFor(next),
-      changeData: JSON.stringify(updated),
-    })
-    .where(
-      and(
-        eq(sessionChanges.id, review.reviewId),
-        eq(sessionChanges.changeType, changeTypeFor(expected)),
-      ),
-    )
-    .returning();
-  return row ? updated : null;
+  return db.transaction((tx) => {
+    const row = tx.select().from(sessionChanges).where(and(
+      eq(sessionChanges.id, review.reviewId),
+      eq(sessionChanges.sessionId, review.sessionId),
+      eq(sessionChanges.changeType, changeTypeFor(expected)),
+    )).get();
+    if (!row) return null;
+    const current = parseReview(row.changeType, row.changeData);
+    if (!current || current.reviewRevision !== review.reviewRevision) return null;
+    const updated: DurableSessionReview = {
+      ...current,
+      status: next,
+      updatedAt: now,
+      ...(next === 'accepted' || next === 'rejected' || next === 'terminalized'
+        ? { resolvedAt: now, ...(resolutionReason ? { resolutionReason } : {}) }
+        : {}),
+    };
+    // Compare the stored snapshot as well as the status. In particular, never
+    // write a stale caller's contents over a refreshed pending publication.
+    const result = tx.update(sessionChanges).set({
+      changeType: changeTypeFor(next), changeData: JSON.stringify(updated),
+    }).where(and(
+      eq(sessionChanges.id, row.id),
+      eq(sessionChanges.changeType, changeTypeFor(expected)),
+      eq(sessionChanges.changeData, row.changeData),
+    )).returning().get();
+    return result ? updated : null;
+  }, { behavior: 'immediate' });
 }
 
 /** Claim the destructive reject path before any workspace mutation. */

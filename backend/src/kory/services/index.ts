@@ -2,6 +2,7 @@
 // Each service handles a single responsibility
 
 export { RoutingServiceEnhanced } from './RoutingServiceEnhanced';
+export { ManagerRoutingService } from './ManagerRoutingService';
 export {
   SmartRouterService,
   type SmartRoutingDecision,

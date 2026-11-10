@@ -23,6 +23,7 @@ function manager(rows: Map<string, any>, fallback: string) {
     workingDirectory: fallback,
     sessionWorkingDirs: new Map(),
     sessionWorkspacePreparations: new Map(),
+    sessionWorkspacePrepareFailures: new Map(),
     sessions: {
       get: async (id: string) => rows.get(id),
       update: async (id: string, updates: object, version: number) => {
@@ -55,7 +56,7 @@ test('sibling sessions resolve their persisted checkouts and missing checkout ne
   await expect(kory.resolveSessionWorkingDirectoryPublic('missing')).rejects.toThrow('unavailable');
 });
 
-test('concurrent first-use calls prepare and persist one legacy non-Git workspace', async () => {
+test('concurrent first-use calls resolve a legacy chat directly in its folder', async () => {
   const { source } = fixture();
   const rows = new Map([['legacy', { id: 'legacy', workingDirectory: source, version: 1 }]]);
   const kory = manager(rows, source);
@@ -64,7 +65,29 @@ test('concurrent first-use calls prepare and persist one legacy non-Git workspac
     kory.resolveSessionWorkingDirectoryPublic('legacy'),
   ]);
   expect(a).toBe(b);
-  expect(a).not.toBe(source);
-  expect(rows.get('legacy')!.version).toBe(2);
+  expect(a).toBe(source);
+  expect(rows.get('legacy')!.version).toBe(1);
   expect(await manager(rows, source).resolveSessionWorkingDirectoryPublic('legacy')).toBe(a);
+});
+
+test('retries a workspace after a transient directory outage instead of serving a stale failure', async () => {
+  const { root, source } = fixture();
+  const project = join(root, 'temporary-project');
+  mkdirSync(project);
+  const rows = new Map([['temporary', { id: 'temporary', workingDirectory: project, version: 1 }]]);
+  const kory = manager(rows, source);
+
+  expect(await kory.resolveSessionWorkingDirectoryPublic('temporary')).toBe(project);
+  rmSync(project, { recursive: true, force: true });
+  await expect(kory.resolveSessionWorkingDirectoryPublic('temporary')).rejects.toThrow('unavailable');
+  await expect(kory.resolveSessionWorkingDirectoryPublic('temporary')).rejects.toThrow(project);
+
+  writeFileSync(project, 'not a directory');
+  await expect(kory.resolveSessionWorkingDirectoryPublic('temporary')).rejects.toThrow('unavailable');
+  rmSync(project);
+
+  mkdirSync(project);
+  expect(await kory.resolveSessionWorkingDirectoryPublic('temporary')).toBe(project);
+  expect(rows.get('temporary')!.workingDirectory).toBe(project);
+  expect(rows.get('temporary')!.version).toBe(1);
 });

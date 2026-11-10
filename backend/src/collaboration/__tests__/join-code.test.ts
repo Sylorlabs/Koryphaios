@@ -30,7 +30,9 @@ describe('live team join-code exchange', () => {
     const before = lookups.length;
     for (const code of ['', 'short', 'AAAAAAAAA', 'ABCDEF01', '../ABCDE']) {
       await expect(resolveTeamJoinCode(code, relayUrl)).rejects.toMatchObject({
-        statusCode: 400, code: 'INVALID_JOIN_CODE', message: expect.stringContaining('Not a valid code'),
+        statusCode: 400,
+        code: 'INVALID_JOIN_CODE',
+        message: expect.stringContaining('Not a valid code'),
       });
     }
     expect(lookups.length).toBe(before);
@@ -38,25 +40,33 @@ describe('live team join-code exchange', () => {
 
   test('checks well-formed unknown codes against the relay', async () => {
     await expect(resolveTeamJoinCode('XXXXXXXX', relayUrl)).rejects.toMatchObject({
-      statusCode: 400, code: 'INVALID_JOIN_CODE',
+      statusCode: 400,
+      code: 'INVALID_JOIN_CODE',
     });
     expect(lookups).toContain('/code/XXXXXXXX');
   });
 
   test('normalizes valid codes and returns the actual signed invitation', async () => {
     expect(await resolveTeamJoinCode(' abcdefgh ', relayUrl)).toMatchObject({
-      sessionId: 'team-1', tierId: 'viewer', inviteUrl: expect.stringContaining('token=signed-invite'),
+      sessionId: 'team-1',
+      tierId: 'viewer',
+      inviteUrl: expect.stringContaining('token=signed-invite'),
     });
   });
 
   test('distinguishes relay outages and broken responses from invalid codes', async () => {
     await expect(resolveTeamJoinCode('ZZZZZZZZ', relayUrl)).rejects.toMatchObject({
-      statusCode: 503, code: 'RELAY_UNAVAILABLE',
+      statusCode: 503,
+      code: 'RELAY_UNAVAILABLE',
     });
     await expect(resolveTeamJoinCode('BBBBBBBB', relayUrl)).rejects.toMatchObject({
-      statusCode: 502, code: 'RELAY_INVALID_RESPONSE',
+      statusCode: 502,
+      code: 'RELAY_INVALID_RESPONSE',
     });
     await expect(resolveTeamJoinCode('ABCDEFGH', null)).rejects.toBeInstanceOf(RelayJoinError);
-    await expect(resolveTeamJoinCode('CCCCCCCC', relayUrl)).rejects.toMatchObject({ statusCode: 429, code: 'JOIN_CODE_RATE_LIMITED' });
+    await expect(resolveTeamJoinCode('CCCCCCCC', relayUrl)).rejects.toMatchObject({
+      statusCode: 429,
+      code: 'JOIN_CODE_RATE_LIMITED',
+    });
   });
 });

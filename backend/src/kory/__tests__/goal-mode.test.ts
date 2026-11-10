@@ -451,15 +451,7 @@ describe('Goal Mode checklist invariants', () => {
     }
   });
 
-  test('fails closed for cloud approval and never upgrades native CLI output', () => {
-    expect(goalProviderPolicy('jules')).toMatchObject({
-      allowed: false,
-      verification: 'remote-pending-review',
-    });
-    expect(goalProviderPolicy('jules', true)).toMatchObject({
-      allowed: true,
-      verification: 'remote-pending-review',
-    });
+  test('never upgrades native CLI output to verified evidence', () => {
     // Native CLI providers (claude, codex, kimicode) are 'unverified' when the
     // host has no OS-level filesystem isolation (Windows), but 'eligible' when
     // sandbox-exec/bwrap is available (macOS, Linux).
@@ -507,7 +499,6 @@ describe('Goal Mode checklist invariants', () => {
     mkdirSync(join(root, '.git'));
     const compiled = compilePrompt({
       role: 'worker',
-      mode: 'advanced',
       provider: 'openai',
       workingDirectory: root,
       taskContract: createTaskContract('Implement it', {

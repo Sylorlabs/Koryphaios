@@ -6,7 +6,9 @@ import {
   buildAntigravityHooks,
   buildAntigravitySettings,
   antigravityNativeToolEquivalent,
+  antigravityNativeToolRedirectReason,
   isAntigravitySafeNativeTool,
+  isAntigravityInternalReadPath,
 } from '../antigravity-permissions';
 
 describe('antigravity permission policy', () => {
@@ -15,7 +17,9 @@ describe('antigravity permission policy', () => {
     // Deny beats Ask beats Allow, so nothing here can be re-enabled by an
     // allow-rule or by an upstream default.
     expect(permissions.deny).toContain('command(*)');
-    expect(permissions.deny).toContain('unsandboxed(*)');
+    // agy 1.4.3 rejects unsandboxed(*) as an invalid resource. command(*) is
+    // the supported shell gate regardless of whether terminal sandboxing is on.
+    expect(permissions.deny).not.toContain('unsandboxed(*)');
     expect(permissions.deny).toContain('write_file(*)');
     expect(permissions.deny).toContain('read_url(*)');
     expect(permissions.deny).toContain('execute_url(*)');
@@ -86,6 +90,10 @@ describe('antigravity native tool mapping', () => {
       kind: 'kory',
       kory: 'kory__bash',
     });
+    expect(antigravityNativeToolEquivalent('RunCommand')).toEqual({
+      kind: 'kory',
+      kory: 'kory__bash',
+    });
     expect(antigravityNativeToolEquivalent('view_file')).toEqual({
       kind: 'kory',
       kory: 'kory__read_file',
@@ -107,7 +115,13 @@ describe('antigravity native tool mapping', () => {
   });
 
   test('allows only provider-local bookkeeping', () => {
-    for (const tool of ['finish', 'todo_write', 'manage_task', 'list_permissions', 'generate_image']) {
+    for (const tool of [
+      'finish',
+      'todo_write',
+      'manage_task',
+      'list_permissions',
+      'generate_image',
+    ]) {
       expect(isAntigravitySafeNativeTool(tool)).toBe(true);
       expect(antigravityNativeToolEquivalent(tool)).toEqual({ kind: 'safe' });
     }
@@ -116,6 +130,14 @@ describe('antigravity native tool mapping', () => {
 
   test('falls through to default-deny for anything unrecognized', () => {
     expect(antigravityNativeToolEquivalent('some_future_tool')).toEqual({ kind: 'unknown' });
+  });
+
+  test('describes the exact agy MCP dispatcher instead of a legacy alias', () => {
+    const reason = antigravityNativeToolRedirectReason('run_command', 'kory__bash');
+    expect(reason).toContain('call_mcp_tool');
+    expect(reason).toContain('ServerName="kory"');
+    expect(reason).toContain('ToolName="kory__bash"');
+    expect(reason).not.toContain('kory_bash');
   });
 });
 
@@ -147,6 +169,18 @@ describe('antigravity hooks file', () => {
     expect(raw.endsWith('\n')).toBe(true);
     expect(() => JSON.parse(raw)).not.toThrow();
   });
+  test('uses the host bridge interpreter when the target has no Node runtime', () => {
+    const parsed = JSON.parse(
+      buildAntigravityHooks({
+        hookScript: '/a.ts',
+        authFile: '/b',
+        runtime: '/private bun/bin/bun',
+      }),
+    );
+    expect(parsed['kory-permission-gate'].PreToolUse[0].hooks[0].command).toStartWith(
+      '"/private bun/bin/bun" ',
+    );
+  });
 });
 
 describe('antigravity bridge grant path', () => {
@@ -161,5 +195,66 @@ describe('antigravity bridge grant path', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  test('trusts internal mcp schema and brain step directories when antigravityHome is supplied', () => {
+    const settings = buildAntigravitySettings({
+      workspacePath: '/workspace/project',
+      antigravityHome: '/managed/agy-home',
+    });
+    expect(settings.trustedWorkspaces).toEqual([
+      '/workspace/project',
+      '/managed/agy-home/.gemini/antigravity-cli/mcp',
+      '/managed/agy-home/.gemini/antigravity-cli/brain',
+    ]);
+    expect(settings.permissions.allow).toContain(
+      'read_file(/managed/agy-home/.gemini/antigravity-cli/mcp)',
+    );
+    expect(settings.permissions.allow).toContain(
+      'read_file(/managed/agy-home/.gemini/antigravity-cli/brain)',
+    );
+  });
+
+  test('allows internal read paths only under mcp/ and brain/, never oauth tokens', () => {
+    expect(
+      isAntigravityInternalReadPath(
+        '/Users/test/.koryphaios/antigravity-home/.gemini/antigravity-cli/mcp/kory/kory__read_file.json',
+      ),
+    ).toBe(true);
+    expect(
+      isAntigravityInternalReadPath(
+        '/Users/test/.koryphaios/antigravity-home/.gemini/antigravity-cli/brain/conv-123/.system_generated/steps/1/output.txt',
+      ),
+    ).toBe(true);
+    expect(
+      isAntigravityInternalReadPath(
+        '/Users/test/.koryphaios/antigravity-home/.gemini/antigravity-cli/antigravity-oauth-token',
+      ),
+    ).toBe(false);
+    expect(isAntigravityInternalReadPath('/workspace/project/src/index.ts')).toBe(false);
+  });
+
+  test('maps view_code_item and view_file_outline to kory__read_file', () => {
+    expect(antigravityNativeToolEquivalent('view_code_item')).toEqual({
+      kind: 'kory',
+      kory: 'kory__read_file',
+    });
+    expect(antigravityNativeToolEquivalent('view_file_outline')).toEqual({
+      kind: 'kory',
+      kory: 'kory__read_file',
+    });
+  });
+
+  test('forwards backendUrl into hook command when configured', () => {
+    const parsed = JSON.parse(
+      buildAntigravityHooks({
+        hookScript: '/a.js',
+        authFile: '/b.json',
+        backendUrl: 'http://127.0.0.1:4123',
+      }),
+    );
+    expect(parsed['kory-permission-gate'].PreToolUse[0].hooks[0].command).toContain(
+      '--backend-url "http://127.0.0.1:4123"',
+    );
   });
 });

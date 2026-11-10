@@ -10,6 +10,7 @@ import {
   KimiCodeCliBridge,
   getCliBridge,
   KORY_HARNESS_NOTE,
+  koryToolWhitelistForContext,
 } from '../cli-bridges';
 import type { SandboxPolicy } from '@koryphaios/shared';
 import { SANDBOX_PRESETS } from '@koryphaios/shared';
@@ -99,8 +100,8 @@ describe('sandboxToScopes', () => {
 // ─── Role-to-permission-mode translator ────────────────────────────────────
 
 describe('roleToPermissionMode', () => {
-  test('critic → plan', () => {
-    expect(roleToPermissionMode('critic', undefined)).toBe('plan');
+  test('critic → read-only', () => {
+    expect(roleToPermissionMode('critic', undefined)).toBe('read-only');
   });
 
   test('manager with readonly sandbox → read-only', () => {
@@ -213,6 +214,36 @@ describe('DevinCliBridge.buildAgentConfig', () => {
   });
 });
 
+describe('Kory CLI tool-name normalization', () => {
+  test('normalizes bare, kory-prefixed, and Claude MCP-prefixed names once', () => {
+    const ctx = {
+      ...makeCtx({ role: 'manager' }),
+      provider: 'devin' as const,
+      tools: [
+        { name: 'read_file', description: '', inputSchema: {} },
+        { name: 'kory__read_file', description: '', inputSchema: {} },
+        { name: 'mcp__kory__read_file', description: '', inputSchema: {} },
+        { name: 'kory__kory__bash', description: '', inputSchema: {} },
+      ],
+    };
+    expect(koryToolWhitelistForContext(ctx)).toEqual(['kory__bash', 'kory__read_file']);
+  });
+
+  test('critic context excludes shell, edit, and delegation tools', () => {
+    const ctx = {
+      ...makeCtx({ role: 'critic' }),
+      provider: 'devin' as const,
+      tools: [
+        { name: 'kory__read_file', description: '', inputSchema: {} },
+        { name: 'mcp__kory__bash', description: '', inputSchema: {} },
+        { name: 'kory__edit_file', description: '', inputSchema: {} },
+        { name: 'delegate_to_worker', description: '', inputSchema: {} },
+      ],
+    };
+    expect(koryToolWhitelistForContext(ctx)).toEqual(['kory__read_file']);
+  });
+});
+
 // ─── Claude Code bridge ────────────────────────────────────────────────────
 
 describe('ClaudeCodeCliBridge', () => {
@@ -237,6 +268,26 @@ describe('ClaudeCodeCliBridge', () => {
     });
     expect(scopes.deny).toContain('Edit');
     expect(scopes.deny).toContain('Bash');
+  });
+
+  test('critic allowlist uses exact MCP names and excludes shell/edit/delegation', () => {
+    const bridge = new ClaudeCodeCliBridge();
+    const scopes = bridge.buildPermissionScopes({
+      ...makeCtx({ sandbox: trustedSandbox, role: 'critic' }),
+      provider: 'claude',
+      tools: [
+        { name: 'mcp__kory__read_file', description: '', inputSchema: {} },
+        { name: 'kory__bash', description: '', inputSchema: {} },
+        { name: 'kory__edit_file', description: '', inputSchema: {} },
+        { name: 'kory__delegate_to_worker', description: '', inputSchema: {} },
+      ],
+    });
+    expect(scopes.allow).toContain('mcp__kory__read_file');
+    expect(scopes.allow).not.toContain('mcp__kory__kory__read_file');
+    expect(scopes.allow).not.toContain('mcp__kory__bash');
+    expect(scopes.allow).not.toContain('mcp__kory__edit_file');
+    expect(scopes.allow).not.toContain('mcp__kory__delegate_to_worker');
+    expect(scopes.allow).not.toContain('mcp__kory__*');
   });
 
   test('buildAgentConfig packages system prompt + harness note', () => {

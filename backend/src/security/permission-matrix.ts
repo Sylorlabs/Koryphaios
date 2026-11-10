@@ -9,6 +9,7 @@
  */
 
 import { koryLog } from '../logger';
+import { NOTE_WORKSPACE_TOOL_DEFINITIONS } from '@koryphaios/shared';
 
 export type PermissionLevel = 'auto' | 'ask' | 'block';
 
@@ -62,6 +63,7 @@ export const DEFAULT_PERMISSION_MATRIX: PermissionMatrix = {
   defaultLevel: 'ask',
 
   tools: {
+    ...Object.fromEntries(NOTE_WORKSPACE_TOOL_DEFINITIONS.map((tool) => [tool.name, { tool: tool.name, level: tool.category === 'read' ? 'auto' as const : 'ask' as const }])),
     // Read operations - safe
     read_file: { tool: 'read_file', level: 'auto' },
     glob: { tool: 'glob', level: 'auto' },
@@ -111,11 +113,6 @@ export const DEFAULT_PERMISSION_MATRIX: PermissionMatrix = {
       tool: 'delegate_to_worker',
       level: 'ask',
       conditions: { maxCost: 10.0 }, // Auto if under 10 cents
-    },
-    delegate_to_jules: {
-      tool: 'delegate_to_jules',
-      level: 'ask',
-      conditions: { maxCost: 10.0 },
     },
   },
 

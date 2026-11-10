@@ -35,6 +35,36 @@ afterEach(() => {
 });
 
 describe('WSManager canonical ordering', () => {
+  test('projects current run outcomes to unvisited chats without replaying their transcripts', () => {
+    const { sqlite, log } = createLog();
+    databases.push(sqlite);
+    setOrderedEventLogForTests(log);
+    const manager = new WSManager();
+    managers.push(manager);
+    const sent: string[] = [];
+    manager.add({
+      data: { id: 'sidebar-client' }, readyState: 1,
+      send: (value: string) => sent.push(value), close: () => {},
+    } as unknown as ServerWebSocket<WSClientData>);
+    manager.broadcastToSession('unvisited-chat', {
+      type: 'stream.delta', timestamp: 1,
+      payload: { agentId: 'kory-manager', content: 'private transcript' },
+    });
+    manager.broadcastToSession('unvisited-chat', {
+      type: 'run.state', timestamp: 2,
+      payload: { snapshot: { sessionId: 'unvisited-chat', revision: 2, phase: 'error' }, transition: { command: 'fail' } },
+    });
+    const delivered = sent.map((value) => JSON.parse(value));
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]).toMatchObject({
+      type: 'run.state', sessionId: 'unvisited-chat',
+      payload: { snapshot: { phase: 'error', revision: 2 }, transition: null },
+    });
+    expect(delivered[0].sequence).toBeUndefined();
+    expect(delivered[0].eventId).toBeUndefined();
+    expect(log.getAfter('unvisited-chat', 1, 0, 10)).toHaveLength(2);
+  });
+
   test('persists sequence before serializing and publishing to a subscribed client', () => {
     const { sqlite, log } = createLog();
     databases.push(sqlite);
@@ -164,6 +194,38 @@ describe('WSManager canonical ordering', () => {
     expect(replay.every((message) => message.replayed === true)).toBe(true);
   });
 
+  test('can subscribe to a fresh chat without replaying its old operational history', () => {
+    const { sqlite, log } = createLog();
+    databases.push(sqlite);
+    setOrderedEventLogForTests(log);
+    const manager = new WSManager();
+    managers.push(manager);
+
+    manager.broadcastToSession('session-1', {
+      type: 'stream.delta',
+      timestamp: 10,
+      payload: { agentId: 'kory-manager', content: 'old operational event' },
+    });
+
+    const sent: string[] = [];
+    const socket = {
+      data: { id: 'client-fresh-snapshot' },
+      readyState: 1,
+      send: (value: string) => sent.push(value),
+      close: () => {},
+    } as unknown as ServerWebSocket<WSClientData>;
+    manager.add(socket);
+    manager.subscribeClientToSession(
+      'client-fresh-snapshot',
+      'session-1',
+      undefined,
+      undefined,
+      false,
+    );
+
+    expect(sent).toHaveLength(0);
+  });
+
   test('can suppress stale actionable replay rows while preserving the ordered cursor', () => {
     const { sqlite, log } = createLog();
     databases.push(sqlite);
@@ -204,15 +266,28 @@ describe('WSManager canonical ordering', () => {
 
     expect(sent.map((value) => JSON.parse(value))).toEqual([
       expect.objectContaining({
+        type: 'session.replay_skipped',
+        sequence: 1,
+        epoch: 1,
+        payload: null,
+        replayed: true,
+      }),
+      expect.objectContaining({
+        type: 'session.replay_skipped',
+        sequence: 2,
+        epoch: 1,
+        payload: null,
+        replayed: true,
+      }),
+      expect.objectContaining({
         type: 'stream.delta',
         sequence: 3,
         replayed: true,
       }),
     ]);
 
-    // The suppressed rows were still consumed by the replay cursor. A later
-    // reconnect can therefore resume at the true sequence rather than looping
-    // forever over an intentionally non-actionable historical projection.
+    // Clients can apply the placeholders before sequence three and safely
+    // resume from that cursor without reviving the old question or review.
     const resumed: string[] = [];
     const resumeSocket = {
       data: { id: 'client-resumed' },

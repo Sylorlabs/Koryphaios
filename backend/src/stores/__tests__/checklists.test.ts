@@ -65,6 +65,16 @@ describe('checklist store', () => {
     expect(checklist.scope).toBe('workspace');
   });
 
+  test('scopes a checklist created inside a chat to that chat', async () => {
+    const checklist = await store.create({ title: 'Per-chat plan', sessionId: 'session-a' });
+    expect(checklist.scope).toBe('session');
+    expect(checklist.sessionId).toBe('session-a');
+    const here = await store.listVisible({ sessionId: 'session-a' });
+    const elsewhere = await store.listVisible({ sessionId: 'session-b' });
+    expect(here.map((entry) => entry.id)).toContain(checklist.id);
+    expect(elsewhere.map((entry) => entry.id)).not.toContain(checklist.id);
+  });
+
   test('rejects an empty title and a scope it cannot satisfy', async () => {
     await expect(store.create({ title: '   ' })).rejects.toThrow(/require a title/);
     await expect(store.create({ title: 'x', scope: 'project' })).rejects.toThrow(
@@ -164,6 +174,15 @@ describe('checklist tools', () => {
         expect(registry.isAllowedForRole(tool.name, role)).toBe(true);
       }
     }
+  });
+
+  test('an agent checklist stays inside the chat that asked for it', async () => {
+    const result = await run('create_checklist', { title: 'Agent plan' });
+    expect(result.isError).toBe(false);
+    const [created] = await store.list();
+    expect(created?.scope).toBe('session');
+    expect(created?.sessionId).toBe('session-1');
+    expect(await store.listVisible({ sessionId: 'another-chat' })).toEqual([]);
   });
 
   test('create returns an embed token so the transcript can render it', async () => {

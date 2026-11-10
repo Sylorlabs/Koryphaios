@@ -1,9 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import {
-  encodeHookDecision,
-  parseArgs,
-  readToolCall,
-} from '../kory-hook-bridge';
+import { encodeHookDecision, parseArgs, readToolCall, resolveHookAuthFile } from '../kory-hook-bridge';
+import { createKoryBridgeGrantLease } from '../bridge-grant';
 
 describe('hook bridge argument parsing', () => {
   const argv = (...extra: string[]) => ['node', 'bridge.ts', ...extra];
@@ -81,22 +78,24 @@ describe('hook bridge decision encoding', () => {
     // Claude Code (and Devin, whose binary parses `ClaudeHookSpecificOutput`)
     // ignore a top-level `decision` on PreToolUse and read this instead. The
     // top-level form is what silently let the native-tool gate never run.
-    expect(encodeHookDecision({ decision: 'block', reason: 'no' }, 'claude', 'PreToolUse')).toEqual({
-      hookSpecificOutput: {
-        hookEventName: 'PreToolUse',
-        permissionDecision: 'deny',
-        permissionDecisionReason: 'no',
+    expect(encodeHookDecision({ decision: 'block', reason: 'no' }, 'claude', 'PreToolUse')).toEqual(
+      {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: 'no',
+        },
       },
-    });
-    expect(
-      encodeHookDecision({ decision: 'approve', reason: '' }, 'claude', 'PreToolUse'),
-    ).toEqual({
-      hookSpecificOutput: {
-        hookEventName: 'PreToolUse',
-        permissionDecision: 'allow',
-        permissionDecisionReason: '',
+    );
+    expect(encodeHookDecision({ decision: 'approve', reason: '' }, 'claude', 'PreToolUse')).toEqual(
+      {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'allow',
+          permissionDecisionReason: '',
+        },
       },
-    });
+    );
   });
 
   test('uses hookSpecificOutput.decision.behavior for PermissionRequest', () => {
@@ -125,10 +124,9 @@ describe('hook bridge decision encoding', () => {
 
   test('never emits a decision agy would reject', () => {
     for (const internal of ['approve', 'block', 'ask', 'force_ask', 'anything']) {
-      const encoded = encodeHookDecision(
-        { decision: internal, reason: 'r' },
-        'antigravity',
-      ) as { decision: string };
+      const encoded = encodeHookDecision({ decision: internal, reason: 'r' }, 'antigravity') as {
+        decision: string;
+      };
       expect(['allow', 'deny']).toContain(encoded.decision);
     }
   });
@@ -139,5 +137,20 @@ describe('hook bridge decision encoding', () => {
       'antigravity',
     );
     expect(encoded.reason).toContain('kory__bash');
+  });
+
+  test('prefers a live KORY_BRIDGE_AUTH_FILE over a stale CLI --auth-file', () => {
+    const lease = createKoryBridgeGrantLease('session-live', 'worker');
+    try {
+      const grant = lease.grant(['hook:pre-tool']);
+      expect(resolveHookAuthFile('/stale/revoked/bridge-grant.json', grant.path)).toBe(
+        grant.path,
+      );
+      expect(resolveHookAuthFile('/cli/grant.json', '/missing/env-grant.json')).toBe(
+        '/cli/grant.json',
+      );
+    } finally {
+      lease.cleanup();
+    }
   });
 });

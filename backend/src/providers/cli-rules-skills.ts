@@ -134,7 +134,6 @@ export function buildKorySkills(): KorySkillContent[] {
         '',
         '## Delegation',
         '- kory__delegate_to_worker: Delegate a task to a Kory worker agent',
-        '- kory__delegate_to_jules: Delegate to Google Jules (cloud async)',
         '',
         '## Git',
         '- kory__commit_and_create_pr: Commit + create PR',

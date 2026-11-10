@@ -116,9 +116,6 @@ const PROVIDER_KEY: Record<string, string> = {
   // own key; the rest of the WorkBuddy catalog (GLM/DeepSeek/Kimi/MiniMax)
   // resolve through the cross-lab fallback in modelsDevKeysFor below.
   workbuddy: 'tencent-tokenhub',
-  // AutoClaw's local gateway serves the Z.ai GLM/DeepSeek model family;
-  // models.dev's 'zai' lab supplies context/reasoning enrichment.
-  autoclaw: 'zai',
   gitlab: 'gitlab',
   mistralai: 'mistral',
   cohere: 'cohere',
@@ -145,6 +142,24 @@ const GATEWAY_FALLBACK_PROVIDERS = new Set([
   'experientiallabs',
   'commandcode',
   'github-models',
+  // UnoRouter exposes a first-party catalog for its own models, but also routes
+  // upstream ids such as `openai/gpt-*` and `anthropic/claude-*`.
+  'unorouter',
+  // Respan is an OpenAI-compatible gateway with no models.dev key of its own.
+  'respan',
+  // Token Harbor, Logfare and APInex resell upstream labs under upstream
+  // model ids and publish no models.dev catalog of their own, so their
+  // reasoning ladders and limits resolve through the cross-lab fallback.
+  'tokenharbor',
+  'logfare',
+  'apinex',
+  'gwarden',
+  // Vyce AI is an OpenAI-compatible proxy over Claude, GPT, Gemini, DeepSeek
+  // and other upstream labs, and its authenticated /v1/models publishes the
+  // callable ids without context limits or a reasoning ladder. Without this
+  // entry every Vyce model had an estimated window and no reasoning picker;
+  // the cross-lab fallback resolves each id against its own lab's entry.
+  'vyceai',
   // Cline resells Anthropic/OpenAI/Google/xAI/DeepSeek/Mistral/Qwen models
   // under OpenRouter-style `provider/model` ids and has no models.dev key of
   // its own, so its reasoning tiers and limits resolve through the cross-lab
@@ -182,7 +197,10 @@ export function modelsDevKeysFor(providerName: string, kind?: string): string[] 
   // Multi-lab gateways without their own catalog key resolve through the
   // common upstream labs (Plan C); anything rarer falls through to the
   // full-catalog scan in applyModelsDevMetadata.
-  if (GATEWAY_FALLBACK_PROVIDERS.has(providerName)) return [...COMMON_LAB_KEYS];
+  if (GATEWAY_FALLBACK_PROVIDERS.has(providerName)) {
+    const ownKey = PROVIDER_KEY[providerName];
+    return ownKey ? [ownKey, ...COMMON_LAB_KEYS] : [...COMMON_LAB_KEYS];
+  }
   const key = PROVIDER_KEY[providerName];
   return key ? [key] : [];
 }
@@ -220,6 +238,7 @@ interface ModelsDevEntry {
   id: string;
   reasoning?: boolean;
   reasoning_options?: Array<{ type: string; values?: string[]; max?: number }>;
+  canonical_model_id?: string;
   limit?: { context?: number; output?: number };
   /** $ per million tokens, straight from models.dev. */
   cost?: { input?: number; output?: number; cache_read?: number; cache_write?: number };
@@ -522,7 +541,54 @@ export function applyModelsDevMetadata(
       }
     }
     if (!e) return m;
-    const levels = levelsFromOptions(e.reasoning_options);
+    // Some gateway catalogs (e.g. UnoRouter) publish thin stub entries that
+    // carry `reasoning: true` and a `canonical_model_id` pointing at the
+    // upstream lab, but no `reasoning_options` of their own. Inherit the
+    // reasoning effort tiers (and reasoning flag) from that canonical entry so
+    // the composer can actually offer a reasoning picker instead of silently
+    // hiding it. Context/output limits still come from the route's own entry.
+    let canonicalEntry: ModelsDevEntry | undefined;
+    const canonicalId =
+      typeof e.canonical_model_id === 'string' ? e.canonical_model_id.trim() : '';
+    if (canonicalId) {
+      const slash = canonicalId.indexOf('/');
+      if (slash > 0) {
+        const provKey = canonicalId.slice(0, slash).toLowerCase();
+        const modelKey = canonicalId.slice(slash + 1);
+        const providerBucket = cache?.[provKey]?.models;
+        if (providerBucket) {
+          canonicalEntry =
+            providerBucket[modelKey] ??
+            Object.values(providerBucket).find(
+              (entry) => entry?.id?.toLowerCase() === modelKey.toLowerCase(),
+            );
+          if (!canonicalEntry) {
+            const normalizedTarget = normalizeEntryId(modelKey);
+            canonicalEntry = Object.values(providerBucket).find(
+              (entry) => entry?.id && normalizeEntryId(entry.id) === normalizedTarget,
+            );
+          }
+        }
+      } else {
+        // No provider prefix: scan every lab for a matching model id.
+        if (cache) {
+          for (const prov of Object.values(cache)) {
+            const bucket = prov?.models;
+            if (!bucket) continue;
+            const hit =
+              bucket[canonicalId] ??
+              Object.values(bucket).find((entry) => entry?.id?.toLowerCase() === canonicalId.toLowerCase());
+            if (hit) {
+              canonicalEntry = hit;
+              break;
+            }
+          }
+        }
+      }
+    }
+    const canonicalLevels = canonicalEntry ? levelsFromOptions(canonicalEntry.reasoning_options) : undefined;
+    const canReason = e.reasoning === true || canonicalEntry?.reasoning === true;
+    const levels = levelsFromOptions(e.reasoning_options) ?? canonicalLevels;
     const ctx = e.limit?.context;
     // Image input is additive-only: when the lab reports it, advertise it so
     // vision pickers and attachment flows include the model. When the lab is
@@ -531,9 +597,15 @@ export function applyModelsDevMetadata(
     // makes the OpenAI path strip images up front.
     const imageInput =
       e.modalities?.input?.some((modality) => modality.toLowerCase() === 'image') === true;
+    // Output modalities are the lab's own statement of what the model can
+    // produce. They are the only evidence the image and video surfaces accept;
+    // a model name is never enough.
+    const outputModalities = e.modalities?.output?.length
+      ? [...new Set(e.modalities.output.map((modality) => modality.trim().toLowerCase()))]
+      : undefined;
     return {
       ...m,
-      ...(e.reasoning === true ? { canReason: true } : {}),
+      ...(canReason ? { canReason: true } : {}),
       // Fill-only: route-reported tiers and live-verified windows always beat
       // this third-party catalog (e.g. a gateway serving a model under a
       // smaller route limit than the lab's headline number). Without this, a
@@ -545,6 +617,9 @@ export function applyModelsDevMetadata(
         : {}),
       ...(e.limit?.output && e.limit.output > 0 ? { maxOutputTokens: e.limit.output } : {}),
       ...(imageInput ? { vision: true, supportsAttachments: true } : {}),
+      // Fill-only: a route that states its own output modalities is more
+      // authoritative than the lab's catalog row for the same model.
+      ...(!m.outputModalities?.length && outputModalities ? { outputModalities } : {}),
     };
   });
 }
@@ -578,7 +653,8 @@ export function getModelsDevPricing(
       const entry =
         entries[cand] ?? Object.values(entries).find((e) => e.id?.toLowerCase() === low);
       const c = entry?.cost;
-      if (c && typeof c.input === 'number' && typeof c.output === 'number') {
+      if (c && typeof c.input === 'number' && Number.isFinite(c.input) && c.input >= 0 &&
+        typeof c.output === 'number' && Number.isFinite(c.output) && c.output >= 0) {
         return {
           inPerM: c.input,
           outPerM: c.output,
@@ -589,12 +665,17 @@ export function getModelsDevPricing(
     }
     return null;
   };
-  const key = PRICING_PROVIDER_KEY[providerName];
-  const direct = key ? tryEntries(cache[key]?.models) : null;
+  const key = PRICING_PROVIDER_KEY[providerName] ?? providerName;
+  const entries = cache[key]?.models;
+  const direct = tryEntries(entries);
   if (direct) return direct;
-  for (const prov of Object.values(cache)) {
-    const hit = tryEntries(prov?.models);
-    if (hit) return hit;
+  // OpenRouter namespaces bare upstream IDs. Only accept an unambiguous
+  // suffix match, never another provider's rate for a similarly named model.
+  if (key === 'openrouter' && !modelId.includes('/') && entries) {
+    const matches = Object.values(entries).filter((entry) =>
+      entry.id?.toLowerCase().endsWith(`/${modelId.toLowerCase()}`),
+    );
+    if (matches.length === 1) return tryEntries({ [modelId]: matches[0] });
   }
   return null;
 }

@@ -1,3 +1,4 @@
+import { NOTE_TOOL_DEFINITIONS } from '@koryphaios/shared';
 import type { AgentSettings, SandboxSettings } from '../agent-settings';
 import { DEFAULT_SANDBOX_SETTINGS } from '../agent-settings';
 import { osSandboxAvailable } from '../security/os-sandbox';
@@ -86,6 +87,8 @@ export function resolveSandboxOptions(
 
 export interface ToolPermissionPolicy {
   mode: PermissionMode;
+  /** Planning is an interaction posture, not a permission preset. */
+  interactionMode?: 'act' | 'plan';
   autoRunTools: boolean;
   autoApplySafeFixes: boolean;
   confirmRiskyActions: boolean;
@@ -104,7 +107,8 @@ export type SubAgentApprovalMode = 'manager' | 'user' | 'auto';
 
 /** Resolve the effective permission policy for a sub-agent (worker).
  *
- *  - 'manager' → inherit the manager's permission preset (default; current behavior)
+ *  - 'manager' → Guarded workers can use manager review; other presets keep
+ *                their normal user-facing policy (default)
  *  - 'user'    → use the dedicated sub-agent-user mode: reads and searches are
  *                free, but file edits, risky tools, and bash prompt the user
  *  - 'auto'    → force YOLO mode so workers run with no approval prompts
@@ -155,12 +159,19 @@ export type ToolPermissionDecision =
   | { action: 'ask'; reason: string }
   | { action: 'deny'; reason: string };
 
-const INTERACTION_TOOLS = new Set(['ask_user', 'ask_manager']);
+// These tools only update conversation control-plane state. They never touch
+// the workspace or external systems, so they remain available regardless of
+// permission mode or an action-tool blocklist.
+const INTERACTION_TOOLS = new Set(['ask_user', 'ask_manager', 'rename_session', 'request_critic_review']);
 
 export const READ_ONLY_TOOLS = new Set([
+  'list_mcp_tools',
+  'list_linked_devices',
+  ...NOTE_TOOL_DEFINITIONS.filter((tool) => tool.category === 'read').map((tool) => tool.name),
   'git_inspect',
   'computer_status',
   'computer_list_apps',
+  'computer_list_elements',
   'computer_observe',
   'computer_wait',
   'computer_click',
@@ -219,7 +230,6 @@ const RISKY_TOOLS = new Set([
   'delete_file',
   'delete_note',
   'shell_manage',
-  'delegate_to_jules',
   'commit_and_create_pr',
   'git_switch',
   'manage_mcp_server',
@@ -230,12 +240,13 @@ export function resolveToolPermissionPolicy(
   settings: AgentSettings,
   interactionMode: 'act' | 'plan' = 'act',
 ): ToolPermissionPolicy {
-  const mode = (interactionMode === 'plan' ? 'plan' : settings.permissionMode) as PermissionMode;
+  const mode = settings.permissionMode;
   const tierEntry = settings.toolPermissionsByTier?.[mode as string];
   const fallbackAllow = settings.toolAllowlist ?? [];
   const fallbackBlock = settings.toolBlocklist ?? [];
   return {
     mode,
+    interactionMode,
     autoRunTools: settings.autoRunTools !== false,
     autoApplySafeFixes: settings.autoApplySafeFixes === true,
     confirmRiskyActions: settings.confirmRuleViolations !== false,
@@ -263,6 +274,17 @@ export function decideToolPermission(
     return { action: 'deny', reason: `Tool '${toolName}' is blocked by the tool blocklist` };
   }
 
+  // Planning is an interaction posture the host enforces itself: while the user
+  // is still planning, nothing that can mutate state may run, whatever the
+  // preset, allowlist, or per-tier Ask/Allow lists say. Reads stay available so
+  // the agent can investigate before proposing a plan.
+  if (policy.interactionMode === 'plan' && !READ_ONLY_TOOLS.has(toolName)) {
+    return {
+      action: 'deny',
+      reason: 'Planning mode blocked write-capable tool: switch to Act to make changes',
+    };
+  }
+
   // Explicit per-tier Ask beats the mode default (e.g. forcing a read-only
   // tool to prompt in Ask mode) but never overrides an explicit block.
   if (policy.toolAsklist?.includes(toolName)) {
@@ -275,6 +297,12 @@ export function decideToolPermission(
     return { action: 'allow', reason: `Tool '${toolName}' is on the tool allowlist` };
   }
 
+  // Chat organization is available in every mode, including Plan, without
+  // granting file writes or bypassing explicit per-tool block/ask settings.
+  if (toolName === 'rename_session') {
+    return { action: 'allow', reason: 'Session title metadata does not require approval' };
+  }
+
   const readOnly = READ_ONLY_TOOLS.has(toolName);
   const fileEdit = FILE_EDIT_TOOLS.has(toolName);
   const risky = RISKY_TOOLS.has(toolName);
@@ -285,11 +313,7 @@ export function decideToolPermission(
       change.linesChanged > policy.approvalThresholdLines),
   );
 
-  if (policy.mode === 'plan') {
-    return readOnly
-      ? { action: 'allow', reason: 'Read-only action in Plan mode' }
-      : { action: 'deny', reason: `Plan mode blocked write-capable tool ${toolName}` };
-  }
+  //
   if (policy.mode === 'yolo') {
     return { action: 'allow', reason: 'YOLO mode bypasses local approval prompts' };
   }

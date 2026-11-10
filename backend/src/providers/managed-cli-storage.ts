@@ -15,9 +15,17 @@ import {
 } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { homedir } from 'node:os';
-import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
+import { basename, dirname, relative, resolve } from 'node:path';
 import { PROJECT_ROOT } from '../runtime/paths';
+import {
+  hasHardLinks,
+  hasUnexpectedMode,
+  hasUnexpectedOwner,
+  isContainedBy,
+  isUnix,
+} from '../runtime/platform';
 import { ensureSecureDir } from '../security/fs-permissions';
+import { currentProviderExecutionScope } from './execution-scope';
 
 const HOME_MANAGED_CLI_ROOT = resolve(homedir(), '.koryphaios');
 const PROJECT_MANAGED_CLI_ROOT = resolve(PROJECT_ROOT, '.koryphaios');
@@ -36,18 +44,15 @@ type ManagedWriteOptions = {
   encoding?: BufferEncoding | null;
 };
 
-function isContainedBy(root: string, target: string): boolean {
-  const relation = relative(root, target);
-  return (
-    relation === '' ||
-    (!isAbsolute(relation) &&
-      relation !== '..' &&
-      !relation.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`))
-  );
-}
-
 function defaultManagedRoots(): string[] {
-  return [...new Set([HOME_MANAGED_CLI_ROOT, PROJECT_MANAGED_CLI_ROOT])];
+  const staged = currentProviderExecutionScope()?.antigravityHome;
+  return [
+    ...new Set([
+      HOME_MANAGED_CLI_ROOT,
+      PROJECT_MANAGED_CLI_ROOT,
+      ...(staged ? [resolve(staged)] : []),
+    ]),
+  ];
 }
 
 function resolveManagedRoot(path: string, options: ManagedCliStorageOptions): string {
@@ -70,8 +75,7 @@ function assertOwnedDirectory(path: string): void {
   if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
     throw new Error('Managed CLI directory target is not a real directory');
   }
-  const currentUid = process.getuid?.();
-  if (process.platform !== 'win32' && currentUid !== undefined && metadata.uid !== currentUid) {
+  if (hasUnexpectedOwner(metadata)) {
     throw new Error('Managed CLI directory has an unexpected owner');
   }
 }
@@ -80,14 +84,13 @@ function assertPrivateRegularMetadata(metadata: Stats): void {
   if (metadata.isSymbolicLink() || !metadata.isFile()) {
     throw new Error('Managed CLI file target is not a regular file');
   }
-  const currentUid = process.getuid?.();
-  if (process.platform !== 'win32' && currentUid !== undefined && metadata.uid !== currentUid) {
+  if (hasUnexpectedOwner(metadata)) {
     throw new Error('Managed CLI file has an unexpected owner');
   }
-  if (process.platform !== 'win32' && metadata.nlink > 1) {
+  if (hasHardLinks(metadata)) {
     throw new Error('Managed CLI file target has multiple hard links');
   }
-  if (process.platform !== 'win32' && (metadata.mode & 0o777) !== 0o600) {
+  if (hasUnexpectedMode(metadata, 0o600)) {
     throw new Error('Managed CLI file mode is not private');
   }
 }
@@ -128,11 +131,10 @@ function assertSafeManagedFile(path: string, options: ManagedCliStorageOptions):
   if (metadata.isSymbolicLink() || !metadata.isFile()) {
     throw new Error('Managed CLI file target is not a regular file');
   }
-  const currentUid = process.getuid?.();
-  if (process.platform !== 'win32' && currentUid !== undefined && metadata.uid !== currentUid) {
+  if (hasUnexpectedOwner(metadata)) {
     throw new Error('Managed CLI file has an unexpected owner');
   }
-  if (process.platform !== 'win32' && metadata.nlink > 1) {
+  if (hasHardLinks(metadata)) {
     throw new Error('Managed CLI file target has multiple hard links');
   }
   return target;
@@ -154,7 +156,8 @@ export function healManagedCliFile(path: string, options: ManagedCliStorageOptio
 }
 
 function syncManagedDirectory(path: string): void {
-  if (process.platform === 'win32') return;
+  // Windows has no directory fsync: opening a directory handle for read fails.
+  if (!isUnix()) return;
   const noFollow = constants.O_NOFOLLOW ?? 0;
   const directoryOnly = constants.O_DIRECTORY ?? 0;
   const fd = openSync(path, constants.O_RDONLY | noFollow | directoryOnly);
@@ -172,7 +175,6 @@ function atomicWritePrefix(target: string): string {
 function pruneStaleAtomicWrites(target: string, now = Date.now()): void {
   const parent = dirname(target);
   const prefix = atomicWritePrefix(target);
-  const currentUid = process.getuid?.();
   for (const entry of readdirSync(parent)) {
     if (!entry.startsWith(prefix)) continue;
     const candidate = resolve(parent, entry);
@@ -181,7 +183,7 @@ function pruneStaleAtomicWrites(target: string, now = Date.now()): void {
       if (
         metadata.isSymbolicLink() ||
         !metadata.isFile() ||
-        (process.platform !== 'win32' && currentUid !== undefined && metadata.uid !== currentUid) ||
+        hasUnexpectedOwner(metadata) ||
         now - metadata.mtimeMs < STALE_ATOMIC_WRITE_MS
       ) {
         continue;

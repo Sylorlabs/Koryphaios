@@ -52,6 +52,26 @@ const ENDPOINTS: Record<string, { url: string; auth: 'x-api-key' | 'bearer' | 'q
     url: 'https://api.experientiallabs.ai/v1/models',
     auth: 'bearer',
   },
+  tokenharbor: {
+    url: 'https://tokenharbor.ai/v1/models',
+    auth: 'bearer',
+  },
+  logfare: {
+    url: 'https://logfare.ai/v1/models',
+    auth: 'bearer',
+  },
+  apinex: {
+    url: 'https://api.apinex.bond/v1/models',
+    auth: 'bearer',
+  },
+  gwarden: {
+    url: 'https://gwarden.su/v1/models',
+    auth: 'bearer',
+  },
+  respan: {
+    url: 'https://api.respan.ai/api/v1/models',
+    auth: 'bearer',
+  },
   xai: {
     url: 'https://api.x.ai/v1/models',
     auth: 'bearer',

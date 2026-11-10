@@ -60,6 +60,32 @@ describe('Config Loading', () => {
     }
   });
 
+  test.each(['beginner', 'advanced'])(
+    'ignores the retired UI mode %s in config and environment',
+    (mode) => {
+      const previousMode = process.env.KORYPHAIOS_MODE;
+      try {
+        process.env.KORYPHAIOS_MODE = mode;
+        writeFileSync(
+          join(TEST_DIR, 'koryphaios.json'),
+          JSON.stringify({
+            mode,
+            enableCritic: true,
+            agentSettings: { permissionMode: 'ask', agentExecutionMode: 'single' },
+          }),
+        );
+        const config = loadConfig(TEST_DIR);
+        expect('mode' in config).toBe(false);
+        expect(config.enableCritic).toBe(true);
+        expect(config.agentSettings?.permissionMode).toBe('ask');
+        expect(config.agentSettings?.agentExecutionMode).toBe('single');
+      } finally {
+        if (previousMode === undefined) delete process.env.KORYPHAIOS_MODE;
+        else process.env.KORYPHAIOS_MODE = previousMode;
+      }
+    },
+  );
+
   test('merges partial safety config with defaults', async () => {
     const dir = getTestDir();
     mkdirSync(dir, { recursive: true });

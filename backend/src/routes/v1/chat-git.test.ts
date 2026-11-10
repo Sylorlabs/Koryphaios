@@ -12,7 +12,7 @@ const { initDb } = await import('../../db');
 const { localAuth } = await import('../../auth/local-auth');
 const { buildLocalBearerToken } = await import('../../auth/local-route-auth');
 const { errorHandler } = await import('../../middleware/error-handling');
-const { setContext } = await import('../../context');
+const { setContext, getContext } = await import('../../context');
 const { SessionStore } = await import('../../stores/session-store');
 const { createSessionWorkspace } = await import('../../kory/session-workspace');
 const { KoryManager } = await import('../../kory/manager');
@@ -23,6 +23,8 @@ const { ToolRegistry } = await import('../../tools/registry');
 const { registerGitTools } = await import('../../tools/git');
 const { decideToolPermission } = await import('../../tools/permission-policy');
 const { tryAcquireWorkspaceOperation } = await import('../../tools/workspace-operation-gate');
+const { sourceControlService } = await import('../../services/source-control-service');
+const { chatGitForSession } = await import('../../services/chat-git-service');
 const app = new Elysia().onError(errorHandler).use(gitRoutes);
 const sessions = new SessionStore();
 const source = join(root, 'source');
@@ -35,6 +37,10 @@ let processBusy = false;
 const released = mock(() => {});
 const processLease = spyOn(processSupervisor, 'tryAcquireAgentToolBarrier').mockImplementation(
   () => (processBusy ? null : { release: released }),
+);
+const chatFacade = sourceControlService.chat.bind(sourceControlService);
+const chatFacadeSpy = spyOn(sourceControlService, 'chat').mockImplementation((scope) =>
+  chatFacade(scope),
 );
 function git(cwd: string, ...args: string[]) {
   const result = Bun.spawnSync(['git', ...args], { cwd, stdout: 'pipe', stderr: 'pipe' });
@@ -70,6 +76,7 @@ beforeAll(async () => {
     workingDirectory: source,
     sessionWorkingDirs: new Map(),
     sessionWorkspacePreparations: new Map(),
+    sessionWorkspacePrepareFailures: new Map(),
     emitWSMessage: mock(() => {}),
   }) as InstanceType<typeof KoryManager>;
   setContext({
@@ -85,6 +92,7 @@ beforeAll(async () => {
 });
 afterAll(() => {
   processLease.mockRestore();
+  chatFacadeSpy.mockRestore();
   localAuth.dispose();
   rmSync(root, { recursive: true, force: true });
 });
@@ -123,28 +131,56 @@ describe('chat-scoped Git API and tools', () => {
     expect(second.data.branch).toBe('chat-b');
     expect(first.data.repositoryPath).toBe(a.path);
     expect(second.data.repositoryPath).toBe(b.path);
+    expect(chatFacadeSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: a.id, workspaceRoot: realpathSync(a.path) }),
+    );
   });
-  test('dirty legacy chats return the recovery reason as a conflict without rebinding', async () => {
-    // Seed a pre-isolation chat directly; normal creation already isolates it.
+  test('ordinary chats read and write the selected folder directly', async () => {
+    // Seed a chat without an explicit revision workspace.
     const legacy = await sessions.create('local-user', 'Legacy chat');
     await sessions.update(legacy.id, { workingDirectory: source });
     writeFileSync(join(source, 'unfinished.txt'), 'legacy draft');
-    const before = git(source, 'status', '--porcelain');
     try {
       for (const path of ['/chat', '/status']) {
         const response = await app.handle(request(path, legacy.id));
-        expect(response.status).toBe(409);
-        const body = await response.json();
-        expect(body.code).toBe('CONFLICT');
-        expect(body.error).toContain('unfinished or unreadable Git work');
-        expect(body.error).toContain('Commit or recover');
+        expect(response.status).toBe(200);
       }
       expect((await sessions.get(legacy.id))?.gitWorkspace).toBeUndefined();
-      expect(git(source, 'status', '--porcelain')).toBe(before);
+      expect(git(source, 'status', '--porcelain')).toContain('unfinished.txt');
+      expect(
+        (await app.handle(request('/stage', legacy.id, { file: 'unfinished.txt' }))).status,
+      ).toBe(200);
+      expect(git(source, 'diff', '--cached', '--name-only')).toContain('unfinished.txt');
       expect((await app.handle(request('/chat', a.id))).status).toBe(200);
     } finally {
+      git(source, 'reset', '--', 'unfinished.txt');
       rmSync(join(source, 'unfinished.txt'), { force: true });
     }
+  });
+  test('in-place access refuses a resolved directory that differs from the persisted binding', async () => {
+    const session = await sessions.create('local-user', 'Bound folder', undefined, source);
+    const resolver = spyOn(getContext().kory, 'resolveSessionWorkingDirectoryPublic')
+      .mockResolvedValue(b.path);
+    try {
+      await expect(chatGitForSession(session.id)).rejects.toThrow('binding changed');
+      expect(git(source, 'rev-parse', 'HEAD')).toBe(head);
+      expect(git(b.path, 'rev-parse', 'HEAD')).toBe(head);
+    } finally {
+      resolver.mockRestore();
+    }
+  });
+  test('returns a first-class non-repository state instead of failing Git inspection', async () => {
+    const plain = join(root, 'plain-folder');
+    mkdirSync(plain);
+    const session = await sessions.create('local-user', 'Plain folder');
+    await sessions.update(session.id, { workingDirectory: plain });
+
+    const response = await app.handle(request('/chat', session.id));
+    expect(response.status).toBe(200);
+    const value = await response.json();
+    expect(value.data.isRepo).toBe(false);
+    expect(value.data.branch).toBeNull();
+    expect(value.data.sourceRefs).toEqual([]);
   });
   test('stages and commits only the explicit chat and returns real commit failures', async () => {
     expect((await app.handle(request('/stage', undefined, { file: '.' }))).status).toBe(400);
@@ -307,7 +343,7 @@ describe('chat-scoped Git API and tools', () => {
     expect(git(a.path, 'branch', '--show-current')).toBe('agent-branch');
   });
 
-  test('Git inspection is read-only but switching asks in guarded mode and denies in plan mode', () => {
+  test('Git inspection is read-only but switching asks in guarded mode and denies in planning interaction', () => {
     const policy = {
       mode: 'guarded' as const,
       autoRunTools: true,
@@ -322,6 +358,8 @@ describe('chat-scoped Git API and tools', () => {
     };
     expect(decideToolPermission(policy, 'git_inspect').action).toBe('allow');
     expect(decideToolPermission(policy, 'git_switch').action).toBe('ask');
-    expect(decideToolPermission({ ...policy, mode: 'plan' }, 'git_switch').action).toBe('deny');
+    expect(decideToolPermission({ ...policy, interactionMode: 'plan' }, 'git_switch').action).toBe(
+      'deny',
+    );
   });
 });

@@ -95,6 +95,30 @@ describe('provider diagnostics upstream detail', () => {
     expect(classifyProviderDiagnostic(new Error('validation failed'), 422)).toBe('invalid_request');
   });
 
+  it('classifies a gateway payload rejection that arrives without a status', () => {
+    // Gwarden answers an already-open stream with this text and no HTTP status,
+    // so the request used to fall through to "retry or inspect provider status".
+    const diagnostic = safeProviderDiagnostic(
+      'gwarden',
+      'stream',
+      new Error('Error:The request is invalid. Please check the parameters.'),
+    );
+    expect(diagnostic.category).toBe('invalid_request');
+    const message = safeProviderFailureMessage('gwarden', diagnostic);
+    expect(message).toContain('rejected the request');
+    expect(message).not.toContain('inspect provider status');
+  });
+
+  it('classifies "could not be processed" as an invalid request, not a transient blip', () => {
+    const diagnostic = safeProviderDiagnostic(
+      'gwarden',
+      'stream',
+      new Error('Error:The request could not be processed.'),
+    );
+    expect(diagnostic.category).toBe('invalid_request');
+    expect(diagnostic.transient).toBe(false);
+  });
+
   it('classifies a conduit-style 413 route-limit envelope as context_limit', () => {
     const err = new Error(
       'Error:413 {"type":"error","error": {"type":"invalid_request_error","message":"The request exceeds this model route context limit. Reduce the request or select a model with a larger verified context window.","code":"contex...',
@@ -144,6 +168,14 @@ describe('transient stream error detection', () => {
     );
     expect(isTransientStreamErrorText('{"type":"overloaded_error"}')).toBe(true);
     expect(isTransientStreamErrorText('Please try again later')).toBe(true);
+  });
+
+  it('recognizes Omnirush’s temporary 426 outage wording as retryable', () => {
+    expect(
+      isTransientStreamErrorText(
+        'omnirush API error (426): 426 Omnirush is briefly unavailable and could not complete this request (tried 1 time, waited 1s) — please retry in a moment. [ref omr-b2b64215]',
+      ),
+    ).toBe(true);
   });
 
   it('leaves rejections and empty text alone', () => {

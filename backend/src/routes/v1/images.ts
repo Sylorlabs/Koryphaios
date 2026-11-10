@@ -25,6 +25,10 @@ import {
   resolveCapabilityConfig,
 } from '../../providers/capabilities';
 import {
+  detectMediaProviders,
+  type DetectedMediaProvider,
+} from '../../providers/modality-detection';
+import {
   KLING_IMAGE_MODELS,
   LUMA_IMAGE_MODELS,
   PRODIA_IMAGE_MODELS,
@@ -474,51 +478,42 @@ function isImageProviderConfigured(
   return Boolean((def.custom || def.endpointAuth) && config.baseUrl?.trim());
 }
 
-const DISCOVERED_IMAGE_MODEL_PATTERN =
-  /(flux|stable[-_ ]?diffusion|sdxl|sd3|sd15|diffus|dall|imagen|image)/i;
+/** Option defaults for a model the provider reports but we have no shape for. */
+const DETECTED_IMAGE_SIZES = ['1024x1024', 'auto'];
+const DETECTED_IMAGE_FORMATS = ['png', 'jpeg'];
 
 /**
- * Merge image-capable models discovered from the authenticated provider
- * (registry catalog cache — e.g. a local server's /v1/models) into the curated
- * list. Chat models are ignored; curated entries win over discovered duplicates.
+ * Which models a provider actually offers for images.
+ *
+ * The provider's own catalog decides. A declared entry (`def.models`) is only
+ * the request shape — sizes, qualities, formats, edit support — for a model id
+ * the provider reports, because a name pattern cannot tell an image model from
+ * a chat model and used to let text models into the picker.
+ *
+ * When the catalog publishes no modality data at all (many OpenAI-compatible
+ * endpoints list ids only), classification is impossible, so the declared
+ * catalog is the honest answer rather than an empty picker.
  */
-function mergeDiscoveredImageModels(def: ImageProviderDef): ImageModelDef[] {
-  // Capability adapters are absent from the chat provider registry, so there is
-  // no `/v1/models` catalog to merge — their model lists come from the adapter.
+function imageModelsForProvider(
+  def: ImageProviderDef,
+  detected: DetectedMediaProvider | undefined,
+): ImageModelDef[] {
+  // Capability adapters own their own submit/poll contract and are absent from
+  // the chat registry, so their model lists come from the adapter itself.
   if (def.adapter === 'capability-adapter') return def.models;
-  let registryProvider:
-    | {
-        listModels(): Array<{ id: string; name?: string; apiModelId?: string }>;
-      }
-    | undefined;
-  try {
-    registryProvider = getContext().providers.get(def.id);
-  } catch {
-    return def.models;
-  }
-  if (!registryProvider) return def.models;
-  let live: Array<{ id: string; name?: string; apiModelId?: string }> = [];
-  try {
-    live = registryProvider.listModels();
-  } catch (err: unknown) {
-    serverLog.debug(
-      { err: err instanceof Error ? err.message : String(err), provider: def.id },
-      'Image model discovery failed',
-    );
-    return def.models;
-  }
-  const curated = new Set(def.models.map((model) => model.id));
-  const discovered = live
-    .map((model) => {
-      const id = model.apiModelId?.trim() || model.id;
-      return { id, label: model.name?.trim() || id };
-    })
-    .filter(
-      (model): model is { id: string; label: string } =>
-        DISCOVERED_IMAGE_MODEL_PATTERN.test(model.id) && !curated.has(model.id),
-    )
-    .map((model) => ({ ...model, custom: true as const }));
-  return [...def.models, ...discovered];
+  if (!detected?.reportsModalities) return def.models;
+  const curated = new Map(def.models.map((model) => [model.id, model]));
+  return detected.models.map(({ id, label }) => {
+    const shape = curated.get(id);
+    if (shape) return { ...shape, label };
+    return {
+      id,
+      label,
+      sizes: DETECTED_IMAGE_SIZES,
+      formats: DETECTED_IMAGE_FORMATS,
+      custom: true,
+    };
+  });
 }
 
 function resolveImageProvider(
@@ -911,7 +906,9 @@ export function resolveImageModelSelection(
     ProviderSettingsConfig | undefined
   >;
   const definition = resolveImageProvider(provider, configs);
-  if (!definition || !mergeDiscoveredImageModels(definition).some((item) => item.id === model)) {
+  if (!definition) return undefined;
+  const detected = detectMediaProviders('image').find((entry) => entry.provider === definition.id);
+  if (!imageModelsForProvider(definition, detected).some((item) => item.id === model)) {
     return undefined;
   }
   return { provider, model };
@@ -1124,15 +1121,23 @@ export const imageRoutes = new Elysia({ prefix: '/api/images' })
       string,
       ProviderSettingsConfig | undefined
     >;
-    const defs = [...IMAGE_PROVIDERS, ...customImageProviders(configs)];
+    const detected = new Map(detectMediaProviders('image').map((entry) => [entry.provider, entry]));
+    const defs = [...IMAGE_PROVIDERS, ...customImageProviders(configs)]
+      .map((def) => ({ def, models: imageModelsForProvider(def, detected.get(def.id)) }))
+      // A provider whose catalog publishes output modalities but offers none for
+      // images cannot generate an image, so it is left out rather than offered
+      // with a model that would reject the request. Transport-only entries
+      // (local endpoints) declare no models and stay listed so they can be
+      // connected and then detected.
+      .filter(({ def, models }) => models.length > 0 || def.models.length === 0);
     return {
       ok: true,
-      data: defs.map((def) => ({
+      data: defs.map(({ def, models }) => ({
         id: def.id,
         label: def.label,
         adapter: def.adapter,
         configured: isImageProviderConfigured(def, configs[def.id]),
-        models: mergeDiscoveredImageModels(def).map((model) => ({
+        models: models.map((model) => ({
           id: model.id,
           label: model.label,
           sizes: model.sizes,
@@ -1142,6 +1147,11 @@ export const imageRoutes = new Elysia({ prefix: '/api/images' })
           edits: model.edits ?? false,
         })),
       })),
+      // Providers that can generate images but have no credential yet, so the UI
+      // can offer to connect them instead of hiding them.
+      unconnected: defs
+        .filter(({ def }) => !isImageProviderConfigured(def, configs[def.id]))
+        .map(({ def }) => def.id),
     };
   })
   .post('/generate', async ({ body }) => runStudioImageJob(body.jobId ?? randomUUID(), body), {

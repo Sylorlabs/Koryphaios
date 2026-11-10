@@ -32,6 +32,7 @@ import {
   safeProviderFailureMessage,
 } from './provider-diagnostics';
 import { buildProviderCliEnv } from './cli-environment';
+import { recordedToolIdentity, recordedToolInput, recordedToolName } from './recorded-tool';
 
 // ─── JSON-RPC types ────────────────────────────────────────────────────────
 
@@ -186,6 +187,7 @@ export class DevinAcpClient {
     if (!this.sessionId) throw new Error('No active ACP session');
     const msgId = randomUUID();
     const eventQueue: ProviderEvent[] = [];
+    const pendingTools = new Map<string, { name?: string; input: Record<string, unknown> }>();
     let resolveWait: (() => void) | null = null;
     let done = false;
 
@@ -198,6 +200,7 @@ export class DevinAcpClient {
           eventQueue.push({ type: 'thinking_delta', thinking: event.text });
           break;
         case 'tool_call':
+          pendingTools.set(event.toolCallId, recordedToolIdentity(recordedToolName({ name: event.toolName }), event.input));
           // Intercept: ask the caller whether to approve/block/rewrite.
           if (opts?.onToolCall) {
             opts
@@ -213,6 +216,8 @@ export class DevinAcpClient {
                     reason: 'Blocked by Koryphaios — use kory__ MCP tool instead.',
                   });
                 } else if (typeof decision === 'object' && 'rewrite' in decision) {
+                  const pending = pendingTools.get(event.toolCallId);
+                  if (pending) pending.input = decision.rewrite;
                   await this.sendNotification('tool/rewrite', {
                     toolCallId: event.toolCallId,
                     input: decision.rewrite,
@@ -231,21 +236,22 @@ export class DevinAcpClient {
             // Passthrough: auto-approve.
             this.sendNotification('tool/approve', { toolCallId: event.toolCallId });
           }
-          eventQueue.push({
-            type: 'tool_use_start',
-            toolCallId: event.toolCallId,
-            toolName: event.toolName,
-          });
+          // This CLI executes its own approved calls. Do not enqueue a Kory
+          // tool_use (which belongs to Kory's executable-tool loop).
           break;
-        case 'tool_result':
+        case 'tool_result': {
+          const pending = pendingTools.get(event.toolCallId);
+          pendingTools.delete(event.toolCallId);
           eventQueue.push({
             type: 'tool_executed',
-            toolName: '',
-            toolInput: '',
+            toolCallId: event.toolCallId,
+            toolName: pending?.name,
+            toolInput: JSON.stringify(pending?.input ?? {}),
             toolOutput: event.output,
             isError: event.isError,
           });
           break;
+        }
         case 'usage':
           eventQueue.push({
             type: 'usage_update',
@@ -410,8 +416,8 @@ export class DevinAcpClient {
         return {
           type: 'tool_call',
           toolCallId: String(params.toolCallId ?? ''),
-          toolName: String(params.toolName ?? ''),
-          input: (params.input as Record<string, unknown>) ?? {},
+          toolName: recordedToolName(params) ?? '',
+          input: recordedToolInput(params.input),
         };
       case 'event/tool_result':
         return {

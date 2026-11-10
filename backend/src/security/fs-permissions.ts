@@ -13,6 +13,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, realpathSync } from 'node:
 import { homedir, tmpdir } from 'node:os';
 import { dirname, parse, resolve } from 'node:path';
 import { serverLog } from '../logger';
+import { isWindows } from '../runtime/platform';
 
 export interface SecureDirectoryOptions {
   /**
@@ -38,7 +39,7 @@ function protectedDirectoryTargets(target: string): Set<string> {
 
   // tmpdir() may be a per-user directory on some platforms. These are still
   // shared Unix roots and must never be chmodded by application startup.
-  if (process.platform !== 'win32') targets.push('/tmp', '/var/tmp');
+  if (!isWindows()) targets.push('/tmp', '/var/tmp');
 
   return new Set(targets.flatMap((path) => [resolve(path), canonicalExistingPath(path)]));
 }
@@ -62,7 +63,7 @@ function assertOwnedPrivateDirectory(target: string): void {
     throw new Error(`Secure directory target is not a directory: ${target}`);
   }
 
-  if (process.platform === 'win32') return;
+  if (isWindows()) return;
 
   const currentUid = process.getuid?.();
   if (currentUid !== undefined && metadata.uid !== currentUid) {
@@ -100,7 +101,7 @@ export function ensureSecureDir(dir: string, options: SecureDirectoryOptions = {
     }
 
     const currentUid = process.getuid?.();
-    if (process.platform !== 'win32' && currentUid !== undefined && metadata.uid !== currentUid) {
+    if (!isWindows() && currentUid !== undefined && metadata.uid !== currentUid) {
       throw new Error(`Secure directory is not owned by the current user: ${target}`);
     }
   } else {

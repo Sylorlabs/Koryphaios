@@ -90,6 +90,30 @@ export class WSManager {
   private heartbeatInterval: Timer | null = null;
   private terminalRetryInterval: Timer | null = null;
   private isShutdown = false;
+  private readonly sessionEventListeners = new Map<string, Set<(message: WSMessage) => void>>();
+
+  /** In-process session consumers receive the same ordered stream as sockets,
+   * including lifecycle events published directly by the run coordinator. */
+  onSessionEvent(sessionId: string, listener: (message: WSMessage) => void): () => void {
+    const listeners = this.sessionEventListeners.get(sessionId) ?? new Set();
+    listeners.add(listener);
+    this.sessionEventListeners.set(sessionId, listeners);
+    return () => {
+      listeners.delete(listener);
+      if (!listeners.size) this.sessionEventListeners.delete(sessionId);
+    };
+  }
+
+  private notifySessionListeners(message: WSMessage): void {
+    if (!message.sessionId) return;
+    for (const listener of this.sessionEventListeners.get(message.sessionId) ?? []) {
+      try {
+        listener(message);
+      } catch (error) {
+        serverLog.error({ error, sessionId: message.sessionId }, 'Session event listener failed');
+      }
+    }
+  }
 
   constructor() {
     // Heartbeat checks for stale connections every 10s. This is a separate
@@ -184,7 +208,8 @@ export class WSManager {
   /**
    * Replays a session in sequence order. `replayFilter` may suppress stale
    * operational projections when a durable current-state lookup proves they
-   * are no longer actionable; the cursor still advances across skipped rows.
+   * are no longer actionable. Replace each filtered row with an ephemeral
+   * placeholder at that same sequence so ordered clients can advance safely.
    *
    * Replay honors the same backpressure guard as the live path: every event
    * goes through deliverToClient (never raw ws.send), pages are capped at
@@ -197,6 +222,7 @@ export class WSManager {
     sessionId: string,
     cursor?: { epoch?: number; sequence?: number },
     replayFilter?: (event: WSMessage) => boolean,
+    replayHistory = true,
   ) {
     const client = this.clients.get(clientId);
     if (!client) return;
@@ -214,16 +240,32 @@ export class WSManager {
     const log = getOrderedEventLog();
     const current = log.getCursor(sessionId);
     const epoch = current.epoch;
-    let after = cursor?.epoch === current.epoch ? Math.max(0, cursor?.sequence ?? 0) : 0;
+    // A freshly opened chat already loads its durable message/context
+    // projection over HTTP. Replaying the entire operational event log here
+    // only makes old tool/thinking rows stream in one by one and delays the
+    // recent conversation. Live events after this point still deliver normally.
+    let after = replayHistory
+      ? cursor?.epoch === current.epoch
+        ? Math.max(0, cursor?.sequence ?? 0)
+        : 0
+      : current.latestSequence;
     while (after < current.latestSequence) {
       const events = log.getAfter(sessionId, epoch, after, REPLAY_PAGE_SIZE);
       if (events.length === 0) break;
       for (const event of events) {
         if (client.ws.readyState !== 1) return;
-        if (!replayFilter || replayFilter(event)) {
-          const replayed = { ...event, replayed: true } satisfies WSMessage;
-          this.deliverToClient(client, replayed, JSON.stringify(replayed));
-        }
+        const replayed: WSMessage = !replayFilter || replayFilter(event)
+          ? { ...event, replayed: true }
+          : {
+              type: 'session.replay_skipped',
+              sessionId,
+              epoch: event.epoch,
+              sequence: event.sequence,
+              timestamp: event.timestamp,
+              payload: null,
+              replayed: true,
+            };
+        this.deliverToClient(client, replayed, JSON.stringify(replayed));
         after = event.sequence ?? after;
         // Same overload guard as the live path: stop flooding a slow client.
         // Queued terminal events drain on the retry timer; the client resumes
@@ -298,6 +340,7 @@ export class WSManager {
   broadcast(message: WSMessage) {
     if (message.sessionId && this.erasedSessions.has(message.sessionId)) return;
     const ordered = this.persist(message);
+    this.notifySessionListeners(ordered);
     const data = JSON.stringify(ordered);
     let successCount = 0;
 
@@ -332,12 +375,23 @@ export class WSManager {
   }
 
   private deliverPersistedToSession(sessionId: string, ordered: WSMessage): void {
+    this.notifySessionListeners(ordered);
     const data = JSON.stringify(ordered);
     let targetCount = 0;
 
     for (const [, client] of this.clients) {
       if (client.subscribedSessions.has(sessionId)) {
         if (this.deliverToClient(client, ordered, data)) targetCount++;
+      } else if (ordered.type === 'run.state') {
+        // Sidebar outcomes must stay live for unvisited chats too. Send only
+        // the current projection: no transcript, transition, or ordered cursor.
+        // A later real subscription still replays its durable history normally.
+        const payload = ordered.payload as { snapshot: unknown };
+        const projection = {
+          type: 'run.state', sessionId, timestamp: ordered.timestamp,
+          payload: { snapshot: payload.snapshot, transition: null },
+        } as WSMessage;
+        this.deliverToClient(client, projection, JSON.stringify(projection));
       }
     }
 
@@ -431,6 +485,7 @@ export class WSManager {
 
     serverLog.info({ clientCount: this.clients.size }, 'Shutting down WebSocket manager');
     this.isShutdown = true;
+    this.sessionEventListeners.clear();
 
     // Stop heartbeat and terminal-event retry timers.
     if (this.heartbeatInterval) {

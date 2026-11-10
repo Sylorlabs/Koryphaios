@@ -226,8 +226,13 @@ describe('runtime (inference) verification', () => {
       urls.length = 0;
 
       // Manage Models must stay cheap: no generation, no catalog re-probe.
-      await registry.setCredentials('openai', { selectedModels: ['gpt-4o-mini'] });
+      await registry.setCredentials(
+        'openai',
+        { selectedModels: ['gpt-4o-mini'] },
+        { preferenceOnly: true },
+      );
       expect(urls.filter((u) => u.includes('/chat/completions'))).toHaveLength(0);
+      expect(urls.filter((u) => u.includes('/models'))).toHaveLength(0);
     });
   });
 

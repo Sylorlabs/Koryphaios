@@ -42,7 +42,8 @@
  * built-in `call_mcp_tool` tool rather than one tool per server.
  */
 
-import { realpathSync } from 'node:fs';
+import { lstatSync, realpathSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 
 /** Native agy tools that carry no host authority and may always run. */
 const ANTIGRAVITY_SAFE_NATIVE_TOOLS = new Set([
@@ -71,9 +72,12 @@ const ANTIGRAVITY_NATIVE_TO_KORY: Record<string, string> = {
   multi_replace_file_content: 'kory__batch_edit',
   read_url_content: 'kory__web_fetch',
   replace_file_content: 'kory__edit_file',
+  read_file: 'kory__read_file',
   run_command: 'kory__bash',
   search_web: 'kory__web_search',
+  view_code_item: 'kory__read_file',
   view_file: 'kory__read_file',
+  view_file_outline: 'kory__read_file',
   write_to_file: 'kory__write_file',
 };
 
@@ -84,19 +88,85 @@ const ANTIGRAVITY_SUBAGENT_TOOLS = new Set([
   'send_message',
 ]);
 
+/** agy has emitted both snake_case step types and display-style names such as
+ * `RunCommand` in hook/result payloads. Normalize both forms before applying
+ * the Kory mapping so a display name cannot fall through to generic denial. */
+function normalizeAntigravityToolName(toolName: string): string {
+  return toolName
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[\s-]+/g, '_')
+    .toLowerCase();
+}
+
 export function isAntigravitySafeNativeTool(toolName: string): boolean {
-  return ANTIGRAVITY_SAFE_NATIVE_TOOLS.has(toolName.toLowerCase());
+  return ANTIGRAVITY_SAFE_NATIVE_TOOLS.has(normalizeAntigravityToolName(toolName));
 }
 
 export function antigravityNativeToolEquivalent(
   toolName: string,
 ): { kind: 'safe' } | { kind: 'delegate' } | { kind: 'kory'; kory: string } | { kind: 'unknown' } {
-  const name = toolName.toLowerCase();
+  const name = normalizeAntigravityToolName(toolName);
   if (ANTIGRAVITY_SAFE_NATIVE_TOOLS.has(name)) return { kind: 'safe' };
   const kory = ANTIGRAVITY_NATIVE_TO_KORY[name];
   if (kory) return { kind: 'kory', kory };
   if (ANTIGRAVITY_SUBAGENT_TOOLS.has(name)) return { kind: 'delegate' };
   return { kind: 'unknown' };
+}
+
+/**
+ * Give agy an executable recovery instruction when its native tool gate fires.
+ * A bare `kory__bash` name is not callable in agy's tool surface: agy exposes
+ * the Kory server through the single `call_mcp_tool` dispatcher. Naming the
+ * dispatcher and its exact envelope prevents the model from retrying the
+ * refused native call or inventing the legacy `kory_bash` spelling.
+ */
+export function antigravityNativeToolRedirectReason(nativeTool: string, koryTool: string): string {
+  return (
+    `Native agy tool ${JSON.stringify(nativeTool)} is denied and must not be retried. ` +
+    `Call call_mcp_tool with ServerName="kory", ToolName=${JSON.stringify(koryTool)}, ` +
+    'and Arguments containing the equivalent operation. ' +
+    'Koryphaios owns host tool execution and permission checks.'
+  );
+}
+
+function canonicalizeExistingAncestor(targetPath: string): string | null {
+  let cursor = resolve(targetPath);
+  const missing: string[] = [];
+  for (;;) {
+    try {
+      const stat = lstatSync(cursor);
+      if (stat.isSymbolicLink()) {
+        return resolve(realpathSync(cursor), ...missing);
+      }
+      return resolve(realpathSync(cursor), ...missing);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') return null;
+      const parent = dirname(cursor);
+      if (parent === cursor) return resolve(cursor, ...missing);
+      missing.unshift(basename(cursor));
+      cursor = parent;
+    }
+  }
+}
+
+/**
+ * Antigravity registers MCP tools as lazy (`call_mcp_tool`) and instructs the
+ * model to read `$GEMINI_DIR/antigravity-cli/mcp/<server>/<tool>.json` for tool
+ * schemas and `$GEMINI_DIR/antigravity-cli/brain/<id>/...` for spilled step
+ * outputs. Those two internal trees are read-only CLI metadata and never
+ * include sibling credential files (`antigravity-oauth-token`).
+ */
+export function isAntigravityInternalReadPath(rawPath: unknown): boolean {
+  if (typeof rawPath !== 'string' || !rawPath.trim()) return false;
+  const trimmed = rawPath.trim();
+  if (!trimmed.startsWith('/') || trimmed.includes('\0')) return false;
+  const resolved = resolve(trimmed);
+  const matchesInternalSubtree = (candidate: string): boolean =>
+    /(?:^|\/)\.gemini\/antigravity-cli\/(?:mcp|brain)\/[^/]/.test(candidate);
+  if (!matchesInternalSubtree(resolved)) return false;
+  const canonical = canonicalizeExistingAncestor(resolved);
+  return canonical !== null && matchesInternalSubtree(canonical);
 }
 
 /**
@@ -129,6 +199,8 @@ export interface AntigravityPermissionSettings {
 export interface AntigravitySettingsInput {
   /** Session workspace. Grants recursive read of exactly this tree. */
   workspacePath?: string | null;
+  /** Managed Antigravity home so agy can read its own lazy MCP schemas and brain step outputs. */
+  antigravityHome?: string | null;
 }
 
 /** `read_file` targets are matched literally against the path agy resolved, so
@@ -154,7 +226,9 @@ function readTarget(workspacePath: string): string {
  *
  * Everything Koryphaios owns execution of is in `deny`, so no stray allow-rule
  * or upstream default can re-enable it (Deny beats Ask beats Allow):
- *   - `command(*)` / `unsandboxed(*)` — native shell, in or out of the sandbox
+ *   - `command(*)` — native shell. Current agy releases reject the old
+ *     `unsandboxed(*)` resource name, so do not emit it: `command(*)` is the
+ *     supported shell gate for both sandboxed and unsandboxed execution.
  *   - `write_file(*)`               — native edits, which implicitly grant reads
  *   - `read_url(*)` / `execute_url(*)` — native web, including the browser agent
  *
@@ -174,13 +248,28 @@ export function buildAntigravitySettings(
 ): AntigravityPermissionSettings {
   const allow: string[] = ['mcp(kory/*)'];
   const trustedWorkspaces: string[] = [];
-  const workspace = input.workspacePath?.trim();
-  if (workspace) {
-    const canonical = readTarget(workspace);
-    if (canonical) {
+  const addReadableRoot = (candidatePath?: string | null) => {
+    const trimmed = candidatePath?.trim();
+    if (!trimmed) return;
+    const canonical = readTarget(trimmed);
+    if (!canonical) return;
+    if (!trustedWorkspaces.includes(canonical)) {
       trustedWorkspaces.push(canonical);
-      allow.push(`read_file(${canonical})`);
     }
+    const rule = `read_file(${canonical})`;
+    if (!allow.includes(rule)) {
+      allow.push(rule);
+    }
+  };
+
+  addReadableRoot(input.workspacePath);
+  const agyHome = input.antigravityHome?.trim();
+  if (agyHome) {
+    // Allow agy to read only its lazy MCP tool schema directory and brain step
+    // output directory — never the parent antigravity-cli root where the OAuth
+    // token file resides.
+    addReadableRoot(join(agyHome, '.gemini', 'antigravity-cli', 'mcp'));
+    addReadableRoot(join(agyHome, '.gemini', 'antigravity-cli', 'brain'));
   }
 
   return {
@@ -190,13 +279,7 @@ export function buildAntigravitySettings(
     enableTerminalSandbox: true,
     allowNonWorkspaceAccess: false,
     permissions: {
-      deny: [
-        'command(*)',
-        'unsandboxed(*)',
-        'write_file(*)',
-        'read_url(*)',
-        'execute_url(*)',
-      ],
+      deny: ['command(*)', 'write_file(*)', 'read_url(*)', 'execute_url(*)'],
       // Nothing can be asked headlessly; leaving this empty keeps `deny` the
       // single source of refusals instead of adding a second, softer path.
       ask: [],
@@ -210,6 +293,10 @@ export interface AntigravityHooksInput {
   hookScript: string;
   /** Per-turn bridge grant file that authenticates the hook callback. */
   authFile: string;
+  /** Host-resolved bridge interpreter; the headless runtime may be Bun-only. */
+  runtime?: string;
+  /** Optional explicit backend URL for the hook callback. */
+  backendUrl?: string;
 }
 
 const KORY_HOOK_NAME = 'kory-permission-gate';
@@ -230,10 +317,11 @@ const HOOK_TIMEOUT_SECONDS = 20;
  */
 export function buildAntigravityHooks(input: AntigravityHooksInput): string {
   const command = [
-    'node',
+    input.runtime ? JSON.stringify(input.runtime) : 'node',
     JSON.stringify(input.hookScript),
     '--auth-file',
     JSON.stringify(input.authFile),
+    ...(input.backendUrl ? ['--backend-url', JSON.stringify(input.backendUrl)] : []),
     '--event',
     'PreToolUse',
     '--decision-vocabulary',

@@ -57,6 +57,12 @@ export function cliResearchBoundary(provider: ProviderName | string): CliResearc
         nativeTools: [],
         reason: 'Cursor exposes no exact native tool visibility allowlist',
       };
+    case 'opencode':
+      return {
+        eligible: false,
+        nativeTools: [],
+        reason: 'OpenCode ACP plan mode is an interaction posture, not a machine-enforced native tool visibility allowlist',
+      };
     default:
       return {
         eligible: false,

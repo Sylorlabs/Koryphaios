@@ -21,7 +21,6 @@ describe('workflow architecture', () => {
     writeFileSync(join(root, 'AGENTS.override.md'), 'override-only-marker');
     const compiled = compilePrompt({
       role: 'manager',
-      mode: 'advanced',
       provider: 'openai',
       workingDirectory: root,
       taskContract: createTaskContract('fix the bug'),
@@ -52,14 +51,12 @@ describe('workflow architecture', () => {
     const contract = createTaskContract('answer the question');
     const anthropic = compilePrompt({
       role: 'manager',
-      mode: 'advanced',
       provider: 'claude',
       workingDirectory: root,
       taskContract: contract,
     });
     const google = compilePrompt({
       role: 'manager',
-      mode: 'advanced',
       provider: 'gemini-cli',
       workingDirectory: root,
       taskContract: contract,

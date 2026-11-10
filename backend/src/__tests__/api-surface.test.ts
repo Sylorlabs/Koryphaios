@@ -20,7 +20,6 @@ const { authRoutes } = await import('../routes/v1/auth');
 const { agentSettingsRoutes } = await import('../routes/v1/agent-settings');
 const { gitRoutes } = await import('../routes/v1/git');
 const { memoryRoutes } = await import('../routes/v1/memory');
-const { modeRoutes } = await import('../routes/v1/mode');
 const { spendRoutes } = await import('../routes/v1/spend');
 const { spendCapsRoutes } = await import('../routes/v1/spend-caps');
 const { billingRoutes } = await import('../routes/v1/billing');
@@ -58,7 +57,6 @@ const app = new Elysia()
   .use(agentSettingsRoutes)
   .use(gitRoutes)
   .use(memoryRoutes)
-  .use(modeRoutes)
   .use(spendRoutes)
   .use(spendCapsRoutes)
   .use(billingRoutes)
@@ -209,9 +207,6 @@ const protectedRoutes: RouteCheck[] = [
   { method: 'POST', path: '/api/memory/settings/reset' },
   { method: 'GET', path: '/api/memory/context?sessionId=s1' },
   { method: 'GET', path: '/api/memory/stats?sessionId=s1' },
-  { method: 'GET', path: '/api/mode' },
-  { method: 'PUT', path: '/api/mode', body: { mode: 'advanced' } },
-  { method: 'POST', path: '/api/mode/toggle' },
   { method: 'GET', path: '/api/spend/status?sessionId=s1' },
   { method: 'POST', path: '/api/spend/reset-session', body: { sessionId: 's1' } },
   { method: 'GET', path: '/api/spend-caps/config' },
@@ -285,6 +280,17 @@ async function request(check: RouteCheck): Promise<Response> {
 }
 
 describe('API surface verification', () => {
+  test('retired UI mode endpoints are unavailable', async () => {
+    for (const check of [
+      { method: 'GET', path: '/api/mode' },
+      { method: 'PUT', path: '/api/mode', body: { mode: 'advanced' } },
+      { method: 'POST', path: '/api/mode/toggle' },
+    ]) {
+      const response = await request(check);
+      expect(response.status).toBe(404);
+    }
+  });
+
   test('public endpoints respond successfully', async () => {
     const health = await request({ method: 'GET', path: '/api/health' });
     const project = await request({ method: 'GET', path: '/api/project' });

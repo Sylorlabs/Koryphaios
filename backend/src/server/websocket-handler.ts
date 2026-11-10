@@ -26,6 +26,7 @@ import {
   listPendingSessionReviewSessionIds,
 } from '../stores/session-review-store';
 import type { SessionRunCoordinator } from '../runs/session-run-coordinator';
+import { toolApprovalQueue } from '../tools/approval-queue';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -62,13 +63,16 @@ function isCurrentActionableReplay(
   event: WSMessage,
   questionId: string | undefined,
   reviewId: string | undefined,
+  reviewRevision: string | undefined,
 ): boolean {
   if (event.type === 'kory.ask_user') {
     return !!questionId && (event.payload as Partial<KoryAskUserPayload>).questionId === questionId;
   }
   if (event.type === 'session.changes') {
     return (
-      !!reviewId && (event.payload as Partial<KorySessionChangesPayload>).reviewId === reviewId
+      !!reviewId && !!reviewRevision &&
+      (event.payload as Partial<KorySessionChangesPayload>).reviewId === reviewId &&
+      (event.payload as Partial<KorySessionChangesPayload>).reviewRevision === reviewRevision
     );
   }
   return true;
@@ -169,7 +173,9 @@ export async function handleWSMessage(
                   ? initialPending.questionId
                   : undefined,
                 initialReview?.reviewId,
+                initialReview?.reviewRevision,
               ),
+            msg.replayHistory !== false,
           );
 
           // Re-read after subscription. If a question/review changed during
@@ -209,6 +215,7 @@ export async function handleWSMessage(
             const payload: KorySessionChangesPayload = {
               changes: review.changes,
               reviewId: review.reviewId,
+              reviewRevision: review.reviewRevision,
             };
             wsManager.sendToClientEphemeral(ws.data.id, {
               type: 'session.changes',
@@ -241,9 +248,23 @@ export async function handleWSMessage(
         }
         break;
 
+      case 'permission.response': {
+        const id = typeof msg.payload?.id === 'string' ? msg.payload.id : '';
+        const response = msg.payload?.response === 'granted' ? 'Allow once' : 'Reject';
+        const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : '';
+        if (sessionId && (await assertSessionAccess(sessionId))) {
+          toolApprovalQueue.respond(sessionId, id, response);
+        } else {
+          serverLog.warn({ sessionId, clientId: ws.data.id }, 'Unauthorized permission response');
+        }
+        break;
+      }
+
       case 'session.accept_changes':
         if (await assertSessionAccess(msg.sessionId)) {
-          await kory.handleSessionResponse(msg.sessionId, true);
+          await kory.handleSessionResponse(msg.sessionId, true, {
+            reviewId: msg.reviewId, reviewRevision: msg.reviewRevision,
+          });
         } else {
           serverLog.warn(
             { sessionId: msg.sessionId, clientId: ws.data.id },
@@ -254,7 +275,9 @@ export async function handleWSMessage(
 
       case 'session.reject_changes':
         if (await assertSessionAccess(msg.sessionId)) {
-          await kory.handleSessionResponse(msg.sessionId, false);
+          await kory.handleSessionResponse(msg.sessionId, false, {
+            reviewId: msg.reviewId, reviewRevision: msg.reviewRevision,
+          });
         } else {
           serverLog.warn(
             { sessionId: msg.sessionId, clientId: ws.data.id },

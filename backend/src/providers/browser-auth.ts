@@ -25,11 +25,22 @@ import {
   createGrokCLIAuthMarker,
   detectAntigravityCLILogin,
   createAntigravityCLIAuthMarker,
+  detectCodeBuddyCLILogin,
+  createCodeBuddyCLIAuthMarker,
+  detectOpenCodeCLILogin,
+  createOpenCodeCLIAuthMarker,
 } from './auth-utils';
 import type { ProviderName } from '@koryphaios/shared';
 
 export type BrowserAuthProvider =
-  'copilot' | 'codex-auth' | 'kimicode' | 'claude' | 'grok' | 'antigravity';
+  | 'copilot'
+  | 'codex-auth'
+  | 'kimicode'
+  | 'claude'
+  | 'grok'
+  | 'antigravity'
+  | 'codebuddy'
+  | 'opencode';
 
 const BROWSER_AUTH_PROVIDER_NAMES: ReadonlySet<BrowserAuthProvider> = new Set([
   'copilot',
@@ -38,6 +49,8 @@ const BROWSER_AUTH_PROVIDER_NAMES: ReadonlySet<BrowserAuthProvider> = new Set([
   'claude',
   'grok',
   'antigravity',
+  'codebuddy',
+  'opencode',
 ]);
 
 export function isBrowserAuthProvider(name: string): name is BrowserAuthProvider {
@@ -305,6 +318,32 @@ const BROWSER_AUTH_STRATEGIES: Record<BrowserAuthProvider, BrowserAuthStrategy> 
     completeNotLoggedInError:
       'No Grok Build login material was detected. Install grok and run "grok login" first.',
     completeLogLabel: 'Grok Build',
+  }),
+
+  opencode: cliLoginStrategy({
+    provider: 'opencode',
+    detect: detectOpenCodeCLILogin,
+    marker: createOpenCodeCLIAuthMarker,
+    startDetectedMessage:
+      'OpenCode login material detected locally. Account access remains unverified until the CLI runs.',
+    startNotLoggedInMessage:
+      'Install the opencode CLI and run "opencode auth login", then click Auth again to connect.',
+    completeNotLoggedInError:
+      'No OpenCode login material was detected. Install the opencode CLI and run "opencode auth login" first.',
+    completeLogLabel: 'OpenCode',
+  }),
+
+  codebuddy: cliLoginStrategy({
+    provider: 'codebuddy',
+    detect: detectCodeBuddyCLILogin,
+    marker: createCodeBuddyCLIAuthMarker,
+    startDetectedMessage:
+      'CodeBuddy CLI login material detected locally. Account access remains unverified until the CLI runs.',
+    startNotLoggedInMessage:
+      'Complete the interactive `codebuddy` login, then click Auth again. Note: the international endpoint (www.codebuddy.ai) is currently banned upstream — run `CODEBUDDY_COPILOT_INTERNET_ENVIRONMENT=internal codebuddy` to log in against the reachable endpoint.',
+    completeNotLoggedInError:
+      'No CodeBuddy CLI login material was detected. Complete the interactive `codebuddy` login first.',
+    completeLogLabel: 'CodeBuddy',
   }),
 
   antigravity: cliLoginStrategy({

@@ -65,6 +65,8 @@ const SECRET_PATTERNS: RegExp[] = [
  */
 export function safeUpstreamDetail(value: unknown, maxChars = UPSTREAM_DETAIL_MAX_CHARS): string {
   let text = rawDiagnosticText(value);
+  // This is SDK-generated fallback text, not a statement from the provider.
+  if (/^(?:[a-z]*Error:)?\d{3} status code \(no body\)$/i.test(text.trim())) return '';
   for (const pattern of SECRET_PATTERNS) text = text.replace(pattern, '[redacted]');
   text = text.replace(/\s+/g, ' ').trim();
   if (!text) return '';
@@ -79,9 +81,26 @@ function rawDiagnosticText(value: unknown): string {
   }
   if (value && typeof value === 'object') {
     const record = value as Record<string, unknown>;
-    const parts = [record.name, record.message, record.error, record.type, record.code]
+    const nestedError =
+      record.error && typeof record.error === 'object'
+        ? (record.error as Record<string, unknown>)
+        : undefined;
+    const nestedNestedError =
+      nestedError?.error && typeof nestedError.error === 'object'
+        ? (nestedError.error as Record<string, unknown>)
+        : undefined;
+    const parts = [
+      record.name,
+      record.message,
+      typeof record.error === 'string' ? record.error : undefined,
+      nestedError?.message,
+      typeof nestedError?.error === 'string' ? nestedError.error : undefined,
+      nestedNestedError?.message,
+      record.type,
+      record.code,
+    ]
       .filter((part): part is string => typeof part === 'string')
-      .slice(0, 6);
+      .slice(0, 8);
     return parts.join(':');
   }
   return value === undefined || value === null ? '' : String(value);
@@ -176,15 +195,38 @@ const TRANSIENT_STREAM_ERROR_TYPES = [
   'timeout_error',
 ];
 
+/**
+ * Prose a gateway uses to reject the request payload itself, often on an
+ * already-open stream where there is no HTTP status to classify against ("200
+ * OK" followed by `{"error":{"message":"Error:The request is invalid. Please
+ * check the parameters."}}`). Without these, such a rejection fell through to
+ * "request failed — retry or inspect provider status", which sends the user to
+ * Settings for a problem that is neither transient nor configuration-shaped.
+ */
+const INVALID_REQUEST_PHRASES = [
+  'request is invalid',
+  'invalid_request_error',
+  'invalid request',
+  'could not be processed',
+  'cannot be processed',
+  'check the parameters',
+  'invalid parameter',
+  'malformed request',
+  'bad request',
+  'unsupported parameter',
+];
+
 /** Untyped prose gateways use for the same server-side condition. */
 const TRANSIENT_STREAM_ERROR_PHRASES = [
   'service interruption',
   'temporary service',
   'internal error',
   'temporarily unavailable',
+  'briefly unavailable',
   'temporarily down',
   'temporary upstream service error',
   'please try again later',
+  'please retry in a moment',
   'try this request again',
 ];
 
@@ -306,6 +348,7 @@ export function classifyProviderDiagnostic(
     return 'permission';
   if (status === 400 || status === 404 || status === 409 || status === 422)
     return 'invalid_request';
+  if (INVALID_REQUEST_PHRASES.some((phrase) => text.includes(phrase))) return 'invalid_request';
   if (
     /\b(?:econnrefused|econnreset|enotfound|network|socket|dns|connection refused|fetch failed)\b/.test(
       text,
@@ -373,16 +416,19 @@ function providerLabel(provider: string): string {
     cursor: 'Cursor',
     devin: 'Devin',
     grok: 'Grok Build',
+    opencode: 'OpenCode',
+    codebuddy: 'CodeBuddy',
     openai: 'OpenAI',
     xai: 'xAI',
+    gwarden: 'Gwarden AI',
     nvidia: 'NVIDIA',
     moonshot: 'Moonshot',
     deepseek: 'DeepSeek',
     groq: 'Groq',
     togetherai: 'Together AI',
     zai: 'Z.ai',
-    workbuddy: 'Work Buddy',
-    autoclaw: 'AutoClaw',
+    workbuddy: 'WorkBuddy',
+    'workbuddy-desktop': 'WorkBuddy Desktop',
   };
   return labels[provider] ?? provider;
 }
@@ -413,7 +459,7 @@ export function safeProviderFailureMessage(
       return `${label} reported the request exceeds its context limit. Koryphaios shrinks skills, memory, tools, and history automatically and retries; if this persists, choose a larger-context model or shorten the latest input.`;
     case 'authentication':
       return withUpstreamDetail(
-        `${label} authentication failed.${options.authenticationAction ? ` ${options.authenticationAction}` : ' Reconnect the provider and retry.'}`,
+        `${label} authentication failed${diagnostic.status ? ` (HTTP ${diagnostic.status})` : ''}.${options.authenticationAction ? ` ${options.authenticationAction}` : ' Reconnect the provider and retry.'}`,
         diagnostic,
       );
     case 'rate_limit':

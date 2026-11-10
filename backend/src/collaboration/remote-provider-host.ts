@@ -39,7 +39,18 @@ const log = serverLog.child({ module: 'remote-provider-host' });
 // they cannot be served as pure inference to a remote client's filesystem.
 // They are advertised as `agentic: true` (offered in host-side "remote agentic"
 // mode) so the UI can present them honestly.
-const AGENTIC_PROVIDERS = new Set(['claude', 'codex', 'codex-auth', 'grok', 'antigravity', 'cursor', 'devin', 'freebuff', 'codebuff']);
+const AGENTIC_PROVIDERS = new Set([
+  'claude',
+  'codex',
+  'codex-auth',
+  'grok',
+  'antigravity',
+  'cursor',
+  'devin',
+  'freebuff',
+  'codebuff',
+  'opencode',
+]);
 
 export function isAgenticProvider(name: string): boolean {
   return AGENTIC_PROVIDERS.has(name);
@@ -127,7 +138,13 @@ const activeHosts = new Map<RelayClient, string>();
 export function refreshSharedCatalogs(): void {
   for (const [relay, name] of activeHosts) {
     if (relay.isConnected)
-      relay.broadcast({ type: 'provider-catalog', catalog: buildSharedCatalog(relay.policy?.hostName || name, relay.policy?.defaultTierId === 'models') });
+      relay.broadcast({
+        type: 'provider-catalog',
+        catalog: buildSharedCatalog(
+          relay.policy?.hostName || name,
+          relay.policy?.defaultTierId === 'models',
+        ),
+      });
   }
 }
 
@@ -224,8 +241,10 @@ export function toRemoteStreamRequest(
         imageInputOverride: { provider: payload.provider, model: payload.model },
       }),
     harnessRole: payload.harnessRole,
+    interactionMode: payload.interactionMode,
     promptManifestHash: payload.promptManifestHash,
     taskContractHash: payload.taskContractHash,
+    forceFreshConversation: payload.forceFreshConversation,
     signal,
     // Agentic turns run the CLI in the host sandbox; pure inference ignores it.
     workingDirectory: sandboxRoot,
@@ -254,7 +273,9 @@ async function handleInferenceRequest(
   }
   const inferenceOnly = tierId === 'models';
   if (inferenceOnly && (isAgenticProvider(payload.provider) || payload.projectSync)) {
-    fail('Model-sharing codes grant inference only. Native agents and host filesystem access are unavailable.');
+    fail(
+      'Model-sharing codes grant inference only. Native agents and host filesystem access are unavailable.',
+    );
     return;
   }
 
@@ -268,7 +289,9 @@ async function handleInferenceRequest(
     fail(`Model "${payload.model}" is not shared by this host.`);
     return;
   }
-  const advertised = buildSharedCatalog('Host', inferenceOnly).providers.find((provider) => provider.provider === payload.provider);
+  const advertised = buildSharedCatalog('Host', inferenceOnly).providers.find(
+    (provider) => provider.provider === payload.provider,
+  );
   if (!advertised?.models.some((model) => model.id === payload.model)) {
     fail('This model is not currently available from the host.');
     return;
@@ -324,15 +347,21 @@ async function handleInferenceRequest(
     // Agentic turn: land the guest's project in a host sandbox first.
     let sandboxRoot: string | undefined;
     if (agentic && payload.projectSync) {
-      sandboxRoot = await applyProjectSync(`${relay.currentSessionId}:${guestId}`, payload.provider, payload.projectSync);
+      sandboxRoot = await applyProjectSync(
+        `${relay.currentSessionId}:${guestId}`,
+        payload.provider,
+        payload.projectSync,
+      );
     }
     const request = toRemoteStreamRequest(payload, controller.signal, sandboxRoot);
     request.requiredProvider = payload.provider;
     if (inferenceOnly) {
       request.harnessRole = 'critic';
-      request.permissionMode = 'plan';
-      request.maxTokens = Math.min(payload.maxTokens ?? 4096,
-        advertised.models.find((model) => model.id === payload.model)?.maxOutputTokens ?? 8192);
+      request.interactionMode = 'plan';
+      request.maxTokens = Math.min(
+        payload.maxTokens ?? 4096,
+        advertised.models.find((model) => model.id === payload.model)?.maxOutputTokens ?? 8192,
+      );
     }
     if (agentic) request.sandbox = { ...sandbox, filesystemIsolation: true };
     const stream = getContext().providers.executeWithRetry(request, payload.provider as never);
@@ -374,7 +403,8 @@ export function startProviderHost(relay: RelayClient, hostName: string): () => v
       const tier = relay.policy?.accessTiers.find((item) => item.id === msg.role);
       if (tier?.permissions.useRemoteProviders)
         relay.sendToGuest(String(msg.guestId), {
-          type: 'provider-catalog', catalog: buildSharedCatalog(relay.policy?.hostName || hostName, msg.role === 'models'),
+          type: 'provider-catalog',
+          catalog: buildSharedCatalog(relay.policy?.hostName || hostName, msg.role === 'models'),
         });
       return;
     }

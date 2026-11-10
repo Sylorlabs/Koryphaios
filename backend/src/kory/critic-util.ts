@@ -127,5 +127,5 @@ export function formatMessagesForCritic(
     .filter(Boolean)
     .join('\n\n---\n\n');
   if (raw.length <= maxLength) return raw;
-  return raw.slice(0, maxLength) + '\n\n...[truncated]';
+  return '...[earlier evidence truncated]\n\n' + raw.slice(-maxLength);
 }

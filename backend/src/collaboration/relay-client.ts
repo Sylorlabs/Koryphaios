@@ -60,7 +60,10 @@ class HybridPeerTransport {
           this.receive({ ...message, guestId, tierId: peer.tierId, transport: 'p2p' });
         } catch (err: unknown) {
           // Malformed peer payloads can't be processed; relay fallback handles delivery.
-          log.debug({ err: err instanceof Error ? err.message : String(err), guestId }, 'Ignoring malformed peer payload');
+          log.debug(
+            { err: err instanceof Error ? err.message : String(err), guestId },
+            'Ignoring malformed peer payload',
+          );
         }
       });
     });
@@ -101,7 +104,10 @@ class HybridPeerTransport {
         delivered.push(guestId);
       } catch (err: unknown) {
         // P2P send failed; the relay fallback will deliver this message.
-        log.debug({ err: err instanceof Error ? err.message : String(err), guestId }, 'P2P channel send failed; relay fallback will deliver');
+        log.debug(
+          { err: err instanceof Error ? err.message : String(err), guestId },
+          'P2P channel send failed; relay fallback will deliver',
+        );
       }
     }
     return delivered;
@@ -110,10 +116,14 @@ class HybridPeerTransport {
   async closePeer(guestId: string) {
     const peer = this.peers.get(guestId);
     this.peers.delete(guestId);
-    if (peer) await peer.pc.close().catch((err: unknown) => {
-      // RTCPeerConnection.close() can throw if already closed — safe to ignore.
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err), guestId }, 'Peer connection close failed (may already be closed)');
-    });
+    if (peer)
+      await peer.pc.close().catch((err: unknown) => {
+        // RTCPeerConnection.close() can throw if already closed — safe to ignore.
+        serverLog.debug(
+          { err: err instanceof Error ? err.message : String(err), guestId },
+          'Peer connection close failed (may already be closed)',
+        );
+      });
   }
 
   async closeAll() {
@@ -136,12 +146,15 @@ export class RelayClient {
       const tier = this.activePolicy?.accessTiers.find((item) => item.id === tierId);
       if (!tier) return false;
       if (tier.id === 'models')
-        return ['provider-catalog', 'host-disconnected', 'session-ended'].includes(String(message.type));
+        return ['provider-catalog', 'host-disconnected', 'session-ended'].includes(
+          String(message.type),
+        );
       if (message.type === 'chat') return tier.permissions.viewChat;
       if (message.type === 'diff') return tier.permissions.viewDiffs;
       if (message.type === 'log') return tier.permissions.viewSystemMessages;
       if (message.type === 'agent-status') return tier.permissions.viewAgentStatus;
-      if (message.type === 'guest-joined' || message.type === 'guest-left') return tier.permissions.viewParticipants;
+      if (message.type === 'guest-joined' || message.type === 'guest-left')
+        return tier.permissions.viewParticipants;
       if (message.type === 'provider-catalog') return tier.permissions.useRemoteProviders === true;
       return false;
     },
@@ -207,7 +220,10 @@ export class RelayClient {
         h(msg);
       } catch (err) {
         // A single misbehaving handler must not break fan-out to the rest.
-        log.debug({ err: err instanceof Error ? err.message : String(err), msgType: msg.type }, 'Relay message handler threw; continuing to remaining handlers');
+        log.debug(
+          { err: err instanceof Error ? err.message : String(err), msgType: msg.type },
+          'Relay message handler threw; continuing to remaining handlers',
+        );
       }
     });
   }
@@ -250,10 +266,18 @@ export class RelayClient {
   async createInvite(tierId = 'viewer'): Promise<string> {
     if (!this.sessionId) throw new Error('No active relay session');
     if (tierId === 'models') {
-      const health = await fetch(`${this.config.relayUrl}/health`, { signal: AbortSignal.timeout(10_000) });
+      const health = await fetch(`${this.config.relayUrl}/health`, {
+        signal: AbortSignal.timeout(10_000),
+      });
       const data = await health.json().catch(() => null);
-      if (!health.ok || data?.capabilities?.modelOnlyIsolation !== true || data?.capabilities?.revocableInvites !== true)
-        throw new ValidationError('Update the collaboration relay to support isolated, revocable model sharing.');
+      if (
+        !health.ok ||
+        data?.capabilities?.modelOnlyIsolation !== true ||
+        data?.capabilities?.revocableInvites !== true
+      )
+        throw new ValidationError(
+          'Update the collaboration relay to support isolated, revocable model sharing.',
+        );
     }
     const res = await fetch(`${this.config.relayUrl}/session/${this.sessionId}/invite`, {
       method: 'POST',
@@ -342,9 +366,13 @@ export class RelayClient {
   /** Revoke invitations as well as disconnecting the private host transport. */
   async endSession() {
     if (this.sessionId) {
-      const res = await fetch(`${this.config.relayUrl}/session/${encodeURIComponent(this.sessionId)}`, {
-        method: 'DELETE', headers: { 'x-host-secret': this.config.hostSecret },
-      });
+      const res = await fetch(
+        `${this.config.relayUrl}/session/${encodeURIComponent(this.sessionId)}`,
+        {
+          method: 'DELETE',
+          headers: { 'x-host-secret': this.config.hostSecret },
+        },
+      );
       if (!res.ok) throw new Error('Could not revoke the model-sharing session');
     }
     await this.disconnect();
@@ -383,7 +411,10 @@ export class RelayClient {
           this.dispatch(msg);
         } catch (err) {
           // Malformed relay frames must not tear down the signaling socket.
-          log.debug({ err: err instanceof Error ? err.message : String(err) }, 'Relay frame parse failed; skipping');
+          log.debug(
+            { err: err instanceof Error ? err.message : String(err) },
+            'Relay frame parse failed; skipping',
+          );
         }
       });
 

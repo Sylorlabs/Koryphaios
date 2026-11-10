@@ -1,9 +1,9 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, describe, expect, mock, setSystemTime, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { KoryphaiosConfig, StoredMessage } from '@koryphaios/shared';
+import type { KoryphaiosConfig, SessionRunStatePayload, StoredMessage } from '@koryphaios/shared';
 import type { ProviderRegistry } from '../../providers';
 import type { IMessageStore } from '../../stores/message-store';
 import type { ISessionStore } from '../../stores/session-store';
@@ -16,10 +16,14 @@ import {
   SessionRunStore,
 } from '../../runs/session-run-store';
 import { KoryManager } from '../manager';
+import type { ManagerRunHandle, ManagerRunLifecycle } from './ManagerRunLifecycle';
 
 const directories: string[] = [];
 
-function createRunCoordinator(sessionIds: string | string[]): {
+function createRunCoordinator(
+  sessionIds: string | string[],
+  publish: ConstructorParameters<typeof SessionRunCoordinator>[1] = () => undefined,
+): {
   sqlite: Database;
   coordinator: SessionRunCoordinator;
 } {
@@ -60,7 +64,7 @@ function createRunCoordinator(sessionIds: string | string[]): {
   }
   return {
     sqlite,
-    coordinator: new SessionRunCoordinator(new SessionRunStore(sqlite), () => undefined),
+    coordinator: new SessionRunCoordinator(new SessionRunStore(sqlite), publish),
   };
 }
 
@@ -249,6 +253,124 @@ afterEach(() => {
 });
 
 describe('KoryManager turn admission', () => {
+  test('terminal publication waits for manager cleanup and immediately admits the next turn', async () => {
+    const sessionId = 'completion-cleanup-race';
+    const cleanupEntered = deferred();
+    const cleanupRelease = deferred();
+    const terminalPublished = deferred();
+    const publicationRelease = deferred();
+    let manager!: KoryManager;
+    let firstRunId: string;
+    let nextAdmission: ReturnType<KoryManager['reserveSessionTurn']> | undefined;
+    let busyAtTerminal: boolean | undefined;
+    const { sqlite, coordinator } = createRunCoordinator(sessionId, (_sid, message) => {
+      const { snapshot } = message.payload as SessionRunStatePayload;
+      if (snapshot.runId === firstRunId && snapshot.status === 'terminal') {
+        busyAtTerminal = manager.isSessionRunning(sessionId);
+        // Model a client sending as soon as Done is visible, even while the
+        // publisher has not yet acknowledged delivery of the old terminal.
+        nextAdmission = manager.reserveSessionTurn(sessionId, 'user_turn');
+        terminalPublished.resolve();
+        return publicationRelease.promise;
+      }
+    });
+    manager = createManager(coordinator);
+    const internal = manager as unknown as {
+      processTaskWithClaim(): Promise<void>;
+      requireRunHandle(sessionId: string): ManagerRunHandle;
+      runLifecycle: ManagerRunLifecycle;
+    };
+    // Reproduce the real manager's nested finish -> awaited finally ordering,
+    // without a provider, filesystem checkpoint, or wall-clock race.
+    internal.processTaskWithClaim = async () => {
+      const handle = internal.requireRunHandle(sessionId);
+      await internal.runLifecycle.phase(handle, 'streaming', 'answer_persisted');
+      try {
+        await internal.runLifecycle.finish(handle, 'complete', 'provider_turn_completed');
+      } finally {
+        cleanupEntered.resolve();
+        await cleanupRelease.promise;
+      }
+    };
+    let completion: ReturnType<KoryManager['dispatchAdmittedTask']> | undefined;
+    try {
+      const first = await manager.reserveSessionTurn(sessionId, 'user_turn');
+      firstRunId = first!.runId;
+      completion = manager.dispatchAdmittedTask(first!, { userMessage: 'First answer' });
+      // A buggy terminal publisher blocks before cleanup; release it to make
+      // the pre-fix failure deterministic rather than timing out.
+      await Promise.race([cleanupEntered.promise, terminalPublished.promise]);
+      expect(nextAdmission).toBeUndefined();
+      expect(coordinator.get(sessionId)).toMatchObject({ runId: firstRunId, status: 'active' });
+      expect(await manager.reserveSessionTurn(sessionId, 'user_turn')).toBeNull();
+
+      cleanupRelease.resolve();
+      await terminalPublished.promise;
+      expect(busyAtTerminal).toBe(false);
+      publicationRelease.resolve();
+      const next = await nextAdmission!;
+      expect(next).not.toBeNull();
+      expect(next!.runId).not.toBe(firstRunId);
+      await expect(completion).resolves.toMatchObject({ runId: firstRunId, status: 'completed' });
+      expect(manager.hasActiveSessionExecution(sessionId)).toBe(true);
+      expect(coordinator.get(sessionId)).toMatchObject({ runId: next!.runId, status: 'active' });
+      expect(await manager.reserveSessionTurn(sessionId, 'user_turn')).toBeNull();
+      await manager.rejectSessionTurn(next!, 'test_cleanup');
+    } finally {
+      cleanupRelease.resolve();
+      publicationRelease.resolve();
+      await completion;
+      await manager.shutdown();
+      sqlite.close();
+    }
+  });
+
+  test('admitted work stays busy through workflow cleanup, including outbox replay', async () => {
+    const sessionId = 'work-cleanup-race';
+    const published: SessionRunStatePayload[] = [];
+    const { sqlite, coordinator } = createRunCoordinator(sessionId, (_sid, message) => {
+      published.push(message.payload as SessionRunStatePayload);
+    });
+    const manager = createManager(coordinator);
+    const workEntered = deferred();
+    const workRelease = deferred();
+    const cleanupEntered = deferred();
+    const cleanupRelease = deferred();
+    manager.updateWorkflowState = async () => {
+      cleanupEntered.resolve();
+      await cleanupRelease.promise;
+    };
+    let completion: Promise<void> | undefined;
+    try {
+      const first = await manager.reserveSessionTurn(sessionId, 'image_turn');
+      completion = manager.dispatchAdmittedWork(first!, async () => {
+        workEntered.resolve();
+        await workRelease.promise;
+      }, 'work_completed');
+      await workEntered.promise;
+      expect(await manager.reserveSessionTurn(sessionId, 'user_turn')).toBeNull();
+      expect(first!.signal.aborted).toBe(false);
+      workRelease.resolve();
+      await cleanupEntered.promise;
+      expect(await manager.reserveSessionTurn(sessionId, 'user_turn')).toBeNull();
+      await coordinator.drainOutbox();
+      expect(coordinator.get(sessionId)?.status).toBe('active');
+      expect(published.some(({ snapshot }) => snapshot.status === 'terminal')).toBe(false);
+      cleanupRelease.resolve();
+      await completion;
+      expect(coordinator.get(sessionId)?.phase).toBe('done');
+      const next = await manager.reserveSessionTurn(sessionId, 'user_turn');
+      expect(next).not.toBeNull();
+      await manager.rejectSessionTurn(next!, 'test_cleanup');
+    } finally {
+      workRelease.resolve();
+      cleanupRelease.resolve();
+      await completion;
+      await manager.shutdown();
+      sqlite.close();
+    }
+  });
+
   test('starts exactly one durable run before dispatching an admitted manager task', async () => {
     const sessionId = 'admitted-task';
     const { sqlite, coordinator } = createRunCoordinator(sessionId);
@@ -267,6 +389,32 @@ describe('KoryManager turn admission', () => {
         .map((row) => JSON.parse(row.payload).transition.command as string);
       expect(commands.filter((command) => command === 'start')).toHaveLength(1);
       expect(coordinator.get(sessionId)).toMatchObject({ status: 'terminal', phase: 'error' });
+    } finally {
+      await manager.shutdown();
+      sqlite.close();
+    }
+  });
+
+  test('recovers a durable active run with no local execution before admitting a new turn', async () => {
+    const sessionId = 'orphaned-active-run';
+    const { sqlite, coordinator } = createRunCoordinator(sessionId);
+    const manager = createManager(coordinator);
+    try {
+      const orphan = await coordinator.start(sessionId, 'user_turn');
+      expect(orphan.status).toBe('active');
+
+      const admission = await manager.reserveSessionTurn(sessionId, 'user_turn');
+
+      expect(admission).not.toBeNull();
+      expect(coordinator.get(sessionId)).toMatchObject({
+        runId: admission!.runId,
+        status: 'active',
+        phase: 'analyzing',
+      });
+      expect(admission!.runId).not.toBe(orphan.runId);
+      expect(orphan.terminalReason).toBeNull();
+
+      await manager.rejectSessionTurn(admission!, 'test_cleanup');
     } finally {
       await manager.shutdown();
       sqlite.close();
@@ -727,6 +875,88 @@ describe('KoryManager turn admission', () => {
       ).rejects.toThrow(/Agent thread not found/);
     } finally {
       provider.release();
+      await manager.shutdown();
+      sqlite.close();
+    }
+  });
+
+  test('a stop that times out force-releases a hung owner and admits the next turn', async () => {
+    const sessionId = 'hung-stop-admission';
+    const never = deferred();
+    const start = new Date('2026-11-03T20:00:00.000Z').getTime();
+    const { sqlite, coordinator } = createRunCoordinator(sessionId);
+    const manager = createManager(coordinator);
+    const internal = manager as unknown as {
+      processTaskWithClaim(): Promise<void>;
+      waitForSessionExecutionToSettle(): Promise<void>;
+    };
+    internal.processTaskWithClaim = (async () => {
+      await never.promise;
+    }) as never;
+    internal.waitForSessionExecutionToSettle = async () => {
+      throw new Error(`Session ${sessionId} cancellation timed out waiting for active work to settle`);
+    };
+    setSystemTime(start);
+    let completion: ReturnType<KoryManager['dispatchAdmittedTask']> | undefined;
+    try {
+      const first = await manager.reserveSessionTurn(sessionId, 'user_turn');
+      expect(first).not.toBeNull();
+      completion = manager.dispatchAdmittedTask(first!, { userMessage: 'Hang forever' });
+      manager.abortManagerRun(sessionId);
+      setSystemTime(start + 60_000);
+      await manager.cancelSessionWorkers(sessionId);
+      expect(coordinator.get(sessionId)).toMatchObject({
+        status: 'terminal',
+        phase: 'cancelled',
+        terminalReason: 'cancelled_by_user',
+      });
+      expect(manager.hasActiveSessionExecution(sessionId)).toBe(false);
+      const next = await manager.reserveSessionTurn(sessionId, 'user_turn');
+      expect(next).not.toBeNull();
+      expect(next!.runId).not.toBe(first!.runId);
+      await manager.rejectSessionTurn(next!, 'test_cleanup');
+    } finally {
+      setSystemTime();
+      never.resolve();
+      await completion;
+      await manager.shutdown();
+      sqlite.close();
+    }
+  });
+
+  test('admission reclaims a stale aborted run claim instead of rejecting forever', async () => {
+    const sessionId = 'stale-abort-recovery';
+    const never = deferred();
+    const start = new Date('2026-11-03T20:00:00.000Z').getTime();
+    const { sqlite, coordinator } = createRunCoordinator(sessionId);
+    const manager = createManager(coordinator);
+    const internal = manager as unknown as {
+      processTaskWithClaim(): Promise<void>;
+    };
+    internal.processTaskWithClaim = (async () => {
+      await never.promise;
+    }) as never;
+    setSystemTime(start);
+    let completion: ReturnType<KoryManager['dispatchAdmittedTask']> | undefined;
+    try {
+      const first = await manager.reserveSessionTurn(sessionId, 'user_turn');
+      expect(first).not.toBeNull();
+      completion = manager.dispatchAdmittedTask(first!, { userMessage: 'Hung owner' });
+      manager.abortManagerRun(sessionId);
+      // The owner never produced another durable transition.
+      setSystemTime(start + 60_000);
+      const next = await manager.reserveSessionTurn(sessionId, 'user_turn');
+      expect(next).not.toBeNull();
+      expect(next!.runId).not.toBe(first!.runId);
+      expect(coordinator.get(sessionId)).toMatchObject({
+        runId: next!.runId,
+        status: 'active',
+      });
+      await manager.rejectSessionTurn(next!, 'test_cleanup');
+    } finally {
+      setSystemTime();
+      never.resolve();
+      await completion;
       await manager.shutdown();
       sqlite.close();
     }

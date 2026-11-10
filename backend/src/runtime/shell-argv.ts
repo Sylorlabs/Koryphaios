@@ -29,8 +29,7 @@
 //     is the program's responsibility (most CLIs glob themselves).
 //   - tilde expansion — passed literally (~ stays ~).
 
-import { delimiter, join } from 'node:path';
-import { existsSync } from 'node:fs';
+import { findOnPath, looksLikePath } from './platform';
 
 export interface TokenizeResult {
   argv: string[];
@@ -246,29 +245,14 @@ export function tokenizeCommand(command: string): TokenizeResult {
  * Resolve a bare command name (e.g. "git") to an absolute path on PATH,
  * mirroring what a shell would do. Returns null when not found.
  *
- * Unlike runtime/shell.ts's `which`, this does NOT cache — the sandboxed
+ * Unlike runtime/shell.ts's resolution, this does NOT cache — the sandboxed
  * path is hot but not THAT hot, and a stale cache after a tool install
  * would be confusing.
  */
 export function resolveCommandPath(command: string): string | null {
   // Absolute or relative path: use as-is after normalization.
-  if (command.includes('/') || (process.platform === 'win32' && command.includes('\\'))) {
-    return command;
-  }
-  const PATH = process.env.PATH ?? '';
-  const exts = process.platform === 'win32' ? ['', '.exe', '.cmd', '.bat'] : [''];
-  for (const dir of PATH.split(delimiter)) {
-    if (!dir) continue;
-    for (const ext of exts) {
-      const full = join(dir, command + ext);
-      try {
-        // existsSync is fine; we don't need to stat for executability here
-        // because the OS will fail with EACCES if it's not executable.
-        if (existsSync(full)) return full;
-      } catch {
-        /* ignore */
-      }
-    }
-  }
-  return null;
+  if (looksLikePath(command)) return command;
+  // existsSync is fine; we don't need to stat for executability here because
+  // the OS will fail with EACCES if it isn't executable.
+  return findOnPath(command);
 }

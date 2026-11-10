@@ -3,7 +3,7 @@
 //
 // A stdio MCP server that exposes ALL Koryphaios tools as `kory__<tool>` MCP
 // tools. When a native CLI (devin, claude, codex, cursor, antigravity,
-// grok) is configured to use this server, the CLI calls `kory__read_file`,
+// grok, opencode) is configured to use this server, the CLI calls `kory__read_file`,
 // `kory__edit_file`, `kory__bash`, `kory__create_note`, `kory__delegate_to_worker`,
 // etc. instead of its own native tools. Every call is proxied to the Koryphaios
 // backend HTTP API (`POST /api/v1/mcp-bridge/execute`), which runs it through
@@ -28,12 +28,15 @@ import {
 } from '../tools/note-relationship-schema';
 import { validatedToolImages, type ToolImage } from '../tools/tool-images';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
+import { roleIncludesTool } from '../tools/tool-roles';
+import { MCP_DISCOVERY_SCHEMA, MCP_INVOCATION_SCHEMA } from '../tools/external-mcp-schemas';
 import { readBridgeGrantScopeFromFile, signedBridgeHeadersFromFile } from './bridge-grant';
 
 // Catalog startup should fail promptly; tools may wait for explicit human
 // approval. Neither deadline is unlimited and neither bypasses backend policy.
 export const BRIDGE_CATALOG_TIMEOUT_MS = 30_000;
 export const BRIDGE_EXECUTE_TIMEOUT_MS = 5 * 60_000;
+const bridgeProcessAbort = new AbortController();
 
 function relayHeaders(): Record<string, string> {
   const token = process.env.KORY_BRIDGE_RELAY_TOKEN;
@@ -46,6 +49,7 @@ export function parseArgs(argv: string[]): {
   sessionId: string;
   role: string;
   backendUrl: string;
+  backendId: string;
   authFile: string;
 } {
   const args: Record<string, string> = {};
@@ -65,9 +69,12 @@ export function parseArgs(argv: string[]): {
       args.backendUrl ||
       process.env.KORY_BACKEND_URL ||
       'http://127.0.0.1:3001',
+    backendId: args['backend-id'] || args.backendId || process.env.KORY_BACKEND_ID || 'local',
     authFile: args['auth-file'] || args.authFile || process.env.KORY_BRIDGE_AUTH_FILE || '',
   };
 }
+
+import { NOTE_WORKSPACE_TOOL_DEFINITIONS } from '@koryphaios/shared';
 
 // ─── Kory tool catalog ────────────────────────────────────────────────────
 // The name/role capability index for Koryphaios tools exposed to CLI harnesses.
@@ -83,10 +90,20 @@ export interface KoryToolDef {
 }
 
 export const KORY_TOOLS: KoryToolDef[] = [
+  {
+    name: 'kory__manage_review_agents', role: 'critic',
+    description: 'Manage specialists owned by this Critic review.',
+    inputSchema: { type: 'object', properties: {
+      action: { type: 'string', enum: ['list', 'message', 'cancel'] },
+      agentId: { type: 'string' }, message: { type: 'string' },
+    }, required: ['action'] },
+  },
+  ...NOTE_WORKSPACE_TOOL_DEFINITIONS.map((tool): KoryToolDef => ({ name: `kory__${tool.name}`, description: tool.description, inputSchema: { type: 'object' }, role: tool.category === 'read' ? 'any' : 'worker' })),
   // Runtime schemas/descriptions are fetched from the authoritative registry.
   ...[
     'status',
     'list_apps',
+    'list_elements',
     'observe',
     'click',
     'double_click',
@@ -140,7 +157,17 @@ export const KORY_TOOLS: KoryToolDef[] = [
   {
     name: 'kory__read_file',
     description: 'Read a file from the working directory.',
-    inputSchema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string' },
+        startLine: { type: 'number' },
+        endLine: { type: 'number' },
+        start_line: { type: 'number' },
+        end_line: { type: 'number' },
+      },
+      required: ['path'],
+    },
     role: 'any',
   },
   {
@@ -155,15 +182,17 @@ export const KORY_TOOLS: KoryToolDef[] = [
   },
   {
     name: 'kory__edit_file',
-    description: 'Edit a file by replacing old_string with new_string.',
+    description: 'Edit a file by replacing old_str with new_str.',
     inputSchema: {
       type: 'object',
       properties: {
         path: { type: 'string' },
+        old_str: { type: 'string' },
+        new_str: { type: 'string' },
         old_string: { type: 'string' },
         new_string: { type: 'string' },
       },
-      required: ['path', 'old_string', 'new_string'],
+      required: ['path'],
     },
     role: 'worker',
   },
@@ -559,13 +588,15 @@ export const KORY_TOOLS: KoryToolDef[] = [
   },
   {
     name: 'kory__prune_context',
-    description: 'Prune context segments to free token budget.',
+    description: 'Prune old tool output context. Managers use archive ids; workers and Critics can prune their own context with keepRecent.',
     inputSchema: {
       type: 'object',
-      properties: { segments: { type: 'array', items: { type: 'string' } } },
-      required: ['segments'],
+      properties: {
+        ids: { type: 'array', items: { type: 'string' } },
+        keepRecent: { type: 'number', minimum: 4, maximum: 100 },
+      },
     },
-    role: 'manager',
+    role: 'any',
   },
 
   // ── Checkpoints ──
@@ -581,6 +612,27 @@ export const KORY_TOOLS: KoryToolDef[] = [
   },
 
   // ── Interaction ──
+  {
+    name: 'kory__request_critic_review',
+    description: 'In Critic Auto mode, request an independent Critic review of your proposed answer.',
+    inputSchema: {
+      type: 'object',
+      properties: { reason: { type: 'string', minLength: 1, maxLength: 500 } },
+      required: ['reason'],
+      additionalProperties: false,
+    },
+    role: 'manager',
+  },
+  {
+    name: 'kory__rename_session',
+    description: 'Rename the current chat with a concise, descriptive title as its topic evolves.',
+    inputSchema: {
+      type: 'object',
+      properties: { title: { type: 'string' } },
+      required: ['title'],
+    },
+    role: 'manager',
+  },
   {
     name: 'kory__ask_user',
     description: 'Ask the user a question and wait for a response.',
@@ -616,16 +668,20 @@ export const KORY_TOOLS: KoryToolDef[] = [
     role: 'manager',
   },
   {
-    name: 'kory__delegate_to_jules',
-    description: 'Delegate a task to Google Jules (cloud async agent).',
+    name: 'kory__manage_agents',
+    description:
+      'List and control workers spawned in this chat: message, cancel, change controls, or prune context.',
     inputSchema: {
       type: 'object',
       properties: {
-        task: { type: 'string' },
-        createPr: { type: 'boolean' },
-        branch: { type: 'string' },
+        action: { type: 'string', enum: ['list', 'message', 'cancel', 'set_controls', 'prune_context'] },
+        agentId: { type: 'string' },
+        message: { type: 'string' },
+        model: { type: 'string' },
+        reasoningLevel: { type: 'string' },
+        keepRecent: { type: 'number', minimum: 2, maximum: 100 },
       },
-      required: ['task'],
+      required: ['action'],
     },
     role: 'manager',
   },
@@ -671,6 +727,18 @@ export const KORY_TOOLS: KoryToolDef[] = [
     role: 'any',
   },
 
+  {
+    name: 'kory__list_linked_devices',
+    description: 'List user-authorized linked desktops available to the session manager, with names, OS, and connectivity.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    role: 'manager',
+  },
+  {
+    name: 'kory__control_linked_device',
+    description: 'Route work to a user-authorized desktop through its Kory manager. Use workspace/session IDs discovered on that device, never local paths. Cannot approve remote prompts or change device grants.',
+    inputSchema: { type: 'object', properties: { deviceId: { type: 'string' }, operation: { type: 'string', enum: ['workspaces','folders','sessions','snapshot','create_chat','prompt','cancel'] }, input: { type: 'object', properties: { workspaceId: {type:'string'}, sessionId: {type:'string'}, title: {type:'string'}, content: {type:'string'} }, additionalProperties: false } }, required: ['deviceId','operation'], additionalProperties: false },
+    role: 'manager',
+  },
   // ── Goals ──
   {
     name: 'kory__create_goal',
@@ -1039,12 +1107,14 @@ export const KORY_TOOLS: KoryToolDef[] = [
   },
 
   // ── MCP server management ──
+  { name: 'kory__list_mcp_tools', description: 'Discover this project’s custom MCP tools and exact input schemas.', inputSchema: MCP_DISCOVERY_SCHEMA, role: 'worker' },
+  { name: 'kory__invoke_mcp_tool', description: 'Invoke a discovered custom MCP tool, including tools added mid-turn.', inputSchema: MCP_INVOCATION_SCHEMA, role: 'worker' },
   {
     name: 'kory__manage_mcp_server',
     description:
       'Manage user-pluggable MCP servers: list, add, update, remove, test-connect, or reload. ' +
       'Env vars (including tokens) are stored in the 0600 secret store, never in koryphaios.json. ' +
-      'Mutations are blocked in plan mode.',
+       'Mutations are blocked in planning interaction mode.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1067,18 +1137,11 @@ export const KORY_TOOLS: KoryToolDef[] = [
   },
 ];
 
-/** Filter tools by role. Critic gets read-only; worker gets build tools; manager gets all. */
+/** Match the authoritative ToolRegistry role filter without loading the backend. */
 export function toolsForRole(role: string): KoryToolDef[] {
   const r = role === 'coder' ? 'worker' : role;
   if (r !== 'manager' && r !== 'worker' && r !== 'critic') return [];
-  return KORY_TOOLS.filter((t) => {
-    const tr = t.role as string | undefined;
-    if (!tr || tr === 'any') return true;
-    if (r === 'critic') return tr === 'critic' || tr === 'any';
-    if (r === 'manager') return tr === 'manager' || tr === 'worker' || tr === 'any';
-    if (r === 'worker') return tr === 'worker' || tr === 'any';
-    return false;
-  });
+  return KORY_TOOLS.filter((tool) => roleIncludesTool(tool.name.replace(/^kory__/, ''), r, tool.role));
 }
 
 // ─── Backend proxy ─────────────────────────────────────────────────────────
@@ -1097,7 +1160,11 @@ export async function fetchAuthoritativeToolCatalog(
   }
   try {
     const path = '/api/v1/mcp-bridge/catalog';
-    const body = { sessionId: config.sessionId, role: config.role };
+    const body = {
+      sessionId: config.sessionId,
+      role: config.role,
+      target: { kind: 'local' as const, backendId: config.backendId },
+    };
     const response = await fetch(`${config.backendUrl}${path}`, {
       method: 'POST',
       headers: {
@@ -1107,7 +1174,7 @@ export async function fetchAuthoritativeToolCatalog(
       },
       body: JSON.stringify(body),
       redirect: 'error',
-      signal: AbortSignal.timeout(BRIDGE_CATALOG_TIMEOUT_MS),
+      signal: AbortSignal.any([bridgeProcessAbort.signal, AbortSignal.timeout(BRIDGE_CATALOG_TIMEOUT_MS)]),
     });
     if (!response.ok) throw new Error('Catalog request rejected');
     const payload = (await response.json()) as { tools?: unknown };
@@ -1157,6 +1224,7 @@ async function proxyToolCall(
       toolName: koryName,
       input,
       role: config.role,
+      target: { kind: 'local' as const, backendId: config.backendId },
     };
     const resp = await fetch(`${config.backendUrl}${path}`, {
       method: 'POST',
@@ -1167,7 +1235,7 @@ async function proxyToolCall(
       },
       body: JSON.stringify(body),
       redirect: 'error',
-      signal: AbortSignal.timeout(BRIDGE_EXECUTE_TIMEOUT_MS),
+      signal: AbortSignal.any([bridgeProcessAbort.signal, AbortSignal.timeout(BRIDGE_EXECUTE_TIMEOUT_MS)]),
     });
     if (!resp.ok) {
       return {
@@ -1200,6 +1268,45 @@ async function proxyToolCall(
 
 // ─── Server factory ────────────────────────────────────────────────────────
 
+const bridgeRegistrations = new WeakMap<McpServer, Map<string, { signature: string; remove(): void }>>();
+
+/** Reconcile the authenticated catalog using SDK registration handles. The SDK
+ * emits tools/list_changed for additions, removals and schema replacements. */
+export function updateBridgeToolCatalog(
+  server: McpServer,
+  tools: RuntimeKoryToolDef[],
+  proxy: (toolName: string, input: Record<string, unknown>) => Promise<{ content: string; isError: boolean; images?: ToolImage[] }>,
+): void {
+  const registrations = bridgeRegistrations.get(server)!;
+  const names = new Set(tools.map((tool) => tool.name));
+  for (const [name, registered] of registrations) {
+    if (!names.has(name)) { registered.remove(); registrations.delete(name); }
+  }
+  for (const tool of tools) {
+    const signature = JSON.stringify(tool);
+    const previous = registrations.get(tool.name);
+    if (previous?.signature === signature) continue;
+    previous?.remove();
+    registrations.delete(tool.name);
+    try {
+      const registered = server.registerTool(tool.name, {
+        description: tool.description, inputSchema: fromJsonSchema(tool.inputSchema),
+      }, async (args: unknown) => {
+        const result = await proxy(tool.name, (args ?? {}) as Record<string, unknown>);
+        return {
+          content: [
+            { type: 'text' as const, text: result.content },
+            ...(!result.isError ? validatedToolImages(result.images) : []).map((image) => ({ type: 'image' as const, ...image })),
+          ], isError: result.isError,
+        };
+      });
+      registrations.set(tool.name, { signature, remove: () => registered.remove() });
+    } catch (error) {
+      process.stderr.write(`[kory-mcp-bridge] skipped invalid tool schema ${tool.name}: ${error instanceof Error ? error.message : String(error)}\n`);
+    }
+  }
+}
+
 /**
  * Build a v2 McpServer wired with the bridge's tools via the high-level
  * registerTool API. Each tool's JSON Schema is wrapped with fromJsonSchema()
@@ -1216,49 +1323,36 @@ export function buildServer(
     toolName: string,
     input: Record<string, unknown>,
   ) => Promise<{ content: string; isError: boolean; images?: ToolImage[] }>,
+  options: { loadCatalog?: () => Promise<RuntimeKoryToolDef[]>; refreshIntervalMs?: number } = {},
 ): McpServer {
   const server = new McpServer(
     { name: 'kory-control-plane', version: '1.0.0' },
-    { capabilities: { tools: {} } },
+    { capabilities: { tools: { listChanged: true } } },
   );
 
-  const registeredNames = new Set<string>();
-  for (const tool of allowedTools) {
-    if (registeredNames.has(tool.name)) continue;
-    try {
-      server.registerTool(
-        tool.name,
-        {
-          description: tool.description,
-          inputSchema: fromJsonSchema(tool.inputSchema),
-        },
-        // fromJsonSchema wraps a raw JSON Schema; the SDK validates args against
-        // it before the handler runs, but the TypeScript type is `unknown` since
-        // JSON Schema carries no TS types. Cast to Record at the call site.
-        async (args: unknown) => {
-          const result = await proxy(tool.name, (args ?? {}) as Record<string, unknown>);
-          return {
-            content: [
-              { type: 'text' as const, text: result.content },
-              ...(!result.isError ? validatedToolImages(result.images) : []).map((image) => ({
-                type: 'image' as const,
-                ...image,
-              })),
-            ],
-            isError: result.isError,
-          };
-        },
-      );
-      registeredNames.add(tool.name);
-    } catch (error) {
-      // Catalog data is backend-authenticated but still runtime input. Skip a
-      // single invalid schema rather than taking down the whole stdio server.
-      process.stderr.write(
-        `[kory-mcp-bridge] skipped invalid tool schema ${tool.name}: ${
-          error instanceof Error ? error.message : String(error)
-        }\n`,
-      );
-    }
+  bridgeRegistrations.set(server, new Map());
+  let closed = false;
+  let pending: Promise<void> | undefined;
+  const refresh = (): Promise<void> => {
+    if (!options.loadCatalog || closed) return Promise.resolve();
+    return pending ??= options.loadCatalog().then((tools) => {
+      if (!closed) updateBridgeToolCatalog(server, tools, dispatch);
+    }).catch(() => {
+      // Retain only the last authenticated catalog on a transient failure.
+      // Every execution still authenticates against the current backend state.
+    }).finally(() => { pending = undefined; });
+  };
+  const dispatch: typeof proxy = async (name, input) => {
+    const result = await proxy(name, input);
+    if (name === 'kory__manage_mcp_server') await refresh();
+    return result;
+  };
+  updateBridgeToolCatalog(server, allowedTools, dispatch);
+  if (options.loadCatalog) {
+    const timer = setInterval(() => { void refresh(); }, options.refreshIntervalMs ?? 2_000);
+    timer.unref?.();
+    const previousClose = server.server.onclose;
+    server.server.onclose = () => { closed = true; clearInterval(timer); previousClose?.(); };
   }
 
   return server;
@@ -1271,6 +1365,13 @@ export const createBridgeServer = buildServer;
 // ─── Main ──────────────────────────────────────────────────────────────────
 
 export async function runBridge(): Promise<void> {
+  const onParentClosed = () => {
+    bridgeProcessAbort.abort();
+  };
+  process.stdin.once('end', onParentClosed);
+  process.stdin.once('close', onParentClosed);
+  process.once('SIGTERM', onParentClosed);
+  process.once('SIGINT', onParentClosed);
   const config = parseArgs(process.argv);
   try {
     const scope = readBridgeGrantScopeFromFile(config.authFile);
@@ -1299,7 +1400,9 @@ export async function runBridge(): Promise<void> {
   // high-level registerTool API using fromJsonSchema() for automatic
   // input validation of the dynamic backend-provided JSON Schemas.
   serveStdio(() =>
-    buildServer(allowedTools, (toolName, input) => proxyToolCall(config, toolName, input)),
+    buildServer(allowedTools, (toolName, input) => proxyToolCall(config, toolName, input), {
+      loadCatalog: () => fetchAuthoritativeToolCatalog(config),
+    }),
   );
   // stdout is reserved for the MCP channel; do not echo session or endpoint
   // metadata to inherited diagnostics.

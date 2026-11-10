@@ -16,8 +16,9 @@ import {
   ValidationError,
 } from '../../errors/types';
 import { SESSION } from '../../constants';
-import { GitWorkspace } from '../../kory/git-workspace';
-import { getRequestProjectRoot } from '../../runtime/request-project';
+import { sessionSettingsRoot } from '../../kory/session-workspace';
+import { listToolServerIdentities } from '../../mcp/server-service';
+import { koryMcpServerIdentity } from '../../providers/cli-bridges';
 import { timeTravelDegradedResponse, withSessionRecoveryGuard } from './session-recovery-guard';
 import {
   eraseSessionsCoordinated,
@@ -27,6 +28,9 @@ import {
   archiveSessionCoordinated,
   restoreSessionCoordinated,
 } from '../../services/session-archive-service';
+import { forkSessionAtMessage } from '../../services/session-fork-service';
+import { projectRootFromRequest } from '../../runtime/source-control-scope';
+import { sourceControlService } from '../../services/source-control-service';
 
 async function requireActiveSession(sessionId: string) {
   const { sessions } = getContext();
@@ -48,9 +52,12 @@ async function timeTravelForSession(sessionId: string) {
 export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
   .get('/', async ({ request }) => {
     if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
-    const { sessions } = getContext();
+    const { sessions, runs } = getContext();
     const list = await sessions.listActive();
-    return { ok: true, data: list };
+    // One lightweight durable projection hydrates all sidebar chats, including
+    // sessions never opened in this renderer. No worker history is inferred.
+    const runStates = list.map((session) => runs.store.getOrIdle(session.id));
+    return { ok: true, data: list, runStates };
   })
   .post(
     '/',
@@ -68,7 +75,10 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
         // A revision choice always creates an isolated, persistent checkout.
         // Never switch a directory which another chat/provider may be using.
         const workspace = body.git
-          ? await new GitWorkspace(getRequestProjectRoot(request)).create(body.git)
+          ? await sourceControlService.createChatWorkspace(
+              projectRootFromRequest(request),
+              body.git,
+            )
           : undefined;
         try {
           session = await sessions.create(
@@ -98,6 +108,12 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
         // Expected failure: CLI rules are supplementary, not request-critical.
         serverLog.warn({ err, sessionId: session.id }, 'Failed to write CLI rules + skills');
       }
+      getContext().wsManager.broadcastEphemeral({
+        type: 'session.updated',
+        sessionId: session.id,
+        timestamp: Date.now(),
+        payload: { session },
+      });
       return { ok: true, data: session };
     },
     {
@@ -187,7 +203,6 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
                 t.Literal('guarded'),
                 t.Literal('edits'),
                 t.Literal('ask'),
-                t.Literal('plan'),
                 t.Literal('custom'),
               ]),
             ),
@@ -195,6 +210,9 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
               t.Union([t.Literal('auto'), t.Literal('single'), t.Literal('multi')]),
             ),
             criticGateEnabled: t.Optional(t.Boolean()),
+            criticMode: t.Optional(
+              t.Union([t.Literal('auto'), t.Literal('always'), t.Literal('off')]),
+            ),
           }),
         }),
       ),
@@ -210,6 +228,44 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     const session = await restoreSessionCoordinated(id);
     return { ok: true, data: session };
   })
+  .post(
+    '/:id/fork',
+    async ({ request, params: { id }, body }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+      const creationLease = tryAcquireSessionCreationLease();
+      if (!creationLease) {
+        throw new ConflictError(
+          'Session creation is temporarily blocked while delete-all is finishing.',
+        );
+      }
+      let result;
+      try {
+        result = forkSessionAtMessage({ sourceSessionId: id, messageId: body.messageId });
+      } finally {
+        creationLease.release();
+      }
+      const { session } = result;
+      try {
+        writeAllCliRulesAndSkills(session.id, '');
+      } catch (err: unknown) {
+        // Expected failure: CLI rules are supplementary, not request-critical.
+        serverLog.warn({ err, sessionId: session.id }, 'Failed to write CLI rules + skills');
+      }
+      if (session.agentOverrides) setSessionAgentOverrides(session.id, session.agentOverrides);
+      getContext().wsManager.broadcastEphemeral({
+        type: 'session.updated',
+        sessionId: session.id,
+        timestamp: Date.now(),
+        payload: { session },
+      });
+      return { ok: true, data: session, copiedMessageCount: result.copiedMessageCount };
+    },
+    {
+      body: t.Object({
+        messageId: t.String({ minLength: 1, maxLength: 256 }),
+      }),
+    },
+  )
   .delete('/:id', async ({ request, params: { id } }) => {
     if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
     const result = await eraseSessionsCoordinated({ kind: 'selected', sessionId: id });
@@ -224,24 +280,40 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
       processes: await Promise.all(processes.map((process) => serializeProcess(process))),
     };
   })
-  .post('/:id/cancel', async ({ request, params: { id } }) => {
-    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
-    const { kory, wsManager } = getContext();
-    // Cancel all workers for this session
-    await getContext().goalDriver.pauseForSession(id);
-    await kory.cancelSessionWorkers(id);
-    // Cancel any LLM jobs for this session
-    const { cancelLLMJobsForSession } = await import('../../queue/workers/llm-worker');
-    await cancelLLMJobsForSession(id);
-    // Notify all clients about the cancellation
-    wsManager.broadcastToSession(id, {
-      type: 'system.info',
-      payload: { message: 'Session cancelled' },
-      timestamp: Date.now(),
-      sessionId: id,
-    });
-    return { ok: true, message: 'Session cancelled' };
-  })
+  .post(
+    '/:id/cancel',
+    async ({ request, params: { id }, body }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+      const { kory, wsManager } = getContext();
+      const steering = body?.purpose === 'steer';
+      // Cancel all workers for this session
+      await getContext().goalDriver.pauseForSession(id);
+      await kory.cancelSessionWorkers(id);
+      // Cancel any LLM jobs for this session
+      const { cancelLLMJobsForSession } = await import('../../queue/workers/llm-worker');
+      await cancelLLMJobsForSession(id);
+      // A steer is an intentional cancel-and-continuation handoff. Do not put a
+      // visible "Session cancelled" banner between the partial response and the
+      // replacement instruction; the authoritative run.state still records the
+      // old run as cancelled before the new run is admitted.
+      if (!steering) {
+        wsManager.broadcastToSession(id, {
+          type: 'system.info',
+          payload: { message: 'Session cancelled' },
+          timestamp: Date.now(),
+          sessionId: id,
+        });
+      }
+      return { ok: true, message: steering ? 'Session ready for steering' : 'Session cancelled' };
+    },
+    {
+      body: t.Optional(
+        t.Object({
+          purpose: t.Optional(t.Literal('steer')),
+        }),
+      ),
+    },
+  )
   .post(
     '/:id/compact',
     async ({ request, params: { id }, body }) => {
@@ -263,16 +335,38 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
       }),
     },
   )
-  .get('/:id/context', async ({ request, params: { id } }) => {
+  .get('/:id/context', async ({ request, params: { id }, query }) => {
     if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
     const { sessions, messages } = getContext();
-    if (!(await sessions.get(id))) throw new NotFoundError('Session', id);
+    // A chat is opened one page of messages at a time, so only the archived
+    // tool evidence belonging to that window is worth sending. Without this
+    // bound a reopened long chat carried the whole session's tool history
+    // (hundreds of rows at up to 4 KB each) to render a single page.
+    const sinceRaw = Number((query as { since?: string } | undefined)?.since);
+    const since = Number.isFinite(sinceRaw) && sinceRaw > 0 ? sinceRaw : undefined;
+    const session = await sessions.get(id);
+    if (!session) throw new NotFoundError('Session', id);
+    const sourceRoot = session.gitWorkspace?.repositoryPath ?? session.workingDirectory;
+    const mcpServers = sourceRoot ? listToolServerIdentities(sessionSettingsRoot(sourceRoot)) : [];
+    // CLI-harness providers inject the kory MCP bridge (kory__* tools) into
+    // their turns — it is not project configuration, so surface its identity
+    // here too. The session's provider comes from its most recent assistant
+    // message; this makes the injected tool surface visible in the feed
+    // (server identity, icons, labels) for every kory__ call the turn makes.
+    const recent = await messages.getRecent(id, 10);
+    const turnProvider = [...recent].reverse().find((m) => m.provider)?.provider;
+    const koryIdentity = turnProvider ? koryMcpServerIdentity(turnProvider) : null;
+    if (koryIdentity && !mcpServers.some((server) => server.name === koryIdentity.name)) {
+      mcpServers.push(koryIdentity);
+    }
     // Archived tool activity for this session — used to restore tool entries
     // in the feed after a reload (they're not part of the message history).
     const { getContextArchive, usageSnapshotMatchesBoundary } =
       await import('../../kory/context-archive');
     const archive = getContextArchive();
-    if (!archive) return { ok: true, data: [] };
+    // Return an explicit null snapshot so a client refreshing after a branch
+    // switch can clear usage measured against the previous active response.
+    if (!archive) return { ok: true, lastUsage: null, data: [], mcpServers };
     const [entries, lastUsage, boundary] = await Promise.all([
       archive.listRecent(id, 500),
       archive.getLastUsage(id),
@@ -281,17 +375,20 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     return {
       ok: true,
       lastUsage: usageSnapshotMatchesBoundary(lastUsage, boundary) ? lastUsage : null,
-      data: entries.map((e) => ({
+      mcpServers,
+      data: entries.filter((e) => since === undefined || e.ts >= since).map((e) => ({
         id: e.id,
         ts: e.ts,
         kind: e.kind,
         label: e.label,
+        toolInput: e.toolInput,
         content: e.content.slice(0, 4000),
         originalByteCount: e.originalByteCount,
         contentSha256: e.contentSha256,
         truncated: e.truncated,
         redacted: e.redacted,
         isError: e.isError,
+        ...(e.runRef ? { runRef: e.runRef } : {}),
         prunedForAgent: e.prunedForAgent === true,
       })),
     };

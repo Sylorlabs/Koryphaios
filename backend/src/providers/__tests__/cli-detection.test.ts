@@ -60,12 +60,15 @@ describe('detectAgentClis', () => {
     expect(list.map((c) => c.id).sort()).toEqual([
       'antigravity',
       'claude',
+      'codebuddy',
       'codex',
       'cursor',
       'devin',
       'freebuff',
       'grok',
       'kimi',
+      'omnirush',
+      'opencode',
     ]);
     const byId = Object.fromEntries(list.map((c) => [c.id, c]));
     expect(byId.claude.provider).toBe('claude');
@@ -73,6 +76,7 @@ describe('detectAgentClis', () => {
     expect(byId.antigravity.provider).toBe('antigravity');
     expect(byId.gemini).toBeUndefined(); // unsupported — never re-add
     expect(byId.grok.provider).toBe('grok'); // Grok Build has its own CLI-harness provider
+    expect(byId.codebuddy.provider).toBe('codebuddy'); // CodeBuddy CLI-harness provider
     expect(byId.cursor.provider).toBe('cursor'); // Cursor CLI harness provider
     expect(byId.devin.provider).toBe('devin'); // Devin CLI harness provider
   });
@@ -155,7 +159,7 @@ describe('login detectors (deterministic via temp HOME)', () => {
 });
 
 describe('canAutoEnable gate', () => {
-  it('rejects a stale login file when the CLI reports that it is logged out', () => {
+  it('keeps local discovery separate from explicit account verification', async () => {
     const bin = join(tmpHome, 'bin');
     mkdirSync(bin, { recursive: true });
     const claude = join(bin, 'claude');
@@ -168,8 +172,35 @@ describe('canAutoEnable gate', () => {
     writeFileSync(join(tmpHome, '.claude', '.credentials.json'), JSON.stringify({ oauth: true }));
     process.env.PATH = `${bin}${delimiter}${saved.PATH ?? ''}`;
 
-    expect(probeCliConnection(claude, 'claude')).toBe(false);
-    expect(canAutoEnable('claude')).toBe(false);
+    expect(canAutoEnable('claude')).toBe(true);
+    expect(await probeCliConnection(claude, 'claude')).toBe(false);
+  });
+
+  it('does not spawn the CLI during detection and keeps verification nonblocking', async () => {
+    const bin = join(tmpHome, 'bin');
+    mkdirSync(bin, { recursive: true });
+    const claude = join(bin, 'claude');
+    const marker = join(tmpHome, 'probed');
+    writeFileSync(
+      claude,
+      `#!/bin/sh\n/usr/bin/touch "${marker}"\n/bin/sleep 0.3\nprintf '{"loggedIn":true}\\n'\n`,
+    );
+    chmodSync(claude, 0o755);
+    mkdirSync(join(tmpHome, '.claude'), { recursive: true });
+    writeFileSync(join(tmpHome, '.claude', '.credentials.json'), JSON.stringify({ oauth: true }));
+    process.env.PATH = bin;
+
+    expect(canAutoEnable('claude')).toBe(true);
+    expect(await Bun.file(marker).exists()).toBe(false);
+    let settled = false;
+    const verification = probeCliConnection(claude, 'claude').then((result) => {
+      settled = true;
+      return result;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(settled).toBe(false);
+    expect(await verification).toBe(true);
+    expect(await Bun.file(marker).exists()).toBe(true);
   });
 
   it('honors the KORY_DISABLE_CLI_AUTODETECT opt-out', () => {

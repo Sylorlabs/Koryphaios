@@ -4,9 +4,14 @@ import {
   getSubscriptionStatuses,
   getKoryAccountUsage,
   getUsageCostBreakdown,
+  getUsageEventsSince,
   repriceUnknownUsage,
 } from '../../credit-accountant';
-import { summarizeBillingSpend, summarizeSessionCosts } from '../../billing/cost-summary';
+import {
+  summarizeBillingSpend,
+  summarizeSessionCosts,
+  summarizeUsageAnalytics,
+} from '../../billing/cost-summary';
 import { getCliUsageReports } from '../../billing/cli-usage';
 import type { CliUsageReport } from '../../billing/cli-usage';
 import { getProviderBalances } from '../../billing/provider-balances';
@@ -358,6 +363,18 @@ export const billingRoutes = new Elysia({ prefix: '/api/billing' })
     const visibleUsageRows = allUsageRows.filter((row) => providerAllowed(row.provider, excluded));
     const spend = summarizeBillingSpend(visibleUsageRows);
 
+    const now = Date.now();
+    const ninetyOneDaysAgo = now - 91 * 24 * 60 * 60 * 1_000;
+    const rawUsageEvents = await safeBillingResult(
+      'usage-events-since',
+      () => getUsageEventsSince(ninetyOneDaysAgo),
+      [],
+    );
+    const visibleUsageEvents = rawUsageEvents.filter((row) =>
+      providerAllowed(row.provider, excluded),
+    );
+    const analytics = summarizeUsageAnalytics(visibleUsageEvents, now);
+
     const configs = await safeBillingResult(
       'providerConfig',
       () => getContext().providers.getConfigs(),
@@ -452,6 +469,7 @@ export const billingRoutes = new Elysia({ prefix: '/api/billing' })
       balanceProviders: providerBalance.providers,
       byProvider: spend.byProvider,
       byModel: spend.byModel,
+      analytics,
       subscriptions,
       cliUsage,
       balances,

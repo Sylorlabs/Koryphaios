@@ -156,8 +156,8 @@ describe('V5 skill packages', () => {
       selectionMode: 'conditional',
       broader: ['human-experience'],
     });
-    expect(visualInterfaceDesign.instructions).toContain('Start from the actual product');
-    expect(visualInterfaceDesign.instructions).toContain('diagnostic prompts, not permanent bans');
+    expect(visualInterfaceDesign.instructions).toContain('When the task supplies screenshots');
+    expect(visualInterfaceDesign.instructions).toContain('similar defaults of generated design as prompts for justification');
     expect(visualInterfaceDesign.evaluation.routing).toHaveLength(16);
     expect(visualInterfaceDesign.evaluation.tasks).toHaveLength(2);
   });
@@ -195,7 +195,7 @@ describe('V5 skill packages', () => {
       'Route execution and conformance evidence',
     );
     expect(accessibilityPractice.instructions).toContain('Do not assume browser mechanics apply');
-    expect(accessibilityPractice.evaluation.routing).toHaveLength(16);
+    expect(accessibilityPractice.evaluation.routing).toHaveLength(24);
     expect(accessibilityPractice.evaluation.tasks).toHaveLength(2);
   });
 
@@ -320,8 +320,14 @@ describe('V5 skill packages', () => {
     const source = loadV5SkillPackages().packages.find(
       (item) => item.sidecar.name === 'skill-authoring-evaluation',
     )!.sidecar.sources[0]!;
-    expect(sourceFreshness(source, new Date('2026-09-30T00:00:00Z'))).toBe('fresh');
-    expect(sourceFreshness(source, new Date('2027-01-01T00:00:00Z'))).toBe('stale');
+    // Derive the probe dates from the source's own verifiedAt and policy so a
+    // genuine source refresh cannot silently re-point this control at a
+    // different side of the stale-after boundary.
+    const verified = new Date(`${source.verifiedAt}T00:00:00.000Z`);
+    const atDays = (days: number) =>
+      new Date(verified.getTime() + days * 86_400_000);
+    expect(sourceFreshness(source, atDays(source.staleAfterDays))).toBe('fresh');
+    expect(sourceFreshness(source, atDays(source.staleAfterDays + 1))).toBe('stale');
   });
 
   test('keeps the complete V5 package library individually authored, fresh, portable, and non-generic', () => {

@@ -31,6 +31,8 @@ import { bypassLocalRiskPrompts } from './permission-policy';
 import { loadAgentSettings, saveAgentSettings } from '../agent-settings';
 import { captureGitChangeEvidence, diffGitChangeEvidence } from './git-change-evidence';
 import { getSafeSubprocessEnv } from '../runtime/safe-env';
+import { isWindows, canonicalizePath } from '../runtime/platform';
+import { canonicalPathForAccess } from '../security/path-security';
 
 const MAX_OUTPUT_BYTES = 512_000; // 512KB output limit per command
 
@@ -71,6 +73,26 @@ export function isCatastrophicBashCommand(command: string): boolean {
 function isWithinRoot(root: string, target: string): boolean {
   const rel = relative(root, target);
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+
+/** Extract obvious absolute path operands for the outside-directory policy.
+ * Shell syntax is still validated separately; this is only a host approval
+ * signal, so it intentionally errs toward asking rather than granting. */
+function outsideCommandOperands(command: string, workspaceRoot: string): string[] {
+  const candidates = [...command.matchAll(/(?:^|[\s"'=])((?:\/|[A-Za-z]:[\\/])[^\s"';&|<>]*)/g)]
+    .map((match) => match[1])
+    .filter(Boolean);
+  const outside: string[] = [];
+  for (const candidate of candidates) {
+    try {
+      const canonical = canonicalPathForAccess(candidate);
+      if (!isWithinRoot(workspaceRoot, canonical)) outside.push(canonical);
+    } catch {
+      // The command validator remains responsible for malformed/missing
+      // operands. Do not turn an unverifiable string into an access grant.
+    }
+  }
+  return [...new Set(outside)];
 }
 
 /** Extract base command names from a compound shell command.
@@ -127,7 +149,7 @@ interface SpawnedProc {
 function wrapDetachedBunProcess(proc: Bun.Subprocess): SpawnedProc {
   return {
     kill: (signal = 'SIGTERM') => {
-      if (process.platform !== 'win32' && proc.pid > 0) {
+      if (!isWindows() && proc.pid > 0) {
         try {
           process.kill(-proc.pid, signal as NodeJS.Signals);
           return;
@@ -154,6 +176,7 @@ function spawnSandboxedCommand(
   authorizedRoot: string,
   requiredWorkspaceRoot?: string,
   blockNetwork = true,
+  additionalAllowedRoots: string[] = [],
 ): SpawnedProc {
   if (!osSandboxEnabled()) {
     throw new Error('Sandboxed command cannot run without kernel path confinement');
@@ -167,7 +190,7 @@ function spawnSandboxedCommand(
     // without confinement is exactly the bypass the old path allowed.
     // OS sandbox enabled: run the command through a confined shell.
     const shell = requireBash();
-    const roots = defaultAllowedRoots(authorizedRoot);
+    const roots = [...defaultAllowedRoots(authorizedRoot), ...additionalAllowedRoots];
     const { proc, cleanup } = spawnOsSandboxed([shell.command, ...shell.args, command], {
       allowedRoots: roots,
       requiredWorkspaceRoot,
@@ -187,7 +210,7 @@ function spawnSandboxedCommand(
     throw new Error(`Command not found: ${argv[0]}`);
   }
 
-  const roots = defaultAllowedRoots(authorizedRoot);
+  const roots = [...defaultAllowedRoots(authorizedRoot), ...additionalAllowedRoots];
   const { proc, cleanup } = spawnOsSandboxed([resolved, ...argv.slice(1)], {
     allowedRoots: roots,
     requiredWorkspaceRoot,
@@ -318,6 +341,9 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
       isBackground?: boolean;
       processName?: string;
     };
+    if (ctx.reviewWorkspaceRoot && isBackground) {
+      return { callId: call.id, name: this.name, output: 'Review commands must finish within their timeout so their disposable workspace can be released.', isError: true, durationMs: 0 };
+    }
 
     // 1. Resolve and Validate Working Directory
     let requestedCwd = workingDirectory
@@ -419,14 +445,21 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
 
     // The host-owned grant is separate from the requested cwd. Resolve the
     // actual directory, not just its spelling, before checking containment.
-    const authorizedRoot = ctx.requiredWorkspaceRoot ?? ctx.workingDirectory;
+    // A manager's checkout is the normal workspace, not a non-bypassable
+    // worker grant. Worker/Critic contexts retain their mandatory root even in
+    // YOLO; the manager may explicitly use the outside-path policy below.
+    const mandatoryWorkspaceRoot =
+      ctx.requiredWorkspaceRoot && ctx.callerRole !== 'manager'
+        ? ctx.requiredWorkspaceRoot
+        : undefined;
+    const authorizedRoot = mandatoryWorkspaceRoot ?? ctx.workingDirectory;
     let isInsideProject = false;
     try {
       const canonicalRoot = realpathSync(authorizedRoot);
       requestedCwd = realpathSync(requestedCwd);
       isInsideProject =
         isWithinRoot(canonicalRoot, requestedCwd) &&
-        (!ctx.requiredWorkspaceRoot || canonicalRoot === ctx.requiredWorkspaceRoot);
+        (!mandatoryWorkspaceRoot || canonicalRoot === mandatoryWorkspaceRoot);
     } catch {
       // A missing, dangling or inaccessible cwd is never a valid grant.
     }
@@ -436,13 +469,77 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
     // callers that haven't been wired through the resolver yet.
     const sandbox = ctx.sandboxOptions;
     const preferenceSandboxed = sandbox ? sandbox.isSandboxed : ctx.isSandboxed;
-    const effectiveSandboxed = Boolean(ctx.requiredWorkspaceRoot) || preferenceSandboxed;
+    const effectiveSandboxed = Boolean(mandatoryWorkspaceRoot) || preferenceSandboxed;
     const enforcePathConfinement =
-      Boolean(ctx.requiredWorkspaceRoot) ||
+      Boolean(mandatoryWorkspaceRoot) ||
       (sandbox ? sandbox.pathConfinement && sandbox.isSandboxed : ctx.isSandboxed);
 
-    // Only enforce project root check if sandboxed (and path confinement enabled)
-    if (enforcePathConfinement && !isInsideProject) {
+    const outsideWorkspace = !isInsideProject;
+    let canonicalWorkspaceRoot = authorizedRoot;
+    try {
+      canonicalWorkspaceRoot = canonicalizePath(authorizedRoot);
+    } catch {
+      // The cwd/root checks below fail closed if the host grant disappeared.
+    }
+    const outsideOperands = outsideCommandOperands(command, canonicalWorkspaceRoot);
+    const outsideAccessRequested = outsideWorkspace || outsideOperands.length > 0;
+    if (outsideAccessRequested && mandatoryWorkspaceRoot) {
+      return {
+        callId: call.id,
+        name: this.name,
+        output: 'Access denied: the working directory is outside the mandatory workspace boundary.',
+        isError: true,
+        durationMs: 0,
+      };
+    }
+
+    let externalCwdApproved = false;
+    const hostPermissionPolicy = ctx.permissionPolicy;
+    if (outsideAccessRequested && hostPermissionPolicy) {
+      if (hostPermissionPolicy.mode !== 'yolo') {
+        const question =
+          `${ctx.callerRole === 'manager' ? 'Kory' : (ctx.agentName ?? 'The agent')} is requesting terminal access outside the working directory.\n\n` +
+          (outsideWorkspace ? `Working directory:\n${requestedCwd}\n` : '') +
+          (outsideOperands.length ? `Command path operands:\n${outsideOperands.join('\n')}\n` : '') +
+          '\nAllow this invocation only?';
+        let selection: string;
+        try {
+          selection = ctx.waitForToolApproval
+            ? await ctx.waitForToolApproval(ctx, call, question, ['Allow once', 'Reject'], ctx.signal)
+            : ctx.waitForUserInput
+              ? await ctx.waitForUserInput(question, ['Allow once', 'Reject'], {
+                  allowOther: false,
+                  allowKeepChatting: false,
+                })
+              : '__unavailable__';
+        } catch {
+          selection = '__cancelled__';
+        }
+        if (selection !== 'Allow once' || ctx.signal?.aborted) {
+          return {
+            callId: call.id,
+            name: this.name,
+            output:
+              selection === '__unavailable__'
+                ? 'Outside-directory terminal access requires human approval, but no approval channel is available.'
+                : 'Outside-directory terminal access was not approved by the user.',
+            isError: true,
+            durationMs: 0,
+          };
+        }
+        externalCwdApproved = true;
+      }
+    }
+
+    // A sandboxed manager can still use an explicitly authorized outside cwd.
+    // The extra root is invocation-local and never becomes a durable grant.
+    if (
+      enforcePathConfinement &&
+      outsideAccessRequested &&
+      hostPermissionPolicy &&
+      !externalCwdApproved &&
+      hostPermissionPolicy.mode !== 'yolo'
+    ) {
       return {
         callId: call.id,
         name: this.name,
@@ -668,12 +765,15 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
       // unsandboxed manager commands that legitimately need shell features.
       proc = effectiveSandboxed
         ? spawnSandboxedCommand(
-            limitedCommand,
-            requestedCwd,
-            authorizedRoot,
-            ctx.requiredWorkspaceRoot,
-            Boolean(preferenceSandboxed),
-          )
+             limitedCommand,
+             requestedCwd,
+             authorizedRoot,
+             mandatoryWorkspaceRoot,
+             Boolean(preferenceSandboxed),
+             externalCwdApproved || ctx.permissionPolicy?.mode === 'yolo'
+               ? [requestedCwd, ...outsideOperands]
+               : [],
+           )
         : spawnUnsandboxedCommand(limitedCommand, requestedCwd);
 
       const timeoutPromise = new Promise<never>(

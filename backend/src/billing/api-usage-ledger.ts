@@ -414,11 +414,27 @@ export function recordedImageUsageCostUsd(sessionId: string | undefined, since: 
   return total;
 }
 
-export async function listApiUsage(limit = 100): Promise<ApiUsageEntry[]> {
+function providerFilter(excludedProviders?: ReadonlySet<string>): { clause: string; values: string[] } {
+  const values = [...(excludedProviders ?? [])]
+    .map((provider) => provider.trim().toLowerCase())
+    .filter(Boolean);
+  return {
+    clause: values.length
+      ? `lower(provider) NOT IN (${values.map(() => '?').join(', ')})`
+      : '1 = 1',
+    values,
+  };
+}
+
+export async function listApiUsage(
+  limit = 100,
+  excludedProviders?: ReadonlySet<string>,
+): Promise<ApiUsageEntry[]> {
   try {
+    const filter = providerFilter(excludedProviders);
     const rows = withDb()
-      .prepare(`SELECT * FROM api_usage ORDER BY ts DESC, id DESC LIMIT ?`)
-      .all(Math.max(1, Math.min(limit, 1000))) as Array<Record<string, unknown>>;
+      .prepare(`SELECT * FROM api_usage WHERE ${filter.clause} ORDER BY ts DESC, id DESC LIMIT ?`)
+      .all(...filter.values, Math.max(1, Math.min(limit, 1000))) as Array<Record<string, unknown>>;
     return rows.map(rowToEntry);
   } catch (err: unknown) {
     serverLog.debug(
@@ -429,12 +445,15 @@ export async function listApiUsage(limit = 100): Promise<ApiUsageEntry[]> {
   }
 }
 
-export async function apiUsageTotals(): Promise<ApiUsageTotals> {
+export async function apiUsageTotals(
+  excludedProviders?: ReadonlySet<string>,
+): Promise<ApiUsageTotals> {
   try {
     const database = withDb();
+    const filter = providerFilter(excludedProviders);
     const kindRows = database
-      .prepare(`SELECT kind, COUNT(*) AS count FROM api_usage GROUP BY kind`)
-      .all() as Array<{ kind: string; count: number }>;
+      .prepare(`SELECT kind, COUNT(*) AS count FROM api_usage WHERE ${filter.clause} GROUP BY kind`)
+      .all(...filter.values) as Array<{ kind: string; count: number }>;
     const byKind: Record<ApiUsageKind, number> = Object.fromEntries(
       API_USAGE_KINDS.map((kind) => [kind, 0]),
     ) as Record<ApiUsageKind, number>;
@@ -442,12 +461,16 @@ export async function apiUsageTotals(): Promise<ApiUsageTotals> {
       if (row.kind in byKind) byKind[row.kind as ApiUsageKind] = row.count;
     }
     const total = (
-      database.prepare(`SELECT COUNT(*) AS count FROM api_usage`).all() as Array<{
+      database
+        .prepare(`SELECT COUNT(*) AS count FROM api_usage WHERE ${filter.clause}`)
+        .all(...filter.values) as Array<{
         count: number;
       }>
     )[0];
     const cost = (
-      database.prepare(`SELECT SUM(estimated_cost_usd) AS total FROM api_usage`).all() as Array<{
+      database
+        .prepare(`SELECT SUM(estimated_cost_usd) AS total FROM api_usage WHERE ${filter.clause}`)
+        .all(...filter.values) as Array<{
         total: number | null;
       }>
     )[0];
@@ -473,17 +496,21 @@ export async function apiUsageTotals(): Promise<ApiUsageTotals> {
 }
 
 /** Daily buckets (UTC) for the usage dashboard trend. */
-export async function apiUsageDaily(days = 30): Promise<ApiUsageDailyBucket[]> {
+export async function apiUsageDaily(
+  days = 30,
+  excludedProviders?: ReadonlySet<string>,
+): Promise<ApiUsageDailyBucket[]> {
   try {
     const since = Date.now() - Math.max(1, Math.min(days, 365)) * 24 * 60 * 60 * 1000;
+    const filter = providerFilter(excludedProviders);
     const rows = withDb()
       .prepare(
         `SELECT date(ts / 1000, 'unixepoch') AS day, kind,
                 COUNT(*) AS count, SUM(estimated_cost_usd) AS cost
-         FROM api_usage WHERE ts >= ?
+         FROM api_usage WHERE ts >= ? AND ${filter.clause}
          GROUP BY day, kind ORDER BY day DESC`,
       )
-      .all(since) as Array<{ day: string; kind: string; count: number; cost: number | null }>;
+      .all(since, ...filter.values) as Array<{ day: string; kind: string; count: number; cost: number | null }>;
 
     const buckets = new Map<string, ApiUsageDailyBucket>();
     for (const row of rows) {
@@ -550,13 +577,14 @@ function csvField(value: string): string {
 }
 
 /** Every entry, paged in batches so exports never truncate. */
-async function listAllApiUsage(): Promise<ApiUsageEntry[]> {
+async function listAllApiUsage(excludedProviders?: ReadonlySet<string>): Promise<ApiUsageEntry[]> {
   const all: ApiUsageEntry[] = [];
   const pageSize = 1000;
+  const filter = providerFilter(excludedProviders);
   for (;;) {
     const page = withDb()
-      .prepare(`SELECT * FROM api_usage ORDER BY ts DESC, id DESC LIMIT ? OFFSET ?`)
-      .all(pageSize, all.length) as Array<Record<string, unknown>>;
+      .prepare(`SELECT * FROM api_usage WHERE ${filter.clause} ORDER BY ts DESC, id DESC LIMIT ? OFFSET ?`)
+      .all(...filter.values, pageSize, all.length) as Array<Record<string, unknown>>;
     if (page.length === 0) break;
     all.push(...page.map(rowToEntry));
     if (page.length < pageSize) break;
@@ -565,8 +593,8 @@ async function listAllApiUsage(): Promise<ApiUsageEntry[]> {
 }
 
 /** Full ledger as CSV (usage dashboard export). */
-export async function apiUsageCsv(): Promise<string> {
-  const entries = await listAllApiUsage();
+export async function apiUsageCsv(excludedProviders?: ReadonlySet<string>): Promise<string> {
+  const entries = await listAllApiUsage(excludedProviders);
   const header =
     'id,ts,kind,provider,model,estimated_cost_usd,unit_measure,unit_amount,detail,session_id,run_id';
   const lines = entries.map((entry) =>

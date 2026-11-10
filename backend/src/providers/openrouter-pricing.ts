@@ -322,6 +322,11 @@ export function quoteOpenRouterUsage(
   };
 }
 
+/** Read the last verified catalog without starting network work in the accounting path. */
+export function getCachedOpenRouterModelPricing(model: string): OpenRouterModelPricing | null {
+  return cachedCatalog ? resolveOpenRouterModelPricing(cachedCatalog, model) : null;
+}
+
 export async function getOpenRouterPricingCatalog(): Promise<OpenRouterPricingCatalog | null> {
   return loadCatalog(false);
 }

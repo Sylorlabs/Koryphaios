@@ -1,23 +1,13 @@
-// Pricing hub — the single place that answers "what does this model cost?".
-//
-// Resolution order:
-//   1. models.dev live catalog (refreshed daily; covers every major provider)
-//   2. the static ModelDef catalog's costPerM fields (curated in-repo)
-//   3. null — unknown. Callers must surface "unpriced", never invent a number.
-//
-// CLI subscription providers (claude, codex, grok, cursor, copilot,
-// antigravity, kilo) are flat-rate: the $ cost of a request is $0 out of
-// pocket, but we still expose the EQUIVALENT API price ("inference value") so
-// usage can show what the tokens would have cost.
-
+// Resolve provider rates first. Only verified OpenRouter rates may value an equivalent.
 import { getModelsDevPricing } from './providers/models-dev';
+import { getCachedOpenRouterModelPricing } from './providers/openrouter-pricing';
 
 export interface ResolvedPricing {
   inPerM: number;
   outPerM: number;
   cacheReadPerM?: number;
   cacheWritePerM?: number;
-  source: 'models.dev' | 'catalog';
+  source: 'models.dev' | 'provider-rate' | 'openrouter-equivalent';
 }
 
 /** Providers billed by subscription — no per-token dollar spend. */
@@ -29,16 +19,53 @@ export const SUBSCRIPTION_PROVIDERS = new Set([
   'grok',
   'antigravity',
   'kilocode',
-  'jules',
   'freebuff',
 ]);
 
+const providerRates = new Map<string, ResolvedPricing>();
+
+/** Store only rates explicitly published by this provider's model endpoint. */
+export function recordProviderModelPricing(provider: string, model: string, raw: unknown): void {
+  if (!raw || typeof raw !== 'object') return;
+  const entry = raw as Record<string, unknown>;
+  const pricing = entry.pricing as Record<string, unknown> | undefined;
+  if (!pricing || typeof pricing !== 'object') return;
+  const rate = (value: unknown): number | undefined => {
+    if (typeof value !== 'number' && typeof value !== 'string') return undefined;
+    if (typeof value === 'string' && !value.trim()) return undefined;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed * 1_000_000 : undefined;
+  };
+  const input = rate(pricing.prompt);
+  const output = rate(pricing.completion);
+  if (input === undefined || output === undefined) return;
+  providerRates.set(`${provider}::${model}`, {
+    inPerM: input,
+    outPerM: output,
+    cacheReadPerM: rate(pricing.input_cache_read),
+    cacheWritePerM: rate(pricing.input_cache_write),
+    source: 'provider-rate',
+  });
+}
+
+/** Resolve the serving provider's price, then an explicitly attributed equivalent. */
 export function resolvePricing(provider: string, model: string): ResolvedPricing | null {
-  // 1. Live catalog
+  const remote = providerRates.get(`${provider}::${model}`);
+  if (remote) return remote;
   const live = getModelsDevPricing(provider, model);
   if (live) return { ...live, source: 'models.dev' };
-
-  return null;
+  const official = getCachedOpenRouterModelPricing(model);
+  if (official && official.completion !== undefined) {
+    return {
+      inPerM: official.prompt * 1_000_000,
+      outPerM: official.completion * 1_000_000,
+      cacheReadPerM: official.inputCacheRead === undefined ? undefined : official.inputCacheRead * 1_000_000,
+      cacheWritePerM: official.inputCacheWrite === undefined ? undefined : official.inputCacheWrite * 1_000_000,
+      source: provider === 'openrouter' ? 'provider-rate' : 'openrouter-equivalent',
+    };
+  }
+  const equivalent = getModelsDevPricing('openrouter', model);
+  return equivalent ? { ...equivalent, source: 'openrouter-equivalent' } : null;
 }
 
 /** Cost in USD; null when the model has no verified price. */

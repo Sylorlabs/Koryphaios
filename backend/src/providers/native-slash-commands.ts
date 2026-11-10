@@ -65,6 +65,8 @@ const PROVIDER_LABELS: Record<string, string> = {
   cursor: 'Cursor',
   antigravity: 'Antigravity',
   kimicode: 'Kimi Code',
+  omnirush: 'Omnirush',
+  opencode: 'OpenCode',
 };
 
 export function getNativeProviderLabel(provider: string): string {
@@ -802,6 +804,130 @@ const KIMICODE_COMMANDS: NativeCommandDefinition[] = [
   },
 ];
 
+const OMNIRUSH_COMMANDS: NativeCommandDefinition[] = [
+  {
+    command: 'version',
+    description: 'Show the installed Omnirush CLI version.',
+    category: 'Diagnostics',
+    execute: (ctx) => runCli('omnirush', ['--version'], ctx.workingDirectory, ctx),
+  },
+  {
+    command: 'models',
+    aliases: ['model'],
+    argsHint: '[search]',
+    description: 'List the models reported by the installed Omnirush CLI.',
+    category: 'Models',
+    execute: (ctx) => runCli('omnirush', ['--list-models', ...ctx.args], ctx.workingDirectory, ctx),
+  },
+  {
+    command: 'whoami',
+    description: 'Show the signed-in Omnirush account.',
+    category: 'Diagnostics',
+    execute: (ctx) => runCli('omnirush', ['whoami'], ctx.workingDirectory, ctx),
+  },
+  {
+    command: 'doctor',
+    description: 'Run the Omnirush CLI health checks.',
+    category: 'Diagnostics',
+    execute: (ctx) => runCli('omnirush', ['doctor'], ctx.workingDirectory, ctx),
+  },
+  {
+    command: 'diff',
+    description: 'Show uncommitted changes in the working tree.',
+    category: 'Review',
+    execute: runGitDiff,
+  },
+  {
+    command: 'mcp',
+    description: 'Show Omnirush MCP server state.',
+    category: 'Diagnostics',
+    execute: (ctx) =>
+      note(
+        interactiveNote(
+          'omnirush',
+          'mcp',
+          'shows MCP server state in the Omnirush session',
+          'Koryphaios wires its Kory MCP server automatically for each turn',
+        ),
+        ctx,
+      ),
+  },
+];
+
+const OPENCODE_COMMANDS: NativeCommandDefinition[] = [
+  {
+    command: 'version',
+    description: 'Show the installed OpenCode CLI version.',
+    category: 'Diagnostics',
+    execute: (ctx) => runCli('opencode', ['--version'], ctx.workingDirectory, ctx),
+  },
+  {
+    command: 'models',
+    aliases: ['model', 'm'],
+    description: 'List the models reported by the installed OpenCode CLI.',
+    category: 'Models',
+    execute: (ctx) => runCli('opencode', ['models'], ctx.workingDirectory, ctx),
+  },
+  {
+    command: 'status',
+    aliases: ['auth', 'whoami'],
+    description: 'Show stored OpenCode integrations (no secrets printed).',
+    category: 'Diagnostics',
+    execute: (ctx) => runCli('opencode', ['auth', 'list'], ctx.workingDirectory, ctx),
+  },
+  {
+    command: 'diff',
+    description: 'Show uncommitted changes in the working tree.',
+    category: 'Review',
+    execute: runGitDiff,
+  },
+  {
+    command: 'init',
+    description: 'Guided AGENTS.md setup.',
+    category: 'Project',
+    execute: (ctx) =>
+      note(
+        interactiveNote(
+          'opencode',
+          'init',
+          'guides the AGENTS.md setup interactively',
+          'ask Koryphaios to create an AGENTS.md for this project instead',
+        ),
+        ctx,
+      ),
+  },
+  {
+    command: 'review',
+    description: 'Review changes [commit|branch|pr], defaults to uncommitted.',
+    category: 'Review',
+    execute: (ctx) =>
+      note(
+        interactiveNote(
+          'opencode',
+          'review',
+          'reviews changes interactively',
+          'ask Koryphaios to review the working tree instead',
+        ),
+        ctx,
+      ),
+  },
+  {
+    command: 'compact',
+    description: 'Compact the OpenCode session context.',
+    category: 'Session',
+    execute: (ctx) =>
+      note(
+        interactiveNote(
+          'opencode',
+          'compact',
+          'compacts the OpenCode session context',
+          'Koryphaios manages context automatically; start a new chat to reset it',
+        ),
+        ctx,
+      ),
+  },
+];
+
 const REGISTRY: Record<string, NativeCommandDefinition[]> = {
   claude: CLAUDE_COMMANDS,
   codex: CODEX_COMMANDS,
@@ -810,6 +936,8 @@ const REGISTRY: Record<string, NativeCommandDefinition[]> = {
   cursor: CURSOR_COMMANDS,
   antigravity: ANTIGRAVITY_COMMANDS,
   kimicode: KIMICODE_COMMANDS,
+  omnirush: OMNIRUSH_COMMANDS,
+  opencode: OPENCODE_COMMANDS,
 };
 
 /** Public command list for a provider (executors stripped) for the picker. */

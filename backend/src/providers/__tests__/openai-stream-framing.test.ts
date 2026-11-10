@@ -95,6 +95,24 @@ describe('OpenAI stream usage and completion framing', () => {
     expect(events.filter((e) => e.type === 'complete')).toHaveLength(1);
   });
 
+  it('preserves a provider reported zero charge and rejects invalid charges', async () => {
+    for (const cost of [0, 0.125, -1, '0.1']) {
+      installFetch([
+        JSON.stringify({
+          id: 'cost',
+          object: 'chat.completion.chunk',
+          choices: [],
+          usage: { prompt_tokens: 10, completion_tokens: 2, cost },
+        }),
+        '[DONE]',
+      ]);
+      const { events } = await collect(provider(), request());
+      expect(events.find((event) => event.type === 'usage_update')?.reportedCostUsd).toBe(
+        typeof cost === 'number' && cost >= 0 ? cost : undefined,
+      );
+    }
+  });
+
   it('completes once when a provider repeats finish_reason on a final chunk pair', async () => {
     const frames = [
       '{"id":"1","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{"content":"a"},"finish_reason":null}]}',
@@ -113,6 +131,132 @@ describe('OpenAI stream usage and completion framing', () => {
     expect(events.filter((e) => e.type === 'complete')).toHaveLength(1);
     // Usage from the repeated chunk is still captured.
     expect(events.filter((e) => e.type === 'usage_update')).toHaveLength(1);
+  });
+
+  it('buffers tool arguments until the streamed tool identity is complete', async () => {
+    const frames = [
+      '{"id":"1","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\\"path\\\":"}}]},"finish_reason":null}]}',
+      '{"id":"1","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"read_file","arguments":"\\\"a.ts\\\"}"}}]},"finish_reason":null}]}',
+      '[DONE]',
+    ];
+    installFetch(frames);
+    const events: ProviderEvent[] = [];
+    try {
+      for await (const event of provider().streamResponse(request())) events.push(event);
+    } finally {
+      restoreFetch();
+    }
+
+    expect(events.map((event) => event.type)).toEqual([
+      'tool_use_start',
+      'tool_use_delta',
+      'tool_use_stop',
+      'complete',
+    ]);
+    expect(events[0]).toMatchObject({ toolCallId: 'call-1', toolName: 'read_file' });
+    // The prefix that arrived before the call was announced is still delivered:
+    // the runtime appends deltas, so it must receive the whole buffered payload.
+    expect(events[1]).toMatchObject({ toolCallId: 'call-1', toolInput: '{\"path\":\"a.ts\"}' });
+    expect(events[2]).toMatchObject({ toolCallId: 'call-1', toolInput: '{\"path\":\"a.ts\"}' });
+    expect(events[3]).toMatchObject({ finishReason: 'tool_use' });
+  });
+
+  it('assembles arguments when the gateway omits `index` on continuation chunks', async () => {
+    const frames = [
+      '{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"read_file","arguments":"{\\\"path\\\":"}}]},"finish_reason":null}]}',
+      // Same call, no index: this used to open a second id-less buffer and the
+      // rest of the arguments were silently dropped.
+      '{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"\\\"a.ts\\\"}"}}]},"finish_reason":null}]}',
+      '{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}',
+      '[DONE]',
+    ];
+    installFetch(frames);
+    const events: ProviderEvent[] = [];
+    try {
+      for await (const event of provider().streamResponse(request())) events.push(event);
+    } finally {
+      restoreFetch();
+    }
+
+    const stop = events.find((event) => event.type === 'tool_use_stop');
+    expect(stop).toMatchObject({ toolCallId: 'call-1', toolName: 'read_file' });
+    expect(JSON.parse(String(stop?.toolInput))).toEqual({ path: 'a.ts' });
+  });
+
+  it('closes a running call when a proxy reuses its index for another id', async () => {
+    const frames = [
+      '{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_a","function":{"name":"read_file","arguments":"{}"}}]},"finish_reason":null}]}',
+      '{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_b","function":{"name":"list_files","arguments":"{}"}}]},"finish_reason":null}]}',
+      '{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}',
+      '[DONE]',
+    ];
+    installFetch(frames);
+    const events: ProviderEvent[] = [];
+    try {
+      for await (const event of provider().streamResponse(request())) events.push(event);
+    } finally {
+      restoreFetch();
+    }
+
+    const starts = events.filter((event) => event.type === 'tool_use_start');
+    const stops = events.filter((event) => event.type === 'tool_use_stop');
+    expect(starts.map((event) => event.toolCallId)).toEqual(['call_a', 'call_b']);
+    expect(stops.map((event) => event.toolCallId)).toEqual(['call_a', 'call_b']);
+  });
+
+  it('surfaces an error frame sent instead of deltas', async () => {
+    installFetch([
+      '{"error":{"message":"Error:The request is invalid. Please check the parameters.","type":"invalid_request_error"}}',
+      '[DONE]',
+    ]);
+    const events: ProviderEvent[] = [];
+    try {
+      for await (const event of provider().streamResponse(request())) events.push(event);
+    } finally {
+      restoreFetch();
+    }
+
+    const error = events.find((event) => event.type === 'error');
+    expect(error?.error).toContain('rejected the request');
+    expect(events.some((event) => event.type === 'complete')).toBe(false);
+  });
+
+  it('sends a valid JSON object when the upstream truncated the arguments', async () => {
+    const frames = [
+      '{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"read_file","arguments":"{\\\"path\\\":\\\"a.t"}}]},"finish_reason":null}]}',
+      '{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"length"}]}',
+      '[DONE]',
+    ];
+    installFetch(frames);
+    const events: ProviderEvent[] = [];
+    try {
+      for await (const event of provider().streamResponse(request())) events.push(event);
+    } finally {
+      restoreFetch();
+    }
+
+    const stop = events.find((event) => event.type === 'tool_use_stop');
+    expect(() => JSON.parse(String(stop?.toolInput))).not.toThrow();
+  });
+
+  it('discards streamed tool fragments without a complete identity', async () => {
+    const frames = [
+      '{"id":"1","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\\"x\\\":1}"}}]},"finish_reason":null}]}',
+      '[DONE]',
+    ];
+    installFetch(frames);
+    const events: ProviderEvent[] = [];
+    try {
+      for await (const event of provider().streamResponse(request())) events.push(event);
+    } finally {
+      restoreFetch();
+    }
+
+    expect(events.filter((event) => event.type.startsWith('tool_use_'))).toEqual([]);
+    expect(events.filter((event) => event.type === 'complete')).toHaveLength(1);
+    expect(events.find((event) => event.type === 'complete')).toMatchObject({
+      finishReason: 'tool_use',
+    });
   });
 
   it('still records the standard trailing usage-only chunk', async () => {

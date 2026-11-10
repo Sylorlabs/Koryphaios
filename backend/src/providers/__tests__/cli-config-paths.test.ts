@@ -32,9 +32,7 @@ describe('unverified CLI config roots', () => {
     // A malformed join here would silently link something outside the CLI's own
     // config, e.g. resolving an absolute target against the source directory.
     const realDir = '/real/.grok';
-    for (const { source } of credentialLinkCandidates(realDir, '/home', '.grok', [
-      'auth.json',
-    ])) {
+    for (const { source } of credentialLinkCandidates(realDir, '/home', '.grok', ['auth.json'])) {
       expect(source).toBe(join(realDir, 'auth.json'));
       expect(source.startsWith('/home')).toBe(false);
     }

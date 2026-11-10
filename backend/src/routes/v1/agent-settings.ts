@@ -1139,7 +1139,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
           model: body.model,
           reasoningLevel: body.reasoningLevel,
         });
-        return { ok: true, data: { status: 'processing', runId: accepted.runId } };
+         return { ok: true, data: accepted };
       } catch (err: unknown) {
         if (err instanceof ConflictError) throw err;
         const message = err instanceof Error ? err.message : String(err);
@@ -1157,11 +1157,80 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
       }),
     },
   )
+  .get('/:agentId/steering', async ({ request, params: { agentId }, query, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const { kory } = getContext();
+    return { ok: true, data: await kory.getAgentSteering(query.sessionId, agentId) };
+  }, { query: t.Object({ sessionId: t.String() }) })
+  .patch('/:agentId/steering/:commandId', async ({ request, params: { agentId, commandId }, body, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const { kory } = getContext();
+    return { ok: true, data: await kory.editAgentSteering(body.sessionId, agentId, commandId, body.content) };
+  }, { body: t.Object({ sessionId: t.String(), content: t.String() }) })
+  .delete('/:agentId/steering/:commandId', async ({ request, params: { agentId, commandId }, query, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const { kory } = getContext();
+    return { ok: true, data: await kory.deleteAgentSteering(query.sessionId, agentId, commandId) };
+  }, { query: t.Object({ sessionId: t.String() }) })
+  .post('/:agentId/steering/reorder', async ({ request, params: { agentId }, body, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const { kory } = getContext();
+    return { ok: true, data: await kory.reorderAgentSteering(body.sessionId, agentId, body.commandId, body.beforeId ?? null) };
+  }, { body: t.Object({ sessionId: t.String(), commandId: t.String(), beforeId: t.Optional(t.Union([t.String(), t.Null()])) }) })
+  .post(
+    '/:agentId/controls',
+    async ({ request, params: { agentId }, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      const { kory } = getContext();
+      try {
+        const data = await kory.updateAgentControls(body.sessionId, agentId, {
+          model: body.model,
+          reasoningLevel: body.reasoningLevel,
+        });
+        return { ok: true, data };
+      } catch (err: unknown) {
+        if (err instanceof ConflictError) throw err;
+        throw new ValidationError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    {
+      body: t.Object({
+        sessionId: t.String(),
+        model: t.Optional(t.String()),
+        reasoningLevel: t.Optional(t.String()),
+      }),
+    },
+  )
+  .post(
+    '/:agentId/prune-context',
+    ({ request, params: { agentId }, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      const { kory } = getContext();
+      try {
+        const removed = kory.pruneAgentContext(body.sessionId, agentId, body.keepRecent);
+        return { ok: true, data: { removed } };
+      } catch (err: unknown) {
+        if (err instanceof ConflictError) throw err;
+        throw new ValidationError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    {
+      body: t.Object({
+        sessionId: t.String(),
+        keepRecent: t.Optional(t.Number({ minimum: 2, maximum: 100 })),
+      }),
+    },
+  )
   .post('/:agentId/cancel', async ({ request, params: { agentId }, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const { kory } = getContext();
-    kory.cancelWorker(agentId);
-    return { ok: true, message: 'Agent cancelled' };
+    const cancelled = kory.cancelWorker(agentId);
+    if (cancelled) await kory.waitForAgentIdle(agentId);
+    return {
+      ok: true,
+      data: { cancelled },
+      message: cancelled ? 'Agent cancellation requested' : 'Agent is not running',
+    };
   })
   .get('/settings', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };

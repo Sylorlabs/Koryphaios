@@ -286,14 +286,12 @@ describe('Kory prompt cache contract', () => {
     mkdirSync(join(root, '.git'));
     const first = compilePrompt({
       role: 'manager',
-      mode: 'advanced',
       provider: 'openai',
       workingDirectory: root,
       taskContract: createTaskContract('first task'),
     });
     const second = compilePrompt({
       role: 'manager',
-      mode: 'advanced',
       provider: 'openai',
       workingDirectory: root,
       taskContract: createTaskContract('second task'),
@@ -312,14 +310,12 @@ describe('Kory prompt cache contract', () => {
     mkdirSync(join(secondRoot, '.git'));
     const first = compilePrompt({
       role: 'manager',
-      mode: 'advanced',
       provider: 'openai',
       workingDirectory: firstRoot,
       taskContract: createTaskContract('same task'),
     });
     const second = compilePrompt({
       role: 'manager',
-      mode: 'advanced',
       provider: 'openai',
       workingDirectory: secondRoot,
       taskContract: createTaskContract('same task'),

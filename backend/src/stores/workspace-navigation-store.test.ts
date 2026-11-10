@@ -162,6 +162,55 @@ describe('WorkspaceNavigationStore', () => {
     );
   });
 
+  test('closes a directly opened project by clearing its selection', () => {
+    const rawRoot = join(tmpdir(), `kory-workspace-${crypto.randomUUID()}`);
+    roots.push(rawRoot);
+    mkdirSync(join(rawRoot, 'standalone'), { recursive: true });
+    const project = join(canonicalRoot(rawRoot), 'standalone');
+    const { database, store } = createStore();
+    expect(store.selectProject(project).projects.map((entry) => entry.path)).toEqual([project]);
+
+    const closed = store.closeProject(project);
+    expect(closed.selectedProject).toBeNull();
+    expect(closed.projects).toEqual([]);
+    expect(new WorkspaceNavigationStore(database).snapshot().selectedProject).toBeNull();
+    database.close();
+  });
+
+  test('closing a workspace child clears only the selection and keeps the folder listed', () => {
+    const rawRoot = join(tmpdir(), `kory-workspace-${crypto.randomUUID()}`);
+    roots.push(rawRoot);
+    mkdirSync(join(rawRoot, 'alpha'), { recursive: true });
+    mkdirSync(join(rawRoot, 'beta'), { recursive: true });
+    const root = canonicalRoot(rawRoot);
+    const { database, store } = createStore();
+    store.openWorkspace(root);
+    store.selectProject(join(root, 'alpha'));
+
+    const closed = store.closeProject(join(root, 'alpha'));
+    expect(closed.selectedProject).toBeNull();
+    expect(closed.workspaceRoot).toBe(root);
+    // Children come from the filesystem, so the folder stays in the workspace.
+    expect(closed.projects.map((entry) => entry.name)).toEqual(['alpha', 'beta']);
+    database.close();
+  });
+
+  test('closing the workspace root closes the workspace itself', () => {
+    const rawRoot = join(tmpdir(), `kory-workspace-${crypto.randomUUID()}`);
+    roots.push(rawRoot);
+    mkdirSync(join(rawRoot, 'alpha'), { recursive: true });
+    const root = canonicalRoot(rawRoot);
+    const { database, store } = createStore();
+    store.openWorkspace(root);
+
+    const closed = store.closeProject(root);
+    expect(closed.workspaceRoot).toBeNull();
+    expect(closed.selectedProject).toBeNull();
+    expect(closed.projects).toEqual([]);
+    expect(new WorkspaceNavigationStore(database).snapshot().workspaceRoot).toBeNull();
+    database.close();
+  });
+
   test('still refuses a home or temp directory as a workspace root', () => {
     const { store } = createStore();
     expect(() => store.openWorkspace(homedir())).toThrow('Workspace root is too broad');

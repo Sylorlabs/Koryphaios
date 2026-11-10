@@ -3,7 +3,9 @@ import { existsSync, realpathSync, readdirSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, parse, resolve } from 'node:path';
 import type { Database } from 'bun:sqlite';
+import type { ProjectIdentity } from '@koryphaios/shared';
 import { WORKSPACE_MARKER } from '../memory/unified-memory';
+import { ProjectIdentityStore } from './project-identity-store';
 
 const NAVIGATION_ID = 'local-desktop';
 const MAX_WORKSPACE_PROJECTS = 2_000;
@@ -20,6 +22,7 @@ export interface WorkspaceProjectEntry {
   path: string;
   name: string;
   modifiedAt: number;
+  identity?: ProjectIdentity;
 }
 
 export interface WorkspaceNavigationSnapshot {
@@ -31,6 +34,7 @@ export interface WorkspaceNavigationSnapshot {
   unavailableProject: string | null;
   /** Monotonic write sequence — clients discard snapshots older than the last applied one. */
   seq: number;
+  projectIdentities?: Record<string, ProjectIdentity>;
 }
 
 function isFilesystemRoot(path: string): boolean {
@@ -124,7 +128,11 @@ function snapshotRevision(
 }
 
 export class WorkspaceNavigationStore {
-  constructor(private readonly database: Database) {}
+  private readonly identityStore: ProjectIdentityStore;
+
+  constructor(private readonly database: Database) {
+    this.identityStore = new ProjectIdentityStore(database);
+  }
 
   private readRow(): NavigationRow {
     return (
@@ -211,6 +219,41 @@ export class WorkspaceNavigationStore {
     return this.snapshot();
   }
 
+  /** Close a project.
+   *
+   *  Navigation persists only a workspace root and one selection, so a project
+   *  opened on its own is closed by clearing that selection — the snapshot then
+   *  reports no projects. Closing the workspace root closes the workspace. A
+   *  workspace child is discovered from the filesystem on every snapshot and
+   *  has no persisted entry to delete, so closing one clears the selection and
+   *  leaves the folder where it is. */
+  closeProject(path: string): WorkspaceNavigationSnapshot {
+    const target = canonicalDirectory(path, 'Project directory');
+    const current = this.readRow();
+    let workspaceRoot: string | null = null;
+    if (current.workspace_root) {
+      try {
+        workspaceRoot = validateWorkspaceRoot(current.workspace_root);
+      } catch {
+        // A stale workspace must not block closing the project itself.
+        workspaceRoot = null;
+      }
+    }
+
+    if (workspaceRoot && target === workspaceRoot) {
+      this.write(null, null);
+      return this.snapshot();
+    }
+
+    const selected = current.selected_project;
+    if (selected && (selected === target || resolve(selected) === target)) {
+      this.write(workspaceRoot, null, current.unavailable_workspace, null);
+      return this.snapshot();
+    }
+
+    return this.snapshot();
+  }
+
   acknowledgeUnavailable(): WorkspaceNavigationSnapshot {
     const current = this.readRow();
     this.write(current.workspace_root, current.selected_project);
@@ -287,6 +330,20 @@ export class WorkspaceNavigationStore {
       unavailableWorkspace !== row.unavailable_workspace ||
       unavailableProject !== row.unavailable_project;
 
+    const identityPaths = [
+      ...projects.map((project) => project.path),
+      ...(selectedProject ? [selectedProject] : []),
+    ];
+    const projectIdentities = identityPaths.length
+      ? this.identityStore.list(identityPaths)
+      : undefined;
+    if (projectIdentities) {
+      projects = projects.map((project) => ({
+        ...project,
+        identity: projectIdentities[project.path],
+      }));
+    }
+
     return {
       workspaceRoot,
       selectedProject,
@@ -301,6 +358,7 @@ export class WorkspaceNavigationStore {
       unavailableWorkspace,
       unavailableProject,
       seq: this.readRow().updated_at,
+      projectIdentities,
     };
   }
 

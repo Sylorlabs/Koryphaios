@@ -4,9 +4,29 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, relative, resolve, sep, isAbsolute } from 'node:path';
 import { GitExecutor } from './git-executor';
-import { ConflictError } from '../errors/types';
+import { ConflictError, ValidationError } from '../errors/types';
 
 export const SESSION_WORKSPACE_ROOT = join(homedir(), '.koryphaios', 'chat-repositories');
+
+/** Names excluded from an explicit non-Git source copy. */
+const ISOLATION_EXCLUDED_NAMES = [
+  '.git',
+  '.koryphaios',
+  'node_modules',
+  '.trees',
+  '.ssh',
+  '.aws',
+  '.gnupg',
+  '.kube',
+  '.docker',
+  '.npmrc',
+  '.netrc',
+  '.git-credentials',
+];
+function isolationExcluded(name: string): boolean {
+  return ISOLATION_EXCLUDED_NAMES.includes(name) || name === '.env' || name.startsWith('.env.');
+}
+
 export interface SessionWorkspace {
   path: string;
   repositoryPath: string;
@@ -183,27 +203,7 @@ export async function createSessionWorkspace(
       await cp(source, checkout, {
         recursive: true,
         dereference: false,
-        filter: (path) => {
-          const name = basename(path);
-          return (
-            ![
-              '.git',
-              '.koryphaios',
-              'node_modules',
-              '.trees',
-              '.ssh',
-              '.aws',
-              '.gnupg',
-              '.kube',
-              '.docker',
-              '.npmrc',
-              '.netrc',
-              '.git-credentials',
-            ].includes(name) &&
-            name !== '.env' &&
-            !name.startsWith('.env.')
-          );
-        },
+        filter: (path) => !isolationExcluded(basename(path)),
       });
     const git = new GitExecutor(checkout);
     await run(git, ['init', '-b', branch]);

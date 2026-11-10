@@ -49,6 +49,60 @@ describe('built-in provider catalog truth', () => {
     });
   });
 
+  it('uses the official AgentRouter OpenAI-compatible gateway contract', () => {
+    expect(PROVIDER_CONFIG_MAP.get('agentrouter')).toMatchObject({
+      baseUrl: 'https://agentrouter.org/v1',
+      authMode: 'api_key',
+      envKeys: ['AGENTROUTER_API_KEY'],
+    });
+  });
+
+  it('exposes AgentRouter through the provider-type list used by Settings', () => {
+    const registry = Object.create(ProviderRegistry.prototype) as ProviderRegistry;
+    Object.assign(registry, { customProviderIds: new Set<ProviderName>() });
+    expect(registry.getAvailableProviderTypes()).toContainEqual({
+      name: 'agentrouter',
+      authMode: 'api_key',
+    });
+  });
+
+  it('reports the canonical AgentRouter endpoint and model catalog URL', () => {
+    const registry = new ProviderRegistry({
+      providers: {},
+      server: { port: 3001, host: '127.0.0.1' },
+    } as any);
+    const status = registry.getStatus().find((entry) => entry.name === 'agentrouter');
+    expect(status).toMatchObject({
+      endpointUrl: 'https://agentrouter.org/v1',
+      modelCatalogUrl: 'https://agentrouter.org/v1/models',
+    });
+  });
+
+  it('preserves the configured AgentRouter origin across registry hydration', () => {
+    const registry = Object.create(ProviderRegistry.prototype) as ProviderRegistry;
+    Object.assign(registry, {
+      config: {
+        server: { port: 3001, host: '127.0.0.1' },
+        providers: {
+          'custom:agentrouter': {
+            name: 'custom:agentrouter',
+            custom: true,
+            kind: 'openai',
+            baseUrl: 'https://agentrouter.org/v1',
+            disabled: false,
+          },
+        },
+      },
+    });
+    const buildProviderConfig = (
+      registry as unknown as {
+        buildProviderConfig(name: ProviderName): ProviderConfig;
+      }
+    ).buildProviderConfig.bind(registry);
+
+    expect(buildProviderConfig('custom:agentrouter').baseUrl).toBe('https://agentrouter.org/v1');
+  });
+
   it('uses the official UnoRouter gateway contract', () => {
     expect(PROVIDER_CONFIG_MAP.get('unorouter')).toMatchObject({
       baseUrl: 'https://api.unorouter.com/v1',
@@ -65,6 +119,14 @@ describe('built-in provider catalog truth', () => {
     });
   });
 
+  it('uses the official Vyce AI OpenAI-compatible gateway contract', () => {
+    expect(PROVIDER_CONFIG_MAP.get('vyceai')).toMatchObject({
+      baseUrl: 'https://vyceai.com/v1',
+      authMode: 'api_key',
+      envKeys: ['VYCEAI_API_KEY', 'VYCE_AI_API_KEY'],
+    });
+  });
+
   it('uses the official Command Code OpenAI-compatible gateway contract', () => {
     expect(PROVIDER_CONFIG_MAP.get('commandcode')).toMatchObject({
       baseUrl: 'https://api.commandcode.ai/provider/v1',
@@ -77,14 +139,6 @@ describe('built-in provider catalog truth', () => {
     expect(PROVIDER_CONFIG_MAP.get('workbuddy')).toMatchObject({
       baseUrl: 'https://tokenhub-intl.tencentcloudmaas.com/v1',
       envKeys: ['WORKBUDDY_API_KEY'],
-    });
-  });
-
-  it('uses the local AutoClaw gateway contract (loopback, gateway token env)', () => {
-    expect(PROVIDER_CONFIG_MAP.get('autoclaw')).toMatchObject({
-      baseUrl: 'http://127.0.0.1:18789/v1',
-      authMode: 'api_key',
-      envKeys: ['AUTOCLAW_GATEWAY_TOKEN'],
     });
   });
 
@@ -204,35 +258,6 @@ describe('built-in provider catalog truth', () => {
       supportsApiKey: true,
     });
     expect(status?.configurationBlocked).toBeUndefined();
-  });
-
-  it('reports a still-blocked adapter as unavailable, not ready', () => {
-    const registry = Object.create(ProviderRegistry.prototype) as ProviderRegistry;
-    const createProvider = (
-      registry as unknown as { createProvider(name: ProviderName, config: ProviderConfig): unknown }
-    ).createProvider.bind(registry);
-    // Set before the big assign: createProvider is called while that object
-    // literal is being evaluated, so these fields must already exist.
-    Object.assign(registry, { customProviderIds: new Set() });
-    const julesConfig: ProviderConfig = {
-      name: 'jules',
-      apiKey: 'present-but-not-approved',
-      disabled: false,
-    };
-    Object.assign(registry, {
-      providers: new Map([['jules', createProvider('jules', julesConfig)]]),
-      providerConfigs: new Map([['jules', julesConfig]]),
-      circuitStates: new Map(),
-      customProviderIds: new Set(),
-      verificationRecords: new Map(),
-    });
-    const status = registry.getStatus().find((entry) => entry.name === 'jules');
-    expect(status?.authenticated).toBe(false);
-    expect(status?.supportsApiKey).toBe(false);
-    expect(status?.supportsAuthToken).toBe(false);
-    expect(status?.requiresBaseUrl).toBe(false);
-    expect(status?.configurationBlocked).toBe(true);
-    expect(status?.error).toBeTruthy();
   });
 
   it('reports media and memory capability adapters as configurable without a chat adapter', () => {

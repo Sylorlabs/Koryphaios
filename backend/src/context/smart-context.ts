@@ -1,7 +1,7 @@
 // Smart Context Detection
 // Automatically figures out what files to include based on imports, errors, recent changes
 
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, statSync } from 'fs';
 import { join, dirname, extname, relative, isAbsolute } from 'path';
 import { PROJECT_ROOT } from '../runtime/paths';
 import { serverLog } from '../logger';
@@ -36,11 +36,24 @@ export class SmartContextDetector {
     basePath: string,
     hints?: ContextHints,
   ): Promise<RelevantFile[]> {
-    const cacheKey = `${prompt}-${hints?.cursorFile || 'none'}`;
+    // The filesystem is mutable independently of this short-lived cache. Include
+    // the complete selection input in the key so a changed/renamed hint set or
+    // project cannot reuse paths from an earlier request.
+    const cacheKey = JSON.stringify([basePath, prompt, hints ?? null]);
     const cached = this.cache.get(cacheKey);
 
     if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
-      return cached.files;
+      // A file can disappear or be renamed after indexing. Re-read cached
+      // entries before exposing them so agents never receive a stale path or
+      // stale contents from the context cache.
+      const refreshedFiles = cached.files.flatMap((file) => {
+        if (!this.isReadableFile(file.path)) return [];
+        const content = this.readFileSafe(file.path);
+        return content === undefined ? [] : [{ ...file, content }];
+      });
+      const currentFiles = this.limitContext(refreshedFiles, 8000);
+      this.cache.set(cacheKey, { files: currentFiles, timestamp: Date.now() });
+      return currentFiles;
     }
 
     const files: RelevantFile[] = [];
@@ -158,7 +171,13 @@ export class SmartContextDetector {
     }
 
     files.sort((a, b) => b.relevance - a.relevance);
-    const limitedFiles = this.limitContext(files, 8000);
+    // ResolvePath normally performs this check, but the filesystem may change
+    // while imports/hints are being collected. Never expose an entry that no
+    // longer names a readable regular file.
+    const currentFiles = files.filter(
+      (file) => this.isReadableFile(file.path) && file.content !== undefined,
+    );
+    const limitedFiles = this.limitContext(currentFiles, 8000);
 
     this.cache.set(cacheKey, { files: limitedFiles, timestamp: Date.now() });
 
@@ -195,11 +214,11 @@ export class SmartContextDetector {
 
     for (const ext of extensions) {
       const fullPath = join(baseDir, importPath + ext);
-      if (existsSync(fullPath)) {
+      if (this.isReadableFile(fullPath)) {
         return fullPath;
       }
       const indexPath = join(baseDir, importPath, `index${ext}`);
-      if (existsSync(indexPath)) {
+      if (this.isReadableFile(indexPath)) {
         return indexPath;
       }
     }
@@ -217,7 +236,7 @@ export class SmartContextDetector {
 
     implPath = implPath.replace(/\/(test|tests)\//, '/');
 
-    if (implPath !== testPath && existsSync(implPath)) {
+    if (implPath !== testPath && this.isReadableFile(implPath)) {
       return implPath;
     }
 
@@ -248,16 +267,16 @@ export class SmartContextDetector {
 
   private resolvePath(file: string, basePath: string): string | null {
     if (isAbsolute(file)) {
-      return existsSync(file) ? file : null;
+      return this.isReadableFile(file) ? file : null;
     }
 
     const resolved = join(basePath, file);
-    if (existsSync(resolved)) {
+    if (this.isReadableFile(resolved)) {
       return resolved;
     }
 
     const fromRoot = join(PROJECT_ROOT, file);
-    if (existsSync(fromRoot)) {
+    if (this.isReadableFile(fromRoot)) {
       return fromRoot;
     }
 
@@ -268,8 +287,19 @@ export class SmartContextDetector {
     try {
       return readFileSync(path, 'utf-8');
     } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err), path }, 'Failed to read file for context');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err), path },
+        'Failed to read file for context',
+      );
       return undefined;
+    }
+  }
+
+  private isReadableFile(path: string): boolean {
+    try {
+      return statSync(path).isFile();
+    } catch {
+      return false;
     }
   }
 
@@ -327,7 +357,10 @@ export class SmartContextDetector {
         hints.lastCommitMessage = lastCommit;
       }
     } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Git not available for context hints');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Git not available for context hints',
+      );
     }
 
     return hints;

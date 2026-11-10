@@ -7,6 +7,7 @@ import {
   rmSync,
   writeFileSync,
   existsSync,
+  symlinkSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,6 +16,7 @@ import { ChatGit } from '../chat-git';
 import { createSessionWorkspace } from '../session-workspace';
 import { GitExecutor } from '../git-executor';
 import { githubRepositoryFromRemote } from '../github-pull-requests';
+import { directoryLinkType } from '../../runtime/platform';
 
 let root: string;
 let source: string;
@@ -92,6 +94,50 @@ describe('chat-local Git revisions', () => {
     expect(readFileSync(join(chat, 'file.txt'), 'utf8')).toBe('feature');
     expect(readFileSync(join(source, 'file.txt'), 'utf8')).toBe('baseline');
     expect(git(source, 'branch', '--show-current')).toBe('main');
+  });
+  test('new source commits import with read-only access that cannot write source Git metadata', async () => {
+    writeFileSync(join(source, 'file.txt'), 'new source commit');
+    git(source, 'add', '.');
+    git(source, 'commit', '-m', 'Created after the chats');
+    const commit = git(source, 'rev-parse', 'HEAD');
+    const index = readFileSync(join(source, '.git', 'index'));
+    const config = readFileSync(join(source, '.git', 'config'));
+    expect(git(chat, 'rev-parse', 'HEAD')).toBe(initial);
+    const original = GitExecutor.prototype.exec;
+    let imports = 0;
+    const transport = spyOn(GitExecutor.prototype, 'exec').mockImplementation(function (
+      this: GitExecutor,
+      args,
+      options,
+    ) {
+      if (args.includes('fetch') && args.includes(source)) {
+        imports++;
+        expect(options?.readOnlyRoots).toEqual([source]);
+      }
+      return original.call(this, args, options);
+    });
+    try {
+      await service.switch(
+        await input({ kind: 'commit', ref: commit, source: true, branch: 'new-source-commit' }),
+      );
+      expect(imports).toBe(1);
+    } finally {
+      transport.mockRestore();
+    }
+    expect(git(chat, 'rev-parse', 'HEAD')).toBe(commit);
+    expect(readFileSync(join(chat, 'file.txt'), 'utf8')).toBe('new source commit');
+    const sourceWrite = await new GitExecutor(chat).exec(
+      ['config', '--local', 'test.escape', 'blocked'],
+      {
+        readOnlyRoots: [source],
+        env: { GIT_DIR: join(source, '.git'), GIT_WORK_TREE: source },
+      },
+    );
+    expect(sourceWrite.success).toBe(false);
+    expect(readFileSync(join(source, '.git', 'index'))).toEqual(index);
+    expect(readFileSync(join(source, '.git', 'config'))).toEqual(config);
+    expect(git(source, 'rev-parse', 'HEAD')).toBe(commit);
+    expect(git(sibling, 'rev-parse', 'HEAD')).toBe(initial);
   });
   test('source inspection does not run fsmonitor helpers or refresh the source index', async () => {
     const marker = join(root, 'source-helper-ran');
@@ -172,6 +218,22 @@ describe('chat-local Git revisions', () => {
       }),
     ).rejects.toThrow('subdirectory is absent');
     expect(git(chat, 'branch', '--show-current')).toBe('chat-one');
+  });
+  test('requires explicit in-place access and retains owned checkout containment', async () => {
+    const inPlace = new ChatGit(source, undefined, { allowInPlace: true });
+    const state = await inPlace.state('ordinary-chat');
+    expect(state.isolated).toBe(false);
+    expect(state.head).toBe(initial);
+    expect(state.branch).toBe('main');
+    expect(() => new ChatGit(source)).toThrow('owned isolated');
+
+    const redirected = join(chat, 'outside');
+    symlinkSync(source, redirected, directoryLinkType());
+    for (const allowInPlace of [false, true]) {
+      expect(() => new ChatGit(redirected, undefined, { allowInPlace })).toThrow('redirected');
+    }
+    expect(git(source, 'rev-parse', 'HEAD')).toBe(initial);
+    expect(git(sibling, 'rev-parse', 'HEAD')).toBe(initial);
   });
   test('fetches a PR into this chat only, pins its head and records details', async () => {
     git(source, 'remote', 'add', 'origin', 'git@github.com:example/project.git');

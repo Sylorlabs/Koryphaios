@@ -47,16 +47,30 @@ function mergePayload(
 function truncateToolResult(message: WSMessage): WSMessage {
   if (message.type !== 'stream.tool_result') return message;
   const payload = message.payload as {
-    toolResult?: { output?: string; truncated?: boolean };
+    toolResult?: { name?: string; output?: string; truncated?: boolean; computerUse?: unknown };
   };
   const output = payload?.toolResult?.output;
+  // Preserve structured computer evidence before the generic text preview is clipped.
+  // CLI providers transport this same receipt in the JSON text result.
+  if (output && /(?:^|__)computer_/.test(payload.toolResult?.name ?? '')) {
+    try {
+      const computerUse = JSON.parse(output).computerUse;
+      if (computerUse?.version === 1) {
+        message = { ...message, payload: { ...payload, toolResult: { ...payload.toolResult!, computerUse } } };
+      }
+    } catch { /* Legacy/plain-text results keep their normal preview. */ }
+  }
   if (!output || output.length <= MAX_TOOL_OUTPUT_CHARS) return message;
   return {
     ...message,
     payload: {
-      ...payload,
+      ...(message.payload && typeof message.payload === 'object'
+        ? message.payload as Record<string, unknown>
+        : {}),
       toolResult: {
-        ...payload.toolResult!,
+        ...(payload.toolResult ?? {}),
+        ...(((message.payload as typeof payload).toolResult?.computerUse)
+          ? { computerUse: (message.payload as typeof payload).toolResult!.computerUse } : {}),
         output: `${output.slice(0, MAX_TOOL_OUTPUT_CHARS)}\n\n… [truncated ${output.length - MAX_TOOL_OUTPUT_CHARS} chars — open file or re-run tool for full output]`,
         truncated: true,
       },

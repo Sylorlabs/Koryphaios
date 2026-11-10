@@ -50,7 +50,6 @@ describe('skill assignment evidence', () => {
       expect(() =>
         compilePrompt({
           role,
-          mode: 'advanced',
           provider: 'openai',
           workingDirectory: root,
           taskContract: contract,
@@ -66,7 +65,6 @@ describe('skill assignment evidence', () => {
     });
     const compiled = compilePrompt({
       role: 'worker',
-      mode: 'advanced',
       provider: 'openai',
       workingDirectory: root,
       taskContract: contract,
@@ -94,7 +92,6 @@ describe('skill assignment evidence', () => {
     });
     const compiled = compilePrompt({
       role: 'worker',
-      mode: 'advanced',
       provider: 'openai',
       workingDirectory: root,
       taskContract: contract,

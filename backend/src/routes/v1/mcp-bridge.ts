@@ -16,16 +16,22 @@
 //   POST /api/v1/mcp-bridge/hooks/session-end   — SessionEnd hook → flush
 
 import { Elysia, t } from 'elysia';
+import { mcpProjectScope } from '../../mcp/project-scope';
+import { ensureProjectMcpServers } from '../../mcp/server-service';
 import { realpathSync } from 'node:fs';
+import { isAbsolute, relative, sep } from 'node:path';
 import { sessionWorkspaceOwnership } from '../../kory/session-workspace';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 import { localAuth } from '../../auth/local-auth';
 import { getContext } from '../../context';
 import { providerLog, serverLog } from '../../logger';
 import type { ToolContext } from '../../tools/registry';
+import { waitForToolApproval } from '../../tools/approval-queue';
 import { loadAgentSettingsForSession } from '../../agent-settings';
+import { withSessionProviderExecutionScope } from '../../providers/execution-scope';
 import {
   decideToolPermission,
+  resolveSubAgentPermissionPolicy,
   resolveToolPermissionPolicy,
   resolveSandboxOptions,
 } from '../../tools/permission-policy';
@@ -34,7 +40,7 @@ import {
   filterToolDefsForNotesPermissions,
   formatNoteToolApprovalSummary,
 } from '../../notes/notes-settings';
-import { isNoteToolName } from '@koryphaios/shared';
+import { isLocalExecutionTarget, isNoteToolName } from '@koryphaios/shared';
 import {
   AuthenticationError,
   AuthorizationError,
@@ -49,7 +55,11 @@ import {
 } from '../../providers/bridge-grant';
 import type { SessionToken } from '../../auth/local-auth';
 import { safeProviderDiagnostic } from '../../providers/provider-diagnostics';
-import { antigravityNativeToolEquivalent } from '../../providers/antigravity-permissions';
+import {
+  antigravityNativeToolEquivalent,
+  antigravityNativeToolRedirectReason,
+  isAntigravityInternalReadPath,
+} from '../../providers/antigravity-permissions';
 
 const NATIVE_TO_KORY: Record<string, string> = {
   read: 'kory__read_file',
@@ -86,14 +96,44 @@ const SAFE_NATIVE_CONTROL_TOOLS = new Set([
 
 export function managedNativeToolDecision(
   toolName: string,
+  toolInput: Record<string, unknown> = {},
 ):
   | { decision: 'approve'; reason: string }
   | { decision: 'block'; reason: string; koryEquivalent?: string } {
   const name = toolName.toLowerCase();
+  if (name === 'call_mcp_tool') {
+    const server = toolInput.ServerName ?? toolInput.serverName ?? toolInput.server_name;
+    const tool = toolInput.ToolName ?? toolInput.toolName ?? toolInput.tool_name;
+    if (server === 'kory' && typeof tool === 'string' && /^kory__[a-z][a-z0-9_-]*$/.test(tool))
+      return {
+        decision: 'approve',
+        reason:
+          'Kory MCP dispatch; the signed bridge enforces tool role, session and permission policy.',
+      };
+    return {
+      decision: 'block',
+      reason: 'Managed MCP calls must target a kory__ tool on the kory server.',
+    };
+  }
+  if (
+    (name === 'view_file' || name === 'read_file') &&
+    isAntigravityInternalReadPath(
+      toolInput.AbsolutePath ??
+        toolInput.absolute_path ??
+        toolInput.Path ??
+        toolInput.path ??
+        toolInput.file_path,
+    )
+  ) {
+    return {
+      decision: 'approve',
+      reason: 'Antigravity internal MCP schema and brain artifact inspection',
+    };
+  }
   // agy names its tools after the step type (`run_command`, `view_file`, …), so
   // its catalog is resolved from its own map rather than the Claude-style
   // spellings below. A missed name still lands on the default-deny tail.
-  const antigravity = antigravityNativeToolEquivalent(name);
+  const antigravity = antigravityNativeToolEquivalent(toolName);
   if (antigravity.kind === 'safe') {
     return { decision: 'approve', reason: 'Provider-local bookkeeping only' };
   }
@@ -107,15 +147,15 @@ export function managedNativeToolDecision(
     return {
       decision: 'block',
       koryEquivalent: antigravity.kory,
-      reason: `Use ${antigravity.kory}; Koryphaios owns host tool execution.`,
+      reason: antigravityNativeToolRedirectReason(toolName, antigravity.kory),
     };
   }
-  const koryEquivalent = NATIVE_TO_KORY[toolName];
+  const koryEquivalent = NATIVE_TO_KORY[toolName] ?? NATIVE_TO_KORY[name];
   if (koryEquivalent)
     return {
       decision: 'block',
       koryEquivalent,
-      reason: `Use ${koryEquivalent}; Koryphaios owns host tool execution.`,
+      reason: antigravityNativeToolRedirectReason(toolName, koryEquivalent),
     };
   if (toolName === 'run_subagent' || toolName === 'Task' || toolName === 'Agent')
     return {
@@ -170,6 +210,17 @@ function hasBridgeRole(auth: BridgeRouteAuth, sessionId: string, role: string): 
   return localAuth.hasPermission(auth.session, `mcp:${sessionId}:${role}`);
 }
 
+function requireLocalMcpTarget(auth: BridgeRouteAuth, target: unknown): void {
+  const backendId = process.env.KORY_BACKEND_ID?.trim() || 'local';
+  // Signed bridge grants are minted by this backend and are the only current
+  // MCP transport. Requiring the target on that path prevents a caller from
+  // turning a local ToolRegistry grant into an implied linked/remote transport.
+  if (target === undefined && auth.kind === 'signed')
+    throw new ValidationError('A local MCP execution target is required');
+  if (target !== undefined && !isLocalExecutionTarget(target, backendId))
+    throw new AuthorizationError('MCP bridge only accepts this backend as a local target');
+}
+
 async function requireActiveBridgeSession(sessionId: string) {
   const { sessions } = getContext();
   const session = await sessions.getActive(sessionId);
@@ -188,7 +239,11 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
     async ({ request, body, set }) => {
       const auth = authenticateBridgeRoute(request, set, body, 'mcp');
       if (!auth) throw new AuthenticationError('Unauthorized');
-      const { sessionId, role } = body as { sessionId: string; role: string };
+      const { sessionId, role, target } = body as {
+        sessionId: string;
+        role: string;
+        target?: unknown;
+      };
       if (!sessionId) throw new ValidationError('sessionId is required');
       if (role !== 'manager' && role !== 'worker' && role !== 'critic' && role !== 'coder') {
         throw new ValidationError('A valid CLI role is required');
@@ -196,13 +251,17 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
       if (!hasBridgeRole(auth, sessionId, role)) {
         throw new AuthorizationError('The CLI capability is not scoped to this session and role');
       }
+      requireLocalMcpTarget(auth, target);
       const { tools } = getContext();
       const session = await requireActiveBridgeSession(sessionId);
-      const root = session.workingDirectory || process.cwd();
+      const root = mcpProjectScope(
+        session.gitWorkspace?.repositoryPath ?? session.workingDirectory ?? process.cwd(),
+      );
+      await ensureProjectMcpServers(root);
 
       return {
         ok: true,
-        tools: filterToolDefsForNotesPermissions(tools.getToolDefsForRole(role), root).map(
+        tools: filterToolDefsForNotesPermissions(tools.getToolDefsForRole(role, root), root).map(
           (tool) => ({
             ...tool,
             name: `kory__${tool.name}`,
@@ -210,7 +269,13 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
         ),
       };
     },
-    { body: t.Object({ sessionId: t.String(), role: t.String() }) },
+    {
+      body: t.Object({
+        sessionId: t.String(),
+        role: t.String(),
+        target: t.Optional(t.Unknown()),
+      }),
+    },
   )
 
   // ── Execute a Kory tool by name (called by the MCP bridge server) ────────
@@ -219,13 +284,22 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
     async ({ request, body, set }) => {
       const auth = authenticateBridgeRoute(request, set, body, 'mcp');
       if (!auth) throw new AuthenticationError('Unauthorized');
-      const { sessionId, toolName, input, role, workingDirectory } = body as {
+      const {
+        sessionId,
+        toolName: rawToolName,
+        input,
+        role,
+        workingDirectory,
+        target,
+      } = body as {
         sessionId: string;
         toolName: string;
         input: Record<string, unknown>;
         role?: string;
         workingDirectory?: string;
+        target?: unknown;
       };
+      const toolName = rawToolName?.replace(/^kory__/, '') ?? '';
       if (!sessionId || !toolName) {
         throw new ValidationError('sessionId and toolName are required');
       }
@@ -247,9 +321,40 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
         if (!hasBridgeRole(auth, sessionId, role)) {
           throw new AuthorizationError('The CLI capability is not scoped to this session and role');
         }
+        requireLocalMcpTarget(auth, target);
         const normalizedRole = role;
-        if (!tools.isAllowedForRole(toolName, normalizedRole)) {
+        const settingsRoot = mcpProjectScope(
+          session.gitWorkspace?.repositoryPath ?? session.workingDirectory ?? process.cwd(),
+        );
+        if (!tools.isAllowedForRole(toolName, normalizedRole, settingsRoot)) {
           throw new AuthorizationError(`${normalizedRole} is not allowed to call ${toolName}`);
+        }
+        const executionSignal =
+          auth.kind === 'signed'
+            ? AbortSignal.any([request.signal, auth.grant.signal])
+            : request.signal;
+        if (normalizedRole === 'critic') {
+          if (auth.kind !== 'signed' || !auth.grant.workspaceRoot)
+            throw new AuthorizationError('Critic calls require an active host-bound review grant');
+          const result = await withSessionProviderExecutionScope(sessionId, () =>
+            kory.executeCriticBridgeTool(
+              sessionId,
+              auth.grant.workspaceRoot!,
+              {
+                id: `critic-bridge-${crypto.randomUUID()}`,
+                name: toolName,
+                input,
+              },
+              executionSignal,
+            ),
+          );
+          return {
+            ok: true,
+            output: result.output,
+            isError: result.isError,
+            durationMs: result.durationMs,
+            ...(result.images && !result.isError ? { images: result.images } : {}),
+          };
         }
         const activeGoal = (await goals.list()).find(
           (goal) =>
@@ -263,11 +368,28 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
         const chatRoot = await kory.resolveSessionWorkingDirectoryPublic(sessionId);
         let root = chatRoot;
         if (auth.kind === 'signed' && auth.grant.workspaceRoot) {
-          const granted = realpathSync(auth.grant.workspaceRoot);
-          const chatOwner = sessionWorkspaceOwnership(chatRoot);
-          const grantOwner = sessionWorkspaceOwnership(granted);
-          if (!chatOwner || !grantOwner || chatOwner.checkout !== grantOwner.checkout) {
+          let granted: string;
+          let canonicalChatRoot: string;
+          try {
+            granted = realpathSync(auth.grant.workspaceRoot);
+            canonicalChatRoot = realpathSync(chatRoot);
+          } catch {
             throw new AuthorizationError('CLI workspace grant does not belong to this chat');
+          }
+          const chatOwner = sessionWorkspaceOwnership(canonicalChatRoot);
+          const grantOwner = sessionWorkspaceOwnership(granted);
+          if (chatOwner) {
+            if (!grantOwner || chatOwner.checkout !== grantOwner.checkout) {
+              throw new AuthorizationError('CLI workspace grant does not belong to this chat');
+            }
+          } else {
+            const rel = relative(canonicalChatRoot, granted);
+            if (
+              grantOwner ||
+              (rel !== '' && (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)))
+            ) {
+              throw new AuthorizationError('CLI workspace grant does not belong to this chat');
+            }
           }
           root = granted;
         } else if (
@@ -277,39 +399,22 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
           throw new AuthorizationError('Worker CLI calls require a host-bound workspace grant');
         }
         const mcpSettings = loadAgentSettingsForSession(root, sessionId);
-        const permissionPolicy = resolveToolPermissionPolicy(
-          mcpSettings,
-          normalizedRole === 'critic' || session.interactionMode === 'plan' ? 'plan' : 'act',
-        );
-        const mcpNaturalSandboxed = normalizedRole === 'critic' || permissionPolicy.mode !== 'yolo';
+        const permissionPolicy =
+          normalizedRole === 'worker' && session.interactionMode !== 'plan'
+            ? resolveSubAgentPermissionPolicy(mcpSettings, mcpSettings.subAgentApproval)
+            : resolveToolPermissionPolicy(
+                mcpSettings,
+                session.interactionMode === 'plan' ? 'plan' : 'act',
+              );
+        const mcpNaturalSandboxed = permissionPolicy.mode !== 'yolo';
         if (isNoteToolName(toolName)) {
           const notePermission = checkNoteToolPermission(toolName, root, {
-            yoloMode: permissionPolicy.mode === 'yolo',
+            mode: permissionPolicy.mode,
           });
           if (!notePermission.allowed) {
             throw new AuthorizationError(`${normalizedRole} is not allowed to call ${toolName}`);
           }
-          if (
-            // Retrieval composes read_note permissions in ToolRegistry and
-            // needs its invocation-bound approval receipt, not an outer prompt.
-            ![
-              'retrieve_note_context',
-              'propose_note_relationship',
-              'review_note_relationship',
-            ].includes(toolName) &&
-            notePermission.requiresApproval &&
-            decideToolPermission(permissionPolicy, toolName).action === 'allow'
-          ) {
-            const selection = await kory.requestToolApproval(
-              sessionId,
-              `Allow agent to ${formatNoteToolApprovalSummary(toolName, input)}?`,
-              ['Allow', 'Reject'],
-              { allowOther: false, allowKeepChatting: false },
-            );
-            if (selection !== 'Allow') {
-              throw new AuthorizationError(`Note action rejected for ${toolName}`);
-            }
-          }
+          // ToolRegistry owns Notes approval and the single-use receipt.
         }
         const ctx: ToolContext = {
           sessionId,
@@ -318,30 +423,59 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
           ...(activeGoal ? { goalId: activeGoal.id } : {}),
           ...(activeGoalItem ? { goalItemId: activeGoalItem.id } : {}),
           workingDirectory: root,
+          settingsRoot,
           requiredWorkspaceRoot: sessionWorkspaceOwnership(root)
             ? normalizedRole === 'manager'
               ? sessionWorkspaceOwnership(root)!.checkout
               : root
             : undefined,
-          // Native calls must not outlive a disconnected/timed-out bridge request.
+          // Native calls must not outlive a disconnected/timed-out bridge request
+          // or a revoked turn grant when the user stops the session.
           signal: toolName.startsWith('computer_')
-            ? AbortSignal.any([request.signal, AbortSignal.timeout(25_000)])
-            : request.signal,
+            ? AbortSignal.any([executionSignal, AbortSignal.timeout(25_000)])
+            : executionSignal,
           isSandboxed: mcpNaturalSandboxed,
           sandboxOptions: resolveSandboxOptions(mcpSettings, mcpNaturalSandboxed),
           permissionPolicy,
           approvedToolCallIds: new Set(),
+          ...(normalizedRole === 'manager'
+            ? {
+                renameSession: (title: string) => kory.renameSession(sessionId, title),
+                delegateToWorker: (
+                  task: string,
+                  domain?: string,
+                  skills?: import('../../kory/skill-assignment').SkillAssignment,
+                  workerModel?: string,
+                  reasoningLevel?: string,
+                ) =>
+                  kory.runWorkerPipeline(
+                    sessionId,
+                    task,
+                    undefined,
+                    reasoningLevel,
+                    domain,
+                    skills,
+                    workerModel,
+                  ),
+              }
+            : {}),
           waitForUserInput: (question, options, opts) =>
             kory.requestToolApproval(sessionId, question, options, opts),
+          ...(normalizedRole === 'worker' &&
+          !(mcpSettings.subAgentApproval === 'manager' && mcpSettings.permissionMode === 'guarded')
+            ? { waitForToolApproval }
+            : {}),
           recordChange: (change) => {
             kory.recordChange?.(sessionId, change);
           },
         };
-        const result = await tools.execute(ctx, {
-          id: `mcp-bridge-${Date.now()}`,
-          name: toolName,
-          input,
-        });
+        const result = await withSessionProviderExecutionScope(sessionId, () =>
+          tools.execute(ctx, {
+            id: `mcp-bridge-${Date.now()}`,
+            name: toolName,
+            input,
+          }),
+        );
         return {
           ok: true,
           output: result.output,
@@ -360,6 +494,7 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
         input: t.Record(t.String(), t.Unknown()),
         role: t.Optional(t.String()),
         workingDirectory: t.Optional(t.String()),
+        target: t.Optional(t.Unknown()),
       }),
     },
   )
@@ -390,7 +525,7 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
             decision: 'block' as const,
             reason: 'CLI capability is not scoped to this session',
           };
-        const decision = managedNativeToolDecision(tool_name);
+        const decision = managedNativeToolDecision(tool_name, tool_input);
         // Route native CLI tool calls through Kory's permission system.
         // If the tool is one Kory can handle (read, write, exec, etc.), block
         // the native call and tell the CLI to use the kory__ equivalent instead.
@@ -398,9 +533,7 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
           // agy only reads `reason` from a PreToolUse verdict — it has no
           // `hookSpecificOutput` — so the redirect has to be in the reason for
           // the agent to recover instead of retrying a denied tool.
-          const redirect = decision.koryEquivalent
-            ? `${decision.reason} Call ${decision.koryEquivalent} via the kory MCP server instead.`
-            : decision.reason;
+          const redirect = decision.reason;
           return {
             decision: 'block' as const,
             reason: redirect,
@@ -496,7 +629,7 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
           decision: 'block' as const,
           reason: 'CLI capability is not scoped to this session',
         };
-      return managedNativeToolDecision(tool_name);
+      return managedNativeToolDecision(tool_name, tool_input);
     },
     {
       body: t.Object({
@@ -586,7 +719,7 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
     { body: t.Object({ session_id: t.String() }) },
   )
 
-  // ── SessionEnd hook: flush ──────────────────────────────────────────────
+  // ── SessionEnd hook: flush ───────────────────────────────────────────────
   .post(
     '/hooks/session-end',
     async ({ request, body, set }) => {

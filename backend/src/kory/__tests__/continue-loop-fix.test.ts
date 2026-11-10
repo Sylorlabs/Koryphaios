@@ -4,7 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'bun';
 import { ProviderRegistry } from '../../providers/registry';
-import { shouldAutoContinueAfterCap, shouldRequestFinalAnswer } from '../manager';
+import {
+  shouldAutoContinueAfterCap,
+  shouldContinueAfterOutputLimit,
+  shouldRequestFinalAnswer,
+} from '../manager';
 import { WorkspaceManager } from '../workspace-manager';
 import { GitManager } from '../git-manager';
 import { SnapshotManager } from '../snapshot-manager';
@@ -98,6 +102,23 @@ describe('continue-loop fixes', () => {
         lastToolCallCount: 0,
       }),
     ).toBe(false);
+  });
+
+  test('only output-limit stops are auto-resumable', () => {
+    const base = {
+      finishReason: 'max_tokens' as const,
+      attempts: 0,
+      maxAttempts: 3,
+      stoppedByUser: false,
+      turnFailure: false,
+    };
+    expect(shouldContinueAfterOutputLimit(base)).toBe(true);
+    expect(shouldContinueAfterOutputLimit({ ...base, finishReason: 'stop' })).toBe(false);
+    expect(shouldContinueAfterOutputLimit({ ...base, finishReason: 'end_turn' })).toBe(false);
+    expect(shouldContinueAfterOutputLimit({ ...base, finishReason: 'tool_use' })).toBe(false);
+    expect(shouldContinueAfterOutputLimit({ ...base, turnFailure: true })).toBe(false);
+    expect(shouldContinueAfterOutputLimit({ ...base, stoppedByUser: true })).toBe(false);
+    expect(shouldContinueAfterOutputLimit({ ...base, attempts: 3 })).toBe(false);
   });
 });
 

@@ -62,19 +62,29 @@ function admission(controller = new AbortController(), runId = 'run-image-1') {
   };
 }
 
-function admittedWorkExecutor(controller: AbortController) {
+function admittedWorkExecutor(controller: AbortController, onSettled?: () => void) {
   return mock(
     async <T>(
       _admission: SessionTurnAdmission,
       work: (context: AdmittedWorkContext) => Promise<T>,
       _completeReason: string,
-    ): Promise<T> =>
-      work({
-        signal: controller.signal,
-        phase: async () => undefined,
-      }),
+    ): Promise<T> => {
+      try {
+        return await work({
+          signal: controller.signal,
+          phase: async () => undefined,
+        });
+      } finally {
+        onSettled?.();
+      }
+    },
   );
 }
+
+const imageReview = {
+  runCriticGate: async () => ({ passed: true }),
+  resolveSessionWorkingDirectoryPublic: async () => dataDir,
+};
 
 describe('image generation from chat', () => {
   test.each(['omit', 'allow'] as const)(
@@ -169,6 +179,7 @@ describe('image generation from chat', () => {
         get: () => undefined,
       },
       kory: {
+        ...imageReview,
         generateSessionTitle: async () => undefined,
         reserveSessionTurn,
         dispatchAdmittedWork,
@@ -282,9 +293,11 @@ describe('image generation from chat', () => {
         get: () => undefined,
       },
       kory: {
+        ...imageReview,
         reserveSessionTurn,
         dispatchAdmittedWork,
         rejectSessionTurn: async () => undefined,
+        generateSessionTitle: async () => undefined,
       },
       wsManager: { broadcastToSession: () => undefined },
     } as never);
@@ -329,6 +342,7 @@ describe('image generation from chat', () => {
         get: () => undefined,
       },
       kory: {
+        ...imageReview,
         generateSessionTitle: async () => undefined,
         reserveSessionTurn: async () => token,
         dispatchAdmittedWork,
@@ -363,7 +377,9 @@ describe('image generation from chat', () => {
     const stored: Array<Record<string, unknown>> = [];
     const events: Array<{ type: string; payload: unknown; sessionId?: string }> = [];
     const { controller, token } = admission(undefined, 'run-image-cancelled');
-    const dispatchAdmittedWork = admittedWorkExecutor(controller);
+    let markWorkSettled!: () => void;
+    const workSettled = new Promise<void>((resolve) => { markWorkSettled = resolve; });
+    const dispatchAdmittedWork = admittedWorkExecutor(controller, () => markWorkSettled());
     let releaseFetch!: () => void;
     const fetchRelease = new Promise<void>((resolve) => {
       releaseFetch = resolve;
@@ -391,6 +407,7 @@ describe('image generation from chat', () => {
         get: () => undefined,
       },
       kory: {
+        ...imageReview,
         generateSessionTitle: async () => undefined,
         reserveSessionTurn: async () => token,
         dispatchAdmittedWork,
@@ -417,7 +434,10 @@ describe('image generation from chat', () => {
     controller.abort(new DOMException('cancelled by test', 'AbortError'));
     expect(providerSignal?.aborted).toBe(true);
     releaseFetch();
-    await waitFor(() => events.some((event) => event.type === 'system.error'));
+    await workSettled;
+    // Intentional cancellation is silent, unlike a provider failure.
+    await Bun.sleep(0);
+    expect(events.some((event) => event.type === 'system.error')).toBe(false);
 
     expect(stored.map((message) => message.role)).toEqual(['user']);
     expect(events.some((event) => event.type === 'stream.delta')).toBe(false);

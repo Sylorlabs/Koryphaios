@@ -94,8 +94,9 @@ export class PruneContextTool implements Tool {
   readonly name = 'prune_context';
   readonly description =
     'Free context-window space by pruning earlier tool outputs you no longer need (old file reads, ' +
-    'terminal output, search results). Pass their archive ids. Pruned content is replaced by a stub; ' +
-    'its bounded, redacted durable preview stays available through fetch_context.';
+    'terminal output, search results). Managers may pass archive ids. Workers and Critics may omit ids ' +
+    'and prune their own older tool output context with keepRecent. Pruned content is replaced by a stub ' +
+    'and is not removed from the visible transcript.';
   readonly inputSchema = {
     type: 'object',
     properties: {
@@ -104,12 +105,38 @@ export class PruneContextTool implements Tool {
         items: { type: 'string' },
         description: 'Archive ids to prune, e.g. ["cx_3", "cx_4"]',
       },
+      keepRecent: {
+        type: 'number',
+        minimum: 4,
+        maximum: 100,
+        description: 'For a worker or Critic, retain this many recent context messages.',
+      },
     },
-    required: ['ids'],
   };
-  readonly role = 'manager' as const;
+  readonly role = 'any' as const;
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
+    if (ctx.pruneOwnContext) {
+      const keepRecent =
+        typeof call.input.keepRecent === 'number' ? call.input.keepRecent : undefined;
+      try {
+        return {
+          callId: call.id,
+          name: this.name,
+          output: await ctx.pruneOwnContext(keepRecent),
+          isError: false,
+          durationMs: 0,
+        };
+      } catch (error) {
+        return {
+          callId: call.id,
+          name: this.name,
+          output: error instanceof Error ? error.message : String(error),
+          isError: true,
+          durationMs: 0,
+        };
+      }
+    }
     const archive = getContextArchive();
     if (!archive) {
       return {

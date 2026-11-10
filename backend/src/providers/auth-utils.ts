@@ -48,8 +48,29 @@ export function clearCachedToken(key: string): void {
 
 const CODEX_CLI_AUTH_PREFIX = 'cli:codex:';
 const CLAUDE_CLI_AUTH_PREFIX = 'cli:claude:';
+const OPENCODE_CLI_AUTH_PREFIX = 'cli:opencode:';
+/** OpenCode CLI opt-in marker — the CLI owns its own auth (~/.local/share/opencode/auth.json). */
+export function isOpenCodeCLIAuthMarker(value: string | null | undefined): boolean {
+  return typeof value === 'string' && value.startsWith(OPENCODE_CLI_AUTH_PREFIX);
+}
+export function createOpenCodeCLIAuthMarker(): string {
+  return `${OPENCODE_CLI_AUTH_PREFIX}${Date.now()}`;
+}
+
+/** Detect only the CLI-owned credential signal (workspace credentials are
+ *  CLI-owned). A live ACP turn remains the verification authority. */
+export function detectOpenCodeCLILogin(): boolean {
+  const home = homeDir();
+  if (!home) return false;
+  return existsSync(join(home, '.local', 'share', 'opencode', 'auth.json'));
+}
+
 const GROK_CLI_AUTH_PREFIX = 'cli:grok:';
+const CODEBUDDY_CLI_AUTH_PREFIX = 'cli:codebuddy:';
+/** WorkBuddy Desktop marker — the installed desktop app owns the login. */
+const WORKBUDDY_DESKTOP_AUTH_PREFIX = 'workbuddy-desktop:installed:';
 const ANTIGRAVITY_CLI_AUTH_PREFIX = 'cli:antigravity:';
+const OMNIRUSH_CLI_AUTH_PREFIX = 'cli:omnirush:';
 const KORY_CODEX_HOME = join(PROJECT_ROOT, '.koryphaios', 'codex-home');
 
 /** Grok Build CLI opt-in marker — the CLI owns its own auth (subscription or XAI key). */
@@ -58,6 +79,34 @@ export function isGrokCLIAuthMarker(value: string | null | undefined): boolean {
 }
 export function createGrokCLIAuthMarker(): string {
   return `${GROK_CLI_AUTH_PREFIX}${Date.now()}`;
+}
+
+/** CodeBuddy CLI opt-in marker — the CLI owns its own auth (~/.codebuddy login). */
+export function isCodeBuddyCLIAuthMarker(value: string | null | undefined): boolean {
+  return typeof value === 'string' && value.startsWith(CODEBUDDY_CLI_AUTH_PREFIX);
+}
+export function createCodeBuddyCLIAuthMarker(): string {
+  return `${CODEBUDDY_CLI_AUTH_PREFIX}${Date.now()}`;
+}
+
+/** WorkBuddy Desktop opt-in marker — presence means "the desktop app owns the
+ *  login". Installing the app is the entire configuration; no token is ever
+ *  requested from the user. */
+export function isWorkBuddyDesktopAuthMarker(value: string | null | undefined): boolean {
+  return typeof value === 'string' && value.startsWith(WORKBUDDY_DESKTOP_AUTH_PREFIX);
+}
+export function createWorkBuddyDesktopAuthMarker(): string {
+  return `${WORKBUDDY_DESKTOP_AUTH_PREFIX}${Date.now()}`;
+}
+
+/** Detect the CLI-owned login signal; a live turn remains the real verification. */
+export function detectCodeBuddyCLILogin(): boolean {
+  if (process.env.CODEBUDDY_API_KEY?.trim()) return true;
+  const home = homeDir();
+  if (!home) return false;
+  return existsSync(join(home, '.codebuddy', 'settings.json')) ||
+    existsSync(join(home, '.codebuddy', 'auth.json')) ||
+    existsSync(join(home, '.codebuddy', 'user-state.json'));
 }
 
 export function isCursorCLIAuthMarker(value: string | null | undefined): boolean {
@@ -72,6 +121,23 @@ export function isAntigravityCLIAuthMarker(value: string | null | undefined): bo
 }
 export function createAntigravityCLIAuthMarker(): string {
   return `${ANTIGRAVITY_CLI_AUTH_PREFIX}${Date.now()}`;
+}
+
+export function isOmnirushCLIAuthMarker(value: string | null | undefined): boolean {
+  return typeof value === 'string' && value.startsWith(OMNIRUSH_CLI_AUTH_PREFIX);
+}
+
+export function createOmnirushCLIAuthMarker(): string {
+  return `${OMNIRUSH_CLI_AUTH_PREFIX}${Date.now()}`;
+}
+
+/** Detect only the CLI-owned state signal; whoami remains the verification authority. */
+export function detectOmnirushCLILogin(): boolean {
+  return existsSync(join(omnirushStateDirectory(), 'auth.json'));
+}
+
+export function omnirushStateDirectory(): string {
+  return process.env.OMNIRUSH_DIR?.trim() || join(homeDir(), '.omnirush');
 }
 
 const GEMINI_CLI_AUTH_PREFIX = 'cli:gemini:';
@@ -220,6 +286,15 @@ function homeDir(): string {
 }
 
 /**
+ * Freebuff resolves its profile from FREEBUFF_CONFIG_DIR when set, otherwise
+ * from ~/.config/manicode. Keep discovery aligned with the CLI instead of
+ * assuming the default path on every host.
+ */
+export function freebuffConfigDir(): string {
+  return process.env.FREEBUFF_CONFIG_DIR?.trim() || join(homeDir(), '.config', 'manicode');
+}
+
+/**
  * Detects a machine-wide Codex CLI login at ~/.codex/auth.json. This is separate from
  * Koryphaios's managed Codex app-server profile and is informational —
  * it tells us the user has the Codex CLI set up on their system.
@@ -292,9 +367,9 @@ export function createFreebuffCLIAuthMarker(): string {
  * of login validity, entitlement, or runtime/keychain support.
  */
 export function detectFreebuffCLILogin(): boolean {
-  const home = homeDir();
-  if (!home) return false;
-  const status = inspectFreebuffCredentials(join(home, '.config', 'manicode'));
+  const profile = freebuffConfigDir();
+  if (!profile) return false;
+  const status = inspectFreebuffCredentials(profile);
   return status.kind === 'plaintext' || status.kind === 'keychain';
 }
 
@@ -315,9 +390,9 @@ export function readFreebuffCredentials(): {
   authToken: string;
   fingerprintId: string;
 } | null {
-  const home = homeDir();
-  if (!home) return null;
-  return readFreebuffPlaintextCredentials(join(home, '.config', 'manicode'));
+  const profile = freebuffConfigDir();
+  if (!profile) return null;
+  return readFreebuffPlaintextCredentials(profile);
 }
 
 // ─── Multi-account Freebuff discovery ────────────────────────────────────────
@@ -346,7 +421,8 @@ export function discoverFreebuffAccounts(): FreebuffAccount[] {
   const home = homeDir();
   if (!home) return [];
 
-  const configDir = join(home, '.config');
+  const configuredProfile = process.env.FREEBUFF_CONFIG_DIR?.trim();
+  const configDir = configuredProfile ? join(configuredProfile, '..') : join(home, '.config');
   if (!existsSync(configDir)) return [];
 
   // Scan for manicode* directories (manicode, manicode2, manicode-work, etc.)
@@ -362,6 +438,9 @@ export function discoverFreebuffAccounts(): FreebuffAccount[] {
           return false;
         }
       });
+    if (configuredProfile && existsSync(configuredProfile) && !candidateDirs.includes(configuredProfile)) {
+      candidateDirs.push(configuredProfile);
+    }
   } catch (err: unknown) {
     serverLog.debug(
       { err: err instanceof Error ? err.message : String(err) },
@@ -429,12 +508,6 @@ export function detectCursorCLILogin(): boolean {
     );
     return false;
   }
-}
-
-/** Google Jules API key from the environment (https://jules.google.com/settings#api). */
-export function detectJulesApiKey(): string | null {
-  const k = process.env.JULES_API_KEY?.trim();
-  return k || null;
 }
 
 /** The Antigravity CLI (`agy`) API key from the environment. */

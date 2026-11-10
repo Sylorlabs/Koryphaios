@@ -17,6 +17,32 @@ describe('managed CLI native tool boundary', () => {
     expect(managedNativeToolDecision('mystery_host_tool').decision).toBe('block');
   });
 
+  test('allows agy dispatcher only for session-authorized Kory bridge tools', () => {
+    expect(
+      managedNativeToolDecision('call_mcp_tool', {
+        ServerName: 'kory',
+        ToolName: 'kory__bash',
+        Arguments: { command: 'pwd' },
+      }).decision,
+    ).toBe('approve');
+    expect(
+      managedNativeToolDecision('call_mcp_tool', {
+        ServerName: 'kory',
+        ToolName: 'kory__suggest-fixes',
+        Arguments: {},
+      }).decision,
+    ).toBe('approve');
+    for (const input of [
+      undefined,
+      {},
+      { ServerName: 'other', ToolName: 'kory__bash' },
+      { ServerName: 'kory', ToolName: 'native_bash' },
+      { ServerName: 'kory', ToolName: 'kory__bash; command' },
+    ]) {
+      expect(managedNativeToolDecision('call_mcp_tool', input).decision).toBe('block');
+    }
+  });
+
   test('allows only provider-local bookkeeping and internal generation without host authority', () => {
     expect(managedNativeToolDecision('manage_task').decision).toBe('approve');
     expect(managedNativeToolDecision('finish').decision).toBe('approve');
@@ -38,6 +64,7 @@ describe('managed CLI native tool boundary', () => {
   test('redirects agy step-type tool names to their Kory equivalents', () => {
     for (const [tool, equivalent] of [
       ['run_command', 'kory__bash'],
+      ['RunCommand', 'kory__bash'],
       ['view_file', 'kory__read_file'],
       ['write_to_file', 'kory__write_file'],
       ['replace_file_content', 'kory__edit_file'],
@@ -49,6 +76,8 @@ describe('managed CLI native tool boundary', () => {
         decision: 'block',
         koryEquivalent: equivalent,
       });
+      expect(managedNativeToolDecision(tool).reason).toContain('call_mcp_tool');
+      expect(managedNativeToolDecision(tool).reason).toContain(`ToolName="${equivalent}"`);
     }
   });
 
@@ -62,5 +91,31 @@ describe('managed CLI native tool boundary', () => {
     const decision = managedNativeToolDecision('browser_click_element');
     expect(decision.decision).toBe('block');
     expect(decision.reason).toContain('browser_click_element');
+  });
+
+  test('allows agy view_file only on internal mcp schema and brain step paths', () => {
+    expect(
+      managedNativeToolDecision('view_file', {
+        AbsolutePath:
+          '/Users/test/.koryphaios/antigravity-home/.gemini/antigravity-cli/mcp/kory/kory__read_file.json',
+      }).decision,
+    ).toBe('approve');
+    expect(
+      managedNativeToolDecision('view_file', {
+        AbsolutePath:
+          '/Users/test/.koryphaios/antigravity-home/.gemini/antigravity-cli/brain/conv-1/output.txt',
+      }).decision,
+    ).toBe('approve');
+    expect(
+      managedNativeToolDecision('view_file', {
+        AbsolutePath:
+          '/Users/test/.koryphaios/antigravity-home/.gemini/antigravity-cli/antigravity-oauth-token',
+      }).decision,
+    ).toBe('block');
+    expect(
+      managedNativeToolDecision('view_file', {
+        AbsolutePath: '/workspace/project/README.md',
+      }).decision,
+    ).toBe('block');
   });
 });

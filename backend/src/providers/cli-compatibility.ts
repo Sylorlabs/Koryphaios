@@ -157,6 +157,77 @@ export const CLI_ADAPTER_COMPATIBILITY = [
   },
   {
     ...unverified,
+    provider: 'codebuddy',
+    binary: 'codebuddy',
+    transport: 'Print mode stream-json NDJSON (Claude Code envelope shapes) fed by stdin artifacts',
+    versionBoundary: unknownBoundary,
+    evidence: [
+      source(
+        'codebuddy',
+        'modelsFromProductJson',
+        'Model catalog parsed from the installed CLI\'s own product*.json.',
+      ),
+      fixture(
+        'codebuddy',
+        'models come from the CLI product catalog with context from maxInputTokens',
+        'Catalog plumbing from canned product catalog data.',
+      ),
+      fixture(
+        'codebuddy',
+        'isAvailable requires opt-in or detected CLI login; disabled blocks it',
+        'Availability/plumbing; live CLI runs are not part of this evidence.',
+        'plumbing-test',
+      ),
+    ],
+    revalidate: [
+      'Print flags and stream-json envelope shapes against a live login',
+      'Effort enum discovery and MCP config against the installed CLI version',
+    ],
+  },
+  {
+    ...unverified,
+    provider: 'workbuddy-desktop',
+    binary: 'WorkBuddy AI.app (bundled CLI in --serve mode)',
+    transport:
+      'ACP over HTTP SSE against the installed WorkBuddy AI desktop app\'s host runtime ' +
+      '(bundled codebuddy CLI started with --serve inside the app bundle)',
+    versionBoundary: unknownBoundary,
+    evidence: [
+      source(
+        'workbuddy-desktop-runtime',
+        'modelsFromWorkBuddyProductJson',
+        'Model catalog parsed from the app bundle\'s own product.json.',
+      ),
+      fixture(
+        'workbuddy-desktop',
+        'models come from the app bundle product catalog with context from maxInputTokens',
+        'Catalog plumbing from canned product catalog data.',
+      ),
+      fixture(
+        'workbuddy-desktop',
+        'reasoning ladders come from the runtime per-model data, never invented',
+        'Reasoning ladder derived from runtime-reported supportedEfforts.',
+      ),
+      fixture(
+        'workbuddy-desktop',
+        'isAvailable is true with an install and disabled config blocks it',
+        'Availability/plumbing; live desktop runtime turns are not part of this evidence.',
+        'plumbing-test',
+      ),
+      fixture(
+        'workbuddy-desktop',
+        'the CLI bridge injects the kory MCP server config',
+        'Kory MCP bridge wiring (kory__ tools) into the runtime via --mcp-config.',
+      ),
+    ],
+    revalidate: [
+      'ACP over HTTP SSE wire protocol against the installed app version',
+      'Sidecar attach path (session.create) against a running desktop app',
+      'Session config options (thought_level, modes) against the live runtime',
+    ],
+  },
+  {
+    ...unverified,
     provider: 'antigravity',
     binary: 'agy',
     transport: 'stream-json input/output with transcript telemetry',
@@ -174,7 +245,7 @@ export const CLI_ADAPTER_COMPATIBILITY = [
       ),
       fixture(
         'antigravity-stream',
-        'emits authoritative final usage for accounting and Billing',
+        'keeps final turn accounting separate from exact live context evidence',
         'Usage mapping from a synthetic final record.',
       ),
     ],
@@ -238,16 +309,81 @@ export const CLI_ADAPTER_COMPATIBILITY = [
   },
   {
     ...unverified,
+    provider: 'omnirush',
+    binary: 'omnirush',
+    transport:
+      'Omnirush 2.x --print engine with CLI-owned model-catalog.json; legacy 1.x JSONL RPC fallback',
+    versionBoundary: unknownBoundary,
+    evidence: [
+      source(
+        'omnirush-cli',
+        'model-catalog.json',
+        'Model, context-window, output-limit, image, and thinking metadata are parsed from the installed CLI-owned catalog.',
+      ),
+      fixture(
+        'omnirush-cli',
+        'uses the installed CLI table as the source of model capabilities',
+        'Synthetic CLI table parsing and live metadata mapping.',
+      ),
+    ],
+    revalidate: [
+      'Current --print output and exit/error shapes',
+      'CLI-owned model-catalog.json metadata and thinking-level output',
+      'MCP remains disabled by current managed-engine releases; revalidate before enabling tool calls',
+    ],
+  },
+  {
+    ...unverified,
+    provider: 'opencode',
+    binary: 'opencode',
+    transport:
+      'ACP (protocolVersion 1) over stdio — `opencode acp`; authenticated live catalog via `opencode api model.list`',
+    versionBoundary: unknownBoundary,
+    evidence: [
+      source(
+        'opencode-cli',
+        'model.list',
+        'Catalog fetch chain: authenticated api model.list, then --standalone fallback, then the bare id list.',
+      ),
+      source(
+        'opencode-acp',
+        'session/set_config_option',
+        'Model, effort and plan-mode negotiation are ACP-native; no config files are written.',
+      ),
+      source(
+        'opencode-cli',
+        'isKoryBridgeMetaExec',
+        'kory__* bridge calls are recognized and not double-reported in the feed.',
+      ),
+      fixture(
+        'opencode-cli',
+        'parses the model.list catalog with real context limits',
+        'Synthetic catalog fixture; not an installed-CLI probe.',
+      ),
+      fixture(
+        'opencode-acp',
+        'decides permission requests fail-closed for mutating kinds',
+        'Synthetic permission fixtures.',
+      ),
+    ],
+    revalidate: [
+      'ACP protocolVersion and session/update shapes against the installed CLI',
+      'model.list schema (limit, variants reasoningEffort, cost tiers)',
+      'session/request_permission option kinds and the plan-mode read-only posture',
+    ],
+  },
+  {
+    ...unverified,
     provider: 'freebuff',
     binary: 'freebuff',
-    transport: 'Ink TUI through tmux PTY; log.jsonl evidence; mandatory Linux bubblewrap',
+    transport: 'OpenTUI through tmux PTY; log.jsonl evidence; mandatory Linux bubblewrap',
     versionBoundary: {
       kind: 'source-reference',
       detail:
-        'AGENTS.md and adapter comments reference the qualified native 0.2.12 build. No live validation is established here. Fixture versions 9.8.7 and 10.0.0 are synthetic and are not support claims.',
+        'AGENTS.md and adapter comments reference the qualified native 0.2.16 build; docs/freebuff-cli.md records the separate opt-in live probe. This diagnostic catalog does not probe an installed CLI. Fixture versions 9.8.7 and 10.0.0 are synthetic and are not support claims.',
     },
     evidence: [
-      source('freebuff-cli', '0.2.12', 'Version-sensitive TUI/log assumptions recorded in source.'),
+      source('freebuff-cli', '0.2.16', 'Version-sensitive TUI/log assumptions recorded in source.'),
       fixture(
         'freebuff-codebuff-contract',
         'discovers picker models and image capabilities from the installed-binary shape',

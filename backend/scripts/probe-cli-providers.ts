@@ -11,12 +11,14 @@ import {
 } from '../src/providers/claude-code';
 import { GrokBuildProvider } from '../src/providers/grok-build';
 import { AntigravityProvider } from '../src/providers/antigravity';
+import { OpenCodeCliProvider } from '../src/providers/opencode-cli';
 import { CodexProvider } from '../src/providers/codex';
 import {
   detectClaudeCodeLogin,
   detectGrokCLILogin,
   detectAntigravityCLILogin,
   detectCodexCLILogin,
+  detectOpenCodeCLILogin,
 } from '../src/providers/auth-utils';
 import { whichBinary } from '../src/providers/cli-detection';
 import type { ModelDef, ProviderName } from '@koryphaios/shared';
@@ -70,7 +72,7 @@ async function main() {
   console.log(`Waiting ${WAIT_MS}ms for background model refresh...`);
   await Bun.sleep(WAIT_MS);
 
-  const targets: ProviderName[] = ['claude', 'grok', 'antigravity', 'codex'];
+  const targets: ProviderName[] = ['claude', 'grok', 'antigravity', 'codex', 'opencode'];
   const rows: Row[] = [];
 
   for (const name of targets) {
@@ -101,7 +103,9 @@ async function main() {
             ? detectGrokCLILogin()
             : name === 'antigravity'
               ? detectAntigravityCLILogin()
-              : detectCodexCLILogin(),
+              : name === 'opencode'
+                ? detectOpenCodeCLILogin()
+                : detectCodexCLILogin(),
       configDisabled: cfg?.disabled ?? null,
       registryConnected: connected,
       modelCount: models.length,

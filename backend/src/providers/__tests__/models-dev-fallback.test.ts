@@ -179,7 +179,14 @@ describe('models.dev fallback chain', () => {
 
   it('keeps direct single-key mappings intact', () => {
     expect(modelsDevKeysFor('openai')).toEqual(['openai']);
-    expect(modelsDevKeysFor('unorouter')).toEqual(['unorouter']);
+    expect(modelsDevKeysFor('unorouter')).toEqual([
+      'unorouter', 'openai', 'anthropic', 'google', 'xai', 'deepseek', 'groq', 'mistral',
+    ]);
+    // Vyce AI publishes bare upstream ids with no limits or effort ladder, so
+    // it resolves through the cross-lab keys like the other resale gateways.
+    expect(modelsDevKeysFor('vyceai')).toEqual([
+      'openai', 'anthropic', 'google', 'xai', 'deepseek', 'groq', 'mistral',
+    ]);
     expect(modelsDevKeysFor('mistral')).toEqual(['mistral']);
     expect(modelsDevKeysFor('qwen')).toEqual(['alibaba']);
     expect(modelsDevKeysFor('kimicode')).toEqual(['moonshotai']);
@@ -210,6 +217,21 @@ describe('models.dev fallback chain', () => {
       contextWindow: 262_144,
       contextVerified: true,
       canReason: true,
+    });
+  });
+
+  it('prefers UnoRouter metadata, then enriches routed upstream ids', async () => {
+    await seedCatalog();
+    const [native, routed] = applyModelsDevMetadata(
+      'unorouter',
+      [def('unorouter-house', 'unorouter'), def('gpt-5.5', 'unorouter')],
+      modelsDevKeysFor('unorouter'),
+    );
+    expect(native).toMatchObject({ contextWindow: 128_000, contextVerified: true });
+    expect(routed).toMatchObject({
+      contextWindow: 400_000,
+      contextVerified: true,
+      reasoningLevels: ['low', 'medium', 'high'],
     });
   });
 

@@ -10,6 +10,7 @@ import {
 import { getDb } from '../db';
 import { ConflictError, NotFoundError } from '../errors/types';
 import { PROJECT_ROOT } from '../runtime/paths';
+import { resolveProjectIdentity } from '../runtime/request-project';
 
 const PROJECTION_PAGE_SIZE = 250;
 const PROPERTY_TYPES: readonly NotePropertyType[] = [
@@ -88,11 +89,11 @@ export interface NotePropertySchemaSummary {
 }
 
 function normalizedProjectRoot(projectRoot: string): string {
-  return resolve(projectRoot);
+  return resolveProjectIdentity(projectRoot);
 }
 
 function includesLegacyProjectRows(projectRoot: string): boolean {
-  return normalizedProjectRoot(projectRoot) === resolve(PROJECT_ROOT);
+  return normalizedProjectRoot(projectRoot) === normalizedProjectRoot(PROJECT_ROOT);
 }
 
 function normalizedPropertyKey(key: string): string {

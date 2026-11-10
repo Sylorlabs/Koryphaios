@@ -102,9 +102,7 @@ export interface DynamicClientRegistration {
 }
 
 function isTokenEndpointAuthMethod(value: unknown): value is TokenEndpointAuthMethod {
-  return (
-    value === 'none' || value === 'client_secret_post' || value === 'client_secret_basic'
-  );
+  return value === 'none' || value === 'client_secret_post' || value === 'client_secret_basic';
 }
 
 export interface OAuthTokens {
@@ -598,10 +596,7 @@ function parseTokenResponse(payload: TokenResponse, endpointForLog: string): OAu
       { endpoint: safeUrlForLog(endpointForLog), oauthError: payload.error },
       'MCP OAuth token endpoint returned a non-standard error',
     );
-    throw new McpOAuthError(
-      `Authorization failed (${payload.error})`,
-      'token_exchange_failed',
-    );
+    throw new McpOAuthError(`Authorization failed (${payload.error})`, 'token_exchange_failed');
   }
   if (typeof payload.error === 'string') {
     const description =

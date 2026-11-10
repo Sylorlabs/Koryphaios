@@ -86,6 +86,72 @@ describe('ManagerRunLifecycle', () => {
     });
   });
 
+  for (const outcome of ['complete', 'fail', 'cancel'] as const) {
+    test(`defers ${outcome} until owner settlement without allowing another run`, async () => {
+      const lifecycle = new ManagerRunLifecycle(coordinator);
+      const handle = await lifecycle.begin(SESSION_ID, 'user_turn');
+      const settle = lifecycle.deferTerminal(handle);
+      await lifecycle.finish(handle, outcome, 'original_outcome');
+      await lifecycle.finish(handle, 'fail', 'late_cleanup_error');
+      await lifecycle.phase(handle, 'streaming', 'late_callback');
+
+      expect(coordinator.get(SESSION_ID)).toMatchObject({
+        runId: handle.runId, status: 'active', revision: 1,
+      });
+      await expect(lifecycle.begin(SESSION_ID, 'overlapping_turn')).rejects.toThrow();
+      await coordinator.drainOutbox();
+      expect(coordinator.get(SESSION_ID)?.status).toBe('active');
+
+      const settled = await settle();
+      expect(settled).toMatchObject({
+        runId: handle.runId,
+        phase: outcome === 'complete' ? 'done' : outcome === 'fail' ? 'error' : 'cancelled',
+        status: 'terminal', terminalReason: 'original_outcome', revision: 2,
+      });
+      const next = await lifecycle.begin(SESSION_ID, 'next_turn');
+      // Repeated settlement and a late callback cannot release the new lease.
+      expect(await settle()).toEqual(settled);
+      await lifecycle.finish(handle, 'cancel', 'stale_callback');
+      expect(lifecycle.runRef(next).runId).toBe(next.runId);
+      expect(coordinator.get(SESSION_ID)).toMatchObject({ runId: next.runId, status: 'active' });
+    });
+  }
+
+  test('settling an execution scope preserves a parked process wait', async () => {
+    const lifecycle = new ManagerRunLifecycle(coordinator);
+    const handle = await lifecycle.begin(SESSION_ID, 'user_turn');
+    const settle = lifecycle.deferTerminal(handle);
+    sqlite.exec(`INSERT INTO supervised_processes
+      (id, session_id, status, provenance, supervision, is_background)
+      VALUES ('scope-proc', '${SESSION_ID}', 'running', 'agent-tool', 'owned-child', 1)`);
+    await lifecycle.waitForProcesses(handle, ['scope-proc']);
+    await settle();
+    expect(coordinator.get(SESSION_ID)).toMatchObject({ status: 'waiting', phase: 'waiting_terminal' });
+    expect(lifecycle.listProcessWaits()).toHaveLength(1);
+    await expect(lifecycle.begin(SESSION_ID, 'overlapping_turn')).rejects.toThrow();
+  });
+
+  test('exposes the current revision only through the owning run handle', async () => {
+    const lifecycle = new ManagerRunLifecycle(coordinator);
+    const handle = await lifecycle.begin(SESSION_ID, 'user_turn');
+
+    expect(lifecycle.runRef(handle)).toEqual({
+      sessionId: SESSION_ID,
+      runId: handle.runId,
+      revision: 1,
+    });
+
+    await lifecycle.phase(handle, 'thinking', 'provider_reasoning');
+    expect(lifecycle.runRef(handle)).toMatchObject({
+      sessionId: SESSION_ID,
+      runId: handle.runId,
+      revision: 2,
+    });
+
+    await lifecycle.finish(handle, 'complete', 'provider_turn_completed');
+    expect(() => lifecycle.runRef(handle)).toThrow(/no longer owns session/);
+  });
+
   test('persists worker membership even when the manager phase does not change', async () => {
     const lifecycle = new ManagerRunLifecycle(coordinator);
     const handle = await lifecycle.begin(SESSION_ID, 'user_turn');

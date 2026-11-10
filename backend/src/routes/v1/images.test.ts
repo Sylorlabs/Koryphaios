@@ -133,7 +133,7 @@ describe('image generation routes', () => {
     expect(local?.configured).toBe(true);
   });
 
-  test('exposes local endpoint image models discovered from the provider registry', async () => {
+  test('classifies local endpoint models by reported output modality, never by name', async () => {
     setContext({
       providers: {
         getConfigs: () => ({
@@ -143,9 +143,9 @@ describe('image generation routes', () => {
           if (id === 'local') {
             return {
               listModels: () => [
-                { id: 'flux.1-schnell', name: 'FLUX.1 Schnell' },
-                { id: 'stable-diffusion-3.5-large', name: 'SD 3.5 Large' },
-                { id: 'llama3-8b', name: 'Llama 3 8B' },
+                { id: 'flux.1-schnell', name: 'FLUX.1 Schnell', outputModalities: ['image'] },
+                { id: 'stable-diffusion-3.5-large', name: 'SD 3.5 Large', outputModalities: ['image'] },
+                { id: 'llama3-8b', name: 'Llama 3 8B', outputModalities: ['text'] },
               ],
             };
           }
@@ -163,7 +163,36 @@ describe('image generation routes', () => {
       const ids = local?.models.map((model) => model.id) ?? [];
       expect(ids).toContain('flux.1-schnell');
       expect(ids).toContain('stable-diffusion-3.5-large');
+      // A text-only model must never be offered as an image generator, even from
+      // an endpoint that also serves image models.
       expect(ids).not.toContain('llama3-8b');
+    } finally {
+      setContext(BASE_PROVIDER_CONTEXT as never);
+    }
+  });
+
+  test('never invents image models for an endpoint that publishes no modality data', async () => {
+    setContext({
+      providers: {
+        getConfigs: () => ({
+          local: { baseUrl: 'http://localhost:9853/v1' },
+        }),
+        get: (id: string) =>
+          id === 'local'
+            ? { listModels: () => [{ id: 'flux.1-schnell', name: 'FLUX.1 Schnell' }] }
+            : undefined,
+      },
+    } as never);
+    try {
+      const response = await app.handle(authorizedRequest('/api/images/providers'));
+      const payload = (await response.json()) as {
+        data: Array<{ id: string; models: Array<{ id: string }> }>;
+      };
+      const local = payload.data.find((provider) => provider.id === 'local');
+      // The listing carries ids only, so nothing is classified as an image
+      // model. The provider stays listed and the picker accepts a typed id.
+      expect(local).toBeDefined();
+      expect(local?.models).toEqual([]);
     } finally {
       setContext(BASE_PROVIDER_CONTEXT as never);
     }

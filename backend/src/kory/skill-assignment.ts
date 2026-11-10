@@ -50,6 +50,8 @@ export interface SkillDeliveryEvidence {
 export interface SkillReviewContext {
   taskContract: TaskContract;
   delivery?: SkillDeliveryEvidence;
+  /** Host-owned producer thread whose held response is released after review. */
+  producerAgentId?: string;
 }
 
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');

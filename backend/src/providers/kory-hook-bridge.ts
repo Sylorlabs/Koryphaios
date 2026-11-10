@@ -48,13 +48,41 @@ export function parseArgs(argv: string[]): {
   const requested = args['decision-vocabulary'] || args.decisionVocabulary || '';
   return {
     event: args['event'] || args.event || '',
-    backendUrl: args['backend-url'] || args.backendUrl || process.env.KORY_BACKEND_URL || 'http://127.0.0.1:3001',
-    authFile:
-      args['auth-file'] || args.authFile || process.env.KORY_BRIDGE_AUTH_FILE || '',
+    backendUrl:
+      args['backend-url'] ||
+      args.backendUrl ||
+      process.env.KORY_BACKEND_URL ||
+      'http://127.0.0.1:3001',
+    authFile: args['auth-file'] || args.authFile || process.env.KORY_BRIDGE_AUTH_FILE || '',
     // Default to Claude Code's approve/block vocabulary; `antigravity` selects
     // agy's allow/deny/ask vocabulary, which rejects anything else.
     decisionVocabulary: requested === 'antigravity' ? 'antigravity' : 'claude',
   };
+}
+
+/**
+ * Resolve the active bridge grant file for a hook invocation.
+ *
+ * When a CLI shares a global hooks file (such as Antigravity's
+ * `$GEMINI_DIR/config/hooks.json`), a nested or concurrent turn can overwrite
+ * `--auth-file` on disk and then revoke that file when the inner turn exits.
+ * Prefer `KORY_BRIDGE_AUTH_FILE` from the spawning CLI process's environment
+ * whenever it points to a valid live grant, falling back to `--auth-file`.
+ */
+export function resolveHookAuthFile(
+  cliAuthFile: string,
+  envAuthFile = process.env.KORY_BRIDGE_AUTH_FILE ?? '',
+): string {
+  const candidates = [...new Set([envAuthFile.trim(), cliAuthFile.trim()].filter(Boolean))];
+  for (const candidate of candidates) {
+    try {
+      readBridgeGrantScopeFromFile(candidate);
+      return candidate;
+    } catch {
+      // Try next candidate.
+    }
+  }
+  return cliAuthFile.trim() || envAuthFile.trim();
 }
 
 /**
@@ -165,7 +193,10 @@ export async function main(): Promise<void> {
   const { text: stdinRaw, oversized } = readBoundedStdin();
   if (oversized) {
     process.stdout.write(
-      JSON.stringify({ decision: 'block', reason: 'Kory permission input exceeded the safe limit' }),
+      JSON.stringify({
+        decision: 'block',
+        reason: 'Kory permission input exceeded the safe limit',
+      }),
     );
     return;
   }
@@ -178,13 +209,13 @@ export async function main(): Promise<void> {
   }
 
   const eventMap: Record<string, string> = {
-    'PreToolUse': 'pre-tool',
-    'PostToolUse': 'post-tool',
-    'PermissionRequest': 'permission',
-    'UserPromptSubmit': 'prompt-submit',
-    'Stop': 'stop',
-    'SessionStart': 'session-start',
-    'SessionEnd': 'session-end',
+    PreToolUse: 'pre-tool',
+    PostToolUse: 'post-tool',
+    PermissionRequest: 'permission',
+    UserPromptSubmit: 'prompt-submit',
+    Stop: 'stop',
+    SessionStart: 'session-start',
+    SessionEnd: 'session-end',
   };
 
   const endpoint = eventMap[config.event];
@@ -200,9 +231,10 @@ export async function main(): Promise<void> {
     return;
   }
 
+  const activeAuthFile = resolveHookAuthFile(config.authFile);
   let sessionId = '';
   try {
-    sessionId = readBridgeGrantScopeFromFile(config.authFile).sessionId;
+    sessionId = readBridgeGrantScopeFromFile(activeAuthFile).sessionId;
   } catch {
     process.stdout.write(
       JSON.stringify(
@@ -227,10 +259,10 @@ export async function main(): Promise<void> {
   })();
 
   try {
-    if (!config.authFile) throw new Error('Bridge grant file is unavailable');
+    if (!activeAuthFile) throw new Error('Bridge grant file is unavailable');
     const path = `/api/v1/mcp-bridge/hooks/${endpoint}`;
     const signedHeaders = signedBridgeHeadersFromFile(
-      config.authFile,
+      activeAuthFile,
       'hook',
       'POST',
       path,
@@ -245,7 +277,9 @@ export async function main(): Promise<void> {
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(requestTimeoutMs()),
     });
-    const data = await resp.json().catch(() => ({ decision: 'block', reason: `Kory hook returned HTTP ${resp.status}` }));
+    const data = await resp
+      .json()
+      .catch(() => ({ decision: 'block', reason: `Kory hook returned HTTP ${resp.status}` }));
     // The hook endpoints return { decision, reason, ... } or { ok, ... }.
     // Normalize to the decision vocabulary the calling CLI actually parses.
     const vocabulary = config.decisionVocabulary;

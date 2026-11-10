@@ -13,6 +13,8 @@ import { QUEUE_NAMES, type LLMJobData, type LLMJobResult } from '../types';
 import { ProviderRegistry } from '../../providers';
 import { serverLog, providerLog } from '../../logger';
 import type { StreamRequest, ProviderMessage, ProviderEvent } from '../../providers/types';
+import { currentProviderExecutionScope, withSessionProviderExecutionScope } from '../../providers/execution-scope';
+import { getContext } from '../../context';
 
 // ============================================================================
 // Worker State
@@ -22,7 +24,12 @@ let llmWorker: Worker<LLMJobData, LLMJobResult> | null = null;
 let providerRegistry: ProviderRegistry | null = null;
 
 // Track in-flight requests for cancellation
-const inFlightRequests = new Map<string, AbortController>();
+interface InFlightLLMRequest {
+  sessionId: string;
+  controller: AbortController;
+}
+
+const inFlightRequests = new Map<string, InFlightLLMRequest>();
 
 // ============================================================================
 // Worker Setup
@@ -101,6 +108,10 @@ export function createLLMWorker(
 // ============================================================================
 
 async function processLLMJob(job: Job<LLMJobData>): Promise<LLMJobResult> {
+  return withSessionProviderExecutionScope(job.data.sessionId, () => processScopedLLMJob(job));
+}
+
+async function processScopedLLMJob(job: Job<LLMJobData>): Promise<LLMJobResult> {
   const {
     sessionId,
     prompt,
@@ -117,7 +128,7 @@ async function processLLMJob(job: Job<LLMJobData>): Promise<LLMJobResult> {
 
   // Create abort controller for this job
   const abortController = new AbortController();
-  inFlightRequests.set(job.id as string, abortController);
+  inFlightRequests.set(job.id as string, { sessionId, controller: abortController });
 
   const startTime = Date.now();
 
@@ -149,6 +160,10 @@ async function processLLMJob(job: Job<LLMJobData>): Promise<LLMJobResult> {
     const messages: ProviderMessage[] = [{ role: 'user', content: prompt }];
 
     const request: StreamRequest = {
+      sessionId,
+      ...(currentProviderExecutionScope() ? {
+        workingDirectory: await getContext().kory.resolveSessionWorkingDirectoryPublic(sessionId),
+      } : {}),
       model,
       messages,
       systemPrompt: systemPrompt ?? 'You are a helpful assistant.',
@@ -262,7 +277,7 @@ async function processLLMJob(job: Job<LLMJobData>): Promise<LLMJobResult> {
 export async function cancelLLMJob(jobId: string): Promise<boolean> {
   const controller = inFlightRequests.get(jobId);
   if (controller) {
-    controller.abort();
+    controller.controller.abort();
     inFlightRequests.delete(jobId);
     serverLog.info({ jobId }, 'LLM job cancelled');
     return true;
@@ -273,12 +288,15 @@ export async function cancelLLMJob(jobId: string): Promise<boolean> {
 /**
  * Cancel all running jobs for a session
  */
-export async function cancelLLMJobsForSession(sessionId: string): Promise<number> {
+export async function cancelLLMJobsForSession(
+  sessionId: string,
+  requests: Map<string, InFlightLLMRequest> = inFlightRequests,
+): Promise<number> {
   let cancelled = 0;
-  for (const [jobId, controller] of inFlightRequests.entries()) {
-    // Note: This is a simplification. In production, you'd track sessionId per job
-    controller.abort();
-    inFlightRequests.delete(jobId);
+  for (const [jobId, request] of requests.entries()) {
+    if (request.sessionId !== sessionId) continue;
+    request.controller.abort();
+    requests.delete(jobId);
     cancelled++;
   }
   serverLog.info({ sessionId, cancelled }, 'Cancelled LLM jobs for session');
@@ -325,8 +343,8 @@ export function getLLMWorkerStatus(): {
  */
 export async function closeLLMWorker(): Promise<void> {
   // Cancel all in-flight requests
-  for (const [jobId, controller] of inFlightRequests.entries()) {
-    controller.abort();
+  for (const [jobId, request] of inFlightRequests.entries()) {
+    request.controller.abort();
   }
   inFlightRequests.clear();
 

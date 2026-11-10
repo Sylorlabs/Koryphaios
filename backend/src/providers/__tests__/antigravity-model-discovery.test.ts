@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AntigravityProvider } from '../antigravity';
@@ -32,18 +32,45 @@ describe('Antigravity model discovery environment', () => {
     rmSync(workdir, { recursive: true, force: true });
   });
 
-  it('probes `agy models` with the real HOME so the OS keychain login resolves', async () => {
-    // agy stores its Google OAuth token in the OS credential store (macOS login
-    // keychain, libsecret elsewhere). The Security framework resolves the login
-    // keychain from the user's home directory, so a discovery probe launched
-    // with Koryphaios's isolated HOME finds no keychain, agy answers
-    // "Please sign in to view available models", and the provider ends up
-    // "Connected" with an empty catalog. The fake agy below stands in for the
-    // real binary and reports which HOME it was handed.
+  it('serves a cold catalog without blocking and coalesces failed discovery', async () => {
+    const attempts = join(workdir, 'attempts');
+    fakeAgy(
+      workdir,
+      `if [ "$1" = "models" ]; then printf 'probe\\n' >> "${attempts}"; /bin/sleep 0.3; exit 1; fi\nprintf '{}\\n'`,
+    );
+    process.env.PATH = `${workdir}:${originalPath ?? ''}`;
+    const provider = new AntigravityProvider({ name: 'antigravity', authToken: 'cli-login' } as never);
+    let settled = false;
+    const refresh = provider.refreshModels().then((models) => {
+      settled = true;
+      return models;
+    });
+    expect(provider.listModels()).toEqual([]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(settled).toBe(false);
+    expect(await refresh).toEqual([]);
+    provider.listModels();
+    provider.isAvailable();
+    provider.getQuota();
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(readFileSync(attempts, 'utf8')).toBe('probe\n');
+
+    // An explicit refresh must bypass the negative-cache cooldown rather than
+    // silently returning the previous failed result.
+    await provider.refreshModels();
+    expect(readFileSync(attempts, 'utf8')).toBe('probe\nprobe\n');
+  });
+
+  it('probes `agy models` with the managed HOME so it cannot mutate the host keychain', async () => {
+    // Discovery must use the same managed HOME as a turn. The fake agy below
+    // stands in for the real binary and reports which HOME it was handed;
+    // using the host HOME here would make status refreshes reach for the host
+    // keychain on every probe.
+    const managedHome = getKoryphaiosAntigravityHome();
     fakeAgy(
       workdir,
       'if [ "$HOME" = "' +
-        homedir() +
+        managedHome +
         '" ]; then printf "gemini-3.8-flash-high\\tGemini 3.8 Flash (High)\\n"; else echo "Error: Please sign in to view available models." >&2; exit 1; fi',
     );
     process.env.PATH = `${workdir}:${originalPath ?? ''}`;

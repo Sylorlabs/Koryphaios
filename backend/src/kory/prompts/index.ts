@@ -1,6 +1,6 @@
 /** Versioned prompt compiler shared by manager, worker, and critic execution. */
 
-import type { ProviderName, UIMode, WorkerDomain } from '@koryphaios/shared';
+import type { ProviderName, WorkerDomain } from '@koryphaios/shared';
 import type { PromptCachePlan } from '../../providers/types';
 import { createPromptCachePlan } from '../../providers/prompt-cache';
 import { createHash } from 'node:crypto';
@@ -63,7 +63,7 @@ export interface TaskContract {
     objective: string;
     itemId: string;
     itemTitle: string;
-    verification: 'eligible' | 'unverified' | 'remote-pending-review';
+    verification: 'eligible' | 'unverified';
   };
 }
 
@@ -171,29 +171,6 @@ export interface SkillContextBudgetDecision {
   occupiedContextTokenUpperBound: number;
   nonSkillPromptTokenUpperBound: number;
   reservedOutputTokens?: number;
-}
-
-/** Legacy mode-copy shape retained for UI/status callers; live agents use compilePrompt. */
-export interface PromptTemplate {
-  managerSystem: string;
-  workerSystem: string;
-  criticSystem: string;
-  workerDelegation: (domain: string) => string;
-  criticReview: string;
-  toolDescriptions: Record<string, string>;
-  errors: {
-    noProvider: string;
-    toolFailed: string;
-    workerFailed: string;
-    noGitRepo: string;
-  };
-  thoughts: {
-    analyzing: string;
-    planning: string;
-    executing: string;
-    reviewing: string;
-    complete: string;
-  };
 }
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -382,6 +359,27 @@ export const MANAGER_OUTPUT_TOKEN_LIMIT = 16_384;
 export const WORKER_OUTPUT_TOKEN_LIMIT = 16_384;
 export const CRITIC_OUTPUT_TOKEN_LIMIT = 2_048;
 
+const SESSION_NAMING = `## Session naming
+Koryphaios assigns a concise, specific fallback title from the first user message without delaying the first response, then may refine it in the background.
+Session naming and renaming apply in every interaction, permission, and agent mode. You can call rename_session (kory__rename_session through the MCP bridge) at any time to improve the title when the conversation topic evolves or the user requests a rename.
+Use 3-6 descriptive words; never use New Session or generic filler. Preserve an explicitly user-chosen title unless the user asks to change it. Do not ask for approval or announce routine title changes.`;
+
+/**
+ * Chat-response formatting available to user-facing text. This is a stable
+ * cached section: it describes the renderer's real capabilities so agents
+ * emphasize effectively instead of guessing at unsupported syntax. The
+ * user's theme accent stays the default voice — custom colors are for
+ * genuine emphasis, never a replacement theme.
+ */
+export const RESPONSE_FORMATTING = `## Response formatting (chat text only, never files)
+- Keep all user facing prose, including highlighted text, free of dash characters and semicolons. Use commas, periods, or separate sentences instead.
+- Standard GFM works: headings, **bold**, *italic*, ~~strikethrough~~, tables, task lists, code fences.
+- Inline emphasis: [text]{attrs} — e.g. [alert]{red, large, bold}, [note]{color=accent, size=xl}. Colors accept #hex, rgb()/hsl(), CSS names, or \`accent\` for the user's theme accent. Sizes: xs/sm/base/lg/xl/2xl/3xl or 10-48px. Flags: bold, italic, underline, strike, mark. Prefer \`accent\` and default styles; use custom colors sparingly for genuine emphasis.
+- ==highlight== and ++underline++ are available. A safe <span style="color:...; font-size:..."> subset (color, background-color, font-size, font-weight, font-style, text-decoration) is also honored.
+- Links: [label](https://example.com) render with the site's icon and open externally. Use descriptive labels, never bare URLs for important links.
+- File and symbol navigation: Create clickable links for files and code symbols using [filename.ts](file:///absolute/path/to/filename.ts#L10-L20) or [\`SymbolName\`](file:///absolute/path/to/file.ts#L10-L20), and link sessions as [title](kory-session://<sessionId>). Link Notes with [label](kory-note://id/<encoded-note-id>), or [label](kory-note://path/<encoded-path>). Percent encode the ID or path with encodeURIComponent, preserving case. Paths can be Notes folder/title paths such as /Findings/Guide, or indexed project source paths such as docs/notes-workspace.md. Prefer IDs when known. [[Title]] and [[/Folder/Title|label]] also navigate within the active project.
+- Fenced blocks: chart (bar/line/pie JSON with labels+datasets), color (swatch chips), html (sandboxed iframe, no scripts). Math: $...$ / $$...$$ / \`\`\`math.`;
+
 /**
  * Chars-per-token planning estimate shared by skill budgeting, the
  * context-usage bar, compaction accounting, and CLI bridges (see TOKEN_CHARS).
@@ -487,7 +485,10 @@ export function deriveSkillContextBudget(input: {
     // margin) before any provider call. The budget floors at
     // MIN_SKILL_CONTEXT_BUDGET: a crowded window degrades to minimal-only
     // guidance plus a warning instead of a `max(1, …)` dead end.
-    budget: Math.max(MIN_SKILL_CONTEXT_BUDGET, Math.min(requestedBudget, availableTokens)),
+    budget: Math.max(
+      MIN_SKILL_CONTEXT_BUDGET,
+      Math.min(requestedBudget, availableTokens * TOKEN_CHARS),
+    ),
     requestedBudget,
     source: 'trusted-model-window',
     contextWindowTokens: Math.floor(window),
@@ -628,7 +629,6 @@ function renderForProvider(adapter: string, sections: string[]): string {
 
 export function compilePrompt(input: {
   role: PromptRole;
-  mode: UIMode;
   provider: ProviderName | string;
   /** Exact selected model ID; context capacity is used only when live-verified. */
   model?: string;
@@ -645,12 +645,17 @@ export function compilePrompt(input: {
   workingDirectory: string;
   taskContract: TaskContract;
   contextPaths?: string[];
+  /** Live chat metadata belongs after the stable cache prefix. */
+  sessionTitle?: string;
   skillSelection?: {
     pins?: string[];
     remove?: string[];
     collisionChoices?: Record<string, 'personal' | 'project'>;
     targetMedium?: string;
     contextBudget?: number;
+    /** Only report authored per-skill budget overflow when the user enabled an
+     * explicit skill-context cap. Authored budgets remain advisory metadata. */
+    warnOnAuthoredBudgetOverflow?: boolean;
     activePaths?: string[];
   };
 }): CompiledPrompt {
@@ -663,12 +668,10 @@ export function compilePrompt(input: {
       ? 'You are Kory, the user-facing manager. The user manually chose your model; never replace or auto-rank the manager. Choose subagents only from the user-enabled category pool. Prefer an agent identity distinct from yourself and prefer a different provider harness for material work, but when the user enabled only one eligible model, reuse it rather than blocking delegation. Disclose that the agent is not independent. Apply the same evidence standard to direct and delegated edits. Use send_agent_message (exposed as kory__send_agent_message through the MCP bridge) for manager-to-manager cross-project coordination and same-project agent handoffs. Reply with replyToMessageId so message threads remain correlated.'
       : input.role === 'worker'
         ? 'You are a bounded implementation worker. Preserve the immutable objective across retries, stay within granted paths, and return changed files plus exact verification evidence. You may message your manager or same-project agents with send_agent_message. You cannot contact another project directly; use request_manager_relay and let your manager decide whether to forward the request.'
-        : 'You are a fresh independent critic. You are read-only. Judge the actual diff and evidence against every acceptance criterion. Missing or malformed evidence is not a pass.';
+        : 'You are the universal independent Critic. Evaluate every proposed response against the original request, including answers, plans, research, and code. Inspect actual artifacts, run terminal commands to reproduce claims, and red-team edge cases when useful. Your workspace is a disposable verification copy: changes there are experiments, never fixes to the producer project. Commands and delegation require host approval: the manager decides in YOLO/Guarded, and the user decides in other modes. Delegate focused checks to specialists with delegate_to_worker and manage your review team with manage_review_agents; you remain responsible for their evidence and the final verdict. Do not recursively request another Critic to review your own verdict. Judge every acceptance criterion. Missing or malformed evidence is not a pass.';
   const criticOutputContract = input.role === 'critic' ? CRITIC_OUTPUT_CONTRACT : '';
   const style =
-    input.mode === 'beginner'
-      ? 'Explain outcomes in plain, respectful language without weakening technical rigor or hiding failures.'
-      : 'Communicate concisely and technically. Lead with outcomes and exact evidence.';
+    'Communicate clearly, concisely, and respectfully. Lead with outcomes and exact evidence; explain non-obvious details without hiding failures or weakening technical rigor.';
   const instructionText = sources.length
     ? sources
         .map(
@@ -687,13 +690,18 @@ export function compilePrompt(input: {
   const stableSections = [
     `# Koryphaios prompt ${PROMPT_VERSION} (${adapter})`,
     roleRules,
+    input.role === 'manager' ? SESSION_NAMING : '',
     criticOutputContract,
     style,
     UNIVERSAL_CORE,
+    RESPONSE_FORMATTING,
     `## Provider capability truth\n${providerRules}`,
     `## Applicable repository instructions (broad to specific)\n${instructionText}`,
   ];
   const taskSections = [renderTaskContract(input.taskContract)];
+  if (input.role === 'manager' && input.sessionTitle) {
+    taskSections.push(`## Current session title\n${JSON.stringify(input.sessionTitle)}`);
+  }
   const baseSections = [...stableSections, ...taskSections];
   const trustedWindow = applyContextWindowOverride(
     input.model
@@ -737,7 +745,10 @@ export function compilePrompt(input: {
     ...new Set([
       ...(input.skillSelection?.pins ?? []),
       ...requiredSkills,
-      ...(input.role === 'critic' ? ['verification'] : []),
+      ...(input.role === 'critic' ? ['verification', 'critic-review'] : []),
+      ...(input.role === 'manager' && input.skillSelection?.pins?.includes('critic-auto-selection')
+        ? ['critic-auto-selection']
+        : []),
     ]),
   ];
   const skillResolution: SkillResolverResult = resolveSkills(
@@ -750,15 +761,33 @@ export function compilePrompt(input: {
       activePaths: input.skillSelection?.activePaths ?? input.contextPaths,
       targetMedium,
       contextBudget: skillContextBudget.budget,
+      // The model-window budget is always computed for execution, but authored
+      // per-skill budgets are only a diagnostic for users who explicitly turn
+      // on a skill-context cap. A normal turn must not warn merely because a
+      // skill's advisory metadata is smaller than its rendered guidance.
+      warnOnAuthoredBudgetOverflow:
+        input.skillSelection?.warnOnAuthoredBudgetOverflow ??
+        input.skillSelection?.contextBudget !== undefined,
     },
   );
+  // A manager's explicit assignment is part of the delegated contract. A
+  // missing assigned skill cannot be represented as a successful delivery
+  // receipt, even when optional skill discovery degrades gracefully.
+  const deliveredNames = new Set(skillResolution.selected.map(({ skill }) => skill.name));
+  const missingRequired = requiredSkills.filter((name) => !deliveredNames.has(name));
+  if (missingRequired.length > 0) {
+    throw new Error(`Skill resolution blocked: required ${input.role} skills unavailable: ${missingRequired.join(', ')}`);
+  }
   if (skillResolution.blocked) {
     const conflicts = [
       ...skillResolution.collisions.map((item) => item.name),
       ...skillResolution.selectionConflicts.map((item) => `${item.left} <> ${item.right}`),
       ...skillResolution.hierarchyErrors,
     ];
-    throw new Error(`Skill resolution blocked before work starts: ${conflicts.join(', ')}`);
+    // Broken or conflicting skills must not break the agent: surface the
+    // resolution problem as a turn warning and continue with whatever skills
+    // the resolver could safely select. A skill issue is not an agent failure.
+    warnings.push(`Skill resolution warning: ${conflicts.join(', ')}`);
   }
   // Budget overflow no longer blocks: surface the resolver's graceful-
   // degradation notes as turn warnings and keep them in the manifest.
@@ -793,6 +822,7 @@ export function compilePrompt(input: {
       criticContract: criticOutputContract,
       style,
       universalCore: UNIVERSAL_CORE,
+      responseFormatting: RESPONSE_FORMATTING,
       providerCapabilities: `## Provider capability truth\n${providerRules}`,
       repositoryInstructions: `## Applicable repository instructions (broad to specific)\n${instructionText}`,
     },
@@ -841,40 +871,6 @@ export function compilePrompt(input: {
     manifest,
     skillDelivery: createSkillDeliveryEvidence(manifest, skillResolution.selected, requiredSkills),
     ...(warnings.length > 0 ? { warnings } : {}),
-  };
-}
-
-/** Compatibility helper for mode-specific status copy. Quality rules are compiled above. */
-export function getPrompts(mode: UIMode): PromptTemplate {
-  const beginner = mode === 'beginner';
-  return {
-    managerSystem:
-      'Live manager prompts are generated by the versioned Koryphaios prompt compiler.',
-    workerSystem: 'Live worker prompts are generated by the versioned Koryphaios prompt compiler.',
-    criticSystem: 'Live critic prompts are generated by the versioned Koryphaios prompt compiler.',
-    workerDelegation: (domain: string) =>
-      beginner ? `Starting the ${domain} work…` : `Delegating bounded ${domain} work…`,
-    criticReview: beginner ? 'Checking the result…' : 'Running independent review…',
-    toolDescriptions: {},
-    errors: {
-      noProvider: beginner
-        ? 'No AI provider is available. Add one in Settings.'
-        : 'No provider available.',
-      toolFailed: beginner ? 'A tool failed: ${error}' : 'Tool execution failed: ${error}',
-      workerFailed: beginner
-        ? 'The delegated work failed: ${error}'
-        : 'Worker failed after ${attempts} attempts: ${error}',
-      noGitRepo: beginner
-        ? 'No Git repository was detected, so repository recovery features are unavailable.'
-        : 'No Git repository detected.',
-    },
-    thoughts: {
-      analyzing: beginner ? 'Understanding the request…' : 'Analyzing request…',
-      planning: beginner ? 'Preparing the approach…' : 'Planning approach…',
-      executing: beginner ? 'Working on it…' : 'Executing…',
-      reviewing: beginner ? 'Checking the result…' : 'Reviewing output…',
-      complete: beginner ? 'Complete.' : 'Complete.',
-    },
   };
 }
 

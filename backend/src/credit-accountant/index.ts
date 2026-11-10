@@ -20,9 +20,12 @@ import {
   getUsageSamplesByProvider,
   getPromptCacheUsageSummary,
   getUsageCostBreakdown,
+  getUsageEventsSince,
   getUnknownCostUsage,
   setUsageKnownCost,
+  type CreditUsageEventRow,
 } from './db';
+import type { RunRevisionRef } from '@koryphaios/shared';
 import {
   startCreditPolling,
   stopCreditPolling,
@@ -42,7 +45,9 @@ export {
   getUsageSamplesByProvider,
   getPromptCacheUsageSummary,
   getUsageCostBreakdown,
+  getUsageEventsSince,
   getCreditDbPath,
+  type CreditUsageEventRow,
 } from './db';
 export {
   startCreditPolling,
@@ -61,9 +66,10 @@ export function recordUsage(
   provider: string,
   tokensIn: number,
   tokensOut: number,
-  attribution?: { accountId?: string; sessionId?: string },
+  attribution?: { accountId?: string; sessionId?: string; runRef?: RunRevisionRef },
   cacheUsage?: {
-    cacheReadTokens?: number;
+    reportedCostUsd?: number;
+  cacheReadTokens?: number;
     cacheWriteTokens?: number;
     ttftMs?: number;
     latencyMs?: number;
@@ -130,7 +136,7 @@ export function initCreditAccountant(dataDir: string, pollingConfig?: PollingCon
   }
 }
 
-// ─── Subscription quota tracking ────────────────────────────────────────────
+// ─── Subscription quota tracking ──────────────────────────────────────────────
 // Subscription providers (Claude Code, Codex, Copilot, …) are flat-rate: there is
 // no per-token dollar "remaining balance" to report. Instead they expose rate-limit
 // windows. We keep the latest window in memory so the billing route can surface real

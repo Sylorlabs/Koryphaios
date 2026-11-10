@@ -16,14 +16,20 @@ import { randomUUID } from 'node:crypto';
 import {
   FreebuffProvider,
   freebuffCompletionFromLogRow,
+  freebuffResponseFromLogRow,
   freebuffPrivateCliArgs,
   freebuffStartupState,
+  freebuffAccountLimitError,
+  freebuffNeedsSessionConfirmation,
+  freebuffPromptReady,
+  waitForFreebuffPromptReady,
   readFreebuffLogRows,
   waitForFreebuffPoll,
   waitForFreebuffStartup,
   type FreebuffProviderDependencies,
 } from '../freebuff-cli';
 import { FREEBUFF_CLI_DEFAULT_MODEL_ID } from '../freebuff-bundled-catalog';
+import type { FreebuffAccountCatalog } from '../freebuff-model-catalog';
 import { FreebuffCliBridge } from '../cli-bridges';
 import type { FreebuffTurnRuntime, FreebuffRuntimeOptions } from '../freebuff-runtime';
 import type { PreparedFreebuffBridge } from '../freebuff-bridge-runtime';
@@ -62,6 +68,8 @@ function harness(
     readyOnSubmit?: boolean;
     runtimeAvailable?: boolean;
     catalogVersion?: string;
+    accountCatalog?: FreebuffAccountCatalog;
+    accountCatalogFailure?: boolean;
   } = {},
 ) {
   // Only synthetic credentials in a temporary fixture. Never discover actual CLI accounts.
@@ -79,6 +87,8 @@ function harness(
   temporary.push(runRoot);
   const calls: string[] = [];
   const tmuxCalls: string[][] = [];
+  let loadedPrompt = '';
+  let pastedPrompt = '';
   let runtimeOptions: FreebuffRuntimeOptions | undefined;
   const readyPath = join(runRoot, 'bridge-ready.json');
   const selectedModel = options.selectedModel ?? FREEBUFF_CLI_DEFAULT_MODEL_ID;
@@ -114,12 +124,16 @@ function harness(
     }),
     tmux: mock(async (args: string[]) => {
       tmuxCalls.push(args);
+      if (args[0] === 'load-buffer' && args.at(-1) === join(runRoot, 'prompt.txt')) {
+        loadedPrompt = readFileSync(args.at(-1)!, 'utf8');
+      }
+      if (args[0] === 'paste-buffer' && loadedPrompt) pastedPrompt = loadedPrompt;
       if (options.readyOnSubmit && args[0] === 'send-keys' && args.at(-1) === 'Enter') {
         writeFileSync(readyPath, '{"ready":true}');
       }
       if (args[0] === 'capture-pane') {
         fail('capture');
-        return options.pane ?? READY;
+        return `${options.pane ?? READY}\n${pastedPrompt ? (pastedPrompt.length > 2000 ? `Pasted text (${pastedPrompt.length.toLocaleString()} chars)` : pastedPrompt) : ''}`;
       }
       return '';
     }),
@@ -153,8 +167,24 @@ function harness(
     findBinary: () => join(profileDir, 'freebuff'),
     discoverCatalog: async () => ({
       cliVersion: options.catalogVersion ?? '0.2.12',
-      models: [{ id: selectedModel, name: 'Fixture default', multimodal: false }],
+      ...(options.accountCatalog || options.accountCatalogFailure
+        ? { selectionMode: 'cli-managed' as const }
+        : {}),
+      models: [
+        {
+          id:
+            options.accountCatalog || options.accountCatalogFailure
+              ? FREEBUFF_CLI_DEFAULT_MODEL_ID
+              : selectedModel,
+          name: 'Fixture default',
+          multimodal: false,
+        },
+      ],
     }),
+    discoverAccountCatalog: async () => {
+      if (options.accountCatalogFailure) throw new Error(SECRET);
+      return options.accountCatalog ?? { models: [], refreshAt: Date.now() + 60_000 };
+    },
     runtimeStatus: () => ({
       available: options.runtimeAvailable !== false,
       kind: 'docker',
@@ -232,11 +262,39 @@ function harness(
 }
 
 describe('Freebuff native TUI evidence', () => {
+  it('waits for the actual paste receipt before submitting an asynchronous composer', async () => {
+    const prompt = 'synthetic text '.repeat(200);
+    expect(freebuffPromptReady(READY, prompt)).toBe(false);
+    expect(
+      freebuffPromptReady(`Pasted text (${prompt.length.toLocaleString()} chars)`, prompt),
+    ).toBe(true);
+    expect(freebuffPromptReady(`📄 ${prompt.length.toLocaleString()} chars`, prompt)).toBe(true);
+    expect(freebuffPromptReady('Pasted text (1,000 chars)', prompt)).toBe(false);
+    expect(freebuffPromptReady('Hello fixture', 'Hello fixture')).toBe(true);
+    expect(
+      freebuffPromptReady(
+        '│must retrieve the  │\n│note.              │',
+        'must retrieve the note.',
+      ),
+    ).toBe(true);
+    let polls = 0;
+    const tmux = mock(async (_args: string[]) =>
+      ++polls === 1 ? READY : `Pasted text (${prompt.length.toLocaleString()} chars)`,
+    );
+    await waitForFreebuffPromptReady(tmux, 'private', prompt, undefined, 1000);
+    expect(polls).toBe(2);
+    expect(tmux.mock.calls.map(([args]) => args[0])).toEqual(['capture-pane', 'capture-pane']);
+  });
   it('requires the actual composer placeholder, not a banner or long arbitrary pane', () => {
     expect(freebuffStartupState(READY)).toBe('ready');
     expect(freebuffStartupState('Freebuff\n' + 'continue '.repeat(100))).toBe('waiting');
     expect(freebuffStartupState('Load and run these? [y/N]')).toBe('trust');
     expect(freebuffStartupState('Please log in')).toBe('login');
+  });
+
+  it('reports an account Freebuck limit instead of misclassifying it as bridge startup failure', () => {
+    expect(freebuffAccountLimitError('Not enough Freebucks available')).toContain('no Freebucks');
+    expect(freebuffAccountLimitError('Freebucks: 12 remaining')).toBeNull();
   });
 
   it('does not approve a trust prompt or include pane contents in failures', async () => {
@@ -281,6 +339,29 @@ describe('Freebuff native TUI evidence', () => {
     expect(freebuffCompletionFromLogRow(finished('error'))).toBe('error');
     expect(freebuffCompletionFromLogRow(finished('unknown'))).toBe('error');
     expect(freebuffCompletionFromLogRow({ msg: 'Main prompt finished', data: {} })).toBe('error');
+    expect(freebuffCompletionFromLogRow({ msg: 'Main prompt finished', data: {} }, true)).toBe(
+      'success',
+    );
+  });
+
+  it('recovers text from native completion payload variants', () => {
+    expect(
+      freebuffResponseFromLogRow({
+        msg: 'Main prompt finished',
+        data: { lastMessage: { role: 'assistant', content: 'structured answer' } },
+      }),
+    ).toBe('structured answer');
+    expect(
+      freebuffResponseFromLogRow({
+        msg: 'Main prompt finished',
+        data: {
+          allMessages: [
+            { role: 'user', content: 'prompt' },
+            { role: 'model', content: 'answer' },
+          ],
+        },
+      }),
+    ).toBe('answer');
   });
 
   it('removes poll abort listeners on resolution and propagates cancellation', async () => {
@@ -300,6 +381,124 @@ describe('Freebuff native TUI evidence', () => {
 });
 
 describe('Freebuff mocked lifecycle (no login or inference)', () => {
+  const accountModel = {
+    id: 'freebuff/catalog-m-fixture',
+    name: 'Account model',
+    multimodal: true,
+    contextWindow: 1_000_000,
+    reasoningLevels: ['low', 'high'],
+    handle: 'private-account-handle',
+  };
+  it('publishes real account capabilities without handles and verifies explicit selection and effort', async () => {
+    const source = {
+      freebuffModelKey: 'm-other',
+      freebuffCatalogReasoningEfforts: { 'm-other': 'low' },
+    };
+    const fixture = harness({
+      accountCatalog: { models: [accountModel], refreshAt: Date.now() + 60_000 },
+      selectedModel: accountModel.id,
+      settings: JSON.stringify(source),
+      rows: [[rootRow('Selected answer', accountModel.handle), finished()]],
+      onStart: (root) => {
+        expect(
+          JSON.parse(readFileSync(join(root, 'home/.config/manicode/settings.json'), 'utf8')),
+        ).toMatchObject({
+          freebuffModelKey: 'm-fixture',
+          freebuffCatalogReasoningEfforts: { 'm-other': 'low', 'm-fixture': 'high' },
+        });
+      },
+    });
+    const models = await fixture.provider.refreshModels();
+    expect(models.find((model) => model.apiModelId === accountModel.id)).toMatchObject({
+      name: 'Account model',
+      accountId: 'fixture',
+      vision: true,
+      supportsAttachments: true,
+      contextWindow: 1_000_000,
+      contextVerified: true,
+      reasoningLevels: ['low', 'high'],
+    });
+    expect(JSON.stringify(models)).not.toContain(accountModel.handle);
+    const events = await fixture.collect({ reasoningLevel: 'high' });
+    expect(events.some((event) => event.type === 'complete')).toBe(true);
+    expect(JSON.stringify(events)).not.toContain(accountModel.handle);
+  });
+  it('rejects a substituted modern catalog handle before publishing content', async () => {
+    const fixture = harness({
+      accountCatalog: { models: [accountModel], refreshAt: Date.now() + 60_000 },
+      selectedModel: accountModel.id,
+      rows: [[rootRow('Wrong answer', 'private-other-handle'), finished()]],
+    });
+    const events = await fixture.collect();
+    expect(events).toHaveLength(1);
+    expect(events[0]?.error).toContain('did not use the requested model');
+    expect(JSON.stringify(events)).not.toContain('private-other-handle');
+  });
+  it('rejects unavailable account models and unsupported effort before staging a runtime', async () => {
+    for (const accountCatalogFailure of [false, true]) {
+      const fixture = harness({
+        accountCatalog: { models: [accountModel], refreshAt: Date.now() + 60_000 },
+        selectedModel: accountModel.id,
+        accountCatalogFailure,
+      });
+      const events = await fixture.collect({ reasoningLevel: 'unsupported' });
+      expect(events[0]?.type).toBe('error');
+      expect(fixture.calls).not.toContain('runtime');
+      expect(JSON.stringify(events)).not.toContain(SECRET);
+    }
+  });
+
+  it('surfaces the real tool and late result through the provider polling loop', async () => {
+    const fixture = harness({
+      rows: [
+        [
+          {
+            msg: 'step',
+            data: {
+              toolCalls: [
+                { toolCallId: 'read-1', toolName: 'kory__read_file', input: { path: 'README.md' } },
+              ],
+            },
+          },
+        ],
+        [
+          {
+            msg: 'step results',
+            data: {
+              toolResults: [{ toolCallId: 'read-1', content: 'Permission denied', isError: true }],
+            },
+          },
+          rootRow(),
+          finished(),
+        ],
+      ],
+    });
+    const events = await fixture.collect();
+    expect(events.filter((event) => event.type === 'tool_executed')).toEqual([
+      {
+        type: 'tool_executed',
+        toolCallId: 'read-1',
+        toolName: 'kory__read_file',
+        toolInput: '{"path":"README.md"}',
+        toolOutput: 'Permission denied',
+        isError: true,
+      },
+    ]);
+    expect(events.some((event) => event.type === 'complete')).toBe(true);
+    const pasteIndex = fixture.tmuxCalls.findIndex((args) => args[0] === 'paste-buffer');
+    expect(fixture.tmuxCalls[pasteIndex]).not.toContain('-p');
+    expect(fixture.tmuxCalls[pasteIndex - 1]?.at(-1)).toBe('\x1b[200~');
+    expect(fixture.tmuxCalls[pasteIndex + 1]?.at(-1)).toBe('\x1b[201~');
+    const submitIndex = fixture.tmuxCalls.findIndex(
+      (args) => args[0] === 'send-keys' && args.at(-1) === 'Enter',
+    );
+    expect(
+      fixture.tmuxCalls
+        .slice(pasteIndex + 2, submitIndex)
+        .some((args) => args[0] === 'capture-pane'),
+    ).toBe(true);
+  });
+
   it('honors image confirmation but still verifies native TUI attachment evidence', async () => {
     const fixture = harness({
       pane: `${READY}\nki1.png`,
@@ -428,6 +627,18 @@ describe('Freebuff mocked lifecycle (no login or inference)', () => {
         const prompt = readFileSync(join(root, 'prompt.txt'), 'utf8');
         expect(prompt).toContain('tools/list catalog defines available tools');
         expect(prompt).not.toContain('Authoritative Kory MCP catalog for this role:');
+        expect(
+          JSON.parse(readFileSync(join(root, 'workspace', '.agents', 'mcp.json'), 'utf8')),
+        ).toEqual({
+          mcpServers: {
+            kory: {
+              command: '/private/bun',
+              args: ['/private/bridge.js'],
+              env: {},
+              type: 'stdio',
+            },
+          },
+        });
       },
     });
     const events = await fixture.collect();
@@ -500,6 +711,14 @@ describe('Freebuff mocked lifecycle (no login or inference)', () => {
         ['send-keys', 'load-buffer', 'paste-buffer'].includes(args[0]!),
       ),
     ).toBe(false);
+  });
+
+  it('recognizes the native paid-model confirmation without treating it as MCP approval', () => {
+    expect(freebuffNeedsSessionConfirmation('\u001b[31mEnter: confirm and send\u001b[0m')).toBe(
+      true,
+    );
+    expect(freebuffNeedsSessionConfirmation('Enter: retry')).toBe(false);
+    expect(freebuffNeedsSessionConfirmation('take over this session?')).toBe(false);
   });
 
   it('requires the actual MCP ready marker, not only a successful probe', async () => {

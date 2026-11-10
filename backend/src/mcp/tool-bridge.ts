@@ -19,6 +19,7 @@ import { MCPClient, MCPToolWrapper } from './client';
 export async function registerMCPToolsInRegistry(
   registry: ToolRegistry,
   client: MCPClient,
+  projectRoot = process.cwd(),
 ): Promise<number> {
   const tools = client.availableTools;
   if (tools.length === 0) {
@@ -29,7 +30,7 @@ export async function registerMCPToolsInRegistry(
   let registered = 0;
   for (const toolDef of tools) {
     try {
-      const wrapper = new MCPToolWrapper(client, toolDef);
+      const wrapper = new MCPToolWrapper(client, toolDef, projectRoot);
       registry.register(wrapper);
       registered++;
       mcpLog.info({ tool: wrapper.name }, 'Registered MCP tool via bridge');

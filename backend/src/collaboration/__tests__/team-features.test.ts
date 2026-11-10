@@ -72,21 +72,29 @@ describe.skipIf(!LOOPBACK_AVAILABLE)('team collaboration boundaries', () => {
       const created = await host.startSession('host-folder-metadata');
       await host.updatePolicy({
         ...structuredClone(DEFAULT_COLLABORATION_POLICY),
-        hostName: 'Micah', workspacePaths: ['/Users/private-host/projects/koryphaios', 'C:\\Users\\private-host\\docs'],
+        hostName: 'Micah',
+        workspacePaths: [
+          '/Users/private-host/projects/koryphaios',
+          'C:\\Users\\private-host\\docs',
+        ],
         joinMode: 'auto',
       });
       const resolved = await host.resolveJoinCode(created.joinCode);
       expect(resolved.hostName).toBe('Micah');
       expect(resolved.sharedFolders).toEqual([
-        { id: 'workspace-1', name: 'koryphaios' }, { id: 'workspace-2', name: 'docs' },
+        { id: 'workspace-1', name: 'koryphaios' },
+        { id: 'workspace-2', name: 'docs' },
       ]);
       expect(JSON.stringify(resolved)).not.toContain('private-host');
       const { RelayGuestClient } = await import('../relay-guest-client');
       const previousUrl = process.env.RELAY_URL;
       process.env.RELAY_URL = relayUrl;
       try {
-        await expect(new RelayGuestClient().connect(created.joinCode, 'Guest', true)).rejects.toMatchObject({
-          code: 'WRONG_SHARING_CODE', statusCode: 400,
+        await expect(
+          new RelayGuestClient().connect(created.joinCode, 'Guest', true),
+        ).rejects.toMatchObject({
+          code: 'WRONG_SHARING_CODE',
+          statusCode: 400,
         });
       } finally {
         if (previousUrl === undefined) delete process.env.RELAY_URL;
@@ -105,12 +113,19 @@ describe.skipIf(!LOOPBACK_AVAILABLE)('team collaboration boundaries', () => {
       await host.startSession('model-only-session-boundary');
       const policy = structuredClone(DEFAULT_COLLABORATION_POLICY);
       policy.accessTiers.find((tier) => tier.id === 'models')!.permissions.viewChat = true;
-      await host.updatePolicy({ ...policy, hostName: 'Micah', joinMode: 'auto', workspacePaths: ['/private/top-secret-project'] });
+      await host.updatePolicy({
+        ...policy,
+        hostName: 'Micah',
+        joinMode: 'auto',
+        workspacePaths: ['/private/top-secret-project'],
+      });
       host.broadcast({ type: 'chat', from: 'agent', content: 'private session history' });
       await Bun.sleep(30);
       const inviteUrl = await host.createInvite('models');
       const token = new URL(inviteUrl).searchParams.get('token');
-      guest = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${encodeURIComponent(token!)}&name=ModelsGuest`);
+      guest = new WebSocket(
+        `ws://127.0.0.1:${port}/ws?token=${encodeURIComponent(token!)}&name=ModelsGuest`,
+      );
       const frames: Record<string, any>[] = [];
       guest.addEventListener('message', (event) => frames.push(JSON.parse(String(event.data))));
       const init = await nextMessage(guest, 'init');
@@ -121,7 +136,12 @@ describe.skipIf(!LOOPBACK_AVAILABLE)('team collaboration boundaries', () => {
       expect(JSON.stringify(init)).not.toContain('top-secret-project');
       host.broadcast({ type: 'chat', content: 'another private message' });
       host.broadcast({ type: 'log', content: 'password=never-visible' });
-      await host.updatePolicy({ ...policy, hostName: 'Renamed host', workspacePaths: ['/private/another-secret'], joinMode: 'auto' });
+      await host.updatePolicy({
+        ...policy,
+        hostName: 'Renamed host',
+        workspacePaths: ['/private/another-secret'],
+        joinMode: 'auto',
+      });
       await Bun.sleep(50);
       expect(frames.some((frame) => frame.type === 'chat' || frame.type === 'log')).toBe(false);
       expect(JSON.stringify(frames)).not.toContain('another-secret');
@@ -134,9 +154,11 @@ describe.skipIf(!LOOPBACK_AVAILABLE)('team collaboration boundaries', () => {
   test('model codes register host-named models, serve inference without credentials, and revoke on stop', async () => {
     const { setContext } = await import('../../context');
     const { setSharedProviders } = await import('../remote-provider-host');
-    const { startModelSharing, stopModelSharing, modelSharingStatus } = await import('../model-sharing');
+    const { startModelSharing, stopModelSharing, modelSharingStatus } =
+      await import('../model-sharing');
     const { RelayGuestClient } = await import('../relay-guest-client');
-    const { connectToProviderHost, disconnectFromProviderHost } = await import('../remote-provider-client');
+    const { connectToProviderHost, disconnectFromProviderHost } =
+      await import('../remote-provider-client');
     const registered: any[] = [];
     const providerRequests: StreamRequest[] = [];
     let cancelledOnHost = false;
@@ -145,30 +167,44 @@ describe.skipIf(!LOOPBACK_AVAILABLE)('team collaboration boundaries', () => {
     process.env.RELAY_URL = relayUrl;
     process.env.RELAY_HOST_SECRET = hostSecret;
     const credential = 'host-private-provider-api-key-abcdefgh';
-    setContext({ providers: {
-      getStatus: () => [{ name: 'openai', enabled: true, adapterAvailable: true, models: ['test-model'],
-        apiKey: credential, authToken: 'host-login-secret',
-        allAvailableModels: [{ id: 'test-model', name: 'Test model', apiKey: credential }],
-      }],
-      getConfigs: () => ({ openai: { apiKey: credential } }),
-      clearRemoteProviders: () => { registered.length = 0; },
-      registerRemoteProvider: (provider: any) => registered.push(provider),
-      executeWithRetry: async function* (request: StreamRequest) {
-        providerRequests.push(request);
-        if (request.systemPrompt === 'wait-for-cancel') {
-          yield { type: 'content_delta', content: 'Streaming response. '.repeat(100) };
-          await new Promise<void>((resolveCancelled) => {
-            const cancelled = () => { cancelledOnHost = true; resolveCancelled(); };
-            if (request.signal?.aborted) cancelled();
-            else request.signal?.addEventListener('abort', cancelled, { once: true });
-          });
-          return;
-        }
-        yield { type: 'content_delta', content: `Answer ${credential.slice(0, 12)}` };
-        yield { type: 'content_delta', content: credential.slice(12), apiKey: credential };
-        yield { type: 'complete', accountId: 'private-host-account' };
+    setContext({
+      providers: {
+        getStatus: () => [
+          {
+            name: 'openai',
+            enabled: true,
+            adapterAvailable: true,
+            models: ['test-model'],
+            apiKey: credential,
+            authToken: 'host-login-secret',
+            allAvailableModels: [{ id: 'test-model', name: 'Test model', apiKey: credential }],
+          },
+        ],
+        getConfigs: () => ({ openai: { apiKey: credential } }),
+        clearRemoteProviders: () => {
+          registered.length = 0;
+        },
+        registerRemoteProvider: (provider: any) => registered.push(provider),
+        executeWithRetry: async function* (request: StreamRequest) {
+          providerRequests.push(request);
+          if (request.systemPrompt === 'wait-for-cancel') {
+            yield { type: 'content_delta', content: 'Streaming response. '.repeat(100) };
+            await new Promise<void>((resolveCancelled) => {
+              const cancelled = () => {
+                cancelledOnHost = true;
+                resolveCancelled();
+              };
+              if (request.signal?.aborted) cancelled();
+              else request.signal?.addEventListener('abort', cancelled, { once: true });
+            });
+            return;
+          }
+          yield { type: 'content_delta', content: `Answer ${credential.slice(0, 12)}` };
+          yield { type: 'content_delta', content: credential.slice(12), apiKey: credential };
+          yield { type: 'complete', accountId: 'private-host-account' };
+        },
       },
-    } } as never);
+    } as never);
     setSharedProviders(['openai'], { openai: ['test-model'] });
     const guest = new RelayGuestClient();
     try {
@@ -182,7 +218,12 @@ describe.skipIf(!LOOPBACK_AVAILABLE)('team collaboration boundaries', () => {
       expect(JSON.stringify(registered[0]?.config)).not.toContain(credential);
       const renamed = await startModelSharing('Study group');
       expect(renamed.joinCode).toBe(sharing.joinCode);
-      for (let attempt = 0; attempt < 100 && registered[0]?.config.label !== 'Study group · openai'; attempt++) await Bun.sleep(10);
+      for (
+        let attempt = 0;
+        attempt < 100 && registered[0]?.config.label !== 'Study group · openai';
+        attempt++
+      )
+        await Bun.sleep(10);
       expect(registered[0]?.config.label).toBe('Study group · openai');
       disconnectFromProviderHost();
       expect(modelSharingStatus().active).toBe(true);
@@ -193,12 +234,23 @@ describe.skipIf(!LOOPBACK_AVAILABLE)('team collaboration boundaries', () => {
       expect(JSON.stringify(catalog)).not.toContain(credential);
       expect(JSON.stringify(catalog)).not.toContain('host-login-secret');
       const events = [];
-      for await (const event of guest.requestInference({ provider: 'openai', model: 'test-model', messages: [], systemPrompt: '' })) events.push(event);
+      for await (const event of guest.requestInference({
+        provider: 'openai',
+        model: 'test-model',
+        messages: [],
+        systemPrompt: '',
+      }))
+        events.push(event);
       expect(events.map((event) => event.content || '').join('')).toBe('Answer [redacted]');
       expect(JSON.stringify(events)).not.toContain(credential);
       expect(JSON.stringify(events)).not.toContain('private-host-account');
 
-      for await (const event of guest.requestInference({ provider: 'openai', model: 'test-model', messages: [], systemPrompt: 'wait-for-cancel' })) {
+      for await (const event of guest.requestInference({
+        provider: 'openai',
+        model: 'test-model',
+        messages: [],
+        systemPrompt: 'wait-for-cancel',
+      })) {
         expect(event.type).toBe('content_delta');
         break;
       }
@@ -207,7 +259,14 @@ describe.skipIf(!LOOPBACK_AVAILABLE)('team collaboration boundaries', () => {
       const requestCount = providerRequests.length;
       const aborted = new AbortController();
       aborted.abort();
-      await expect(guest.requestInference({ provider: 'openai', model: 'test-model', messages: [] }, aborted.signal).next()).rejects.toThrow('Cancelled');
+      await expect(
+        guest
+          .requestInference(
+            { provider: 'openai', model: 'test-model', messages: [] },
+            aborted.signal,
+          )
+          .next(),
+      ).rejects.toThrow('Cancelled');
       await Bun.sleep(10);
       expect(providerRequests).toHaveLength(requestCount);
       await stopModelSharing();
@@ -216,7 +275,9 @@ describe.skipIf(!LOOPBACK_AVAILABLE)('team collaboration boundaries', () => {
       expect((await fetch(`${relayUrl}/code/${sharing.joinCode}`)).status).toBe(404);
       const token = new URL(sharing.inviteUrl).searchParams.get('token');
       const stale = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${encodeURIComponent(token!)}`);
-      const denied = await new Promise<number>((resolveClose) => stale.addEventListener('close', (event) => resolveClose(event.code)));
+      const denied = await new Promise<number>((resolveClose) =>
+        stale.addEventListener('close', (event) => resolveClose(event.code)),
+      );
       expect(denied).not.toBe(1000);
 
       // Concurrent settings requests retain their order: stop revokes the
@@ -229,7 +290,11 @@ describe.skipIf(!LOOPBACK_AVAILABLE)('team collaboration boundaries', () => {
       expect((await fetch(`${relayUrl}/code/${first.joinCode}`)).status).toBe(404);
       expect((await fetch(`${relayUrl}/code/${latest.joinCode}`)).status).toBe(200);
       expect(latest.joinCode).not.toBe(first.joinCode);
-      expect(modelSharingStatus()).toMatchObject({ active: true, hostName: 'Latest host', joinCode: latest.joinCode });
+      expect(modelSharingStatus()).toMatchObject({
+        active: true,
+        hostName: 'Latest host',
+        joinCode: latest.joinCode,
+      });
     } finally {
       guest.disconnect();
       disconnectFromProviderHost();
@@ -378,9 +443,11 @@ describe.skipIf(!LOOPBACK_AVAILABLE)('team collaboration boundaries', () => {
 
   test('relay limits repeated code guessing', async () => {
     let last: Response | undefined;
-    for (let attempt = 0; attempt < 21; attempt++)
-      last = await fetch(`${relayUrl}/code/XXXXXXXX`);
+    for (let attempt = 0; attempt < 21; attempt++) last = await fetch(`${relayUrl}/code/XXXXXXXX`);
     expect(last?.status).toBe(429);
-    expect(await last?.json()).toMatchObject({ ok: false, error: expect.stringContaining('Too many code attempts') });
+    expect(await last?.json()).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('Too many code attempts'),
+    });
   });
 });

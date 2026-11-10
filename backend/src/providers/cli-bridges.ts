@@ -44,11 +44,12 @@ import {
 import type { ProviderEvent } from './types';
 import { buildKoryCliMcpConfig } from './kory-cli-mcp-config';
 import { getKoryBridgeGrant, type BridgeGrantAction } from './bridge-grant';
-import { toolsForRole } from './kory-mcp-bridge';
+import { KORY_TOOLS, toolsForRole } from './kory-mcp-bridge';
 import { ensureManagedCliDirectory } from './managed-cli-storage';
 import { credentialLinkCandidates } from './cli-config-paths';
+import { currentProviderExecutionScope } from './execution-scope';
 
-// ─── Shared harness note ───────────────────────────────────────────────────
+// ─── Shared harness note ─────────────────────────────────────────────────────
 
 export const KORY_HARNESS_NOTE =
   'You are running inside the Koryphaios orchestrator. Koryphaios owns ALL tool execution, ' +
@@ -56,7 +57,12 @@ export const KORY_HARNESS_NOTE =
   'Bash, Grep, Glob, etc.) — they are disabled. Use only the role-scoped kory__ tools listed ' +
   'by the "kory" MCP server. Every kory__ tool call goes through Koryphaios permission + ' +
   'sandbox policy. Never spawn native subagents; delegate through Koryphaios only when ' +
-  'your advertised role-scoped tool list contains one; otherwise return the need to the manager.';
+  'your advertised role-scoped tool list contains one; otherwise return the need to the manager. ' +
+  'For custom MCP servers, discover exact schemas with kory__list_mcp_tools and invoke them ' +
+  'with kory__invoke_mcp_tool if your CLI tool list has not refreshed.';
+export const KORY_CUSTOM_MCP_NOTE =
+  'Discover custom MCP tools with kory__list_mcp_tools. If your CLI tool list is stale, ' +
+  'invoke newly added tools with kory__invoke_mcp_tool using the discovered server_name, tool_name and arguments.';
 
 export const KORY_HARNESS_NOTE_EXTENDED =
   KORY_HARNESS_NOTE +
@@ -69,7 +75,7 @@ export const KORY_DIRECT_TOOL_HARNESS_NOTE =
   'request; do not invent kory__ aliases or use unsupplied native tools. Never spawn or delegate ' +
   'to native subagents; use a supplied Koryphaios delegation tool only when your role exposes it.';
 
-// ─── Legacy Codebuff SDK harness note ──────────────────────────────────────
+// ─── Legacy Codebuff SDK harness note ───────────────────────────────────────
 // Retained while the old adapter is still present for migration tests. The
 // active Freebuff provider is freebuff-cli.ts and uses the real TUI + MCP.
 export const FREEBUFF_HARNESS_NOTE =
@@ -91,9 +97,10 @@ export const FREEBUFF_PTY_HARNESS_NOTE =
   'native Freebuff tools still exist, but they can see and modify only this disposable ' +
   'workspace and are not authority for the real project. Never claim a native-only action ' +
   "changed the user's project. Finish the requested work in this turn and return a concise " +
-  'user-facing answer.';
+  'user-facing answer. ' +
+  KORY_CUSTOM_MCP_NOTE;
 
-// ─── Shared kory tool whitelist ────────────────────────────────────────────
+// ─── Shared kory tool whitelist ──────────────────────────────────────────────
 // Derive provider allowlists from the bridge catalog instead of maintaining a
 // second copy that can drift from MCP ListTools role filtering.
 export const KORY_MANAGER_TOOL_WHITELIST = toolsForRole('manager').map((tool) => tool.name);
@@ -110,6 +117,33 @@ export function koryToolWhitelistForRole(role: string): string[] {
   if (role === 'critic') return KORY_CRITIC_TOOL_WHITELIST;
   if (role === 'coder') return KORY_CODER_TOOL_WHITELIST;
   return [];
+}
+
+/** Normalize a tool name from a provider or MCP catalog to Kory's namespace. */
+export function normalizeKoryToolName(name: string): string {
+  let toolName = name.trim();
+  while (toolName.startsWith('kory__') || toolName.startsWith('mcp__kory__')) {
+    toolName = toolName.startsWith('mcp__kory__')
+      ? toolName.slice('mcp__kory__'.length)
+      : toolName.slice('kory__'.length);
+  }
+  return `kory__${toolName}`;
+}
+
+const CRITIC_BRIDGE_EXCLUDED_TOOLS = new Set(['bash', 'edit_file', 'delegate_to_worker']);
+
+/** Provider requests carry the authoritative project/role-filtered catalog. */
+export function koryToolWhitelistForContext(ctx: CliBridgeContext): string[] {
+  if (!['manager', 'worker', 'coder', 'critic'].includes(ctx.role)) return [];
+  const tools = ctx.tools.length
+    ? ctx.tools.map((tool) => normalizeKoryToolName(tool.name))
+    : koryToolWhitelistForRole(ctx.role);
+  return [...new Set(tools)]
+    .filter(
+      (tool) =>
+        ctx.role !== 'critic' || !CRITIC_BRIDGE_EXCLUDED_TOOLS.has(tool.slice('kory__'.length)),
+    )
+    .sort();
 }
 
 /** Build the kory MCP server config for a CLI harness. Uses the env vars set
@@ -134,16 +168,18 @@ export function buildKoryHookConfigs(ctx: CliBridgeContext): CliHookConfig[] | n
     UserPromptSubmit: 'hook:prompt-submit',
     Stop: 'hook:stop',
   };
+  const backendUrl = process.env.KORY_BACKEND_URL?.trim();
+  const backendFlag = backendUrl ? ` --backend-url ${JSON.stringify(backendUrl)}` : '';
   return events.map((event) => {
     const grant = ctx.bridgeGrantLease
       ? ctx.bridgeGrantLease.grant([actionForEvent[event]])
       : getKoryBridgeGrant(ctx.sessionId!, ctx.role, [actionForEvent[event]]);
-    const command = `node ${JSON.stringify(hookScript)} --auth-file ${JSON.stringify(grant.path)} --event ${event}`;
+    const command = `node ${JSON.stringify(hookScript)} --auth-file ${JSON.stringify(grant.path)}${backendFlag} --event ${event}`;
     return { events: [event], command, matcher: '' };
   });
 }
 
-// ─── Session-isolated homes ────────────────────────────────────────────────
+// ─── Session-isolated homes ──────────────────────────────────────────────────
 
 function makeIsolatedHome(dirName: string, realHome: string, symlinkFiles: string[]): string {
   const dir = join(homedir(), '.koryphaios', dirName);
@@ -198,15 +234,21 @@ const ANTIGRAVITY_CREDENTIAL_FILES = [
   'google_accounts.json',
 ] as const;
 
-export function getKoryphaiosAntigravityHome(): string {
-  const dir = makeIsolatedHome('antigravity-home', join(homedir(), '.antigravity'), []);
+export function getKoryphaiosAntigravityHome(subscope?: string): string {
+  const staged = currentProviderExecutionScope()?.antigravityHome;
+  const safeSubscope = subscope?.trim().replace(/[^a-z0-9._-]/gi, '-') || '';
+  if (staged && !safeSubscope) return staged;
+  const baseDir =
+    staged ?? makeIsolatedHome('antigravity-home', join(homedir(), '.antigravity'), []);
+  const dir = safeSubscope ? join(baseDir, safeSubscope) : baseDir;
   // agy authenticates via ~/.gemini OAuth material, but the child runs with
   // HOME/ANTIGRAVITY_HOME pointed at this isolated dir. Link the credentials
   // in so the jailed child signs in as the user (read-only by convention —
   // agy only reads these). The sandbox mounts the real ~/.gemini read-only so
   // the links resolve inside the jail too.
   try {
-    const geminiDir = join(homedir(), '.gemini');
+    ensureManagedCliDirectory(dir);
+    const geminiDir = staged ? join(staged, '.gemini') : join(homedir(), '.gemini');
     const isolatedGemini = join(dir, '.gemini');
     ensureManagedCliDirectory(isolatedGemini);
     for (const file of ANTIGRAVITY_CREDENTIAL_FILES) {
@@ -288,7 +330,179 @@ export function getKoryphaiosGrokHome(): string {
   return dir;
 }
 
-// ─── Claude Code bridge ────────────────────────────────────────────────────
+/**
+ * Stage Omnirush's CLI-owned state without copying its bearer token. The CLI
+ * refreshes its own auth.json in place, so the auth file is linked rather than
+ * read by Koryphaios or placed in process arguments.
+ */
+export function getKoryphaiosOmnirushHome(): string {
+  const source = process.env.OMNIRUSH_DIR?.trim() || join(homedir(), '.omnirush');
+  const dir = makeIsolatedHome('omnirush-home', source, ['auth.json']);
+  // Keep the agent directory Kory-owned and disposable. The launcher installs
+  // its extension/model metadata there; linking the user's real agent folder
+  // would let a Kory turn mutate unrelated Omnirush state. Only auth.json is
+  // linked above, because the CLI remains the sole credential authority.
+  return dir;
+}
+
+/**
+ * Private CodeBuddy configuration/transcripts. codebuddy-environment.ts stages
+ * the exact HOME-relative CLI auth file separately; settings are not credentials.
+ */
+export function getKoryphaiosCodeBuddyHome(): string {
+  return makeIsolatedHome('codebuddy-home', join(homedir(), '.codebuddy'), []);
+}
+
+// ─── CodeBuddy bridge ────────────────────────────────────────────────────────
+
+export class CodeBuddyCliBridge extends ManagedCliBridge implements CliBridge {
+  readonly provider: ProviderName = 'codebuddy' as const;
+  preferredTransport: 'acp' | 'agent-config' | 'legacy' = 'legacy';
+
+  getCapabilities(): CliCapabilities {
+    return {
+      ...EMPTY_CLI_CAPABILITIES,
+      supportsAgentConfig: true, // --system-prompt-file + tool flags
+      supportsSandbox: false, // Kory wraps the child when a sandbox is requested
+      supportsExport: true, // --output-format stream-json (Claude Code envelope shapes)
+      supportsPermissionMode: true, // --permission-mode acceptEdits|plan
+      supportsAcp: false,
+      supportsMcp: true, // user-scope ~/.codebuddy/.codebuddy.json mcpServers
+      supportsRules: false,
+      supportsSkills: false,
+      supportsHooks: false, // unverified against a live codebuddy turn
+      version: null,
+      probedAt: 0,
+    };
+  }
+
+  buildPermissionScopes(ctx: CliBridgeContext): CliPermissionScopes {
+    return sandboxToScopes(ctx.sandbox, ctx.role);
+  }
+
+  buildAgentConfig(ctx: CliBridgeContext): CliAgentConfig | null {
+    return {
+      systemInstructions: [ctx.systemPrompt?.trim() ?? '', KORY_HARNESS_NOTE_EXTENDED].filter(
+        Boolean,
+      ),
+      allowedTools: koryToolWhitelistForContext(ctx),
+      permissions: this.buildPermissionScopes(ctx),
+      extensions: koryProvenanceExtensions(ctx),
+    };
+  }
+
+  serializeAgentConfig(_config: CliAgentConfig): string {
+    return '{}';
+  }
+
+  buildHooks(_ctx: CliBridgeContext): CliHookConfig[] | null {
+    return null;
+  }
+
+  serializeHooks(_hooks: CliHookConfig[]): string {
+    return '{}';
+  }
+
+  buildMcpConfig(ctx: CliBridgeContext): CliMcpServerConfig[] | null {
+    // CodeBuddy reads user-scope MCP servers from ~/.codebuddy/.codebuddy.json.
+    const server = buildKoryMcpServerConfig(ctx, 'codebuddy');
+    return server ? [server] : null;
+  }
+
+  buildRules(_ctx: CliBridgeContext): CliRuleFile[] | null {
+    return null;
+  }
+
+  buildSkills(_ctx: CliBridgeContext): CliSkillFile[] | null {
+    return null;
+  }
+
+  parseTrajectory(_raw: string): { trajectory: CliTrajectory; events: ProviderEvent[] } {
+    return { trajectory: { steps: [] }, events: [] };
+  }
+}
+
+// ─── WorkBuddy Desktop bridge ───────────────────────────────────────────────
+
+/**
+ * The WorkBuddy AI desktop app's host runtime (`codebuddy --serve` inside the
+ * app bundle) speaks ACP over HTTP SSE and loads MCP servers from a
+ * `--mcp-config` file — the same CLI config surface the CodeBuddy bridge
+ * targets, reached through the desktop app's own runtime instead of the
+ * standalone CLI on PATH. Koryphaios injects the kory MCP server through
+ * that config file; the harness note (delivered as the session's system
+ * instructions over ACP) steers the runtime to the kory__ tools.
+ */
+export class WorkBuddyDesktopCliBridge extends ManagedCliBridge implements CliBridge {
+  readonly provider: ProviderName = 'workbuddy-desktop' as const;
+  preferredTransport: 'acp' | 'agent-config' | 'legacy' = 'acp';
+
+  getCapabilities(): CliCapabilities {
+    return {
+      ...EMPTY_CLI_CAPABILITIES,
+      supportsAgentConfig: true, // ACP initialize + session/new system instructions
+      supportsSandbox: false, // the runtime's own product sandbox policy confines commands
+      supportsExport: false,
+      supportsPermissionMode: true, // ACP session/set_mode (default / acceptEdits / read-only)
+      supportsAcp: true, // ACP over HTTP SSE at /api/v1/acp
+      supportsMcp: true, // --mcp-config + --strict-mcp-config
+      supportsRules: false,
+      supportsSkills: false,
+      supportsHooks: false,
+      version: null,
+      probedAt: 0,
+    };
+  }
+
+  buildPermissionScopes(ctx: CliBridgeContext): CliPermissionScopes {
+    return sandboxToScopes(ctx.sandbox, ctx.role);
+  }
+
+  buildAgentConfig(ctx: CliBridgeContext): CliAgentConfig | null {
+    return {
+      systemInstructions: [ctx.systemPrompt?.trim() ?? '', KORY_HARNESS_NOTE_EXTENDED].filter(
+        Boolean,
+      ),
+      allowedTools: koryToolWhitelistForContext(ctx),
+      permissions: this.buildPermissionScopes(ctx),
+      extensions: koryProvenanceExtensions(ctx),
+    };
+  }
+
+  serializeAgentConfig(_config: CliAgentConfig): string {
+    return '{}';
+  }
+
+  buildHooks(_ctx: CliBridgeContext): CliHookConfig[] | null {
+    return null;
+  }
+
+  serializeHooks(_hooks: CliHookConfig[]): string {
+    return '{}';
+  }
+
+  buildMcpConfig(ctx: CliBridgeContext): CliMcpServerConfig[] | null {
+    // The desktop runtime loads MCP servers from the --mcp-config file the
+    // provider writes per turn (mcpServers shape, same as the desktop app's
+    // own agent CLI MCP config).
+    const server = buildKoryMcpServerConfig(ctx, 'workbuddy-desktop');
+    return server ? [server] : null;
+  }
+
+  buildRules(_ctx: CliBridgeContext): CliRuleFile[] | null {
+    return null;
+  }
+
+  buildSkills(_ctx: CliBridgeContext): CliSkillFile[] | null {
+    return null;
+  }
+
+  parseTrajectory(_raw: string): { trajectory: CliTrajectory; events: ProviderEvent[] } {
+    return { trajectory: { steps: [] }, events: [] };
+  }
+}
+
+// ─── Claude Code bridge ──────────────────────────────────────────────────────
 
 export class ClaudeCodeCliBridge extends ManagedCliBridge implements CliBridge {
   readonly provider: ProviderName = 'claude' as const;
@@ -335,9 +549,12 @@ export class ClaudeCodeCliBridge extends ManagedCliBridge implements CliBridge {
     // Allow only the kory MCP tools + TodoWrite (planning only).
     // Claude Code prefixes MCP tools with mcp__<server>__.
     const allow = [
-      ...koryToolWhitelistForRole(ctx.role).map(
-        (tool) => `mcp__kory__${tool.replace(/^kory__/, '')}`,
+      ...koryToolWhitelistForContext(ctx).map(
+        (tool) => `mcp__kory__${tool.slice('kory__'.length)}`,
       ),
+      // Only the host-owned bridge; backend role/project/policy checks own
+      // authority, including tools registered during this same CLI turn.
+      ...(ctx.role === 'critic' ? [] : ['mcp__kory__*']),
       'TodoWrite', // planning only, no side effects
     ];
     return { allow, deny: [...new Set(deny)], ask: [] };
@@ -349,7 +566,7 @@ export class ClaudeCodeCliBridge extends ManagedCliBridge implements CliBridge {
     // We package them here so the provider can pull them out.
     const scopes = this.buildPermissionScopes(ctx);
     const systemInstructions: string[] = [];
-    const note = KORY_HARNESS_NOTE;
+    const note = `${KORY_HARNESS_NOTE} ${KORY_CUSTOM_MCP_NOTE}`;
     if (ctx.systemPrompt?.trim()) {
       systemInstructions.push(`${ctx.systemPrompt.trim()}\n\n${note}`);
     } else {
@@ -421,7 +638,7 @@ export class ClaudeCodeCliBridge extends ManagedCliBridge implements CliBridge {
   }
 }
 
-// ─── Codex bridge ──────────────────────────────────────────────────────────
+// ─── Codex bridge ────────────────────────────────────────────────────────────
 
 function tomlBasicString(value: string): string {
   let out = '"';
@@ -525,11 +742,12 @@ export class CodexCliBridge extends ManagedCliBridge implements CliBridge {
     // This configuration advertises the Kory-owned capability surface. The
     // Codex provider renders the current request's role-filtered, unprefixed
     // ToolRegistry names into its envelope protocol.
-    const allowedTools = koryToolWhitelistForRole(ctx.role);
+    const allowedTools = koryToolWhitelistForContext(ctx);
     return {
       systemInstructions: [
         ctx.systemPrompt?.trim() ?? '',
         'You are running inside Koryphaios. Native tools are not authority. Prefer the host-supplied kory MCP tools for every read, edit, search, and command; if the kory MCP server is unavailable, emit Kory tool calls through the KORY_TOOL_CALL envelope protocol instead. Koryphaios enforces permissions and executes them.',
+        KORY_CUSTOM_MCP_NOTE,
       ],
       allowedTools,
       permissions: this.buildPermissionScopes(ctx),
@@ -578,7 +796,7 @@ export class CodexCliBridge extends ManagedCliBridge implements CliBridge {
   }
 }
 
-// ─── Cursor bridge ─────────────────────────────────────────────────────────
+// ─── Cursor bridge ───────────────────────────────────────────────────────────
 
 export class CursorCliBridge extends ManagedCliBridge implements CliBridge {
   readonly provider: ProviderName = 'cursor' as const;
@@ -647,7 +865,7 @@ export class CursorCliBridge extends ManagedCliBridge implements CliBridge {
   }
 }
 
-// ─── Antigravity bridge ────────────────────────────────────────────────────
+// ─── Antigravity bridge ──────────────────────────────────────────────────────
 
 export class AntigravityCliBridge extends ManagedCliBridge implements CliBridge {
   readonly provider: ProviderName = 'antigravity' as const;
@@ -665,7 +883,7 @@ export class AntigravityCliBridge extends ManagedCliBridge implements CliBridge 
       // antigravity-permissions.ts.
       supportsPermissionMode: true,
       supportsAcp: false,
-      supportsMcp: true, // imports .claude.json mcpServers
+      supportsMcp: true, // $GEMINI_DIR/config/mcp_config.json; agy exposes call_mcp_tool
       supportsRules: true, // AGENTS.md
       supportsSkills: true,
       // agy reads hooks from ~/.gemini/config/hooks.json or
@@ -718,13 +936,14 @@ export class AntigravityCliBridge extends ManagedCliBridge implements CliBridge 
   }
 
   buildMcpConfig(ctx: CliBridgeContext): CliMcpServerConfig[] | null {
-    // Antigravity imports .claude/ config — configure kory MCP server there.
+    // Antigravity's provider writes this to $GEMINI_DIR/config/mcp_config.json.
     const server = buildKoryMcpServerConfig(ctx, 'antigravity');
     return server ? [server] : null;
   }
 
   buildRules(ctx: CliBridgeContext): CliRuleFile[] | null {
-    const home = getKoryphaiosAntigravityHome();
+    const subscope = ctx.role && ctx.role !== 'manager' ? ctx.role : undefined;
+    const home = getKoryphaiosAntigravityHome(subscope);
     return [
       {
         path: join(home, 'AGENTS.md'),
@@ -743,7 +962,7 @@ export class AntigravityCliBridge extends ManagedCliBridge implements CliBridge 
   }
 }
 
-// ─── Grok bridge ───────────────────────────────────────────────────────────
+// ─── Grok bridge ─────────────────────────────────────────────────────────────
 
 export class GrokCliBridge extends ManagedCliBridge implements CliBridge {
   readonly provider: ProviderName = 'grok' as const;
@@ -755,7 +974,7 @@ export class GrokCliBridge extends ManagedCliBridge implements CliBridge {
       supportsAgentConfig: false,
       supportsSandbox: false,
       supportsExport: true, // --output-format streaming-json
-      supportsPermissionMode: true, // --permission-mode plan / --always-approve
+       supportsPermissionMode: true, // --permission-mode and --always-approve
       supportsAcp: false,
       supportsMcp: true, // grok CLI supports MCP servers via config
       supportsRules: true, // .grokrules
@@ -812,7 +1031,152 @@ export class GrokCliBridge extends ManagedCliBridge implements CliBridge {
   }
 }
 
-// ─── KimiCode bridge (API-based, no subprocess) ────────────────────────────
+// ─── OpenCode bridge ─────────────────────────────────────────────────────────
+
+export class OpenCodeCliBridge extends ManagedCliBridge implements CliBridge {
+  readonly provider: ProviderName = 'opencode' as const;
+  preferredTransport: 'acp' | 'agent-config' | 'legacy' = 'acp';
+
+  getCapabilities(): CliCapabilities {
+    return {
+      ...EMPTY_CLI_CAPABILITIES,
+      supportsAgentConfig: false,
+      supportsSandbox: true, // the ACP child can run under the OS jail
+      supportsExport: true, // ACP session/prompt receipts
+      supportsPermissionMode: true, // ACP plan mode + per-request permission veto
+      supportsAcp: true,
+      supportsMcp: true, // session/new mcpServers (stdio)
+      supportsRules: false, // system prompt travels inside the ACP prompt
+      supportsSkills: false,
+      supportsHooks: false,
+      version: null,
+      probedAt: 0,
+    };
+  }
+
+  buildPermissionScopes(ctx: CliBridgeContext): CliPermissionScopes {
+    return sandboxToScopes(ctx.sandbox, ctx.role);
+  }
+
+  buildAgentConfig(ctx: CliBridgeContext): CliAgentConfig | null {
+    const allowedTools = koryToolWhitelistForContext(ctx);
+    return {
+      systemInstructions: [
+        ctx.systemPrompt?.trim() ?? '',
+        `${KORY_HARNESS_NOTE} ${KORY_CUSTOM_MCP_NOTE}`,
+      ],
+      allowedTools,
+      permissions: this.buildPermissionScopes(ctx),
+      extensions: koryProvenanceExtensions(ctx),
+    };
+  }
+
+  serializeAgentConfig(_config: CliAgentConfig): string {
+    return '{}';
+  }
+
+  buildHooks(_ctx: CliBridgeContext): CliHookConfig[] | null {
+    // OpenCode's hook mechanism is its plugin API; per-session tool gating is
+    // enforced here by answering session/request_permission instead.
+    return null;
+  }
+
+  serializeHooks(_hooks: CliHookConfig[]): string {
+    return '{}';
+  }
+
+  buildMcpConfig(ctx: CliBridgeContext): CliMcpServerConfig[] | null {
+    // The kory server is passed per ACP session (session/new.mcpServers), never
+    // written into the user's OpenCode configuration.
+    const server = buildKoryMcpServerConfig(ctx, 'opencode');
+    return server ? [server] : null;
+  }
+
+  buildRules(_ctx: CliBridgeContext): CliRuleFile[] | null {
+    return null;
+  }
+
+  buildSkills(_ctx: CliBridgeContext): CliSkillFile[] | null {
+    return null;
+  }
+
+  parseTrajectory(_raw: string): { trajectory: CliTrajectory; events: ProviderEvent[] } {
+    return { trajectory: { steps: [] }, events: [] };
+  }
+}
+
+// ─── Omnirush bridge ─────────────────────────────────────────────────────────
+
+export class OmnirushCliBridge extends ManagedCliBridge implements CliBridge {
+  readonly provider: ProviderName = 'omnirush' as const;
+  preferredTransport: 'acp' | 'agent-config' | 'legacy' = 'agent-config';
+
+  getCapabilities(): CliCapabilities {
+    return {
+      ...EMPTY_CLI_CAPABILITIES,
+      supportsAgentConfig: true, // --append-system-prompt + tool flags
+      supportsSandbox: false, // Kory wraps the child when a sandbox is requested
+      supportsExport: false,
+      supportsPermissionMode: true, // --yolo is available; Kory never enables it
+      supportsAcp: false,
+      // Omnirush 2.x hard-denies MCP in its managed OpenCode engine. Kory tools
+      // are exposed through the provider's per-turn custom-tool plugin instead.
+      supportsMcp: false,
+      supportsRules: false,
+      supportsSkills: true,
+      supportsHooks: false,
+      version: null,
+      probedAt: 0,
+    };
+  }
+
+  buildPermissionScopes(ctx: CliBridgeContext): CliPermissionScopes {
+    return sandboxToScopes(ctx.sandbox, ctx.role);
+  }
+
+  buildAgentConfig(ctx: CliBridgeContext): CliAgentConfig {
+    return {
+      systemInstructions: [ctx.systemPrompt?.trim() ?? '', KORY_HARNESS_NOTE_EXTENDED].filter(
+        Boolean,
+      ),
+      allowedTools: koryToolWhitelistForContext(ctx),
+      permissions: this.buildPermissionScopes(ctx),
+      extensions: koryProvenanceExtensions(ctx),
+    };
+  }
+
+  serializeAgentConfig(_config: CliAgentConfig): string {
+    return '{}';
+  }
+
+  buildMcpConfig(_ctx: CliBridgeContext): CliMcpServerConfig[] | null {
+    // Omnirush 2.x strips MCP before OpenCode loads project configuration.
+    // The provider owns its custom-tool plugin transport instead.
+    return null;
+  }
+
+  buildHooks(_ctx: CliBridgeContext): CliHookConfig[] | null {
+    return null;
+  }
+
+  serializeHooks(_hooks: CliHookConfig[]): string {
+    return '{}';
+  }
+
+  buildRules(_ctx: CliBridgeContext): CliRuleFile[] | null {
+    return null;
+  }
+
+  buildSkills(_ctx: CliBridgeContext): CliSkillFile[] | null {
+    return null;
+  }
+
+  parseTrajectory(_raw: string): { trajectory: CliTrajectory; events: ProviderEvent[] } {
+    return { trajectory: { steps: [] }, events: [] };
+  }
+}
+
+// ─── KimiCode bridge (API-based, no subprocess) ─────────────────────────────
 
 export class KimiCodeCliBridge extends ManagedCliBridge implements CliBridge {
   readonly provider: ProviderName = 'kimicode' as const;
@@ -878,7 +1242,7 @@ export class KimiCodeCliBridge extends ManagedCliBridge implements CliBridge {
   }
 }
 
-// ─── Freebuff (real TUI + project-local MCP) bridge ────────────────────────
+// ─── Freebuff (real TUI + project-local MCP) bridge ─────────────────────────
 
 export class FreebuffCliBridge extends ManagedCliBridge implements CliBridge {
   readonly provider: ProviderName = 'freebuff' as const;
@@ -906,7 +1270,7 @@ export class FreebuffCliBridge extends ManagedCliBridge implements CliBridge {
   }
 
   buildAgentConfig(ctx: CliBridgeContext): CliAgentConfig | null {
-    const allowedTools = koryToolWhitelistForRole(ctx.role);
+    const allowedTools = koryToolWhitelistForContext(ctx);
     return {
       systemInstructions: [ctx.systemPrompt?.trim() ?? '', FREEBUFF_PTY_HARNESS_NOTE].filter(
         Boolean,
@@ -952,7 +1316,7 @@ export class FreebuffCliBridge extends ManagedCliBridge implements CliBridge {
   }
 }
 
-// ─── Bridge registry ───────────────────────────────────────────────────────
+// ─── Bridge registry ─────────────────────────────────────────────────────────
 
 const bridgeRegistry = new Map<ProviderName, CliBridge>();
 
@@ -980,17 +1344,45 @@ export function getCliBridge(provider: ProviderName): CliBridge | null {
     case 'grok':
       bridge = new GrokCliBridge();
       break;
+    case 'codebuddy':
+      bridge = new CodeBuddyCliBridge();
+      break;
+    case 'workbuddy-desktop':
+      bridge = new WorkBuddyDesktopCliBridge();
+      break;
+    case 'omnirush':
+      bridge = new OmnirushCliBridge();
+      break;
     case 'kimicode':
       bridge = new KimiCodeCliBridge();
       break;
     case 'freebuff':
       bridge = new FreebuffCliBridge();
       break;
+    case 'opencode':
+      bridge = new OpenCodeCliBridge();
+      break;
     default:
       return null;
   }
   bridgeRegistry.set(provider, bridge);
   return bridge;
+}
+
+/**
+ * The kory MCP server identity for a CLI-harness session: every managed CLI
+ * bridge injects the kory MCP server (the kory__* tool surface) into its
+ * turns. Derived from the bridge's own capability declaration — providers
+ * without an MCP lever (plain API providers, CLI harnesses that cannot load
+ * MCP) surface nothing. Used by the session context endpoint so the
+ * injected tools are visible (icons, labels) in the feed, not merely usable.
+ */
+export function koryMcpServerIdentity(
+  provider: ProviderName,
+): { name: string; tools: string[] } | null {
+  const bridge = getCliBridge(provider);
+  if (!bridge?.getCapabilities().supportsMcp) return null;
+  return { name: 'kory', tools: KORY_TOOLS.map((tool) => tool.name) };
 }
 
 export { roleToPermissionMode };

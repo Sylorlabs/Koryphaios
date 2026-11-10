@@ -4,29 +4,12 @@ import { getProviderHarnessCapabilities } from '../providers/provider-harness';
 
 export interface GoalProviderPolicy {
   allowed: boolean;
-  verification: 'eligible' | 'unverified' | 'remote-pending-review';
+  verification: 'eligible' | 'unverified';
   reason?: string;
 }
 
 /** Goal execution never upgrades an untrusted provider result to verified evidence. */
-export function goalProviderPolicy(
-  provider: string,
-  remotePlanApproved = false,
-): GoalProviderPolicy {
-  if (provider === 'jules') {
-    return remotePlanApproved
-      ? {
-          allowed: true,
-          verification: 'remote-pending-review',
-          reason:
-            'Jules runs remotely and may only create a reviewable PR; local verification is still required.',
-        }
-      : {
-          allowed: false,
-          verification: 'remote-pending-review',
-          reason: 'Jules requires explicit plan approval before a cloud run starts.',
-        };
-  }
+export function goalProviderPolicy(provider: string): GoalProviderPolicy {
   const harness = getProviderHarnessCapabilities(provider);
   return harness.verificationEligible
     ? { allowed: true, verification: 'eligible' }

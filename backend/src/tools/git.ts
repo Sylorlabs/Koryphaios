@@ -188,7 +188,7 @@ export class GitSwitchTool implements Tool {
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const start = Date.now();
     try {
-      if (ctx.callerRole !== 'manager' || ctx.permissionPolicy?.mode === 'plan')
+      if (ctx.callerRole !== 'manager')
         throw new Error('Only the acting manager may switch its own chat checkout.');
       const data = await switchChatGit(
         ctx.sessionId,

@@ -13,6 +13,7 @@ import {
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import type { ChildProcess, ChildProcessWithoutNullStreams } from 'node:child_process';
+import { hasPosixPermissionBits, isLinux } from '../runtime/platform';
 
 const PRIVATE_ROOT = join(
   tmpdir(),
@@ -54,7 +55,7 @@ function ensurePrivateRoot(): void {
 }
 
 function processStartId(pid: number): string | null {
-  if (process.platform !== 'linux' || !Number.isSafeInteger(pid) || pid <= 0) return null;
+  if (!isLinux() || !Number.isSafeInteger(pid) || pid <= 0) return null;
   try {
     // Linux /proc stat field 22 is the process start time in clock ticks. The
     // command field may contain spaces, so parse only after its final `)`.
@@ -88,8 +89,11 @@ function readPrivateArtifactOwner(directory: string): PrivateArtifactOwner | nul
     const stat = lstatSync(path);
     // Windows does not support Unix file permissions; skip the mode check
     // there (the file type and symlink checks still apply).
-    const isWindows = process.platform === 'win32';
-    if (!stat.isFile() || stat.isSymbolicLink() || (!isWindows && (stat.mode & 0o077) !== 0))
+    if (
+      !stat.isFile() ||
+      stat.isSymbolicLink() ||
+      (hasPosixPermissionBits() && (stat.mode & 0o077) !== 0)
+    )
       return null;
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<PrivateArtifactOwner>;
     if (!Number.isSafeInteger(parsed.pid) || (parsed.pid ?? 0) <= 0) return null;

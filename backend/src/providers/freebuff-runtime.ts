@@ -1,6 +1,4 @@
 /** Real Freebuff TUI runtime. Docker is transport, never a replacement for bubblewrap. */
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import {
   chmodSync,
   copyFileSync,
@@ -8,7 +6,6 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
-  realpathSync,
   readdirSync,
   rmSync,
   writeFileSync,
@@ -17,10 +14,22 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import seccompProfile from '../../../docker/freebuff-runtime/seccomp.json';
+import dockerfile from '../../../docker/freebuff-runtime/Dockerfile' with { type: 'text' };
+import {
+  canonicalizePath,
+  executableSuffixes,
+  findOnPath,
+  isContainedBy,
+  isLinux,
+  isMac,
+  isWindows,
+} from '../runtime/platform';
+import { FREEBUFF_DYNAMIC_CATALOG_PROBE, parseFreebuffBundledCatalog, type FreebuffBundledCatalog } from './freebuff-bundled-catalog';
+import { discoverFreebuffAccounts, freebuffConfigDir } from './auth-utils';
 
-const execFileAsync = promisify(execFile);
-export const FREEBUFF_RUNTIME_VERSION = '0.2.12';
-export const FREEBUFF_RUNTIME_IMAGE = 'koryphaios/freebuff-runtime:0.2.12-bun1.3.14';
+export const FREEBUFF_RUNTIME_VERSION = '0.2.16';
+export const FREEBUFF_RUNTIME_IMAGE = 'koryphaios/freebuff-runtime:0.2.16-bun1.3.14';
+export const FREEBUFF_RUNTIME_IMAGE_ARM64 = 'koryphaios/freebuff-runtime:0.2.16-bun1.3.14-arm64';
 export interface FreebuffRuntimeStatus {
   available: boolean;
   kind: 'native' | 'docker' | 'unavailable';
@@ -48,6 +57,21 @@ export interface FreebuffTurnRuntime {
   start(cliArgs: string[]): Promise<void>;
   cleanup(): Promise<void>;
 }
+type FreebuffDockerArchitecture = 'amd64' | 'arm64';
+
+function dockerArchitecture(env: NodeJS.ProcessEnv): FreebuffDockerArchitecture {
+  return env.KORY_FREEBUFF_DOCKER_ARCH === 'arm64' ? 'arm64' : 'amd64';
+}
+
+function runtimeImage(architecture: FreebuffDockerArchitecture): string {
+  return architecture === 'arm64' ? FREEBUFF_RUNTIME_IMAGE_ARM64 : FREEBUFF_RUNTIME_IMAGE;
+}
+
+function runtimePath(value: string, hostRoot: string, sandboxRoot: string): string {
+  if (sandboxRoot === hostRoot || !isContainedBy(hostRoot, value)) return value;
+  const child = relative(hostRoot, value);
+  return child ? join(sandboxRoot, child) : sandboxRoot;
+}
 let status: FreebuffRuntimeStatus = {
   available: false,
   kind: 'unavailable',
@@ -55,8 +79,33 @@ let status: FreebuffRuntimeStatus = {
 };
 let checkedAt = 0;
 let checking: Promise<FreebuffRuntimeStatus> | undefined;
+let executionCatalog: FreebuffBundledCatalog | null = null;
+/** Catalog protocol measured from the actual qualified execution binary. */
+export function getFreebuffRuntimeCatalog(): FreebuffBundledCatalog | null {
+  return status.available ? executionCatalog : null;
+}
 export function getFreebuffRuntimeStatus(): FreebuffRuntimeStatus {
   return { ...status };
+}
+
+/**
+ * Native Linux probes must use the same executable discovery as the provider.
+ * Freebuff supports sibling profiles (manicode2, manicode-work, ...), and a
+ * detected account may keep its launcher in that profile instead of the
+ * default ~/.config/manicode directory. Probing only the default path made
+ * those accounts appear detected while the connection check failed before the
+ * real CLI could start.
+ */
+export function findNativeFreebuffProbeBinary(): string | undefined {
+  const profileCandidates = discoverFreebuffAccounts().flatMap((account) =>
+    executableSuffixes().map((suffix) => join(account.profileDir, `freebuff${suffix}`)),
+  );
+  const candidates = [
+    ...profileCandidates,
+    ...executableSuffixes().map((suffix) => join(freebuffConfigDir(), `freebuff${suffix}`)),
+    findOnPath('freebuff'),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+  return candidates.find((candidate) => existsSync(candidate));
 }
 
 /** Docker client may need its own config/context, but it must not receive provider secrets. */
@@ -64,6 +113,7 @@ function controlEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
     HOME: homedir(),
+    USERPROFILE: homedir(),
     LANG: 'C.UTF-8',
   };
   for (const key of [
@@ -80,11 +130,164 @@ function controlEnv(): NodeJS.ProcessEnv {
 async function command(
   file: string,
   args: string[],
-  timeout = 30_000,
+  timeout = 60_000,
   env = controlEnv(),
 ): Promise<string> {
-  const result = await execFileAsync(file, args, { env, timeout, maxBuffer: 2 * 1024 * 1024 });
-  return result.stdout;
+  // Drain both pipes before accepting exit. Bun's Node execFile compatibility
+  // callback can precede the last Docker output chunk under heavy host load.
+  const child = Bun.spawn([file, ...args], { env, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, timeout);
+  const read = async (stream: ReadableStream<Uint8Array>): Promise<string> => {
+    const reader = stream.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > 2 * 1024 * 1024) {
+          child.kill('SIGKILL');
+          throw new Error('Freebuff runtime output exceeded its transport limit');
+        }
+        chunks.push(value);
+      }
+      return Buffer.concat(chunks).toString('utf8');
+    } finally { reader.releaseLock(); }
+  };
+  try {
+    const [code, stdout, stderr] = await Promise.all([child.exited, read(child.stdout), read(child.stderr)]);
+    if (code !== 0 || timedOut) {
+      const action = ['info', 'image', 'exec', 'run', 'rm', 'list', 'start'].includes(args[0] ?? '')
+        ? args[0] : 'isolated command';
+      const message = timedOut
+        ? `Freebuff runtime ${file === 'docker' ? 'Docker' : 'controller'} ${action} timed out`
+        : 'Freebuff runtime command failed';
+      throw Object.assign(new Error(message), { code: timedOut ? 'TIMEOUT' : code, stderr });
+    }
+    return stdout;
+  } finally { clearTimeout(timer); }
+}
+
+export interface FreebuffDockerSetupDependencies {
+  environment: typeof freebuffDockerEnvironment;
+  command: typeof command;
+  build: (env: NodeJS.ProcessEnv) => Promise<void>;
+}
+const setupDependencies: FreebuffDockerSetupDependencies = {
+  environment: freebuffDockerEnvironment,
+  command,
+  async build(env) {
+    // Embedded pinned recipe works in the compiled desktop backend too. stdin
+    // is the entire build context: no project, HOME, login or device keys enter it.
+    const architecture = dockerArchitecture(env);
+    const child = Bun.spawn([
+      'docker', 'build', '--platform', `linux/${architecture}`, '--tag', runtimeImage(architecture), '-',
+    ], { env, stdin: new Blob([dockerfile]), stdout: 'ignore', stderr: 'ignore' });
+    const timer = setTimeout(() => child.kill(), 10 * 60_000);
+    try {
+      if (await child.exited !== 0) throw new Error('Freebuff runtime installation failed. Reconnect to retry.');
+    } finally { clearTimeout(timer); }
+  },
+};
+let imageSetup: Promise<void> | undefined;
+/** App-owned, coalesced installation. Existing images are reused; the caller
+ * still has to prove real bubblewrap isolation afterward. Never an optimistic pass. */
+export function ensureFreebuffDockerImage(
+  dependencies: FreebuffDockerSetupDependencies = setupDependencies,
+): Promise<void> {
+  if (imageSetup) return imageSetup;
+  imageSetup = (async () => {
+    let env: NodeJS.ProcessEnv;
+    try { env = await dependencies.environment(); } catch (error) {
+      // Resume an existing, correctly sized architecture profile without
+      // creating a VM or switching Docker's global context.
+      if (process.env.KORY_FREEBUFF_DOCKER_CONTEXT || process.env.DOCKER_CONTEXT || process.env.DOCKER_HOST)
+        throw error;
+      const profiles = (await dependencies.command('colima', ['list', '--json'], 10_000, controlEnv()))
+        .split('\n').filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+      const existing = profiles.find((profile) =>
+        profile.name === 'default' &&
+        ['x86_64', 'aarch64', 'arm64'].includes(String(profile.arch)) &&
+        profile.runtime === 'docker' &&
+        profile.status === 'Stopped');
+      if (!existing) throw error;
+      await dependencies.command('colima', ['start', 'default', '--activate=false'], 120_000, controlEnv());
+      env = await dependencies.environment();
+    }
+    try {
+      const image = runtimeImage(dockerArchitecture(env));
+      await dependencies.command('docker', ['image', 'inspect', '--format', '{{.Id}}', image], 30_000, env);
+    } catch (error) {
+      // A busy/offline daemon is not a missing image. Never queue a rebuild on
+      // every transient transport failure.
+      if (!/no such (?:image|object)/i.test(String((error as { stderr?: string }).stderr ?? '')))
+        throw error;
+      await dependencies.build(env);
+    }
+  })().finally(() => { imageSetup = undefined; });
+  return imageSetup;
+}
+export async function ensureFreebuffRuntimeReady(): Promise<FreebuffRuntimeStatus> {
+  if (isMac() || isWindows()) {
+    try { await ensureFreebuffDockerImage(); } catch {
+      return {
+        available: false, kind: 'unavailable',
+        reason: 'Freebuff could not prepare its isolated Linux runtime. Make sure Docker is running, then reconnect. Koryphaios installs the runtime automatically.',
+      };
+    }
+  }
+  return refreshFreebuffRuntimeStatus(true);
+}
+
+/** Namespace setup must run on a native Linux kernel, not under user-mode
+ * emulation. Prefer the selected daemon; a running Colima profile is a local fallback.
+ * This never changes Docker's global context or starts/stops a user's VM.
+ */
+export async function freebuffDockerEnvironment(
+  probe: typeof command = command,
+): Promise<NodeJS.ProcessEnv> {
+  const env = controlEnv();
+  if (process.env.KORY_FREEBUFF_DOCKER_CONTEXT) {
+    env.DOCKER_CONTEXT = process.env.KORY_FREEBUFF_DOCKER_CONTEXT;
+    delete env.DOCKER_HOST;
+  }
+  const architecture = await probe('docker', ['info', '--format', '{{.Architecture}}'], 30_000, env)
+    .then((value) => value.trim()).catch(() => 'unavailable');
+  if (['x86_64', 'amd64'].includes(architecture)) {
+    env.KORY_FREEBUFF_DOCKER_ARCH = 'amd64';
+    return env;
+  }
+  if (['aarch64', 'arm64'].includes(architecture)) {
+    env.KORY_FREEBUFF_DOCKER_ARCH = 'arm64';
+    return env;
+  }
+  if (
+    !process.env.KORY_FREEBUFF_DOCKER_CONTEXT &&
+    !process.env.DOCKER_CONTEXT &&
+    !process.env.DOCKER_HOST
+  ) {
+    const colimaEnv: NodeJS.ProcessEnv = { ...env, DOCKER_CONTEXT: 'colima' };
+    try {
+      const colimaArchitecture = (
+        await probe('docker', ['info', '--format', '{{.Architecture}}'], 30_000, colimaEnv)
+      ).trim();
+      if (['x86_64', 'amd64'].includes(colimaArchitecture)) {
+        colimaEnv.KORY_FREEBUFF_DOCKER_ARCH = 'amd64';
+        return colimaEnv;
+      }
+      if (['aarch64', 'arm64'].includes(colimaArchitecture)) {
+        colimaEnv.KORY_FREEBUFF_DOCKER_ARCH = 'arm64';
+        return colimaEnv;
+      }
+    } catch {
+      /* Report the architecture requirement below. */
+    }
+  }
+  throw new Error(
+    'Freebuff requires a Linux Docker daemon with a native amd64 or arm64 kernel; select a running context with KORY_FREEBUFF_DOCKER_CONTEXT',
+  );
 }
 function quote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
@@ -104,18 +307,11 @@ export function validateFreebuffRuntimePaths(options: FreebuffRuntimeOptions): v
     throw new Error('Freebuff runRoot must be a dedicated absolute private directory');
   }
   for (const path of [root, options.runHome, options.workspace, options.privateTmp]) {
-    if (
-      !isAbsolute(path) ||
-      resolve(path) !== path ||
-      (path !== root &&
-        (!relative(root, path) ||
-          relative(root, path).startsWith('..') ||
-          isAbsolute(relative(root, path))))
-    ) {
+    if (!isAbsolute(path) || resolve(path) !== path || !isContainedBy(root, path)) {
       throw new Error('Freebuff runtime paths must stay inside runRoot');
     }
     // macOS /var -> /private/var is a system alias; require callers to canonicalize it.
-    if (!existsSync(path) || !lstatSync(path).isDirectory() || realpathSync(path) !== path) {
+    if (!existsSync(path) || !lstatSync(path).isDirectory() || canonicalizePath(path) !== path) {
       throw new Error(
         'Freebuff runtime paths must be existing canonical directories without symlinks',
       );
@@ -132,7 +328,13 @@ export function validateFreebuffRuntimePaths(options: FreebuffRuntimeOptions): v
  * The actual CLI is UID/GID-dropped with ZERO effective/permitted/inheritable/ambient
  * capabilities and no-new-privileges, inside mandatory bwrap mount/PID/IPC/UTS isolation.
  */
-export function freebuffDockerRunArgs(root: string, name: string, allowNetwork = true): string[] {
+export function freebuffDockerRunArgs(
+  root: string,
+  name: string,
+  allowNetwork = true,
+  architecture: FreebuffDockerArchitecture = 'amd64',
+  mountTarget = root,
+): string[] {
   return [
     'run',
     '-d',
@@ -140,7 +342,7 @@ export function freebuffDockerRunArgs(root: string, name: string, allowNetwork =
     '--name',
     name,
     '--platform',
-    'linux/amd64',
+    `linux/${architecture}`,
     '--pull=never',
     '--read-only',
     '--cap-drop=ALL',
@@ -166,10 +368,14 @@ export function freebuffDockerRunArgs(root: string, name: string, allowNetwork =
     '0:0',
     '--tmpfs',
     '/tmp:rw,nosuid,nodev,mode=1777,size=256m',
+    // Docker Desktop provides this alias automatically; Colima does not.
+    // host-gateway resolves to the selected Linux VM's host bridge on both.
+    '--add-host',
+    'host.docker.internal:host-gateway',
     '--mount',
-    `type=bind,src=${root},dst=${root}`,
+    `type=bind,src=${root},dst=${mountTarget}`,
     ...(!allowNetwork ? ['--network', 'none'] : []),
-    FREEBUFF_RUNTIME_IMAGE,
+    runtimeImage(architecture),
   ];
 }
 
@@ -186,13 +392,19 @@ async function makeRuntime(
   const controlDir =
     kind === 'docker'
       ? `/tmp/kory-control-${id}`
-      : mkdtempSync(join(realpathSync(tmpdir()), 'kory-freebuff-control-'));
+      : mkdtempSync(join(canonicalizePath(tmpdir()), 'kory-freebuff-control-'));
   const socket = join(controlDir, 'tmux.sock');
+  const dockerEnv = kind === 'docker' ? await freebuffDockerEnvironment() : undefined;
+  const dockerArch = dockerEnv ? dockerArchitecture(dockerEnv) : undefined;
+  // Windows paths cannot be used as paths inside the Linux container. Docker
+  // mounts the host run root at this stable POSIX location, while native Linux
+  // and macOS keep the existing same-path mount contract.
+  const sandboxRoot = kind === 'docker' && isWindows() ? '/kory/run' : runRoot;
   let started = false;
   let closed = false;
   const raw = (file: string, args: string[], timeout?: number, env?: NodeJS.ProcessEnv) =>
     kind === 'docker'
-      ? command('docker', ['exec', container, file, ...args], timeout)
+      ? command('docker', ['exec', container, file, ...args], timeout, dockerEnv)
       : command(file, args, timeout, env);
   let freebuffBinary = '/opt/kory/freebuff/freebuff';
   let bunBinary = '/opt/kory/bun';
@@ -208,6 +420,20 @@ async function makeRuntime(
     LANG: 'C.UTF-8',
     PATH: `${join(runRoot, 'bin')}:/opt/kory:/usr/local/bin:/usr/bin:/bin`,
   };
+  if (sandboxRoot !== runRoot) {
+    for (const key of [
+      'HOME',
+      'USERPROFILE',
+      'XDG_CONFIG_HOME',
+      'XDG_CACHE_HOME',
+      'XDG_DATA_HOME',
+      'XDG_STATE_HOME',
+      'TMPDIR',
+    ]) {
+      env[key] = runtimePath(env[key]!, runRoot, sandboxRoot);
+    }
+    env.PATH = `${runtimePath(join(runRoot, 'bin'), runRoot, sandboxRoot)}:/opt/kory:/usr/local/bin:/usr/bin:/bin`;
+  }
   const bwrap = [
     '--die-with-parent',
     '--new-session',
@@ -250,7 +476,7 @@ async function makeRuntime(
   // bwrap creates missing parents mode0700; root-controlled Docker setup must
   // make only the empty synthetic ancestor chain traversable after UID drop.
   const ancestors: string[] = [];
-  for (let parent = dirname(runRoot); parent !== '/'; parent = dirname(parent))
+  for (let parent = dirname(sandboxRoot); parent !== '/'; parent = dirname(parent))
     ancestors.unshift(parent);
   for (const parent of ancestors) bwrap.push('--perms', '0755', '--dir', parent);
   bwrap.push(
@@ -260,12 +486,12 @@ async function makeRuntime(
     '/dev',
     '--bind',
     runRoot,
-    runRoot,
+    sandboxRoot,
     '--bind',
-    privateTmp,
+    runtimePath(privateTmp, runRoot, sandboxRoot),
     '/tmp',
     '--chdir',
-    workspace,
+    runtimePath(workspace, runRoot, sandboxRoot),
     '--clearenv',
   );
   for (const [key, value] of Object.entries(env)) bwrap.push('--setenv', key, value);
@@ -275,7 +501,8 @@ async function makeRuntime(
     if (closed) return;
     closed = true;
     if (kind === 'docker') {
-      if (started) await command('docker', ['rm', '-f', container]).catch(() => {});
+      if (started)
+        await command('docker', ['rm', '-f', container], 30_000, dockerEnv).catch(() => {});
     } else {
       await tmux(['kill-server']).catch(() => {});
       rmSync(controlDir, { recursive: true, force: true });
@@ -289,8 +516,15 @@ async function makeRuntime(
       try {
         await command(
           'docker',
-          freebuffDockerRunArgs(runRoot, container, options.allowNetwork !== false),
+           freebuffDockerRunArgs(
+             runRoot,
+             container,
+             options.allowNetwork !== false,
+             dockerArch ?? 'amd64',
+             sandboxRoot,
+           ),
           60_000,
+          dockerEnv,
         );
       } finally {
         rmSync(profilePath, { force: true });
@@ -300,7 +534,7 @@ async function makeRuntime(
     } else {
       const bin = join(runRoot, 'bin');
       mkdirSync(bin, { recursive: true, mode: 0o700 });
-      const source = options.sourceBinary || join(homedir(), '.config/manicode/freebuff');
+      const source = options.sourceBinary || join(freebuffConfigDir(), 'freebuff');
       freebuffBinary = join(bin, 'freebuff');
       if (resolve(source) !== freebuffBinary) copyFileSync(source, freebuffBinary);
       const wasm = join(dirname(source), 'tree-sitter.wasm');
@@ -328,9 +562,8 @@ async function makeRuntime(
           // directory invalidates that cache. Never retry command/tool execution
           // and never read input contents or touch anything outside runRoot.
           const staged = [file, ...args].filter(
-            (path) =>
-              path.startsWith(`${runRoot}/`) && existsSync(path) && lstatSync(path).isFile(),
-          );
+            (path) => isContainedBy(runRoot, path) && existsSync(path) && lstatSync(path).isFile(),
+          ).map((path) => runtimePath(path, runRoot, sandboxRoot));
           if (staged.length)
             await raw(
               'bwrap',
@@ -347,7 +580,17 @@ async function makeRuntime(
               10_000,
             );
         }
-        return raw('bwrap', [...bwrap, '--', ...dropIdentity, file, ...args], opts?.timeout);
+        return raw(
+          'bwrap',
+          [
+            ...bwrap,
+            '--',
+            ...dropIdentity,
+            runtimePath(file, runRoot, sandboxRoot),
+            ...args.map((arg) => runtimePath(arg, runRoot, sandboxRoot)),
+          ],
+          opts?.timeout,
+        );
       },
       async start(cliArgs) {
         if (closed) throw new Error('Freebuff runtime is closed');
@@ -364,7 +607,7 @@ async function makeRuntime(
             '-ec',
             'for dir do marker=$(mktemp "$dir/.kory-stage-XXXXXXXX"); rm -- "$marker"; done',
             'staged-directories',
-            ...directories,
+            ...directories.map((directory) => runtimePath(directory, runRoot, sandboxRoot)),
           ]);
         }
         await tmux([
@@ -376,7 +619,7 @@ async function makeRuntime(
           '180',
           '-y',
           '50',
-          ['bwrap', ...bwrap, '--', ...dropIdentity, freebuffBinary, ...cliArgs]
+           ['bwrap', ...bwrap, '--', ...dropIdentity, freebuffBinary, ...cliArgs.map((arg) => runtimePath(arg, runRoot, sandboxRoot))]
             .map(quote)
             .join(' '),
         ]);
@@ -399,15 +642,17 @@ async function makeRuntime(
 
 /** Credential-free real kernel/filesystem + private tmux probe, used by readiness and setup. */
 export async function probeFreebuffRuntime(): Promise<FreebuffRuntimeStatus> {
-  if (process.platform !== 'linux' && process.platform !== 'darwin')
-    throw new Error('Freebuff requires Linux, or Docker Linux on macOS');
-  const kind = process.platform === 'linux' ? 'native' : 'docker';
+  if (!isLinux() && !isMac() && !isWindows())
+    throw new Error('Freebuff requires Linux or a Docker Linux runtime');
+  const kind = isLinux() ? 'native' : 'docker';
   // Colima shares HOME, not Darwin's /private/var/folders temporary directory.
   // Only the fresh run subdirectory is mounted, never this parent or HOME.
   const probeParent =
-    kind === 'docker' ? join(homedir(), '.koryphaios', 'freebuff-runs') : realpathSync(tmpdir());
+    kind === 'docker'
+      ? join(homedir(), '.koryphaios', 'freebuff-runs')
+      : canonicalizePath(tmpdir());
   mkdirSync(probeParent, { recursive: true, mode: 0o700 });
-  const root = mkdtempSync(join(realpathSync(probeParent), 'kory-freebuff-probe-'));
+  const root = mkdtempSync(join(canonicalizePath(probeParent), 'kory-freebuff-probe-'));
   const runRoot = join(root, 'run');
   for (const dir of [
     runRoot,
@@ -426,6 +671,7 @@ export async function probeFreebuffRuntime(): Promise<FreebuffRuntimeStatus> {
         runHome: join(runRoot, 'home'),
         workspace: join(runRoot, 'workspace'),
         privateTmp: join(runRoot, 'tmp'),
+        ...(kind === 'native' && { sourceBinary: findNativeFreebuffProbeBinary() }),
         allowNetwork: false,
       },
       kind,
@@ -440,14 +686,18 @@ export async function probeFreebuffRuntime(): Promise<FreebuffRuntimeStatus> {
       join(runRoot, 'workspace/allowed'),
     ]);
     if (evidence !== 'isolation-ok') throw new Error('Freebuff filesystem isolation probe failed');
-    const version = (
-      await runtime.exec(runtime.freebuffBinary, ['--version'], { timeout: 60_000 })
-    ).trim();
-    if (!new RegExp(`\\b${FREEBUFF_RUNTIME_VERSION.replace(/\./g, '\\.')}\\b`).test(version))
-      throw new Error(`Freebuff runtime must be native CLI ${FREEBUFF_RUNTIME_VERSION}`);
+    // Native --version exits before its console output reliably drains through
+    // Docker exec. Inspect the embedded version and protocol of the actual
+    // sandbox binary instead; an empty pipe is never mistaken for a bad version.
+    const catalog = parseFreebuffBundledCatalog(Buffer.from(
+      await runtime.exec(runtime.bunBinary, ['-e', FREEBUFF_DYNAMIC_CATALOG_PROBE, runtime.freebuffBinary]),
+    ));
+    if (catalog.cliVersion !== FREEBUFF_RUNTIME_VERSION)
+      throw new Error('Freebuff execution catalog version does not match its runtime');
     await runtime.tmux(['new-session', '-d', '-s', runtime.session, 'sleep 15']);
     await runtime.tmux(['has-session', '-t', runtime.session]);
     await runtime.tmux(['kill-server']);
+    executionCatalog = catalog;
     return { available: true, kind, version: FREEBUFF_RUNTIME_VERSION };
   } finally {
     await runtime?.cleanup();
@@ -461,6 +711,7 @@ export async function refreshFreebuffRuntimeStatus(force = false): Promise<Freeb
     try {
       status = await probeFreebuffRuntime();
     } catch (error) {
+      executionCatalog = null;
       // Readiness must be actionable, but never echo commands/env/credential-bearing stderr.
       const failed = error as { code?: string | number; stderr?: string; message?: string };
       const detail =
@@ -468,12 +719,13 @@ export async function refreshFreebuffRuntimeStatus(force = false): Promise<Freeb
           ?.trim()
           .split('\n')
           .find((line) => /^(bwrap:|docker:|Error|error)/.test(line)) ||
-        (failed.code ? `runtime command exit ${failed.code}` : failed.message?.split('\n')[0]) ||
+        (failed.code === 'TIMEOUT' ? failed.message :
+          failed.code ? `runtime command exit ${failed.code}` : failed.message?.split('\n')[0]) ||
         'probe failed';
       status = {
         available: false,
         kind: 'unavailable',
-        reason: `Freebuff mandatory bwrap/private-tmux runtime probe failed (${detail.slice(0, 240)}). On macOS start Docker/Colima and run bun scripts/setup-freebuff-runtime.ts.`,
+        reason: `Freebuff isolated runtime check failed (${detail.slice(0, 240)}). Reconnect to let Koryphaios prepare and check the runtime again.`,
       };
     }
     checkedAt = Date.now();

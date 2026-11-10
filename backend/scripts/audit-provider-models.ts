@@ -20,10 +20,10 @@ import { loadEnvFromProject } from '../src/runtime/env';
 const waitMs = Number(process.argv.find((a) => a.startsWith('--wait-ms='))?.split('=')[1] ?? 8_000);
 
 /** Providers with no remote /models discovery API — curated lists are expected. */
-const STATIC_BY_DESIGN = new Set<ProviderName>(['jules', 'gitlab', 'bedrock']);
+const STATIC_BY_DESIGN = new Set<ProviderName>(['gitlab', 'bedrock']);
 
 /** CLI-backed providers whose live lists reuse catalog ids but refresh names/realModelId. */
-const CLI_PROVIDERS = new Set<ProviderName>(['claude', 'grok', 'antigravity', 'codex']);
+const CLI_PROVIDERS = new Set<ProviderName>(['claude', 'grok', 'antigravity', 'codex', 'opencode']);
 
 type AuditRow = {
   provider: ProviderName;

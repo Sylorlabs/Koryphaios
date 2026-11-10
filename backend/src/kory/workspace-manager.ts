@@ -16,15 +16,13 @@
  * All filesystem operations use fs/promises — the event loop is never blocked.
  */
 
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile, appendFile, readdir, symlink, rename } from 'node:fs/promises';
 import { join, resolve, relative, isAbsolute, sep } from 'node:path';
 import { koryLog, serverLog } from '../logger';
 import { GitExecutor } from './git-executor';
+import { canonicalizePath } from '../runtime/platform';
 import type { KoryphaiosConfig } from '@koryphaios/shared';
-
-const canonicalPath =
-  process.platform === 'win32' ? (realpathSync.native ?? realpathSync) : realpathSync;
 
 /** Koryphaios' own per-project state directory. Excluded from Git because it
  *  holds the worktree manifest, snapshots, and credential material. */
@@ -192,7 +190,7 @@ export class WorkspaceManager {
   }
 
   private async initialize(): Promise<void> {
-    const root = canonicalPath(this.repoRoot);
+    const root = canonicalizePath(this.repoRoot);
     const base = resolve(root, this.worktreeDir);
     const rel = relative(root, base);
     if (
@@ -209,7 +207,7 @@ export class WorkspaceManager {
     }
     this.repoRoot = root;
     await mkdir(base, { recursive: true });
-    if (canonicalPath(base) !== base) {
+    if (canonicalizePath(base) !== base) {
       throw new WorkspaceError('Worktree directory must not redirect through a symlink');
     }
     await this.ensureWorktreeDirIgnored();
@@ -259,16 +257,11 @@ export class WorkspaceManager {
     for (const wt of allWorktrees) {
       // On Windows, `git worktree list --porcelain` may report paths using
       // 8.3 short names (e.g. RUNNER~1) while the WorkspaceManager was
-      // constructed with the canonical long name (e.g. runneradmin), or vice
-      // versa. realpathSync may not consistently resolve 8.3 names on Windows,
-      // so use realpathSync.native (which calls GetFinalPathNameByHandleW)
-      // for consistent canonicalization. On other platforms, use the default
-      // realpathSync to avoid behavior differences with the native version.
-      const realpath =
-        process.platform === 'win32' ? (realpathSync.native ?? realpathSync) : realpathSync;
+      // A stale entry can survive a rename between the short (8.3) and long
+      // spelling of the same directory, so compare kernel-canonical paths.
       let absoluteWtPath = resolve(wt.path);
       try {
-        absoluteWtPath = realpath(absoluteWtPath);
+        absoluteWtPath = canonicalizePath(absoluteWtPath);
       } catch {
         // realpath fails if the path doesn't exist (e.g. a stale
         // worktree entry). Keep the resolved path so the startsWith check
@@ -276,7 +269,7 @@ export class WorkspaceManager {
       }
       let canonicalBaseDir = worktreeBaseDir;
       try {
-        canonicalBaseDir = realpath(worktreeBaseDir);
+        canonicalBaseDir = canonicalizePath(worktreeBaseDir);
       } catch {
         // worktreeBaseDir may not exist yet on first run; fall back to the
         // resolved path.
@@ -390,7 +383,8 @@ export class WorkspaceManager {
       throw new WorkspaceError('Invalid or already active worktree task ID');
     }
     const base = resolve(this.repoRoot, this.worktreeDir);
-    if (canonicalPath(base) !== base) throw new WorkspaceError('Worktree directory was redirected');
+    if (canonicalizePath(base) !== base)
+      throw new WorkspaceError('Worktree directory was redirected');
     // Resource Guard: Check concurrent limit
     if (!this.canSpawn()) {
       koryLog.warn(
@@ -1204,7 +1198,7 @@ export class WorkspaceManager {
   private async branchCheckedOutElsewhere(branch: string): Promise<string | null> {
     for (const wt of await this.listAllWorktrees()) {
       if (wt.branch !== branch) continue;
-      if (canonicalPath(wt.path) === this.repoRoot) continue;
+      if (canonicalizePath(wt.path) === this.repoRoot) continue;
       return wt.path;
     }
     return null;
@@ -1337,9 +1331,9 @@ export class WorkspaceManager {
     }
     const base = resolve(this.repoRoot, this.worktreeDir);
     const expected = resolve(base, taskId);
-    const path = canonicalPath(worktree.path);
+    const path = canonicalizePath(worktree.path);
     if (
-      canonicalPath(base) !== base ||
+      canonicalizePath(base) !== base ||
       path !== expected ||
       path === this.repoRoot ||
       (agentId !== undefined && worktree.agentId !== agentId)
@@ -1352,11 +1346,11 @@ export class WorkspaceManager {
     const branch = await this.git.exec(['-C', path, 'symbolic-ref', '--short', 'HEAD']);
     if (
       !top.success ||
-      canonicalPath(top.stdout.trim()) !== path ||
+      canonicalizePath(top.stdout.trim()) !== path ||
       !common.success ||
       !projectCommon.success ||
-      canonicalPath(resolve(path, common.stdout.trim())) !==
-        canonicalPath(resolve(this.repoRoot, projectCommon.stdout.trim())) ||
+      canonicalizePath(resolve(path, common.stdout.trim())) !==
+        canonicalizePath(resolve(this.repoRoot, projectCommon.stdout.trim())) ||
       !branch.success ||
       branch.stdout.trim() !== worktree.branchName ||
       !worktree.branchName.startsWith('ai/') ||

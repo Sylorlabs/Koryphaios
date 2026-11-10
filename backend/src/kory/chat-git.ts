@@ -1,5 +1,5 @@
-import { existsSync, realpathSync } from 'node:fs';
-import { join, relative, isAbsolute } from 'node:path';
+import { existsSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type {
   ChatGitDetails,
@@ -9,6 +9,7 @@ import type {
   ChatGitTarget,
 } from '@koryphaios/shared';
 import { ConflictError, ValidationError } from '../errors/types';
+import { canonicalizePath, isContainedBy } from '../runtime/platform';
 import { assertIndependentChatGitDirectory } from './git-owned-workspace';
 import { sessionWorkspaceOwnership } from './session-workspace';
 import { GitExecutor } from './git-executor';
@@ -19,31 +20,42 @@ import {
   type PullRequestReader,
 } from './github-pull-requests';
 
-/** All mutations are limited to one host-owned, independent chat repository. */
+/** Default to an owned isolated checkout. The session service may explicitly
+ * allow the persisted local folder of an ordinary in-place chat. */
 export class ChatGit {
-  private owner: NonNullable<ReturnType<typeof sessionWorkspaceOwnership>>;
+  private owner?: NonNullable<ReturnType<typeof sessionWorkspaceOwnership>>;
+  private sourceRoot: string;
   private git: GitExecutor;
   constructor(
     private directory: string,
     private pullRequests: PullRequestReader = new GitHubPullRequests(),
+    options: { allowInPlace?: boolean } = {},
   ) {
     const owner = sessionWorkspaceOwnership(directory);
-    if (!owner) throw new ValidationError('This chat has no owned isolated Git checkout.');
+    if (!owner && !options.allowInPlace)
+      throw new ValidationError('This chat has no owned isolated Git checkout.');
+    this.directory = canonicalizePath(directory);
     this.owner = owner;
-    assertIndependentChatGitDirectory(this.owner.checkout);
-    const rel = relative(this.owner.checkout, realpathSync(directory));
-    if (rel.startsWith('..') || isAbsolute(rel))
-      throw new ValidationError('The chat workspace was redirected.');
-    this.git = new GitExecutor(this.owner.checkout);
+    if (owner) {
+      assertIndependentChatGitDirectory(owner.checkout);
+      if (!isContainedBy(owner.checkout, this.directory))
+        throw new ValidationError('The chat workspace was redirected.');
+      this.sourceRoot = owner.sourceRoot;
+      this.git = new GitExecutor(owner.checkout);
+    } else {
+      this.sourceRoot = this.directory;
+      this.git = new GitExecutor(this.directory);
+    }
   }
 
-  private async exec(args: string[]) {
+  private async exec(args: string[], readOnlyRoots: string[] = []) {
     // Do not execute project hooks or external diff/filter monitors on a user
     // selecting a revision. GitExecutor still enforces the mandatory sandbox.
     return this.git.exec(
       ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', ...args],
       {
         env: { GIT_TERMINAL_PROMPT: '0', GH_PROMPT_DISABLED: '1' },
+        readOnlyRoots,
       },
     );
   }
@@ -51,8 +63,8 @@ export class ChatGit {
   async repository(): Promise<string | null> {
     // Chats deliberately have no push remote. Use host-owned source identity
     // solely to discover the GitHub repo; never copy its credential-bearing URL.
-    if (!existsSync(this.owner!.sourceRoot)) return null;
-    const source = new GitExecutor(this.owner!.sourceRoot);
+    if (!existsSync(this.sourceRoot)) return null;
+    const source = new GitExecutor(this.sourceRoot);
     const remote = await source.exec(['config', '--get', 'remote.origin.url']);
     return remote.success ? githubRepositoryFromRemote(remote.stdout.trim()) : null;
   }
@@ -93,12 +105,24 @@ export class ChatGit {
       'rebase-apply',
       'sequencer',
       'BISECT_LOG',
-    ].some((name) => existsSync(join(this.owner!.checkout, '.git', name)));
+    ].some((name) => existsSync(join(this.owner?.checkout ?? this.directory, '.git', name)));
   }
 
   async state(sessionId: string, selection?: ChatGitSelectionRecord): Promise<ChatGitState> {
     return this.git.withLock(async () => {
-      const snapshot = await new GitWorkspace(this.owner!.checkout).selection();
+      const snapshot = await new GitWorkspace(this.owner?.checkout ?? this.directory).selection();
+      if (!snapshot.isRepo) {
+        return {
+          ...snapshot,
+          sessionId,
+          isolated: Boolean(this.owner),
+          changedFiles: 0,
+          operationInProgress: false,
+          githubRepository: null,
+          sourceRefs: [],
+          sourceCommits: [],
+        };
+      }
       const status = await this.exec([
         'status',
         '--porcelain=v1',
@@ -112,13 +136,22 @@ export class ChatGit {
         changedFiles++;
         if (/[RC]/.test(entries[i].slice(0, 2))) i++;
       }
-      const source = existsSync(this.owner!.sourceRoot)
-        ? await new GitWorkspace(this.owner!.sourceRoot).selection()
-        : null;
+      let source: Awaited<ReturnType<GitWorkspace['selection']>> | null = null;
+      if (this.owner && existsSync(this.sourceRoot)) {
+        // The selected chat checkout is authoritative. Source refs/history are
+        // optional picker enrichment and must not make an otherwise healthy
+        // chat display as unavailable when the source checkout is temporarily
+        // unreadable.
+        try {
+          source = await new GitWorkspace(this.sourceRoot).selection();
+        } catch {
+          source = null;
+        }
+      }
       return {
         ...snapshot,
         sessionId,
-        isolated: true,
+        isolated: Boolean(this.owner),
         changedFiles,
         operationInProgress: this.operationInProgress(),
         githubRepository: await this.repository(),
@@ -132,7 +165,7 @@ export class ChatGit {
   private async resolve(ref: string, expectedHash?: string, source = false): Promise<string> {
     const execute = source
       ? (args: string[]) =>
-          new GitExecutor(this.owner!.sourceRoot).exec(['-c', 'core.fsmonitor=false', ...args])
+          new GitExecutor(this.sourceRoot).exec(['-c', 'core.fsmonitor=false', ...args])
       : (args: string[]) => this.exec(args);
     if (!/^[a-f0-9]{7,64}$/i.test(ref)) {
       if (
@@ -163,7 +196,7 @@ export class ChatGit {
       const hash = await this.resolve(ref, undefined, source);
       const execute = source
         ? (args: string[]) =>
-            new GitExecutor(this.owner!.sourceRoot).exec([
+            new GitExecutor(this.sourceRoot).exec([
               '--no-optional-locks',
               '-c',
               'core.fsmonitor=false',
@@ -203,7 +236,7 @@ export class ChatGit {
   }
 
   private async assertCanSwitch(input: ChatGitSwitchRequest) {
-    assertIndependentChatGitDirectory(this.owner!.checkout);
+    if (this.owner) assertIndependentChatGitDirectory(this.owner.checkout);
     const head = await this.exec(['rev-parse', '--verify', 'HEAD']);
     const branch = await this.exec(['symbolic-ref', '--quiet', '--short', 'HEAD']);
     if (
@@ -265,7 +298,7 @@ export class ChatGit {
           throw new ConflictError('The PR head changed. Refresh PR details before switching.');
         const imported = `refs/kory/pr-import/${randomUUID()}`;
         try {
-          const fetched = await this.exec([
+           const fetched = await this.exec([
             '-c',
             'credential.helper=',
             '-c',
@@ -281,7 +314,7 @@ export class ChatGit {
             '--',
             `https://github.com/${pullRequest.repository}.git`,
             `refs/pull/${target.number}/head:${imported}`,
-          ]);
+           ], [this.sourceRoot]);
           if (!fetched.success)
             throw new ValidationError(
               'Could not fetch this PR into the chat. Check gh auth login and repository access.',
@@ -309,13 +342,13 @@ export class ChatGit {
             'Create a new working branch for a commit, tag, remote branch, or source-project revision; detached work is not used.',
           );
         if (target.source && !(await this.exec(['cat-file', '-e', `${commit}^{commit}`])).success) {
-          const sourceRoot = await new GitExecutor(this.owner!.sourceRoot).exec([
+          const sourceRoot = await new GitExecutor(this.sourceRoot).exec([
             'rev-parse',
             '--show-toplevel',
           ]);
           if (!sourceRoot.success)
             throw new ValidationError('The source repository is unavailable.');
-          const imported = await this.exec([
+           const imported = await this.exec([
             '-c',
             'uploadpack.packObjectsHook=',
             'fetch',
@@ -325,14 +358,17 @@ export class ChatGit {
             '--',
             sourceRoot.stdout.trim(),
             commit,
-          ]);
+           ], [this.sourceRoot]);
           if (!imported.success)
             throw new ValidationError(
               'Could not import the selected commit from the source project into this chat.',
             );
         }
       }
-      const subdirectory = relative(this.owner!.checkout, this.directory).replaceAll('\\', '/');
+      const subdirectory = relative(
+        this.owner?.checkout ?? this.directory,
+        this.directory,
+      ).replaceAll('\\', '/');
       if (
         subdirectory &&
         !(await this.exec(['cat-file', '-e', `${commit}:${subdirectory}`])).success

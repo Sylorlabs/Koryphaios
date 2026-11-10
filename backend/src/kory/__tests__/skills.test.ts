@@ -39,6 +39,7 @@ import {
 import {
   MANAGER_OUTPUT_TOKEN_LIMIT,
   MIN_SKILL_CONTEXT_BUDGET,
+  TOKEN_CHARS,
   compilePrompt,
   createTaskContract,
   deriveSkillContextBudget,
@@ -53,11 +54,25 @@ import {
 } from '../skill-qualifications';
 import {
   buildSkillEvaluationCard,
+  CURRENT_SKILL_EVAL_CONTRACT_VERSION,
   evaluateSkillPromotion,
   recordSkillEvaluationRun,
   recordSkillEvaluationRuns,
 } from '../skill-evaluations';
 import { syncSkillStewardRegistry } from '../skill-stewards';
+import { currentV5SkillEvaluationContracts } from '../skill-eval-current-contract';
+
+function currentFullTaskEvidence(skill: string, scenarioId: string, experimentId: string) {
+  const pkg = V5_SKILL_PACKAGE_CATALOG.packages.find((item) => item.sidecar.name === skill)!;
+  const contract = currentV5SkillEvaluationContracts(pkg, CURRENT_SKILL_EVAL_CONTRACT_VERSION).get(scenarioId)!;
+  return {
+    protocolVersion: 3 as const,
+    evaluationContractVersion: contract.evaluationContractVersion,
+    evaluationContractHash: contract.evaluationContractHash,
+    materializerId: contract.materializerIds[0]!, deterministicScorerId: contract.scorerIds[0]!,
+    suiteId: 'current-contract-test-suite', scenarioId, experimentId,
+  };
+}
 import { SKILL_PLAYBOOKS } from '../skill-playbooks';
 import { PLAN_MODE_SKILL_INSTRUCTIONS } from '../plan-mode-skill';
 import { PROFESSIONAL_SKILL_DEFINITIONS } from '../professional-skill-definitions';
@@ -95,6 +110,64 @@ function stderrFailures(stderr: string): string[] {
     );
 }
 
+function expectLosslessOrderedSkillContext(result: ReturnType<typeof resolveSkills>): void {
+  expect(result.blocked).toBe(false);
+  expect(result.hierarchyErrors).toEqual([]);
+  expect(result.promptText.length).toBe(result.totalContextCost);
+  expect(result.promptText.startsWith('## Active local skills\nManifest: ')).toBe(true);
+  expect(result.promptText).toContain(`\nManifest sha256: ${result.manifestHash}`);
+  expect(
+    result.selected.reduce((sum, item) => sum + item.contextCost, 0) + result.contextOverheadCost,
+  ).toBe(result.totalContextCost);
+  const names = result.selected.map((item) => item.skill.name);
+  expect(new Set(names).size).toBe(names.length);
+  for (const item of result.selected) {
+    expect(item.contextCost).toBe(item.promptText.length);
+    expect(item.fullContextCost).toBeGreaterThanOrEqual(item.contextCost);
+    expect(item.omittedDetailChars).toBe(item.fullContextCost - item.contextCost);
+    const authored = V5_SKILL_PACKAGE_CATALOG.packages.find(
+      (skillPackage) => skillPackage.sidecar.name === item.skill.name,
+    )!;
+    expect(item.promptText).toContain(
+      authored.instructions.replace(/^(?:#\s+[^\n]+\n+)+/, '').trim(),
+    );
+    for (const dependency of [...item.skill.metadata.broader, ...item.skill.metadata.requires]) {
+      expect(names).toContain(dependency);
+      expect(names.indexOf(dependency)).toBeLessThan(names.indexOf(item.skill.name));
+    }
+  }
+}
+
+function expectMandatoryOnlyOverflow(
+  result: ReturnType<typeof resolveSkills>,
+  mandatoryNames: string[],
+): void {
+  expectLosslessOrderedSkillContext(result);
+  expect(result.totalContextCost).toBeGreaterThan(result.contextBudget);
+  expect(result.selected.map((item) => item.skill.name).sort()).toEqual([...mandatoryNames].sort());
+  for (const item of result.selected) expect(item.representation).toBe('minimal');
+  expect(result.warnings.join(' ')).toContain(
+    `Mandatory skill guidance requires ${result.totalContextCost} characters but the context budget is ${result.contextBudget}`,
+  );
+}
+
+// Direct web/accessibility selections, execution cores, and their complete
+// broader/requires closure. Optional facets and task-kind defaults are excluded.
+const MANDATORY_ACCESSIBLE_WEB_SKILLS = [
+  'task-routing',
+  'testing-engineering',
+  'verification',
+  'web-interface',
+  'accessibility-practice',
+  'visual-interface-design',
+  'frontend-engineering',
+  'human-experience',
+];
+
+// Host workflow controls are seeded at runtime, but have no V5 packages and
+// are not part of the 182-package qualification/promotion inventory.
+const RUNTIME_CONTROL_SKILL_NAMES = ['critic-auto-selection', 'critic-review'];
+
 describe('local Koryphaios skills', () => {
   test('enforces all three learning modes without limiting human control', () => {
     expect(() => enforceSkillLearningPolicy('human-only', 'human', 'activate')).not.toThrow();
@@ -106,9 +179,16 @@ describe('local Koryphaios skills', () => {
     expect(() => enforceSkillLearningPolicy('automatic', 'agent', 'activate', false)).toThrow();
     expect(() => enforceSkillLearningPolicy('automatic', 'agent', 'activate', true)).not.toThrow();
   });
-  test('seeds the complete instruction-only default library', () => {
+  test('seeds all 182 V5 packages plus exactly the two runtime critic controls', () => {
+    const packageNames = V5_SKILL_PACKAGE_CATALOG.packages.map((item) => item.sidecar.name).sort();
+    expect(packageNames).toHaveLength(182);
+    expect(new Set(packageNames).size).toBe(182);
+    for (const name of RUNTIME_CONTROL_SKILL_NAMES) expect(packageNames).not.toContain(name);
+
     const active = listSkills(root).filter((skill) => skill.state === 'active');
-    expect(active).toHaveLength(182);
+    expect(active.map((skill) => skill.name).sort()).toEqual(
+      [...packageNames, ...RUNTIME_CONTROL_SKILL_NAMES].sort(),
+    );
     expect(active.every((skill) => skill.validation.valid)).toBe(true);
     expect(active.every((skill) => skill.metadata.sourceScope === 'local-only')).toBe(true);
     for (const name of INCOMPATIBLE_EXTERNAL_SKILL_RESOURCES.keys()) {
@@ -116,18 +196,43 @@ describe('local Koryphaios skills', () => {
     }
   });
 
-  test('proves the complete 35 + 47 + 100 definition contract before deployment', () => {
+  test('audits 182 package definitions separately from the two runtime critic controls', () => {
+    const packageNames = V5_SKILL_PACKAGE_CATALOG.packages.map((item) => item.sidecar.name).sort();
+    expect(packageNames).toHaveLength(182);
+    const packageNameSet = new Set(packageNames);
+    expect(packageNameSet.size).toBe(182);
     const audit = auditBundledSkillDefinitions();
     expect(audit).toEqual({
       valid: true,
       errors: [],
-      definitionCount: 182,
-      baseCount: 35,
+      definitionCount: 184,
+      baseCount: 37,
       professionalCount: 47,
       specialistCount: 100,
     });
     const names = BUNDLED_SKILL_DEFINITIONS.map((definition) => definition.name);
-    expect(new Set(names).size).toBe(182);
+    expect(new Set(names).size).toBe(184);
+    expect(names.filter((name) => packageNameSet.has(name)).sort()).toEqual(packageNames);
+    expect(names.filter((name) => !packageNameSet.has(name)).sort()).toEqual(
+      RUNTIME_CONTROL_SKILL_NAMES,
+    );
+    // Preserve the original 35 + 47 + 100 package cohorts. Only the runtime
+    // base inventory grows; qualification remains bound to the V5 catalog.
+    const baseNames = names.slice(0, audit.baseCount);
+    expect(baseNames.filter((name) => packageNameSet.has(name))).toHaveLength(35);
+    expect(baseNames.filter((name) => !packageNameSet.has(name)).sort()).toEqual(
+      RUNTIME_CONTROL_SKILL_NAMES,
+    );
+    expect(
+      names
+        .slice(audit.baseCount, audit.baseCount + audit.professionalCount)
+        .filter((name) => packageNameSet.has(name)),
+    ).toHaveLength(47);
+    expect(
+      names
+        .slice(audit.baseCount + audit.professionalCount)
+        .filter((name) => packageNameSet.has(name)),
+    ).toHaveLength(100);
 
     const activeByName = new Map(listSkills(root).map((skill) => [skill.name, skill]));
     const packageVersions = new Map(
@@ -143,6 +248,11 @@ describe('local Koryphaios skills', () => {
       expect(skill.description.length).toBeLessThanOrEqual(360);
       expect(skill.metadata.version).toBe(packageVersions.get(name) ?? '3.0.0');
       expect(skill.metadata.broader[0]).toBe(skill.metadata.parent);
+    }
+    for (const name of RUNTIME_CONTROL_SKILL_NAMES) {
+      const definition = BUNDLED_SKILL_DEFINITIONS.find((item) => item.name === name)!;
+      expect(packageVersions.has(name)).toBe(false);
+      expect(activeByName.get(name)!.instructions).toContain(definition.instructions);
     }
   });
 
@@ -301,12 +411,10 @@ describe('local Koryphaios skills', () => {
     expect(experience.instructions).toContain('Own the end-to-end human outcome');
     expect(experience.instructions).toContain('[Sources](references/sources.md)');
     expect(experience.instructions).not.toContain('Map entry, orientation, setup');
-    expect(visualDesign.instructions).toContain('State a concise visual direction');
+    expect(visualDesign.instructions).toContain('State the visual direction.');
+    expect(visualDesign.instructions).toContain('Build a matrix from the actual supplied surfaces');
     expect(visualDesign.instructions).toContain(
-      'Run a visual pre-flight on representative real-content states',
-    );
-    expect(visualDesign.instructions).toContain(
-      'This skill owns visual direction and rendered-state critique',
+      'This skill owns visual direction and rendered state critique',
     );
     expect(visualVerification.instructions).toContain(
       'Mark each visual claim passed, failed, or unavailable',
@@ -329,15 +437,20 @@ describe('local Koryphaios skills', () => {
 
   test('preserves historical playbooks without requiring one for a new V5 package', () => {
     expect(PROFESSIONAL_SKILL_DEFINITIONS).toHaveLength(47);
-    const definitionsWithPlaybooks = BUNDLED_SKILL_DEFINITIONS.filter(
-      (definition) =>
-        !['plan-mode', 'dash-free-writing', 'response-style'].includes(definition.name),
-    );
-    expect(Object.keys(SKILL_PLAYBOOKS).sort()).toEqual(
-      definitionsWithPlaybooks.map((definition) => definition.name).sort(),
-    );
-    for (const definition of definitionsWithPlaybooks) {
-      expect(SKILL_PLAYBOOKS[definition.name]?.split(/\s+/).length).toBeGreaterThan(100);
+    const packagesWithoutPlaybooks = ['plan-mode', 'dash-free-writing', 'response-style'];
+    // These three package-backed skills use standalone guidance; the runtime
+    // critic controls likewise have no historical playbooks. Compare exact names.
+    const historicalNames = V5_SKILL_PACKAGE_CATALOG.packages
+      .map((item) => item.sidecar.name)
+      .filter((name) => !packagesWithoutPlaybooks.includes(name))
+      .sort();
+    expect(historicalNames).toHaveLength(179);
+    expect(Object.keys(SKILL_PLAYBOOKS).sort()).toEqual(historicalNames);
+    for (const name of historicalNames) {
+      expect(SKILL_PLAYBOOKS[name]?.split(/\s+/).length).toBeGreaterThan(100);
+    }
+    for (const name of [...packagesWithoutPlaybooks, ...RUNTIME_CONTROL_SKILL_NAMES]) {
+      expect(SKILL_PLAYBOOKS[name]).toBeUndefined();
     }
     expect(PLAN_MODE_SKILL_INSTRUCTIONS.split(/\s+/).length).toBeGreaterThan(100);
     const writing = BUNDLED_SKILL_DEFINITIONS.find(
@@ -639,11 +752,15 @@ describe('local Koryphaios skills', () => {
   });
 
   test('selects small relevant bundles and blocks unresolved personal/project collisions', () => {
-    const contract = createTaskContract('Fix the native settings crash');
-    const result = resolveSkills(root, contract.goal, contract, { targetMedium: 'native' });
+    // A fitting bug bundle respects the planning allowance. The native-medium
+    // mandatory closure is larger and is covered by the overflow regression below.
+    const contract = createTaskContract('Fix the settings crash');
+    const result = resolveSkills(root, contract.goal, contract);
     expect(result.blocked).toBe(false);
     expect(result.selected.map((item) => item.skill.name)).toContain('debugging');
+    expect(result.contextBudget).toBe(30_000);
     expect(result.totalContextCost).toBeLessThanOrEqual(30_000);
+    expect(result.warnings).toEqual([]);
 
     const personal = listSkills(root).find((skill) => skill.name === 'debugging')!;
     const directory = join(root, '.koryphaios', 'skills', 'debugging');
@@ -661,9 +778,80 @@ describe('local Koryphaios skills', () => {
     ).toBe(false);
   });
 
+  test('preserves mandatory native guidance and omits optional bundles on context-budget overflow', () => {
+    const contract = createTaskContract('Fix the native settings crash');
+    // ADR-008 requires complete direct/core guidance and its broader/requires
+    // closure even when minimal exceeds the allowance. 30k is not a hard cap
+    // that permits truncating authored V5 bodies or dropping a live ancestor.
+    const mandatoryNames = [
+      'task-routing',
+      'debugging',
+      'testing-engineering',
+      'verification',
+      'native-interface',
+      'frontend-engineering',
+      'visual-interface-design',
+      'human-experience',
+    ].sort();
+    for (const contextBudget of [undefined, 30_000]) {
+      const result = resolveSkills(root, contract.goal, contract, {
+        targetMedium: 'native',
+        contextBudget,
+      });
+      expect(result.blocked).toBe(false);
+      expect(result.hierarchyErrors).toEqual([]);
+      expect(result.contextBudget).toBe(30_000);
+      expect(result.totalContextCost).toBeGreaterThan(result.contextBudget);
+      expect(result.selected.map((item) => item.skill.name).sort()).toEqual(mandatoryNames);
+      expect(result.omittedByBudget).toEqual(
+        expect.arrayContaining([
+          'accessibility-practice',
+          'interaction-design',
+          'repository-environment-discovery',
+        ]),
+      );
+      expect(result.warnings.join(' ')).toContain(
+        `Mandatory skill guidance requires ${result.totalContextCost} characters but the context budget is ${result.contextBudget}`,
+      );
+      expect(result.totalContextCost).toBe(result.promptText.length);
+      expect(result.totalContextCost).toBe(
+        result.contextOverheadCost +
+          result.selected.reduce((sum, item) => sum + item.contextCost, 0),
+      );
+      const selectedNames = result.selected.map((item) => item.skill.name);
+      for (const item of result.selected) {
+        expect(item.representation).toBe('minimal');
+        expect(item.contextCost).toBe(item.promptText.length);
+        const authored = V5_SKILL_PACKAGE_CATALOG.packages.find(
+          (skillPackage) => skillPackage.sidecar.name === item.skill.name,
+        )!;
+        expect(item.promptText).toContain(
+          authored.instructions.replace(/^(?:#\s+[^\n]+\n+)+/, '').trim(),
+        );
+        for (const dependency of [
+          ...item.skill.metadata.broader,
+          ...item.skill.metadata.requires,
+        ]) {
+          expect(selectedNames).toContain(dependency);
+          expect(selectedNames.indexOf(dependency)).toBeLessThan(
+            selectedNames.indexOf(item.skill.name),
+          );
+        }
+      }
+    }
+  });
+
   test('walks from cross-domain frontend practice into evidence-matched medium children', () => {
     const web = createTaskContract('Build a professional accessible web interface');
-    const webNames = resolveSkills(root, web.goal, web).selected.map((item) => item.skill.name);
+    const pressured = resolveSkills(root, web.goal, web);
+    expectMandatoryOnlyOverflow(pressured, MANDATORY_ACCESSIBLE_WEB_SKILLS);
+    expect(pressured.omittedByBudget).toContain('interaction-design');
+    // Facets are optional, unlike the live broader/requires closure. Exercise
+    // their inclusion with enough capacity as well as their omission above.
+    const roomy = resolveSkills(root, web.goal, web, { contextBudget: 60_000 });
+    expectLosslessOrderedSkillContext(roomy);
+    expect(roomy.totalContextCost).toBeLessThanOrEqual(60_000);
+    const webNames = roomy.selected.map((item) => item.skill.name);
     expect(webNames).toContain('frontend-engineering');
     expect(webNames).toContain('human-experience');
     expect(webNames).toContain('interaction-design');
@@ -742,6 +930,23 @@ describe('local Koryphaios skills', () => {
       expect(names).toContain(expected);
       expect(names).not.toContain(rejected);
     }
+  });
+
+  test('explicit visualization exclusions do not trigger data-visualization routing', () => {
+    for (const prompt of [
+      'Do not plot or visualize these results. Fix the serializer regression and preserve the JSON contract.',
+      'Do not make a chart. Repair the data export serializer.',
+      'Chart output is out of scope. Repair the data export serializer.',
+    ]) {
+      const contract = createTaskContract(prompt);
+      const selection = resolveSkills(root, contract.goal, contract, { contextBudget: 60_000 });
+      expect(selection.selected.map((item) => item.skill.name)).not.toContain('data-visualization');
+    }
+
+    const positive = 'Fix the serializer and plot its processing throughput as a chart.';
+    const contract = createTaskContract(positive);
+    const selection = resolveSkills(root, positive, contract, { contextBudget: 60_000 });
+    expect(selection.selected.map((item) => item.skill.name)).toContain('data-visualization');
   });
 
   test('preserves actual nested hierarchy depth', () => {
@@ -1105,7 +1310,6 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
     for (const role of ['manager', 'worker', 'critic'] as const) {
       const compiled = compilePrompt({
         role,
-        mode: 'advanced',
         provider: 'openai',
         workingDirectory: root,
         taskContract: contract,
@@ -1180,17 +1384,51 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
     expect(result.evidence.domains).not.toContain('verification');
   });
 
-  test('keeps dependency provenance bounded so complete V5 guidance fits its package budget', () => {
+  test('keeps shared dependency provenance bounded while authored package budgets remain advisory', () => {
     const prompt = 'The current task is prompt engineering.';
-    const result = resolveSkills(root, prompt, createTaskContract(prompt), {
+    const contract = createTaskContract(prompt);
+    const fitting = resolveSkills(root, prompt, contract, {
       contextBudget: 60_000,
     });
-    const evaluation = result.selected.find((item) => item.skill.name === 'llm-evaluation')!;
+    expectLosslessOrderedSkillContext(fitting);
+    expect(fitting.totalContextCost).toBeLessThanOrEqual(60_000);
+    expect(fitting.warnings.join(' ')).not.toContain('Mandatory skill guidance requires');
 
-    expect(result.blocked).toBe(false);
-    expect(evaluation).toBeDefined();
-    expect(evaluation.reason).toBe('Required by llm-application-engineering');
-    expect(evaluation.contextCost).toBeLessThanOrEqual(evaluation.skill.metadata.contextBudget);
+    const pressured = resolveSkills(root, prompt, contract, { contextBudget: 22_000 });
+    expectMandatoryOnlyOverflow(pressured, [
+      'task-routing',
+      'implementation',
+      'verification',
+      'data-analysis',
+      'testing-engineering',
+      'llm-evaluation',
+      'llm-application-engineering',
+      'prompt-context-engineering',
+    ]);
+    for (const result of [fitting, pressured]) {
+      const evaluation = result.selected.find((item) => item.skill.name === 'llm-evaluation')!;
+      expect(evaluation.directSelection).toBe(false);
+      expect(evaluation.reason).toBe('Required by llm-application-engineering');
+      // Both dependents require evaluation, but one provenance edge suffices.
+      for (const name of ['llm-application-engineering', 'prompt-context-engineering']) {
+        expect(
+          result.selected.find((item) => item.skill.name === name)!.skill.metadata.requires,
+        ).toContain('llm-evaluation');
+      }
+      expect(evaluation.representation).toBe('minimal');
+      expect(evaluation.contextCost).toBeGreaterThan(evaluation.skill.metadata.contextBudget);
+      expect(result.warnings.join(' ')).toContain('llm-evaluation minimal guidance is');
+      expect(result.warnings.join(' ')).toContain(
+        `above its authored ${evaluation.skill.metadata.contextBudget}-character contextBudget (advisory only)`,
+      );
+      // Keep a real fitting shared-dependency example as well as the expanded
+      // evaluation package: provenance must stay bounded in either case.
+      const verification = result.selected.find((item) => item.skill.name === 'verification')!;
+      expect(verification.reason).toBe('Required by llm-application-engineering');
+      expect(verification.contextCost).toBeLessThanOrEqual(
+        verification.skill.metadata.contextBudget,
+      );
+    }
   });
 
   test('reports only the trigger, collected evidence, or declared relation actually used', () => {
@@ -1226,7 +1464,6 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
     writeFileSync(join(root, 'AGENTS.md'), '# Repository policy\nRepository instruction marker.');
     const input = {
       role: 'worker' as const,
-      mode: 'advanced' as const,
       provider: 'openai',
       workingDirectory: root,
       taskContract: createTaskContract('Implement a feature'),
@@ -1256,57 +1493,59 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
 
   test('uses a dependency-aware context budget and warns instead of blocking mandatory overflow', () => {
     const contract = createTaskContract('Build a professional accessible web interface');
-    const insufficient = resolveSkills(root, contract.goal, contract, { contextBudget: 16_000 });
-    // Mandatory overflow degrades gracefully: the turn proceeds with minimal
-    // guidance plus warnings instead of throwing Mandatory skill guidance.
-    expect(insufficient.blocked).toBe(false);
-    expect(insufficient.totalContextCost).toBeGreaterThan(16_000);
-    expect(insufficient.hierarchyErrors).toEqual([]);
-    expect(insufficient.warnings.join(' ')).toContain('Mandatory skill guidance requires');
-    expect(insufficient.omittedByBudget.length).toBeGreaterThan(0);
-    const compressed = resolveSkills(root, contract.goal, contract, { contextBudget: 22_000 });
-    expect(compressed.blocked).toBe(false);
+    // The expanded web bodies no longer fit either allowance. Mandatory bodies
+    // stay complete; only optional selections and discovery detail may shrink.
+    for (const contextBudget of [16_000, 22_000]) {
+      const insufficient = resolveSkills(root, contract.goal, contract, { contextBudget });
+      expect(insufficient.contextBudget).toBe(contextBudget);
+      expectMandatoryOnlyOverflow(insufficient, MANDATORY_ACCESSIBLE_WEB_SKILLS);
+      expect(insufficient.omittedByBudget.sort()).toEqual([
+        'implementation',
+        'interaction-design',
+        'planning',
+        'repository-environment-discovery',
+      ]);
+      expect(
+        insufficient.selected.find((item) => item.skill.name === 'visual-interface-design')!.reason,
+      ).toBe('Broader concept of web-interface');
+    }
+
+    const fittingContract = createTaskContract('Fix the settings crash');
+    const fitting = resolveSkills(root, fittingContract.goal, fittingContract, {
+      pins: ['deterministic-debugging'],
+      contextBudget: 22_000,
+    });
+    expectLosslessOrderedSkillContext(fitting);
+    expect(fitting.totalContextCost).toBeLessThanOrEqual(22_000);
+    expect(fitting.warnings.join(' ')).not.toContain('Mandatory skill guidance requires');
+    expect(fitting.selected.map((item) => item.skill.name)).toEqual(
+      expect.arrayContaining([
+        'task-routing',
+        'testing-engineering',
+        'verification',
+        'debugging',
+        'deterministic-debugging',
+      ]),
+    );
+    const compressed = resolveSkills(root, fittingContract.goal, fittingContract, {
+      pins: ['deterministic-debugging'],
+      contextBudget: fitting.totalContextCost - 1,
+    });
+    expectLosslessOrderedSkillContext(compressed);
     expect(compressed.compressedByBudget.length).toBeGreaterThan(0);
+    expect(compressed.totalContextCost).toBeLessThanOrEqual(fitting.totalContextCost - 1);
     expect(compressed.totalContextCost).toBeLessThanOrEqual(22_000);
-    expect(compressed.promptText.length).toBe(compressed.totalContextCost);
-    expect(compressed.promptText.startsWith('## Active local skills\nManifest: ')).toBe(true);
-    expect(compressed.promptText).toContain('\nManifest sha256: ');
-    expect(
-      compressed.selected.reduce((sum, item) => sum + item.contextCost, 0) +
-        compressed.contextOverheadCost,
-    ).toBe(compressed.totalContextCost);
-    for (const item of compressed.selected) {
-      expect(item.contextCost).toBe(item.promptText.length);
-      expect(item.fullContextCost).toBeGreaterThanOrEqual(item.contextCost);
-      expect(item.omittedDetailChars).toBe(item.fullContextCost - item.contextCost);
-    }
-    for (const name of ['task-routing', 'testing-engineering', 'verification']) {
-      const selected = compressed.selected.find((item) => item.skill.name === name)!;
-      const requiredCore = BUNDLED_SKILL_DEFINITIONS.find((item) => item.name === name)!
-        .instructions.replace(/^#\s+[^\n]+\n+/, '')
-        .trim();
-      expect(selected.promptText).toContain(requiredCore);
-    }
-    const names = new Set(compressed.selected.map((item) => item.skill.name));
-    for (const item of compressed.selected) {
-      for (const broader of item.skill.metadata.broader) expect(names.has(broader)).toBe(true);
-    }
+    expect(compressed.warnings.join(' ')).not.toContain('Mandatory skill guidance requires');
+
     const pinned = resolveSkills(root, contract.goal, contract, {
       contextBudget: 1,
       pins: ['web-interface'],
     });
     // Tiny budgets floor at MIN_SKILL_CONTEXT_BUDGET and warn instead of blocking.
     expect(pinned.contextBudget).toBe(MIN_SKILL_CONTEXT_BUDGET);
-    expect(pinned.blocked).toBe(false);
-    expect(pinned.warnings.join(' ')).toContain('Mandatory skill guidance requires');
-    expect(pinned.totalContextCost).toBeGreaterThan(pinned.contextBudget);
-    expect(pinned.selected.map((item) => item.skill.name)).toEqual(
-      expect.arrayContaining([
-        'task-routing',
-        'testing-engineering',
-        'verification',
-        'web-interface',
-      ]),
+    expectMandatoryOnlyOverflow(pinned, MANDATORY_ACCESSIBLE_WEB_SKILLS);
+    expect(pinned.selected.find((item) => item.skill.name === 'web-interface')!.reason).toBe(
+      'Pinned explicitly for this task',
     );
     expect(pinned.omittedByBudget).not.toContain('web-interface');
   });
@@ -1325,6 +1564,8 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
     const contract = createTaskContract('Build a professional accessible web interface');
     const result = resolveSkills(root, contract.goal, contract, {
       pins: ['frontend-engineering'],
+      // Authored-budget diagnostics are opt-in with an explicit user cap.
+      contextBudget: 30_000,
       skillRevisions: revisions.map((skill) =>
         skill.name === oversized.name ? underBudget : skill,
       ),
@@ -1338,49 +1579,120 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
     expect(result.warnings.join(' ')).toContain('advisory only');
   });
 
+  test('does not warn about authored skill budgets for the default uncapped turn', () => {
+    const oversized = listSkills(root).find((skill) => skill.name === 'frontend-engineering')!;
+    const contract = createTaskContract('Build a professional accessible web interface');
+    const result = resolveSkills(root, contract.goal, contract, {
+      pins: ['frontend-engineering'],
+      skillRevisions: listSkills(root).map((skill) =>
+        skill.name === oversized.name
+          ? { ...skill, metadata: { ...skill.metadata, contextBudget: 100 } }
+          : skill,
+      ),
+    });
+
+    expect(result.blocked).toBe(false);
+    expect(result.warnings.join(' ')).not.toContain('Per-skill contextBudget');
+  });
+
+  test('does not report authored skill-budget overflow when the user cap is off', () => {
+    const oversized = listSkills(root).find((skill) => skill.name === 'frontend-engineering')!;
+    const contract = createTaskContract('Build a professional accessible web interface');
+    const result = resolveSkills(root, contract.goal, contract, {
+      pins: ['frontend-engineering'],
+      warnOnAuthoredBudgetOverflow: false,
+      skillRevisions: listSkills(root).map((skill) =>
+        skill.name === oversized.name
+          ? { ...skill, metadata: { ...skill.metadata, contextBudget: 100 } }
+          : skill,
+      ),
+    });
+
+    expect(result.warnings.join(' ')).not.toContain('Per-skill contextBudget');
+    expect(result.blocked).toBe(false);
+  });
+
   test('injects exactly the advertised bounded skill representations', () => {
-    const taskContract = createTaskContract('Build a professional accessible web interface');
+    const taskContract = createTaskContract('Fix the settings crash');
+    const pins = ['deterministic-debugging'];
+    const resolved = resolveSkills(root, taskContract.goal, taskContract, {
+      contextBudget: 22_000,
+      pins,
+    });
+    expectLosslessOrderedSkillContext(resolved);
     const compiled = compilePrompt({
       role: 'worker',
-      mode: 'advanced',
       provider: 'openai',
       workingDirectory: root,
       taskContract,
-      skillSelection: { contextBudget: 22_000 },
+      skillSelection: { contextBudget: 22_000, pins },
     });
     const firstSkill = compiled.manifest.skills[0]!;
     const skillTextStart = compiled.systemPrompt.indexOf('## Active local skills');
     expect(skillTextStart).toBeGreaterThan(0);
     const actualInjectedSkills = compiled.systemPrompt.slice(skillTextStart);
     const advertisedCost = compiled.manifest.skillContextCost;
+    expect(actualInjectedSkills).toBe(resolved.promptText);
     expect(actualInjectedSkills.length).toBe(advertisedCost);
     expect(advertisedCost).toBeLessThanOrEqual(22_000);
     expect(actualInjectedSkills).toContain(`### ${firstSkill.name} v`);
-    expect(compiled.manifest.skills.map((item) => item.representation)).toContain('minimal');
+    expect(compiled.manifest.skills.map((item) => item.representation)).toContain('full');
 
-    const roomy = resolveSkills(root, taskContract.goal, taskContract, { contextBudget: 60_000 });
+    const roomy = resolveSkills(root, taskContract.goal, taskContract, {
+      contextBudget: 60_000,
+      pins,
+    });
     expect(roomy.selected.map((item) => item.representation)).toContain('full');
     const justBelowFull = resolveSkills(root, taskContract.goal, taskContract, {
       contextBudget: roomy.totalContextCost - 1,
+      pins,
     });
-    expect(justBelowFull.blocked).toBe(false);
+    expectLosslessOrderedSkillContext(justBelowFull);
     // One char less than a full fit strictly degrades the bundle without blocking it.
     expect(justBelowFull.totalContextCost).toBeLessThanOrEqual(roomy.totalContextCost - 1);
     expect(justBelowFull.totalContextCost).toBeLessThan(roomy.totalContextCost);
-    // Tiny requested budgets floor instead of throwing Mandatory skill guidance.
-    const pressured = compilePrompt({
-      role: 'worker',
-      mode: 'advanced',
-      provider: 'openai',
-      workingDirectory: root,
-      taskContract,
-      skillSelection: { contextBudget: 100 },
-    });
-    expect(pressured.manifest.skillContextBudget.budget).toBe(MIN_SKILL_CONTEXT_BUDGET);
-    expect(pressured.warnings?.join(' ') ?? '').toContain('Mandatory skill guidance requires');
-    expect(pressured.manifest.skillWarnings.join(' ')).toContain(
-      'Mandatory skill guidance requires',
-    );
+    expect(justBelowFull.compressedByBudget.length).toBeGreaterThan(0);
+  });
+
+  test('injects complete mandatory-only overflow with matching manifest accounting', () => {
+    const taskContract = createTaskContract('Build a professional accessible web interface');
+    for (const contextBudget of [22_000, 100]) {
+      const resolved = resolveSkills(root, taskContract.goal, taskContract, { contextBudget });
+      expectMandatoryOnlyOverflow(resolved, MANDATORY_ACCESSIBLE_WEB_SKILLS);
+      const pressured = compilePrompt({
+        role: 'worker',
+        provider: 'openai',
+        workingDirectory: root,
+        taskContract,
+        skillSelection: { contextBudget },
+      });
+      expect(pressured.manifest.skillContextBudget.budget).toBe(
+        Math.max(contextBudget, MIN_SKILL_CONTEXT_BUDGET),
+      );
+      const start = pressured.systemPrompt.indexOf('## Active local skills');
+      expect(start).toBeGreaterThan(0);
+      const injected = pressured.systemPrompt.slice(start);
+      expect(injected).toBe(resolved.promptText);
+      expect(pressured.manifest.skillContextCost).toBe(injected.length);
+      expect(
+        pressured.manifest.skills.map(({ name, reason, representation, contextCost }) => ({
+          name,
+          reason,
+          representation,
+          contextCost,
+        })),
+      ).toEqual(
+        resolved.selected.map(({ skill, reason, representation, contextCost }) => ({
+          name: skill.name,
+          reason,
+          representation,
+          contextCost,
+        })),
+      );
+      const warning = `Mandatory skill guidance requires ${injected.length} characters but the context budget is ${resolved.contextBudget}`;
+      expect(pressured.warnings?.join(' ') ?? '').toContain(warning);
+      expect(pressured.manifest.skillWarnings.join(' ')).toContain(warning);
+    }
   });
 
   test('derives skill capacity from verified model space and occupied context', () => {
@@ -1399,7 +1711,7 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
       reservedOutputTokens: 4_096,
     });
     expect(open.source).toBe('trusted-model-window');
-    expect(open.budget).toBe(15_904);
+    expect(open.budget).toBe(30_000);
     expect(crowded.budget).toBeLessThan(open.budget);
     // Crowded windows floor at MIN_SKILL_CONTEXT_BUDGET instead of max(1, …).
     expect(crowded.budget).toBe(MIN_SKILL_CONTEXT_BUDGET);
@@ -1414,6 +1726,62 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
     expect(deriveSkillContextBudget({ contextWindowTokens: 200_000 }).requestedBudget).toBe(50_000);
     expect(deriveSkillContextBudget({ contextWindowTokens: 32_000 }).requestedBudget).toBe(8_000);
     expect(deriveSkillContextBudget({}).requestedBudget).toBe(30_000);
+  });
+
+  test('converts remaining 128k model capacity to characters once for skill resolution', () => {
+    const availableTokens = 128_000 - 64_000 - 8_000 - 16_384;
+    const decision = deriveSkillContextBudget({
+      requestedBudget: 200_000,
+      contextWindowTokens: 128_000,
+      occupiedContextTokenUpperBound: 64_000,
+      nonSkillPromptTokenUpperBound: 8_000,
+      reservedOutputTokens: 16_384,
+    });
+
+    expect(decision.budget).toBe(availableTokens * TOKEN_CHARS);
+    expect(decision.budget).toBeGreaterThan(availableTokens);
+  });
+
+  test('keeps the minimum floor but fails closed when the rendered prompt exceeds a small window', () => {
+    const decision = deriveSkillContextBudget({
+      requestedBudget: 200_000,
+      contextWindowTokens: 8_192,
+      occupiedContextTokenUpperBound: 7_000,
+      nonSkillPromptTokenUpperBound: 1_000,
+      reservedOutputTokens: 2_000,
+    });
+    expect(decision.budget).toBe(MIN_SKILL_CONTEXT_BUDGET);
+
+    registerLiveModelResolver((modelId, provider) =>
+      modelId === 'verified-small-window'
+        ? {
+            id: modelId,
+            name: modelId,
+            provider,
+            contextWindow: 8_192,
+            contextVerified: true,
+            maxOutputTokens: 2_000,
+            costPerMInputTokens: 0,
+            costPerMOutputTokens: 0,
+            canReason: true,
+            supportsAttachments: false,
+            supportsStreaming: true,
+          }
+        : undefined,
+    );
+    expect(() =>
+      compilePrompt({
+        role: 'manager',
+        provider: 'openai',
+        model: 'verified-small-window',
+        occupiedContextTokenUpperBound: 7_000,
+        reservedOutputTokens: 2_000,
+        requireVerifiedContextWindow: true,
+        workingDirectory: root,
+        taskContract: createTaskContract('Explain the current module'),
+        skillSelection: { contextBudget: 200_000 },
+      }),
+    ).toThrow('exceeding the verified 8192-token window');
   });
 
   test('reserves the actual completion limit and fails closed on unknown or crowded live context', () => {
@@ -1451,7 +1819,6 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
     const contract = createTaskContract('Build a professional accessible web interface');
     const safe = compilePrompt({
       role: 'manager',
-      mode: 'advanced',
       provider: 'openai',
       model: 'verified-128k',
       occupiedContextTokenUpperBound: 12_000,
@@ -1472,7 +1839,6 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
     // prompt still fails closed against the verified window.
     const crowdedCompiled = compilePrompt({
       role: 'manager',
-      mode: 'advanced',
       provider: 'openai',
       model: 'verified-32k',
       occupiedContextTokenUpperBound: 1_000,
@@ -1487,7 +1853,6 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
     expect(() =>
       compilePrompt({
         role: 'manager',
-        mode: 'advanced',
         provider: 'openai',
         model: 'verified-32k',
         occupiedContextTokenUpperBound: 48_000,
@@ -1500,7 +1865,6 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
     expect(() =>
       compilePrompt({
         role: 'manager',
-        mode: 'advanced',
         provider: 'openai',
         model: 'unknown-window',
         occupiedContextTokenUpperBound: 1,
@@ -1514,7 +1878,6 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
     // of throwing — the agent proceeds with an unverified context window.
     const warned = compilePrompt({
       role: 'manager',
-      mode: 'advanced',
       provider: 'openai',
       model: 'unknown-window',
       occupiedContextTokenUpperBound: 1,
@@ -1858,6 +2221,8 @@ recordSkillEvaluationRun(projectRoot, {
         evidence: [`candidate-${category}`],
         recordedAt: `2026-07-18T00:00:0${index}.000Z`,
         protocolVersion: 2,
+        ...(category === 'full-task'
+          ? currentFullTaskEvidence(skill.name, benchmarkCase.id, `candidate-${index}`) : {}),
         variant: 'with-skill',
         caseCategory: category,
         comparisonId: `pair-${category}-${index}`,
@@ -1946,7 +2311,14 @@ recordSkillEvaluationRun(projectRoot, {
 
     const withoutBaselines = evaluateSkillPromotion(root, skill.name, skill.hash);
     expect(withoutBaselines.status).toBe('insufficient-evidence');
-    expect(withoutBaselines.provenancedBlindReviews).toBe(1);
+    // A persisted review cannot qualify until both execution arms exist.
+    // The review stays in history and becomes eligible once its matching
+    // baseline is recorded; counting it here would bypass pair provenance.
+    expect(withoutBaselines.provenancedBlindReviews).toBe(0);
+    expect(withoutBaselines.excludedEvidence).toContainEqual({
+      runId: 'v2-primary-blind-review',
+      reason: 'Blind review has no eligible matched execution pair with a recorded comparisonId.',
+    });
     expect(withoutBaselines.routingPrecision).toBe(1);
     expect(withoutBaselines.routingRecall).toBe(1);
     expect(withoutBaselines.reasons).toContain(
@@ -1971,6 +2343,8 @@ recordSkillEvaluationRun(projectRoot, {
         evidence: [`baseline-${category}`],
         recordedAt: `2026-07-18T00:01:0${index}.000Z`,
         protocolVersion: 2,
+        ...(category === 'full-task'
+          ? currentFullTaskEvidence(skill.name, benchmarkCase.id, `baseline-${index}`) : {}),
         variant: 'without-skill',
         caseCategory: category,
         comparisonId: `pair-${category}-${index}`,
@@ -1983,6 +2357,7 @@ recordSkillEvaluationRun(projectRoot, {
 
     const ready = evaluateSkillPromotion(root, skill.name, skill.hash);
     expect(ready.status).toBe('ready');
+    expect(ready.provenancedBlindReviews).toBe(1);
     expect(ready.baselineRuns).toBe(6);
     expect(ready.pairedBaselineCases).toBe(6);
     expect(ready.pairedBaselineCategories).toEqual(card.suite.requiredCategories);
@@ -2095,8 +2470,8 @@ recordSkillEvaluationRun(projectRoot, {
     expect(regressionClosed.openRegressions).toBe(0);
   });
 
-  test('uses the latest complete paired retry for skill-vs-no-skill uplift', () => {
-    const skill = listSkills(root).find((item) => item.name === 'web-interface')!;
+  test('generic v2 uses the latest complete paired retry for skill-vs-no-skill uplift', () => {
+    const skill = { ...listSkills(root).find((item) => item.name === 'web-interface')!, name: 'generic-contract-test' };
     const fullTask = buildSkillEvaluationCard(root, skill).suite.categories['full-task'][0]!;
     const base = {
       skill: skill.name,
@@ -2181,15 +2556,13 @@ recordSkillEvaluationRun(projectRoot, {
       routing: { expectedSelection: true, selected: true },
       suiteId: 'test-suite',
       scenarioId: fullTask.id,
-      evaluationContractHash: contractHash,
-      evaluationContractVersion: 3,
-      materializerId: 'test-materializer@1',
-      deterministicScorerId: 'test-scorer@1',
+      ...currentFullTaskEvidence(skill.name, fullTask.id, 'current-rerun'),
     };
     recordSkillEvaluationRuns(root, [
       {
         ...base,
         id: 'v3-regression-source',
+        evaluationContractHash: contractHash,
         revisionHash: 'c'.repeat(64),
         experimentId: 'v3-regression-source-experiment',
         passed: false,
@@ -2198,7 +2571,6 @@ recordSkillEvaluationRun(projectRoot, {
       {
         ...base,
         id: 'v3-regression-rerun',
-        evaluationContractHash: 'd'.repeat(64),
         harnessVersion: 'v3-retry@2',
         experimentId: 'v3-regression-rerun-experiment',
         passed: true,
@@ -2211,8 +2583,8 @@ recordSkillEvaluationRun(projectRoot, {
     expect(gate.openRegressions).toBe(0);
   });
 
-  test('does not carry a protocol-v3 regression forward when the evaluator generation is superseded', () => {
-    const skill = listSkills(root).find((item) => item.name === 'web-interface')!;
+  test('generic v3 does not carry a regression forward when the evaluator generation is superseded', () => {
+    const skill = { ...listSkills(root).find((item) => item.name === 'web-interface')!, name: 'generic-contract-test' };
     const fullTask = buildSkillEvaluationCard(root, skill).suite.categories['full-task'][0]!;
     const base = {
       skill: skill.name,
@@ -2276,6 +2648,69 @@ recordSkillEvaluationRun(projectRoot, {
     expect(applyDefaultUpdate(root, 'planning', 'keep-local').content).toContain('locally edited');
     expect(applyDefaultUpdate(root, 'planning', 'merge').state).toBe('draft');
     expect(applyDefaultUpdate(root, 'planning', 'replace').content).toContain('dependency-ordered');
+  });
+
+  test('keeps bundled resources independent of an incomplete writable data directory', async () => {
+    const dataRoot = join(root, 'bundled-data');
+    const primaryInstaller = join(dataRoot, 'skills', 'skill-installer');
+    mkdirSync(primaryInstaller, { recursive: true });
+    const sourceRoot = join(import.meta.dir, '..', '..', '..', '..', 'skills');
+    const sourceInstaller = readFileSync(join(sourceRoot, 'skill-installer', 'SKILL.md'), 'utf8');
+    const sourceCreator = readFileSync(join(sourceRoot, 'skill-creator', 'SKILL.md'), 'utf8');
+    const primaryContent = `${sourceInstaller.trim()}\n\n<!-- personal override -->\n`;
+    writeFileSync(join(primaryInstaller, 'SKILL.md'), primaryContent);
+    for (const name of ['planning', 'personal-only']) {
+      mkdirSync(join(dataRoot, 'skills', name), { recursive: true });
+      writeFileSync(join(dataRoot, 'skills', name, 'SKILL.md'), primaryContent);
+    }
+    const planning = getBundledSkillContent('planning');
+    const childSkills = join(root, 'child-skills');
+    mkdirSync(join(childSkills, 'skill-creator'), { recursive: true });
+    writeFileSync(join(childSkills, 'skill-creator', 'SKILL.md'), sourceCreator);
+    const code = `
+      import { getBundledSkillContent, listSkills } from ${JSON.stringify(join(import.meta.dir, '..', 'skills.ts'))};
+      const creator = listSkills(${JSON.stringify(root)}).find(skill => skill.name === 'skill-creator');
+      console.log(JSON.stringify({
+        installer: getBundledSkillContent('skill-installer'),
+        creator: getBundledSkillContent('skill-creator'),
+        missing: getBundledSkillContent('nonexistent-skill'),
+        personal: getBundledSkillContent('personal-only'),
+        traversal: getBundledSkillContent('../skills/skill-installer'),
+        planning: getBundledSkillContent('planning'),
+        compatibility: creator?.compatibility,
+        valid: creator?.validation.valid,
+      }));
+    `;
+    const child = Bun.spawn([process.execPath, '--no-env-file', '-e', code], {
+      cwd: root,
+      env: {
+        ...process.env,
+        KORYPHAIOS_DATA_DIR: dataRoot,
+        KORYPHAIOS_SKILLS_HOME: childSkills,
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const [exitCode, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+    expect(exitCode).toBe(0);
+    expect(stderrFailures(stderr)).toEqual([]);
+    const resources = JSON.parse(stdout.trim());
+    expect(resources.installer).toBe(sourceInstaller);
+    expect(resources.creator).toBe(sourceCreator);
+    expect(resources.missing).toBeNull();
+    expect(resources.personal).toBeNull();
+    expect(resources.traversal).toBeNull();
+    expect(resources.planning).toBe(planning);
+    expect(resources.compatibility).toMatchObject({
+      status: 'unavailable',
+      reason: INCOMPATIBLE_EXTERNAL_SKILL_RESOURCES.get('skill-creator'),
+      supportingResources: [join(sourceRoot, 'skill-creator')],
+    });
+    expect(resources.valid).toBe(false);
   });
 
   test('preserves but fail-closes Codex-only bundled resources instead of seeding them active', () => {

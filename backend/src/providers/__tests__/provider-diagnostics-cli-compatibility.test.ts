@@ -70,7 +70,6 @@ describe('runtime diagnostics CLI compatibility context', () => {
 
   it('does not assign CLI evidence to HTTP/SDK providers, unknown names or aliases', () => {
     for (const provider of [
-      'chatbase',
       'openai',
       'anthropic',
       'codebuff',
@@ -103,7 +102,7 @@ describe('runtime diagnostics CLI compatibility context', () => {
     expect(context.supportedVersions).toBe('unknown');
     expect(context.liveVerification).toBe('not-established');
     expect(context.versionBoundary.kind).toBe('source-reference');
-    expect(context.versionBoundary.detail).toContain('0.2.12');
+    expect(context.versionBoundary.detail).toContain('0.2.16');
     expect(context.versionBoundary.detail).toContain('synthetic');
     expect(JSON.stringify(context)).not.toContain('run untrusted command');
     expect(JSON.stringify(diagnostic)).not.toContain('synthetic-private-token');
@@ -135,8 +134,7 @@ describe('runtime diagnostics CLI compatibility context', () => {
     );
     expect(cliCompatibility).toBeDefined();
     // Keep the pre-existing user edits to provider labels observable as well.
-    expect(safeProviderFailureMessage('workbuddy', nonCli)).toStartWith('Work Buddy');
-    expect(safeProviderFailureMessage('autoclaw', nonCli)).toStartWith('AutoClaw');
+    expect(safeProviderFailureMessage('workbuddy', nonCli)).toStartWith('WorkBuddy');
   });
 
   it('returns detached nested metadata so consumers cannot corrupt later diagnostics', () => {

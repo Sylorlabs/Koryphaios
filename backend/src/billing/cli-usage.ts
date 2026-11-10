@@ -17,7 +17,6 @@
 //   devin        ~/.local/share/devin/cli/transcripts/*.json  ATIF final_metrics (session totals)
 //   kimicode     ~/.kimi/sessions/<hash>/<uuid>/wire.jsonl    StatusUpdate token_usage events
 //   freebuff     Kory PTY usage events sourced from Freebuff's own log.jsonl
-//   jules        detected-only (approval-required; no local usage)
 //
 // Quota state: claude, codex, copilot, and antigravity expose live quota
 // endpoints or local rate_limit records. cursor, devin, and kimicode
@@ -34,10 +33,13 @@ import { discoverCliAccounts, type DiscoveredCliAccount } from '../providers/cli
 import { CodexAppServer } from '../providers/codex-app-server';
 import { getUsageSamplesByProvider } from '../credit-accountant';
 import { getContext } from '../context';
+import {
+  getFreebuffAccountSnapshot,
+  type FreebuffAccountSnapshot,
+} from '../providers/freebuff-account';
 import { serverLog } from '../logger';
 import {
   detectFreebuffCLILogin,
-  detectJulesApiKey,
   discoverFreebuffAccounts,
 } from '../providers/auth-utils';
 import { fetchAntigravityQuotaGroups } from '../providers/antigravity-quota';
@@ -76,6 +78,8 @@ export interface CliUsageReport {
   planType?: string;
   /** Current account-wide credit balance when the official Codex CLI reports one. */
   creditBalance?: string | null;
+  /** Provider-reported Freebucks; intentionally excluded from USD balances. */
+  freebuffAccount?: FreebuffAccountSnapshot;
   /** Provenance for the activity time series. */
   usageSource?: 'local-session-history' | 'codex-app-server' | 'kory-provider-events';
   /** Whether both sides came from upstream usage or only input context was exposed. */
@@ -383,7 +387,6 @@ export const CLI_API_PROVIDER_MAP: Record<string, string> = {
   kimicode: 'kimicode',
   kilocode: 'kilocode',
   freebuff: 'openrouter',
-  jules: 'google',
 };
 
 /** Builds a resolver that consults the provider's live model catalog to map
@@ -1539,17 +1542,31 @@ async function readKimiCode(now: number, account?: DiscoveredCliAccount): Promis
 
 // ── Freebuff ─────────────────────────────────────────────────────────────────
 // The PTY adapter reads the selected model's exact input-context count from
-// Freebuff's own log before every request. Freebuff 0.0.162 does not write
+// Freebuff's own log before every request. The qualified CLI does not write
 // upstream output-token usage, so Billing labels the equivalent value as an
 // input-only figure instead of estimating output from response text.
 
-async function readFreebuff(now: number): Promise<CliUsageReport | null> {
+async function readFreebuff(
+  now: number,
+  account?: ReturnType<typeof discoverFreebuffAccounts>[number],
+  forceRefresh = false,
+): Promise<CliUsageReport | null> {
   const accounts = discoverFreebuffAccounts();
   if (accounts.length === 0 && !detectFreebuffCLILogin()) return null;
+  const selectedAccount = account ?? (accounts.length === 1 ? accounts[0] : undefined);
+  const accountSnapshotJob = selectedAccount
+    ? getFreebuffAccountSnapshot(selectedAccount.profileDir, forceRefresh)
+    : Promise.resolve(undefined);
 
   let samples: UsageSample[] = [];
   try {
-    samples = getUsageSamplesByProvider('freebuff', now - SCAN_HORIZON_MS).map((row) => ({
+    samples = getUsageSamplesByProvider(
+      'freebuff',
+      now - SCAN_HORIZON_MS,
+      selectedAccount
+        ? { accountId: selectedAccount.id, includeUnattributed: accounts.length === 1 }
+        : undefined,
+    ).map((row) => ({
       ...row,
       cacheRead: 0,
     }));
@@ -1572,7 +1589,9 @@ async function readFreebuff(now: number): Promise<CliUsageReport | null> {
     const provider = getContext().providers.get('freebuff');
     if (provider) {
       await withTimeout(Promise.resolve(provider.refreshModels?.()), MODEL_REFRESH_TIMEOUT_MS);
-      models = provider.listModels();
+      models = provider
+        .listModels()
+        .filter((model) => !selectedAccount || model.accountId === selectedAccount.id);
       providerAvailable = provider.isAvailable();
     }
   } catch (err: unknown) {
@@ -1668,12 +1687,16 @@ async function readFreebuff(now: number): Promise<CliUsageReport | null> {
     });
   }
 
+  const accountSnapshot = await accountSnapshotJob;
   return {
     provider: 'freebuff',
-    ...(accounts.length === 1
-      ? { accountId: accounts[0]!.id, accountLabel: accounts[0]!.label }
+    ...(selectedAccount
+      ? { accountId: selectedAccount.id, accountLabel: selectedAccount.label }
       : {}),
-    available: providerAvailable || hasReportedUsage(samples),
+    ...(accountSnapshot
+      ? { freebuffAccount: accountSnapshot, planType: accountSnapshot.planType }
+      : {}),
+    available: providerAvailable || hasReportedUsage(samples) || !!accountSnapshot?.hours,
     attribution: 'account',
     usageSource: 'kory-provider-events',
     usagePrecision: 'input-context-only',
@@ -1697,33 +1720,6 @@ async function readFreebuff(now: number): Promise<CliUsageReport | null> {
     quotas: [],
     byModel,
     modelCatalog: [...uniqueCatalog.values()],
-    updatedAt: now,
-  };
-}
-
-// ── Unavailable CLI providers (jules) ────────────────────────────────────────
-// Approval-required providers without usage evidence remain explicit rather
-// than silently disappearing from Billing.
-
-function readUnavailableCli(
-  providerName: string,
-  detectionFn: (() => boolean | string | null) | null,
-  unavailableNote: string,
-  now: number,
-): CliUsageReport | null {
-  // Only surface when the CLI is actually detected on-disk.
-  const detected = detectionFn ? !!detectionFn() : false;
-  if (!detected) return null;
-  return {
-    provider: providerName,
-    apiProviderName: CLI_API_PROVIDER_MAP[providerName],
-    available: false,
-    attribution: 'unavailable',
-    attributionNote: unavailableNote,
-    windows: [],
-    dailyUsage: [],
-    quotas: [],
-    byModel: [],
     updatedAt: now,
   };
 }
@@ -1772,17 +1768,10 @@ async function collectCliUsageReports(opts?: {
   const kimiReaders = (kimiAccounts.length > 0 ? kimiAccounts : [undefined]).map(
     (account) => (at: number) => readKimiCode(at, account),
   );
-
-  // ── Freebuff and unavailable CLI providers ─────────────────────────────────
-  const unavailableReaders: Array<(now: number) => CliUsageReport | null> = [
-    (at) =>
-      readUnavailableCli(
-        'jules',
-        detectJulesApiKey,
-        'Jules is an async cloud coding agent that requires explicit approval per task. No local usage is recorded; usage is tracked on Google’s side.',
-        at,
-      ),
-  ];
+  const freebuffAccounts = discoverFreebuffAccounts();
+  const freebuffReaders = (freebuffAccounts.length > 0 ? freebuffAccounts : [undefined]).map(
+    (account) => (at: number) => readFreebuff(at, account, opts?.forceRefresh),
+  );
 
   const readers: Array<(now: number) => CliUsageReport | null | Promise<CliUsageReport | null>> = [
     readClaude,
@@ -1793,8 +1782,7 @@ async function collectCliUsageReports(opts?: {
     ...cursorReaders,
     ...devinReaders,
     ...kimiReaders,
-    readFreebuff,
-    ...unavailableReaders,
+    ...freebuffReaders,
   ];
   const results = await Promise.allSettled(
     readers.map((reader) =>
@@ -1809,6 +1797,7 @@ async function collectCliUsageReports(opts?: {
       result.status === 'fulfilled' &&
       result.value &&
       (result.value.available ||
+        result.value.provider === 'freebuff' ||
         result.value.quotas.length > 0 ||
         result.value.attribution === 'unavailable')
     ) {

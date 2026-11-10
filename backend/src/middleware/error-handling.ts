@@ -17,6 +17,7 @@ import Elysia from 'elysia';
 import { serverLog } from '../logger';
 import {
   MalformedJsonError,
+  NotFoundError,
   ValidationError,
   normalizeError,
   getErrorStatusCode,
@@ -78,7 +79,9 @@ export function errorHandler({ code: frameworkCode, error, request, set }: any) 
       ? new ValidationError('Request does not match the required schema')
       : frameworkCode === 'PARSE' || error?.code === 'PARSE'
         ? new MalformedJsonError()
-        : normalizeError(error);
+        : frameworkCode === 'NOT_FOUND'
+          ? new NotFoundError('Route')
+          : normalizeError(error);
   const statusCode = getErrorStatusCode(normalized);
   const code = getErrorCode(normalized);
 

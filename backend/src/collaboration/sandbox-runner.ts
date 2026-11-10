@@ -13,26 +13,14 @@
  * unchanged and reports it, so the host always knows the true enforcement level.
  */
 
-import { existsSync, mkdtempSync, mkdirSync, symlinkSync, rmSync, realpathSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, symlinkSync, rmSync, realpathSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { delimiter, join, basename, dirname } from 'node:path';
+import { join, basename, dirname } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { serverLog } from '../logger';
 import type { SandboxPolicy } from '@koryphaios/shared';
 import { sessionWorkspaceOwnership } from '../kory/session-workspace';
-
-function which(bin: string): string | null {
-  const PATH = process.env.PATH ?? '';
-  const exts = process.platform === 'win32' ? ['', '.exe', '.cmd'] : [''];
-  for (const dir of PATH.split(delimiter)) {
-    if (!dir) continue;
-    for (const ext of exts) {
-      const p = join(dir, bin + ext);
-      if (existsSync(p)) return p;
-    }
-  }
-  return null;
-}
+import { findOnPath, hostOS, isMac, isLinux } from '../runtime/platform';
 
 export type SandboxMechanism = 'bubblewrap' | 'seatbelt' | 'none';
 
@@ -40,8 +28,8 @@ let cached: { mechanism: SandboxMechanism; path: string | null } | undefined;
 
 function detect(): { mechanism: SandboxMechanism; path: string | null } {
   if (cached !== undefined) return cached;
-  if (process.platform === 'linux') {
-    const bw = which('bwrap');
+  if (isLinux()) {
+    const bw = findOnPath('bwrap');
     if (bw) {
       // Verify user namespaces actually work (some kernels disable them).
       try {
@@ -64,10 +52,10 @@ function detect(): { mechanism: SandboxMechanism; path: string | null } {
         );
       }
     }
-  } else if (process.platform === 'darwin') {
+  } else if (isMac()) {
     // sandbox-exec ships with macOS at a fixed path.
     const sb =
-      which('sandbox-exec') ??
+      findOnPath('sandbox-exec') ??
       (existsSync('/usr/bin/sandbox-exec') ? '/usr/bin/sandbox-exec' : null);
     if (sb) {
       cached = { mechanism: 'seatbelt', path: sb };
@@ -90,7 +78,7 @@ export function sandboxCapabilities(): SandboxCapabilities {
   return {
     osIsolation: d.mechanism !== 'none',
     mechanism: d.mechanism,
-    platform: process.platform,
+    platform: hostOS(),
   };
 }
 
@@ -117,7 +105,19 @@ export function sandboxHome(opts: Pick<WrapOptions, 'cwd' | 'homeDir'>): string 
 // ─── Linux: bubblewrap ───────────────────────────────────────────────────────
 
 const SYSTEM_RO = ['/usr', '/bin', '/sbin', '/lib', '/lib64', '/opt', '/nix', '/etc/alternatives'];
-const NET_RO = ['/etc/resolv.conf', '/etc/hosts', '/etc/ssl', '/etc/ca-certificates', '/etc/pki'];
+const NET_RO = [
+  '/etc/resolv.conf',
+  '/etc/nsswitch.conf',
+  '/etc/gai.conf',
+  '/etc/hosts',
+  '/etc/ssl',
+  '/etc/ca-certificates',
+  '/etc/pki',
+];
+// Some hosts resolve through nss-resolve instead of a usable resolv.conf. Bind
+// only the resolver query socket, and only when this jail permits networking.
+// Exposing all of /run (or a session bus) would grant unrelated host services.
+const DNS_QUERY_SOCKETS = ['/run/systemd/resolve/io.systemd.Resolve'];
 
 function binaryBindDirs(bin: string): string[] {
   if (!bin.startsWith('/')) return [];
@@ -128,6 +128,20 @@ function binaryBindDirs(bin: string): string[] {
     if (real.startsWith('/')) dirs.add(dirname(real));
   } catch {
     /* dangling or unreadable link — fall back to the literal dir */
+  }
+  // Script-based CLIs need their absolute shebang interpreter inside the
+  // namespace too. This matters for managed test/runtime shims and for CLI
+  // launchers installed outside /usr; binding only the launcher directory
+  // otherwise produces the misleading `execvp ... No such file` error.
+  try {
+    const firstLine = readFileSync(bin, 'utf8').split('\n', 1)[0] ?? '';
+    const interpreter = /^#!\s*(\/\S+)/.exec(firstLine)?.[1];
+    if (interpreter) {
+      const realInterpreter = realpathSync(interpreter);
+      if (realInterpreter.startsWith('/')) dirs.add(dirname(realInterpreter));
+    }
+  } catch {
+    /* binary is not a readable script — the executable directory is enough */
   }
   return [...dirs].filter((d) => !!d && existsSync(d));
 }
@@ -147,6 +161,12 @@ function buildBwrap(bw: string, bin: string, args: string[], opts: WrapOptions):
     '/dev',
     '--tmpfs',
     '/tmp',
+    // Hide the host root before adding explicit managed-home and executable
+    // binds. If this is added after those binds, a runtime installed under
+    // /root (for example an npx/Bun shim) is masked and script CLIs fail with
+    // the misleading `execvp ... No such file` error.
+    '--tmpfs',
+    '/root',
   ];
   for (const p of SYSTEM_RO) if (existsSync(p)) flags.push('--ro-bind-try', p, p);
   if (opts.policy.allowNetwork) {
@@ -169,6 +189,7 @@ function buildBwrap(bw: string, bin: string, args: string[], opts: WrapOptions):
     ...(opts.readonlyConfigDirs ?? []),
     ...(opts.sockets ?? []),
     ...cliBinDirs,
+    ...(opts.policy.allowNetwork ? DNS_QUERY_SOCKETS.filter((path) => existsSync(path)) : []),
   ];
   const created = new Set<string>();
   for (const target of mountTargets) {
@@ -204,7 +225,11 @@ function buildBwrap(bw: string, bin: string, args: string[], opts: WrapOptions):
     if (!sock || flags.includes(sock)) continue;
     if (existsSync(sock)) flags.push('--bind', sock, sock);
   }
-  flags.push('--tmpfs', '/root', '--setenv', 'HOME', sandboxHome(opts));
+  if (opts.policy.allowNetwork)
+    for (const socket of DNS_QUERY_SOCKETS) {
+      if (existsSync(socket)) flags.push('--bind', socket, socket);
+    }
+  flags.push('--setenv', 'HOME', sandboxHome(opts));
   return [...flags, '--', bin, ...args];
 }
 

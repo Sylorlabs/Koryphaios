@@ -42,10 +42,7 @@ import {
 } from './oauth-secrets';
 import { startOAuthCallbackListener } from './oauth-callback';
 import { createHash } from 'node:crypto';
-import {
-  startFakeOAuthMcp,
-  EXPECTED_USER_AGENT,
-} from './testing/fake-oauth-mcp';
+import { startFakeOAuthMcp, EXPECTED_USER_AGENT } from './testing/fake-oauth-mcp';
 
 // ─── Fake authorization server + MCP server in one origin ───────────────────
 

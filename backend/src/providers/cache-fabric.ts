@@ -181,6 +181,21 @@ export function explainCacheTransition(
   return reasons;
 }
 
+// Diagnostics are observability state, not durable cache state. Session and
+// model identities are unbounded, so keep a bounded LRU-like window rather
+// than retaining one lane forever for every conversation ever opened.
+export const PROMPT_CACHE_DIAGNOSTIC_KEY_LIMIT = 4096;
+
+function rememberBounded<K, V>(map: Map<K, V>, key: K, value: V): void {
+  map.delete(key);
+  map.set(key, value);
+  while (map.size > PROMPT_CACHE_DIAGNOSTIC_KEY_LIMIT) {
+    const oldest = map.keys().next();
+    if (oldest.done) break;
+    map.delete(oldest.value);
+  }
+}
+
 export class PromptCacheDiagnosticsRegistry {
   private readonly previousBySlot = new Map<string, CacheLaneIdentity>();
   private readonly routeSeen = new Map<string, number>();
@@ -237,10 +252,10 @@ export class PromptCacheDiagnosticsRegistry {
         : state === 'workspace-warm-candidate'
           ? 1
           : 0;
-    this.warmStreakBySlot.set(lane.slotKey, warmCandidateStreak);
+    rememberBounded(this.warmStreakBySlot, lane.slotKey, warmCandidateStreak);
     const workspaceReuseCount = priorRouteCount + 1;
-    this.routeSeen.set(lane.routingKey, workspaceReuseCount);
-    this.previousBySlot.set(lane.slotKey, lane);
+    rememberBounded(this.routeSeen, lane.routingKey, workspaceReuseCount);
+    rememberBounded(this.previousBySlot, lane.slotKey, lane);
     const diagnostic: CacheDispatchDiagnostic = {
       state,
       laneKey: lane.key,

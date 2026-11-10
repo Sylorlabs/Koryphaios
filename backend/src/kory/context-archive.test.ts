@@ -16,6 +16,48 @@ async function expectPrivateMode(path: string, expected: number): Promise<void> 
 }
 
 describe('ContextArchiveService history pruning', () => {
+  it('keeps command input separate from its clipped label across restart', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kory-context-input-'));
+    try {
+      const secret = `sk-proj-${'A'.repeat(32)}`;
+      const command = `bun run verify --filter ${'project-'.repeat(30)} --token ${secret}`;
+      const input = JSON.stringify({ command, workdir: '/workspace/app' });
+      const archive = new ContextArchiveService(root);
+      const id = await archive.record(
+        'session',
+        'terminal',
+        `bash ${input.slice(0, 140)}`,
+        'done',
+        false,
+        input,
+      );
+      const entry = await new ContextArchiveService(root).get('session', id);
+
+      expect(entry?.content).toBe('done');
+      expect(entry?.label.length).toBeLessThanOrEqual(200);
+      const restored = JSON.parse(entry!.toolInput!);
+      expect(restored.command).toContain('project-'.repeat(30));
+      expect(restored.command).toContain('[REDACTED_KEY]');
+      expect(restored.command).not.toContain(secret);
+      expect(restored.workdir).toBe('/workspace/app');
+
+      const largeId = await archive.record(
+        'session',
+        'terminal',
+        'bash large',
+        'done',
+        false,
+        JSON.stringify({ command: 'x'.repeat(20_000) }),
+      );
+      const largeEntry = await new ContextArchiveService(root).get('session', largeId);
+      expect(Buffer.byteLength(largeEntry!.toolInput!)).toBeLessThanOrEqual(
+        CONTEXT_ARCHIVE_LIMITS.previewBytes,
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('removes tool context after the edited conversation pivot', async () => {
     const root = await mkdtemp(join(tmpdir(), 'kory-context-edit-'));
     try {
@@ -181,6 +223,41 @@ describe('ContextArchiveService history pruning', () => {
       );
       expect(persisted).toContain('"isError":true');
       expect(persisted).toContain('"isError":false');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('persists explicit run provenance across restart and rejects mismatched refs', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kory-context-run-ref-'));
+    try {
+      const runRef = { sessionId: 'session', runId: 'run-1', revision: 3 } as const;
+      const archive = new ContextArchiveService(root);
+      const id = await archive.record(
+        'session',
+        'tool_result',
+        'run output',
+        'output',
+        false,
+        undefined,
+        runRef,
+      );
+
+      expect((await new ContextArchiveService(root).get('session', id))?.runRef).toEqual(runRef);
+      await expect(
+        archive.record('session', 'tool_result', 'wrong session', 'output', false, undefined, {
+          sessionId: 'other-session',
+          runId: 'run-1',
+          revision: 3,
+        }),
+      ).rejects.toThrow(/invalid run provenance/);
+      await expect(
+        archive.record('session', 'tool_result', 'bad revision', 'output', false, undefined, {
+          sessionId: 'session',
+          runId: 'run-1',
+          revision: -1,
+        } as never),
+      ).rejects.toThrow(/invalid run provenance/);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

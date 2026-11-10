@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { Elysia } from 'elysia';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_NOTE_TOOL_PERMISSIONS } from '@koryphaios/shared';
@@ -21,6 +21,7 @@ import { KORY_TOOLS, toolsForRole } from '../../providers/kory-mcp-bridge';
 import type { ToolRegistry } from '../../tools/registry';
 import { saveNotesAgentPermissions } from '../../notes/notes-settings';
 import { mcpBridgeRoutes } from './mcp-bridge';
+import { createKoryBridgeGrantLease, signedBridgeHeadersFromFile, withBridgeWorkspace } from '../../providers/bridge-grant';
 
 const ROLES = ['manager', 'worker', 'critic', 'coder'] as const;
 type Role = (typeof ROLES)[number];
@@ -204,7 +205,9 @@ describe('MCP bridge role authority', () => {
         })),
       });
       for (const tool of registry.getAll()) {
-        const allowed = registry.isAllowedForRole(tool.name, role);
+        // Critic execution additionally requires a signed, host-owned active
+        // disposable workspace grant. Local role tokens only expose metadata.
+        const allowed = role !== 'critic' && registry.isAllowedForRole(tool.name, role);
         const response = await execute(role, tool.name, authorization);
         expect(response.status).toBe(allowed ? 200 : 403);
         const body = (await response.json()) as Record<string, unknown>;
@@ -219,7 +222,10 @@ describe('MCP bridge role authority', () => {
           expect(body).toMatchObject({
             ok: false,
             code: 'ACCESS_DENIED',
-            error: `${role} is not allowed to call ${tool.name}`,
+            error:
+              role === 'critic' && registry.isAllowedForRole(tool.name, role)
+                ? 'Critic calls require an active host-bound review grant'
+                : `${role} is not allowed to call ${tool.name}`,
           });
         }
       }
@@ -231,6 +237,17 @@ describe('MCP bridge role authority', () => {
         .map(({ agentId }) => agentId)
         .sort(),
     ).toEqual(['mcp-bridge:coder', 'mcp-bridge:manager', 'mcp-bridge:worker']);
+
+    // Direct custom-tool transports may retain the catalog's presentation
+    // prefix. The route must normalize it before role authorization, just as
+    // the stdio MCP bridge does.
+    const prefixedRename = await execute(
+      'manager',
+      'kory__rename_session',
+      authorizationFor(sessionId, 'manager'),
+    );
+    expect(prefixedRename.status).toBe(200);
+    expect(executed.at(-1)?.name).toBe('rename_session');
 
     const unknownRole = await execute(
       'auditor',
@@ -334,6 +351,118 @@ describe('MCP bridge role authority', () => {
       expect(executed).toBe(false);
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('signed workspace grant succeeds on in-place folder chats and blocks outside roots', async () => {
+    const registry = await authoritativeRegistry();
+    const projectRoot = mkdtempSync(join(tmpdir(), 'kory-mcp-inplace-folder-'));
+    const outsideRoot = mkdtempSync(join(tmpdir(), 'kory-mcp-outside-folder-'));
+    const subdir = join(projectRoot, 'packages', 'app');
+    mkdirSync(subdir, { recursive: true });
+    const sessionId = 'mcp-inplace-folder-session';
+    const validLease = createKoryBridgeGrantLease(sessionId, 'manager');
+    const outsideLease = createKoryBridgeGrantLease(sessionId, 'manager');
+    const grantWithRoot = async (root: string, lease: typeof validLease) => {
+      for await (const grant of withBridgeWorkspace(root, (async function* () { yield lease.grant(['mcp:execute']); })())) {
+        return grant;
+      }
+      throw new Error('unreachable');
+    };
+    try {
+      setContext({
+        tools: {
+          getToolDefsForRole: (role: Role) => registry.getToolDefsForRole(role),
+          isAllowedForRole: (name: string, role: Role) => registry.isAllowedForRole(name, role),
+          execute: async () => ({
+            callId: 'inplace-ok',
+            name: 'read_file',
+            output: 'read-ok',
+            isError: false,
+            durationMs: 0,
+          }),
+        },
+        sessions: {
+          get: async (id: string) =>
+            id === sessionId ? { id, workingDirectory: projectRoot } : undefined,
+          getActive: async (id: string) =>
+            id === sessionId ? { id, workingDirectory: projectRoot } : undefined,
+        },
+        goals: { list: async () => [] },
+        kory: {
+          resolveSessionWorkingDirectoryPublic: async () => projectRoot,
+          requestToolApproval: async () => 'Allow',
+          hasActiveSessionExecution: () => true,
+          tryAcquireSessionMutationBarrier: () => null,
+        },
+      } as never);
+      const app = new Elysia()
+        .onError(({ error, set }) => {
+          const operational = error as { statusCode?: number; code?: string; message?: string };
+          set.status = operational.statusCode ?? 500;
+          return {
+            ok: false,
+            code: operational.code ?? 'INTERNAL_ERROR',
+            error: operational.message ?? String(error),
+          };
+        })
+        .use(mcpBridgeRoutes);
+
+      const validGrant = await grantWithRoot(subdir, validLease);
+      const validBody = {
+        sessionId,
+        role: 'manager',
+        toolName: 'read_file',
+        input: { path: 'README.md' },
+        target: { kind: 'local', backendId: 'local' },
+      };
+      const okResp = await app.handle(
+        new Request('http://localhost/api/v1/mcp-bridge/execute', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            ...signedBridgeHeadersFromFile(
+              validGrant.path,
+              'mcp',
+              'POST',
+              '/api/v1/mcp-bridge/execute',
+              validBody,
+            ),
+          },
+          body: JSON.stringify(validBody),
+        }),
+      );
+      expect(okResp.status).toBe(200);
+      expect(await okResp.json()).toMatchObject({ ok: true, output: 'read-ok', isError: false });
+
+      const outsideGrant = await grantWithRoot(outsideRoot, outsideLease);
+      const deniedResp = await app.handle(
+        new Request('http://localhost/api/v1/mcp-bridge/execute', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            ...signedBridgeHeadersFromFile(
+              outsideGrant.path,
+              'mcp',
+              'POST',
+              '/api/v1/mcp-bridge/execute',
+              validBody,
+            ),
+          },
+          body: JSON.stringify(validBody),
+        }),
+      );
+      expect(deniedResp.status).toBe(403);
+      expect(await deniedResp.json()).toMatchObject({
+        ok: false,
+        code: 'ACCESS_DENIED',
+        error: 'CLI workspace grant does not belong to this chat',
+      });
+    } finally {
+      validLease.cleanup();
+      outsideLease.cleanup();
+      rmSync(projectRoot, { recursive: true, force: true });
+      rmSync(outsideRoot, { recursive: true, force: true });
     }
   });
 });

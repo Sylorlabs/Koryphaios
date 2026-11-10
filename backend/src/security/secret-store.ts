@@ -23,6 +23,24 @@ type ProviderSecretEntry = Partial<Record<SecretField, string>> & {
 };
 export type ProviderSecrets = Record<string, ProviderSecretEntry>;
 
+function assertProviderKey(name: string): void {
+  if (name === '__proto__' || name === 'constructor' || name === 'prototype') {
+    throw new Error('Unsafe provider key in credentials map');
+  }
+}
+
+function validateProviderSecrets(value: unknown): asserts value is ProviderSecrets {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Credentials store root is not an object');
+  }
+  for (const [name, entry] of Object.entries(value)) {
+    assertProviderKey(name);
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error('Credentials store entry is not an object');
+    }
+  }
+}
+
 function normalizedSecretHeaders(value: unknown): Record<string, string> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const headers = Object.fromEntries(
@@ -34,22 +52,50 @@ function normalizedSecretHeaders(value: unknown): Record<string, string> | undef
   return Object.keys(headers).length > 0 ? headers : undefined;
 }
 
+/** Stored entries are untrusted data, not provider configuration. */
+function normalizedProviderSecretEntry(values: ProviderSecretEntry): ProviderSecretEntry {
+  const filtered: ProviderSecretEntry = Object.fromEntries(
+    SECRET_FIELDS.flatMap((field) => {
+      const value = Object.prototype.hasOwnProperty.call(values, field) ? values[field] : undefined;
+      return typeof value === 'string' && value.trim() ? [[field, value]] : [];
+    }),
+  );
+  const headers = Object.prototype.hasOwnProperty.call(values, 'headers')
+    ? normalizedSecretHeaders(values.headers)
+    : undefined;
+  if (headers) filtered.headers = headers;
+  return filtered;
+}
+
 function secretsPath(projectRoot: string): string {
   return join(projectRoot, '.koryphaios', 'credentials.json');
 }
 
 export function loadProviderSecrets(projectRoot: string): ProviderSecrets {
   const path = secretsPath(projectRoot);
-  if (!existsSync(path)) return {};
+  let contents: string;
   try {
-    return JSON.parse(readFileSync(path, 'utf-8')) as ProviderSecrets;
+    contents = readFileSync(path, 'utf-8');
   } catch (err) {
-    serverLog.warn({ err, path }, 'Failed to read credentials store');
-    return {};
+    // Only a missing file is an empty store. Read/parse failures must stop
+    // upserts and migrations before they can replace recoverable credentials.
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return {};
+    throw new Error('Provider credentials store is unreadable');
+  }
+  try {
+    const parsed: unknown = JSON.parse(contents);
+    validateProviderSecrets(parsed);
+    return parsed;
+  } catch {
+    // Parser errors can include file contents; do not expose credential text.
+    throw new Error('Provider credentials store is invalid');
   }
 }
 
 export function saveProviderSecrets(projectRoot: string, secrets: ProviderSecrets): void {
+  validateProviderSecrets(secrets);
+  // Even a direct save must not silently replace an existing corrupt store.
+  loadProviderSecrets(projectRoot);
   const path = secretsPath(projectRoot);
   ensureSecureDir(dirname(path));
   const tmp = `${path}.${process.pid}.tmp`;
@@ -72,17 +118,12 @@ export function upsertProviderSecrets(
   provider: string,
   values: ProviderSecretEntry,
 ): void {
-  const filtered: ProviderSecretEntry = Object.fromEntries(
-    SECRET_FIELDS.flatMap((field) => {
-      const value = values[field];
-      return typeof value === 'string' && value.trim() ? [[field, value]] : [];
-    }),
-  );
-  const headers = normalizedSecretHeaders(values.headers);
-  if (headers) filtered.headers = headers;
+  assertProviderKey(provider);
+  const filtered = normalizedProviderSecretEntry(values);
+  const headers = filtered.headers;
   if (Object.keys(filtered).length === 0) return;
   const secrets = loadProviderSecrets(projectRoot);
-  const existing = secrets[provider] ?? {};
+  const existing = Object.prototype.hasOwnProperty.call(secrets, provider) ? secrets[provider]! : {};
   secrets[provider] = {
     ...existing,
     ...filtered,
@@ -92,16 +133,10 @@ export function upsertProviderSecrets(
 }
 
 export function removeProviderSecrets(projectRoot: string, provider: string): boolean {
-  const path = secretsPath(projectRoot);
-  if (!existsSync(path)) return false;
-
+  assertProviderKey(provider);
   let secrets: ProviderSecrets;
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error('credentials store root is not an object');
-    }
-    secrets = parsed as ProviderSecrets;
+    secrets = loadProviderSecrets(projectRoot);
   } catch (err: unknown) {
     // A disconnect must never report success after silently treating an
     // unreadable credential store as empty. Preserve the file for recovery and
@@ -125,8 +160,9 @@ export function stripProviderSecrets(providers: Record<string, unknown>): {
   secrets: ProviderSecrets;
 } {
   const clean: Record<string, unknown> = {};
-  const secrets: ProviderSecrets = {};
+  const secrets: ProviderSecrets = Object.create(null);
   for (const [name, cfg] of Object.entries(providers)) {
+    assertProviderKey(name);
     if (!cfg || typeof cfg !== 'object') {
       clean[name] = cfg;
       continue;
@@ -154,16 +190,19 @@ export function hydrateProviderSecrets<T extends Record<string, unknown>>(
   projectRoot: string,
   providers: T,
 ): T {
+  for (const name of Object.keys(providers)) assertProviderKey(name);
   const secrets = loadProviderSecrets(projectRoot);
   const out: Record<string, unknown> = { ...providers };
   for (const [name, vals] of Object.entries(secrets)) {
-    const existing = (out[name] as Record<string, unknown>) ?? {};
-    const headers = normalizedSecretHeaders(vals.headers);
+    const existing = Object.prototype.hasOwnProperty.call(out, name)
+      ? (out[name] as Record<string, unknown>) ?? {}
+      : {};
+    const filtered = normalizedProviderSecretEntry(vals);
+    const headers = filtered.headers;
     const existingHeaders = normalizedSecretHeaders(existing.headers);
-    const { headers: _secretHeaders, ...flatSecrets } = vals;
     out[name] = {
       ...existing,
-      ...flatSecrets,
+      ...filtered,
       ...(headers && { headers: { ...(existingHeaders ?? {}), ...headers } }),
     };
   }

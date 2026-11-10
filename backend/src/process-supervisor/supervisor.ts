@@ -7,6 +7,7 @@ import { readFileSync, readlinkSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { serverLog } from '../logger';
 import { requireBash } from '../runtime/shell';
+import { isLinux, isWindows } from '../runtime/platform';
 import { getSafeSubprocessEnv } from '../runtime/safe-env';
 import { redactSecretsInText } from '../security';
 import {
@@ -137,7 +138,7 @@ function protectedProcessPids(): Set<number> {
 }
 
 function observeProcess(pid: number): { cmdline: string; cwd: string } | null {
-  if (process.platform !== 'linux') return null;
+  if (!isLinux()) return null;
   try {
     return {
       cmdline: readFileSync(`/proc/${pid}/cmdline`, 'utf8'),
@@ -503,7 +504,7 @@ export class ProcessSupervisor {
         ...(isAgentBackgroundProcess(classification) && { env: getSafeSubprocessEnv() }),
         // Own a process group on POSIX so cancellation and failure cleanup do
         // not leave grandchildren (watchers, dev servers, pipelines) alive.
-        detached: process.platform !== 'win32',
+        detached: !isWindows(),
       });
       if (!proc || typeof proc.pid !== 'number' || !proc.exited) {
         throw new Error('Process spawner returned no usable child handle');
@@ -744,7 +745,7 @@ export class ProcessSupervisor {
       // After the original leader exits, only a still-present verified group
       // may be signalled. A missing or unknowable PGID is not permission to
       // fall through to a possibly reused positive pid.
-      if (process.platform !== 'win32' && proc.leaderExited) {
+      if (!isWindows() && proc.leaderExited) {
         if (proc.ownedGroupObservedGone) return;
         const groupState = this.ownedProcessGroupState(proc);
         if (groupState === 'gone') proc.ownedGroupObservedGone = true;
@@ -765,7 +766,7 @@ export class ProcessSupervisor {
     // guards PID reuse and also makes the negative-PGID path authoritative for
     // descendants left behind by a dead group leader.
     if (proc.pid <= 1 || proc.recoveredOwnershipVerified !== true) return;
-    if (process.platform !== 'win32') {
+    if (!isWindows()) {
       try {
         process.kill(-proc.pid, signal as NodeJS.Signals);
         return;
@@ -786,7 +787,7 @@ export class ProcessSupervisor {
 
   private isOwnedProcessAlive(proc: SupervisedProcess): boolean {
     if (proc.pid <= 1) return false;
-    if (process.platform !== 'win32') {
+    if (!isWindows()) {
       if (proc.proc && proc.leaderExited && proc.ownedGroupObservedGone) return false;
       const groupState = this.ownedProcessGroupState(proc);
       if (proc.proc && proc.leaderExited && groupState === 'gone') {
@@ -810,7 +811,7 @@ export class ProcessSupervisor {
   }
 
   private ownedProcessGroupState(proc: Pick<SupervisedProcess, 'pid'>): ProcessGroupState {
-    if (process.platform === 'win32' || proc.pid <= 1) return 'gone';
+    if (isWindows() || proc.pid <= 1) return 'gone';
     try {
       process.kill(-proc.pid, 0);
       return 'alive';
@@ -831,7 +832,7 @@ export class ProcessSupervisor {
    * PGID that may have been reused.
    */
   private async waitForSpawnedProcessGroupReap(proc: SupervisedProcess): Promise<void> {
-    if (process.platform === 'win32' || !proc.proc) return;
+    if (isWindows() || !proc.proc) return;
     let missingSince: number | undefined;
     while (true) {
       const state = this.ownedProcessGroupState(proc);
@@ -1287,7 +1288,7 @@ export class ProcessSupervisor {
     proc: { pid?: number; kill?: (signal: string | number) => unknown },
     signal: string,
   ) {
-    if (process.platform !== 'win32' && (proc.pid ?? 0) > 1) {
+    if (!isWindows() && (proc.pid ?? 0) > 1) {
       try {
         process.kill(-(proc.pid as number), signal as NodeJS.Signals);
         return;

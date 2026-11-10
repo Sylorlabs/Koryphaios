@@ -37,6 +37,7 @@ import { koryLog } from '../logger';
 import { getSafeSubprocessEnv } from '../runtime/safe-env';
 import { spawnSandboxed } from '../security/os-sandbox';
 import { assertIndependentChatGitDirectory, gitWorkspaceOwnership } from './git-owned-workspace';
+import { isWindows } from '../runtime/platform';
 
 /** Default timeout for git operations (30 seconds). */
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -77,6 +78,8 @@ export interface GitExecOptions {
   timeoutMs?: number;
   /** Explicit non-secret environment variables merged on top of the safe allowlist. */
   env?: Record<string, string>;
+  /** Additional repository roots needed for read-only Git object access. */
+  readOnlyRoots?: string[];
   /** Working directory. Defaults to the executor's `cwd`. */
   cwd?: string;
   /** String to pipe to the process's stdin. */
@@ -165,6 +168,7 @@ export class GitExecutor {
         maxStdoutBytes,
         maxStderrBytes,
         options.stdin,
+        options.readOnlyRoots,
       );
 
     const result = await run(1);
@@ -206,6 +210,7 @@ export class GitExecutor {
     maxStdoutBytes: number,
     maxStderrBytes: number,
     stdin?: string,
+    readOnlyRoots: string[] = [],
   ): Promise<GitExecResult> {
     // Nested calls inside withLock() already own the mutex.
     const release = GitExecutor.holdsLock() ? () => {} : await gitMutex.acquire();
@@ -221,6 +226,7 @@ export class GitExecutor {
         // This is mandatory even when workspace.sandbox is disabled in policy.
         const sandbox = spawnSandboxed(['git', ...args], {
           allowedRoots: [owner.checkout],
+          readOnlyRoots,
           requiredWorkspaceRoot: owner.checkout,
           cwd,
           env,
@@ -487,7 +493,7 @@ async function terminateProcessTree(proc: GitProcess): Promise<TerminationResult
 }
 
 function signalProcessTree(proc: GitProcess, signal: NodeJS.Signals): void {
-  if (process.platform !== 'win32' && proc.pid > 0) {
+  if (!isWindows() && proc.pid > 0) {
     try {
       // `detached: true` makes the child a process-group leader on POSIX.
       process.kill(-proc.pid, signal);
@@ -516,7 +522,7 @@ async function waitForProcessTreeExit(proc: GitProcess, timeoutMs: number): Prom
 }
 
 function isProcessTreeAlive(proc: GitProcess): boolean {
-  if (process.platform !== 'win32' && proc.pid > 0) {
+  if (!isWindows() && proc.pid > 0) {
     try {
       process.kill(-proc.pid, 0);
       return true;

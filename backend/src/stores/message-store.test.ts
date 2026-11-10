@@ -984,4 +984,39 @@ describe('MessageStore history editing', () => {
 
     await db.delete(sessions).where(eq(sessions.id, sessionId));
   });
+
+  it('pages newest display history and walks backward through the active lineage', async () => {
+    const suffix = `${Date.now()}-${Math.random()}`;
+    const sessionId = `display-page-${suffix}`;
+    await db.insert(sessions).values({
+      id: sessionId,
+      title: 'Paged display history',
+      createdAt: new Date(1_000),
+      updatedAt: new Date(1_000),
+    });
+    const store = new MessageStore();
+    for (let index = 0; index < 5; index += 1) {
+      await store.add(sessionId, {
+        id: `page-${suffix}-${index}`,
+        sessionId,
+        role: index % 2 === 0 ? 'user' : 'assistant',
+        content: `message ${index}`,
+        createdAt: (index + 2) * 1_000,
+      });
+    }
+
+    const newest = await store.getDisplayProjection(sessionId, 2);
+    expect(newest.messages.map((message) => message.content)).toEqual(['message 3', 'message 4']);
+    expect(newest.hasMore).toBe(true);
+    expect(newest.oldestMessageId).toBe(`page-${suffix}-3`);
+
+    const older = await store.getDisplayProjection(sessionId, 2, {
+      beforeMessageId: newest.oldestMessageId ?? undefined,
+    });
+    expect(older.messages.map((message) => message.content)).toEqual(['message 0', 'message 1']);
+    expect(older.hasMore).toBe(true);
+    expect(older.oldestMessageId).toBe(`page-${suffix}-0`);
+
+    await db.delete(sessions).where(eq(sessions.id, sessionId));
+  });
 });

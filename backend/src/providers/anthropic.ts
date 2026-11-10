@@ -16,8 +16,17 @@ import { withRetry, withTimeoutSignal } from './utils';
 import { createUsageInterceptingFetch } from '../credit-accountant';
 import { providerLog } from '../logger';
 import { applyModelsDevMetadata, refreshModelsDevCache, modelsDevKeysFor } from './models-dev';
-import { isModelListCacheFresh, mergeModelLists, modelFromRemoteId } from './model-list-cache';
-import { providerStreamFailure } from './provider-diagnostics';
+import {
+  enrichFromRemoteMetadata,
+  isModelListCacheFresh,
+  mergeModelLists,
+  modelFromRemoteId,
+} from './model-list-cache';
+import {
+  providerStreamFailure,
+  safeProviderDiagnostic,
+  safeProviderFailureMessage,
+} from './provider-diagnostics';
 import {
   canonicalizeProviderTools,
   derivePromptCacheLane,
@@ -55,17 +64,28 @@ export class AnthropicProvider implements Provider {
       defaultHeaders['x-api-key'] = null;
       defaultHeaders.Authorization = null;
     }
-    return new Anthropic({
-      // An Anthropic auth token is a Bearer credential. Supplying the custom
-      // keyless placeholder alongside it makes the SDK prefer x-api-key and
-      // turns a successful Bearer catalog probe into a runtime 401.
-      apiKey:
-        this.config.apiKey ||
-        (!this.config.authToken && this.config.custom ? 'placeholder' : undefined),
-      authToken: this.config.authToken,
+    // SDK 0.39 validates only request-level auth omissions, ignoring nulls in
+    // defaultHeaders. Honor the explicit keyless custom policy during validation.
+    const Client =
+      !hasCredential && this.config.custom
+        ? class extends Anthropic {
+            protected override validateHeaders(
+              headers: Record<string, string | null | undefined>,
+              customHeaders: Record<string, string | null | undefined>,
+            ): void {
+              super.validateHeaders(headers, { 'x-api-key': null, ...customHeaders });
+            }
+          }
+        : Anthropic;
+    return new Client({
+      // Undefined activates SDK environment fallback. In particular, an ambient
+      // API key would take precedence over a selected Bearer token.
+      apiKey: this.config.apiKey || null,
+      authToken: this.config.authToken || null,
       baseURL: this.config.baseUrl || undefined,
       defaultHeaders,
       fetch: createUsageInterceptingFetch(globalThis.fetch),
+      timeout: 1_800_000,
     });
   }
 
@@ -86,6 +106,8 @@ export class AnthropicProvider implements Provider {
   private cachedModels: ModelDef[] | null = null;
   private lastFetch = 0;
   private refreshInProgress: Promise<void> | null = null;
+  private anthropicModelDiscoveryError: string | undefined;
+  private anthropicModelDiscoveryHttpStatus: number | undefined;
 
   listModels(): ModelDef[] {
     const fallback: ModelDef[] = [];
@@ -115,7 +137,7 @@ export class AnthropicProvider implements Provider {
         for (const model of response.data) {
           const id = model.id;
           if (!id) continue;
-          discovered.push(modelFromRemoteId(id, this.name, []));
+          discovered.push(enrichFromRemoteMetadata(model, modelFromRemoteId(id, this.name, [])));
         }
         if (discovered.length > 0) {
           this.cachedModels = applyModelsDevMetadata(
@@ -128,9 +150,22 @@ export class AnthropicProvider implements Provider {
             'Model list refreshed from provider API',
           );
         }
+        this.anthropicModelDiscoveryError = undefined;
+        this.anthropicModelDiscoveryHttpStatus = undefined;
         this.lastFetch = Date.now();
       } catch (err) {
         this.lastFetch = Date.now();
+        const errorStatus =
+          err && typeof err === 'object' && 'status' in err && typeof err.status === 'number'
+            ? err.status
+            : undefined;
+        const diagnostic = safeProviderDiagnostic(this.name, 'http', err, {
+          ...(errorStatus !== undefined ? { status: errorStatus } : {}),
+        });
+        this.anthropicModelDiscoveryHttpStatus = diagnostic.status;
+        this.anthropicModelDiscoveryError = safeProviderFailureMessage(this.name, diagnostic, {
+          authenticationAction: 'Reconnect the provider and retry model discovery.',
+        });
         providerLog.debug(
           { provider: this.name, err: err instanceof Error ? err.message : String(err) },
           'Model list refresh failed; leaving catalog empty rather than exposing a fallback list',
@@ -140,6 +175,14 @@ export class AnthropicProvider implements Provider {
       }
     })();
     return this.refreshInProgress;
+  }
+
+  getModelDiscoveryError(): string | undefined {
+    return this.anthropicModelDiscoveryError;
+  }
+
+  getModelDiscoveryHttpStatus(): number | undefined {
+    return this.anthropicModelDiscoveryHttpStatus;
   }
 
   private refreshModelsInBackground(_fallback: ModelDef[]) {
@@ -321,7 +364,8 @@ export class AnthropicProvider implements Provider {
 
     try {
       // Apply 60-second hard timeout to prevent indefinite hangs
-      const timeoutSignal = withTimeoutSignal(request.signal, 60_000);
+      // Match the global task timeout (30 min) instead of a 60s hard cap.
+      const timeoutSignal = withTimeoutSignal(request.signal, 1_800_000);
       const stream = await withRetry(
         () =>
           this.client.messages.stream(params, {
@@ -399,7 +443,12 @@ export class AnthropicProvider implements Provider {
             };
             yield {
               type: 'complete',
-              finishReason: event.delta.stop_reason === 'tool_use' ? 'tool_use' : 'end_turn',
+              finishReason:
+                event.delta.stop_reason === 'tool_use'
+                  ? 'tool_use'
+                  : event.delta.stop_reason === 'max_tokens'
+                    ? 'max_tokens'
+                    : 'end_turn',
             };
             break;
           }

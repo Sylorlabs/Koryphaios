@@ -106,7 +106,9 @@ function normalizeGrant(value: unknown): StoredMcpOAuthGrant | null {
     clientId: record.clientId,
     clientSecret: str('clientSecret'),
     tokenEndpointAuthMethod:
-      authMethod === 'none' || authMethod === 'client_secret_post' || authMethod === 'client_secret_basic'
+      authMethod === 'none' ||
+      authMethod === 'client_secret_post' ||
+      authMethod === 'client_secret_basic'
         ? authMethod
         : undefined,
     tokenEndpoint: record.tokenEndpoint,

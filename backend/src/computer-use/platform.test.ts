@@ -130,7 +130,7 @@ describe('computer platform adapter (no native dependencies)', () => {
   });
   it('refuses unsupported input without falling back to global injection', async () => {
     const adapter = createComputerPlatformAdapter({
-      platform: 'win32',
+      platform: 'freebsd',
       invoke: async () => {
         throw new Error('must not run');
       },
@@ -249,7 +249,8 @@ describe('native helper transport', () => {
   });
   it('has embedded sources usable in a Bun compiled binary, without desktop capture/injection fallbacks', () => {
     expect(MACOS_HELPER_SOURCE).toContain('SCContentFilter(desktopIndependentWindow: native)');
-    expect(MACOS_HELPER_SOURCE).not.toContain('CGEvent(');
+    expect(MACOS_HELPER_SOURCE).toContain('CGEvent(');
+    expect(MACOS_HELPER_SOURCE).toContain('eventSourceUserData');
     expect(WINDOWS_HELPER_SOURCE).toContain('PrintWindow($handle');
     expect(WINDOWS_HELPER_SOURCE).not.toContain('SendInput');
     expect(WINDOWS_HELPER_SOURCE).not.toContain('CopyFromScreen');

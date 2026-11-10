@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import type { UsageCostBreakdownRow } from '../credit-accountant/db';
-import { summarizeBillingSpend, summarizeSessionCosts } from './cost-summary';
+import type { CreditUsageEventRow, UsageCostBreakdownRow } from '../credit-accountant/db';
+import {
+  summarizeBillingSpend,
+  summarizeSessionCosts,
+  summarizeUsageAnalytics,
+} from './cost-summary';
 
 function row(partial: Partial<UsageCostBreakdownRow>): UsageCostBreakdownRow {
   return {
@@ -14,6 +18,23 @@ function row(partial: Partial<UsageCostBreakdownRow>): UsageCostBreakdownRow {
     knownCostUsd: 0,
     knownRows: 0,
     unknownRows: 0,
+    ...partial,
+  };
+}
+
+function eventRow(partial: Partial<CreditUsageEventRow>, now = 1_760_000_000_000): CreditUsageEventRow {
+  return {
+    ts: now - 30 * 60 * 1_000,
+    sessionId: 'session-1',
+    provider: 'openai',
+    model: 'gpt-5.6',
+    tokensIn: 500_000,
+    tokensOut: 120_000,
+    cacheReadTokens: 100_000,
+    cacheWriteTokens: 0,
+    cacheSavingsUsd: 0.18,
+    costUsd: 2.13,
+    costKnown: true,
     ...partial,
   };
 }
@@ -84,5 +105,67 @@ describe('billing cost summaries', () => {
     expect(sessions['session-1']?.spendUsd).toBeCloseTo(0.75);
     expect(sessions['session-1']?.hasKnownCost).toBe(true);
     expect(sessions['session-1']?.pricingIncomplete).toBe(true);
+  });
+
+  test('computes windowed analytics with hourly/daily series, cost-by-type, and subscription rows', () => {
+    const now = 1_760_000_000_000;
+    const analytics = summarizeUsageAnalytics(
+      [
+        eventRow(
+          {
+            sessionId: 'session-1',
+            provider: 'openai',
+            model: 'gpt-6-sol',
+            tokensIn: 500_000,
+            tokensOut: 120_000,
+            cacheReadTokens: 98_600,
+            cacheSavingsUsd: 0.18,
+            costUsd: 2.13,
+            costKnown: true,
+          },
+          now,
+        ),
+        eventRow(
+          {
+            sessionId: 'session-2',
+            provider: 'antigravity',
+            model: 'gemini-4-argon-medium',
+            tokensIn: 60_000,
+            tokensOut: 28_600,
+            cacheReadTokens: 0,
+            cacheSavingsUsd: 0,
+            costUsd: 0,
+            costKnown: true,
+          },
+          now,
+        ),
+      ],
+      now,
+    );
+
+    const w24 = analytics.windows['24h'];
+    expect(w24.granularity).toBe('hour');
+    expect(w24.series.length).toBe(24);
+    expect(w24.totalSpendUsd).toBeCloseTo(2.13);
+    expect(w24.sessionCount).toBe(2);
+    expect(w24.totals.processedTokens).toBe(708_600);
+    expect(w24.totals.cachedInputTokens).toBe(98_600);
+    expect(w24.totals.uncachedInputTokens).toBe(461_400);
+    expect(w24.totals.outputTokens).toBe(148_600);
+    expect(w24.totals.cacheSavingsUsd).toBeCloseTo(0.18);
+    expect(
+      w24.costByType.inputUsd + w24.costByType.cacheReadUsd + w24.costByType.outputUsd,
+    ).toBeCloseTo(2.13);
+
+    expect(w24.byProvider.map((p) => p.name)).toEqual(['openai', 'antigravity']);
+    expect(w24.byProvider[0]?.sharePercent).toBeCloseTo(100);
+    expect(w24.byProvider[1]?.spendUsd).toBe(0);
+    expect(w24.byProvider[1]?.subscription).toBe(true);
+
+    expect(w24.byModel[0]?.model).toBe('gpt-6-sol');
+    expect(w24.byModel[0]?.hasKnownCost).toBe(true);
+    expect(w24.byModel[1]?.model).toBe('gemini-4-argon-medium');
+    expect(w24.byModel[1]?.hasKnownCost).toBe(false);
+    expect(w24.byModel[1]?.spendUsd).toBeNull();
   });
 });

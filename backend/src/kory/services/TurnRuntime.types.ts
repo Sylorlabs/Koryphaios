@@ -1,5 +1,6 @@
-import type { AgentStatus, ProviderName, WSMessage } from '@koryphaios/shared';
+import type { AgentStatus, ProviderName, RunRevisionRef, WSMessage } from '@koryphaios/shared';
 import type { ProviderEvent, StreamRequest } from '../../providers/types';
+import type { OutputLoopDetection, OutputLoopStop } from '../output-loop-detector';
 import type { ManagerRunHandle, ManagerRunLifecycle } from './ManagerRunLifecycle';
 
 export interface CompletedToolCall {
@@ -15,6 +16,8 @@ export interface TurnStreamUsage {
   cacheWriteInputTokens: number;
   usageKnown: boolean;
   estimated: boolean;
+  /** chars/4 estimate of native tool traffic exposed by this CLI turn. */
+  nativeToolContextTokens?: number;
 }
 
 /** Capabilities needed to stream a turn; no manager or session-store access. */
@@ -22,7 +25,7 @@ export interface TurnRuntimeDependencies {
   providers: {
     executeWithRetry(request: StreamRequest, provider?: ProviderName): AsyncIterable<ProviderEvent>;
   };
-  lifecycle: Pick<ManagerRunLifecycle, 'phase'>;
+  lifecycle: Pick<ManagerRunLifecycle, 'phase' | 'runRef'>;
   /** Throws unless this exact run still owns active execution. Never reads UI state. */
   assertActive(handle: ManagerRunHandle): void;
   archive?: {
@@ -32,6 +35,8 @@ export interface TurnRuntimeDependencies {
       label: string,
       content: string,
       isError?: boolean,
+      toolInput?: string,
+      runRef?: RunRevisionRef,
     ): Promise<string>;
   } | null;
   processes: {
@@ -50,6 +55,7 @@ export interface TurnStreamEffects {
   heartbeat(phase: AgentStatus): void;
   fileEdit(path: string, content: string, operation: 'create' | 'edit', oldContent?: string): void;
   usage(usage: TurnStreamUsage): void;
+  loopDetected?(detection: OutputLoopDetection): void;
 }
 
 export interface TurnStreamInput {
@@ -58,12 +64,18 @@ export interface TurnStreamInput {
   handle: ManagerRunHandle;
   agentId: string;
   effects: TurnStreamEffects;
+  /** Cancels the owning manager run without converting the loop into an error. */
+  cancel?(reason: OutputLoopStop): void;
 }
 
 export interface TurnStreamResult {
   content: string;
+  reasoningContent?: string;
   completedToolCalls: CompletedToolCall[];
   observedNativeTool: boolean;
+  loopDetected: boolean;
+  /** The provider's terminal reason, when it reported one. */
+  finishReason?: ProviderEvent['finishReason'];
   usage: TurnStreamUsage;
 }
 

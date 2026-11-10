@@ -1,6 +1,7 @@
 import { Elysia } from 'elysia';
 import { localAuth } from '../../auth/local-auth';
 import { buildLocalBearerToken } from '../../auth/local-route-auth';
+import { canBootstrapLocalSession, requestPeer } from '../../auth/request-peer';
 
 export const authRoutes = new Elysia({ prefix: '/api/auth' })
   .get('/me', async ({ request }) => {
@@ -42,10 +43,9 @@ export const authRoutes = new Elysia({ prefix: '/api/auth' })
   })
   .post(
     '/session',
-    async ({ request, set }) => {
-      const clientIp = (request.headers.get('x-forwarded-for') ?? '127.0.0.1').split(',')[0].trim();
-      const isLocal = clientIp === '127.0.0.1' || clientIp === '::1' || clientIp === 'local' || clientIp.startsWith('192.168.') || clientIp.startsWith('10.') || clientIp.startsWith('172.');
-      if (!isLocal) {
+    async ({ request, set, server }) => {
+      const peerIp = requestPeer(request) ?? server?.requestIP(request)?.address ?? null;
+      if (!canBootstrapLocalSession(request, peerIp)) {
         if (set) set.status = 403;
         return { ok: false, error: 'Session creation is restricted to local network.' };
       }

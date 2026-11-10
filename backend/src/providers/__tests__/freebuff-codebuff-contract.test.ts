@@ -27,7 +27,11 @@ describe('Freebuff PTY provider contract', () => {
       systemPrompt: '',
       tools: [],
     });
-    expect(config?.allowedTools).toEqual(toolsForRole('manager').map((tool) => tool.name));
+    expect([...((config?.allowedTools ?? []) as string[])].sort()).toEqual(
+      toolsForRole('manager')
+        .map((tool) => tool.name)
+        .sort(),
+    );
   });
 
   it('fails closed when disabled instead of starting a native TUI', async () => {

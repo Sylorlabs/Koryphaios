@@ -55,7 +55,6 @@ describe('offline CLI compatibility evidence', () => {
       'kilocode',
       'codebuff',
       'openai',
-      'chatbase',
       'Claude',
       'unknown',
       '',

@@ -5,7 +5,7 @@
  */
 export function routingRelevantText(value: string): string {
   const quotation =
-    /"[^"\n]{1,1000}"|(?<![\p{L}\p{N}])'[^'\n]{1,1000}'(?![\p{L}\p{N}])|“[^”\n]{1,1000}”|‘[^’\n]{1,1000}’/gu;
+    /"[^"\n]{1,1000}"|(?<![\p{L}\p{N}])'[^'\n]{1,1000}'(?![\p{L}\p{N}])|“[^”\n]{1,1000}”|‘[^’\n]{1,1000}’|`[^`\n]{1,1000}`/gu;
   const quotes = [...value.matchAll(quotation)];
   const explicitQuoteRejection =
     /\b(?:ignore (?:that|the) quote|quote is not the task|quoted text is not the task)\b/i.test(
@@ -22,15 +22,15 @@ export function routingRelevantText(value: string): string {
     const currentClause =
       prefix.split(/\b(?:actual|current|new) (?:task|request)\b/iu).at(-1) ?? prefix;
     const decoyPrefix =
-      /\b(?:historical context only|quoted (?:example|old issue|old memo|issue|comment)|(?:old|historical|archived) (?:issue|ticket|comment|note|memo|email)|pasted (?:article|issue|comment)|(?:test|parser) fixture (?:contains|says)|(?:inert|example) (?:text|string))\b/iu.test(
+      /\b(?:historical context only|ignore (?:the )?quoted (?:readme|section|note|example)|quoted (?:example|old issue|old memo|issue|comment|instruction|directive)|(?:old|historical|archived) (?:issue|ticket|comment|note|memo|email)|pasted (?:article|issue|comment)|(?:test|parser) fixture (?:contains|says)|(?:inert|example) (?:text|string))\b/iu.test(
         currentClause,
       );
     const historicalObject =
-      /\b(?:old|historical|archived|legacy|obsolete|rejected)\s+(?:(?:incident|design|engineering|implementation|support|project|release|quoted)\s+){0,3}(?:issue|ticket|comment|note|memo|email|report|readme|plan|proposal|task|instruction|diagnosis|title|checklist)\b/iu.test(
+      /\b(?:old|historical|archived|legacy|obsolete|rejected)\s+(?:(?:incident|design|engineering|implementation|support|project|release|quoted)\s+){0,3}(?:incident|issue|ticket|comment|note|memo|email|report|readme|plan|proposal|task|instruction|diagnosis|title|checklist)\b/iu.test(
         currentClause,
       );
     const dataObject =
-      /\b(?:fixture(?:['’]s)?|(?:test[- ]data|parser|unit[- ]test)\s+(?:field|input|string)|(?:log|alert)\s+(?:line|record|message)|sample\s+(?:text|string|input)|literal\s+(?:phrase|string|text))\b[^\n.!?]{0,180}$/iu.test(
+      /\b(?:fixture(?:['’]s)?|(?:test[- ]data|parser|unit[- ]test)\s+(?:field|input|string)|(?:log|alert)\s+(?:line|record|message)|tool\s+(?:result|output)|sample\s+(?:text|string|input)|literal\s+(?:phrase|string|text))\b[^\n.!?]{0,180}$/iu.test(
         currentClause,
       );
     const storedLiteral =
@@ -56,9 +56,25 @@ export function routingRelevantText(value: string): string {
       ? ' '
       : quoted;
   });
+  // Quotation marks are not required for an explicitly historical statement.
+  // Discard only the historical clause immediately before a declared current
+  // task; requests to inspect or implement an old proposal retain their subject.
+  const withoutHistoricalClauses = withoutDecoyQuotes.replace(
+    /(^|[.!?;\n]\s*)(?:(?:a|an|the)\s+)?(?:old|historical|archived|obsolete|rejected)\s+(?:(?:incident|design|engineering|implementation|support|project|release)\s+){0,3}(?:issue|ticket|comment|note|memo|email|report|readme|plan|proposal|task|instruction|diagnosis|title|checklist)\s+(?:discussed|mentioned|requested|said|says|mentions|asked\s+for)\b[^.!?;\n]{0,1000}(?=[.!?;\n]\s*(?:(?:the\s+)?(?:actual|current|new)\s+(?:task|request)|today['’]s\s+(?:task|request))\s+is\b)/giu,
+    '$1 ',
+  );
+  // An explicit exclusive current-task statement supersedes earlier quoted,
+  // incident, or release-note context. Keep later instructions in full.
+  const exclusiveScope =
+    /\b(?:the\s+)?(?:(?:active|actual|current)\s+(?:task|request)|task\s+here|request\s+here)\s+is\s+(?:solely|only)\b/iu.exec(
+      withoutHistoricalClauses,
+    );
+  const currentTaskText = exclusiveScope
+    ? withoutHistoricalClauses.slice(exclusiveScope.index)
+    : withoutHistoricalClauses;
   // Names of data fields/categories are not requests to operate the technology
   // named by that value. Retain the surrounding analysis or implementation task.
-  return withoutDecoyQuotes
+  return currentTaskText
     .replace(
       /\b(?:fixture(?:['’]s)?\s+(?:name|label)|(?:data|test[- ]data)\s+field)\s+(?:is|named|called)\s+[^,;.!?\n]{1,100}(?=[,;.!?\n]|$)/giu,
       'fixture label ',

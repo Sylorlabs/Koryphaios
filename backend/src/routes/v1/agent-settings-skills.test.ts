@@ -297,12 +297,13 @@ describe('agent settings skill routes', () => {
     const roomyResponse = await app.handle(
       request('/api/agent/skills/resolve', {
         prompt: 'Build an accessible browser analytics interface',
+        options: { contextBudget: 60_000 },
       }),
     );
     expect(roomyResponse.status).toBe(200);
     const roomy = (await roomyResponse.json()) as typeof payload;
     expect(roomy.data.blocked).toBe(false);
-    expect(roomy.data.contextBudget).toBe(30_000);
+    expect(roomy.data.contextBudget).toBe(60_000);
     expect(roomy.data.totalContextCost).toBeLessThanOrEqual(roomy.data.contextBudget);
   });
 

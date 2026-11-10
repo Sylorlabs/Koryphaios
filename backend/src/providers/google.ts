@@ -304,7 +304,11 @@ export class GoogleProvider implements Provider {
                       },
                     };
                   }
-                  if ((b.type === 'audio' || b.type === 'video') && b.mediaData && b.mediaMimeType) {
+                  if (
+                    (b.type === 'audio' || b.type === 'video') &&
+                    b.mediaData &&
+                    b.mediaMimeType
+                  ) {
                     return { inlineData: { mimeType: b.mediaMimeType, data: b.mediaData } };
                   }
                   return null;
@@ -362,7 +366,9 @@ export class GoogleProvider implements Provider {
         const msg = err instanceof Error ? err.message : String(err);
         const userConfirmedImages = userConfirmedImageInput(this, request);
         const hasMedia = request.messages.some(
-          (m) => Array.isArray(m.content) && m.content.some((b) => b.type === 'audio' || b.type === 'video'),
+          (m) =>
+            Array.isArray(m.content) &&
+            m.content.some((b) => b.type === 'audio' || b.type === 'video'),
         );
         if (
           hasImages &&
@@ -410,7 +416,15 @@ export class GoogleProvider implements Provider {
           if (isThought) yield { type: 'thinking_delta', thinking: part.text };
           else yield { type: 'content_delta', content: part.text };
         }
-        if (candidate.finishReason) yield { type: 'complete', finishReason: 'end_turn' };
+        if (candidate.finishReason) {
+          yield {
+            type: 'complete',
+            finishReason:
+              String(candidate.finishReason).toUpperCase() === 'MAX_TOKENS'
+                ? 'max_tokens'
+                : 'end_turn',
+          };
+        }
       }
     } catch (err: unknown) {
       const failure = providerStreamFailure(this.name, 'sdk', err);

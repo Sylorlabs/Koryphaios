@@ -57,6 +57,7 @@ describe('prose style and skill editorial diagnostics', () => {
     expect(debt.schemaVersion).toBe(1);
     expect(Object.keys(debt.counts).sort()).toEqual([...skillNames].sort());
 
+    const overBudget: Array<{ skill: string; allowed: number; actual: number }> = [];
     for (const skill of catalog.packages) {
       const findings = authoredMarkdownFiles(skill.directory).flatMap((path) =>
         lintProse(readFileSync(path, 'utf8'), { literals: skillNames }).findings.map((finding) => ({
@@ -64,13 +65,15 @@ describe('prose style and skill editorial diagnostics', () => {
           ...finding,
         })),
       );
-      expect(findings.length, skill.sidecar.name).toBeLessThanOrEqual(
-        debt.counts[skill.sidecar.name] ?? 0,
-      );
+      const allowed = debt.counts[skill.sidecar.name] ?? 0;
+      if (findings.length > allowed) {
+        overBudget.push({ skill: skill.sidecar.name, allowed, actual: findings.length });
+      }
       if (STRICT_DASH_FREE_SKILLS.has(skill.sidecar.name)) {
         expect(findings, skill.sidecar.name).toEqual([]);
       }
     }
+    expect(overBudget, 'Authored prose must not increase the recorded dash debt').toEqual([]);
   });
   test('reports dash families, compounds, double hyphens and soft hyphens', () => {
     for (const mark of [

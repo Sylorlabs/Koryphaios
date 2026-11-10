@@ -28,6 +28,7 @@ import { classifyTask, createTaskContract, type TaskContract, type TaskKind } fr
 import { getProviderHarnessCapabilities } from '../../providers/provider-harness';
 import { computeCostUsd } from '../../pricing';
 import type { CheckpointStore } from '../checkpoint-store';
+import { canonicalizePath } from '../../runtime/platform';
 import {
   normalizeSkillAssignment,
   type SkillAssignment,
@@ -39,8 +40,7 @@ import {
 // boundary back into KoryManager.
 type InternalMessage = ProviderMessage;
 
-/** Task kinds that mutate the repository and therefore cannot skip the
- *  completion-blocking critic review, regardless of user policy. Read-only
+/** Task kinds that use blocking review whenever the Critic is enabled. Read-only
  *  answer/research kinds (question, research-docs) are advisory-tolerant:
  *  one worker attempt, then advisory reporting instead of forced retries. */
 const ALWAYS_STRICT: ReadonlySet<TaskKind> = new Set([
@@ -70,6 +70,7 @@ export function resolveGateStrictness(
   configured: 'strict' | 'advisory' | 'off',
   failedReviews = 0,
 ): 'strict' | 'advisory' | 'off' {
+  if (configured === 'off') return 'off';
   if (ALWAYS_STRICT.has(kind)) return 'strict';
   if (configured === 'strict' && failedReviews >= 1) return 'advisory';
   return configured;
@@ -162,7 +163,7 @@ export interface WorkerPipelineHost {
     reviewDirectory?: string,
     producerIdentity?: { provider: ProviderName; model: string },
     skillReviewContext?: SkillReviewContext,
-  ): Promise<{ passed: boolean; skipped?: boolean; feedback?: string }>;
+  ): Promise<{ passed: boolean; skipped?: boolean; independent?: boolean; feedback?: string }>;
   runDestinationChecks(
     sessionId: string,
     workingDirectory: string,
@@ -220,14 +221,7 @@ export class WorkerPipelineService {
 
   private async canonicalDirectory(path: string, label: string): Promise<string> {
     if (!path?.trim()) throw new Error(`${label} is empty`);
-    // On Windows, use realpathSync.native for consistent 8.3 short name
-    // resolution (GetFinalPathNameByHandleW). On other platforms, use the
-    // default realpathSync to avoid behavior differences with the native
-    // version (especially on macOS where /var → /private/var symlinks can
-    // be resolved differently).
-    const canonicalResolve =
-      process.platform === 'win32' ? (realpathSync.native ?? realpathSync) : realpathSync;
-    const canonical = canonicalResolve(resolve(path));
+    const canonical = canonicalizePath(resolve(path));
     const info = await stat(canonical);
     if (!info.isDirectory()) throw new Error(`${label} is not a directory: ${canonical}`);
     return canonical;
@@ -918,7 +912,7 @@ export class WorkerPipelineService {
               model: routing.model,
               tokensIn: res.usage?.tokensIn,
               tokensOut: res.usage?.tokensOut,
-              verification: harness.verificationEligible ? 'verified' : 'unverified',
+              verification: harness.verificationEligible && !criticResult.skipped && criticResult.independent !== false ? 'verified' : 'unverified',
               workerTranscript: formatMessagesForCritic(res.workerMessages ?? []),
               criticFeedback: harness.verificationEligible
                 ? criticResult.feedback
@@ -988,7 +982,7 @@ export class WorkerPipelineService {
             model: routing.model,
             tokensIn: result.usage?.tokensIn,
             tokensOut: result.usage?.tokensOut,
-            verification: harness.verificationEligible ? 'verified' : 'unverified',
+            verification: harness.verificationEligible && !criticResult.skipped && criticResult.independent !== false ? 'verified' : 'unverified',
             workerTranscript: formatMessagesForCritic(result.workerMessages ?? []),
             criticFeedback: harness.verificationEligible
               ? criticResult.feedback
@@ -1012,6 +1006,7 @@ export class WorkerPipelineService {
           };
         }
         workerTask = `${immutableObjective}\n\nREVIEW FINDINGS FROM ATTEMPT ${attempts}:\n${criticResult.feedback ?? 'Critic rejected the attempt without valid findings.'}\n\nAddress the findings without changing or narrowing the original objective.`;
+        continue;
       }
       const quota = this.providers.isQuotaError(result.error);
       const retriable =

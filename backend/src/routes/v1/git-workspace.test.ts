@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, spyOn, test } from 'bun:test';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -16,6 +16,7 @@ const { errorHandler } = await import('../../middleware/error-handling');
 const { setContext } = await import('../../context');
 const { SessionStore } = await import('../../stores/session-store');
 const { GitWorkspace } = await import('../../kory/git-workspace');
+const { sourceControlService } = await import('../../services/source-control-service');
 const rules = await import('../../providers/cli-rules-skills');
 const rulesSpy = spyOn(rules, 'writeAllCliRulesAndSkills').mockImplementation(() => true);
 const { gitRoutes } = await import('./git');
@@ -29,6 +30,8 @@ const create = GitWorkspace.prototype.create;
 const createSpy = spyOn(GitWorkspace.prototype, 'create').mockImplementation(function (input) {
   return create.call(new GitWorkspace(repo, join(root, 'workspaces')), input);
 });
+const inspectProjectSpy = spyOn(sourceControlService, 'inspectProject');
+const createChatWorkspaceSpy = spyOn(sourceControlService, 'createChatWorkspace');
 function git(...args: string[]) {
   const result = Bun.spawnSync(['git', ...args], { cwd: repo, stdout: 'pipe', stderr: 'pipe' });
   if (result.exitCode) throw new Error(result.stderr.toString());
@@ -46,10 +49,12 @@ beforeAll(async () => {
   git('add', '.');
   git('commit', '-m', 'Initial');
   head = git('rev-parse', 'HEAD');
-  setContext({ sessions } as never);
+  setContext({ sessions, wsManager: { broadcastEphemeral() {} } } as never);
 });
 afterAll(() => {
   createSpy.mockRestore();
+  inspectProjectSpy.mockRestore();
+  createChatWorkspaceSpy.mockRestore();
   rulesSpy.mockRestore();
   localAuth.dispose();
   rmSync(root, { recursive: true, force: true });
@@ -87,6 +92,9 @@ describe('Git workspace chat API', () => {
   test('reads the explicit project rather than the launch directory', async () => {
     const response = await app.handle(request('/api/git/selection'));
     expect(response.status).toBe(200);
+    expect(inspectProjectSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ path: realpathSync(repo) }),
+    );
     expect(await response.json()).toMatchObject({
       ok: true,
       data: { isRepo: true, head, branch: 'main' },
@@ -101,6 +109,14 @@ describe('Git workspace chat API', () => {
       }),
     );
     expect(response.status).toBe(200);
+    expect(createChatWorkspaceSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ path: realpathSync(repo) }),
+      expect.objectContaining({
+        ref: 'refs/heads/main',
+        expectedHash: head,
+        branch: 'feature/api',
+      }),
+    );
     const body = await response.json();
     expect(body.ok).toBe(true);
     expect(body.data.workingDirectory).toBe(body.data.gitWorkspace.repositoryPath);

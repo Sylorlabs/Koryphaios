@@ -121,7 +121,6 @@ const checks: Check[] = [
     path: '/api/spend-caps/sessions/test-session',
     assert: (b) => (b?.ok ? null : 'ok!=true'),
   },
-  { name: 'mode', path: '/api/mode', assert: (b) => (b?.ok ? null : 'ok!=true') },
   { name: 'memory/stats', path: '/api/memory/stats', assert: (b) => (b?.ok ? null : 'ok!=true') },
   {
     name: 'agent/settings',

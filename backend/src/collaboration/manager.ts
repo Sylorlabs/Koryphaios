@@ -3,6 +3,7 @@ import { db, collaborationSessions, sessionParticipants } from '../db';
 import { eq, and, desc } from 'drizzle-orm';
 import { relayClient, relayEnabled, resolveRelayJoinCode } from './relay-client';
 import { serverLog } from '../logger';
+import { getInstalledContext } from '../runtime/context-access';
 import { DEFAULT_COLLABORATION_POLICY, type CollaborationPolicy } from '@koryphaios/shared';
 
 const log = serverLog.child({ module: 'collab-manager' });
@@ -69,7 +70,10 @@ function normalizePolicy(
     ...patch,
     accessTiers: tiers,
     defaultTierId,
-    hostName: String(patch.hostName ?? current.hostName ?? 'Host').trim().slice(0, 80) || 'Host',
+    hostName:
+      String(patch.hostName ?? current.hostName ?? 'Host')
+        .trim()
+        .slice(0, 80) || 'Host',
     sessionName:
       String(patch.sessionName ?? current.sessionName ?? 'Team session')
         .trim()
@@ -225,10 +229,18 @@ function parseRuntimeSnapshot(
                 ? { reasoningLevel: prompt.reasoningLevel }
                 : {}),
               ...(Array.isArray(prompt.commandAllowlist)
-                ? { commandAllowlist: prompt.commandAllowlist.filter((item): item is string => typeof item === 'string') }
+                ? {
+                    commandAllowlist: prompt.commandAllowlist.filter(
+                      (item): item is string => typeof item === 'string',
+                    ),
+                  }
                 : {}),
               ...(Array.isArray(prompt.commandBlocklist)
-                ? { commandBlocklist: prompt.commandBlocklist.filter((item): item is string => typeof item === 'string') }
+                ? {
+                    commandBlocklist: prompt.commandBlocklist.filter(
+                      (item): item is string => typeof item === 'string',
+                    ),
+                  }
                 : {}),
               ...(typeof prompt.tierId === 'string' ? { tierId: prompt.tierId } : {}),
             },
@@ -339,17 +351,16 @@ export class CollaborationManager {
     );
   }
 
-  private buildRuntimeSnapshot(
-    sessionId: string,
-    revision: number,
-  ): PersistedCollaborationRuntime {
+  private buildRuntimeSnapshot(sessionId: string, revision: number): PersistedCollaborationRuntime {
     return {
       version: 1,
       revision,
       pendingPrompts: Array.from(pendingPrompts.entries())
         .filter(([, prompt]) => prompt.sessionId === sessionId)
         .map(([promptId, prompt]) => ({ ...prompt, promptId })),
-      pendingJoins: Array.from(pendingJoins.values()).filter((join) => join.sessionId === sessionId),
+      pendingJoins: Array.from(pendingJoins.values()).filter(
+        (join) => join.sessionId === sessionId,
+      ),
       participants: Array.from(connectedGuests.values())
         .filter((participant) => participant.sessionId === sessionId)
         .map(({ sessionId: _sessionId, ...participant }) => participant),
@@ -375,10 +386,7 @@ export class CollaborationManager {
   private async persistRuntimeState(sessionId: string): Promise<void> {
     await this.enqueueRuntimeOperation(sessionId, async () => {
       const revision = (this.runtimeRevisions.get(sessionId) ?? 0) + 1;
-      await this.runtimeSnapshotWriter(
-        sessionId,
-        this.buildRuntimeSnapshot(sessionId, revision),
-      );
+      await this.runtimeSnapshotWriter(sessionId, this.buildRuntimeSnapshot(sessionId, revision));
       this.runtimeRevisions.set(sessionId, revision);
     });
   }
@@ -474,8 +482,7 @@ export class CollaborationManager {
       }
 
       try {
-        const { getContext } = await import('../context');
-        const submission = await getContext().kory.startSessionTurn({
+        const submission = await getInstalledContext().kory.startSessionTurn({
           sessionId: baseSessionId,
           source: 'collaboration',
           sourceCommandId: pending.sourceCommandId,
@@ -641,10 +648,17 @@ export class CollaborationManager {
 
           // Serve shared providers to remote clients over this relay
           // connection (separate from the guest-prompt/session path below).
+          // The dynamic import can reject in a packaged build (module absent
+          // from the bundle); an unhandled rejection terminates Bun.
           const hostRelay = relayClient;
-          void import('./remote-provider-host').then(({ startProviderHost }) =>
-            startProviderHost(hostRelay, hostName?.trim() || 'Host'),
-          );
+          void import('./remote-provider-host')
+            .then(({ startProviderHost }) => startProviderHost(hostRelay, hostName?.trim() || 'Host'))
+            .catch((err: unknown) => {
+              log.error(
+                { err: err instanceof Error ? err.message : String(err) },
+                'Remote provider host failed to start',
+              );
+            });
 
           // Relay dispatch is synchronous, so explicitly observe the durable
           // handler promise rather than leaking an unhandled rejection.
@@ -693,7 +707,10 @@ export class CollaborationManager {
 
     let policy: CollaborationPolicy = existing
       ? readStoredPolicy(existing.aiState)
-      : normalizePolicy(DEFAULT_COLLABORATION_POLICY, { workspacePaths: requestedWorkspacePaths, hostName });
+      : normalizePolicy(DEFAULT_COLLABORATION_POLICY, {
+          workspacePaths: requestedWorkspacePaths,
+          hostName,
+        });
     if (existing && (requestedWorkspacePaths.length || hostName?.trim())) {
       policy = normalizePolicy(policy, {
         ...(requestedWorkspacePaths.length && { workspacePaths: requestedWorkspacePaths }),
@@ -759,7 +776,9 @@ export class CollaborationManager {
    * projection rather than a stored invite: renderer reloads regain control
    * and polling, while bearer invite URLs are never written to disk.
    */
-  async getActiveHostForBaseSession(baseSessionId: string): Promise<CollaborationHostSnapshot | null> {
+  async getActiveHostForBaseSession(
+    baseSessionId: string,
+  ): Promise<CollaborationHostSnapshot | null> {
     const [session] = await db
       .select()
       .from(collaborationSessions)
@@ -800,7 +819,12 @@ export class CollaborationManager {
     if (!existing) return null;
     if (!relayEnabled || !relayClient) return existing;
     if (relayClient.isConnected) return existing;
-    return this.hostSession(baseSessionId, existing.ownerId, existing.policy.workspacePaths ?? [], existing.policy.hostName);
+    return this.hostSession(
+      baseSessionId,
+      existing.ownerId,
+      existing.policy.workspacePaths ?? [],
+      existing.policy.hostName,
+    );
   }
 
   async updatePolicy(

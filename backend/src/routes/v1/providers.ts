@@ -13,6 +13,7 @@ import {
 } from '../../providers/custom-provider-icons';
 import type { ProviderName } from '@koryphaios/shared';
 import { serverLog } from '../../logger';
+import { wsManager } from '../../ws/ws-manager';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 import { ValidationError, InternalError } from '../../errors/types';
 import { db, userCredentials } from '../../db';
@@ -35,6 +36,8 @@ import { getPromptCacheUsageSummary } from '../../credit-accountant';
 import { getManagedCodexAppServer } from '../../providers/codex-app-server';
 import { getCatalogRefreshScheduler } from '../../providers/catalog-refresh';
 import { discoverCliAccounts, getDiscoveredCliAccount } from '../../providers/cli-accounts';
+import { discoverFreebuffAccounts } from '../../providers/auth-utils';
+import { getFreebuffAccountSnapshot } from '../../providers/freebuff-account';
 import {
   clearKimiCodeAuthState,
   createKimiCodeAuthMarker,
@@ -77,6 +80,10 @@ const providerConfigBody = t.Object({
   awsSessionToken: t.Optional(t.String()),
   selectedModels: t.Optional(t.Array(t.String())),
   hideModelSelector: t.Optional(t.Boolean()),
+  /** Effective context budget for CLI providers that report selectable tiers.
+   *  A positive integer from the provider's own catalog; 0 clears the choice
+   *  and restores the maximum tier. */
+  contextWindow: t.Optional(t.Number()),
   /**
    * Explicit intent from "Run safe check" / an explicit connect: re-probe the
    * stored credentials even though no credential field changed, and close the
@@ -93,10 +100,15 @@ const providerConfigBody = t.Object({
 function splitFullCheck(body: unknown): {
   credentials: Record<string, unknown>;
   fullCheck: boolean;
+  preferenceOnly: boolean;
 } {
   const record = (body ?? {}) as Record<string, unknown>;
   const { fullCheck, ...credentials } = record;
-  return { credentials, fullCheck: fullCheck === true };
+  const preferenceKeys = new Set(['selectedModels', 'hideModelSelector', 'contextWindow']);
+  const preferenceOnly =
+    Object.keys(credentials).length > 0 &&
+    Object.keys(credentials).every((key) => preferenceKeys.has(key));
+  return { credentials, fullCheck: fullCheck === true, preferenceOnly };
 }
 
 function readStoredMetadata(credential: UserCredential): StoredAccountMetadata {
@@ -109,6 +121,28 @@ function readStoredMetadata(credential: UserCredential): StoredAccountMetadata {
 function syncProviderConfigsSafely(providers: ReturnType<typeof getContext>['providers']): boolean {
   if (process.env.NODE_ENV === 'test') return true;
   return syncProviderConfigsToConfig(PROJECT_ROOT, providers.getConfigs());
+}
+
+function persistRejectedConnection(
+  providers: ReturnType<typeof getContext>['providers'],
+  name: string,
+  result: { error?: string; credentialsRetained?: boolean },
+): { ok: false; error?: string } {
+  if (result.credentialsRetained) {
+    const config = providers.getConfigs()[name];
+    // Persist only the submitted provider, never the rest of the runtime map.
+    const saved =
+      config &&
+      config.name === name &&
+      (process.env.NODE_ENV === 'test' ||
+        syncProviderConfigsToConfig(PROJECT_ROOT, { [name]: config }));
+    if (!saved)
+      return {
+        ok: false,
+        error: 'Verification failed and the credential could not be saved. Retry saving it.',
+      };
+  }
+  return { ok: false, error: result.error };
 }
 
 function providerSecretStoreRoot(): string {
@@ -230,16 +264,50 @@ async function getStoredAccountBundle(
   return account ? { account, values } : null;
 }
 
+type Providers = ReturnType<typeof getContext>['providers'];
+const statusChecks = new WeakMap<Providers, { pending?: Promise<void>; checkedAt: number }>();
+
+/** A status read serves the current projection immediately. Account adoption
+ * and verification can involve CLIs, Docker, or remote accounts; publish their
+ * results afterward instead of holding the application's startup gate open. */
+async function refreshStatus(providers: Providers, force: boolean): Promise<void> {
+  const previous = statusChecks.get(providers);
+  if (force) {
+    await previous?.pending;
+    await adoptManagedCodexSession();
+    await providers.autoConnectCliProviders(true);
+    await providers.refreshModelCatalogs();
+    return;
+  }
+  if (previous?.pending || (previous && Date.now() - previous.checkedAt < 5_000)) return;
+  const check = { checkedAt: 0, pending: undefined as Promise<void> | undefined };
+  statusChecks.set(providers, check);
+  check.pending = (async () => {
+    // Yield past the HTTP response before even the local discovery work starts.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await adoptManagedCodexSession();
+    await providers.autoConnectCliProviders();
+    wsManager?.broadcastEphemeral({
+      type: 'provider.status',
+      payload: { providers: providers.getStatus() },
+      timestamp: Date.now(),
+    });
+  })()
+    .catch((error: unknown) => {
+      serverLog.debug({ error }, 'Background provider status verification failed');
+    })
+    .finally(() => {
+      check.checkedAt = Date.now();
+      check.pending = undefined;
+    });
+}
+
 export const providerRoutes = new Elysia({ prefix: '/api/providers' })
   .get('/', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const { providers } = getContext();
-    await adoptManagedCodexSession();
     const forceRefreshModels = new URL(request.url).searchParams.get('refreshModels') === '1';
-    await providers.autoConnectCliProviders(forceRefreshModels);
-    if (forceRefreshModels) {
-      await providers.refreshModelCatalogs();
-    }
+    await refreshStatus(providers, forceRefreshModels);
     return {
       ok: true,
       data: providers.getStatus(),
@@ -248,12 +316,8 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
   .get('/status', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const { providers } = getContext();
-    await adoptManagedCodexSession();
     const forceRefreshModels = new URL(request.url).searchParams.get('refreshModels') === '1';
-    await providers.autoConnectCliProviders(forceRefreshModels);
-    if (forceRefreshModels) {
-      await providers.refreshModelCatalogs();
-    }
+    await refreshStatus(providers, forceRefreshModels);
     return {
       ok: true,
       data: providers.getStatus(),
@@ -264,9 +328,7 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
     const scheduler = getCatalogRefreshScheduler();
     return {
       ok: true,
-      data: scheduler
-        ? scheduler.getStatus()
-        : { running: false, providers: [] },
+      data: scheduler ? scheduler.getStatus() : { running: false, providers: [] },
     };
   })
   .get('/cache-diagnostics', ({ request, set }) => {
@@ -453,6 +515,7 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
             canSaveUnverified: probe.canSaveUnverified,
             requiresManualModels: probe.canSaveUnverified && manualModels.length === 0,
             normalizedBaseUrl: probe.normalizedBaseUrl,
+            ...(probe.status !== undefined ? { upstreamStatus: probe.status } : {}),
           };
         }
         if (manualModels.length === 0) {
@@ -525,27 +588,53 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
       return { ok: false, error: 'Custom provider not found' };
     }
 
-    let form: FormData;
-    try {
-      form = await request.formData();
-    } catch {
-      throw new ValidationError('Upload a PNG icon using multipart form data');
-    }
-    const icon = form.get('icon');
-    const shape = form.get('shape');
-    if (!(icon instanceof File)) throw new ValidationError('Choose an icon image to upload');
-    if (icon.size < 1 || icon.size > CUSTOM_PROVIDER_ICON_MAX_BYTES) {
-      throw new ValidationError(
-        `Custom provider icon must be between 1 and ${CUSTOM_PROVIDER_ICON_MAX_BYTES} bytes`,
-      );
+    let bytes: Uint8Array;
+    let contentType: string;
+    let shape: unknown;
+    if (request.headers.get('content-type')?.toLowerCase().includes('application/json')) {
+      let body: { base64?: unknown; shape?: unknown };
+      try {
+        body = (await request.json()) as { base64?: unknown; shape?: unknown };
+      } catch {
+        throw new ValidationError('Custom provider icon payload is invalid');
+      }
+      if (typeof body.base64 !== 'string' || !body.base64.trim()) {
+        throw new ValidationError('Choose an icon image to upload');
+      }
+      if (body.base64.length > Math.ceil((CUSTOM_PROVIDER_ICON_MAX_BYTES * 4) / 3) + 8) {
+        throw new ValidationError(
+          `Custom provider icon must be between 1 and ${CUSTOM_PROVIDER_ICON_MAX_BYTES} bytes`,
+        );
+      }
+      const decoded = Buffer.from(body.base64, 'base64');
+      bytes = new Uint8Array(decoded.buffer, decoded.byteOffset, decoded.byteLength);
+      contentType = 'image/png';
+      shape = body.shape;
+    } else {
+      let form: FormData;
+      try {
+        form = await request.formData();
+      } catch {
+        throw new ValidationError('Upload a PNG icon using multipart form data');
+      }
+      const icon = form.get('icon');
+      shape = form.get('shape');
+      if (!(icon instanceof File)) throw new ValidationError('Choose an icon image to upload');
+      if (icon.size < 1 || icon.size > CUSTOM_PROVIDER_ICON_MAX_BYTES) {
+        throw new ValidationError(
+          `Custom provider icon must be between 1 and ${CUSTOM_PROVIDER_ICON_MAX_BYTES} bytes`,
+        );
+      }
+      bytes = new Uint8Array(await icon.arrayBuffer());
+      contentType = icon.type;
     }
 
     try {
       const previousIcon = config.customIcon;
       const metadata = await storeCustomProviderIcon({
         providerId: id,
-        bytes: new Uint8Array(await icon.arrayBuffer()),
-        contentType: icon.type,
+        bytes,
+        contentType,
         shape,
       });
       const updated = providers.setCustomProviderIcon(id as ProviderName, metadata);
@@ -637,6 +726,53 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
     removeProviderSecrets(providerSecretStoreRoot(), id);
     if (process.env.NODE_ENV !== 'test') removeProviderFromConfig(PROJECT_ROOT, id);
     return { ok: true };
+  })
+
+  /**
+   * Per-provider refresh: re-check this provider and reload its model catalog.
+   *
+   * The UI's per-row Refresh button. Deliberately one provider, so a click costs
+   * one probe rather than a fleet-wide refresh, and coalesced per provider so a
+   * double-click cannot spawn the same CLI twice. `runtimeCheck` additionally
+   * spends a real generation and is opt-in because it costs tokens.
+   */
+  .post('/:name/refresh', async ({ request, params: { name }, set, body }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const { providers } = getContext();
+    const result = await providers.refreshProviderAndVerify(name as ProviderName, {
+      runtimeCheck: (body as { runtimeCheck?: boolean } | undefined)?.runtimeCheck === true,
+    });
+    if (result.status) {
+      // Push the fresh status so every open surface (model picker included)
+      // sees it without re-fetching.
+      try {
+        wsManager?.broadcastEphemeral({
+          type: 'provider.status',
+          payload: { providers: providers.getStatus() },
+          timestamp: Date.now(),
+        });
+      } catch {
+        // A push failure must not fail the refresh the user asked for.
+      }
+    }
+    return { ok: true, ...result };
+  })
+  .get('/:name/account', async ({ request, params: { name }, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    if (name !== 'freebuff') {
+      set.status = 404;
+      return { ok: false, error: 'Account balance API is only available for Freebuff' };
+    }
+    const forceRefresh = new URL(request.url).searchParams.get('refresh') === '1';
+    const accounts = discoverFreebuffAccounts();
+    const data = await Promise.all(
+      accounts.map(async (account) => ({
+        accountId: account.id,
+        label: account.label,
+        snapshot: await getFreebuffAccountSnapshot(account.profileDir, forceRefresh),
+      })),
+    );
+    return { ok: true, data };
   })
   .post('/:name/auth/start', async ({ request, params: { name }, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
@@ -732,15 +868,16 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
     async ({ request, params: { name }, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       const { providers } = getContext();
-      const { credentials, fullCheck } = splitFullCheck(body);
+      const { credentials, fullCheck, preferenceOnly } = splitFullCheck(body);
       const result = await providers.setCredentials(name as ProviderName, credentials, {
         fullCheck,
+        preferenceOnly,
       });
       if (result.success) {
         syncProviderConfigsSafely(providers);
         return { ok: true };
       }
-      return { ok: false, error: result.error };
+      return persistRejectedConnection(providers, name, result);
     },
     { body: providerConfigBody },
   )
@@ -802,7 +939,7 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
         syncProviderConfigsSafely(providers);
         return { ok: true };
       }
-      return { ok: false, error: result.error };
+      return persistRejectedConnection(providers, name, result);
     },
     { body: providerConfigBody },
   )
@@ -816,7 +953,7 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
         syncProviderConfigsSafely(providers);
         return { ok: true };
       }
-      return { ok: false, error: result.error };
+      return persistRejectedConnection(providers, name, result);
     },
     { body: providerConfigBody },
   )

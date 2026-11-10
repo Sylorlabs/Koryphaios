@@ -54,6 +54,7 @@ import {
   writeManagedCliFile,
 } from './managed-cli-storage';
 import { buildProviderCliEnv } from './cli-environment';
+import { recordedToolIdentity, recordedToolInput, recordedToolName, recordedToolOutput } from './recorded-tool';
 
 const GROK_STREAM_TIMEOUT_MS = 300_000;
 
@@ -301,9 +302,7 @@ export class GrokBuildProvider implements Provider {
     // As with Antigravity: the soft jail replaces HOME, so link the dot-dir
     // the CLI actually resolves (`$HOME/.grok`) to the staged home holding the
     // kory MCP config and the credential links. Additive with GROK_HOME.
-    const jail = request.sandbox
-      ? buildSoftJail(baseEnv, [join(grokHome, '.grok')])
-      : null;
+    const jail = request.sandbox ? buildSoftJail(baseEnv, [join(grokHome, '.grok')]) : null;
     const wrapped = request.sandbox
       ? wrapCommand(bin, args, {
           cwd,
@@ -526,6 +525,17 @@ function refreshModelsInBackground(): Promise<void> {
   modelsFetchInProgress = true;
   modelRefreshPromise = Promise.all([fetchGrokModels(bin), probeGrokReasoningLevels(bin)])
     .then(([models, reasoningLevels]) => {
+      if (models.length === 0) {
+        // Negative cache. `listModels()` kicks a background refresh whenever the
+        // catalog is not fresh, so leaving the timestamp untouched on an empty
+        // result re-spawned `grok models` plus the reasoning probe on every
+        // provider-status render. Serve the previous catalog for one TTL instead.
+        cachedModelsAt = Date.now();
+        providerLog.warn(
+          { provider: 'grok' },
+          'grok models returned no models; keeping the previous catalog',
+        );
+      }
       if (models.length > 0) {
         // The CLI's own per-model metadata cache (~/.grok/models_cache.json)
         // is authoritative: real context_window and, critically, whether the
@@ -573,6 +583,9 @@ function refreshModelsInBackground(): Promise<void> {
       }
     })
     .catch((err) => {
+      // Same negative cache as an empty result: a failing probe must not be
+      // retried on every status read.
+      cachedModelsAt = Date.now();
       providerLog.warn(
         safeProviderDiagnostic('grok', 'stdout', err),
         'Grok Build model list refresh failed',
@@ -937,9 +950,9 @@ function encodeGrokCwd(cwd: string): string {
 interface GrokToolTailer {
   updatesPath: string;
   offset: number;
-  /** toolCallId → { name, filePath } captured from the initial tool_call so a
+  /** toolCallId → name/input captured from the initial tool_call so a
    *  later completed update can be tied back to it. */
-  calls: Map<string, { name: string; filePath?: string; content?: string; emitted: boolean }>;
+  calls: Map<string, { name?: string; input: Record<string, unknown>; emitted: boolean }>;
 }
 
 function newGrokToolTailer(cwd: string, sessionId: string): GrokToolTailer {
@@ -949,7 +962,41 @@ function newGrokToolTailer(cwd: string, sessionId: string): GrokToolTailer {
 
 const GROK_FILE_WRITE_TOOLS = new Set(['write', 'create_file', 'write_file']);
 const GROK_FILE_EDIT_TOOLS = new Set(['edit', 'edit_file', 'apply_patch', 'str_replace']);
-const GROK_FILE_READ_TOOLS = new Set(['read_file', 'read', 'view_file']);
+
+/** Correlate ACP result updates with the original call, preserving full input.
+ *  Titles are human-facing; use one as a name only when it is an identifier. */
+export function parseGrokToolUpdate(update: Record<string, unknown>, calls: GrokToolTailer['calls']): ProviderEvent[] {
+  const id = typeof update.toolCallId === 'string' ? update.toolCallId : '';
+  if (!id || !['tool_call', 'tool_call_update'].includes(String(update.sessionUpdate))) return [];
+  const previous = calls.get(id);
+  if (previous?.emitted) return [];
+  const title = typeof update.title === 'string' && /^[A-Za-z_][\w:./-]*$/.test(update.title)
+    ? recordedToolName({ name: update.title }) : undefined;
+  const input = { ...previous?.input, ...recordedToolInput(update.rawInput) };
+  const identity = recordedToolIdentity(recordedToolName(update) ?? previous?.name ?? title, input);
+  const call = { ...identity, emitted: false };
+  calls.set(id, call);
+  if (update.status !== 'completed' && update.status !== 'failed') return [];
+  call.emitted = true;
+  const failed = update.status === 'failed';
+  const events: ProviderEvent[] = [];
+  const name = (call.name ?? '').toLowerCase();
+  const path = call.input.file_path ?? call.input.target_file ?? call.input.path;
+  if (!failed && typeof path === 'string' && (GROK_FILE_WRITE_TOOLS.has(name) || GROK_FILE_EDIT_TOOLS.has(name))) {
+    events.push({
+      type: 'file_edit', filePath: path,
+      fileContent: typeof call.input.content === 'string' ? call.input.content : '',
+      fileOperation: GROK_FILE_WRITE_TOOLS.has(name) ? 'create' : 'edit',
+    });
+  }
+  events.push({
+    type: 'tool_executed', toolCallId: id, toolName: call.name,
+    toolInput: JSON.stringify(call.input),
+    toolOutput: recordedToolOutput(update.rawOutput ?? update.content ?? update.error ?? '').slice(0, 8_000),
+    isError: failed,
+  });
+  return events;
+}
 
 function drainGrokToolTailer(state: GrokToolTailer): ProviderEvent[] {
   const events: ProviderEvent[] = [];
@@ -966,7 +1013,7 @@ function drainGrokToolTailer(state: GrokToolTailer): ProviderEvent[] {
     );
     return events;
   }
-  const fresh = text.slice(state.offset);
+  const fresh = Buffer.from(text, 'utf-8').subarray(state.offset).toString('utf-8');
   const lastNl = fresh.lastIndexOf('\n');
   if (lastNl === -1) return events;
   state.offset += Buffer.byteLength(fresh.slice(0, lastNl + 1), 'utf-8');
@@ -985,49 +1032,7 @@ function drainGrokToolTailer(state: GrokToolTailer): ProviderEvent[] {
       );
       continue;
     }
-    const kind = update.sessionUpdate as string | undefined;
-    const toolCallId = update.toolCallId as string | undefined;
-    if (!toolCallId) continue;
-    const raw = (update.rawInput ?? {}) as Record<string, unknown>;
-    const path = (raw.file_path ?? raw.target_file ?? raw.path) as string | undefined;
-
-    if (kind === 'tool_call') {
-      state.calls.set(toolCallId, {
-        name: String(update.title ?? 'tool'),
-        filePath: path,
-        content: typeof raw.content === 'string' ? raw.content : undefined,
-        emitted: false,
-      });
-    } else if (kind === 'tool_call_update') {
-      const call = state.calls.get(toolCallId) ?? { name: 'tool', emitted: false };
-      if (path && !call.filePath) call.filePath = path;
-      if (typeof raw.content === 'string' && !call.content) call.content = raw.content;
-      state.calls.set(toolCallId, call);
-
-      // Emit once, when the tool completes.
-      if (update.status === 'completed' && !call.emitted) {
-        call.emitted = true;
-        const name = call.name.toLowerCase();
-        if (call.filePath && (GROK_FILE_WRITE_TOOLS.has(name) || GROK_FILE_EDIT_TOOLS.has(name))) {
-          events.push({
-            type: 'file_edit',
-            filePath: call.filePath,
-            fileContent: call.content ?? '',
-            fileOperation: GROK_FILE_WRITE_TOOLS.has(name) ? 'create' : 'edit',
-          });
-        } else {
-          const detail = call.filePath ? ` ${call.filePath}` : '';
-          events.push({
-            type: 'tool_executed',
-            toolName: call.name,
-            toolInput: JSON.stringify(call.filePath ? { path: call.filePath } : {}),
-            toolOutput: GROK_FILE_READ_TOOLS.has(name)
-              ? `Read${detail}`
-              : `Ran ${call.name}${detail}`,
-          });
-        }
-      }
-    }
+    events.push(...parseGrokToolUpdate(update, state.calls));
   }
   return events;
 }

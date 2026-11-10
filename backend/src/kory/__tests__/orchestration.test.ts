@@ -176,7 +176,6 @@ describe('KoryManager Orchestration', () => {
   test('compiled prompts selectively suggest goals and reusable workflows', () => {
     const compiled = compilePrompt({
       role: 'manager',
-      mode: 'advanced',
       provider: 'openai',
       workingDirectory: testWorkDir,
       taskContract: createTaskContract('Explain the architecture'),
@@ -186,7 +185,7 @@ describe('KoryManager Orchestration', () => {
     expect(compiled.systemPrompt).toContain('ordinary questions, one-off fixes, or small edits');
   });
 
-  test('critic role is limited to read-only filesystem tools', () => {
+  test('critic role gets read tools plus approved verification commands and delegation', () => {
     const registry = new ToolRegistry();
     registry.register(new BashTool());
     registry.register(new ReadFileTool());
@@ -201,7 +200,7 @@ describe('KoryManager Orchestration', () => {
       .map((d) => d.name)
       .sort();
 
-    expect(criticNames).toEqual(['glob', 'grep', 'ls', 'read_file']);
+    expect(criticNames).toEqual(['bash', 'delegate_to_worker', 'glob', 'grep', 'ls', 'read_file']);
   });
 
   test('worker tool context uses the granted worktree directory as cwd', async () => {
@@ -383,7 +382,6 @@ describe('KoryManager Orchestration', () => {
 
     const compiled = compilePrompt({
       role: 'manager',
-      mode: 'beginner',
       provider: 'openai',
       workingDirectory: join(root, 'packages', 'app'),
       taskContract: createTaskContract('Build a custom native UI toolkit'),
@@ -402,7 +400,6 @@ describe('KoryManager Orchestration', () => {
   test('native providers remain eligible for every role under Kory enforcement', () => {
     const compiled = compilePrompt({
       role: 'critic',
-      mode: 'advanced',
       provider: 'claude',
       workingDirectory: testWorkDir,
       taskContract: createTaskContract('Review the implementation'),
@@ -429,7 +426,6 @@ describe('KoryManager Orchestration', () => {
     });
     const worker = compilePrompt({
       role: 'worker',
-      mode: 'advanced',
       provider: 'openai',
       workingDirectory: testWorkDir,
       taskContract,
@@ -443,13 +439,31 @@ describe('KoryManager Orchestration', () => {
 
     const critic = compilePrompt({
       role: 'critic',
-      mode: 'advanced',
       provider: 'openai',
       workingDirectory: testWorkDir,
       taskContract,
     });
+    const managerAuto = compilePrompt({
+      role: 'manager',
+      provider: 'openai',
+      workingDirectory: testWorkDir,
+      taskContract,
+      skillSelection: { pins: ['critic-auto-selection'] },
+    });
+    expect(managerAuto.manifest.skills.map((skill) => skill.name)).toContain('critic-auto-selection');
+    expect(managerAuto.manifest.skills.map((skill) => skill.name)).not.toContain('critic-review');
+
+    const managerWithoutAuto = compilePrompt({
+      role: 'manager',
+      provider: 'openai',
+      workingDirectory: testWorkDir,
+      taskContract,
+    });
+    expect(managerWithoutAuto.manifest.skills.map((skill) => skill.name)).not.toContain('critic-auto-selection');
+
     const criticSkills = critic.manifest.skills.map((skill) => skill.name);
     expect(criticSkills).toContain('verification');
+    expect(criticSkills).toContain('critic-review');
     expect(criticSkills).toContain('testing-engineering');
     expect(critic.skillDelivery.requiredSkills).toEqual(['testing-engineering']);
     expect(

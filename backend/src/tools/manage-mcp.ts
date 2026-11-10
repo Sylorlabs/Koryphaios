@@ -7,8 +7,8 @@
 //   • Manager-only (role: 'manager').
 //   • Host approval is required in guarded/custom modes because adding an MCP
 //     server grants a new process/network tool surface to future turns.
-//   • Plan mode blocks mutations (add/update/remove) — only list/test/reload
-//     are read-only enough for plan mode. This keeps a planning agent from
+//   • Planning interaction blocks mutations (add/update/remove) — only list/test/reload
+//     are read-only enough for planning. This keeps a planning agent from
 //     wiring up new tool surfaces before the user approves the plan.
 
 import type { Tool, ToolCallInput, ToolCallOutput, ToolContext } from './registry';
@@ -22,9 +22,10 @@ import {
   type McpServerInput,
 } from '../mcp/server-service';
 import { KoryphaiosError } from '../errors/types';
+import { mcpProjectScope } from '../mcp/project-scope';
 
 function isPlanMode(ctx: ToolContext): boolean {
-  return ctx.permissionPolicy?.mode === 'plan';
+  return ctx.permissionPolicy?.interactionMode === 'plan';
 }
 
 function formatStatusLine(s: {
@@ -48,7 +49,7 @@ export class ManageMcpServerTool implements Tool {
     'Manage user-pluggable MCP servers: list, add, update, remove, test-connect, or reload. ' +
     'Adding an MCP server exposes its tools to all agents as mcp_<server>_<tool>. ' +
     'Env vars (including tokens) are stored in the 0600 secret store, never in koryphaios.json. ' +
-    'Mutations are blocked in plan mode — use action mode to add or remove servers.';
+    'Mutations are blocked in planning mode — use action mode to add or remove servers.';
   readonly inputSchema = {
     type: 'object',
     properties: {
@@ -98,7 +99,7 @@ export class ManageMcpServerTool implements Tool {
     const start = performance.now();
     const action = call.input.action as string | undefined;
     const name = call.input.name as string | undefined;
-    const projectRoot = ctx.workingDirectory;
+    const projectRoot = mcpProjectScope(ctx.settingsRoot ?? ctx.workingDirectory);
 
     try {
       switch (action) {
@@ -128,7 +129,7 @@ export class ManageMcpServerTool implements Tool {
             return {
               callId: call.id,
               name: this.name,
-              output: 'Blocked: cannot add MCP servers in plan mode. Switch to action mode.',
+              output: 'Blocked: cannot add MCP servers in planning mode. Switch to action mode.',
               isError: true,
               durationMs: performance.now() - start,
             };
@@ -150,7 +151,7 @@ export class ManageMcpServerTool implements Tool {
             return {
               callId: call.id,
               name: this.name,
-              output: 'Blocked: cannot update MCP servers in plan mode. Switch to action mode.',
+              output: 'Blocked: cannot update MCP servers in planning mode. Switch to action mode.',
               isError: true,
               durationMs: performance.now() - start,
             };
@@ -172,7 +173,7 @@ export class ManageMcpServerTool implements Tool {
             return {
               callId: call.id,
               name: this.name,
-              output: 'Blocked: cannot remove MCP servers in plan mode. Switch to action mode.',
+              output: 'Blocked: cannot remove MCP servers in planning mode. Switch to action mode.',
               isError: true,
               durationMs: performance.now() - start,
             };

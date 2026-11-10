@@ -52,6 +52,11 @@ const TEST_TOOLS: RuntimeKoryToolDef[] = [
       required: ['title', 'content'],
     },
   },
+  {
+    name: 'kory__suggest-fixes',
+    description: 'Suggest fixes for an error',
+    inputSchema: { type: 'object', properties: { error: { type: 'string' } }, required: ['error'] },
+  },
 ];
 
 /** In-memory proxy stub: returns a deterministic echo for each tool call. */
@@ -96,7 +101,12 @@ describe('Kory MCP bridge — 2026-07-28 protocol (createMcpHandler + Streamable
   it('lists all allowed tools via tools/list', async () => {
     const result = await client.listTools();
     const names = result.tools.map((t) => t.name);
-    expect(names).toEqual(['kory__read_file', 'kory__bash', 'kory__create_note']);
+    expect(names).toEqual([
+      'kory__read_file',
+      'kory__bash',
+      'kory__create_note',
+      'kory__suggest-fixes',
+    ]);
   });
 
   it('calls a tool and receives the proxied result', async () => {
@@ -112,6 +122,17 @@ describe('Kory MCP bridge — 2026-07-28 protocol (createMcpHandler + Streamable
     expect(proxyStub.calls).toHaveLength(1);
     expect(proxyStub.calls[0].tool).toBe('kory__read_file');
     expect(proxyStub.calls[0].input).toEqual({ path: '/tmp/test.txt' });
+  });
+
+  it('registers and dispatches valid hyphenated tool names', async () => {
+    const result = await client.callTool({
+      name: 'kory__suggest-fixes',
+      arguments: { error: 'bad import' },
+    });
+    expect(result.isError).toBe(false);
+    expect(proxyStub.calls).toEqual([
+      { tool: 'kory__suggest-fixes', input: { error: 'bad import' } },
+    ]);
   });
 
   it('rejects an unknown tool with a thrown ProtocolError', async () => {
@@ -183,8 +204,9 @@ describe('Kory MCP bridge — tool catalog integrity', () => {
     }
   });
 
-  it('manager role sees all tools', () => {
-    expect(toolsForRole('manager')).toHaveLength(KORY_TOOLS.length);
+  it('manager role sees its tools and leaves specialist-team management to the Critic', () => {
+    expect(toolsForRole('manager')).toHaveLength(KORY_TOOLS.filter((tool) => tool.role !== 'critic').length);
+    expect(toolsForRole('critic').some((tool) => tool.name === 'kory__manage_review_agents')).toBe(true);
   });
 
   it('unknown role sees no tools', () => {

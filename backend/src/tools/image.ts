@@ -6,10 +6,10 @@
 // next provider turn can see it. The frontend renders the image inline in the
 // chat feed via /api/workspace/raw.
 
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join, extname, isAbsolute } from 'node:path';
-import { validatePathAccess } from '../security';
 import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from './registry';
+import { validateFileToolPath } from './external-paths';
 
 export const IMAGE_MIME_TYPES: Record<string, string> = {
   '.png': 'image/png',
@@ -56,8 +56,7 @@ export class ViewImageTool implements Tool {
       durationMs: 0,
     });
 
-    const roots = [ctx.workingDirectory, ...(ctx.allowedPaths ?? [])].filter(Boolean);
-    const access = validatePathAccess(absPath, roots);
+    const access = validateFileToolPath(ctx, call, absPath);
     if (!access.allowed) return fail(`Error: Access denied. ${access.reason}`);
     if (!existsSync(absPath)) return fail(`Image not found: ${absPath}`);
 
@@ -84,6 +83,12 @@ export class ViewImageTool implements Tool {
       output: JSON.stringify(result),
       isError: false,
       durationMs: 0,
+      // Bridge-driven CLIs (Antigravity, etc.) never see the manager's follow-up
+      // image message, so the bytes must travel on the tool result itself as an
+      // MCP image block. SVG is not an accepted vision payload.
+      ...(mimeType === 'image/svg+xml'
+        ? {}
+        : { images: [{ mimeType, data: readFileSync(absPath).toString('base64') }] }),
     };
   }
 }

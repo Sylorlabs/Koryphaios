@@ -13,9 +13,15 @@
  */
 
 import { Elysia, t } from 'elysia';
+import { getContext } from '../../context';
+import { sessions as sessionRows, messages as messageRows } from '../../db/schema';
+import { getDatabase } from '../../db';
+import { eq } from 'drizzle-orm';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 import * as notesService from '../../notes/notes-service';
 import { retrieveNoteContext } from '../../notes/note-context';
+import { listNoteAppearances } from '../../notes/note-appearances';
+import { buildChatFinding } from '../../notes/chat-finding';
 import {
   getNoteSemanticIndexStatus,
   rebuildNoteSemanticIndex,
@@ -52,6 +58,7 @@ import {
 } from '../../notes/notes-settings';
 import {
   DEFAULT_NOTES_AGENT_PERMISSIONS,
+  type ChatFindingInput,
   type NotesAgentPermissions,
   type NotesSettings,
 } from '@koryphaios/shared';
@@ -188,6 +195,8 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
     {
       query: t.Object({
         noteId: t.Optional(t.String({ maxLength: 2048 })),
+        limit: t.Optional(t.Numeric({ minimum: 1, maximum: 200 })),
+        offset: t.Optional(t.Numeric({ minimum: 0, maximum: 100000 })),
         status: t.Optional(
           t.Union([t.Literal('proposed'), t.Literal('accepted'), t.Literal('rejected')]),
         ),
@@ -222,6 +231,15 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
         expectedTargetRevision: t.Integer({ minimum: 1 }),
       }),
     },
+  )
+  .post(
+    '/relationships/:fromId/:toId/refresh',
+    async ({ request, params, body }) => {
+      const data = await notesService.refreshNoteRelationship({ ...body, ...params }, getRequestProjectRoot(request), { provenance: 'user' });
+      broadcastNotesNetworkUpdate('update', data.fromId, undefined, mutationOrigin(request));
+      return { success: true, data };
+    },
+    { body: t.Object({ expectedRevision: t.Integer({ minimum: 1 }), expectedSourceRevision: t.Integer({ minimum: 1 }), expectedTargetRevision: t.Integer({ minimum: 1 }), type: t.Union([t.Literal('related_to'), t.Literal('supports'), t.Literal('contradicts'), t.Literal('depends_on'), t.Literal('supersedes')]), evidence: t.String({ minLength: 1, maxLength: 2000 }), weight: t.Optional(t.Number({ exclusiveMinimum: 0, maximum: 1 })) }) },
   )
   .patch(
     '/relationships/:fromId/:toId',
@@ -354,6 +372,75 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
     },
   )
 
+  // ── Save a chat finding as a sourced note ────────────────────────────────
+  .post(
+    '/chat-findings',
+    async ({ request, body }) => {
+      const { title, body: findingBody, source } = body;
+      const session = await getDatabase()
+        .select({ id: sessionRows.id, workingDirectory: sessionRows.workingDirectory })
+        .from(sessionRows)
+        .where(eq(sessionRows.id, source.sessionId))
+        .limit(1)
+        .then((rows) => rows[0]);
+      if (!session) throw new NotFoundError('Chat session', source.sessionId);
+
+      const projectRoot = getRequestProjectRoot(request);
+      if (session.workingDirectory) {
+        const { resolveProjectIdentity } = await import('../../runtime/request-project');
+        if (resolveProjectIdentity(session.workingDirectory) !== resolveProjectIdentity(projectRoot)) {
+          throw new ValidationError('The source chat does not belong to the selected project.');
+        }
+      }
+
+      let verifiedSource: ChatFindingInput['source'] = {
+        sessionId: session.id,
+        ...(source.messageId ? { messageId: source.messageId } : {}),
+      };
+      if (source.messageId) {
+        const message = await getDatabase()
+          .select({ id: messageRows.id, sessionId: messageRows.sessionId, role: messageRows.role, model: messageRows.model, provider: messageRows.provider })
+          .from(messageRows)
+          .where(eq(messageRows.id, source.messageId))
+          .limit(1)
+          .then((rows) => rows[0]);
+        if (!message || message.sessionId !== session.id || message.role !== 'assistant') {
+          throw new ValidationError('The cited chat message is not an assistant response in this session.');
+        }
+        verifiedSource = {
+          sessionId: session.id,
+          messageId: message.id,
+          role: message.role,
+          ...(message.provider ? { provider: message.provider } : {}),
+          ...(message.model ? { model: message.model } : {}),
+        };
+      }
+
+      const built = buildChatFinding({ title, body: findingBody, source: verifiedSource });
+      const note = await notesService.createNote(
+        {
+          title: built.title,
+          content: built.content,
+          folderPath: built.folderPath,
+          tags: built.tags,
+        },
+        projectRoot,
+      );
+      broadcastNotesNetworkUpdate('create', note.id, undefined, mutationOrigin(request));
+      return { ok: true, data: note };
+    },
+    {
+      body: t.Object({
+        title: t.String({ minLength: 1, maxLength: 240 }),
+        body: t.String({ minLength: 1, maxLength: 8000 }),
+        source: t.Object({
+          sessionId: t.String({ minLength: 1, maxLength: 2048 }),
+          messageId: t.Optional(t.String({ minLength: 1, maxLength: 2048 })),
+        }),
+      }),
+    },
+  )
+
   // ── General notes settings ────────────────────────────────────────────────
   // Persisted server-side so context injection actually honors them.
   .get('/settings', async ({ request }) => {
@@ -420,6 +507,7 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
           ]),
         ),
         tools: t.Optional(t.Record(t.String(), t.String())),
+        overrides: t.Optional(t.Record(t.String(), t.String())),
       }),
     },
   )
@@ -855,6 +943,17 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
   })
 
   // ── Update note ───────────────────────────────────────────────────────────
+  .put('/:id/icon', async ({ request, params, body }) => {
+    const icon = await notesService.setNoteIcon(params.id, body.icon, getRequestProjectRoot(request));
+    broadcastNotesNetworkUpdate('update', params.id, undefined, mutationOrigin(request));
+    return { ok: true, data: icon };
+  }, {
+    body: t.Object({ icon: t.Union([t.Null(), t.Object({
+      kind: t.Union([t.Literal('builtin'), t.Literal('image')]),
+      value: t.String({ maxLength: 500000 }),
+    })]) }),
+  })
+
   .put(
     '/:id',
     async ({ request, params, body }) => {
@@ -958,6 +1057,12 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
     );
     return { ok: true, data: backlinks };
   })
+
+  // ── Where this note appears ───────────────────────────────────────────────
+  .get('/:id/appearances', async ({ request, params }) => ({
+    ok: true,
+    data: await listNoteAppearances(params.id, getRequestProjectRoot(request)),
+  }))
 
   // ── Upload attachment (multipart form) ────────────────────────────────────
   .post('/:id/attachments', async ({ request, params }) => {

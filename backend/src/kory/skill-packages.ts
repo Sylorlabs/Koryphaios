@@ -181,6 +181,24 @@ export interface V5SkillPackageCatalog {
   warnings: string[];
 }
 
+/**
+ * Public terminology aliases for the one bundled Skills catalog. These exact
+ * bare names are reserved for Kory's bundled catalog; callers with a custom
+ * root should pass its path explicitly, preferably as an absolute path when
+ * its name could collide with a reserved alias.
+ *
+ * The compatibility names intentionally resolve to the V5 directory rather
+ * than creating a second tree. Keep `skills-v5` as the canonical on-disk name
+ * because existing commands, exports, and evidence refer to it.
+ */
+export const SKILLS_PACKAGE_ROOT_ALIASES = {
+  skills: 'skills-v5',
+  'skills-v1': 'skills-v5',
+  'skills-v5': 'skills-v5',
+} as const;
+
+export type SkillsPackageRootAlias = keyof typeof SKILLS_PACKAGE_ROOT_ALIASES;
+
 const sourceSchema = z
   .object({
     url: z.string().url(),
@@ -788,8 +806,20 @@ export function bundledV5SkillsRoot(): string {
   return primary;
 }
 
-export function loadV5SkillPackages(root = bundledV5SkillsRoot()): V5SkillPackageCatalog {
-  const resolvedRoot = resolve(root);
+/**
+ * Resolve a catalog path or a public terminology alias to the single V5 root.
+ * Only the aliases' own properties are meaningful. Inherited names such as
+ * `__proto__`, `constructor`, and `toString` remain ordinary custom paths.
+ */
+export function resolveSkillsPackageRoot(root: string = 'skills-v5'): string {
+  if (Object.hasOwn(SKILLS_PACKAGE_ROOT_ALIASES, root)) {
+    return resolve(bundledV5SkillsRoot());
+  }
+  return resolve(root);
+}
+
+export function loadV5SkillPackages(root = 'skills-v5'): V5SkillPackageCatalog {
+  const resolvedRoot = resolveSkillsPackageRoot(root);
   if (!existsSync(resolvedRoot)) {
     return { root: resolvedRoot, packages: [], errors: [], warnings: [] };
   }

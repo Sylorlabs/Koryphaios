@@ -3,7 +3,11 @@ import { DEFAULT_COLLABORATION_POLICY, DEFAULT_COLLABORATION_TIERS } from '@kory
 import { ConfigurationError, ValidationError } from '../errors/types';
 import { RelayClient } from './relay-client';
 import { modelSharingRelayUrl } from './relay-url';
-import { buildSharedCatalog, refreshSharedCatalogs, startProviderHost } from './remote-provider-host';
+import {
+  buildSharedCatalog,
+  refreshSharedCatalogs,
+  startProviderHost,
+} from './remote-provider-host';
 
 let modelRelay: RelayClient | null = null;
 let unregister: (() => void) | null = null;
@@ -30,7 +34,10 @@ export function modelSharingStatus() {
  * session history, login state, provider configs or auth material. */
 export async function startModelSharing(hostName = 'Host') {
   return serializeSharingOperation(async () => {
-    const displayName = hostName.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 80);
+    const displayName = hostName
+      .replace(/[\u0000-\u001f\u007f]/g, '')
+      .trim()
+      .slice(0, 80);
     if (!displayName) throw new ValidationError('Enter a host name for your shared models.');
     if (!buildSharedCatalog(displayName, true).providers.length)
       throw new ValidationError('Choose at least one connected provider and model to share.');
@@ -53,7 +60,9 @@ export async function startModelSharing(hostName = 'Host') {
           modelCatalog: [],
           joinMode: 'auto',
           defaultTierId: 'models',
-          accessTiers: [structuredClone(DEFAULT_COLLABORATION_TIERS.find((tier) => tier.id === 'models')!)],
+          accessTiers: [
+            structuredClone(DEFAULT_COLLABORATION_TIERS.find((tier) => tier.id === 'models')!),
+          ],
           allowPrompts: false,
           showDiffs: false,
           showAgentStatus: false,
@@ -70,7 +79,11 @@ export async function startModelSharing(hostName = 'Host') {
     }
     try {
       if (!modelJoinCode) throw new Error('Model-sharing relay did not return a code');
-      return { inviteUrl: await modelRelay.createInvite('models'), joinCode: modelJoinCode, hostName: displayName };
+      return {
+        inviteUrl: await modelRelay.createInvite('models'),
+        joinCode: modelJoinCode,
+        hostName: displayName,
+      };
     } catch (error) {
       await revokeModelSharing();
       throw error;

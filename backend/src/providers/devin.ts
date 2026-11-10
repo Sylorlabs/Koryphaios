@@ -37,6 +37,7 @@ import { createKoryBridgeGrantLease } from './bridge-grant';
 import {
   getDevinCapabilitiesAsync,
   getDevinCapabilities as getDevinCapabilitiesSync,
+  invalidateDevinCapabilities,
 } from './devin-capabilities';
 import {
   assertPrivateValuesAbsentFromArgv,
@@ -206,6 +207,12 @@ export class DevinProvider implements Provider {
   }
 
   async refreshModels(): Promise<void> {
+    // The capability cache is keyed on the binary path + mtime and has no TTL,
+    // so a forced refresh previously re-probed nothing: `getDevinCapabilitiesAsync`
+    // returned the memoised result and `devin models list` never ran again
+    // unless the binary changed on disk. Drop the cache first so an explicit
+    // refresh is actually a refresh.
+    invalidateDevinCapabilities();
     await getDevinCapabilitiesAsync();
   }
 

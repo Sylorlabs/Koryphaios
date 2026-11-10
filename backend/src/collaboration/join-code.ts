@@ -49,7 +49,11 @@ export async function resolveTeamJoinCode(
   }
   if (response.status === 404 || response.status === 410) throw invalidCode();
   if (response.status === 429)
-    throw new RelayJoinError('Too many code attempts. Try again in a minute.', 'JOIN_CODE_RATE_LIMITED', 429);
+    throw new RelayJoinError(
+      'Too many code attempts. Try again in a minute.',
+      'JOIN_CODE_RATE_LIMITED',
+      429,
+    );
   if (!response.ok)
     throw new RelayJoinError(
       'The team relay could not check this code. Try again in a moment.',
@@ -89,11 +93,16 @@ export async function resolveTeamJoinCode(
     tierId: data.tierId,
     hostName: typeof data.hostName === 'string' ? data.hostName.slice(0, 80) : 'Host',
     sharedFolders: Array.isArray(data.sharedFolders)
-      ? data.sharedFolders.slice(0, 24).flatMap((folder: any) =>
-          typeof folder?.id === 'string' && typeof folder?.name === 'string' &&
-          folder.name.trim() && !/[\\/]/.test(folder.name)
-            ? [{ id: folder.id.slice(0, 64), name: folder.name.slice(0, 160) }]
-            : [])
+      ? data.sharedFolders
+          .slice(0, 24)
+          .flatMap((folder: any) =>
+            typeof folder?.id === 'string' &&
+            typeof folder?.name === 'string' &&
+            folder.name.trim() &&
+            !/[\\/]/.test(folder.name)
+              ? [{ id: folder.id.slice(0, 64), name: folder.name.slice(0, 160) }]
+              : [],
+          )
       : [],
   };
 }

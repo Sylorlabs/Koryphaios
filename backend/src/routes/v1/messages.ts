@@ -1,5 +1,5 @@
 import { Elysia, t } from 'elysia';
-import type { StoredMessage } from '@koryphaios/shared';
+import type { StoredMessage, ProviderName } from '@koryphaios/shared';
 import { getContext } from '../../context';
 import { nanoid } from 'nanoid';
 import { ID, MESSAGE } from '../../constants';
@@ -9,6 +9,25 @@ import { resolveImageModelSelection, runImageJob } from './images';
 import { ConflictError } from '../../errors/types';
 import type { KoryManager, SessionTurnAdmission } from '../../kory/manager';
 import type { RegenerationBranchReservation } from '../../stores/message-store';
+
+function isIntentionalCancellation(error: unknown, admission: SessionTurnAdmission): boolean {
+  return admission.signal.aborted && error === admission.signal.reason;
+}
+
+function reportTurnFailure(
+  error: unknown,
+  admission: SessionTurnAdmission,
+  sessionId: string,
+  wsManager: ReturnType<typeof getContext>['wsManager'],
+): void {
+  if (isIntentionalCancellation(error, admission)) return;
+  wsManager.broadcastToSession(sessionId, {
+    type: 'system.error',
+    payload: { error: error instanceof Error ? error.message : String(error), sessionId },
+    timestamp: Date.now(),
+    sessionId,
+  });
+}
 
 async function processImageMessage(
   kory: KoryManager,
@@ -24,6 +43,17 @@ async function processImageMessage(
   await kory.dispatchAdmittedWork(
     admission,
     async ({ signal, phase }) => {
+      // Naming is metadata, never a prerequisite for image generation. The
+      // old await made a title-model probe (and its retries/403) sit directly
+      // on the user's first-token path. Let it refine the default title in the
+      // background and keep failures out of the response turn.
+      void kory.generateSessionTitle(sessionId, prompt, undefined, signal).catch((error) => {
+        serverLog.debug(
+          { sessionId, error: error instanceof Error ? error.message : String(error) },
+          'Background session title generation failed',
+        );
+      });
+      signal.throwIfAborted();
       await phase('streaming', 'image_generation');
       wsManager.broadcastToSession(sessionId, {
         type: 'agent.status',
@@ -63,6 +93,18 @@ async function processImageMessage(
       const content = result.data.revisedPrompt
         ? `Generated image.\n\n${result.data.revisedPrompt}`
         : 'Generated image.';
+      const review = await kory.runCriticGate(
+        sessionId,
+        [{ role: 'user', content: prompt }, { role: 'assistant', content }, {
+          role: 'user', content: [{ type: 'text', text: 'Generated image to evaluate against the original request.' },
+            { type: 'image', imageData: result.data.imageBase64, imageMimeType: result.data.mimeType }],
+        }],
+        undefined, prompt, await kory.resolveSessionWorkingDirectoryPublic(sessionId),
+        { provider: result.data.provider as ProviderName, model: result.data.model },
+        undefined, { responseOnly: true, purpose: 'image' },
+      );
+      signal.throwIfAborted();
+      if (!review.passed) throw new Error(`Critic did not approve the generated response: ${review.feedback}`);
       const generatedMessage: StoredMessage = {
         id: generatedMessageId,
         sessionId,
@@ -106,10 +148,15 @@ async function processImageMessage(
 }
 
 export const messageRoutes = new Elysia({ prefix: '/api/messages' })
-  .get('/:sessionId', async ({ request, params: { sessionId }, set }) => {
+  .get('/:sessionId', async ({ request, params: { sessionId }, query, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const { messages } = getContext();
-    return { ok: true, data: await messages.getDisplayProjection(sessionId) };
+    const requestedLimit = Number(query?.limit);
+    const limit = Number.isFinite(requestedLimit)
+      ? Math.max(20, Math.min(200, Math.floor(requestedLimit)))
+      : 120;
+    const beforeMessageId = typeof query?.before === 'string' && query.before ? query.before : undefined;
+    return { ok: true, data: await messages.getDisplayProjection(sessionId, limit, { beforeMessageId }) };
   })
   .post(
     '/',
@@ -155,17 +202,6 @@ export const messageRoutes = new Elysia({ prefix: '/api/messages' })
         throw error;
       }
 
-      // Fire-and-forget agent title generation. Only fires on the very first
-      // user message of a session whose title is still the default — the
-      // manager method is a no-op otherwise, so this is safe to call every
-      // turn.
-      kory.generateSessionTitle(body.sessionId, body.content).catch((err: unknown) => {
-        serverLog.debug(
-          { err: err instanceof Error ? err.message : String(err), sessionId: body.sessionId },
-          'Session title generation failed (non-critical, fire-and-forget)',
-        );
-      });
-
       if (imageSelection) {
         processImageMessage(
           kory,
@@ -174,16 +210,8 @@ export const messageRoutes = new Elysia({ prefix: '/api/messages' })
           body.content,
           imageSelection,
           body.attachments,
-        ).catch((err: unknown) => {
-          wsManager.broadcastToSession(body.sessionId, {
-            type: 'system.error',
-            payload: {
-              error: err instanceof Error ? err.message : String(err),
-              sessionId: body.sessionId,
-            },
-            timestamp: Date.now(),
-            sessionId: body.sessionId,
-          });
+        ).catch((error: unknown) => {
+          reportTurnFailure(error, admission, body.sessionId, wsManager);
         });
         return {
           ok: true,
@@ -203,13 +231,8 @@ export const messageRoutes = new Elysia({ prefix: '/api/messages' })
           inputAlreadyPersisted: true,
           imageInputMode: body.imageInputMode ?? 'reject',
         })
-        .catch((err) => {
-          wsManager.broadcast({
-            type: 'system.error',
-            payload: { error: err.message, sessionId: body.sessionId },
-            timestamp: Date.now(),
-            sessionId: body.sessionId,
-          });
+        .catch((error: unknown) => {
+          reportTurnFailure(error, admission, body.sessionId, wsManager);
         });
 
       return {
@@ -370,12 +393,7 @@ export const messageRoutes = new Elysia({ prefix: '/api/messages' })
           { groupId, index: nextIndex },
           branch,
         ).catch((error: unknown) => {
-          wsManager.broadcastToSession(body.sessionId, {
-            type: 'system.error',
-            payload: { error: error instanceof Error ? error.message : String(error) },
-            timestamp: Date.now(),
-            sessionId: body.sessionId,
-          });
+          reportTurnFailure(error, admission, body.sessionId, wsManager);
         });
         return {
           ok: true,
@@ -393,13 +411,8 @@ export const messageRoutes = new Elysia({ prefix: '/api/messages' })
           inputAlreadyPersisted: true,
           regenerationBranch: branch,
         })
-        .catch((error) => {
-          wsManager.broadcastToSession(body.sessionId, {
-            type: 'system.error',
-            payload: { error: error instanceof Error ? error.message : String(error) },
-            timestamp: Date.now(),
-            sessionId: body.sessionId,
-          });
+        .catch((error: unknown) => {
+          reportTurnFailure(error, admission, body.sessionId, wsManager);
         });
       return {
         ok: true,

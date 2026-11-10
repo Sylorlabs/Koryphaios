@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import { constants as fsConstants, existsSync } from 'node:fs';
 import { chmod, lstat, mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ContextBreakdown } from '@koryphaios/shared';
+import { isRunRevisionRef, type ContextBreakdown, type RunRevisionRef } from '@koryphaios/shared';
 import { serverLog } from '../logger';
 import { redactSecretsInText } from '../security';
 
@@ -34,6 +34,8 @@ export interface ArchiveEntry {
   kind: ArchiveKind;
   /** Short human/model-readable label, e.g. `read_file src/foo.ts`. */
   label: string;
+  /** Bounded, redacted JSON input kept separately from the short display label. */
+  toolInput?: string;
   /** Bounded, redacted preview. This is never the exact original output. */
   content: string;
   originalByteCount: number;
@@ -42,6 +44,8 @@ export interface ArchiveEntry {
   redacted: boolean;
   /** Whether the archived tool execution failed. Legacy/non-tool rows omit this. */
   isError?: boolean;
+  /** Exact durable run revision that produced this artifact, when known. */
+  runRef?: RunRevisionRef;
   /** Hidden from the agent's context (stubbed). The preview stays recoverable. */
   prunedForAgent?: boolean;
 }
@@ -207,10 +211,17 @@ export class ContextArchiveService {
           row.sessionId !== sessionId ||
           row.content !== entry.content ||
           row.label !== entry.label ||
+          row.toolInput !== entry.toolInput ||
           typeof row.originalByteCount !== 'number' ||
           typeof row.contentSha256 !== 'string' ||
           typeof row.truncated !== 'boolean' ||
           typeof row.redacted !== 'boolean'
+        ) {
+          requiresRewrite = true;
+        }
+        if (
+          row.runRef !== undefined &&
+          (!isRunRevisionRef(row.runRef) || row.runRef.sessionId !== sessionId)
         ) {
           requiresRewrite = true;
         }
@@ -257,9 +268,16 @@ export class ContextArchiveService {
     label: string,
     content: string,
     isError?: boolean,
+    toolInput?: string,
+    runRef?: RunRevisionRef,
   ): Promise<string> {
     if (this.erasingSessions.has(sessionId)) {
       throw new Error('Context archive write refused because this session is being deleted');
+    }
+    if (runRef !== undefined) {
+      if (!isRunRevisionRef(runRef) || runRef.sessionId !== sessionId) {
+        throw new Error('Context archive refused invalid run provenance');
+      }
     }
     const s = await this.ensureLoaded(sessionId);
     const id = `cx_${s.counter}`;
@@ -270,12 +288,14 @@ export class ContextArchiveService {
       ts: Date.now(),
       kind,
       label: redactSecretsInText(label.replace(/[\r\n\t]+/g, ' '), 200),
+      ...(typeof toolInput === 'string' ? { toolInput: this.preview(toolInput).content } : {}),
       content: persisted.content,
       originalByteCount: persisted.originalByteCount,
       contentSha256: persisted.contentSha256,
       truncated: persisted.truncated,
       redacted: persisted.redacted,
       ...(typeof isError === 'boolean' ? { isError } : {}),
+      ...(runRef ? { runRef } : {}),
     };
     await this.append(sessionId, entry as unknown as Record<string, unknown>);
     s.counter++;
@@ -575,6 +595,9 @@ export class ContextArchiveService {
           ? redactSecretsInText(row.label.replace(/[\r\n\t]+/g, ' '), 200)
           : 'Archived activity',
       content: safe.content,
+      ...(typeof row.toolInput === 'string'
+        ? { toolInput: this.preview(row.toolInput).content }
+        : {}),
       originalByteCount:
         typeof row.originalByteCount === 'number' && Number.isSafeInteger(row.originalByteCount)
           ? row.originalByteCount
@@ -586,6 +609,9 @@ export class ContextArchiveService {
       truncated: row.truncated === true || safe.truncated,
       redacted: row.redacted === true || safe.redacted,
       ...(typeof row.isError === 'boolean' ? { isError: row.isError } : {}),
+      ...(isRunRevisionRef(row.runRef) && row.runRef.sessionId === sessionId
+        ? { runRef: row.runRef }
+        : {}),
       prunedForAgent: row.prunedForAgent === true,
     };
   }

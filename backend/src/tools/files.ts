@@ -14,18 +14,11 @@ import {
 import type { Dirent } from 'fs';
 import { join, relative, dirname, basename, resolve, isAbsolute, sep } from 'path';
 import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from './registry';
-import { validatePathAccess } from '../security';
 import { mutateFileConfined } from '../security/confined-file-mutation';
 import { serverLog } from '../logger';
 import { crossAgentEvidenceCache } from '../cache/evidence-cache';
 import { gitBlobMatchesContent, tryResolveGitBlobEvidenceIdentity } from '../cache/git-evidence';
-
-/** Resolve allowed filesystem roots for file operations.
- *  Default to project directory even when not explicitly sandboxed — never allow "/" implicitly. */
-function getAllowedRoots(ctx: ToolContext): string[] {
-  if (ctx.allowedPaths?.length) return ctx.allowedPaths;
-  return [resolve(ctx.workingDirectory)];
-}
+import { validateFileToolPath } from './external-paths';
 
 /** All mandatory-root writes (including parent creation) happen in the child,
  * never in the backend between path validation and the eventual write. */
@@ -92,6 +85,8 @@ export class ReadFileTool implements Tool {
       path: { type: 'string', description: 'Absolute or relative path to the file.' },
       startLine: { type: 'number', description: 'Start line number (1-indexed). Optional.' },
       endLine: { type: 'number', description: 'End line number (1-indexed, inclusive). Optional.' },
+      start_line: { type: 'number', description: 'Alias for startLine (1-indexed). Optional.' },
+      end_line: { type: 'number', description: 'Alias for endLine (1-indexed, inclusive). Optional.' },
     },
     required: ['path'],
   };
@@ -99,17 +94,22 @@ export class ReadFileTool implements Tool {
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const {
       path: filePath,
-      startLine,
-      endLine,
+      startLine: rawStartLine,
+      endLine: rawEndLine,
+      start_line,
+      end_line,
     } = call.input as {
       path: string;
       startLine?: number;
       endLine?: number;
+      start_line?: number;
+      end_line?: number;
     };
+    const startLine = rawStartLine ?? start_line;
+    const endLine = rawEndLine ?? end_line;
 
     const absPath = isAbsolute(filePath) ? filePath : join(ctx.workingDirectory, filePath);
-    const allowedRoots = getAllowedRoots(ctx);
-    const access = validatePathAccess(absPath, allowedRoots);
+    const access = validateFileToolPath(ctx, call, absPath);
 
     if (!access.allowed) {
       return {
@@ -201,8 +201,7 @@ export class WriteFileTool implements Tool {
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const { path: filePath, content } = call.input as { path: string; content: string };
     const absPath = isAbsolute(filePath) ? filePath : join(ctx.workingDirectory, filePath);
-    const allowedRoots = getAllowedRoots(ctx);
-    const access = validatePathAccess(absPath, allowedRoots);
+    const access = validateFileToolPath(ctx, call, absPath);
 
     if (!access.allowed) {
       return {
@@ -269,23 +268,34 @@ export class EditFileTool implements Tool {
       path: { type: 'string', description: 'Path to the file to edit.' },
       old_str: { type: 'string', description: 'The exact string to find and replace.' },
       new_str: { type: 'string', description: 'The replacement string.' },
+      old_string: { type: 'string', description: 'Alias for old_str.' },
+      new_string: { type: 'string', description: 'Alias for new_str.' },
     },
-    required: ['path', 'old_str', 'new_str'],
+    required: ['path'],
   };
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
-    const {
-      path: filePath,
-      old_str,
-      new_str,
-    } = call.input as {
+    const rawInput = call.input as {
       path: string;
-      old_str: string;
-      new_str: string;
+      old_str?: string;
+      new_str?: string;
+      old_string?: string;
+      new_string?: string;
     };
+    const filePath = rawInput.path;
+    const old_str = rawInput.old_str ?? rawInput.old_string;
+    const new_str = rawInput.new_str ?? rawInput.new_string;
+    if (typeof old_str !== 'string' || typeof new_str !== 'string') {
+      return {
+        callId: call.id,
+        name: this.name,
+        output: 'Error: old_str and new_str are required.',
+        isError: true,
+        durationMs: 0,
+      };
+    }
     const absPath = isAbsolute(filePath) ? filePath : join(ctx.workingDirectory, filePath);
-    const allowedRoots = getAllowedRoots(ctx);
-    const access = validatePathAccess(absPath, allowedRoots);
+    const access = validateFileToolPath(ctx, call, absPath);
 
     if (!access.allowed) {
       return {
@@ -434,7 +444,6 @@ export class BatchEditTool implements Tool {
     if (!Array.isArray(files) || files.length === 0) return fail('No files given.');
 
     // ── Phase 1: validate EVERYTHING before touching anything. ──
-    const allowedRoots = getAllowedRoots(ctx);
     const staged: Array<{
       absPath: string;
       oldContent: string;
@@ -445,7 +454,7 @@ export class BatchEditTool implements Tool {
 
     for (const f of files) {
       const absPath = isAbsolute(f.path) ? f.path : join(ctx.workingDirectory, f.path);
-      const access = validatePathAccess(absPath, allowedRoots);
+      const access = validateFileToolPath(ctx, call, absPath);
       if (!access.allowed) {
         errors.push(`${f.path}: access denied (${access.reason})`);
         continue;
@@ -679,6 +688,16 @@ export class GrepTool implements Tool {
     };
 
     const searchPath = path ?? ctx.workingDirectory;
+    const searchAccess = validateFileToolPath(ctx, call, searchPath);
+    if (!searchAccess.allowed) {
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Error: Access denied. ${searchAccess.reason}`,
+        isError: true,
+        durationMs: 0,
+      };
+    }
     const args = ['rg', '--no-heading', '--line-number', '--color', 'never'];
     if (caseSensitive === false) args.push('-i');
     if (contextLines) args.push(`-C`, String(contextLines));
@@ -803,14 +822,30 @@ export class GlobTool implements Tool {
   };
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
-    const { pattern, path: basePath } = call.input as { pattern: string; path?: string };
+    const { pattern, path: basePath, __displayPath: displayPath } = call.input as {
+      pattern: string;
+      path?: string;
+      __displayPath?: string;
+    };
     const cwd = basePath ?? ctx.workingDirectory;
+    const baseAccess = validateFileToolPath(ctx, call, cwd);
+    if (!baseAccess.allowed) {
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Error: Access denied. ${baseAccess.reason}`,
+        isError: true,
+        durationMs: 0,
+      };
+    }
 
     try {
       const glob = new Bun.Glob(pattern);
       const matches: string[] = [];
       for await (const match of glob.scan({ cwd, onlyFiles: true })) {
-        matches.push(match);
+        matches.push(
+          displayPath ? relative(displayPath, join(cwd, match)).split(sep).join('/') : match,
+        );
         if (matches.length >= 500) break;
       }
 
@@ -873,7 +908,7 @@ export class LsTool implements Tool {
       : ctx.workingDirectory;
 
     // Check directory access (read-only is fine for ls, but still needs scope check)
-    const access = validatePathAccess(absPath, getAllowedRoots(ctx));
+    const access = validateFileToolPath(ctx, call, absPath);
     if (!access.allowed) {
       return {
         callId: call.id,
@@ -954,8 +989,7 @@ export class DeleteFileTool implements Tool {
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const { path: filePath } = call.input as { path: string };
     const absPath = isAbsolute(filePath) ? filePath : join(ctx.workingDirectory, filePath);
-    const allowedRoots = getAllowedRoots(ctx);
-    const access = validatePathAccess(absPath, allowedRoots);
+    const access = validateFileToolPath(ctx, call, absPath);
 
     if (!access.allowed) {
       return {
@@ -1070,8 +1104,8 @@ export class MoveFileTool implements Tool {
     const absSrc = isAbsolute(source) ? source : join(ctx.workingDirectory, source);
     const absDest = isAbsolute(destination) ? destination : join(ctx.workingDirectory, destination);
 
-    const accessSrc = validatePathAccess(absSrc, getAllowedRoots(ctx));
-    const accessDest = validatePathAccess(absDest, getAllowedRoots(ctx));
+    const accessSrc = validateFileToolPath(ctx, call, absSrc);
+    const accessDest = validateFileToolPath(ctx, call, absDest);
 
     if (!accessSrc.allowed || !accessDest.allowed) {
       return {
@@ -1199,7 +1233,7 @@ export class DiffTool implements Tool {
 
     const absA = isAbsolute(path_a) ? path_a : join(ctx.workingDirectory, path_a);
     // Note: Diff is read-only, but still check scope for security
-    const accessA = validatePathAccess(absA, getAllowedRoots(ctx));
+    const accessA = validateFileToolPath(ctx, call, absA);
     if (!accessA.allowed)
       return {
         callId: call.id,
@@ -1223,7 +1257,7 @@ export class DiffTool implements Tool {
       if (path_b) {
         // Diff two files using system diff
         const absB = isAbsolute(path_b) ? path_b : join(ctx.workingDirectory, path_b);
-        const accessB = validatePathAccess(absB, getAllowedRoots(ctx));
+        const accessB = validateFileToolPath(ctx, call, absB);
         if (!accessB.allowed)
           return {
             callId: call.id,
@@ -1382,8 +1416,7 @@ export class PatchTool implements Tool {
     };
 
     const absPath = isAbsolute(filePath) ? filePath : join(ctx.workingDirectory, filePath);
-    const allowedRoots = getAllowedRoots(ctx);
-    const access = validatePathAccess(absPath, allowedRoots);
+    const access = validateFileToolPath(ctx, call, absPath);
 
     if (!access.allowed) {
       return {

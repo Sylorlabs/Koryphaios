@@ -115,6 +115,20 @@ describe('File Tools', () => {
       expect(result.output).toContain('4. Line 4');
     });
 
+    test('reads file with snake_case start_line and end_line aliases', async () => {
+      writeFileSync(join(TEST_DIR, 'lines-snake.txt'), 'Line 1\nLine 2\nLine 3\nLine 4\nLine 5');
+
+      const result = await tool.run(createMockContext(), {
+        id: 'test-6b',
+        input: { path: 'lines-snake.txt', start_line: 2, end_line: 3 },
+      });
+
+      expect(result.isError).toBe(false);
+      expect(result.output).toContain('2. Line 2');
+      expect(result.output).toContain('3. Line 3');
+      expect(result.output).not.toContain('4. Line 4');
+    });
+
     test('returns error for missing file', async () => {
       const result = await tool.run(createMockContext(), {
         id: 'test-7',
@@ -139,6 +153,18 @@ describe('File Tools', () => {
 
       expect(result.isError).toBe(false);
       expect(readFileSync(join(TEST_DIR, 'edit-me.txt'), 'utf-8')).toBe('Hello Universe');
+    });
+
+    test('edits file with old_string and new_string aliases', async () => {
+      writeFileSync(join(TEST_DIR, 'edit-alias.txt'), 'Hello World');
+
+      const result = await tool.run(createMockContext(), {
+        id: 'test-8b',
+        input: { path: 'edit-alias.txt', old_string: 'World', new_string: 'Galaxy' },
+      });
+
+      expect(result.isError).toBe(false);
+      expect(readFileSync(join(TEST_DIR, 'edit-alias.txt'), 'utf-8')).toBe('Hello Galaxy');
     });
 
     test('returns error when old_str not found', async () => {

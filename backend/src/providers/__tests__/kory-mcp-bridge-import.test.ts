@@ -8,7 +8,7 @@ describe('Kory MCP bridge module boundary', () => {
     const bridgePath = resolve(import.meta.dir, '..', 'kory-mcp-bridge.ts');
     const script = [
       `const bridge = await import(${JSON.stringify(pathToFileURL(bridgePath).href)});`,
-      `process.stdout.write(JSON.stringify({ tools: bridge.KORY_TOOLS.length, manager: bridge.toolsForRole('manager').length, unknown: bridge.toolsForRole('auditor').length }));`,
+      `process.stdout.write(JSON.stringify({ tools: bridge.KORY_TOOLS.length, criticOnly: bridge.KORY_TOOLS.filter(tool => tool.role === 'critic').length, manager: bridge.toolsForRole('manager').length, unknown: bridge.toolsForRole('auditor').length }));`,
     ].join('\n');
 
     const result = spawnSync(process.execPath, ['-e', script], {
@@ -25,10 +25,11 @@ describe('Kory MCP bridge module boundary', () => {
     const counts = JSON.parse(result.stdout) as {
       tools: number;
       manager: number;
+      criticOnly: number;
       unknown: number;
     };
     expect(counts.tools).toBeGreaterThan(0);
-    expect(counts.manager).toBe(counts.tools);
+    expect(counts.manager).toBe(counts.tools - counts.criticOnly);
     expect(counts.unknown).toBe(0);
   });
 });

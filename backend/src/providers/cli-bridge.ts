@@ -143,7 +143,7 @@ export interface CliTrajectoryStep {
   source: 'system' | 'user' | 'agent' | 'tool' | string;
   message?: string;
   reasoning?: string;
-  toolCalls?: Array<{ name: string; input: Record<string, unknown>; output?: string }>;
+  toolCalls?: Array<{ id?: string; name: string; input: Record<string, unknown>; output?: string; isError?: boolean }>;
   modelName?: string;
   generationModel?: string;
   metrics?: Record<string, unknown>;
@@ -286,8 +286,8 @@ export function sandboxToScopes(
 export function roleToPermissionMode(
   role: HarnessRole,
   sandbox: SandboxPolicy | undefined,
-): 'plan' | 'accept-edits' | 'auto' | 'dangerous' | 'read-only' | 'workspace-write' {
-  if (role === 'critic') return 'plan';
+): 'accept-edits' | 'auto' | 'dangerous' | 'read-only' | 'workspace-write' {
+  if (role === 'critic') return 'read-only';
   if (sandbox?.preset === 'readonly') return 'read-only';
   if (sandbox?.preset === 'hardened') return 'read-only';
   // Manager/worker with edits allowed.

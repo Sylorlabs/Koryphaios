@@ -25,12 +25,14 @@ const NATIVE_PROVIDERS = new Set([
   'codex',
   'claude',
   'grok',
+  'codebuddy',
   'antigravity',
   'gemini-cli',
-  'jules',
   'cursor',
   'devin',
   'kimicode',
+  'omnirush',
+  'opencode',
 ]);
 
 // These harnesses cannot invoke arbitrary Kory control-plane tools. Codebuff's

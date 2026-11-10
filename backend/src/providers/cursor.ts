@@ -46,6 +46,7 @@ import {
 import { appendBoundedProviderFrames } from './bounded-provider-stream';
 import { buildProviderCliEnv } from './cli-environment';
 import { applyModelsDevMetadata, refreshModelsDevCache } from './models-dev';
+import { recordedToolIdentity, recordedToolInput, recordedToolName, recordedToolOutput } from './recorded-tool';
 
 const CURSOR_STREAM_TIMEOUT_MS = 300_000;
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
@@ -163,13 +164,30 @@ interface CursorStreamLine {
   result?: string;
   message?: { content?: Array<{ type?: string; text?: string }> };
   call_id?: string;
-  tool_call?: Record<string, { args?: Record<string, unknown>; result?: unknown }>;
+  tool_call?: Record<string, Record<string, unknown>>;
   usage?: {
     inputTokens?: number;
     outputTokens?: number;
     cacheReadTokens?: number;
     cacheWriteTokens?: number;
   };
+}
+
+export function parseCursorToolCalls(row: CursorStreamLine): ProviderEvent[] {
+  if (!['completed', 'failed'].includes(row.subtype ?? '') || !row.tool_call) return [];
+  return Object.entries(row.tool_call).map(([kind, payload]) => {
+    const category = kind.replace(/ToolCall$/, '');
+    const input = recordedToolInput(payload.args ?? payload.arguments ?? payload.input);
+    const tool = recordedToolIdentity(recordedToolName(payload) ?? recordedToolName({ name: category }), input);
+    const result = payload.result;
+    const status = result && typeof result === 'object' ? result as Record<string, unknown> : {};
+    return {
+      type: 'tool_executed', toolCallId: row.call_id, toolName: tool.name,
+      toolInput: JSON.stringify(tool.input),
+      toolOutput: recordedToolOutput(result ?? '').slice(0, 8_000),
+      isError: row.subtype === 'failed' || row.is_error === true || status.isError === true || status.is_error === true || status.error != null,
+    };
+  });
 }
 
 export function parseCursorModelList(output: string): ModelDef[] {
@@ -514,9 +532,7 @@ export class CursorProvider implements Provider {
     // relative to $HOME. Expose the dot-directory itself so `$HOME/.cursor`
     // resolves to the staged home that holds the kory MCP config. Additive:
     // CURSOR_CONFIG_DIR still points at the staged home either way.
-    const jail = request.sandbox
-      ? buildSoftJail(baseEnv, [join(cursorHome, '.cursor')])
-      : null;
+    const jail = request.sandbox ? buildSoftJail(baseEnv, [join(cursorHome, '.cursor')]) : null;
     const wrapped = request.sandbox
       ? wrapCommand(bin, args, {
           cwd,
@@ -662,25 +678,7 @@ export class CursorProvider implements Provider {
         return;
       }
       case 'tool_call': {
-        if (row.subtype !== 'completed' || !row.tool_call) return;
-        const [kind, payload] = Object.entries(row.tool_call)[0] ?? ['tool', {}];
-        const name = kind.replace(/ToolCall$/, '');
-        let output = '';
-        try {
-          output = JSON.stringify(payload?.result ?? '').slice(0, 8_000);
-        } catch (err: unknown) {
-          /* unstringifiable */
-          providerLog.debug(
-            { err: err instanceof Error ? err.message : String(err) },
-            'Cursor tool result not stringifiable',
-          );
-        }
-        yield {
-          type: 'tool_executed',
-          toolName: name,
-          toolInput: JSON.stringify(payload?.args ?? {}),
-          toolOutput: output,
-        };
+        yield* parseCursorToolCalls(row);
         return;
       }
       case 'result': {

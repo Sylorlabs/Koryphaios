@@ -297,16 +297,40 @@ interface Logger {
 }
 
 // Simple console-based logger for compiled binaries
+// Ordered severity levels. A message is emitted when its level is at least as
+// severe as the configured threshold.
+const LEVEL_ORDER = { trace: 0, debug: 1, info: 2, warn: 3, error: 4, fatal: 5 } as const;
+type LevelName = keyof typeof LEVEL_ORDER;
+
 function createSimpleLogger(moduleName: string): Logger {
   const safeModuleName = sanitizeLogMessage(moduleName);
+  // Resolve the threshold once at module load. `LOG_LEVEL` was previously only
+  // consulted by the pino factory, which `createLogger()` never reaches — so
+  // every `debug()` line in the backend (the sandbox profile emits one per
+  // confined command) ran in production. Each of those costs a recursive
+  // metadata sanitize pass plus a JSON.stringify plus a synchronous console
+  // write, on the request path.
+  const threshold: LevelName = (() => {
+    const raw = (process.env.LOG_LEVEL ?? '').trim().toLowerCase();
+    if (raw in LEVEL_ORDER) return raw as LevelName;
+    // Console output in a terminal is for the operator; a piped or redirected
+    // stream (the daily-driver install, systemd, the desktop launcher) is a log
+    // file, and debug-level detail there is paid for on every request.
+    if (process.stdout?.isTTY === true) return 'debug';
+    return isProduction ? 'info' : 'debug';
+  })();
+
+  const enabled = (level: LevelName) => LEVEL_ORDER[level] >= LEVEL_ORDER[threshold];
+
   const formatMessage = (level: string, msg: string, extra?: Record<string, unknown>) => {
     const time = new Date().toISOString().split('T')[1]?.split('.')[0] ?? '';
     const extraStr = extra && Object.keys(extra).length > 0 ? ' ' + JSON.stringify(extra) : '';
     return `[${time}] ${level.padEnd(5)} [${safeModuleName}] ${sanitizeLogMessage(msg)}${extraStr}`;
   };
 
-  const makeLogger = (level: string, consoleFn: (...args: unknown[]) => void) => {
+  const makeLogger = (level: LevelName, consoleFn: (...args: unknown[]) => void) => {
     return (arg1: unknown, arg2?: string) => {
+      if (!enabled(level)) return;
       if (typeof arg1 === 'string') {
         consoleFn(formatMessage(level, arg1));
       } else if (arg2) {
@@ -316,12 +340,12 @@ function createSimpleLogger(moduleName: string): Logger {
   };
 
   return {
-    trace: makeLogger('TRACE', console.debug),
-    debug: makeLogger('DEBUG', console.debug),
-    info: makeLogger('INFO', console.info),
-    warn: makeLogger('WARN', console.warn),
-    error: makeLogger('ERROR', console.error),
-    fatal: makeLogger('FATAL', console.error),
+    trace: makeLogger('trace', console.debug),
+    debug: makeLogger('debug', console.debug),
+    info: makeLogger('info', console.info),
+    warn: makeLogger('warn', console.warn),
+    error: makeLogger('error', console.error),
+    fatal: makeLogger('fatal', console.error),
     child: (bindings: { module: string }) => createSimpleLogger(bindings.module),
   };
 }

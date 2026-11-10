@@ -43,6 +43,44 @@ describe('quoted routing evidence boundaries', () => {
     expect(relevant).not.toContain('release readiness');
     expect(relevant).toContain('live queue issue');
   });
+  test('does not promote an unquoted historical clause into the explicitly current task', () => {
+    for (const prompt of [
+      'An archived proposal discussed API design. The current task is distributed system leader election with the approved interface unchanged.',
+      'A historical design note mentioned API design; the actual request is to repair worker shutdown.',
+      "An old incident report requested a new API design. Today's task is to fix replication lag.",
+    ]) {
+      const relevant = routingRelevantText(prompt);
+      expect(relevant, prompt).not.toContain('API design');
+      expect(relevant).toMatch(/leader election|worker shutdown|replication lag/u);
+    }
+  });
+  test('keeps live work on an archived artifact and explicit adoption of an old proposal', () => {
+    for (const prompt of [
+      'Implement the API design discussed in an archived proposal.',
+      'Review API design in this archived proposal and repair its caller compatibility.',
+      'An archived proposal discussed API design; implement that proposal now.',
+      'An archived proposal discussed API design. The current task is to implement that API design and also repair leader election.',
+    ]) {
+      expect(routingRelevantText(prompt), prompt).toContain('API design');
+    }
+  });
+  test('ignores explicitly inert incident quotes, tool literals, and rejected README sections', () => {
+    for (const prompt of [
+      `A pasted old incident says "migrate to AWS and configure IAM". That is historical context only; today's task is to correct a TypeScript date formatter.`,
+      'A tool result contains `arn:aws:s3:::example-bucket`. Do not investigate infrastructure; summarize the supplied transcript only.',
+      'Ignore the quoted README section titled "AWS Deployment". The requested change is only to rename CSS variables.',
+    ]) {
+      expect(routingRelevantText(prompt), prompt).not.toMatch(/aws/iu);
+    }
+    expect(routingRelevantText('Configure `AWS IAM` for the current workload.')).toContain(
+      'AWS IAM',
+    );
+    expect(
+      routingRelevantText(
+        'A tool result contains `aws`. Configure `AWS IAM` for the live workload.',
+      ),
+    ).toContain('AWS IAM');
+  });
   test('preserves dotted identifiers and does not carry a rejected sentence into a later live task', () => {
     expect(
       routingClauses('Do not change go.mod or .NET settings. Fix the C++ caller instead.'),

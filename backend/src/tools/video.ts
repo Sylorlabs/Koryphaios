@@ -47,13 +47,11 @@ export class GenerateVideoTool implements Tool {
       },
       provider: {
         type: 'string',
-        description:
-          'Connected video provider id. Known ids: luma, klingai, prodia, replicate.',
+        description: 'Connected video provider id. Known ids: luma, klingai, prodia, replicate.',
       },
       model: {
         type: 'string',
-        description:
-          'Provider model id. Ask the user which they prefer when unsure.',
+        description: 'Provider model id. Ask the user which they prefer when unsure.',
       },
       duration: {
         type: 'string',
@@ -68,9 +66,18 @@ export class GenerateVideoTool implements Tool {
         type: 'string',
         description: 'What to avoid in the clip (Kling and Replicate support this).',
       },
-      resolution: { type: 'string', description: 'Optional resolution, e.g. "720p" or "1080p", when supported by the model.' },
-      sound: { type: 'boolean', description: 'Generate synchronized audio when supported by the selected model.' },
-      seed: { type: 'integer', description: 'Optional reproducibility seed when supported by the model.' },
+      resolution: {
+        type: 'string',
+        description: 'Optional resolution, e.g. "720p" or "1080p", when supported by the model.',
+      },
+      sound: {
+        type: 'boolean',
+        description: 'Generate synchronized audio when supported by the selected model.',
+      },
+      seed: {
+        type: 'integer',
+        description: 'Optional reproducibility seed when supported by the model.',
+      },
     },
     required: ['prompt', 'provider', 'model'],
   };
@@ -103,7 +110,10 @@ export class GenerateVideoTool implements Tool {
           negativePrompt: asString(call.input.negativePrompt),
           resolution: asString(call.input.resolution),
           sound: typeof call.input.sound === 'boolean' ? call.input.sound : undefined,
-          seed: typeof call.input.seed === 'number' && Number.isSafeInteger(call.input.seed) ? call.input.seed : undefined,
+          seed:
+            typeof call.input.seed === 'number' && Number.isSafeInteger(call.input.seed)
+              ? call.input.seed
+              : undefined,
         },
         { signal: ctx.signal },
       );

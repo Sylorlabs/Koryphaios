@@ -9,6 +9,7 @@ import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from './registr
 import * as notesService from '../notes/notes-service';
 import { broadcastNotesNetworkUpdate } from '../notes/notes-events';
 import { recordWorkNoteTool } from './work-note';
+import { noteWorkspaceTools } from './note-workspace';
 import { noteHostProvenance } from './note-host-provenance';
 import { proposeNoteRelationshipTool, reviewNoteRelationshipTool } from './note-relationships';
 import { retrieveNoteContext, type NoteContextInput } from '../notes/note-context';
@@ -99,6 +100,7 @@ export const createNoteTool: Tool = {
     const input = call.input as Record<string, unknown>;
     const start = Date.now();
     try {
+      if (Array.isArray(input.tags) && input.tags.includes('canvas')) throw new Error('Use create_note_canvas for visual boards so its dedicated permission and validation apply.');
       const note = await notesService.createNote(
         {
           title: String(input.title),
@@ -250,6 +252,8 @@ export const updateNoteTool: Tool = {
           durationMs: Date.now() - start,
         };
       }
+      const current = await notesService.getNote(id, ctx.workingDirectory);
+      if (current?.tags.includes('canvas') || (Array.isArray(input.tags) && input.tags.includes('canvas'))) throw new Error('Use patch_note_canvas for visual boards so its dedicated permission and revision validation apply.');
       const note = await notesService.updateNote(
         id,
         {
@@ -656,7 +660,7 @@ export const retrieveNoteContextTool: Tool = {
         // semantic failure is not permission to publish lexical fallback after
         // read access was revoked while a provider request was in flight.
         for (const name of ['retrieve_note_context', 'read_note']) {
-          const permission = checkNoteToolPermission(name, root);
+          const permission = checkNoteToolPermission(name, root, { mode: ctx.permissionPolicy?.mode });
           const host = decideToolPermission(ctx.permissionPolicy, name);
           if (!permission.allowed) throw new Error(permission.reason);
           if (host.action === 'deny') throw new Error(host.reason);
@@ -1055,6 +1059,7 @@ export const renderNoteTool: Tool = {
 // ============================================================================
 
 export const noteTools: Tool[] = [
+  ...noteWorkspaceTools,
   proposeNoteRelationshipTool,
   reviewNoteRelationshipTool,
   recordWorkNoteTool,

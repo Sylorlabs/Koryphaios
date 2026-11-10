@@ -180,3 +180,67 @@ export async function withRetry<T>(
 
   throw lastError;
 }
+
+/**
+ * Combines multiple AbortSignals into one that aborts when any of them aborts.
+ * Mirrors `AbortSignal.any` with a manual fallback for runtimes that lack it.
+ * `undefined` entries are skipped; returning an already-aborted-safe signal when
+ * nothing is provided.
+ */
+export function mergeAbortSignals(...signals: Array<AbortSignal | undefined>): AbortSignal {
+  const list = signals.filter((s): s is AbortSignal => s != null);
+  if (list.length === 0) {
+    return new AbortController().signal;
+  }
+  if (list.length === 1) return list[0]!;
+  if (typeof AbortSignal !== 'undefined' && 'any' in AbortSignal) {
+    return (AbortSignal as any).any(list);
+  }
+  const controller = new AbortController();
+  const abort = (reason?: unknown) => {
+    try {
+      controller.abort(reason);
+    } catch {
+      // already aborted
+    }
+  };
+  for (const s of list) {
+    s.addEventListener('abort', () => abort(s.reason), { once: true });
+  }
+  return controller.signal;
+}
+
+/**
+ * Returns a signal that aborts after `ms` of **inactivity**, not wall-clock
+ * time. Unlike a hard stream timeout this never cuts an actively-producing
+ * stream — it only aborts when the provider goes silent for the full window,
+ * which guards against a hung provider without truncating legitimate long
+ * generations. Call `reset()` on every stream event to keep the deadline
+ * pushed forward, and `clear()` when the stream is done.
+ */
+export interface IdleAbortSignal {
+  signal: AbortSignal;
+  reset: () => void;
+  clear: () => void;
+}
+
+export function createIdleAbortSignal(ms: number): IdleAbortSignal {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expire = () => {
+    controller.abort(new DOMException(`Stream idle timeout after ${ms}ms`, 'TimeoutError'));
+  };
+  const reset = () => {
+    if (timer !== undefined) clearTimeout(timer);
+    timer = setTimeout(expire, ms);
+  };
+  reset();
+  return {
+    signal: controller.signal,
+    reset,
+    clear: () => {
+      if (timer !== undefined) clearTimeout(timer);
+      timer = undefined;
+    },
+  };
+}

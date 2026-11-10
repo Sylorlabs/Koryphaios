@@ -16,22 +16,24 @@
 // `workspace.sandbox` in the permission policy, not by an environment variable.
 
 import { spawn } from 'node:child_process';
-import {
-  accessSync,
-  constants as fsConstants,
-  existsSync,
-  mkdtempSync,
-  realpathSync,
-  writeFileSync,
-  rmSync,
-} from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join, resolve, relative, isAbsolute, delimiter } from 'node:path';
+import { join, resolve, isAbsolute } from 'node:path';
 import { serverLog } from '../logger';
+import {
+  canonicalizePath,
+  findExecutableOnPath,
+  hostOS,
+  isContainedBy,
+  isLinux,
+  isMac,
+} from '../runtime/platform';
 
 export interface OsSandboxOptions {
   /** Host roots the child is allowed to read/write. */
   allowedRoots: string[];
+  /** Host roots the child may read but never write. */
+  readOnlyRoots?: string[];
   /** Fixed canonical host-owned write grant. When present it supersedes all
    * allowedRoots, cannot be broadened by cwd, and must not have been replaced
    * by a symlink since authorization. Outside reads are not this boundary. */
@@ -63,21 +65,21 @@ export function detectOsSandbox(): OsSandboxAvailability {
   if (availabilityCache) return availabilityCache;
 
   const landlock =
-    process.platform === 'linux' &&
+    isLinux() &&
     existsSync('/usr/include/linux/landlock.h') &&
     // Kernel-side check: landlock is meaningless without a kernel that
     // supports it. Probe via /sys; fall back to header presence.
     (existsSync('/sys/kernel/security/landlock') || process.env.KORYPHAIOS_FORCE_LANDLOCK === '1');
 
   const seccomp =
-    process.platform === 'linux' &&
+    isLinux() &&
     existsSync('/proc/self/status') &&
     // seccomp support is indicated by "Seccomp:" in /proc/self/status on
     // kernels that support it. Even without it, prctl(PR_SET_SECCOMP)
     // exists on any modern kernel.
     true;
 
-  const sandboxExec = process.platform === 'darwin' && existsSync('/usr/bin/sandbox-exec');
+  const sandboxExec = isMac() && existsSync('/usr/bin/sandbox-exec');
 
   availabilityCache = { landlock, seccomp, sandboxExec };
   return availabilityCache;
@@ -86,8 +88,8 @@ export function detectOsSandbox(): OsSandboxAvailability {
 /** True only when a concrete enforcement engine is installed. Linux header
  * support is not sufficient until Koryphaios ships a native Landlock shim. */
 export function osSandboxAvailable(): boolean {
-  if (process.platform === 'linux') return findOnPath('bwrap') !== null;
-  if (process.platform === 'darwin') return detectOsSandbox().sandboxExec;
+  if (isLinux()) return findExecutableOnPath('bwrap') !== null;
+  if (isMac()) return detectOsSandbox().sandboxExec;
   return false;
 }
 
@@ -102,7 +104,7 @@ export function osSandboxEnabled(): boolean {
 /** Resolve a path to its canonical form, tolerating non-existent files. */
 function safeRealpath(p: string): string {
   try {
-    return realpathSync(p);
+    return canonicalizePath(p);
   } catch {
     return resolve(p);
   }
@@ -113,7 +115,7 @@ function normalizeRoots(roots: string[]): string[] {
   const out = new Set<string>();
   for (const r of roots) {
     if (!r) continue;
-    const canonical = realpathSync(r);
+    const canonical = canonicalizePath(r);
     out.add(canonical);
   }
   return [...out];
@@ -146,15 +148,20 @@ export function spawnSandboxed(
   }
 
   const grant = opts.requiredWorkspaceRoot;
-  if (grant && realpathSync(grant) !== grant) {
+  if (grant && canonicalizePath(grant) !== grant) {
     throw new Error('Mandatory workspace root changed after authorization');
   }
   const roots = normalizeRoots(grant ? [grant] : opts.allowedRoots);
-  const cwd = realpathSync(opts.cwd);
-  const cwdInRoots = roots.some((r) => {
-    const rel = relative(r, cwd);
-    return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
-  });
+  const readOnlyRoots = normalizeRoots(opts.readOnlyRoots ?? []);
+  // Overlapping grants have contradictory authority: bind order on Linux and
+  // per-root allows on macOS would otherwise disagree about which wins.
+  if (readOnlyRoots.some((readOnly) => roots.some(
+    (writable) => isContainedBy(writable, readOnly) || isContainedBy(readOnly, writable),
+  ))) {
+    throw new Error('Read-only root overlaps a writable sandbox root');
+  }
+  const cwd = canonicalizePath(opts.cwd);
+  const cwdInRoots = roots.some((root) => isContainedBy(root, cwd));
   if (!cwdInRoots) {
     throw new Error(
       `spawnSandboxed: cwd ${cwd} is not inside any allowed root. ` + `Roots: ${roots.join(', ')}`,
@@ -163,7 +170,11 @@ export function spawnSandboxed(
 
   // A private scratch root provides TMPDIR without granting host /tmp writes.
   // It is never eligible as a caller-selected cwd or a broader workspace grant.
-  const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'kory-sandbox-runtime-')));
+  const scratch = canonicalizePath(mkdtempSync(join(tmpdir(), 'kory-sandbox-runtime-')));
+  if (readOnlyRoots.some((root) => isContainedBy(root, scratch) || isContainedBy(scratch, root))) {
+    rmSync(scratch, { recursive: true, force: true });
+    throw new Error('Read-only root overlaps a writable sandbox root');
+  }
   roots.push(scratch);
 
   // Sandboxed tools never inherit provider keys, database URLs, or backend
@@ -201,9 +212,9 @@ export function spawnSandboxed(
   // addon. Instead, we ship a tiny C shim compiled at install time, or fall
   // back to `bwrap` (bubblewrap) when available — bwrap is the standard
   // unprivileged sandbox on modern Linux distros and is what flatpak uses.
-  if (process.platform === 'linux' && osSandboxEnabled()) {
+  if (isLinux() && osSandboxEnabled()) {
     try {
-      return attachScratchCleanup(spawnLinuxSandbox(argv, opts, roots, env, cwd));
+      return attachScratchCleanup(spawnLinuxSandbox(argv, opts, roots, readOnlyRoots, env, cwd));
     } catch (error) {
       rmSync(scratch, { recursive: true, force: true });
       throw error;
@@ -211,9 +222,9 @@ export function spawnSandboxed(
   }
 
   // ─── macOS: sandbox-exec ─────────────────────────────────────────────
-  if (process.platform === 'darwin' && osSandboxEnabled()) {
+  if (isMac() && osSandboxEnabled()) {
     try {
-      return attachScratchCleanup(spawnMacSandbox(argv, opts, roots, env, cwd));
+      return attachScratchCleanup(spawnMacSandbox(argv, opts, roots, readOnlyRoots, env, cwd));
     } catch (error) {
       rmSync(scratch, { recursive: true, force: true });
       throw error;
@@ -222,7 +233,7 @@ export function spawnSandboxed(
 
   // ─── Unsupported / not enabled: fail closed ──────────────────────────
   rmSync(scratch, { recursive: true, force: true });
-  throw new Error(`OS sandbox enforcement is unavailable on ${process.platform}`);
+  throw new Error(`OS sandbox enforcement is unavailable on ${hostOS()}`);
 }
 
 // ─── Linux: bubblewrap (bwrap) ────────────────────────────────────────
@@ -244,12 +255,13 @@ function spawnLinuxSandbox(
   argv: string[],
   opts: OsSandboxOptions,
   roots: string[],
+  readOnlyRoots: string[],
   env: NodeJS.ProcessEnv,
   cwd: string,
 ): { proc: ReturnType<typeof spawn>; cleanup: () => void } {
-  const bwrapPath = findOnPath('bwrap');
+  const bwrapPath = findExecutableOnPath('bwrap');
   if (bwrapPath) {
-    return spawnBwrap(bwrapPath, argv, opts, roots, env, cwd);
+    return spawnBwrap(bwrapPath, argv, opts, roots, readOnlyRoots, env, cwd);
   }
 
   throw new Error('bubblewrap is required for Linux path confinement');
@@ -260,6 +272,7 @@ function spawnBwrap(
   argv: string[],
   opts: OsSandboxOptions,
   roots: string[],
+  readOnlyRoots: string[],
   env: NodeJS.ProcessEnv,
   cwd: string,
 ): { proc: ReturnType<typeof spawn>; cleanup: () => void } {
@@ -307,7 +320,7 @@ function spawnBwrap(
 
   // Expose only the runtime executable (not the user's home or credentials)
   // when Bun/Node/Git is installed outside the system mounts.
-  const executable = isAbsolute(argv[0]) ? argv[0] : findOnPath(argv[0]);
+  const executable = isAbsolute(argv[0]) ? argv[0] : findExecutableOnPath(argv[0]);
   const systemRoots = ['/usr', '/lib', '/lib64', '/bin', '/etc', '/sbin'];
   const extraExecutable =
     executable &&
@@ -315,7 +328,7 @@ function spawnBwrap(
       ? executable
       : undefined;
   const parents = new Set<string>();
-  for (const target of [...roots, ...(extraExecutable ? [extraExecutable] : [])]) {
+  for (const target of [...roots, ...readOnlyRoots, ...(extraExecutable ? [extraExecutable] : [])]) {
     let parent = '';
     for (const part of target.split('/').filter(Boolean).slice(0, -1)) {
       parent += `/${part}`;
@@ -333,6 +346,9 @@ function spawnBwrap(
   // Bind-mount each allowed root read-write.
   for (const root of roots) {
     args.push('--bind', root, root);
+  }
+  for (const root of readOnlyRoots) {
+    args.push('--ro-bind', root, root);
   }
 
   // Network isolation: unshare the net namespace so the child has no
@@ -381,6 +397,7 @@ function spawnMacSandbox(
   argv: string[],
   opts: OsSandboxOptions,
   roots: string[],
+  readOnlyRoots: string[],
   env: NodeJS.ProcessEnv,
   cwd: string,
 ): { proc: ReturnType<typeof spawn>; cleanup: () => void } {
@@ -401,10 +418,13 @@ function spawnMacSandbox(
   const profileLines: string[] = [
     '(version 1)',
     '(deny default)',
-    // Subprocess spawning: allowed by default because sandbox-exec's
-    // process model is per-line. When blockSubprocesses is true we omit
-    // this allow, which causes the default-deny to block fork/exec.
-    ...(opts.blockSubprocesses ? [] : ['(allow process*)']),
+    // sandbox-exec itself must exec the initial command after applying the
+    // profile. Default-denying all process operations would block that first
+    // exec (exit 71). Permit only the selected executable's resolved path;
+    // process-fork and execution of any other binary remain denied.
+    ...(opts.blockSubprocesses
+      ? [`(allow process-exec (literal ${JSON.stringify(safeRealpath(argv[0]!))}))`]
+      : ['(allow process*)']),
     // Mach IPC, IOKit, signals, and sysctl are required for many macOS
     // system calls. Without these, even simple commands like `touch`
     // fail with "Operation not permitted".
@@ -436,13 +456,8 @@ function spawnMacSandbox(
       // surrounding state/credentials, not the explicitly owned checkout.
       // This exception is never applied to credential stores such as ~/.ssh.
       const grant = opts.requiredWorkspaceRoot;
-      const grantRelative = grant ? relative(canonical, grant) : undefined;
       const dataDir = process.env.KORYPHAIOS_DATA_DIR?.trim();
-      const containsGrant =
-        grantRelative !== undefined &&
-        grantRelative !== '' &&
-        !grantRelative.startsWith('..') &&
-        !isAbsolute(grantRelative);
+      const containsGrant = grant !== undefined && grant !== canonical && isContainedBy(canonical, grant);
       const filter =
         grant && dataDir === secretPath && containsGrant
           ? `(require-all (subpath ${JSON.stringify(canonical)}) (require-not (subpath ${JSON.stringify(grant)})))`
@@ -466,6 +481,9 @@ function spawnMacSandbox(
   // the granted roots.
   for (const root of roots) {
     profileLines.push(allowFile(root));
+  }
+  for (const root of readOnlyRoots) {
+    profileLines.push(`(allow file-read* (subpath ${JSON.stringify(root)}))\n`);
   }
 
   if (opts.blockNetwork) {
@@ -542,22 +560,6 @@ function macOsCredentialPaths(): string[] {
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────
-
-function findOnPath(bin: string): string | null {
-  const PATH = process.env.PATH ?? '';
-  for (const dir of PATH.split(delimiter)) {
-    if (!dir) continue;
-    const full = join(dir, bin);
-    try {
-      accessSync(full, fsConstants.X_OK);
-      return full;
-    } catch {
-      // Keep searching: an existing but non-executable file is not an
-      // enforceable sandbox engine.
-    }
-  }
-  return null;
-}
 
 /**
  * Compute the default allowed roots for a sandboxed command.

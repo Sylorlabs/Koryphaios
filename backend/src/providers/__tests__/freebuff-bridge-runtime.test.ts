@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { isMac } from '../../runtime/platform';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import {
@@ -114,16 +115,23 @@ async function relayFixture() {
   return {
     ...f,
     relay,
-    request: (path = CATALOG, options: RequestInit = {}) =>
-      fetch(`${relay.url}${path}`, {
+    request: async (path = CATALOG, options: RequestInit = {}) => {
+      // Each fixture owns a short-lived listener; do not pool its connection across requests.
+      const response = await fetch(`${relay.url}${path}`, {
         method: 'POST',
         body: JSON.stringify(f.body),
         headers: {
           ...f.headers(path === EXECUTE ? EXECUTE : CATALOG),
           'x-kory-bridge-relay': relay.token,
+          connection: 'close',
         },
         ...options,
-      }),
+      });
+      return new Response(await response.arrayBuffer(), {
+        status: response.status,
+        headers: response.headers,
+      });
+    },
   };
 }
 
@@ -384,7 +392,7 @@ describe('standalone staged bridge and real stdio MCP', () => {
     expect(existsSync(f.prepared.readyPath)).toBe(false);
   }, 20_000);
 
-  it.skipIf(process.env.KORY_TEST_DOCKER_BRIDGE !== '1' || process.platform !== 'darwin')(
+  it.skipIf(process.env.KORY_TEST_DOCKER_BRIDGE !== '1' || !isMac())(
     'runs the staged MCP handshake inside mandatory Docker bubblewrap with only the disposable root mounted',
     async () => {
       const { createFreebuffTurnRuntime } = await import('../freebuff-runtime');

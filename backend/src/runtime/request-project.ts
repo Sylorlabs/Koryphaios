@@ -1,5 +1,6 @@
 import { realpathSync, statSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
+import { getInstalledContext } from './context-access';
 import { PROJECT_ROOT } from './paths';
 import { NotFoundError, ValidationError } from '../errors/types';
 
@@ -22,8 +23,7 @@ export async function getRequestWorkspaceRoot(request: Request): Promise<string>
   if (sessionId === null) return getRequestProjectRoot(request);
   if (!sessionId.trim()) throw new ValidationError('The selected session is required.');
   // Context imports the manager, which itself uses project identity helpers.
-  const { getContext } = await import('../context');
-  const { sessions, kory } = getContext();
+  const { sessions, kory } = getInstalledContext();
   if (!(await sessions.get(sessionId))) throw new NotFoundError('Session', sessionId);
   const workspace = await kory.resolveSessionWorkingDirectoryPublic(sessionId);
   try {

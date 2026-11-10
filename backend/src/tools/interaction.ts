@@ -6,6 +6,33 @@ import { normalizeSkillAssignment } from '../kory/skill-assignment';
  * Tool for the Manager to ask the user a question with predefined options.
  * Blocks execution until the user responds.
  */
+export class RequestCriticReviewTool implements Tool {
+  readonly name = 'request_critic_review';
+  readonly role = 'manager' as const;
+  readonly description =
+    'In Critic Auto mode, request an independent Critic review of your proposed answer when its claims, correctness, or risk would benefit from separate verification. Do not call for trivial checks, readiness tests, simple acknowledgements, or routine low-risk replies. Use only when you can state a concrete review concern; this records a concern for the decision prompt at the end of your turn and has no effect in Always or Off modes. You make the final yes or no decision then and choose an enabled Critic model if yes.';
+  readonly inputSchema = {
+    type: 'object',
+    properties: {
+      reason: { type: 'string', minLength: 1, maxLength: 500, description: 'Specific reason an independent review is valuable for this response.' },
+    },
+    required: ['reason'],
+    additionalProperties: false,
+  };
+
+  async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
+    const reason = typeof call.input.reason === 'string' ? call.input.reason.trim() : '';
+    if (!reason || reason.length > 500) {
+      return { callId: call.id, name: this.name, output: 'Provide a concrete review reason of 1-500 characters.', isError: true, durationMs: 0 };
+    }
+    if (!ctx.requestCriticReview) {
+      return { callId: call.id, name: this.name, output: 'Manager review selection is unavailable in this context.', isError: true, durationMs: 0 };
+    }
+    ctx.requestCriticReview(reason);
+    return { callId: call.id, name: this.name, output: 'Review concern recorded. The finishing agent will decide whether to invoke a Critic at the end of the turn.', isError: false, durationMs: 0 };
+  }
+}
+
 export class AskUserTool implements Tool {
   readonly name = 'ask_user';
   readonly role = 'manager' as const;
@@ -83,6 +110,15 @@ export class DelegateToWorkerTool implements Tool {
         description:
           'Exact installed skill names required for the worker. Missing or conflicting skills block execution.',
       },
+      model: {
+        type: 'string',
+        description: 'Optional worker model selected from the user enabled pool for this domain.',
+      },
+      reasoningLevel: {
+        type: 'string',
+        enum: ['low', 'medium', 'high', 'xhigh'],
+        description: 'Optional reasoning effort for this worker turn.',
+      },
       criticSkills: {
         type: 'array',
         items: { type: 'string' },
@@ -94,7 +130,12 @@ export class DelegateToWorkerTool implements Tool {
   };
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
-    const { task, domain } = call.input as { task: string; domain?: string };
+    const { task, domain, model, reasoningLevel } = call.input as {
+      task: string;
+      domain?: string;
+      model?: string;
+      reasoningLevel?: string;
+    };
     if (!task || typeof task !== 'string' || !task.trim()) {
       return {
         callId: call.id,
@@ -105,10 +146,18 @@ export class DelegateToWorkerTool implements Tool {
       };
     }
     if (!ctx.delegateToWorker) {
+      const role = ctx.callerRole ?? 'unknown';
+      const mode = ctx.permissionPolicy?.interactionMode ?? 'act';
+      const reason =
+        role !== 'manager'
+          ? `caller role is '${role}' (delegation requires 'manager')`
+          : mode === 'plan'
+            ? 'session is in planning mode'
+            : 'no host delegation grant is bound to this session';
       return {
         callId: call.id,
         name: this.name,
-        output: 'Error: Delegation not available in this context.',
+        output: `Error: Delegation not available in this context (${reason}).`,
         isError: true,
         durationMs: 0,
       };
@@ -118,8 +167,15 @@ export class DelegateToWorkerTool implements Tool {
         worker: call.input.workerSkills,
         critic: call.input.criticSkills,
       });
-      const result = await ctx.delegateToWorker(task.trim(), domain, skills);
-      return { callId: call.id, name: this.name, output: result, isError: false, durationMs: 0 };
+      const result = await ctx.delegateToWorker(task.trim(), domain, skills, model, reasoningLevel);
+      const failed = typeof result === 'string' && result.startsWith('WORKER_FAILED');
+      return {
+        callId: call.id,
+        name: this.name,
+        output: result,
+        isError: failed,
+        durationMs: 0,
+      };
     } catch (err: unknown) {
       serverLog.debug(
         { err: err instanceof Error ? err.message : String(err) },
@@ -159,6 +215,10 @@ export class AskManagerTool implements Tool {
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     // The actual execution of this tool is handled as an intercept in KoryManager's loop
     // to allow the Manager to take over. We return a structured signal.
+    if (ctx.requestManagerInput) {
+      const output = await ctx.requestManagerInput(String(call.input.question ?? ''));
+      return { callId: call.id, name: this.name, output, isError: false, durationMs: 0 };
+    }
     return {
       callId: call.id,
       name: this.name,

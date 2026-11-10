@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { canonicalizePath, directoryLinkType } from '../runtime/platform';
@@ -180,6 +181,32 @@ describe('isolated backend test environment', () => {
     expect(() =>
       createIsolatedTestEnvironment({ PLAYWRIGHT_BROWSERS_PATH: '0' }, '/isolated/home'),
     ).toThrow('PLAYWRIGHT_BROWSERS_PATH=0 (hermetic mode) is not supported');
+  });
+
+  test('propagates only an explicitly selected local Docker socket', async () => {
+    const fixture = mkdtempSync(join(tmpdir(), 'kory-test-docker-host-'));
+    const socketPath = join(fixture, 'docker.sock');
+    const server = createServer();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(socketPath, resolve);
+      });
+      const env = createIsolatedTestEnvironment(
+        {
+          KORY_DOCKER_HOST: `unix://${socketPath}`,
+          DOCKER_HOST: 'unix:///ambient/docker.sock',
+          HOME: '/real/home',
+        },
+        join(fixture, 'isolated-home'),
+      );
+      expect(env.DOCKER_HOST).toBe(`unix://${socketPath}`);
+      expect(env.KORY_DOCKER_HOST).toBeUndefined();
+      expect(env.HOME).toBe(join(fixture, 'isolated-home'));
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      rmSync(fixture, { recursive: true, force: true });
+    }
   });
 
   test('focused selection preserves Bun flags and deduplicates explicit files', () => {

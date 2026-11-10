@@ -1,3 +1,4 @@
+import { installContextAccessor } from './runtime/context-access';
 import { ProviderRegistry } from './providers';
 import { ToolRegistry } from './tools';
 import { KoryManager } from './kory/manager';
@@ -42,3 +43,7 @@ export function getContext(): AppContext {
   }
   return context;
 }
+
+// Modules that sit inside the context/manager cycle resolve the context through
+// this accessor rather than a dynamic import; see runtime/context-access.ts.
+installContextAccessor(getContext);

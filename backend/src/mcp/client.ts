@@ -10,11 +10,12 @@
 
 import { mcpLog, serverLog } from '../logger';
 import { validatedToolImages } from '../tools/tool-images';
-import { resolve } from 'node:path';
+import { createHash } from 'node:crypto';
 import type { Tool, ToolCallInput, ToolContext, ToolCallOutput } from '../tools/registry';
 import { ToolRegistry } from '../tools/registry';
 import { VERSION } from '../constants';
 import { registerMCPToolsInRegistry } from './tool-bridge';
+import { mcpProjectScope } from './project-scope';
 
 /** MCP protocol versions supported by this client, newest first. The client
  *  negotiates the highest mutually supported version via server/discover. */
@@ -1033,7 +1034,11 @@ export class MCPToolWrapper implements Tool {
   constructor(
     private client: MCPClient,
     private def: MCPToolDef,
+    readonly projectRoot: string = process.cwd(),
   ) {}
+
+  get mcpServerName() { return this.client.name; }
+  get mcpToolName() { return this.def.name; }
 
   get name() {
     return `mcp_${this.client.name}_${this.def.name}`;
@@ -1047,6 +1052,9 @@ export class MCPToolWrapper implements Tool {
 
   async run(ctx: ToolContext, input: ToolCallInput): Promise<ToolCallOutput> {
     const start = performance.now();
+    if (mcpProjectScope(ctx.settingsRoot ?? ctx.workingDirectory) !== mcpProjectScope(this.projectRoot)) {
+      return { callId: input.id, name: this.name, output: 'MCP tool is not registered for this project.', isError: true, durationMs: 0 };
+    }
     try {
       const result = await this.client.callTool(this.def.name, input.input);
       const text = result.content
@@ -1089,22 +1097,34 @@ export interface McpServerStatus {
 
 export class MCPManager {
   private clients = new Map<string, MCPClient>();
+  private discoveryPending = new Map<string, Promise<void>>();
+  private discoveryFailures = new Map<string, { signature: string; at: number }>();
 
   constructor(private workingDirectory: string) {}
 
-  private scopeKey(name: string, projectRoot = this.workingDirectory): string {
-    return `${resolve(projectRoot)}\u0000${name}`;
+  async ensureConfiguredServers(configs: MCPServerConfig[], registry: ToolRegistry, projectRoot: string): Promise<void> {
+    for (const config of configs) {
+      const key = this.scopeKey(config.name, projectRoot);
+      if (this.clients.has(key)) continue;
+      const signature = createHash('sha256').update(JSON.stringify(config)).digest('hex');
+      const failure = this.discoveryFailures.get(key);
+      if (failure?.signature === signature && Date.now() - failure.at < 30_000) continue;
+      let pending = this.discoveryPending.get(key);
+      if (!pending) {
+        pending = this.addServer(config, registry, projectRoot).then(() => {
+          this.discoveryFailures.delete(key);
+        }).catch(() => {
+          this.discoveryFailures.set(key, { signature, at: Date.now() });
+          mcpLog.warn({ server: config.name }, 'Configured MCP server unavailable; discovery will retry');
+        }).finally(() => this.discoveryPending.delete(key));
+        this.discoveryPending.set(key, pending);
+      }
+      await pending;
+    }
   }
 
-  private assertNameNotActiveInAnotherProject(name: string, projectRoot: string): void {
-    const scope = resolve(projectRoot);
-    for (const key of this.clients.keys()) {
-      const separator = key.indexOf('\u0000');
-      if (separator === -1 || key.slice(separator + 1) !== name) continue;
-      if (key.slice(0, separator) !== scope) {
-        throw new Error(`MCP server "${name}" is already active for another project`);
-      }
-    }
+  private scopeKey(name: string, projectRoot = this.workingDirectory): string {
+    return `${mcpProjectScope(projectRoot)}\u0000${name}`;
   }
 
   /**
@@ -1131,10 +1151,9 @@ export class MCPManager {
     config: MCPServerConfig,
     projectRoot = this.workingDirectory,
   ): Promise<MCPClient> {
-    this.assertNameNotActiveInAnotherProject(config.name, projectRoot);
     const key = this.scopeKey(config.name, projectRoot);
     const client = new MCPClient(config, this.authResolverFor(config, projectRoot));
-    await client.connect();
+    try { await client.connect(); } catch (error) { await client.shutdown(); throw error; }
     this.clients.set(key, client);
     return client;
   }
@@ -1145,19 +1164,18 @@ export class MCPManager {
     registry: ToolRegistry,
     projectRoot = this.workingDirectory,
   ): Promise<MCPClient> {
-    this.assertNameNotActiveInAnotherProject(config.name, projectRoot);
     const key = this.scopeKey(config.name, projectRoot);
     // If a server with this name exists, shut it down first (replace semantics).
     const existing = this.clients.get(key);
     if (existing) {
       await existing.shutdown();
-      registry.unregisterByPrefix(`mcp_${config.name}_`);
+      registry.unregisterMcpServer(config.name, projectRoot);
       this.clients.delete(key);
     }
     const client = new MCPClient(config, this.authResolverFor(config, projectRoot));
-    await client.connect();
+    try { await client.connect(); } catch (error) { await client.shutdown(); throw error; }
     this.clients.set(key, client);
-    await registerMCPToolsInRegistry(registry, client);
+    await registerMCPToolsInRegistry(registry, client, projectRoot);
     return client;
   }
 
@@ -1171,7 +1189,7 @@ export class MCPManager {
     const client = this.clients.get(key);
     if (!client) return false;
     await client.shutdown();
-    registry.unregisterByPrefix(`mcp_${name}_`);
+    registry.unregisterMcpServer(name, projectRoot);
     this.clients.delete(key);
     return true;
   }
@@ -1184,11 +1202,10 @@ export class MCPManager {
     projectRoot = this.workingDirectory,
   ): Promise<MCPClient> {
     const key = this.scopeKey(name, projectRoot);
-    this.assertNameNotActiveInAnotherProject(name, projectRoot);
     const existing = this.clients.get(key);
     if (existing) {
       await existing.shutdown();
-      registry.unregisterByPrefix(`mcp_${name}_`);
+      registry.unregisterMcpServer(name, projectRoot);
       this.clients.delete(key);
     }
     return this.addServer(config, registry, projectRoot);
@@ -1196,7 +1213,7 @@ export class MCPManager {
 
   /** Snapshot of all servers for UI status display. */
   listServers(projectRoot?: string): McpServerStatus[] {
-    const scope = projectRoot === undefined ? null : `${resolve(projectRoot)}\u0000`;
+    const scope = projectRoot === undefined ? null : `${mcpProjectScope(projectRoot)}\u0000`;
     return [...this.clients.entries()]
       .filter(([key]) => scope === null || key.startsWith(scope))
       .map(([, client]) => ({
@@ -1215,8 +1232,8 @@ export class MCPManager {
   }
 
   async registerAllTools(registry: ToolRegistry): Promise<void> {
-    for (const client of this.clients.values()) {
-      await registerMCPToolsInRegistry(registry, client);
+    for (const [key, client] of this.clients) {
+      await registerMCPToolsInRegistry(registry, client, key.slice(0, key.indexOf('\u0000')));
     }
   }
 

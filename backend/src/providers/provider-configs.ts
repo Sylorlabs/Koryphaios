@@ -18,9 +18,8 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
   {
     name: 'anthropic',
     baseUrl: 'https://api.anthropic.com',
-    authMode: 'api_key_or_auth',
+    authMode: 'api_key',
     envKeys: ['ANTHROPIC_API_KEY'],
-    envAuthTokenKey: 'ANTHROPIC_AUTH_TOKEN',
   },
   {
     name: 'openai',
@@ -43,12 +42,30 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
   },
   { name: 'xai', baseUrl: 'https://api.x.ai', authMode: 'api_key', envKeys: ['XAI_API_KEY'] },
 
+  // Reflection AI — Chat Completions and Models, Bearer API key.
+  // https://developers.reflection.ai/openai-compatibility.md
+  {
+    name: 'beam',
+    baseUrl: 'https://api.reflection.ai/openai/v1',
+    authMode: 'api_key',
+    envKeys: ['REFLECTION_API_KEY'],
+  },
+
   // Aggregators
   {
     name: 'openrouter',
     baseUrl: 'https://openrouter.ai/api',
     authMode: 'api_key',
     envKeys: ['OPENROUTER_API_KEY'],
+  },
+  // AgentRouter — OpenAI-compatible catalog/chat at /v1; Claude Messages use
+  // the same selected host with the Anthropic-compatible protocol.
+  // https://co.agentrouter.org/portal/guide
+  {
+    name: 'agentrouter',
+    baseUrl: 'https://agentrouter.org/v1',
+    authMode: 'api_key',
+    envKeys: ['AGENTROUTER_API_KEY'],
   },
   // UnoRouter — open-source OpenRouter alternative; one key for 200+ models.
   // OpenAI-compatible Chat Completions at /v1 (docs: unorouter.com/en/docs).
@@ -76,6 +93,57 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     baseUrl: 'https://api.experientiallabs.ai/v1',
     authMode: 'api_key',
     envKeys: ['EXPERIENTIALLABS_API_KEY', 'EXPLABS_API_KEY'],
+  },
+  // Token Harbor — OpenAI-compatible (and Anthropic-compatible) gateway on one
+  // `thk_live_…` key. Verification probes GET /v1/models with Bearer auth.
+  // https://tokenharbor.ai/docs/api/curl
+  {
+    name: 'tokenharbor',
+    baseUrl: 'https://tokenharbor.ai/v1',
+    authMode: 'api_key',
+    envKeys: ['TOKENHARBOR_API_KEY'],
+  },
+  // Logfare — free, community-run OpenAI-compatible inference host.
+  // `logfare/auto` routes across its catalog; GET /v1/models is public.
+  // https://logfare.ai/
+  {
+    name: 'logfare',
+    baseUrl: 'https://logfare.ai/v1',
+    authMode: 'api_key',
+    envKeys: ['LOGFARE_API_KEY'],
+  },
+  // APInex — OpenAI-compatible model + web-tool gateway. The API lives on the
+  // `api.` host while keys are issued on the site root.
+  // https://apinex.bond/developers
+  {
+    name: 'apinex',
+    baseUrl: 'https://api.apinex.bond/v1',
+    authMode: 'api_key',
+    envKeys: ['APINEX_API_KEY'],
+  },
+  // Gwarden AI — unified gateway speaking the OpenAI, Anthropic and Responses
+  // APIs over one key. Its public /v1/models catalog reports context_length
+  // and max_output_tokens per model, so discovery carries real limits.
+  // https://gwarden.su
+  {
+    name: 'gwarden',
+    baseUrl: 'https://gwarden.su/v1',
+    authMode: 'api_key',
+    envKeys: ['GWARDEN_API_KEY'],
+  },
+  // Vyce AI — OpenAI-compatible multi-model API proxy. The documented API
+  // surface is rooted at /v1 and uses a Bearer API key.
+  {
+    name: 'vyceai',
+    baseUrl: 'https://vyceai.com/v1',
+    authMode: 'api_key',
+    envKeys: ['VYCEAI_API_KEY', 'VYCE_AI_API_KEY'],
+  },
+  {
+    name: 'respan',
+    baseUrl: 'https://api.respan.ai/api/v1',
+    authMode: 'api_key',
+    envKeys: ['RESPAN_API_KEY'],
   },
   {
     name: 'tokenrouter',
@@ -133,10 +201,19 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     envKeys: [],
     envAuthTokenKey: 'GROK_CODE_XAI_API_KEY',
   },
+  {
+    name: 'codebuddy',
+    baseUrl: '',
+    authMode: 'auth_only',
+    envKeys: [],
+    envAuthTokenKey: 'CODEBUDDY_API_KEY',
+  },
   { name: 'antigravity', baseUrl: '', authMode: 'auth_only', envKeys: [] },
   { name: 'cursor', baseUrl: '', authMode: 'auth_only', envKeys: [] },
   { name: 'devin', baseUrl: '', authMode: 'auth_only', envKeys: [] },
   { name: 'freebuff', baseUrl: '', authMode: 'auth_only', envKeys: [] },
+  { name: 'omnirush', baseUrl: '', authMode: 'auth_only', envKeys: [] },
+  { name: 'opencode', baseUrl: '', authMode: 'auth_only', envKeys: [] },
   {
     name: 'codebuff',
     baseUrl: 'https://www.codebuff.com/api',
@@ -148,13 +225,6 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     baseUrl: 'https://api.kilo.ai/api/gateway',
     authMode: 'api_key',
     envKeys: ['KILO_API_KEY'],
-  },
-  // Cloud async agent (API key, not a CLI harness)
-  {
-    name: 'jules',
-    baseUrl: 'https://jules.googleapis.com/v1alpha',
-    authMode: 'api_key',
-    envKeys: ['JULES_API_KEY'],
   },
   // Hybrid async agent (Hoplite) — org-scoped API key created in app.hoplite.sh
   // organization settings. A thread runs in a Hoplite cloud sandbox or on a local
@@ -209,15 +279,6 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     baseUrl: 'http://localhost:8080',
     authMode: 'base_url_only',
     envKeys: [],
-  },
-  // AutoClaw (Z.ai) — the local OpenClaw/AutoClaw desktop gateway ships an
-  // OpenAI-compatible Chat Completions surface bound to loopback only. Users
-  // paste the gateway bearer token from ~/.openclaw-autoclaw/.gateway-token.
-  {
-    name: 'autoclaw',
-    baseUrl: 'http://127.0.0.1:18789/v1',
-    authMode: 'api_key',
-    envKeys: ['AUTOCLAW_GATEWAY_TOKEN'],
   },
   {
     name: 'ollamacloud',
@@ -546,9 +607,9 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
   },
   {
     name: 'blackforestlabs',
-    baseUrl: 'https://api.blackforestlabs.ai/v1',
+    baseUrl: 'https://api.bfl.ai',
     authMode: 'api_key',
-    envKeys: ['BLACKFORESTLABS_API_KEY'],
+    envKeys: ['BFL_API_KEY', 'BLACKFORESTLABS_API_KEY'],
   },
   {
     name: 'klingai',
@@ -625,6 +686,14 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     envKeys: ['WORKBUDDY_API_KEY'],
   },
   {
+    // WorkBuddy AI desktop app: local runtime, no base URL (the app bundle
+    // owns the endpoint). The desktop app's own auth context is used.
+    name: 'workbuddy-desktop',
+    baseUrl: '',
+    authMode: 'auth_only',
+    envKeys: [],
+  },
+  {
     name: 'github-models',
     baseUrl: 'https://models.github.ai/inference',
     authMode: 'api_key',
@@ -659,12 +728,6 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     baseUrl: 'https://api.moark.ai/v1',
     authMode: 'api_key',
     envKeys: ['MOARK_API_KEY'],
-  },
-  {
-    name: 'chatbase',
-    baseUrl: 'https://www.chatbase.co/api/v2',
-    authMode: 'api_key',
-    envKeys: ['CHATBASE_API_KEY'],
   },
   {
     name: 'notion',

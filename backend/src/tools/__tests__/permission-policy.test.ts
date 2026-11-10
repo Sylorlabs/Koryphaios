@@ -21,8 +21,10 @@ function policy(
 }
 
 describe('permission preset policy', () => {
-  it('makes Plan host-enforced read-only', () => {
+  it('makes planning interaction host-enforced read-only without changing the preset', () => {
     const plan = resolveToolPermissionPolicy(DEFAULT_AGENT_SETTINGS, 'plan');
+    expect(plan.mode).toBe('guarded');
+    expect(plan.interactionMode).toBe('plan');
     expect(decideToolPermission(plan, 'read_file').action).toBe('allow');
     expect(decideToolPermission(plan, 'write_file').action).toBe('deny');
     expect(decideToolPermission(plan, 'record_work_note').action).toBe('deny');
@@ -145,7 +147,8 @@ describe('ToolRegistry host enforcement', () => {
       input: { path: 'example.txt' },
     });
     expect(result).toMatchObject({ isError: false, output: 'ran' });
-    expect(ctx.approvedToolCallIds?.has('delete-2')).toBe(true);
+    // Approval receipts are invocation-bound and removed in ToolRegistry's finally block.
+    expect(ctx.approvedToolCallIds?.has('delete-2')).toBe(false);
   });
 
   it('runs without asking in true YOLO mode', async () => {

@@ -94,8 +94,8 @@ describe('independent relationship tool approvals', () => {
     });
     expect(forged.isError).toBe(true);
   });
-  test('review asks separately even with YOLO, Notes auto and replayed receipt', async () => {
-    permission('review_note_relationship', 'auto');
+  test('explicit review Ask survives YOLO and replayed receipt', async () => {
+    permission('review_note_relationship', 'ask');
     const input = await proposal('Approved');
     await proposeNoteRelationship(input as never, root, { provenance: 'agent' });
     let prompts = 0;
@@ -120,8 +120,8 @@ describe('independent relationship tool approvals', () => {
     );
     expect((await listNoteRelationships(root, { fromId: input.fromId }))[0]?.revision).toBe(2);
   });
-  test('proposal approval cannot authorize review; missing channel and explicit rejection fail closed', async () => {
-    permission('review_note_relationship', 'auto');
+  test('proposal approval cannot authorize explicit review Ask; missing channel and rejection fail closed', async () => {
+    permission('review_note_relationship', 'ask');
     const input = await proposal('Reject review');
     await proposeNoteRelationship(input as never, root, { provenance: 'agent' });
     const call = {
@@ -147,7 +147,7 @@ describe('independent relationship tool approvals', () => {
     );
   });
   test('block and approval-time revocation defeat allowlists and YOLO', async () => {
-    permission('review_note_relationship', 'auto');
+    permission('review_note_relationship', 'ask');
     const input = await proposal('Revoke review');
     await proposeNoteRelationship(input as never, root, { provenance: 'agent' });
     const call = {

@@ -128,6 +128,9 @@ export const klingAiAdapter: CapabilityAdapter = {
   provider: 'klingai',
   capabilities: ['video', 'image'],
   defaultBaseUrl: BASE_URL,
+  // `generate` sends negative_prompt and a sound toggle; Kling takes no
+  // resolution preset, only aspect ratio and duration.
+  requestOptions: { audio: true, negativePrompt: true, durationSeconds: true },
 
   async verify(config, signal): Promise<CapabilityVerifyResult> {
     try {

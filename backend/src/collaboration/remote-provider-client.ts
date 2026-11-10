@@ -63,7 +63,11 @@ export async function connectToProviderHost(
   await new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => {
       disconnectFromProviderHost();
-      reject(new Error('The host did not provide a shared-model catalog. Check model access with the host.'));
+      reject(
+        new Error(
+          'The host did not provide a shared-model catalog. Check model access with the host.',
+        ),
+      );
     }, 10_000);
     catalogUnsub = relayGuestClient.onCatalog((catalog) => {
       registerFromCatalog(catalog);

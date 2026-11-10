@@ -40,6 +40,7 @@ export const STUB_INPUT_SCHEMA: Readonly<Record<string, unknown>> = Object.freez
 const EXPOSURE_HINTS: Readonly<Record<string, string>> = Object.freeze({
   ask_manager: 'Ask the manager agent, not the human. params: question',
   ask_user: 'Ask the human and wait for their answer. params: question, options',
+  rename_session: 'Rename this chat as its topic evolves. params: title (3-6 descriptive words)',
   request_manager_relay: 'Relay a message to the manager on another agent behalf.',
   send_agent_message: 'Send a message to another agent. params: body',
   fetch_context: 'Pull previously pruned context back into the window. params: id, query',
@@ -51,8 +52,8 @@ const EXPOSURE_HINTS: Readonly<Record<string, string>> = Object.freeze({
   'analyze-error': 'Explain one already-detected error. params: errorId',
   'detect-errors': 'Scan a source tree for errors. params: source, language, files',
   'suggest-fixes': 'Propose fixes for a detected error. params: errorId',
-  delegate_to_jules: 'Delegate to a remote Google Jules cloud VM. params: task',
   delegate_to_worker: 'Delegate to a local specialist worker. params: task, domain',
+  manage_agents: 'List or control spawned workers. params: action, agentId, message, model, reasoningLevel, keepRecent',
   ghost_commit: 'Commit work-in-progress locally. params: label',
   commit_and_create_pr: 'Commit, push, and open a pull request. params: taskDescription',
   git_inspect:
@@ -93,8 +94,11 @@ const EXPOSURE_HINTS: Readonly<Record<string, string>> = Object.freeze({
   create_workflow_draft: 'Draft a new workflow definition. params: name, description, stages',
   record_work_note: 'Log a work session. params: title, summary, status',
   manage_mcp_server: 'Add, remove, or configure an MCP server. params: action, name',
+  list_mcp_tools: 'Discover custom MCP tools and their full schemas. params: server_name?',
+  invoke_mcp_tool: 'Call a discovered custom MCP tool, including tools added mid-turn. params: server_name, tool_name, arguments',
   shell_manage: 'List, kill, or read a background shell process. params: action, processId',
   batch_edit: 'Apply several file edits in one call. params: files',
+  edit_file: 'params: path, old_str, new_str',
 });
 
 /** Param names worth naming in a hint. Past this the list stops being a hint. */

@@ -7,6 +7,7 @@
  */
 
 import { nanoid } from 'nanoid';
+import { isNoteIcon, validateNoteCanvas } from '@koryphaios/shared';
 import { db, getDb } from '../db';
 import {
   notes,
@@ -45,6 +46,7 @@ import type {
   GraphData,
   GraphNode,
   GraphEdge,
+  NoteIcon,
   FolderNode,
   NoteWithLinks,
   NoteRelationship,
@@ -188,6 +190,16 @@ function scopedTrashCondition(projectRoot?: string) {
 
 function byteLength(value: string): number {
   return Buffer.byteLength(value, 'utf8');
+}
+
+function parseNoteIcon(value: string | null | undefined) {
+  if (!value) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return isNoteIcon(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function validateTitle(title: string): string {
@@ -593,6 +605,7 @@ function rowToNote(row: typeof notes.$inferSelect): Note {
     updatedAt:
       row.updatedAt instanceof Date ? row.updatedAt : new Date((row.updatedAt as number) * 1000),
     revision: row.revision ?? 1,
+    ...(parseNoteIcon(row.icon) ? { icon: parseNoteIcon(row.icon) } : {}),
     sourcePath,
     // Project documents derive format from the file extension; DB notes carry
     // their own format column ('markdown' default, 'html' → sandboxed preview).
@@ -704,6 +717,7 @@ function rowToNoteMeta(row: {
   pinned: number;
   includeInContext: number;
   format: string | null;
+  icon: string | null;
   userId: string | null;
   createdAt: Date | number;
   updatedAt: Date | number;
@@ -726,6 +740,7 @@ function rowToNoteMeta(row: {
     updatedAt:
       row.updatedAt instanceof Date ? row.updatedAt : new Date((row.updatedAt as number) * 1000),
     revision: row.revision ?? 1,
+    ...(parseNoteIcon(row.icon) ? { icon: parseNoteIcon(row.icon) } : {}),
     sourcePath,
     format: sourcePath
       ? extension === '.html' || extension === '.htm'
@@ -767,6 +782,7 @@ export async function createNote(
   const title = validateTitle(input.title);
   const content = input.content ?? '';
   assertContentBudget(content, root);
+  if (input.tags?.includes('canvas')) validateNoteCanvas(JSON.parse(content));
 
   db.transaction((tx) => {
     tx.insert(notes)
@@ -834,6 +850,19 @@ export async function updateNote(
   return withNoteMutation(id, () => updateNoteUnlocked(id, input, projectRoot));
 }
 
+/** Appearance changes never advance document revisions or rewrite source files. */
+export async function setNoteIcon(id: string, icon: NoteIcon | null, projectRoot: string): Promise<NoteIcon | null> {
+  if (icon !== null && !isNoteIcon(icon)) throw new ValidationError('Invalid note icon');
+  return withNoteMutation(id, async () => {
+    const existing = await getNote(id, projectRoot);
+    if (!existing) throw new NotFoundError('Note', id);
+    db.update(notes).set({ icon: icon === null ? null : JSON.stringify(icon) })
+      .where(and(eq(notes.id, id), isNull(notes.trashedAt))).run();
+    invalidateNotesCache();
+    return icon;
+  });
+}
+
 type NotesTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /** The caller owns the source note mutation queue. Graph writes share the
@@ -858,6 +887,7 @@ async function updateNoteUnlocked(
 
   const root = rowProjectRoot({ id, projectRoot: resolvedProjectRoot(projectRoot) });
   if (input.content !== undefined) assertContentBudget(input.content, root);
+  if ((input.tags ?? existing.tags).includes('canvas') && (input.content !== undefined || input.tags?.includes('canvas'))) validateNoteCanvas(JSON.parse(input.content ?? existing.content));
   const sourceFile = resolveProjectDocument(id);
   if (sourceFile && input.content !== undefined) {
     const sourceExists = existsSync(sourceFile);
@@ -2086,6 +2116,10 @@ async function performProjectDocumentSync(projectRoot: string): Promise<ProjectD
     // capped scan reproducible and prevents notes from appearing/disappearing
     // between refreshes on the same unchanged vault.
     entries.sort((a, b) => a.name.localeCompare(b.name));
+    // Instruction packages are managed by Skills, including their supporting
+    // references. A visible bundled skill library must not become hundreds of
+    // ordinary notes just because its documents use Markdown or HTML.
+    if (directory !== root && entries.some((entry) => entry.isFile() && /^SKILL\./i.test(entry.name))) return;
     for (const entry of entries) {
       if (files.length >= MAX_FILES) {
         scanComplete = false;
@@ -2098,6 +2132,7 @@ async function performProjectDocumentSync(projectRoot: string): Promise<ProjectD
         continue;
       }
       if (entry.isFile() && DOCUMENT_EXTENSIONS.has(extname(entry.name).toLowerCase())) {
+        if (/^SKILL\./i.test(entry.name)) continue;
         files.push(join(directory, entry.name));
       }
     }
@@ -2117,6 +2152,7 @@ async function performProjectDocumentSync(projectRoot: string): Promise<ProjectD
     pinned: notes.pinned,
     includeInContext: notes.includeInContext,
     format: notes.format,
+    icon: notes.icon,
     userId: notes.userId,
     createdAt: notes.createdAt,
     updatedAt: notes.updatedAt,
@@ -2682,6 +2718,7 @@ export async function listNotes(
       pinned: notes.pinned,
       includeInContext: notes.includeInContext,
       format: notes.format,
+      icon: notes.icon,
       userId: notes.userId,
       createdAt: notes.createdAt,
       updatedAt: notes.updatedAt,
@@ -2804,6 +2841,7 @@ export async function listNoteRelationships(
     fromId?: string;
     toId?: string;
     limit?: number;
+    offset?: number;
   } = {},
 ): Promise<NoteRelationship[]> {
   const root = resolveProjectIdentity(projectRoot);
@@ -2823,7 +2861,7 @@ export async function listNoteRelationships(
       ${options.status ? sql`AND r.status=${options.status}` : sql``}
       ${options.fromId ? sql`AND r.from_note_id=${options.fromId}` : sql``}
       ${options.toId ? sql`AND r.to_note_id=${options.toId}` : sql``}
-    ORDER BY r.updated_at DESC,r.from_note_id,r.to_note_id LIMIT ${graphBound(options.limit, 100, 200)}
+    ORDER BY r.updated_at DESC,r.from_note_id,r.to_note_id LIMIT ${graphBound(options.limit, 100, 200)} OFFSET ${Math.min(100000, Math.max(0, Math.floor(options.offset ?? 0)))}
   `);
   // Project document IDs are also checked against their encoded filesystem scope.
   const visible: NoteRelationship[] = [];
@@ -2856,11 +2894,29 @@ function nextRelationshipRevision(
   return (row?.revision ?? 0) + 1;
 }
 
-/** One bounded proposal, never automatic acceptance or a rewrite of an existing decision. */
+export async function refreshNoteRelationship(
+  input: ProposeNoteRelationshipInput & { expectedRevision: number },
+  projectRoot: string,
+  host: { provenance: 'user' | 'agent' | 'import'; actor?: NoteRelationshipActor },
+): Promise<NoteRelationship> {
+  if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1) throw new ValidationError('expectedRevision must be a positive integer');
+  return writeNoteRelationshipProposal(input, projectRoot, host, input.expectedRevision);
+}
+
+/** One bounded proposal, never automatic acceptance. */
 export async function proposeNoteRelationship(
   input: ProposeNoteRelationshipInput,
   projectRoot: string,
   host: { provenance: 'user' | 'agent' | 'import'; actor?: NoteRelationshipActor },
+): Promise<NoteRelationship> {
+  return writeNoteRelationshipProposal(input, projectRoot, host);
+}
+
+async function writeNoteRelationshipProposal(
+  input: ProposeNoteRelationshipInput,
+  projectRoot: string,
+  host: { provenance: 'user' | 'agent' | 'import'; actor?: NoteRelationshipActor },
+  expectedRelationshipRevision?: number,
 ): Promise<NoteRelationship> {
   if (!['related_to', 'supports', 'contradicts', 'depends_on', 'supersedes'].includes(input.type))
     throw new ValidationError('Invalid relationship type');
@@ -2921,10 +2977,12 @@ export async function proposeNoteRelationship(
           ),
         )
         .get();
-      if (current)
-        throw new ConflictError(
-          'A relationship already exists for this directed pair. Review it instead.',
-        );
+      if (expectedRelationshipRevision !== undefined) {
+        if (!current || current.projectRoot !== root || current.revision !== expectedRelationshipRevision) throw new ConflictError('Relationship changed; reload before refreshing evidence.');
+        tx.delete(noteRelationships).where(and(eq(noteRelationships.fromNoteId, input.fromId), eq(noteRelationships.toNoteId, input.toId), eq(noteRelationships.projectRoot, root))).run();
+      } else if (current) {
+        throw new ConflictError('A relationship already exists for this directed pair. Review it instead.');
+      }
       const now = new Date();
       tx.insert(noteRelationships)
         .values({
@@ -3866,6 +3924,7 @@ export async function getGraphData(projectRoot?: string): Promise<GraphData> {
     })(),
     linkCount: linkCountMap.get(n.id) ?? 0,
     includeInContext: Boolean(n.includeInContext),
+    ...(parseNoteIcon(n.icon) ? { icon: parseNoteIcon(n.icon) } : {}),
   }));
 
   const edges: GraphEdge[] = allLinks.map((l) => ({ from: l.fromNoteId, to: l.toNoteId }));
@@ -4271,10 +4330,14 @@ export async function saveAttachment(
   mimeType: string,
   data: Buffer,
   projectRoot = PROJECT_ROOT,
+  expectedRevision?: number,
 ): Promise<NoteAttachment> {
-  return withNoteMutation(noteId, () =>
-    saveAttachmentUnlocked(noteId, filename, mimeType, data, projectRoot),
-  );
+  return withNoteMutation(noteId, async () => {
+    const note = await getNote(noteId, projectRoot);
+    if (!note) throw new NotFoundError('Note', noteId);
+    if (expectedRevision !== undefined && note.revision !== expectedRevision) throw new ConflictError('Note changed before attachment creation');
+    return saveAttachmentUnlocked(noteId, filename, mimeType, data, projectRoot);
+  });
 }
 
 async function saveAttachmentUnlocked(
@@ -4384,12 +4447,16 @@ export async function getAttachment(
   };
 }
 
-export async function deleteAttachment(id: string, projectRoot?: string): Promise<void> {
+export async function deleteAttachment(id: string, projectRoot?: string, expectedRevision?: number): Promise<void> {
   const candidate = await getAttachment(id, projectRoot);
   if (!candidate) throw new NotFoundError('Attachment', id);
   await withNoteMutation(candidate.noteId, async () => {
     const att = await getAttachment(id, projectRoot);
     if (!att) throw new NotFoundError('Attachment', id);
+    if (expectedRevision !== undefined) {
+      const note = await getNote(att.noteId, projectRoot);
+      if (!note || note.revision !== expectedRevision) throw new ConflictError('Note changed before attachment removal');
+    }
 
     try {
       unlinkSync(att.storagePath);

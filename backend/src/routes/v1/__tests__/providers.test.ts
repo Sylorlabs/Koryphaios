@@ -165,7 +165,7 @@ mock.module('../../../providers/auth-utils', () => ({
   createCodexCLIProfileMarker: (profileDir: string) =>
     `cli:codex:${Buffer.from(profileDir).toString('base64url')}`,
   detectClaudeCodeLogin: () => true,
-  detectClaudeCodeToken: () => null,
+  detectClaudeCodeToken: () => ({ token: null }),
   createClaudeCLIAuthMarker: () => `cli:claude:${Date.now()}`,
   isClaudeCLIAuthMarker: (value: string | null | undefined) =>
     typeof value === 'string' && value.startsWith('cli:claude:'),
@@ -174,6 +174,22 @@ mock.module('../../../providers/auth-utils', () => ({
   isGrokCLIAuthMarker: (value: string | null | undefined) =>
     typeof value === 'string' && value.startsWith('cli:grok:'),
   detectGrokXaiKey: () => null,
+  detectCodeBuddyCLILogin: () => false,
+  createCodeBuddyCLIAuthMarker: () => 'cli:codebuddy:test',
+  isCodeBuddyCLIAuthMarker: (value: string | null | undefined) =>
+    typeof value === 'string' && value.startsWith('cli:codebuddy:'),
+  createWorkBuddyDesktopAuthMarker: () => 'workbuddy-desktop:installed:test',
+  isWorkBuddyDesktopAuthMarker: (value: string | null | undefined) =>
+    typeof value === 'string' && value.startsWith('workbuddy-desktop:installed:'),
+  detectOmnirushCLILogin: () => false,
+  createOmnirushCLIAuthMarker: () => 'cli:omnirush:test',
+  isOmnirushCLIAuthMarker: (value: string | null | undefined) =>
+    typeof value === 'string' && value.startsWith('cli:omnirush:'),
+  detectOpenCodeCLILogin: () => true,
+  createOpenCodeCLIAuthMarker: () => `cli:opencode:${Date.now()}`,
+  isOpenCodeCLIAuthMarker: (value: string | null | undefined) =>
+    typeof value === 'string' && value.startsWith('cli:opencode:'),
+  omnirushStateDirectory: () => join(providerRouteDataDir, '.omnirush'),
   detectAntigravityCLILogin: () => true,
   createAntigravityCLIAuthMarker: () => `cli:antigravity:${Date.now()}`,
   isAntigravityCLIAuthMarker: (value: string | null | undefined) =>
@@ -193,7 +209,7 @@ mock.module('../../../providers/auth-utils', () => ({
   isFreebuffCLIAuthMarker: (value: string | null | undefined) => value === 'cli:freebuff:test',
   readFreebuffAuthToken: () => null,
   readFreebuffCredentials: () => null,
-  detectJulesApiKey: () => null,
+  freebuffConfigDir: () => join(providerRouteDataDir, '.config', 'manicode'),
   detectKimiCodeCLILogin: () => false,
   detectKiloCLILogin: () => false,
   createKiloCLIAuthMarker: () => 'cli:kilo:test',
@@ -207,7 +223,7 @@ mock.module('../../../providers/auth-utils', () => ({
 
 const { initDb } = await import('../../../db');
 const { providerRoutes } = await import('../providers');
-const { setContext } = await import('../../../context');
+const { getContext, setContext } = await import('../../../context');
 const { localAuth } = await import('../../../auth/local-auth');
 const { buildLocalBearerToken } = await import('../../../auth/local-route-auth');
 const { loadProviderSecrets, upsertProviderSecrets } =
@@ -367,6 +383,56 @@ describe('provider routes', () => {
     expect(response.status).toBe(200);
     expect(body.ok).toBe(true);
     expect(body.data).toEqual(providerStatus);
+  });
+
+  test('status reads return during slow verification while explicit refresh awaits it', async () => {
+    const original = getContext();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const verify = mock(async () => {
+      await gate;
+    });
+    const catalogs = mock(async () => {});
+    setContext({
+      ...original,
+      providers: {
+        ...original.providers,
+        getStatus: () => providerStatus,
+        autoConnectCliProviders: verify,
+        refreshModelCatalogs: catalogs,
+      } as any,
+    });
+    try {
+      for (const path of ['/api/providers', '/api/providers/status']) {
+        const result = await Promise.race([
+          request(path),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Status read waited for verification')), 500),
+          ),
+        ]);
+        expect(result.response.status).toBe(200);
+        expect(result.body.data).toEqual(providerStatus);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(verify).toHaveBeenCalledTimes(1);
+      let refreshed = false;
+      const manual = request('/api/providers?refreshModels=1').then((result) => {
+        refreshed = true;
+        return result;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(refreshed).toBe(false);
+      release();
+      expect((await manual).response.status).toBe(200);
+      expect(verify).toHaveBeenCalledTimes(2);
+      expect(verify.mock.calls[1]).toEqual([true]);
+      expect(catalogs).toHaveBeenCalledTimes(1);
+    } finally {
+      release();
+      setContext(original);
+    }
   });
 
   test('GET /api/providers/catalog-refresh-status reports the adaptive refresh state', async () => {
@@ -560,6 +626,25 @@ describe('provider routes', () => {
     expect(list.response.status).toBe(200);
     expect(list.body.ok).toBe(true);
     expect(list.body.data.some((account: any) => account.id === accountId)).toBe(true);
+
+    // Knowing another provider's account ID must not make its key reusable.
+    const beforeWrongProvider = lastSetCredentials;
+    for (const other of ['anthropic', 'agentrouter', 'custom:other']) {
+      const wrongList = await request(`/api/providers/${other}/accounts`);
+      expect(wrongList.body.data.some((account: any) => account.id === accountId)).toBe(false);
+      const wrongActivate = await request(
+        `/api/providers/${other}/accounts/${accountId}/activate`,
+        {
+          method: 'POST',
+        },
+      );
+      expect(wrongActivate.response.status).toBe(404);
+      expect(lastSetCredentials).toEqual(beforeWrongProvider);
+      const wrongDelete = await request(`/api/providers/${other}/accounts/${accountId}`, {
+        method: 'DELETE',
+      });
+      expect(wrongDelete.response.status).toBe(404);
+    }
 
     const activate = await request(`/api/providers/openai/accounts/${accountId}/activate`, {
       method: 'POST',

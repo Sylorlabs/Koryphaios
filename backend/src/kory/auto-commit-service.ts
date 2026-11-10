@@ -1,8 +1,8 @@
 /**
- * Auto-Commit Service - Handles automatic commits and PR creation for Beginner Mode
+ * Commit Service - Handles commits and PR creation for explicit Git tool requests
  *
- * In Beginner Mode:
- * - Changes are automatically committed after task completion
+ * When the user requests a commit and pull request:
+ * - Changes are committed by the Git tool
  * - A branch is created based on the task
  * - A PR is opened on origin for review
  */
@@ -85,7 +85,7 @@ export class AutoCommitService {
   }
 
   /**
-   * Auto-commit changes and create a PR for beginner mode
+   * Commit changes and create a PR for an explicit tool request
    *
    * Flow:
    * 1. Check if we're in a git repo
@@ -164,7 +164,7 @@ export class AutoCommitService {
       const hashResult = await this.runGit(['rev-parse', 'HEAD']);
       const commitHash = hashResult.success ? hashResult.output.trim() : undefined;
 
-      koryLog.info({ branchName, commitHash }, 'Auto-committed changes in beginner mode');
+      koryLog.info({ branchName, commitHash }, 'Committed changes for Git tool request');
 
       // Try to push and create PR if origin exists
       let prResult: PRResult | undefined;
@@ -282,7 +282,7 @@ ${taskDescription}
 
 ---
 
-*This PR was automatically created by Koryphaios in Beginner Mode* 🤖✨`;
+*This PR was created by Koryphaios*`;
   }
 
   /**

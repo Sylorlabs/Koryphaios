@@ -2,8 +2,8 @@ import { Elysia, t } from 'elysia';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 import { GitManager } from '../../kory/git-manager';
 import { gitWorkspaceOwnership } from '../../kory/git-owned-workspace';
-import { GitWorkspace } from '../../kory/git-workspace';
-import { getRequestProjectRoot, getRequestWorkspaceRoot } from '../../runtime/request-project';
+import { getRequestWorkspaceRoot } from '../../runtime/request-project';
+import { projectRootFromRequest, taskScopeFromRequest } from '../../runtime/source-control-scope';
 import { getContext } from '../../context';
 import {
   chatGitForSession,
@@ -11,6 +11,7 @@ import {
   switchChatGit,
   withChatGitMutation,
 } from '../../services/chat-git-service';
+import { sourceControlService } from '../../services/source-control-service';
 
 const switchRequestSchema = t.Object({
   expectedHead: t.String({ pattern: '^[a-fA-F0-9]{40,64}$' }),
@@ -40,18 +41,32 @@ const requestGit = async (request: Request) =>
 const mutateGit = <T>(request: Request, run: (git: GitManager) => Promise<T>) =>
   withChatGitMutation(requireGitSessionId(request), (directory) => run(gitForDirectory(directory)));
 
+// GET /api/git/status fans out into eight sequential git subprocesses. A UI that
+// mounts several surfaces reading the same workspace root at once (feed, dock,
+// conflicts banner) used to pay that eightfold cost once per reader. Concurrent
+// identical requests share a single probe — no freshness is lost, the second
+// reader simply gets the first one's result.
+const statusInFlight = new Map<string, Promise<unknown>>();
+function coalescedStatus(root: string, run: () => Promise<unknown>): Promise<unknown> {
+  const pending = statusInFlight.get(root);
+  if (pending) return pending;
+  const request = run().finally(() => statusInFlight.delete(root));
+  statusInFlight.set(root, request);
+  return request;
+}
+
 export const gitRoutes = new Elysia({ prefix: '/api/git' })
   .get('/chat', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const id = requireGitSessionId(request);
-    const { git, session } = await chatGitForSession(id);
-    return { ok: true, data: await git.state(id, session.gitWorkspace?.selection) };
+    const scope = await taskScopeFromRequest(request);
+    const { git, session } = await sourceControlService.chat(scope);
+    return { ok: true, data: await git.state(scope.sessionId, session.gitWorkspace?.selection) };
   })
   .get(
     '/chat/commit',
     async ({ request, query, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      const { git } = await chatGitForSession(requireGitSessionId(request));
+      const { git } = await sourceControlService.chat(await taskScopeFromRequest(request));
       return { ok: true, data: await git.details(query.ref, query.source === 'true') };
     },
     {
@@ -63,14 +78,14 @@ export const gitRoutes = new Elysia({ prefix: '/api/git' })
   )
   .get('/chat/pull-requests', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const { git } = await chatGitForSession(requireGitSessionId(request));
+    const { git } = await sourceControlService.chat(await taskScopeFromRequest(request));
     return { ok: true, data: await git.prs() };
   })
   .get(
     '/chat/pull-requests/:number',
     async ({ request, params, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      const { git } = await chatGitForSession(requireGitSessionId(request));
+      const { git } = await sourceControlService.chat(await taskScopeFromRequest(request));
       return { ok: true, data: await git.pr(params.number) };
     },
     { params: t.Object({ number: t.Numeric({ minimum: 1, maximum: 1_000_000_000 }) }) },
@@ -85,7 +100,10 @@ export const gitRoutes = new Elysia({ prefix: '/api/git' })
   )
   .get('/selection', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    return { ok: true, data: await new GitWorkspace(getRequestProjectRoot(request)).selection() };
+    return {
+      ok: true,
+      data: await sourceControlService.inspectProject(projectRootFromRequest(request)),
+    };
   })
   .get('/repo', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
@@ -94,17 +112,21 @@ export const gitRoutes = new Elysia({ prefix: '/api/git' })
   })
   .get('/status', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const git = await requestGit(request);
-    const isRepo = git.isGitRepo();
-    if (!isRepo) {
-      return { ok: true, data: { isRepo: false, status: [], branch: '', ahead: 0, behind: 0 } };
-    }
-    const status = await git.getStatus();
-    const branch = await git.getBranch();
-    const { ahead, behind } = await git.getAheadBehind();
-    const remote = await git.getOrigin();
-    const conflicts = await git.getConflicts();
-    return { ok: true, data: { isRepo: true, status, branch, ahead, behind, remote, conflicts } };
+    const directory = await getRequestWorkspaceRoot(request);
+    const root = gitWorkspaceOwnership(directory)?.checkout ?? directory;
+    return coalescedStatus(root, async () => {
+      const git = gitForDirectory(directory);
+      const isRepo = git.isGitRepo();
+      if (!isRepo) {
+        return { ok: true, data: { isRepo: false, status: [], branch: '', ahead: 0, behind: 0 } };
+      }
+      const status = await git.getStatus();
+      const branch = await git.getBranch();
+      const { ahead, behind } = await git.getAheadBehind();
+      const remote = await git.getOrigin();
+      const conflicts = await git.getConflicts();
+      return { ok: true, data: { isRepo: true, status, branch, ahead, behind, remote, conflicts } };
+    });
   })
   .get(
     '/diff',

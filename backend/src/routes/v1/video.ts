@@ -13,7 +13,12 @@ import {
   listCapabilityProviders,
   requireCapabilityConfig,
 } from '../../providers/capability-service';
-import { capabilityProvidersFor } from '../../providers/capabilities';
+import {
+  capabilityAdapterSupports,
+  capabilityProvidersFor,
+  getCapabilityAdapter,
+} from '../../providers/capabilities';
+import { detectMediaProviders } from '../../providers/modality-detection';
 import { reserveSpendCapacity } from '../../security/spend-caps-enforced';
 
 /**
@@ -235,6 +240,36 @@ const VideoRequest = t.Object({
   negativePrompt: t.Optional(t.String({ maxLength: 2500 })),
 });
 
+/** Request options this provider's adapter actually forwards upstream. */
+export interface VideoProviderCapabilities {
+  audio: boolean;
+  resolution: boolean;
+  negativePrompt: boolean;
+  /** True when the request path takes a bare seconds value ("5", not "5s"). */
+  durationSeconds: boolean;
+}
+
+/**
+ * Which controls the picker may show for a provider.
+ *
+ * Read from the adapter's declared `requestOptions` rather than a provider-name
+ * list, so the picker cannot offer a toggle the request path silently drops.
+ */
+function videoProviderCapabilities(provider: string): VideoProviderCapabilities {
+  const declared = getCapabilityAdapter(provider)?.requestOptions;
+  return {
+    audio: declared?.audio ?? false,
+    resolution: declared?.resolution ?? false,
+    negativePrompt: declared?.negativePrompt ?? false,
+    durationSeconds: declared?.durationSeconds ?? false,
+  };
+}
+
+/** True when a video generation request path exists for this provider. */
+function videoTransport(provider: string): boolean {
+  return capabilityAdapterSupports(provider, 'video');
+}
+
 export const videoRoutes = new Elysia({ prefix: '/api/video' })
   .onBeforeHandle(({ request }) => {
     if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
@@ -242,22 +277,49 @@ export const videoRoutes = new Elysia({ prefix: '/api/video' })
   .get('/providers', async () => {
     const summaries = await listCapabilityProviders('video');
     const supported = capabilityProvidersFor('video');
+    // A provider only belongs here when its own catalog reports video output AND
+    // a video transport exists to call it. Providers whose catalog reports video
+    // but that Koryphaios cannot drive (chat providers with no video request
+    // path) are not offered, and neither are image or text models.
+    const detected = detectMediaProviders('video')
+      .filter(
+        (entry) =>
+          entry.models.length > 0 &&
+          !supported.includes(entry.provider) &&
+          videoTransport(entry.provider),
+      )
+      .map((entry) => ({
+        provider: entry.provider,
+        label: entry.label,
+        configured: entry.configured,
+        detected: true,
+        capabilities: videoProviderCapabilities(entry.provider),
+        models: entry.models.map((model) => ({ id: model.id, label: model.label })),
+      }));
     return {
       ok: true,
-      data: summaries.map((entry) => ({
-        ...entry,
-        models: entry.models.map((model) => ({
-          id: model.id,
-          label: model.label,
-          durations: model.durations,
-          aspectRatios: model.aspectRatios,
+      data: [
+        ...summaries.map((entry) => ({
+          ...entry,
+          detected: false,
+          capabilities: videoProviderCapabilities(entry.provider),
+          models: entry.models.map((model) => ({
+            id: model.id,
+            label: model.label,
+            durations: model.durations,
+            aspectRatios: model.aspectRatios,
+          })),
         })),
-      })),
+        ...detected,
+      ],
       // Providers that implement video but whose credential is not connected, so
       // the UI can offer to connect them instead of hiding them.
-      unconnected: supported.filter(
-        (provider) => !summaries.some((entry) => entry.provider === provider && entry.configured),
-      ),
+      unconnected: [
+        ...supported.filter(
+          (provider) => !summaries.some((entry) => entry.provider === provider && entry.configured),
+        ),
+        ...detected.filter((entry) => !entry.configured).map((entry) => entry.provider),
+      ],
     };
   })
   .post('/generate', async ({ body }) => runTrackedVideoJob(body.jobId ?? randomUUID(), body), {

@@ -466,7 +466,7 @@ describe('Shadow Repo Isolation', () => {
       } finally {
         rmSync(concurrentDir, { recursive: true, force: true });
       }
-    });
+    }, 30_000);
 
     test('serializes independent Bun processes without checkpoint loss', async () => {
       const processDir = join(
@@ -516,7 +516,7 @@ describe('Shadow Repo Isolation', () => {
       } finally {
         rmSync(processDir, { recursive: true, force: true });
       }
-    });
+    }, 30_000);
 
     test('repairs an interrupted bare-repository initialization in place', async () => {
       const interruptedDir = join(

@@ -117,7 +117,6 @@ export const goalRoutes = new Elysia({ prefix: '/api/goals' })
           model: body.model,
           reasoningLevel: body.reasoningLevel,
           instructions: body.instructions,
-          remotePlanApproved: body.remotePlanApproved,
         });
       } catch (error) {
         throw new ConflictError(error instanceof Error ? error.message : 'Goal could not start');
@@ -131,7 +130,6 @@ export const goalRoutes = new Elysia({ prefix: '/api/goals' })
         model: t.String({ minLength: 1, maxLength: 240 }),
         reasoningLevel: t.Optional(t.String()),
         instructions: t.Optional(t.String({ maxLength: 4000 })),
-        remotePlanApproved: t.Optional(t.Boolean()),
       }),
     },
   )

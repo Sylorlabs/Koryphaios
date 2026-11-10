@@ -105,11 +105,9 @@ export const nativeCommandRoutes = new Elysia({ prefix: '/api/native-commands' }
 
         const workingDirectory = await kory.resolveSessionWorkingDirectoryPublic(body.sessionId);
         // Native slash-command adapters do not share the provider turn's OS
-        // jail. Do not create an escape hatch from the isolated chat.
-        if (
-          session.gitWorkspace?.isolation === 'independent-repository' ||
-          workingDirectory !== session.workingDirectory
-        ) {
+        // jail, so they remain unavailable for explicitly isolated revision
+        // chats. Ordinary chats intentionally run in the selected folder.
+        if (session.gitWorkspace?.isolation === 'independent-repository') {
           throw new ValidationError(
             'Native CLI slash commands are unavailable in isolated chats until their adapter enforces the workspace boundary. Use chat tools or run the command manually outside Koryphaios.',
           );
