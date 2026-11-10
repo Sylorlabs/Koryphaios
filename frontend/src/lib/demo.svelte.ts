@@ -370,6 +370,7 @@ function activeSessionId(): string {
 function spawnWorkers(sessionId: string) {
   for (const w of WORKERS) {
     agentStore.spawnAgent(
+      sessionId,
       {
         id: w.id,
         name: w.name,
@@ -380,9 +381,8 @@ function spawnWorkers(sessionId: string) {
         glowColor: w.glow,
       },
       `${w.domain} work`,
-      sessionId,
     );
-    agentStore.updateAgentStatus(w.id, 'idle', sessionId);
+    agentStore.updateAgentStatus(sessionId, w.id, 'idle');
   }
 }
 
@@ -397,14 +397,14 @@ function playTurn(prompt: string, opts: { loop: boolean; clear: boolean }) {
     pendingReplySid = sid;
     pendingReplyContent = reply;
   }
-  if (opts.clear) feedStore.clearFeed();
+  if (opts.clear) feedStore.clearFeed(sid);
   // Remove the workers so they visibly fly back in from the top when Kory
   // routes — mirrors the real spawn animation each turn.
-  agentStore.clearNonManagerAgents();
-  agentStore.updateAgentStatus('kory-manager', 'idle', sid);
+  agentStore.clearNonManagerAgents(sid);
+  agentStore.updateAgentStatus(sid, 'kory-manager', 'idle');
 
   at(600, () => {
-    feedStore.addFeedEntry({
+    feedStore.addFeedEntryForSession(sid, {
       timestamp: Date.now(),
       type: 'user_message',
       agentId: 'user',
@@ -418,8 +418,8 @@ function playTurn(prompt: string, opts: { loop: boolean; clear: boolean }) {
   });
 
   at(1600, () => {
-    agentStore.updateAgentStatus('kory-manager', 'analyzing', sid);
-    feedStore.addFeedEntry({
+    agentStore.updateAgentStatus(sid, 'kory-manager', 'analyzing');
+    feedStore.addFeedEntryForSession(sid, {
       timestamp: Date.now(),
       type: 'thought',
       agentId: 'kory-manager',
@@ -431,8 +431,8 @@ function playTurn(prompt: string, opts: { loop: boolean; clear: boolean }) {
   });
 
   at(3200, () => {
-    agentStore.updateAgentStatus('kory-manager', 'verifying', sid);
-    feedStore.addFeedEntry({
+    agentStore.updateAgentStatus(sid, 'kory-manager', 'verifying');
+    feedStore.addFeedEntryForSession(sid, {
       timestamp: Date.now(),
       type: 'thought',
       agentId: 'kory-manager',
@@ -444,9 +444,9 @@ function playTurn(prompt: string, opts: { loop: boolean; clear: boolean }) {
     // Workers spawn now — they fly in from the top of the agent rail.
     spawnWorkers(sid);
     at(250, () => {
-      agentStore.updateAgentStatus('w-fe', 'writing', sid);
-      agentStore.updateAgentStatus('w-be', 'thinking', sid);
-      agentStore.updateAgentStatus('w-test', 'thinking', sid);
+      agentStore.updateAgentStatus(sid, 'w-fe', 'writing');
+      agentStore.updateAgentStatus(sid, 'w-be', 'thinking');
+      agentStore.updateAgentStatus(sid, 'w-test', 'thinking');
     });
   });
 
@@ -457,7 +457,7 @@ function playTurn(prompt: string, opts: { loop: boolean; clear: boolean }) {
       const updatedSession = getDemoSession(sid);
       if (updatedSession) sessionStore.handleSessionUpdate(updatedSession);
     }
-    feedStore.addFeedEntry({
+    feedStore.addFeedEntryForSession(sid, {
       timestamp: Date.now(),
       type: 'tool_result',
       agentId: 'kory-manager',
@@ -478,11 +478,11 @@ function playTurn(prompt: string, opts: { loop: boolean; clear: boolean }) {
         },
       },
     });
-    agentStore.updateAgentStatus('w-be', 'tool_calling', sid);
+    agentStore.updateAgentStatus(sid, 'w-be', 'tool_calling');
   });
 
   at(5400, () => {
-    feedStore.addFeedEntry({
+    feedStore.addFeedEntryForSession(sid, {
       timestamp: Date.now(),
       type: 'tool_result',
       agentId: 'trial-critic',
@@ -502,13 +502,13 @@ function playTurn(prompt: string, opts: { loop: boolean; clear: boolean }) {
   });
 
   at(6200, () => {
-    agentStore.updateAgentStatus('kory-manager', 'streaming', sid);
+    agentStore.updateAgentStatus(sid, 'kory-manager', 'streaming');
     // Stream the reply word by word. Offsets here are relative to THIS
     // callback (at() schedules from now), not to turn start.
     const words = reply.split(' ');
     words.forEach((word, i) => {
       at(i * 45, () => {
-        feedStore.accumulateFeedEntry({
+        feedStore.accumulateFeedEntry(sid, {
           timestamp: Date.now(),
           type: 'content',
           agentId: 'kory-manager',
@@ -520,8 +520,8 @@ function playTurn(prompt: string, opts: { loop: boolean; clear: boolean }) {
     });
     const doneAt = words.length * 45 + 400;
     at(doneAt, () => {
-      agentStore.updateAgentStatus('kory-manager', 'done', sid);
-      for (const w of WORKERS) agentStore.updateAgentStatus(w.id, 'done', sid);
+      agentStore.updateAgentStatus(sid, 'kory-manager', 'done');
+      for (const w of WORKERS) agentStore.updateAgentStatus(sid, w.id, 'done');
       // Full demo: persist the finished turn in the tab-scoped shim so
       // switching sessions and back restores the conversation.
       if (isFullDemo && pendingReplySid === sid) {
@@ -628,8 +628,8 @@ export function demoStop(): void {
   pendingReplySid = null; // user cancelled — the unfinished reply is not saved
   pendingReplyContent = null;
   const sid = activeSessionId();
-  agentStore.updateAgentStatus('kory-manager', 'done', sid);
-  for (const w of WORKERS) agentStore.updateAgentStatus(w.id, 'done', sid);
+  agentStore.updateAgentStatus(sid, 'kory-manager', 'done');
+  for (const w of WORKERS) agentStore.updateAgentStatus(sid, w.id, 'done');
 }
 
 /** Full demo: switching AWAY from a session mid-run finalizes the in-flight
@@ -648,7 +648,7 @@ export function demoOnSessionSwitch(): void {
     const previousSessionId = guidedPlaybackSessionId;
     clearTimers();
     guidedPlaybackSessionId = null;
-    agentStore.updateAgentStatus('kory-manager', 'done', previousSessionId);
+    agentStore.updateAgentStatus(previousSessionId, 'kory-manager', 'done');
     return;
   }
   if (!isFullDemo || !pendingReplySid) return;
@@ -657,8 +657,8 @@ export function demoOnSessionSwitch(): void {
   recordDemoMessage(pendingReplySid, 'assistant', pendingReplyContent ?? REPLY, 'gpt-5.6-sol');
   const completedSession = getDemoSession(pendingReplySid);
   if (completedSession) sessionStore.handleSessionUpdate(completedSession);
-  agentStore.updateAgentStatus('kory-manager', 'done', pendingReplySid);
-  for (const w of WORKERS) agentStore.updateAgentStatus(w.id, 'done', pendingReplySid);
+  agentStore.updateAgentStatus(pendingReplySid, 'kory-manager', 'done');
+  for (const w of WORKERS) agentStore.updateAgentStatus(pendingReplySid, w.id, 'done');
   pendingReplySid = null;
   pendingReplyContent = null;
 }

@@ -32,8 +32,15 @@ vi.mock('$lib/stores/websocket.svelte', () => ({
     loadAgentThreadMessages: vi.fn(),
   },
 }));
+const agentRecords = vi.hoisted(() => new Map<string, unknown>());
 vi.mock('$lib/stores/agents.svelte', () => ({
-  agentStore: { closeAgentCard: vi.fn(), reopenAgentCard: vi.fn() },
+  agentStore: {
+    getAgent: (sessionId: string, agentId: string) => agentRecords.get(`${sessionId}::${agentId}`),
+    getSessionAgents: (sessionId: string) =>
+      [...agentRecords.values()].filter((a) => (a as { sessionId: string }).sessionId === sessionId),
+    closeAgentCard: vi.fn(),
+    reopenAgentCard: vi.fn(),
+  },
 }));
 vi.mock('$lib/stores/run-state-core', () => ({
   ACTIVE_AGENT_STATUSES: new Set(['thinking', 'streaming', 'tool_calling']),
@@ -57,7 +64,7 @@ function makeRail(): AgentRailState {
 }
 
 function seedAgent(id: string, status: string, name = 'Backend') {
-  (wsStore.agents as Map<string, unknown>).set(id, {
+  agentRecords.set(`s1::${id}`, {
     identity: { id, name, role: 'worker', domain: 'backend', provider: 'openai', model: 'gpt' },
     status,
     content: '',
@@ -74,7 +81,7 @@ function seedAgent(id: string, status: string, name = 'Backend') {
 describe('agent rail close', () => {
   beforeEach(() => {
     fetchMock.mockReset();
-    (wsStore.agents as Map<string, unknown>).clear();
+    agentRecords.clear();
     (agentStore.closeAgentCard as ReturnType<typeof vi.fn>).mockReset();
     (toastStore.error as ReturnType<typeof vi.fn>).mockReset();
   });
@@ -96,7 +103,7 @@ describe('agent rail close', () => {
       'http://127.0.0.1:3001/api/agent/w1/cancel',
       { method: 'POST' },
     );
-    expect(agentStore.closeAgentCard).toHaveBeenCalledWith('w1');
+    expect(agentStore.closeAgentCard).toHaveBeenCalledWith('s1', 'w1');
   });
 
   it('percent-encodes an agent id that contains URL-significant characters', async () => {
@@ -116,7 +123,7 @@ describe('agent rail close', () => {
     await rail.closeAgent('w2');
 
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(agentStore.closeAgentCard).toHaveBeenCalledWith('w2');
+    expect(agentStore.closeAgentCard).toHaveBeenCalledWith('s1', 'w2');
   });
 
   it('keeps the card and reports the error when the cancel fails', async () => {

@@ -78,8 +78,7 @@ function seedGoal(value: Goal): void {
 }
 
 function seedWorker(sessionId: string, agentId: string): void {
-  agentStore.spawnAgent(
-    {
+  agentStore.spawnAgent(sessionId, {
       id: agentId,
       name: agentId,
       role: 'coder',
@@ -87,10 +86,7 @@ function seedWorker(sessionId: string, agentId: string): void {
       provider: 'openai',
       domain: 'frontend',
       glowColor: '',
-    },
-    'test task',
-    sessionId,
-  );
+    }, 'test task');
   agentStore.setAgentThreadFeed(sessionId, agentId, [
     {
       id: `thread-${agentId}`,
@@ -174,7 +170,7 @@ describe('deleting a chat that owns goal state', () => {
 
   it('drops the deleted chat transcript without leaving a loading state', async () => {
     feedStore.activateSessionFeed('one');
-    feedStore.addFeedEntry({
+    feedStore.addFeedEntryForSession(feedStore.sessionId, {
       type: 'content',
       agentId: 'kory-manager',
       agentName: 'Kory',
@@ -195,7 +191,7 @@ describe('deleting a chat that owns goal state', () => {
 
   it('clears session feed and agent state on single deletion', async () => {
     feedStore.activateSessionFeed('one');
-    feedStore.addFeedEntry({
+    feedStore.addFeedEntryForSession(feedStore.sessionId, {
       type: 'content',
       agentId: 'kory-manager',
       agentName: 'Kory',
@@ -217,11 +213,11 @@ describe('deleting a chat that owns goal state', () => {
 
   it('releases completed worker thread lanes when switching chats', () => {
     seedWorker('one', 'worker-switch');
-    agentStore.completeAgent('worker-switch', 'one');
+    agentStore.completeAgent('one', 'worker-switch');
 
     agentStore.clearNonManagerAgents('two');
 
-    expect(agentStore.agents.has('worker-switch')).toBe(false);
+    expect(agentStore.agents.has(agentStore.agentKey('one', 'worker-switch'))).toBe(false);
     expect(agentStore.getAgentThreadEntries('one', 'worker-switch')).toEqual([]);
     expect(agentStore.getAgentSteeringQueue('one', 'worker-switch')).toEqual([]);
   });
@@ -252,7 +248,7 @@ describe('deleting a chat that owns goal state', () => {
     seedWorker('one', 'worker-all-one');
     seedWorker('two', 'worker-all-two');
     feedStore.activateSessionFeed('one');
-    feedStore.addFeedEntry({
+    feedStore.addFeedEntryForSession(feedStore.sessionId, {
       type: 'content',
       agentId: 'kory-manager',
       agentName: 'Kory',

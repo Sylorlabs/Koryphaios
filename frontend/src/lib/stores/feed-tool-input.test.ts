@@ -58,11 +58,11 @@ describe('tool results keep their call input', () => {
     state.apiFetch.mockReset();
     state.apiFetch.mockImplementation((path: string) => Promise.resolve(response(path)));
     feedStore.activateSessionFeed('session-1');
-    feedStore.clearFeed();
+    feedStore.clearFeed(feedStore.sessionId);
   });
 
   it('looks up the live tool_call input by callId', () => {
-    feedStore.addFeedEntry({
+    feedStore.addFeedEntryForSession(feedStore.sessionId, {
       timestamp: 1,
       type: 'tool_call',
       agentId: 'kory-manager',
@@ -75,12 +75,12 @@ describe('tool results keep their call input', () => {
       },
     });
 
-    expect(feedStore.findToolCallInput('call-9')).toEqual({
+    expect(feedStore.findToolCallInput(feedStore.sessionId, 'call-9')).toEqual({
       id: 'call-9',
       name: 'bash',
       input: { command: 'ls' },
     });
-    expect(feedStore.findToolCallInput('missing')).toBeUndefined();
+    expect(feedStore.findToolCallInput(feedStore.sessionId, 'missing')).toBeUndefined();
   });
 
   it('recovers the command from a parseable archive label on reload', async () => {

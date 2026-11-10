@@ -65,7 +65,7 @@ function liveUsage(overrides: Record<string, unknown> = {}) {
 }
 
 function manager() {
-  const state = agentStore.agents.get('kory-manager');
+  const state = agentStore.getAgent(sessionState.activeSessionId, 'kory-manager');
   if (!state) throw new Error('manager state is unavailable');
   return state;
 }
@@ -78,7 +78,7 @@ describe('context window denominator stability', () => {
   it('treats legacy Antigravity receipts as estimates rather than measured window occupancy', () => {
     const sessionId = sessionState.activeSessionId;
     beginManagerContextPreview(sessionId, 'antigravity', 'minimax-m3', 262_144);
-    updateUsage('kory-manager', liveUsage({ provider: 'antigravity', cachedInputTokens: 100_000 }), sessionId);
+    updateUsage(sessionId, 'kory-manager', liveUsage({ provider: 'antigravity', cachedInputTokens: 100_000 }));
     expect(getContextUsage()).toMatchObject({
       used: 120_900,
       max: 262_144,
@@ -90,7 +90,7 @@ describe('context window denominator stability', () => {
   it('a planning estimate that cannot resolve a window never erases a verified one', () => {
     const sessionId = sessionState.activeSessionId;
     beginManagerContextPreview(sessionId, 'openai', 'minimax-m3', 262_144);
-    updateUsage('kory-manager', liveUsage(), sessionId);
+    updateUsage(sessionId, 'kory-manager', liveUsage());
     expect(getContextUsage()).toMatchObject({ used: 120_900, max: 262_144, isReliable: true });
 
     // The manager emits a chars/4 estimate at every turn start and every
@@ -98,9 +98,7 @@ describe('context window denominator stability', () => {
     // that estimate carries contextKnown:false. It previously zeroed the
     // denominator, so the bar flipped to "model window not reported" for the
     // whole turn and then snapped back.
-    updateUsage(
-      'kory-manager',
-      liveUsage({
+    updateUsage(sessionId, 'kory-manager', liveUsage({
         tokensIn: 400_000,
         tokensOut: 0,
         tokensUsed: 400_000,
@@ -108,9 +106,7 @@ describe('context window denominator stability', () => {
         contextWindow: undefined,
         contextKnown: false,
         breakdown: undefined,
-      }),
-      sessionId,
-    );
+      }));
 
     expect(manager()).toMatchObject({ contextMax: 262_144, contextKnown: true });
     expect(getContextUsage()).toMatchObject({ used: 120_900, max: 262_144, isReliable: true });
@@ -119,7 +115,7 @@ describe('context window denominator stability', () => {
   it('clears occupancy when the active response branch changes but keeps the model window', () => {
     const sessionId = sessionState.activeSessionId;
     beginManagerContextPreview(sessionId, 'openai', 'minimax-m3', 262_144);
-    updateUsage('kory-manager', liveUsage(), sessionId);
+    updateUsage(sessionId, 'kory-manager', liveUsage());
 
     invalidateManagerContextUsage(sessionId);
 
@@ -138,11 +134,7 @@ describe('context window denominator stability', () => {
     expect(manager()).toMatchObject({ contextMax: 0, contextKnown: false });
 
     // Provider discovery landed between the picker render and the turn.
-    updateUsage(
-      'kory-manager',
-      liveUsage({ usageKnown: false, tokensUsed: 0, tokensIn: 0, tokensOut: 0 }),
-      sessionId,
-    );
+    updateUsage(sessionId, 'kory-manager', liveUsage({ usageKnown: false, tokensUsed: 0, tokensIn: 0, tokensOut: 0 }));
 
     expect(manager()).toMatchObject({ contextMax: 262_144, contextKnown: true });
     // Still no occupancy from a non-authoritative event.
@@ -152,16 +144,12 @@ describe('context window denominator stability', () => {
   it('an authoritative report with an unknown window does clear the denominator', () => {
     const sessionId = sessionState.activeSessionId;
     beginManagerContextPreview(sessionId, 'openai', 'minimax-m3', 262_144);
-    updateUsage('kory-manager', liveUsage(), sessionId);
+    updateUsage(sessionId, 'kory-manager', liveUsage());
 
     // A real provider report that says "I have no window" is authoritative and
     // must be honored, otherwise the bar would claim a window the provider
     // never reported.
-    updateUsage(
-      'kory-manager',
-      liveUsage({ contextWindow: undefined, contextKnown: false }),
-      sessionId,
-    );
+    updateUsage(sessionId, 'kory-manager', liveUsage({ contextWindow: undefined, contextKnown: false }));
 
     expect(manager()).toMatchObject({ contextMax: 0, contextKnown: false });
     expect(getContextUsage()).toMatchObject({ reason: 'context_unknown', isReliable: false });
@@ -170,13 +158,9 @@ describe('context window denominator stability', () => {
   it('keeps the estimate out of occupancy while preserving the last verified total', () => {
     const sessionId = sessionState.activeSessionId;
     beginManagerContextPreview(sessionId, 'openai', 'minimax-m3', 262_144);
-    updateUsage('kory-manager', liveUsage(), sessionId);
+    updateUsage(sessionId, 'kory-manager', liveUsage());
 
-    updateUsage(
-      'kory-manager',
-      liveUsage({ usageKnown: false, tokensIn: 400_000, tokensOut: 0, tokensUsed: 400_000 }),
-      sessionId,
-    );
+    updateUsage(sessionId, 'kory-manager', liveUsage({ usageKnown: false, tokensIn: 400_000, tokensOut: 0, tokensUsed: 400_000 }));
 
     expect(getContextUsage()).toMatchObject({ used: 120_900, max: 262_144, isReliable: true });
   });
@@ -184,7 +168,7 @@ describe('context window denominator stability', () => {
   it('keeps usage and the model window while the same model catalog temporarily has no metadata', () => {
     const sessionId = sessionState.activeSessionId;
     beginManagerContextPreview(sessionId, 'openai', 'minimax-m3', 262_144);
-    updateUsage('kory-manager', liveUsage(), sessionId);
+    updateUsage(sessionId, 'kory-manager', liveUsage());
 
     beginManagerContextPreview(sessionId, 'openai', 'minimax-m3', undefined);
     expect(getContextUsage()).toMatchObject({
@@ -200,7 +184,7 @@ describe('context window denominator stability', () => {
     (preview) => {
       const sessionId = sessionState.activeSessionId;
       beginManagerContextPreview(sessionId, 'openai', 'minimax-m3', 262_144);
-      updateUsage('kory-manager', liveUsage(), sessionId);
+      updateUsage(sessionId, 'kory-manager', liveUsage());
       // This is a new preview issued after the live report, rather than a stale
       // request. The absent data itself must not revoke the previous reading.
       beginManagerContextPreview(sessionId, 'openai', 'minimax-m3', undefined);
@@ -226,7 +210,7 @@ describe('model preview freshness', () => {
     beginManagerContextPreview(sessionId, 'openai', 'minimax-m3', 262_144);
 
     // ...a real provider report lands while the request is in flight...
-    updateUsage('kory-manager', liveUsage(), sessionId);
+    updateUsage(sessionId, 'kory-manager', liveUsage());
     expect(getContextUsage()).toMatchObject({ used: 120_900 });
 
     // ...and only then does the preview response arrive. It describes an
@@ -248,7 +232,7 @@ describe('model preview freshness', () => {
   it('refuses a stale preview that would blank a verified total', () => {
     const sessionId = sessionState.activeSessionId;
     beginManagerContextPreview(sessionId, 'openai', 'minimax-m3', 262_144);
-    updateUsage('kory-manager', liveUsage(), sessionId);
+    updateUsage(sessionId, 'kory-manager', liveUsage());
 
     // usageKnown:false used to mean "clear everything", which made a delayed
     // HTTP response wipe a perfectly good live reading.
@@ -357,7 +341,7 @@ describe('manager session binding', () => {
   it('does not discard a selection that already names the bound session', () => {
     const first = sessionState.activeSessionId;
     beginManagerContextPreview(first, 'openai', 'minimax-m3', 262_144);
-    updateUsage('kory-manager', liveUsage(), first);
+    updateUsage(first, 'kory-manager', liveUsage());
     expect(getContextUsage()).toMatchObject({ used: 120_900 });
 
     // The feed activation and the composer's preview effect race on a session
@@ -365,11 +349,7 @@ describe('manager session binding', () => {
     // later stream.usage failing the provenance guard until the user touched
     // the model picker.
     bindManagerSession(first);
-    updateUsage(
-      'kory-manager',
-      liveUsage({ tokensIn: 130_000, tokensOut: 900, tokensUsed: 130_900 }),
-      first,
-    );
+    updateUsage(first, 'kory-manager', liveUsage({ tokensIn: 130_000, tokensOut: 900, tokensUsed: 130_900 }));
 
     expect(getContextUsage()).toMatchObject({ used: 130_900, isReliable: true });
   });
@@ -377,7 +357,7 @@ describe('manager session binding', () => {
   it('clears a selection that names a different session', () => {
     const first = sessionState.activeSessionId;
     beginManagerContextPreview(first, 'openai', 'minimax-m3', 262_144);
-    updateUsage('kory-manager', liveUsage(), first);
+    updateUsage(first, 'kory-manager', liveUsage());
 
     const second = `${first}-next`;
     sessionState.activeSessionId = second;
@@ -390,7 +370,7 @@ describe('manager session binding', () => {
       contextKnown: false,
     });
     // A late event for the previous session must not repopulate it.
-    updateUsage('kory-manager', liveUsage(), first);
+    updateUsage(first, 'kory-manager', liveUsage());
     expect(getContextUsage()).toMatchObject({ isReliable: false });
   });
 
@@ -399,7 +379,7 @@ describe('manager session binding', () => {
     (order) => {
       const first = sessionState.activeSessionId;
       beginManagerContextPreview(first, 'openai', 'minimax-m3', 262_144);
-      updateUsage('kory-manager', liveUsage(), first);
+      updateUsage(first, 'kory-manager', liveUsage());
       const second = `${first}-other`;
       sessionState.activeSessionId = second;
       bindManagerSession(second);
@@ -429,7 +409,7 @@ describe('manager session binding', () => {
   it('does not restore cached occupancy from a discarded background branch', () => {
     const first = sessionState.activeSessionId;
     beginManagerContextPreview(first, 'openai', 'minimax-m3', 262_144);
-    updateUsage('kory-manager', liveUsage(), first);
+    updateUsage(first, 'kory-manager', liveUsage());
     sessionState.activeSessionId = `${first}-other`;
     bindManagerSession(sessionState.activeSessionId);
     invalidateManagerContextUsage(first);
@@ -442,7 +422,7 @@ describe('manager session binding', () => {
   it('forgets cached context when its chat is removed', () => {
     const sessionId = sessionState.activeSessionId;
     beginManagerContextPreview(sessionId, 'openai', 'minimax-m3', 262_144);
-    updateUsage('kory-manager', liveUsage(), sessionId);
+    updateUsage(sessionId, 'kory-manager', liveUsage());
     notifySessionRemoved(sessionId);
     bindManagerSession(`${sessionId}-other`);
     bindManagerSession(sessionId);
@@ -452,7 +432,7 @@ describe('manager session binding', () => {
   it('restores an Antigravity receipt that replayed before the composer pinned its selection', () => {
     const sessionId = sessionState.activeSessionId;
     agentStore.clearManagerContextPreview(sessionId);
-    updateUsage('kory-manager', liveUsage({ provider: 'antigravity', estimated: true }), sessionId);
+    updateUsage(sessionId, 'kory-manager', liveUsage({ provider: 'antigravity', estimated: true }));
     // Pending telemetry is not displayed before its route has been checked.
     expect(getContextUsage()).toMatchObject({ used: 0, isReliable: false });
     beginManagerContextPreview(sessionId, 'antigravity', 'minimax-m3', 262_144);
@@ -462,12 +442,12 @@ describe('manager session binding', () => {
   it('does not adopt pending replay for a different selected route or a discarded branch', () => {
     const sessionId = sessionState.activeSessionId;
     agentStore.clearManagerContextPreview(sessionId);
-    updateUsage('kory-manager', liveUsage({ provider: 'antigravity' }), sessionId);
+    updateUsage(sessionId, 'kory-manager', liveUsage({ provider: 'antigravity' }));
     beginManagerContextPreview(sessionId, 'openai', 'minimax-m3', 262_144);
     expect(getContextUsage()).toMatchObject({ used: 0, isReliable: false });
 
     agentStore.clearManagerContextPreview(sessionId);
-    updateUsage('kory-manager', liveUsage({ provider: 'antigravity' }), sessionId);
+    updateUsage(sessionId, 'kory-manager', liveUsage({ provider: 'antigravity' }));
     invalidateManagerContextUsage(sessionId);
     beginManagerContextPreview(sessionId, 'antigravity', 'minimax-m3', 262_144);
     expect(getContextUsage()).toMatchObject({ used: 0, isReliable: false });
@@ -476,7 +456,7 @@ describe('manager session binding', () => {
   it('saved agent threads cannot replace the selected manager route or its context composition', async () => {
     const sessionId = sessionState.activeSessionId;
     beginManagerContextPreview(sessionId, 'antigravity', 'minimax-m3', 262_144);
-    updateUsage('kory-manager', liveUsage({ provider: 'antigravity', cachedInputTokens: 100_000 }), sessionId);
+    updateUsage(sessionId, 'kory-manager', liveUsage({ provider: 'antigravity', cachedInputTokens: 100_000 }));
     vi.mocked(apiFetch).mockResolvedValue({ ok: true } as Response);
     vi.mocked(parseJsonResponse).mockResolvedValue({ ok: true, data: [{
       agent: { ...manager().identity, provider: 'google', model: 'old-model' }, status: 'idle',

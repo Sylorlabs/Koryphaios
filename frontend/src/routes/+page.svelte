@@ -2,6 +2,7 @@
   import { onMount, tick, untrack } from 'svelte';
   import type { NoteLinkTarget } from '$lib/utils/kory-link-favicon';
   import { wsStore } from '$lib/stores/websocket.svelte';
+  import { agentStore } from '$lib/stores/agents.svelte';
   import { theme } from '$lib/stores/theme.svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
   import {
@@ -1825,14 +1826,15 @@
   );
 
   let activeAgents = $derived(
-    [...wsStore.agents.values()].filter(
-      (a) =>
-        a.identity.id !== 'kory-manager' &&
-        a.identity.role !== 'manager' &&
-        a.sessionId === sessionStore.activeSessionId &&
-        a.status !== 'done' &&
-        a.status !== 'idle',
-    ),
+    agentStore
+      .getSessionAgents(sessionStore.activeSessionId)
+      .filter(
+        (a) =>
+          a.identity.id !== 'kory-manager' &&
+          a.identity.role !== 'manager' &&
+          a.status !== 'done' &&
+          a.status !== 'idle',
+      ),
   );
   let composerFileMentions = $derived(
     composerProjectFiles.length > 0

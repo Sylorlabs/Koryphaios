@@ -48,17 +48,17 @@ const RESULT = { callId: 'tc1', name: 'bash', output: 'ok', isError: false, dura
 
 describe('running tool cards clear on completion', () => {
   beforeEach(() => {
-    feedStore.clearFeed();
+    feedStore.clearFeed(feedStore.sessionId);
   });
 
   it('flips the live running row into its result row in place', () => {
     const sid = 'complete-in-place';
     state.activeSessionId = sid;
     feedStore.activateSessionFeed(sid);
-    feedStore.accumulateFeedEntry(toolCallEntry('tc1', sid));
+    feedStore.accumulateFeedEntry(feedStore.sessionId, toolCallEntry('tc1', sid));
 
     const before = feedStore.feed.map((e) => e.id);
-    const done = feedStore.completeToolCall('tc1', 'Tool result (12ms): ok', RESULT, 200);
+    const done = feedStore.completeToolCall(feedStore.sessionId, 'tc1', 'Tool result (12ms): ok', RESULT, 200);
 
     expect(done).toBe(true);
     expect(feedStore.feed).toHaveLength(1);
@@ -79,9 +79,9 @@ describe('running tool cards clear on completion', () => {
     const sid = 'unknown-id';
     state.activeSessionId = sid;
     feedStore.activateSessionFeed(sid);
-    feedStore.accumulateFeedEntry(toolCallEntry('tc-other', sid));
+    feedStore.accumulateFeedEntry(feedStore.sessionId, toolCallEntry('tc-other', sid));
 
-    expect(feedStore.completeToolCall('tc-missing', 'x', RESULT, 200)).toBe(false);
+    expect(feedStore.completeToolCall(feedStore.sessionId, 'tc-missing', 'x', RESULT, 200)).toBe(false);
     expect(feedStore.feed).toHaveLength(1);
     expect(feedStore.feed[0].type).toBe('tool_call');
   });
@@ -90,10 +90,10 @@ describe('running tool cards clear on completion', () => {
     const sid = 'duplicate-absorb';
     state.activeSessionId = sid;
     feedStore.activateSessionFeed(sid);
-    feedStore.accumulateFeedEntry(toolCallEntry('tc1', sid));
+    feedStore.accumulateFeedEntry(feedStore.sessionId, toolCallEntry('tc1', sid));
 
-    expect(feedStore.completeToolCall('tc1', 'out', RESULT, 200)).toBe(true);
-    expect(feedStore.completeToolCall('tc1', 'out', RESULT, 201)).toBe(true);
+    expect(feedStore.completeToolCall(feedStore.sessionId, 'tc1', 'out', RESULT, 200)).toBe(true);
+    expect(feedStore.completeToolCall(feedStore.sessionId, 'tc1', 'out', RESULT, 201)).toBe(true);
     expect(feedStore.feed).toHaveLength(1);
     expect(feedStore.feed[0].type).toBe('tool_result');
   });
@@ -134,8 +134,8 @@ describe('running tool cards clear on completion', () => {
     const sid = 'failed-inspection';
     state.activeSessionId = sid;
     feedStore.activateSessionFeed(sid);
-    feedStore.accumulateFeedEntry(toolCallEntry('failed-grep', sid, 'grep'));
-    feedStore.completeToolCall('failed-grep', 'Missing pattern', {
+    feedStore.accumulateFeedEntry(feedStore.sessionId, toolCallEntry('failed-grep', sid, 'grep'));
+    feedStore.completeToolCall(feedStore.sessionId, 'failed-grep', 'Missing pattern', {
       callId: 'failed-grep', name: 'grep', output: 'Missing pattern', isError: true,
     }, 200);
     expect(feedStore.groupedFeed).toHaveLength(1);

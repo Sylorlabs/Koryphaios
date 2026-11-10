@@ -58,7 +58,7 @@ describe('reasoning traces survive relaunch/reload', () => {
     // terminal history write can round the assistant timestamp earlier than
     // the replayed event timestamps. The live answer is deduplicated during
     // reload, so it must first transfer its canonical anchor to history.
-    feedStore.accumulateFeedEntry({
+    feedStore.accumulateFeedEntry(feedStore.sessionId, {
       timestamp: 5_000,
       type: 'thinking',
       agentId: 'kory-manager',
@@ -73,7 +73,7 @@ describe('reasoning traces survive relaunch/reload', () => {
         replayed: true,
       },
     });
-    feedStore.accumulateFeedEntry({
+    feedStore.accumulateFeedEntry(feedStore.sessionId, {
       timestamp: 5_100,
       type: 'content',
       agentId: 'kory-manager',
@@ -114,7 +114,7 @@ describe('reasoning traces survive relaunch/reload', () => {
 
     // Simulate the server replaying the ordered event log for the session:
     // reasoning first, then the answer text.
-    feedStore.accumulateFeedEntry({
+    feedStore.accumulateFeedEntry(feedStore.sessionId, {
       timestamp: 100,
       type: 'thinking',
       agentId: 'kory-manager',
@@ -123,7 +123,7 @@ describe('reasoning traces survive relaunch/reload', () => {
       text: 'Let me think about this problem deeply before answering.',
       metadata: { ...REPLAY_META },
     });
-    feedStore.accumulateFeedEntry({
+    feedStore.accumulateFeedEntry(feedStore.sessionId, {
       timestamp: 200,
       type: 'content',
       agentId: 'kory-manager',
@@ -163,7 +163,7 @@ describe('reasoning traces survive relaunch/reload', () => {
     expect(ok).toBe(true);
 
     // Late replay chunk (page refreshed mid-replay).
-    feedStore.accumulateFeedEntry({
+    feedStore.accumulateFeedEntry(feedStore.sessionId, {
       timestamp: 100,
       type: 'thinking',
       agentId: 'kory-manager',
@@ -189,7 +189,7 @@ describe('reasoning traces survive relaunch/reload', () => {
     sessionState.activeId = sessionId;
     feedStore.activateSessionFeed(sessionId);
 
-    feedStore.addFeedEntry({
+    feedStore.addFeedEntryForSession(feedStore.sessionId, {
       timestamp: 300,
       type: 'error',
       agentId: '',
@@ -224,8 +224,8 @@ describe('reasoning traces survive relaunch/reload', () => {
     const errorText = 'The provider failed.';
     sessionState.activeId = sessionId;
     feedStore.activateSessionFeed(sessionId);
-    feedStore.clearFeed();
-    feedStore.addFeedEntry({
+    feedStore.clearFeed(feedStore.sessionId);
+    feedStore.addFeedEntryForSession(feedStore.sessionId, {
       timestamp: 5_000,
       type: 'error',
       agentId: '',
@@ -234,10 +234,10 @@ describe('reasoning traces survive relaunch/reload', () => {
       text: errorText,
     });
 
-    expect(feedStore.isDuplicateError(errorText, 4_999)).toBe(false);
-    expect(feedStore.isDuplicateError(errorText, 5_000)).toBe(true);
-    expect(feedStore.isDuplicateError(errorText, 7_999)).toBe(true);
-    expect(feedStore.isDuplicateError(errorText, 8_000)).toBe(false);
+    expect(feedStore.isDuplicateError(feedStore.sessionId, errorText, 4_999)).toBe(false);
+    expect(feedStore.isDuplicateError(feedStore.sessionId, errorText, 5_000)).toBe(true);
+    expect(feedStore.isDuplicateError(feedStore.sessionId, errorText, 7_999)).toBe(true);
+    expect(feedStore.isDuplicateError(feedStore.sessionId, errorText, 8_000)).toBe(false);
   });
 
   it('keeps a replayed backend error that arrives while ancillary history is loading', async () => {
@@ -266,7 +266,7 @@ describe('reasoning traces survive relaunch/reload', () => {
     // loadSessionMessages has committed text history and is awaiting the
     // slower context/timeline lane. A long ordered replay can deliver its
     // terminal error during exactly this window.
-    feedStore.addFeedEntry({
+    feedStore.addFeedEntryForSession(feedStore.sessionId, {
       timestamp: 200,
       type: 'error',
       agentId: '',
@@ -367,7 +367,7 @@ describe('reasoning traces survive relaunch/reload', () => {
     const sessionId = 'rewritten-session';
     sessionState.activeId = sessionId;
     feedStore.activateSessionFeed(sessionId);
-    feedStore.addFeedEntry({
+    feedStore.addFeedEntryForSession(feedStore.sessionId, {
       timestamp: 200,
       type: 'error',
       agentId: '',
@@ -482,7 +482,7 @@ describe('reasoning traces survive relaunch/reload', () => {
     sessionState.activeId = sessionId;
     feedStore.activateSessionFeed(sessionId);
 
-    feedStore.addFeedEntry({
+    feedStore.addFeedEntryForSession(feedStore.sessionId, {
       timestamp: 100,
       type: 'thought',
       agentId: 'kory-manager',

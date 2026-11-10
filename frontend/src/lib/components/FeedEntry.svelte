@@ -429,7 +429,7 @@ import {
     zoomedRawImage = null;
     // Regeneration replays the prompt without adding a second user row. Close
     // the previous turn explicitly so incoming deltas cannot append to it.
-    wsStore.closeStreamTurn('kory-manager');
+    wsStore.closeStreamTurn(sessionId, 'kory-manager');
     wsStore.invalidateManagerContextUsage(sessionId);
     try {
       const response = await apiFetch(apiUrl('/api/messages/regenerate'), {
@@ -571,7 +571,7 @@ import {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ hiddenFromAgent: hidden }),
       });
-      wsStore.setEntryVisibility(entry.id, { agentHidden: hidden });
+      wsStore.setEntryVisibility(sid, entry.id, { agentHidden: hidden });
     } catch (err) {
       console.error('Failed to update agent context visibility:', err);
     }

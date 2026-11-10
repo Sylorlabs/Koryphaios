@@ -86,7 +86,7 @@ describe('chat loading surface', () => {
     state.activeSessionId = '';
     state.apiFetch.mockReset();
     feedStore.activateSessionFeed('');
-    feedStore.clearFeed();
+    feedStore.clearFeed(feedStore.sessionId);
   });
 
   it('stays up until the archived tool rows have joined the text page', async () => {

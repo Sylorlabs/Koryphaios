@@ -317,7 +317,7 @@ describe('transcript recovery after reload and reconnect', () => {
           }),
         }),
       );
-      expect(agentStore.agents.get('kory-manager')?.sessionId).toBe(state.activeSessionId);
+      expect(agentStore.getAgent(state.activeSessionId, 'kory-manager')?.sessionId).toBe(state.activeSessionId);
       expect(agentStore.getContextUsage()).toMatchObject({
         used: 80_000,
         max: 200_000,
@@ -338,6 +338,7 @@ describe('transcript recovery after reload and reconnect', () => {
       expect(feedStore.feed.some((entry) => entry.id === 'hist-answer-1')).toBe(true),
     );
     agentStore.updateUsage(
+      state.activeSessionId,
       'kory-manager',
       {
         agentId: 'kory-manager',
@@ -350,7 +351,6 @@ describe('transcript recovery after reload and reconnect', () => {
         contextKnown: true,
         contextWindow: 200_000,
       },
-      state.activeSessionId,
     );
     resolveContext({
       ok: true,

@@ -13,10 +13,10 @@ export function useAgentRail() {
   let closingAgentIds = $state(new Set<string>());
 
   let sessionAgentChats = $derived(
-    [...wsStore.agents.values()]
+    agentStore
+      .getSessionAgents(sessionStore.activeSessionId)
       .filter(
         (a) =>
-          a.sessionId === sessionStore.activeSessionId &&
           !a.closed &&
           a.identity.id !== 'kory-manager' &&
           a.identity.role !== 'manager',
@@ -29,7 +29,9 @@ export function useAgentRail() {
   );
 
   let selectedAgent = $derived(
-    selectedAgentId ? (wsStore.agents.get(selectedAgentId) ?? null) : null,
+    selectedAgentId
+      ? (agentStore.getAgent(sessionStore.activeSessionId, selectedAgentId) ?? null)
+      : null,
   );
 
   let selectedAgentFeed = $derived.by(() => {
@@ -92,9 +94,8 @@ export function useAgentRail() {
     const openThread = (event: Event) => {
       const detail = (event as CustomEvent<AgentThreadNavigation>).detail;
       if (detail?.sessionId !== sessionStore.activeSessionId) return;
-      const agent = wsStore.agents.get(detail.agentId);
-      if (agent?.sessionId !== detail.sessionId) return;
-      agentStore.reopenAgentCard(detail.agentId);
+      if (!agentStore.getAgent(detail.sessionId, detail.agentId)) return;
+      agentStore.reopenAgentCard(detail.sessionId, detail.agentId);
       selectAgent(detail.agentId);
     };
     window.addEventListener(OPEN_AGENT_THREAD_EVENT, openThread);
@@ -112,7 +113,8 @@ export function useAgentRail() {
    */
   async function closeAgent(agentId: string): Promise<void> {
     if (closingAgentIds.has(agentId)) return;
-    const agent = wsStore.agents.get(agentId);
+    const sessionId = sessionStore.activeSessionId;
+    const agent = agentStore.getAgent(sessionId, agentId);
     if (!agent) return;
 
     const isRunning = !TERMINAL_AGENT_STATUSES.has(agent.status);
@@ -137,8 +139,8 @@ export function useAgentRail() {
       }
     }
 
-    wsStore.markAgentStopped(agentId);
-    agentStore.closeAgentCard(agentId);
+    wsStore.markAgentStopped(sessionId, agentId);
+    agentStore.closeAgentCard(sessionId, agentId);
     if (selectedAgentId === agentId) clearSelection();
     closingAgentIds = new Set([...closingAgentIds].filter((id) => id !== agentId));
   }

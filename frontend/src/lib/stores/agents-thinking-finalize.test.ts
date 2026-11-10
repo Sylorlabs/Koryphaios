@@ -70,7 +70,7 @@ describe('finalizeThreadThinking', () => {
 
   it('finalizes everything when no filter is given (error/stop path)', () => {
     agentStore.upsertAgentThreadEntry('fin-all', 'worker-1', thinkingRow('worker-1', 1000));
-    agentStore.finalizeThreadThinking(undefined, undefined, 2500);
+    agentStore.finalizeThreadThinking('fin-all', undefined, 2500);
 
     const entries = agentStore.getAgentThreadEntries('fin-all', 'worker-1');
     expect(entries[0].thinkingFinalized).toBe(true);

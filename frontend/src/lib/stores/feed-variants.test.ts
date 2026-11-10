@@ -49,7 +49,7 @@ describe('feed response variant truth', () => {
     state.fetchMessages.mockReset();
     state.apiFetch.mockImplementation((path: string) => Promise.resolve(ancillaryResponse(path)));
     feedStore.activateSessionFeed('');
-    feedStore.clearFeed();
+    feedStore.clearFeed(feedStore.sessionId);
   });
 
   it('renders the authoritative active sibling and preserves every action identity', async () => {
@@ -149,7 +149,7 @@ describe('feed response variant truth', () => {
     // regeneration replaced it as the active branch. Only one variant may be
     // rendered, so this row must be absorbed by the history refresh instead of
     // reappearing as a second Kory answer.
-    feedStore.addFeedEntry({
+    feedStore.addFeedEntryForSession(feedStore.sessionId, {
       timestamp: 120,
       type: 'content',
       agentId: 'kory-manager',
@@ -264,7 +264,7 @@ describe('feed response variant truth', () => {
       return Promise.resolve(ancillaryResponse(path));
     });
     feedStore.activateSessionFeed(sessionId);
-    feedStore.addFeedEntry({
+    feedStore.addFeedEntryForSession(feedStore.sessionId, {
       timestamp: 125,
       type: 'system',
       agentId: 'kory-manager',

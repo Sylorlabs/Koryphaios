@@ -491,7 +491,7 @@
           follow={autoScrollCtl.follow}
           resetKey={sessionStore.activeSessionId}
           onScrollNearTop={() => {
-            if (!wsStore.isLoadingSession) void feedStore.loadOlderSessionMessages();
+            if (!wsStore.isLoadingSession) void feedStore.loadOlderSessionMessages(feedStore.sessionId);
           }}
           onLanded={handleTranscriptLanded}
           onRestoreState={(state) => autoScrollCtl.setFollow(state.follow)}

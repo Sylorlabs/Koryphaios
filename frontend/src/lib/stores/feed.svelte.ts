@@ -184,7 +184,18 @@ let analyzingThoughtId = $state<string | null>(null);
 // A thought can arrive as one buffered provider event. Keep the server time at
 // which the agent entered its thinking state so that case still has an honest
 // elapsed duration instead of being displayed as 0.0s.
+// Keyed by feedTurnKey(sessionId, agentId): the same agentId in two chats is two
+// independent reasoning clocks.
 const activeThinkingStartedAt = new Map<string, number>();
+
+/** Forget the reasoning clocks of one session only. */
+function clearThinkingClocksForSession(sessionId: string): void {
+  if (!sessionId) return;
+  const prefix = `${sessionId}::`;
+  for (const key of [...activeThinkingStartedAt.keys()]) {
+    if (key.startsWith(prefix)) activeThinkingStartedAt.delete(key);
+  }
+}
 
 function rebuildGroupedFeedCache(): void {
   lastGroupedFeed = getGroupedEntries(feed);
@@ -220,6 +231,8 @@ function visibleEntriesForSession(sessionId: string, entries: readonly FeedEntry
   return applyFeedVisibility(entries, persistence.tombstones);
 }
 
+/** The session a rendered row was written for. Empty when the row carries no
+ *  identity; callers must not substitute the displayed chat for it. */
 function entrySessionId(entry: FeedEntry): string {
   const direct = entry.metadata?.sessionId;
   if (typeof direct === 'string' && direct) return direct;
@@ -227,7 +240,14 @@ function entrySessionId(entry: FeedEntry): string {
     const childSessionId = entrySessionId(child);
     if (childSessionId) return childSessionId;
   }
-  return feedSessionId;
+  return '';
+}
+
+/** True when a session's rows are the ones currently rendered. This selects
+ *  which array a lane operation reads; it never decides which session a write
+ *  belongs to. */
+function isDisplayedLane(sessionId: string): boolean {
+  return !!sessionId && feedSessionId === sessionId;
 }
 
 function applyDurableVisibilityToSession(sessionId: string): void {
@@ -354,7 +374,7 @@ function activateSessionFeed(sessionId: string): number {
     // A reasoning block still running in the chat the reader is leaving must be
     // sealed, or reopening it shows a stopwatch climbing from a start timestamp
     // whose origin the reader can no longer see.
-    sealThinkingInLane(feed, undefined, 0, false);
+    sealThinkingInLane(feedSessionId, feed, undefined, 0, false);
     sessionFeedCache.set(feedSessionId, cloneEntries(feed));
   }
   feedTransitionGeneration++;
@@ -376,7 +396,9 @@ function activateSessionFeed(sessionId: string): number {
   feedTransitionBaseIds = new Set(feed.map((entry) => entry.id));
   streamingRevision = 0;
   analyzingThoughtId = null;
-  activeThinkingStartedAt.clear();
+  // Only the chat being left loses its clocks; the target's (and any background
+  // chat's) live reasoning timers keep running.
+  clearThinkingClocksForSession(previousSessionId);
   deletedMessageIds.clear();
   feedVersion++;
   rebuildGroupedFeedCache();
@@ -511,18 +533,19 @@ function nextFeedId(prefix: string): string {
 
 // ─── Feed Actions ────────────────────────────────────────────────────────────
 
-function addFeedEntry(entry: Omit<FeedEntry, 'id'>): FeedEntry | undefined {
-  const sessionId = entrySessionId(entry as FeedEntry);
-  const visible = decorateEntryForSession(sessionId, { ...entry, id: 'pending-feed-entry' });
-  if (!visible) return;
+/** A reasoning delta continues a reasoning row, but any other row closes the
+ *  current reasoning segment so the next thinking delta opens a new row at its
+ *  real position in the event stream. */
+function closeReasoningSegment(sessionId: string, entry: Pick<FeedEntry, 'type' | 'agentId'>): void {
+  if (entry.type === 'thinking') return;
+  feedStreamTargets.delete(feedTargetKey(sessionId, entry.agentId, 'thinking', false));
+  feedStreamTargets.delete(feedTargetKey(sessionId, entry.agentId, 'thinking', true));
+}
+
+/** Append an already-decorated row to the displayed lane. */
+function appendDisplayedEntry(sessionId: string, visible: FeedEntry): FeedEntry {
   const newEntry: FeedEntry = { ...visible, id: nextFeedId('fe') };
-  // A tool, response, status marker, or any other non-reasoning event closes
-  // the current reasoning segment. The next thinking delta therefore gets a
-  // new row at its actual position in the event stream.
-  if (newEntry.type !== 'thinking') {
-    feedStreamTargets.delete(feedTargetKey(sessionId, newEntry.agentId, 'thinking', false));
-    feedStreamTargets.delete(feedTargetKey(sessionId, newEntry.agentId, 'thinking', true));
-  }
+  closeReasoningSegment(sessionId, newEntry);
   if (
     newEntry.type === 'thought' &&
     ((newEntry.metadata as { phase?: string })?.phase === 'analyzing' ||
@@ -537,25 +560,27 @@ function addFeedEntry(entry: Omit<FeedEntry, 'id'>): FeedEntry | undefined {
   return newEntry;
 }
 
-/**
- * Preserve a durable event even when its session is running in the background.
- * The realtime ingress cursor is per session and therefore advances for
- * background subscriptions too; dropping the row here would make it
- * impossible to recover when the user later opens that session without
- * reconnecting the socket.
- */
-function addFeedEntryForSession(sessionId: string, entry: Omit<FeedEntry, 'id'>): void {
-  const visible = decorateEntryForSession(sessionId, { ...entry, id: 'pending-feed-entry' });
-  if (!visible) return;
-  if (ownsFeed(sessionId)) {
-    addFeedEntry(visible);
-    return;
-  }
+/** Append an already-decorated row to a background session's cached lane. */
+function appendCachedEntry(sessionId: string, visible: FeedEntry): FeedEntry {
+  const newEntry: FeedEntry = { ...visible, id: nextFeedId('fe') };
+  closeReasoningSegment(sessionId, newEntry);
+  const cached = sessionFeedCache.get(sessionId) ?? [];
+  cached.push(newEntry);
+  if (cached.length > MAX_FEED_ENTRIES) cached.splice(0, cached.length - MAX_FEED_ENTRIES);
+  sessionFeedCache.set(sessionId, cached);
+  return newEntry;
+}
 
-  const cached = cloneEntries(sessionFeedCache.get(sessionId) ?? []);
+/**
+ * The single duplicate rule for every lane, displayed or cached. A replayed
+ * event carries the (epoch, sequence) of the row it already produced, and a
+ * backend error pair with identical text inside one burst is one event that
+ * arrived twice.
+ */
+function isDuplicateLaneEntry(lane: readonly FeedEntry[], visible: FeedEntry): boolean {
   const epoch = visible.metadata?.eventEpoch;
   const sequence = visible.metadata?.sequenceStart;
-  const last = cached.at(-1);
+  const last = lane.at(-1);
   const lastEpoch = last?.metadata?.eventEpoch;
   const lastSequence = last?.metadata?.sequenceEnd ?? last?.metadata?.sequenceStart;
   const duplicateErrorPair =
@@ -567,28 +592,47 @@ function addFeedEntryForSession(sessionId: string, entry: Omit<FeedEntry, 'id'>)
         Number.isSafeInteger(sequence) &&
         lastEpoch === epoch &&
         Number(lastSequence) + 1 === Number(sequence)));
-  if (duplicateErrorPair) return;
-  const alreadyCached = cached.some(
+  if (duplicateErrorPair) return true;
+  return lane.some(
     (candidate) =>
       Number.isSafeInteger(epoch) &&
       Number.isSafeInteger(sequence) &&
       candidate.metadata?.eventEpoch === epoch &&
       candidate.metadata?.sequenceStart === sequence,
   );
-  if (alreadyCached) return;
-
-  cached.push({ ...visible, id: nextFeedId('fe') });
-  if (cached.length > MAX_FEED_ENTRIES) cached.splice(0, cached.length - MAX_FEED_ENTRIES);
-  sessionFeedCache.set(sessionId, cached);
 }
 
-function accumulateFeedEntry(entry: Omit<FeedEntry, 'id'>) {
-  const sessionId = entrySessionId(entry as FeedEntry);
+/**
+ * Record a row for a session. The displayed chat and a background chat go
+ * through the same duplicate rule; only the destination array differs.
+ * Preserves a durable event even when its session is running in the
+ * background: the realtime ingress cursor is per session and advances for
+ * background subscriptions too.
+ */
+function addFeedEntryForSession(sessionId: string, entry: Omit<FeedEntry, 'id'>): void {
+  if (!sessionId) return;
+  const visible = decorateEntryForSession(sessionId, { ...entry, id: 'pending-feed-entry' });
+  if (!visible) return;
+  if (isDisplayedLane(sessionId)) {
+    if (isDuplicateLaneEntry(feed, visible)) return;
+    appendDisplayedEntry(sessionId, visible);
+    return;
+  }
+  if (isDuplicateLaneEntry(sessionFeedCache.get(sessionId) ?? [], visible)) return;
+  appendCachedEntry(sessionId, visible);
+}
+
+/** Continue or create a streamed row (text, reasoning, tool activity) for a
+ *  session. Continuations resolve by identity within that session's lane. */
+function accumulateFeedEntry(sessionId: string, entry: Omit<FeedEntry, 'id'>) {
+  if (!sessionId) return;
   const visible = decorateEntryForSession(sessionId, { ...entry, id: 'pending-feed-entry' });
   if (!visible) return;
   entry = visible;
-  const lastIdx = feed.length - 1;
-  const last = lastIdx >= 0 ? feed[lastIdx] : null;
+  const displayed = isDisplayedLane(sessionId);
+  const lane = displayed ? feed : (sessionFeedCache.get(sessionId) ?? []);
+  const lastIdx = lane.length - 1;
+  const last = lastIdx >= 0 ? lane[lastIdx] : null;
   const continuesTurn = FEED_CONTINUATION_TYPES.has(entry.type);
   const turnKey = feedTurnKey(sessionId, entry.agentId);
   const targetKey = feedTargetKey(sessionId, entry.agentId, entry.type, Boolean(entry.userHidden));
@@ -596,7 +640,7 @@ function accumulateFeedEntry(entry: Omit<FeedEntry, 'id'>) {
   // "whatever is last": a tool call or another agent's row landing mid-sentence
   // must not split this turn's text or reasoning into two rows.
   const target = continuesTurn
-    ? openFeedStreamTarget(feed, targetKey, turnKey, entry as FeedEntry)
+    ? openFeedStreamTarget(lane, targetKey, turnKey, entry as FeedEntry)
     : last &&
         last.type === entry.type &&
         last.agentId === entry.agentId &&
@@ -652,28 +696,33 @@ function accumulateFeedEntry(entry: Omit<FeedEntry, 'id'>) {
     }
 
     Object.assign(target, updates);
-    patchGroupedFeedEntry(target.id, target.text, target.timestamp, updates);
+    if (displayed) patchGroupedFeedEntry(target.id, target.text, target.timestamp, updates);
     streamingRevision++;
     feedStreamTargets.set(targetKey, { sessionId, agentId: entry.agentId, entryId: target.id });
     return;
   }
 
-  const created = addFeedEntry(entry);
-  if (created && continuesTurn) {
+  const created = displayed
+    ? appendDisplayedEntry(sessionId, entry as FeedEntry)
+    : appendCachedEntry(sessionId, entry as FeedEntry);
+  if (continuesTurn) {
     closedFeedTurns.delete(turnKey);
     feedStreamTargets.set(targetKey, { sessionId, agentId: entry.agentId, entryId: created.id });
   }
 }
 
-function beginThinking(agentId: string, timestamp: number): number {
-  const existing = activeThinkingStartedAt.get(agentId);
+/** Reasoning clock for one agent in one session. The first call starts it. */
+function beginThinking(sessionId: string, agentId: string, timestamp: number): number {
+  if (!sessionId) return timestamp;
+  const key = feedTurnKey(sessionId, agentId);
+  const existing = activeThinkingStartedAt.get(key);
   if (existing !== undefined) return existing;
-  activeThinkingStartedAt.set(agentId, timestamp);
+  activeThinkingStartedAt.set(key, timestamp);
   return timestamp;
 }
 
-function getThinkingStart(agentId: string, fallbackTimestamp: number): number {
-  return beginThinking(agentId, fallbackTimestamp);
+function getThinkingStart(sessionId: string, agentId: string, fallbackTimestamp: number): number {
+  return beginThinking(sessionId, agentId, fallbackTimestamp);
 }
 
 function addUserMessage(
@@ -706,52 +755,53 @@ function addUserMessage(
  * is in flight. Filtering by phase as well as the remembered ID makes Stop
  * authoritative even across that race.
  */
-function removeAnalyzingThoughtEntries(sessionId?: string) {
-  const next = withoutAnalyzingThoughts(feed, analyzingThoughtId);
-  if (next.length !== feed.length) {
-    feed = next;
-    feedVersion++;
-    rebuildGroupedFeedCache();
+function removeAnalyzingThoughtEntries(sessionId: string) {
+  if (!sessionId) return;
+  // The tracked analyzing row belongs to the displayed lane. Another chat's
+  // Stop must not clear it.
+  if (isDisplayedLane(sessionId)) {
+    const next = withoutAnalyzingThoughts(feed, analyzingThoughtId);
+    if (next.length !== feed.length) {
+      feed = next;
+      feedVersion++;
+      rebuildGroupedFeedCache();
+    }
+    analyzingThoughtId = null;
   }
-  analyzingThoughtId = null;
-  const targetSession = sessionId ?? feedSessionId;
-  if (targetSession) {
-    const cached = sessionFeedCache.get(targetSession);
-    if (cached) {
-      const nextCached = withoutAnalyzingThoughts(cached, null);
-      if (nextCached.length !== cached.length) {
-        sessionFeedCache.set(targetSession, nextCached);
-      }
+  const cached = sessionFeedCache.get(sessionId);
+  if (cached) {
+    const nextCached = withoutAnalyzingThoughts(cached, null);
+    if (nextCached.length !== cached.length) {
+      sessionFeedCache.set(sessionId, nextCached);
     }
   }
 }
 
-function addClientError(text: string) {
-  const activeSessionId = sessionStore.activeSessionId;
-  if (!activeSessionId) return;
+function addClientError(sessionId: string, text: string) {
+  if (!sessionId) return;
   const clientEntryId = makeClientFeedEntryId();
   const timestamp = Date.now();
-  const localPersistence = persistenceForSession(activeSessionId);
-  sessionFeedPersistence.set(activeSessionId, {
+  const localPersistence = persistenceForSession(sessionId);
+  sessionFeedPersistence.set(sessionId, {
     ...localPersistence,
     entries: [
       ...localPersistence.entries,
       { id: clientEntryId, kind: 'client_error', text, timestamp },
     ],
   });
-  addFeedEntry({
+  addFeedEntryForSession(sessionId, {
     timestamp,
     type: 'error',
     agentId: 'kory-manager',
     agentName: 'Kory',
     glowClass: '',
     text,
-    metadata: { sessionId: activeSessionId, source: 'client', clientEntryId },
+    metadata: { sessionId, source: 'client', clientEntryId },
   });
   // Only explicit session-feed errors use this endpoint. Toasts and passive
   // telemetry remain transient by design, so reconnecting does not replay a
   // pile of stale notifications as transcript evidence.
-  void apiFetch(apiUrl(`/api/sessions/${activeSessionId}/feed/client-errors`), {
+  void apiFetch(apiUrl(`/api/sessions/${sessionId}/feed/client-errors`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ id: clientEntryId, text }),
@@ -768,11 +818,14 @@ function addClientError(text: string) {
 }
 
 function upsertCompaction(
+  sessionId: string,
   payload: CompactionProgressPayload,
   eventMetadata: Record<string, unknown> = {},
 ) {
-  if (!ownsFeed(payload.sessionId)) return;
-  const existing = feed.find(
+  if (!sessionId) return;
+  const displayed = isDisplayedLane(sessionId);
+  const lane = laneEntries(sessionId) ?? [];
+  const existing = lane.find(
     (entry) => entry.type === 'compaction' && entry.metadata?.compactionId === payload.compactionId,
   );
   const metadata = { ...payload, ...eventMetadata } as unknown as Record<string, unknown>;
@@ -781,11 +834,12 @@ function upsertCompaction(
     existing.text = nextText;
     existing.timestamp = Date.now();
     existing.metadata = metadata;
-    patchGroupedFeedEntry(existing.id, existing.text, existing.timestamp, { metadata });
+    if (displayed) patchGroupedFeedEntry(existing.id, existing.text, existing.timestamp, { metadata });
     streamingRevision++;
     return;
   }
-  addFeedEntry({
+  const visible = decorateEntryForSession(sessionId, {
+    id: 'pending-feed-entry',
     timestamp: Date.now(),
     type: 'compaction',
     agentId: 'kory-manager',
@@ -793,14 +847,21 @@ function upsertCompaction(
     glowClass: 'glow-kory',
     text: nextText,
     isCollapsed: true,
-    metadata,
+    metadata: { ...metadata, sessionId },
   });
+  if (!visible) return;
+  if (isDisplayedLane(sessionId)) appendDisplayedEntry(sessionId, visible);
+  else appendCachedEntry(sessionId, visible);
 }
 
-function hasPersistedAssistantContaining(text: string, eventTimestamp: number): boolean {
+function hasPersistedAssistantContaining(
+  sessionId: string,
+  text: string,
+  eventTimestamp: number,
+): boolean {
   const needle = normalizeFeedText(text);
   if (!needle) return false;
-  return feed.some(
+  return (laneEntries(sessionId) ?? []).some(
     (entry) =>
       entry.type === 'content' &&
       entry.agentId === 'kory-manager' &&
@@ -828,6 +889,7 @@ function laneEntries(sessionId: string): FeedEntry[] | null {
 /** Seal every still-running reasoning block in a lane at a server timestamp.
  *  `endedAt` is a provider timestamp, never a client clock reading. */
 function sealThinkingInLane(
+  sessionId: string,
   entries: FeedEntry[],
   agentId: string | undefined,
   endedAt: number,
@@ -838,7 +900,8 @@ function sealThinkingInLane(
     if (e.type !== 'thinking' || e.thinkingFinalized) continue;
     if (agentId && e.agentId !== agentId) continue;
     if (measured) {
-      const startedAt = e.thinkingStartedAt ?? activeThinkingStartedAt.get(e.agentId);
+      const startedAt =
+        e.thinkingStartedAt ?? activeThinkingStartedAt.get(feedTurnKey(sessionId, e.agentId));
       if (startedAt !== undefined) e.durationMs = Math.max(e.durationMs ?? 0, endedAt - startedAt);
     } else {
       // Leaving the chat: the start timestamp's origin is no longer visible, so
@@ -862,23 +925,23 @@ function sealThinkingInLane(
  *  one the reader is looking at: a run that completes in the background must
  *  still seal its own transcript instead of the reader's current chat. */
 function finalizeThinking(
+  sessionId: string,
   agentId?: string,
   endedAt: number | null = Date.now(),
-  sessionId?: string,
 ) {
-  const lane = sessionId ?? feedSessionId;
-  const entries = laneEntries(lane);
+  if (!sessionId) return;
+  const entries = laneEntries(sessionId);
   if (!entries) return;
   // `endedAt` is always a provider timestamp here, so a background lane still
   // measures its own block against its own start — never the reader's clock.
-  const changed = sealThinkingInLane(entries, agentId, endedAt ?? 0, endedAt !== null);
+  const changed = sealThinkingInLane(sessionId, entries, agentId, endedAt ?? 0, endedAt !== null);
   if (agentId) {
-    if (ownsFeed(lane)) activeThinkingStartedAt.delete(agentId);
-  } else if (ownsFeed(lane)) {
-    activeThinkingStartedAt.clear();
+    activeThinkingStartedAt.delete(feedTurnKey(sessionId, agentId));
+  } else {
+    clearThinkingClocksForSession(sessionId);
   }
   if (!changed) return;
-  if (ownsFeed(lane)) {
+  if (ownsFeed(sessionId)) {
     feed = [...feed];
     feedVersion++;
     rebuildGroupedFeedCache();
@@ -888,7 +951,8 @@ function finalizeThinking(
 /** Close the rows an agent's current turn may still append to, so the next
  *  delta opens a new item instead of continuing a finished answer. Mirrors
  *  closeAgentThreadTurn in the agent drilldown. */
-function closeStreamTurn(agentId?: string, sessionId = feedSessionId) {
+function closeStreamTurn(sessionId: string, agentId?: string) {
+  if (!sessionId) return;
   if (!agentId) {
     const closedAgents = new Set<string>();
     for (const [key, target] of [...feedStreamTargets]) {
@@ -913,6 +977,7 @@ function closeStreamTurn(agentId?: string, sessionId = feedSessionId) {
  *  Returns true when a live row was completed, or when the result was already
  *  recorded, so the caller can skip appending a duplicate output row. */
 function completeToolCall(
+  sessionId: string,
   callId: string,
   resultText: string,
   toolResult: Record<string, unknown>,
@@ -920,8 +985,7 @@ function completeToolCall(
   eventMetadata: Record<string, unknown> = {},
   agentId?: string,
 ): boolean {
-  const sessionId =
-    typeof eventMetadata.sessionId === 'string' ? eventMetadata.sessionId : feedSessionId;
+  if (!sessionId) return false;
   const entries = laneEntries(sessionId) ?? [];
   const target = entries.findLast(
     (candidate) =>
@@ -962,11 +1026,12 @@ function completeToolCall(
  * existing card once the backend has the final arguments rather than adding a
  * second, duplicate "Calling tool" row. */
 function updateToolCall(
+  sessionId: string,
   toolCall: { id: string; name: string; input: Record<string, unknown> },
   timestamp: number,
-  sessionId = feedSessionId,
   agentId?: string,
 ) {
+  if (!sessionId) return false;
   const entry = laneEntries(sessionId)?.findLast(
     (candidate) =>
       (candidate.type === 'tool_call' || candidate.type === 'tool_result') &&
@@ -990,10 +1055,11 @@ function updateToolCall(
 /** Input of the live `tool_call` row a result belongs to, so the result can
  * show both the command and its output. */
 function findToolCallInput(
+  sessionId: string,
   callId: string,
 ): { id: string; name: string; input: Record<string, unknown> } | undefined {
-  if (!callId) return undefined;
-  const entry = feed.findLast(
+  if (!sessionId || !callId) return undefined;
+  const entry = (laneEntries(sessionId) ?? []).findLast(
     (candidate) =>
       candidate.type === 'tool_call' &&
       (candidate.metadata as { toolCall?: { id?: string } } | undefined)?.toolCall?.id === callId,
@@ -1005,11 +1071,18 @@ function findToolCallInput(
 }
 
 /** Update an already-rendered row without changing its durable source. */
-function setEntryVisibility(id: string, patch: { userHidden?: boolean; agentHidden?: boolean }) {
-  const entry = feed.find((e) => e.id === id);
+function setEntryVisibility(
+  sessionId: string,
+  id: string,
+  patch: { userHidden?: boolean; agentHidden?: boolean },
+) {
+  if (!sessionId) return;
+  const lane = laneEntries(sessionId);
+  const entry = lane?.find((e) => e.id === id);
   if (!entry) return;
   if (patch.userHidden !== undefined) entry.userHidden = patch.userHidden;
   if (patch.agentHidden !== undefined) entry.agentHidden = patch.agentHidden;
+  if (!isDisplayedLane(sessionId)) return;
   feed = [...feed];
   feedVersion++;
   rebuildGroupedFeedCache();
@@ -1040,7 +1113,7 @@ function bindMessageIdentity(sessionId: string, entryId: string, messageId: stri
     return { entries: next, changed };
   };
 
-  if (feedSessionId === sessionId) {
+  if (isDisplayedLane(sessionId)) {
     const patched = patchEntries(feed);
     if (patched.changed) {
       feed = patched.entries;
@@ -1141,15 +1214,20 @@ async function setUserEntryVisibility(entry: FeedEntry, hidden: boolean): Promis
   if (!sessionId || targetKeys.length === 0) {
     // A truly local, unsequenced row has no future replay source. Keep the
     // useful immediate behavior without pretending it was made durable.
-    setEntryVisibility(entry.id, { userHidden: hidden });
+    setEntryVisibility(feedSessionId, entry.id, { userHidden: hidden });
     return true;
   }
   await persistFeedVisibility(sessionId, targetKeys, hidden ? 'hidden' : 'visible');
   return true;
 }
 
-function removeEntries(ids: Set<string>) {
-  if (ids.size === 0) return;
+function removeEntries(sessionId: string, ids: Set<string>) {
+  if (!sessionId || ids.size === 0) return;
+  if (!isDisplayedLane(sessionId)) {
+    const cached = sessionFeedCache.get(sessionId);
+    if (cached) sessionFeedCache.set(sessionId, cached.filter((e) => !ids.has(e.id)));
+    return;
+  }
   feed = feed.filter((e) => !ids.has(e.id));
   feedVersion++;
   rebuildGroupedFeedCache();
@@ -1227,15 +1305,17 @@ async function deleteEntry(entry: FeedEntry, selectedMessageId?: string): Promis
   } else {
     // Unsequenced ephemeral rows have no replay identity. They can only be
     // removed from the current live view and are never advertised as durable.
-    removeEntries(new Set([entry.id]));
+    removeEntries(feedSessionId, new Set([entry.id]));
   }
   return true;
 }
 
-function removeContentEntriesForAgent(agentId: string) {
+function removeContentEntriesForAgent(sessionId: string, agentId: string) {
+  if (!sessionId) return;
+  const lane = laneEntries(sessionId) ?? [];
   const entriesToRemove = new Set<string>();
-  for (let i = feed.length - 1; i >= 0; i--) {
-    const entry = feed[i];
+  for (let i = lane.length - 1; i >= 0; i--) {
+    const entry = lane[i];
     if (entry?.type === 'user_message') break;
     if (entry?.agentId === agentId && entry?.type === 'content') {
       entriesToRemove.add(entry.id);
@@ -1244,17 +1324,24 @@ function removeContentEntriesForAgent(agentId: string) {
     }
   }
   if (entriesToRemove.size > 0) {
-    removeEntries(entriesToRemove);
+    removeEntries(sessionId, entriesToRemove);
   }
 }
 
-function clearFeed() {
+/** Empty the displayed transcript for one session and forget that session's
+ *  reasoning clocks. Other sessions' clocks and cached lanes are untouched. */
+function clearFeed(sessionId: string) {
+  if (!sessionId) return;
+  clearThinkingClocksForSession(sessionId);
+  if (!isDisplayedLane(sessionId)) {
+    sessionFeedCache.delete(sessionId);
+    return;
+  }
   feed = [];
   feedTransitionBaseIds.clear();
   feedVersion++;
   streamingRevision = 0;
   analyzingThoughtId = null;
-  activeThinkingStartedAt.clear();
   rebuildGroupedFeedCache();
 }
 
@@ -1273,7 +1360,7 @@ function resetSessionFeed(sessionId: string): number {
   feedTransitionBaseIds.clear();
   streamingRevision = 0;
   analyzingThoughtId = null;
-  activeThinkingStartedAt.clear();
+  clearThinkingClocksForSession(sessionId);
   feedVersion++;
   rebuildGroupedFeedCache();
   return feedTransitionGeneration;
@@ -1309,7 +1396,7 @@ function clearSessionFeedState(sessionId: string): void {
   for (const key of [...closedFeedTurns]) {
     if (key.startsWith(`${sessionId}::`)) closedFeedTurns.delete(key);
   }
-  for (const agentId of sessionAgentIds) activeThinkingStartedAt.delete(agentId);
+  clearThinkingClocksForSession(sessionId);
   if (loadingOlderSessionId === sessionId) loadingOlderSessionId = '';
 }
 
@@ -1325,7 +1412,7 @@ function forgetSessionFeed(sessionId: string): void {
   feedTransitionBaseIds = new Set();
   streamingRevision = 0;
   analyzingThoughtId = null;
-  activeThinkingStartedAt.clear();
+  clearThinkingClocksForSession(sessionId);
   deletedMessageIds.clear();
   feedVersion++;
   rebuildGroupedFeedCache();
@@ -1342,14 +1429,14 @@ onSessionsRemoved((sessionIds) => {
   feedTransitionBaseIds = new Set();
   streamingRevision = 0;
   analyzingThoughtId = null;
-  activeThinkingStartedAt.clear();
   deletedMessageIds.clear();
   feedVersion++;
   rebuildGroupedFeedCache();
 });
 
-function isDuplicateError(text: string, timestamp: number): boolean {
-  const last = feed.length > 0 ? feed[feed.length - 1] : null;
+function isDuplicateError(sessionId: string, text: string, timestamp: number): boolean {
+  const lane = laneEntries(sessionId) ?? [];
+  const last = lane.length > 0 ? lane[lane.length - 1] : null;
   const delta = last ? timestamp - last.timestamp : -1;
   return !!(last?.type === 'error' && last.text === text && delta >= 0 && delta < 3_000);
 }
@@ -2038,7 +2125,7 @@ async function loadSessionMessagesImpl(
   return true;
 }
 
-async function loadOlderSessionMessages(sessionId = feedSessionId): Promise<boolean> {
+async function loadOlderSessionMessages(sessionId: string): Promise<boolean> {
   if (
     !sessionId ||
     sessionId !== sessionStore.activeSessionId ||
@@ -2121,7 +2208,6 @@ export const feedStore = {
   get isLoadingOlderMessages() {
     return loadingOlderSessionId === feedSessionId;
   },
-  addFeedEntry,
   addFeedEntryForSession,
   accumulateFeedEntry,
   addUserMessage,
@@ -2138,7 +2224,7 @@ export const feedStore = {
   visibleEntriesForSession,
   finalizeThinking,
   finalizeSessionThinking: (sessionId: string, agentId?: string, endedAt: number | null = null) =>
-    finalizeThinking(agentId, endedAt, sessionId),
+    finalizeThinking(sessionId, agentId, endedAt),
   closeStreamTurn,
   completeToolCall,
   beginThinking,

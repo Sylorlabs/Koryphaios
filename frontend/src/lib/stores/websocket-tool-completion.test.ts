@@ -121,7 +121,7 @@ describe('realtime command completion', () => {
       task: 'Review the delegated work',
     }, 1);
 
-    expect(agentStore.agents.get('critic-1')).toMatchObject({
+    expect(agentStore.getAgent(state.activeSessionId, 'critic-1')).toMatchObject({
       identity: { id: 'critic-1', role: 'critic', name: 'Critic' },
       status: 'thinking',
     });

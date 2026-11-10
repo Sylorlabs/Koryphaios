@@ -57,14 +57,14 @@ function toolCall(callId: string, name: string, timestamp: number) {
 describe('one turn renders as one answer', () => {
   beforeEach(() => {
     state.activeSessionId = SID;
-    feedStore.clearFeed();
+    feedStore.clearFeed(feedStore.sessionId);
     feedStore.activateSessionFeed(SID);
   });
 
   it('keeps text on one row when a tool call lands mid-sentence', () => {
-    feedStore.accumulateFeedEntry(content('Launching Codex — checking its ', 100));
-    feedStore.addFeedEntry(toolCall('tc1', 'read_file', 110));
-    feedStore.accumulateFeedEntry(content('layout and start command.', 120));
+    feedStore.accumulateFeedEntry(feedStore.sessionId, content('Launching Codex — checking its ', 100));
+    feedStore.addFeedEntryForSession(feedStore.sessionId, toolCall('tc1', 'read_file', 110));
+    feedStore.accumulateFeedEntry(feedStore.sessionId, content('layout and start command.', 120));
 
     const rows = feedStore.feed;
     expect(rows).toHaveLength(2);
@@ -76,7 +76,7 @@ describe('one turn renders as one answer', () => {
   });
 
   it('starts a new reasoning row after tool activity', () => {
-    feedStore.accumulateFeedEntry({
+    feedStore.accumulateFeedEntry(feedStore.sessionId, {
       timestamp: 100,
       type: 'thinking',
       agentId: AGENT,
@@ -86,8 +86,8 @@ describe('one turn renders as one answer', () => {
       thinkingStartedAt: 100,
       metadata: { sessionId: SID },
     });
-    feedStore.addFeedEntry(toolCall('tc1', 'grep', 110));
-    feedStore.accumulateFeedEntry({
+    feedStore.addFeedEntryForSession(feedStore.sessionId, toolCall('tc1', 'grep', 110));
+    feedStore.accumulateFeedEntry(feedStore.sessionId, {
       timestamp: 120,
       type: 'thinking',
       agentId: AGENT,
@@ -110,9 +110,9 @@ describe('one turn renders as one answer', () => {
 
   it('starts a new row for the next user turn', () => {
     feedStore.addUserMessage(SID, 'launch codex for me');
-    feedStore.accumulateFeedEntry(content('Checking its layout.', 100));
+    feedStore.accumulateFeedEntry(feedStore.sessionId, content('Checking its layout.', 100));
     feedStore.addUserMessage(SID, 'and now something else');
-    feedStore.accumulateFeedEntry(content('On it.', 200));
+    feedStore.accumulateFeedEntry(feedStore.sessionId, content('On it.', 200));
 
     const content1 = feedStore.feed.filter((entry) => entry.type === 'content');
     expect(content1).toHaveLength(2);
@@ -120,9 +120,9 @@ describe('one turn renders as one answer', () => {
   });
 
   it('does not merge another agent into the same row', () => {
-    feedStore.accumulateFeedEntry(content('Manager text', 100));
-    feedStore.accumulateFeedEntry(content('Worker text', 110, 'worker-1'));
-    feedStore.accumulateFeedEntry(content(' more manager', 120));
+    feedStore.accumulateFeedEntry(feedStore.sessionId, content('Manager text', 100));
+    feedStore.accumulateFeedEntry(feedStore.sessionId, content('Worker text', 110, 'worker-1'));
+    feedStore.accumulateFeedEntry(feedStore.sessionId, content(' more manager', 120));
 
     const content1 = feedStore.feed.filter((entry) => entry.type === 'content');
     expect(content1).toHaveLength(2);
@@ -131,9 +131,9 @@ describe('one turn renders as one answer', () => {
   });
 
   it('opens a new row after the turn is closed', () => {
-    feedStore.accumulateFeedEntry(content('Done.', 100));
-    feedStore.closeStreamTurn(AGENT);
-    feedStore.accumulateFeedEntry(content('A later continuation.', 200));
+    feedStore.accumulateFeedEntry(feedStore.sessionId, content('Done.', 100));
+    feedStore.closeStreamTurn(feedStore.sessionId, AGENT);
+    feedStore.accumulateFeedEntry(feedStore.sessionId, content('A later continuation.', 200));
 
     const content1 = feedStore.feed.filter((entry) => entry.type === 'content');
     expect(content1.map((entry) => entry.text)).toEqual(['Done.', 'A later continuation.']);

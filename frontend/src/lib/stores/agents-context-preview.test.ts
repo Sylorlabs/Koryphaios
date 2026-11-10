@@ -59,7 +59,7 @@ const API_BREAKDOWN = {
 };
 
 function manager() {
-  const state = agentStore.agents.get('kory-manager');
+  const state = agentStore.getAgent(sessionState.activeSessionId, 'kory-manager');
   if (!state) throw new Error('manager state is unavailable');
   return state;
 }
@@ -72,9 +72,7 @@ describe('manager context preview provider transitions', () => {
   it('surfaces live prompt-cache receipt metrics for the selected manager route', () => {
     const sessionId = sessionState.activeSessionId;
     beginManagerContextPreview(sessionId, 'openai', 'gpt-5.6', 262_144);
-    updateUsage(
-      'kory-manager',
-      {
+    updateUsage(sessionId, 'kory-manager', {
         agentId: 'kory-manager',
         model: 'gpt-5.6',
         provider: 'openai',
@@ -89,9 +87,7 @@ describe('manager context preview provider transitions', () => {
         estimatedCostUsd: 0.0123,
         cacheSavingsUsd: 0.0042,
         breakdown: API_BREAKDOWN,
-      },
-      sessionId,
-    );
+      });
 
     expect(getContextUsage()).toMatchObject({
       cachedInputTokens: 12_000,
@@ -152,9 +148,7 @@ describe('manager context preview provider transitions', () => {
     const sessionId = sessionState.activeSessionId;
     clearManagerContextPreview(sessionId);
 
-    updateUsage(
-      'kory-manager',
-      {
+    updateUsage(sessionId, 'kory-manager', {
         agentId: 'kory-manager',
         model: 'gpt-5.6-codex',
         provider: 'codex',
@@ -165,9 +159,7 @@ describe('manager context preview provider transitions', () => {
         contextWindow: 1_000_000,
         contextKnown: true,
         breakdown: CLI_BREAKDOWN,
-      },
-      sessionId,
-    );
+      });
     expect(
       seedManagerUsage(sessionId, {
         used: 211_700,
@@ -192,8 +184,7 @@ describe('manager context preview provider transitions', () => {
   it('never lets a worker restore provider usage while the selected manager awaits a report', () => {
     const sessionId = sessionState.activeSessionId;
     beginManagerContextPreview(sessionId, 'openai', 'minimax-m3', 262_144);
-    spawnAgent(
-      {
+    spawnAgent(sessionId, {
         id: 'codex-worker',
         name: 'Codex worker',
         role: 'coder',
@@ -201,13 +192,8 @@ describe('manager context preview provider transitions', () => {
         provider: 'codex',
         domain: 'backend',
         glowColor: '#fff',
-      },
-      'work',
-      sessionId,
-    );
-    updateUsage(
-      'codex-worker',
-      {
+      }, 'work');
+    updateUsage(sessionId, 'codex-worker', {
         agentId: 'codex-worker',
         model: 'gpt-5.6-codex',
         provider: 'codex',
@@ -218,9 +204,7 @@ describe('manager context preview provider transitions', () => {
         contextWindow: 1_000_000,
         contextKnown: true,
         breakdown: CLI_BREAKDOWN,
-      },
-      sessionId,
-    );
+      });
 
     expect(getContextUsage()).toMatchObject({
       used: 0,
@@ -230,7 +214,7 @@ describe('manager context preview provider transitions', () => {
       provider: 'openai',
     });
     expect(getContextUsage().breakdown).toBeUndefined();
-    removeAgent('codex-worker');
+    removeAgent(sessionId, 'codex-worker');
   });
 
   it('clears exact telemetry when manager ownership moves to another session', () => {
@@ -262,9 +246,7 @@ describe('manager context preview provider transitions', () => {
     const sessionId = sessionState.activeSessionId;
     beginManagerContextPreview(sessionId, 'codex', 'gpt-5.6-codex', 285_000);
 
-    updateUsage(
-      'kory-manager',
-      {
+    updateUsage(sessionId, 'kory-manager', {
         agentId: 'kory-manager',
         model: 'gpt-5.6-codex',
         provider: 'codex',
@@ -276,9 +258,7 @@ describe('manager context preview provider transitions', () => {
         contextWindow: 285_000,
         contextKnown: true,
         breakdown: CLI_BREAKDOWN,
-      },
-      sessionId,
-    );
+      });
 
     // The meter must never render 860.3k / 285.0k.
     expect(manager()).toMatchObject({
@@ -339,9 +319,7 @@ describe('manager context preview provider transitions', () => {
     expect(manager().contextBreakdown).toBeUndefined();
     expect(manager().cachedInputTokens).toBeUndefined();
 
-    updateUsage(
-      'kory-manager',
-      {
+    updateUsage(sessionId, 'kory-manager', {
         agentId: 'kory-manager',
         model: 'gpt-5.6-codex',
         provider: 'codex',
@@ -353,9 +331,7 @@ describe('manager context preview provider transitions', () => {
         contextWindow: 1_000_000,
         contextKnown: true,
         breakdown: CLI_BREAKDOWN,
-      },
-      sessionId,
-    );
+      });
     expect(manager()).toMatchObject({
       identity: { provider: 'openai', model: 'minimax-m3' },
       tokensUsed: 0,
@@ -414,9 +390,7 @@ describe('manager context preview provider transitions', () => {
     // and before every tool-loop dispatch — must neither be adopted as a total
     // nor destroy the last verified one. The 400k figure mirrors the real
     // chars/4 planning estimate, which runs ~10x above the actual total.
-    updateUsage(
-      'kory-manager',
-      {
+    updateUsage(sessionId, 'kory-manager', {
         agentId: 'kory-manager',
         model: 'minimax-m3',
         provider: 'openai',
@@ -428,9 +402,7 @@ describe('manager context preview provider transitions', () => {
         contextKnown: true,
         breakdown: API_BREAKDOWN,
         cachedInputTokens: 10_000,
-      },
-      sessionId,
-    );
+      });
     expect(manager()).toMatchObject({
       tokensUsed: 20_000,
       contextMax: 262_144,

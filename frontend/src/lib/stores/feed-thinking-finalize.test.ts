@@ -34,13 +34,13 @@ function feedEntryById(entries: FeedEntry[], text: string): FeedEntry {
 describe('reasoning timers stop when the run ends, not seconds later', () => {
   it('freezes a live block in the visible feed', () => {
     feedStore.activateSessionFeed('reason-1');
-    feedStore.beginThinking('kory-manager', 1000);
-    feedStore.accumulateFeedEntry({
+    feedStore.beginThinking(feedStore.sessionId, 'kory-manager', 1000);
+    feedStore.accumulateFeedEntry(feedStore.sessionId, {
       ...thinkingRow('kory-manager', 1000, 'reason-1'),
-      thinkingStartedAt: feedStore.getThinkingStart('kory-manager', 1000),
+      thinkingStartedAt: feedStore.getThinkingStart(feedStore.sessionId, 'kory-manager', 1000),
     });
 
-    feedStore.finalizeThinking('kory-manager', 4600, 'reason-1');
+    feedStore.finalizeThinking('reason-1', 'kory-manager', 4600);
 
     const entry = feedStore.feed[0];
     expect(entry.thinkingFinalized).toBe(true);
@@ -49,15 +49,15 @@ describe('reasoning timers stop when the run ends, not seconds later', () => {
 
   it('freezes the block of a session that finished while another chat was open', () => {
     feedStore.activateSessionFeed('reason-2');
-    feedStore.beginThinking('kory-manager', 2000);
-    feedStore.accumulateFeedEntry({
+    feedStore.beginThinking(feedStore.sessionId, 'kory-manager', 2000);
+    feedStore.accumulateFeedEntry(feedStore.sessionId, {
       ...thinkingRow('kory-manager', 2000, 'reason-2'),
-      thinkingStartedAt: feedStore.getThinkingStart('kory-manager', 2000),
+      thinkingStartedAt: feedStore.getThinkingStart(feedStore.sessionId, 'kory-manager', 2000),
     });
 
     // The reader switches away, then the run completes in the background.
     feedStore.activateSessionFeed('reason-3');
-    feedStore.finalizeThinking('kory-manager', 5000, 'reason-2');
+    feedStore.finalizeThinking('reason-2', 'kory-manager', 5000);
 
     // Reopening the chat must show a finished stopwatch, not a live one, and
     // it must not borrow the reader's current chat's reasoning rows.
@@ -76,7 +76,7 @@ describe('reasoning timers stop when the run ends, not seconds later', () => {
     });
 
     // A terminal event for that session lands while another chat is open.
-    feedStore.finalizeThinking('kory-manager', 5000, 'reason-2b');
+    feedStore.finalizeThinking('reason-2b', 'kory-manager', 5000);
 
     feedStore.activateSessionFeed('reason-2b');
     const entry = feedEntryById(feedStore.feed, 'background reasoning');
@@ -91,7 +91,7 @@ describe('reasoning timers stop when the run ends, not seconds later', () => {
       text: 'other lane',
     });
 
-    feedStore.finalizeThinking('kory-manager', 5000, 'reason-2b');
+    feedStore.finalizeThinking('reason-2b', 'kory-manager', 5000);
 
     feedStore.activateSessionFeed('reason-2c');
     expect(feedStore.feed[0].thinkingFinalized).toBeUndefined();
@@ -99,11 +99,11 @@ describe('reasoning timers stop when the run ends, not seconds later', () => {
 
   it('seals a still-running block when the reader leaves the chat', () => {
     feedStore.activateSessionFeed('reason-4');
-    feedStore.beginThinking('kory-manager', 7000);
-    feedStore.accumulateFeedEntry({
+    feedStore.beginThinking(feedStore.sessionId, 'kory-manager', 7000);
+    feedStore.accumulateFeedEntry(feedStore.sessionId, {
       ...thinkingRow('kory-manager', 7000, 'reason-4'),
       text: 'left mid-thought',
-      thinkingStartedAt: feedStore.getThinkingStart('kory-manager', 7000),
+      thinkingStartedAt: feedStore.getThinkingStart(feedStore.sessionId, 'kory-manager', 7000),
     });
 
     feedStore.activateSessionFeed('reason-5');
@@ -120,12 +120,12 @@ describe('reasoning timers stop when the run ends, not seconds later', () => {
 
   it('freezes at the last server duration when Stop has no server end timestamp', () => {
     feedStore.activateSessionFeed('reason-stop');
-    feedStore.beginThinking('kory-manager', 1000);
-    feedStore.accumulateFeedEntry({
+    feedStore.beginThinking(feedStore.sessionId, 'kory-manager', 1000);
+    feedStore.accumulateFeedEntry(feedStore.sessionId, {
       ...thinkingRow('kory-manager', 1000, 'reason-stop'),
-      thinkingStartedAt: feedStore.getThinkingStart('kory-manager', 1000),
+      thinkingStartedAt: feedStore.getThinkingStart(feedStore.sessionId, 'kory-manager', 1000),
     });
-    feedStore.accumulateFeedEntry({
+    feedStore.accumulateFeedEntry(feedStore.sessionId, {
       ...thinkingRow('kory-manager', 2400, 'reason-stop'),
       thinkingStartedAt: 1000,
     });
@@ -139,9 +139,9 @@ describe('reasoning timers stop when the run ends, not seconds later', () => {
 
   it('re-opens a sealed block when live reasoning resumes after a reconnect', () => {
     feedStore.activateSessionFeed('reason-6');
-    feedStore.beginThinking('kory-manager', 1000);
+    feedStore.beginThinking(feedStore.sessionId, 'kory-manager', 1000);
     // Replay seals history on arrival…
-    feedStore.accumulateFeedEntry({
+    feedStore.accumulateFeedEntry(feedStore.sessionId, {
       ...thinkingRow('kory-manager', 1000, 'reason-6'),
       thinkingStartedAt: 1000,
       thinkingFinalized: true,
@@ -150,7 +150,7 @@ describe('reasoning timers stop when the run ends, not seconds later', () => {
     expect(feedStore.feed[0].thinkingFinalized).toBe(true);
 
     // …and the live tail of the same turn continues afterwards.
-    feedStore.accumulateFeedEntry({
+    feedStore.accumulateFeedEntry(feedStore.sessionId, {
       ...thinkingRow('kory-manager', 3200, 'reason-6'),
       thinkingStartedAt: 1000,
     });
@@ -162,13 +162,13 @@ describe('reasoning timers stop when the run ends, not seconds later', () => {
 
   it('does not re-open a sealed block from another replayed delta', () => {
     feedStore.activateSessionFeed('reason-7');
-    feedStore.accumulateFeedEntry({
+    feedStore.accumulateFeedEntry(feedStore.sessionId, {
       ...thinkingRow('kory-manager', 1000, 'reason-7'),
       thinkingStartedAt: 1000,
       thinkingFinalized: true,
       durationMs: 0,
     });
-    feedStore.accumulateFeedEntry({
+    feedStore.accumulateFeedEntry(feedStore.sessionId, {
       ...thinkingRow('kory-manager', 2500, 'reason-7'),
       thinkingStartedAt: 1000,
       thinkingFinalized: true,

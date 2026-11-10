@@ -90,7 +90,7 @@ export function useSessionSync(options: SessionSyncOptions = {}) {
         const message = err instanceof Error ? err.message : 'Failed to load chat history.';
         wsStore.finishSessionLoad(activeId, feedGeneration);
         toastStore.error(message);
-        wsStore.addClientError(`Chat history failed to load: ${message}`);
+        wsStore.addClientError(activeId, `Chat history failed to load: ${message}`);
       }
     });
   });
