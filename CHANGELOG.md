@@ -4,6 +4,10 @@ All notable Koryphaios changes are recorded here. Release automation prepends a 
 
 ## Unreleased
 
+### ✨ Features
+
+- **OpenCode provider**: the official `opencode` CLI is now a first-class CLI provider. Chat turns run through `opencode acp` (Agent Client Protocol, protocolVersion 1) — the CLI owns auth (`opencode auth login`, detected via `~/.local/share/opencode/auth.json`) and inference; Koryphaios owns the tool loop. Host actions flow through the Kory MCP bridge passed per ACP session (`session/new.mcpServers`) with a session-scoped grant — nothing is written into your workspace or OpenCode configuration. Models, context windows, output limits, reasoning-effort ladders, capabilities, and pricing come from the CLI's authenticated live catalog (`opencode api model.list`, with a `--standalone` fallback) — never from bundled tables. Native-tool asks are vetoed at the ACP layer (read-like kinds allowed; mutating kinds rejected); research-only turns run the read-only `plan` agent. See [OpenCode CLI provider](docs/opencode-cli.md).
+
 ## [0.5.0] - 2026-10-03
 
 ### ✨ Features

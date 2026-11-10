@@ -2,7 +2,7 @@
 
 ## Per-chat Git UI
 
-The compact Git control in the composer is bound to **the active chat ID**, not the selected project. It shows the branch and changed-file count; the panel header shows the short HEAD hash. Two chats from the same project keep independent Git refs, indexes, files, and selection state.
+The compact Git control in the composer is bound to **the active chat ID**, not the selected project. It shows the branch and changed-file count; the panel header shows the short HEAD hash. Ordinary chats use the selected project folder directly; chats created through revision selection keep independent Git refs, indexes, files, and selection state.
 
 Open the panel for **Changes**, **Branches**, **History**, or **PRs**. Changes supports per-file diffs, stage/unstage (including all files), and staged commits with Ctrl/Cmd+Enter. Branches supports switching, creating a branch from the selected revision, and merging a chat-local branch into the current branch. History and PRs open pinned revisions on new chat-local branches.
 
@@ -21,7 +21,7 @@ PR support currently targets **GitHub.com**, using the host-owned source project
 
 ### Safety and agent access
 
-`git_inspect` and `git_switch` are manager-only first-party tools, also exposed as `kory__git_inspect` and `kory__git_switch` through the authenticated MCP bridge. They use the caller's host-bound session, never a model-supplied session/path. Inspection is read-only; switching follows the normal risky-tool approval policy and is unavailable in Plan mode. Workers/critics cannot switch the manager's checkout.
+`git_inspect` and `git_switch` are manager-only first-party tools, also exposed as `kory__git_inspect` and `kory__git_switch` through the authenticated MCP bridge. They use the caller's host-bound session, never a model-supplied session/path. Inspection is read-only; switching follows the normal risky-tool approval policy and is unavailable in the Plan interaction mode. Workers/critics cannot switch the manager's checkout.
 
 Both UI and tool switching reject dirty/unreadable status, unfinished Git operations, stale current HEAD/branch, moved target refs, pending change reviews, active workers and agent background terminals. UI switching additionally requires an idle chat. A manager can intentionally switch during its own turn, but the exclusive tool lease refuses overlapping managed tool executions. The existing mandatory OS sandbox confines Git and helpers to the owned chat checkout.
 
@@ -55,6 +55,6 @@ Backend provider status includes `execution: { modes, defaultMode }`. The shared
 - Missing capabilities: hide the selector instead of guessing.
 - No wired selection handler: the control is read-only/disabled, never a cosmetic toggle that silently fails to route work.
 
-Today, the integrated CLI adapters are local-only. Hoplite describes both local and cloud execution, but its delegation adapter is deliberately unavailable, so Settings displays a **disabled** dual-mode control with an explanation. Jules is cloud-only and also unavailable; it has no redundant mode selector. This change does **not** enable cloud delegation, persist a runnable cloud choice, or bypass the provider's approval requirements.
+Today, the integrated CLI adapters are local-only. Hoplite describes both local and cloud execution, but its delegation adapter is deliberately unavailable, so Settings displays a **disabled** dual-mode control with an explanation. This change does **not** enable cloud delegation, persist a runnable cloud choice, or bypass the provider's approval requirements.
 
 Before enabling dual-mode execution for an adapter, implement the real execution route, approval flow, session-scoped mode persistence and backend validation, cancellation/status tracking, and result import. Then wire the selector's value/change handler to that authority and mark only implemented modes available.

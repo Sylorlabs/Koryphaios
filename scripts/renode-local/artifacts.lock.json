@@ -1,0 +1,43 @@
+{
+  "version": "1.16.1",
+  "release": "https://github.com/renode/renode/releases/tag/v1.16.1",
+  "release_api": "https://api.github.com/repos/renode/renode/releases/tags/v1.16.1",
+  "runtime_digest_source": "GitHub's digest field on the official renode/renode release assets; not a separately signed checksum manifest",
+  "runtimes": {
+    "osx-arm64": {
+      "name": "renode-1.16.1-dotnet.osx-arm64-portable.dmg",
+      "asset_id": 356851416,
+      "size": 86362454,
+      "sha256": "99b8ae5897b8926ef179868d39a504fe5296555dc9c9b973718ddf3ab09175d9"
+    },
+    "linux-arm64": {
+      "name": "renode-1.16.1.linux-arm64-portable-dotnet.tar.gz",
+      "asset_id": 356851252,
+      "size": 75145061,
+      "sha256": "fff3a098c96ed0a4ffbdff3f028c9c5fde432db09587c7bd7c99406180f90007"
+    },
+    "linux-x64": {
+      "name": "renode-1.16.1.linux-portable-dotnet.tar.gz",
+      "asset_id": 356830383,
+      "size": 77304986,
+      "sha256": "00e113cdbd0f5354cf2f64bbe3f5a070d8958409542fca66e45ac97d982938c0"
+    }
+  },
+  "smoke_digest_source": "Locally computed SHA-256 of HTTPS downloads from Antmicro; no independent SHA-256 publication was found. The ELF URL's SHA-1 was also checked against its content.",
+  "smoke_source": "https://github.com/renode/renode/blob/v1.16.1/tests/platforms/STM32F4_Discovery.robot#L12-L22",
+  "smoke_assets": [
+    {
+      "name": "stm32f4-zephyr-hello_world.elf",
+      "url": "https://dl.antmicro.com/projects/renode/stm32f4_discovery--zephyr-hello_world.elf-s_515008-2180a4018e82fcbc8821ef4330c9b5f3caf2dcdb",
+      "size": 515008,
+      "sha1": "2180a4018e82fcbc8821ef4330c9b5f3caf2dcdb",
+      "sha256": "bb4fb93353eeba8beef96e4402ef388e24cf8a08f3ba7ece1a679fc67e2a7adf"
+    },
+    {
+      "name": "STM32F40x.svd.gz",
+      "url": "https://dl.antmicro.com/projects/renode/svd/STM32F40x.svd.gz",
+      "size": 74195,
+      "sha256": "d71b3e11c870ec83346eb994e98a57c5eacdf0082d2949ed495d7a3828bf41ec"
+    }
+  ]
+}

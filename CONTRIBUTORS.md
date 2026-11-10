@@ -14,7 +14,6 @@ Koryphaios keeps automated work visible instead of presenting it as anonymous
 human authorship. The repository history currently includes contributions from:
 
 - [@claude](https://github.com/claude)
-- [Google Labs Jules](https://github.com/apps/google-labs-jules)
 - [@actions-user](https://github.com/actions-user)
 
 Every contribution remains subject to the same review, testing, and evidence

@@ -1,0 +1,7 @@
+#!/usr/bin/env bun
+import { runNativeStatelessReviewer } from './kory-native-stateless-reviewer.ts';
+
+runNativeStatelessReviewer().catch(() => {
+  process.stderr.write('kory-native-stateless-reviewer: failed; diagnostics redacted. No completed review emitted.\n');
+  process.exitCode = 1;
+});

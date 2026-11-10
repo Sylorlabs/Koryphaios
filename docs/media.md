@@ -2,15 +2,15 @@
 
 Koryphaios can display images and play audio/video attachments in the conversation. Model understanding and media generation depend on the selected provider's actual API capabilities.
 
-| Workflow | Where to use it | Provider requirements |
-| --- | --- | --- |
-| Image input | Composer paperclip → Attach image, audio, video; paste screenshots; drag files into the composer | A chat integration and model that support image input |
-| Image output | Settings → Images, or the image generation workflow | A connected image generation provider |
-| Video input | Attach a short video in the composer | The native Gemini integration: Google, AI Studio, Vertex AI, or a Gemini-compatible custom endpoint |
-| Video output | Settings → Video, or ask the manager to use `generate_video` | A connected Luma, Kling AI, Prodia, or Replicate account and an appropriate model |
-| Audio input / analysis | Attach an audio file in the composer | The native Gemini integration |
-| Speech-to-text | Hold the composer microphone, or choose **Use transcript** on an audio attachment | Settings → Voice selects Kory Voice, system microphone recognition, a local endpoint, or a connected transcription API |
-| Text-to-speech | **Listen** beneath an assistant reply, Voice settings' test button, or automatic reply playback | Settings → Voice selects operating-system voices, a local endpoint, or a connected speech API |
+| Workflow               | Where to use it                                                                                  | Provider requirements                                                                                                  |
+| ---------------------- | ------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| Image input            | Composer paperclip → Attach image, audio, video; paste screenshots; drag files into the composer | A chat integration and model that support image input                                                                  |
+| Image output           | Settings → Images, or the image generation workflow                                              | A connected image generation provider                                                                                  |
+| Video input            | Attach a short video in the composer                                                             | The native Gemini integration: Google, AI Studio, Vertex AI, or a Gemini-compatible custom endpoint                    |
+| Video output           | Settings → Video, or ask the manager to use `generate_video`                                     | A connected Luma, Kling AI, Prodia, or Replicate account and an appropriate model                                      |
+| Audio input / analysis | Attach an audio file in the composer                                                             | The native Gemini integration                                                                                          |
+| Speech-to-text         | Press the composer microphone to start and again to stop, or choose **Use transcript** on an audio attachment | Settings → Voice selects Kory Voice, system microphone recognition, a local endpoint, or a connected transcription API |
+| Text-to-speech         | **Listen** beneath an assistant reply, Voice settings' test button, or automatic reply playback  | Settings → Voice selects operating-system voices, a local endpoint, or a connected speech API                          |
 
 ## Media uploads and playback
 

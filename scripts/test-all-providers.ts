@@ -23,6 +23,7 @@ const CLI_BINARY_MAP: Record<string, string> = {
   antigravity: 'agy',
   cursor: 'cursor-agent',
   devin: 'devin',
+  opencode: 'opencode',
 };
 
 function hasBin(bin: string): boolean {
@@ -55,8 +56,6 @@ function resolveVerifyUrl(cfg: PCfg): {
   if (name === 'groq') return { url: 'https://api.groq.com/openai/v1/models', method: 'GET' };
   if (name === 'xai') return { url: 'https://api.x.ai/v1/models', method: 'GET' };
   if (name === 'copilot') return { url: 'https://api.githubcopilot.com/models', method: 'GET' };
-  if (name === 'jules')
-    return { url: 'https://jules.googleapis.com/v1alpha/sources?pageSize=1', method: 'GET' };
   if (name === 'ollama') return { url: 'http://localhost:11434/api/tags', method: 'GET' };
   if (name === 'llamacpp') return { url: 'http://127.0.0.1:8080/v1/models', method: 'GET' };
   if (name === 'lmstudio') return { url: 'http://localhost:1234/v1/models', method: 'GET' };

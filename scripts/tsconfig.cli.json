@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "Preserve",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["bun"],
+    "typeRoots": ["../backend/node_modules/@types"]
+  },
+  "include": ["koryphaios.ts", "admin-cli.ts", "admin-cli.test.ts", "link-device.ts"]
+}

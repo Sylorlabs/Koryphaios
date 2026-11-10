@@ -1,17 +1,17 @@
 # Chat workspace isolation
 
-Every project-backed chat gets a durable **independent Git repository**, including chats created without the revision picker. This is deliberately stronger than a linked Git worktree: linked worktrees share stashes, refs, tags, remotes and configuration.
+Chats opened directly in a local folder work **in place** in that folder. A chat created with the revision picker gets a durable **independent Git repository**. This is deliberately stronger than a linked Git worktree: linked worktrees share stashes, refs, tags, remotes and configuration.
 
 ## Source project versus execution checkout
 
 - `Session.workingDirectory` remains the source project identity for grouping, navigation and project settings.
-- `Session.gitWorkspace.path` is the execution directory. A selected project subdirectory remains the corresponding subdirectory of the new checkout.
+- `Session.gitWorkspace.path`, when present, is the execution directory for an explicitly isolated revision chat. Ordinary chats use `Session.workingDirectory` directly.
 - Independent repositories live under `~/.koryphaios/chat-repositories/<id>/checkout`. Ownership/settings metadata is stored outside the agent-writable checkout.
-- Git-backed chats start at the selected commit, or committed `HEAD` for ordinary new chats. Uncommitted source edits and untracked/ignored source files are **not** transferred. The original index and working directory are untouched.
-- Non-Git and unborn projects receive an independent initial snapshot. Git is initialized in the copy, not the source. `node_modules`, `.git`, `.trees`, `.koryphaios`, `.env*`, and common credential directories/files are excluded from that snapshot.
+- Explicit revision chats start at the selected commit. Ordinary folder chats retain the live folder, including its current Git state and uncommitted work.
+- Non-Git and unborn projects are used directly; opening them does not scan or copy their contents.
 - Chats without a selected project receive an empty private repository on first execution, rather than copying the backend's data directory.
 - Dependencies and environment files are not symlinked back to the source. Install dependencies in the isolated checkout as needed.
-- Source remotes are not carried into the copy. Publishing/merging back is an explicit human action; there is no automatic cross-chat merge or writeback to the source repository.
+- Explicit revision chats do not carry source remotes into their copy. Publishing/merging back is an explicit human action. Ordinary in-place chats use the folder's existing Git state.
 
 The Git panel, file mentions, chat-relative images, native tool bridge, checkpoints and worker recovery APIs resolve the active session checkout. The new-chat revision picker intentionally reads the source project. Project policy/preferences remain source-owned, not controlled by a copied `koryphaios.json`.
 

@@ -4,8 +4,8 @@
  * Starts backend + frontend dev server + Tauri native shell.
  */
 
-const { spawn } = await import('node:child_process');
-const { readFileSync, existsSync, writeFileSync, rmSync } = await import('node:fs');
+const { spawn, execFileSync } = await import('node:child_process');
+const { readFileSync, existsSync, writeFileSync, rmSync, readdirSync } = await import('node:fs');
 const { join, resolve } = await import('node:path');
 const net = await import('node:net');
 const os = await import('node:os');
@@ -35,12 +35,18 @@ type ManagedChild = {
   owned: boolean;
 };
 
-const PROJECT_ROOT = resolve(import.meta.dir, '..');
-const BACKEND_DIR = resolve(PROJECT_ROOT, 'backend');
+const PROJECT_ROOT = resolve(import.meta.dir, '..');const BACKEND_DIR = resolve(PROJECT_ROOT, 'backend');
 const FRONTEND_DIR = resolve(PROJECT_ROOT, 'frontend');
 const DESKTOP_DIR = resolve(PROJECT_ROOT, 'desktop');
+const LOCAL_CLAUDE_BIN_DIR = resolve(PROJECT_ROOT, '.tools', 'bin');
 const APP_CONFIG_PATH = resolve(PROJECT_ROOT, 'config', 'app.config.json');
 const ACTIVE_PORT_PATH = resolve(PROJECT_ROOT, '.koryphaios', '.active-port.json');
+// The checkout's normal backend database is also used by `bun run user` and
+// can contain a previously opened workspace. Desktop development must have its
+// own database so a stale project selection from another runtime cannot become
+// the first screen of every local launch. An explicitly supplied DATABASE_URL
+// still wins for integration/debugging workflows that intentionally share one.
+const DEV_DATABASE_PATH = resolve(PROJECT_ROOT, '.koryphaios', 'desktop-dev', 'koryphaios.db');
 
 const BACKEND_READY_TIMEOUT_MS = Number(process.env.KORYPHAIOS_BACKEND_READY_TIMEOUT_MS ?? 120_000);
 const FRONTEND_READY_TIMEOUT_MS = Number(
@@ -147,8 +153,71 @@ if (await isPreferredPortHeld()) {
   frontendCorsOrigins = resolveFrontendCorsOrigins(frontendUrl);
 }
 
+/**
+ * macOS beta SDKs can ship `.tbd` stubs that declare targets the installed
+ * Rust linker's tapi does not understand. MacOSX27.0, for example, lists
+ * `arm64e.x1-macos`, which fails the desktop link with
+ * "unknown architecture … tapi error: malformed file". When the default SDK
+ * is unusable, pin SDKROOT to the newest installed SDK whose stubs the linker
+ * can parse so `bun run dev` keeps working without hand-set environment.
+ */
+function resolveCompatibleMacSdk(): { sdkPath: string; reason: string } | null {
+  if (process.platform !== 'darwin') return null;
+  const SDK_ROOT = '/Library/Developer/CommandLineTools/SDKs';
+  const PROBE = 'System/Library/Frameworks/CoreFoundation.framework/CoreFoundation.tbd';
+  const UNSUPPORTED_TARGET = 'arm64e.x1';
+  const readProbe = (sdkPath: string): string | null => {
+    try {
+      return readFileSync(join(sdkPath, PROBE), 'utf-8');
+    } catch {
+      return null;
+    }
+  };
+  let defaultSdk: string | null = null;
+  try {
+    defaultSdk = execFileSync('xcrun', ['--show-sdk-path'], { encoding: 'utf-8' }).trim();
+  } catch {
+    /* xcrun unavailable — nothing to pin */
+  }
+  const defaultProbe = defaultSdk ? readProbe(defaultSdk) : null;
+  // Only intervene when the default SDK actually declares a target the linker
+  // rejects; a healthy toolchain is left untouched.
+  if (!defaultProbe || !defaultProbe.includes(UNSUPPORTED_TARGET)) return null;
+  let candidates: string[] = [];
+  try {
+    candidates = readdirSync(SDK_ROOT)
+      .filter((entry) => /^MacOSX[\d.]+\.sdk$/.test(entry))
+      .sort((a, b) => {
+        const version = (name: string) => name.match(/\d+/g)?.map(Number) ?? [];
+        const va = version(a);
+        const vb = version(b);
+        for (let i = 0; i < Math.max(va.length, vb.length); i++) {
+          const diff = (vb[i] ?? 0) - (va[i] ?? 0);
+          if (diff !== 0) return diff;
+        }
+        return 0;
+      });
+  } catch {
+    return null;
+  }
+  for (const entry of candidates) {
+    const sdkPath = join(SDK_ROOT, entry);
+    if (sdkPath === defaultSdk) continue;
+    const probe = readProbe(sdkPath);
+    if (!probe || probe.includes(UNSUPPORTED_TARGET)) continue;
+    return {
+      sdkPath,
+      reason: `default SDK declares ${UNSUPPORTED_TARGET}, which the Rust linker rejects`,
+    };
+  }
+  return null;
+}
+
 const sharedEnv = {
   ...process.env,
+  ...(existsSync(resolve(LOCAL_CLAUDE_BIN_DIR, 'claude'))
+    ? { PATH: `${LOCAL_CLAUDE_BIN_DIR}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH ?? ''}` }
+    : {}),
   KORYPHAIOS_HOST: backendHost,
   KORYPHAIOS_PORT: String(backendPort),
   KORYPHAIOS_FRONTEND_HOST: frontendHost,
@@ -157,6 +226,7 @@ const sharedEnv = {
   // Keep every caller-configured origin and add only the exact dev frontend
   // origins. The backend never needs a wildcard for the native WebView.
   CORS_ORIGINS: mergeCorsOriginEnv(process.env.CORS_ORIGINS, frontendCorsOrigins),
+  ...(process.env.DATABASE_URL ? {} : { DATABASE_URL: `sqlite:${DEV_DATABASE_PATH}` }),
   // Inherit any pinned compat hash so the dev backend's /api/health reports
   // the same value the dev frontend's Vite define baked in. Without this the
   // backend falls back to its own resolution (env, then compat-hash.json) —
@@ -448,9 +518,16 @@ async function main() {
   const tauriConfigPath = join(os.tmpdir(), `kory-desktop-tauri-config-${process.pid}.json`);
   writeFileSync(tauriConfigPath, JSON.stringify({ build: { devUrl: frontendUrl } }));
   tempConfigPaths.push(tauriConfigPath);
+  const sdkOverride = resolveCompatibleMacSdk();
+  if (sdkOverride) {
+    log(
+      `Using SDKROOT=${sdkOverride.sdkPath} for the native build (${sdkOverride.reason})`,
+      colors.yellow,
+    );
+  }
   const tauri = spawn('bun', ['run', 'tauri', 'dev', '--config', tauriConfigPath], {
     cwd: DESKTOP_DIR,
-    env: sharedEnv,
+    env: { ...sharedEnv, ...(sdkOverride ? { SDKROOT: sdkOverride.sdkPath } : {}) },
     stdio: 'inherit',
     shell: SPAWN_SHELL,
   });

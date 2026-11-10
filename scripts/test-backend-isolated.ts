@@ -13,16 +13,20 @@
  * works on macOS, Windows, and Linux without requiring bash.
  *
  * Isolated runtime setup: explicitly prefix a focused invocation with
- * BUN_INSTALL_CACHE_DIR, PLAYWRIGHT_BROWSERS_PATH, and/or DEVELOPER_DIR to
- * reuse existing credential-free asset directories. Relative paths resolve
- * from the caller's cwd; shell-expand home paths before invoking this script.
- * Unset selectors stay unset (no host HOME lookup); invalid directories fail
- * before launch. PLAYWRIGHT_BROWSERS_PATH=0 is unsupported: supply an existing
- * browser directory instead. HOME, XDG roots, and temp remain disposable.
+ * BUN_INSTALL_CACHE_DIR, PLAYWRIGHT_BROWSERS_PATH, DEVELOPER_DIR, SDKROOT, and, when
+ * real local Docker fixtures are intended, KORY_DOCKER_HOST. Relative paths
+ * resolve from the caller's cwd; shell-expand home paths before invoking this
+ * script. Unset selectors stay unset (no host HOME lookup); invalid asset
+ * directories and Docker sockets fail before launch. Native iOS simulator
+ * selections may be forwarded via KORY_IOS_EVAL_IPHONE_UDID and
+ * KORY_IOS_EVAL_IPAD_UDID, each validated before launching tests. Explicit
+ * KORY_IOS_EVAL_NATIVE_TESTS=1 opts into real XCUITest control runs.
+ * PLAYWRIGHT_BROWSERS_PATH=0 is unsupported: supply an existing browser
+ * directory instead. HOME, XDG roots, credentials, and temp remain disposable.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { canonicalizePath } from '../backend/src/runtime/platform';
@@ -37,7 +41,15 @@ const ASSET_DIRECTORY_ENV = [
   'BUN_INSTALL_CACHE_DIR',
   'PLAYWRIGHT_BROWSERS_PATH',
   'DEVELOPER_DIR',
+  'SDKROOT',
 ] as const;
+const DOCKER_HOST_SELECTOR = 'KORY_DOCKER_HOST';
+const IOS_DEVICE_SELECTORS = [
+  'KORY_IOS_EVAL_IPHONE_UDID',
+  'KORY_IOS_EVAL_IPAD_UDID',
+] as const;
+const IOS_NATIVE_TESTS_FLAG = 'KORY_IOS_EVAL_NATIVE_TESTS';
+const IOS_SIMULATOR_UDID = /^[A-Fa-f0-9]{8}(?:-[A-Fa-f0-9]{4}){3}-[A-Fa-f0-9]{12}$/u;
 const SAFE_HOST_ENV = new Set([
   'PATH',
   'PATHEXT',
@@ -90,10 +102,51 @@ export function createIsolatedTestEnvironment(
         // Freeze caller-relative paths before runBackendTests changes cwd.
         const directory = canonicalizePath(resolve(value));
         if (!statSync(directory).isDirectory()) throw new Error(invalidPath);
+        if (
+          name === 'SDKROOT' &&
+          (!/^MacOSX.*\.sdk$/u.test(basename(directory)) ||
+            !existsSync(join(directory, 'SDKSettings.json')))
+        ) {
+          throw new Error(invalidPath);
+        }
         env[name] = directory;
       } catch {
         // Never silently fall back to HOME/default assets after a bad selector.
         throw new Error(invalidPath);
+      }
+    }
+    for (const name of IOS_DEVICE_SELECTORS) {
+      const value = source[name];
+      if (value === undefined) continue;
+      if (!IOS_SIMULATOR_UDID.test(value)) {
+        throw new Error(`${name} must be a valid explicit simulator UDID`);
+      }
+      env[name] = value;
+    }
+    const nativeIOSSelection = source[IOS_NATIVE_TESTS_FLAG];
+    if (nativeIOSSelection !== undefined) {
+      if (nativeIOSSelection !== '0' && nativeIOSSelection !== '1') {
+        throw new Error('KORY_IOS_EVAL_NATIVE_TESTS must be 0 or 1');
+      }
+      env[IOS_NATIVE_TESTS_FLAG] = nativeIOSSelection;
+    }
+    const dockerHost = source[DOCKER_HOST_SELECTOR];
+    if (dockerHost !== undefined) {
+      const invalidDockerHost =
+        'KORY_DOCKER_HOST must name an existing local Unix socket using unix://; shell-expand paths before invoking the isolated runner.';
+      if (!dockerHost.trim() || /[\x00-\x1f\x7f\s]/.test(dockerHost)) {
+        throw new Error(invalidDockerHost);
+      }
+      const prefix = 'unix://';
+      if (!dockerHost.startsWith(prefix)) throw new Error(invalidDockerHost);
+      try {
+        // macOS realpath cannot canonicalize a live Unix socket (EOPNOTSUPP),
+        // so validate the resolved lexical path and let Docker open the socket.
+        const socketPath = resolve(dockerHost.slice(prefix.length));
+        if (!statSync(socketPath).isSocket()) throw new Error(invalidDockerHost);
+        env.DOCKER_HOST = `${prefix}${socketPath}`;
+      } catch {
+        throw new Error(invalidDockerHost);
       }
     }
     env[LIVE_PROVIDER_TEST_FLAG] = '0';

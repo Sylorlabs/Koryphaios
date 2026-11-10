@@ -202,10 +202,8 @@ jobs:
         run: |
           set -euo pipefail
           OUTFILE="$GITHUB_WORKSPACE/koryphaios-backend-${{ matrix.target }}${{ matrix.suffix }}"
-          DEFINE=()
-          [ -n "$RELAY_URL" ] && DEFINE+=(--define "process.env.RELAY_URL=\"$RELAY_URL\"")
-          bun build --compile --target=${{ matrix.bun-target }} "${DEFINE[@]}" \
-            backend/src/server.ts --outfile="$OUTFILE"
+          bun --no-env-file run scripts/compile-backend.ts --target=${{ matrix.bun-target }} \
+            --outfile="$OUTFILE"
           if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
             gzip -9 -c "$OUTFILE" > "$OUTFILE.gz"
             rm "$OUTFILE"

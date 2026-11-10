@@ -25,12 +25,14 @@ const { resolveToolPermissionPolicy } = await import('../backend/src/tools/permi
 const { DEFAULT_AGENT_SETTINGS } = await import('../backend/src/agent-settings');
 const { verifySignedBridgeRequest } = await import('../backend/src/providers/bridge-grant');
 const { discoverFreebuffAccounts } = await import('../backend/src/providers/auth-utils');
-const { FreebuffProvider } = await import('../backend/src/providers/freebuff-cli');
-const { refreshFreebuffRuntimeStatus } = await import('../backend/src/providers/freebuff-runtime');
+const { FreebuffProvider, freebuffStartupState, readFreebuffLogRows } =
+  await import('../backend/src/providers/freebuff-cli');
+const { refreshFreebuffRuntimeStatus, createFreebuffTurnRuntime } =
+  await import('../backend/src/providers/freebuff-runtime');
 
 let server: ReturnType<typeof Bun.serve> | undefined;
 const abort = new AbortController();
-const timer = setTimeout(() => abort.abort(), 180_000);
+const timer = setTimeout(() => abort.abort(), 360_000);
 try {
   const accounts = discoverFreebuffAccounts();
   if (!accounts.length)
@@ -125,29 +127,173 @@ try {
   });
   process.env.KORYPHAIOS_HOST = '127.0.0.1';
   process.env.KORYPHAIOS_PORT = String(server.port);
-  const provider = new FreebuffProvider({ name: 'freebuff', disabled: false });
+  const provider = new FreebuffProvider(
+    { name: 'freebuff', disabled: false },
+    process.env.KORY_FREEBUFF_PROBE_DIAGNOSTICS === '1'
+      ? {
+          createRuntime: async (options) => {
+            const runtime = await createFreebuffTurnRuntime(options);
+            let polls = 0;
+            let pasted = false;
+            let capturePolls = 0;
+            return {
+               ...runtime,
+               tmux: async (args) => {
+                 let result: string;
+                 try {
+                   result = await runtime.tmux(args);
+                 } catch (error) {
+                   if (args[0] === 'has-session') {
+                     const pane = await runtime.tmux([
+                       'capture-pane',
+                       '-p',
+                       '-J',
+                       '-t',
+                       runtime.session,
+                     ]).catch(() => '');
+                     console.log(JSON.stringify({
+                       stage: 'private_runtime_exit',
+                       paneCharacters: pane.length,
+                       freebucksVisible: /Freebucks/i.test(pane),
+                       insufficientFreebucks: /not enough freebucks/i.test(pane),
+                       errorVisible: /error|failed|unavailable/i.test(pane),
+                       loginVisible: /sign in|log in/i.test(pane),
+                       errorCode: (error as { code?: string | number }).code,
+                     }));
+                   }
+                   throw error;
+                 }
+                if (args[0] === 'paste-buffer') pasted = true;
+                if (pasted && args[0] === 'capture-pane' && ++capturePolls % 5 === 1) {
+                  const prompt = readFileSync(join(options.runRoot, 'prompt.txt'), 'utf8');
+                  console.log(
+                    JSON.stringify({
+                      stage: 'paste_receipt',
+                      expectedCharacters: prompt.length,
+                      nativeTextCard: /\d[\d,]* chars/.test(result),
+                      pasteToast: /Pasted text/.test(result),
+                      promptSuffixVisible: result
+                        .replace(/\s+/g, ' ')
+                        .includes(prompt.trim().slice(-64).replace(/\s+/g, ' ')),
+                      compactSuffixVisible: result
+                        .replace(/\s+/g, '')
+                        .includes(prompt.trim().slice(-64).replace(/\s+/g, '')),
+                      shortSuffixVisible: result.includes(prompt.trim().slice(-12)),
+                      promptWordsVisible: prompt
+                        .split(/\s+/)
+                        .filter((word) => word.length > 4 && result.includes(word)).length,
+                      paneCharacters: result.length,
+                      startupState: freebuffStartupState(result),
+                    }),
+                  );
+                }
+                if (args[0] === 'has-session' && ++polls % 5 === 1) {
+                  const pane = await runtime.tmux([
+                    'capture-pane',
+                    '-p',
+                    '-J',
+                    '-t',
+                    runtime.session,
+                  ]);
+                  const rows = await readFreebuffLogRows(
+                    runtime,
+                    join(options.runHome, '.config/manicode/projects'),
+                    new Map(),
+                  );
+                  // Only fixed classifications/counters: never panes, row data, model handles or prompts.
+                  console.log(
+                    JSON.stringify({
+                      stage: 'private_runtime_evidence',
+                      startupState: freebuffStartupState(pane),
+                      freebucksVisible: /Freebucks/i.test(pane),
+                      confirmationVisible: /confirm|start session|purchase|take over/i.test(pane),
+                      sessionStarting: /starting your model session|your message is saved/i.test(pane),
+                      sessionConfirm: /enter: confirm and send/i.test(pane),
+                      sessionRetry: /enter: retry/i.test(pane),
+                      takeoverVisible: /take over/i.test(pane),
+                      balanceUnavailable: /balance unavailable/i.test(pane),
+                      insufficientFreebucks: /not enough freebucks/i.test(pane),
+                      errorVisible: /error|failed|unavailable/i.test(pane),
+                      submitted: rows.some(
+                        (row) => row.msg === '[send-message] Sending message with sdk run config',
+                      ),
+                      agentStarted: rows.some(
+                        (row) => typeof row.msg === 'string' && row.msg.startsWith('Start agent '),
+                      ),
+                       mainFinished: rows.some((row) => row.msg === 'Main prompt finished'),
+                       mainOutputTypes: rows
+                         .filter((row) => row.msg === 'Main prompt finished')
+                         .map((row) => {
+                           const data = row.data && typeof row.data === 'object'
+                             ? row.data as Record<string, unknown>
+                             : {};
+                           const values = Object.values(data).filter((value): value is string => typeof value === 'string');
+                           return {
+                             outputType: typeof data.outputType === 'string' ? data.outputType : 'missing',
+                             quotaMentioned: values.some((value) => /freebucks?|quota|balance|limit/i.test(value)),
+                             modelMentioned: values.some((value) => /model|catalog|entitlement/i.test(value)),
+                             errorMentioned: values.some((value) => /error|failed|unavailable/i.test(value)),
+                           };
+                         }),
+                       rootEndCount: rows.filter((row) => {
+                         if (typeof row.msg !== 'string' || !row.msg.startsWith('End agent ')) return false;
+                         const data = row.data && typeof row.data === 'object'
+                           ? row.data as Record<string, unknown>
+                           : {};
+                         return data.agentId === 'main-agent';
+                       }).length,
+                       logRows: rows.length,
+                    }),
+                  );
+                }
+                return result;
+              },
+            };
+          },
+        }
+      : {},
+  );
   const models = await provider.refreshModels();
   if (!models.length)
     throw new Error(provider.getModelDiscoveryError() ?? 'CLI model discovery failed');
+  const requestedModel = process.env.KORY_FREEBUFF_PROBE_MODEL;
+  const selectedModel = requestedModel
+    ? models.find((model) => model.id === requestedModel || model.apiModelId === requestedModel)
+    : models[0];
+  if (!selectedModel) throw new Error('The requested live probe model is not available in the account catalog.');
   console.log(
     JSON.stringify({
       stage: 'live_turn',
       runtime: runtime.kind,
       cliVersion: runtime.version,
       syntheticOnly: true,
+      explicitAccountModel: selectedModel.apiModelId?.startsWith('freebuff/catalog-') === true,
     }),
   );
   let complete = false;
   let matched = false;
   let error: string | undefined;
+  let inputContextTokens = 0;
+  let processedInputTokens = 0;
+  let billingSamples = 0;
+  let accountAttributed = false;
   for await (const event of provider.streamResponse({
     sessionId,
-    model: models[0]!.id,
+    model: selectedModel.id,
+    reasoningLevel: process.env.KORY_FREEBUFF_PROBE_REASONING,
     workingDirectory: root,
     harnessRole: 'critic',
     signal: abort.signal,
-    systemPrompt:
+    systemPrompt: [
       'This is a synthetic integration check. Use the configured Kory MCP read_note tool only. Do not inspect local files or run commands. Read the requested note and reply with its exact verification code, and nothing else. No notes or files may be written.',
+      process.env.KORY_FREEBUFF_PROBE_LONG_PROMPT === '1'
+        ? 'Additional synthetic transport context: the verification code must be obtained only from the configured Kory read_note tool.\n'.repeat(
+            40,
+          )
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n'),
     messages: [
       {
         role: 'user',
@@ -158,14 +304,30 @@ try {
     if (event.type === 'content_delta' && event.content?.includes(expected)) matched = true;
     if (event.type === 'complete') complete = true;
     if (event.type === 'error') error = event.error;
+    if (event.type === 'usage_update' && event.usagePrecision === 'input-context-only') {
+      inputContextTokens = event.tokensIn ?? 0;
+      processedInputTokens = event.billingTokensIn ?? 0;
+      billingSamples = event.billingUsageSamples?.length ?? 0;
+      accountAttributed = event.accountId === accounts[0]!.id;
+    }
   }
-  const verified = complete && matched && bridgeReads > 0 && !error;
+  const billingUsageVerified =
+    inputContextTokens > 0 &&
+    processedInputTokens >= inputContextTokens &&
+    billingSamples > 0 &&
+    accountAttributed;
+  const verified = complete && matched && bridgeReads > 0 && billingUsageVerified && !error;
   console.log(
     JSON.stringify({
       verified,
       completed: complete,
       matchedSyntheticNote: matched,
       signedBridgeReads: bridgeReads,
+      billingUsageVerified,
+      inputContextTokens,
+      processedInputTokens,
+      billingSamples,
+      accountAttributed,
       ...(error ? { error } : {}),
     }),
   );

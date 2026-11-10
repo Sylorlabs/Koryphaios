@@ -1,0 +1,2 @@
+#!/usr/bin/env bun
+import "./kory-logfare-stateless-reviewer.ts";

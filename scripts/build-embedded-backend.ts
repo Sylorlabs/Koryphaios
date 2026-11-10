@@ -2,140 +2,174 @@
 /**
  * Build the embedded backend payload for the HOST platform's Tauri target.
  *
- * `desktop/src-tauri/build.rs` panics in release builds if the payload for the
- * current compile target is missing. CI builds the payload per-target before
- * `tauri build`, but local `bun run build:desktop` on macOS or Windows had no
- * equivalent step — this script fills that gap so `tauri build` works locally
- * on any platform.
+ * The payload ships as a Tauri resource, separately from the Rust shell.
+ * Local `bun run build:desktop` calls this before `tauri build`; CI currently
+ * has its own per-target compile route.
  *
- * Maps the host OS/arch to the Bun compile target and the Rust target triple,
- * then runs `bun build --compile --target=<bun-target> backend/src/server.ts
- * --outfile=<embedded-backend>/koryphaios-backend-<rust-target>[.exe]`.
- *
- * If RELAY_URL is set in the environment, it's baked into the payload via
- * `--define process.env.RELAY_URL=...` (matches the CI workflow).
+ * Use the backend's fresh-source V5 contract plugin in the actual standalone
+ * compile, not a generated manifest or a prebuilt backend/build artifact.
+ * RELAY_URL is baked into the payload as before (an endpoint, not a secret).
  */
 
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join, dirname } from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { gzipSync } from 'node:zlib';
+import type { BuildConfig } from 'bun';
+import { hostOS } from '../backend/src/runtime/platform';
+import { currentV5SkillEvaluationContractsPlugin } from '../backend/scripts/build-current-v5-contracts';
 
 const PROJECT_ROOT = join(import.meta.dir, '..');
 const BACKEND_ENTRY = join(PROJECT_ROOT, 'backend', 'src', 'server.ts');
 const PAYLOAD_DIR = join(PROJECT_ROOT, 'desktop', 'src-tauri', 'embedded-backend');
 
-const SPAWN_SHELL = process.platform === 'win32';
-
-interface HostTarget {
+export interface HostTarget {
   rustTarget: string;
-  bunTarget: string;
-  suffix: string; // ".exe" on Windows, "" elsewhere
+  bunTarget: Bun.Build.CompileTarget;
+  suffix: string;
+  compressResource: boolean;
 }
 
-function detectHostTarget(): HostTarget {
-  const platform = process.platform;
-  const arch = process.arch;
+const HOST_TARGETS: Record<string, Record<string, HostTarget>> = {
+  win32: {
+    x64: {
+      rustTarget: 'x86_64-pc-windows-msvc',
+      bunTarget: 'bun-windows-x64',
+      suffix: '.exe',
+      compressResource: false,
+    },
+    arm64: {
+      rustTarget: 'aarch64-pc-windows-msvc',
+      bunTarget: 'bun-windows-arm64',
+      suffix: '.exe',
+      compressResource: false,
+    },
+  },
+  darwin: {
+    x64: {
+      rustTarget: 'x86_64-apple-darwin',
+      bunTarget: 'bun-darwin-x64',
+      suffix: '',
+      compressResource: false,
+    },
+    arm64: {
+      rustTarget: 'aarch64-apple-darwin',
+      bunTarget: 'bun-darwin-arm64',
+      suffix: '',
+      compressResource: false,
+    },
+  },
+  linux: {
+    x64: {
+      rustTarget: 'x86_64-unknown-linux-gnu',
+      bunTarget: 'bun-linux-x64',
+      suffix: '',
+      compressResource: true,
+    },
+    arm64: {
+      rustTarget: 'aarch64-unknown-linux-gnu',
+      bunTarget: 'bun-linux-arm64',
+      suffix: '',
+      compressResource: true,
+    },
+  },
+};
 
-  if (platform === 'win32') {
-    if (arch === 'x64') {
-      return { rustTarget: 'x86_64-pc-windows-msvc', bunTarget: 'bun-windows-x64', suffix: '.exe' };
-    }
-    if (arch === 'arm64') {
-      return {
-        rustTarget: 'aarch64-pc-windows-msvc',
-        bunTarget: 'bun-windows-arm64',
-        suffix: '.exe',
-      };
-    }
-    throw new Error(`Unsupported Windows arch: ${arch}`);
-  }
-
-  if (platform === 'darwin') {
-    if (arch === 'x64') {
-      return { rustTarget: 'x86_64-apple-darwin', bunTarget: 'bun-darwin-x64', suffix: '' };
-    }
-    if (arch === 'arm64') {
-      return { rustTarget: 'aarch64-apple-darwin', bunTarget: 'bun-darwin-arm64', suffix: '' };
-    }
-    throw new Error(`Unsupported macOS arch: ${arch}`);
-  }
-
-  if (platform === 'linux') {
-    if (arch === 'x64') {
-      return { rustTarget: 'x86_64-unknown-linux-gnu', bunTarget: 'bun-linux-x64', suffix: '' };
-    }
-    if (arch === 'arm64') {
-      return { rustTarget: 'aarch64-unknown-linux-gnu', bunTarget: 'bun-linux-arm64', suffix: '' };
-    }
-    throw new Error(`Unsupported Linux arch: ${arch}`);
-  }
-
-  throw new Error(`Unsupported platform: ${platform}`);
+export function detectHostTarget(
+  platform: string = hostOS(),
+  arch: string = process.arch,
+): HostTarget {
+  const targets = HOST_TARGETS[platform];
+  if (!targets) throw new Error(`Unsupported platform: ${platform}`);
+  const target = targets[arch];
+  if (!target) throw new Error(`Unsupported ${platform} arch: ${arch}`);
+  return target;
 }
 
-function main() {
-  const target = detectHostTarget();
-  const outfile = join(PAYLOAD_DIR, `koryphaios-backend-${target.rustTarget}${target.suffix}`);
-  // linuxdeploy rewrites every ELF resource it discovers. Bun's compiled
-  // executable is valid as shipped, but the host linuxdeploy/patchelf pass can
-  // make its loader segfault when it injects a RUNPATH. Keep the Linux payload
-  // opaque to that pass and restore executable permissions only in the private
-  // runtime cache (desktop/src-tauri/src/lib.rs).
-  const compressResource = process.platform === 'linux';
-  const compressedOutfile = `${outfile}.gz`;
-  const compileOutfile = compressResource ? `${outfile}.raw-${process.pid}` : outfile;
+export interface EmbeddedBackendCompileOptions {
+  entrypoint: string;
+  outfile: string;
+  bunTarget: Bun.Build.CompileTarget;
+  relayUrl?: string;
+}
 
-  mkdirSync(dirname(outfile), { recursive: true });
+/** Shared by the real desktop route and a credential-free native compile smoke. */
+export function embeddedBackendBuildConfig(options: EmbeddedBackendCompileOptions): BuildConfig {
+  return {
+    entrypoints: [options.entrypoint],
+    root: PROJECT_ROOT,
+    target: 'bun',
+    compile: { target: options.bunTarget, outfile: options.outfile },
+    define: options.relayUrl
+      ? { 'process.env.RELAY_URL': JSON.stringify(options.relayUrl) }
+      : undefined,
+    // Each invocation collects actual current source packages/registered IDs.
+    plugins: [currentV5SkillEvaluationContractsPlugin()],
+  };
+}
 
-  // Do not let a previous host build leave two backend resources in the
-  // directory. Tauri copies the whole directory into every bundle.
-  if (compressResource && existsSync(outfile)) unlinkSync(outfile);
-  if (!compressResource && existsSync(compressedOutfile)) unlinkSync(compressedOutfile);
-  if (existsSync(compileOutfile)) unlinkSync(compileOutfile);
-
-  const args: string[] = ['build', '--compile', `--target=${target.bunTarget}`];
-
-  // Bake the collaboration relay endpoint so shipped builds can host/join
-  // out of the box (it's an endpoint, not a secret). Matches the CI workflow.
-  const relayUrl = process.env.RELAY_URL;
-  if (relayUrl) {
-    args.push('--define', `process.env.RELAY_URL="${relayUrl}"`);
-  }
-
-  args.push(BACKEND_ENTRY, '--outfile', compileOutfile);
-
-  console.log(`[build-embedded-backend] target=${target.rustTarget} bun=${target.bunTarget}`);
-  console.log(`[build-embedded-backend] outfile=${compressResource ? compressedOutfile : outfile}`);
-
-  const result = spawnSync('bun', args, {
-    cwd: PROJECT_ROOT,
-    stdio: 'inherit',
-    shell: SPAWN_SHELL,
-  });
-
-  if (result.status !== 0) {
-    throw new Error(
-      `Failed to build embedded backend payload (exit ${result.status}). ` +
-        `Ensure 'bun build --compile --target=${target.bunTarget}' is supported by your Bun version.`,
+export async function compileEmbeddedBackend(
+  options: EmbeddedBackendCompileOptions,
+): Promise<void> {
+  const result = await Bun.build(embeddedBackendBuildConfig(options));
+  if (!result.success) {
+    throw new AggregateError(
+      result.logs,
+      `Failed to build embedded backend payload for ${options.bunTarget}`,
     );
   }
-
-  if (!existsSync(compileOutfile)) {
-    throw new Error(`Embedded backend payload was not written to ${compileOutfile}`);
+  if (!existsSync(options.outfile)) {
+    throw new Error(`Embedded backend payload was not written to ${options.outfile}`);
   }
-
-  if (compressResource) {
-    const compressed = gzipSync(readFileSync(compileOutfile), { level: 9 });
-    writeFileSync(compressedOutfile, compressed, { mode: 0o644 });
-    unlinkSync(compileOutfile);
-  } else if (compileOutfile !== outfile) {
-    // Kept for clarity if another platform ever uses a staging output.
-    writeFileSync(outfile, readFileSync(compileOutfile), { mode: 0o755 });
-    unlinkSync(compileOutfile);
-  }
-
-  console.log(`[build-embedded-backend] done`);
 }
 
-main();
+export async function buildEmbeddedBackend(payloadDir: string = PAYLOAD_DIR): Promise<void> {
+  const target = detectHostTarget();
+  const outfile = join(payloadDir, `koryphaios-backend-${target.rustTarget}${target.suffix}`);
+  // linuxdeploy rewrites every ELF resource it discovers. Keep Linux's payload
+  // opaque to that pass; lib.rs restores executable permissions in its cache.
+  const compressedOutfile = `${outfile}.gz`;
+  // Keep Windows's executable suffix at the end of the staging name too.
+  const compileOutfile = join(
+    payloadDir,
+    `koryphaios-backend-${target.rustTarget}.raw-${process.pid}${target.suffix}`,
+  );
+
+  mkdirSync(dirname(outfile), { recursive: true });
+  console.log(`[build-embedded-backend] target=${target.rustTarget} bun=${target.bunTarget}`);
+  console.log(
+    `[build-embedded-backend] outfile=${target.compressResource ? compressedOutfile : outfile}`,
+  );
+
+  try {
+    await compileEmbeddedBackend({
+      entrypoint: BACKEND_ENTRY,
+      outfile: compileOutfile,
+      bunTarget: target.bunTarget,
+      relayUrl: process.env.RELAY_URL,
+    });
+
+    if (target.compressResource) {
+      const compressed = gzipSync(readFileSync(compileOutfile), { level: 9 });
+      writeFileSync(compressedOutfile, compressed, { mode: 0o644 });
+      if (existsSync(outfile)) unlinkSync(outfile);
+    } else {
+      renameSync(compileOutfile, outfile);
+      if (existsSync(compressedOutfile)) unlinkSync(compressedOutfile);
+    }
+    // Remove the obsolete format only after success: Tauri copies the directory
+    // as a whole, but a failed compile must not erase a previous usable payload.
+  } finally {
+    if (existsSync(compileOutfile)) unlinkSync(compileOutfile);
+  }
+
+  console.log('[build-embedded-backend] done');
+}
+
+if (import.meta.main) await buildEmbeddedBackend();
