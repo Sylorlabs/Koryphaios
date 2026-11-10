@@ -110,22 +110,22 @@
     '.cm-scroller': {
       overflow: 'auto',
       fontFamily: 'var(--font-mono)',
-      lineHeight: '1.6',
+      lineHeight: '1.8',
     },
     '.cm-content': {
       minHeight: '100%',
-      padding: '12px 0',
+      padding: '22px 0',
       caretColor: 'var(--color-accent)',
     },
     '.cm-line': {
-      padding: '0 14px',
+      padding: '0 22px',
     },
     '.cm-cursor, .cm-dropCursor': {
       borderLeftColor: 'var(--color-accent)',
     },
     '.cm-gutters': {
       color: 'var(--color-text-muted)',
-      backgroundColor: 'var(--color-surface-2)',
+      backgroundColor: 'var(--color-surface-1)',
       borderRight: '1px solid var(--color-border)',
     },
     '.cm-gutterElement': {

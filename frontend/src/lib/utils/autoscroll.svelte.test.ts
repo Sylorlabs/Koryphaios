@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAutoScroll } from './autoscroll.svelte';
+import { READER_RESIZE_EVENT } from './expand-anchor';
 
 // happy-dom performs no layout, and the controller only needs a scroll
 // container's geometry + event surface. A duck-typed fake keeps this test
@@ -140,6 +141,30 @@ describe('createAutoScroll — sticky bottom', () => {
     expect(ctl.follow).toBe(false);
   });
 
+  it('pauses bottom-follow through tool expansion and collapse until a real scroll gesture', () => {
+    const ctl = attach();
+    ctl.jumpToBottom('instant');
+    ctl.requestPin();
+    scroller.dispatchEvent(new Event(READER_RESIZE_EVENT));
+    expect(ctl.follow).toBe(false);
+    expect(raf.pending).toBe(0);
+    const original = scroller.scrollTop;
+    scroller.scrollHeight += 300;
+    ctl.requestPin();
+    raf.flush(4);
+    expect(scroller.scrollTop).toBe(original);
+    scroller.scrollHeight -= 300;
+    scroller.fireScroll();
+    expect(ctl.follow).toBe(false);
+    scroller.wheelBy(100);
+    scroller.scrollTop -= 20;
+    scroller.fireScroll();
+    scroller.wheelBy(100);
+    scroller.scrollTop = scroller.scrollHeight;
+    scroller.fireScroll();
+    expect(ctl.follow).toBe(true);
+  });
+
   it('re-engages when the reader returns to the bottom', () => {
     const ctl = attach();
 
@@ -197,6 +222,15 @@ describe('createAutoScroll — sticky bottom', () => {
     const ctl = attach();
     expect(ctl.follow).toBe(true);
     expect(ctl.unseenCount).toBe(0);
+  });
+
+  it('does not report content below when the transcript fits the viewport', () => {
+    scroller = new FakeScroller(500, 500);
+    const ctl = attach();
+
+    expect(ctl.hasContentBelow).toBe(false);
+    ctl.jumpToBottom('instant');
+    expect(ctl.hasContentBelow).toBe(false);
   });
 });
 

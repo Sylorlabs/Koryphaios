@@ -32,6 +32,19 @@ if (typeof Element !== 'undefined' && typeof Element.prototype.animate !== 'func
 }
 
 describe('ThinkingBlock expansion anchoring', () => {
+  it('removes unused boundary lines while preserving paragraphs during streaming', async () => {
+    const { container, rerender } = render(ThinkingBlock, {
+      props: {
+        text: '\n\nFirst paragraph.\n\nSecond paragraph.\n\n\n',
+        agentName: 'Kory',
+        defaultExpanded: true,
+      },
+    });
+    expect(container.querySelector('.thinking-full-text')?.textContent).toBe('First paragraph.\n\nSecond paragraph.');
+    await rerender({ text: '\n\nFirst paragraph.\n\nSecond paragraph. More detail.\n\n' });
+    expect(container.querySelector('.thinking-full-text')?.textContent).toBe('First paragraph.\n\nSecond paragraph. More detail.');
+  });
+
   it('asks the transcript to keep the messages below it in place', async () => {
     const onAnchor = vi.fn();
     const { container } = render(ThinkingBlock, {

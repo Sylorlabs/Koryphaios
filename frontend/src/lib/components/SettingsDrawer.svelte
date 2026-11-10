@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from 'svelte';
+  import { fade, fly } from 'svelte/transition';
   import { providerCapabilityKinds, type ProviderCapabilityKind } from '@koryphaios/shared';
   import { providersStore } from '$lib/stores/providers.svelte';
   import { theme } from '$lib/stores/theme.svelte';
@@ -33,6 +34,7 @@
   import GripVertical from 'lucide-svelte/icons/grip-vertical';
   import Plus from 'lucide-svelte/icons/plus';
   import ChevronDown from 'lucide-svelte/icons/chevron-down';
+  import ArrowUpRight from 'lucide-svelte/icons/arrow-up-right';
   import Trash2 from 'lucide-svelte/icons/trash-2';
   import StickyNote from 'lucide-svelte/icons/sticky-note';
   import FolderOpen from 'lucide-svelte/icons/folder-open';
@@ -43,6 +45,7 @@
   import AudioLines from 'lucide-svelte/icons/audio-lines';
   import Film from 'lucide-svelte/icons/film';
   import ImageIcon from 'lucide-svelte/icons/image';
+  import ImagePlus from 'lucide-svelte/icons/image-plus';
   import Plug from 'lucide-svelte/icons/plug';
   import Clock3 from 'lucide-svelte/icons/clock-3';
   import House from 'lucide-svelte/icons/house';
@@ -52,18 +55,14 @@
   import AgentSettings from './AgentSettings.svelte';
   import ExperimentalSettings from './ExperimentalSettings.svelte';
   import ProviderIcon from './icons/ProviderIcon.svelte';
+  import FreebuffBalance from './FreebuffBalance.svelte';
   import { memoryStore } from '$lib/stores/memory.svelte';
   import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
   import { experimentalStore } from '$lib/stores/experimental.svelte';
   import { collaborationStore } from '$lib/stores/collaboration.svelte';
   import { notesStore } from '$lib/stores/notes.svelte';
-  import { projectStore } from '$lib/stores/project.svelte';
+  import { projectDisplayName, projectStore } from '$lib/stores/project.svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
-  import {
-    NOTE_TOOL_DEFINITIONS,
-    type NotePermissionLevel,
-    type NotesPermissionPreset,
-  } from '@koryphaios/shared';
   import ModelSelectionDialog from './ModelSelectionDialog.svelte';
   import TeamAccessProfiles from './TeamAccessProfiles.svelte';
   import ColorPickerModal from './ColorPickerModal.svelte';
@@ -95,8 +94,18 @@
     type SettingsTab,
   } from '$lib/utils/settings-catalog';
   import { shouldRemaskSecrets } from '$lib/utils/secret-visibility';
+  import { formatContextWindowOption } from '$lib/utils/context-window';
   import { dndzone } from 'svelte-dnd-action';
   import { invoke } from '@tauri-apps/api/core';
+  import LinkDevicePanel from './LinkDevicePanel.svelte';
+  import MonitorSmartphone from 'lucide-svelte/icons/monitor-smartphone';
+  import Layers from 'lucide-svelte/icons/layers';
+  import SkillsWorkspace from './SkillsWorkspace.svelte';
+  import KnowledgeScope from './KnowledgeScope.svelte';
+  import ProjectIdentitySettings from './settings/ProjectIdentitySettings.svelte';
+  import ProviderIconContextMenu from './ProviderIconContextMenu.svelte';
+  import UsageAnalyticsDashboard from './settings/UsageAnalyticsDashboard.svelte';
+  import type { UsageViewMode } from '$lib/utils/usage-analytics';
 
   interface Props {
     open?: boolean;
@@ -121,10 +130,13 @@
   let previouslyFocused = $state<HTMLElement | null>(null);
   const SETTINGS_PANE_STORAGE_KEY = 'koryphaios-settings-last-pane';
   const settingsIcons: Record<SettingsTab, typeof Key> = {
+    project: FolderOpen,
+    devices: MonitorSmartphone,
     providers: Key,
     agent: Bot,
     memory: Brain,
     notes: StickyNote,
+    skills: Layers,
     archived: Archive,
     appearance: Palette,
     welcome: House,
@@ -157,9 +169,6 @@
   }
 
   const filteredSettingsCatalog = $derived(filterSettingsCatalog(SETTINGS_CATALOG, settingsSearch));
-  const selectedSettingsEntry = $derived(
-    SETTINGS_CATALOG.find((entry) => entry.id === activeTab) ?? SETTINGS_CATALOG[0],
-  );
 
   function readSavedSettingsTab(): string | null {
     if (typeof localStorage === 'undefined') return null;
@@ -237,9 +246,6 @@
         document.activeElement instanceof HTMLElement ? document.activeElement : null;
       selectSettingsTab(resolveSettingsTab(initialTab, readSavedSettingsTab()));
       settingsSearch = '';
-      // Memory and Agent are single-page consoles. Their specialised editors
-      // remain available from within the page, rather than becoming a second
-      // row of navigation under Settings.
       memoryStore.setActiveTab('settings');
       agentSettingsStore.setActiveTab('settings');
       void tick().then(() => {
@@ -247,11 +253,20 @@
         else settingsDialog?.focus();
       });
     } else if (!open && wasOpen) {
+      // Reopening rebuilds the panes it needs, so nothing stale survives a
+      // closed drawer. Every pane is still mounted while it is in use.
+      visitedSettingsTabs = new Set();
       const target = previouslyFocused;
       previouslyFocused = null;
       void tick().then(() => target?.focus());
     }
     wasOpen = open;
+  });
+
+  // Mount the pane the user actually opened. Panes that were never opened stay
+  // unmounted, so their work never competes with the one that is on screen.
+  $effect(() => {
+    if (open) markSettingsTabVisited(activeTab);
   });
 
   onMount(() => {
@@ -274,17 +289,34 @@
     window.addEventListener('koryphaios:skills-dirty', trackUnsavedSkills);
     window.addEventListener('koryphaios:agent-settings-dirty', trackUnsavedAgentSettings);
     // Capture before the page-level shortcut handler. Otherwise assigning a
-    // binding such as Ctrl+K can trigger the old global action before this
+    // binding such as the primary-modifier chord can trigger the old global
+    // action before this
     // drawer has a chance to save the newly captured binding.
     const captureShortcutAssignment = (event: KeyboardEvent) => {
       if (editingShortcutId) handleShortcutKeydown(event);
     };
     window.addEventListener('keydown', captureShortcutAssignment, { capture: true });
+    // macOS never delivers fn/Globe to a webview, so the shell relays it and
+    // the editor records it here — otherwise Fn could never be assigned even
+    // though the voice binding can be set to it.
+    const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+    let unlistenNativeFn: (() => void) | null = null;
+    if (inTauri) {
+      void import('@tauri-apps/api/event').then(({ listen }) => {
+        void listen('voice://fn-down', () => {
+          if (!editingShortcutId) return;
+          commitCapturedShortcut(['Fn']);
+        }).then((u) => {
+          unlistenNativeFn = u;
+        });
+      });
+    }
     return () => {
       window.removeEventListener('open-provider-account-settings', openProviderAccounts);
       window.removeEventListener('koryphaios:skills-dirty', trackUnsavedSkills);
       window.removeEventListener('koryphaios:agent-settings-dirty', trackUnsavedAgentSettings);
       window.removeEventListener('keydown', captureShortcutAssignment, { capture: true });
+      unlistenNativeFn?.();
     };
   });
 
@@ -335,26 +367,11 @@
     await collaborationStore.hostSession(paths, teamHostName.trim() || 'Host');
   }
 
-  const NOTE_PERMISSION_PRESETS: Array<{
-    id: Exclude<NotesPermissionPreset, 'custom'>;
-    label: string;
-    description: string;
-  }> = [
-    { id: 'default', label: 'Default', description: 'Reads auto, writes ask' },
-    { id: 'allow_all', label: 'Allow all', description: 'Agents run without prompts' },
-    { id: 'ask_all', label: 'Ask all', description: 'Confirm every action' },
-    { id: 'block_all', label: 'Block all', description: 'Hide all note tools from agents' },
-  ];
-
-  const permissionLevelLabels: Record<NotePermissionLevel, string> = {
-    auto: 'Allow',
-    ask: 'Ask',
-    block: 'Hide',
-  };
   let loadedNotesProject: string | null = null;
   // `null` is a valid "personal skills only" project scope. Keep an explicit
   // uninitialized sentinel so the first Agent open still loads that scope.
   let loadedAgentProject: string | null | undefined = undefined;
+  let loadedAgentSkillsProject: string | null | undefined = undefined;
 
   $effect(() => {
     const projectPath = projectStore.currentPath;
@@ -367,6 +384,10 @@
     }
     if (open && activeTab === 'agent' && loadedAgentProject !== projectPath) {
       loadedAgentProject = projectPath;
+      void agentSettingsStore.loadSettingsAndPreferences();
+    }
+    if (open && activeTab === 'skills' && loadedAgentSkillsProject !== projectPath) {
+      loadedAgentSkillsProject = projectPath;
       void agentSettingsStore.loadAll();
     }
   });
@@ -423,6 +444,7 @@
     loadDetectedClis,
     loadAwsCredentialScan,
     refreshAwsScanAndStatus,
+    refreshProvider,
     loadProviderAccounts,
     connectProvider,
     startBrowserAuthFlow,
@@ -432,6 +454,7 @@
     activateProviderAccount,
     deleteProviderAccount,
     saveSelectedModels: saveProviderModels,
+    saveContextWindow,
     rotateProviderKey,
     addCustomProvider: addCustomProviderToStore,
     deleteCustomProvider: deleteCustomProviderFromStore,
@@ -472,6 +495,24 @@
   let providersLoadAttempted = $state(false);
   let lastInitializedTab = $state<typeof activeTab | null>(null);
   let handledTeamSettingsRequest = 0;
+  // The provider catalog arrives over the network, so an empty pane is a
+  // loading state rather than a result. Rendering placeholders keeps the
+  // drawer from reading as broken for the beat before the data lands.
+  let providersLoading = $state(false);
+  // Roughly the height of a screenful of provider rows, so the placeholder
+  // block occupies about as much space as the catalog that replaces it.
+  const PROVIDER_SKELETON_ROWS = Array.from({ length: 8 }, (_, index) => index);
+  // Panes mount the first time they are opened and stay mounted afterwards.
+  // Mounting every tab at once made opening Settings build all of its markup
+  // and fire the Voice/Images/Video/MCP requests before the user looked at
+  // any of them, which is what made the drawer feel slow to load.
+  let visitedSettingsTabs = $state<Set<SettingsTab>>(new Set());
+  const skillsVisited = $derived(visitedSettingsTabs.has('skills'));
+
+  function markSettingsTabVisited(tab: SettingsTab) {
+    if (visitedSettingsTabs.has(tab)) return;
+    visitedSettingsTabs = new Set(visitedSettingsTabs).add(tab);
+  }
 
   $effect(() => {
     if (collaborationStore.settingsRequest > handledTeamSettingsRequest) {
@@ -488,6 +529,25 @@
   const isBedrock = (name: string): boolean => name === 'bedrock';
   // Notion credentials are Personal Access Tokens (ntn_…), not API keys.
   const isNotion = (name: string): boolean => name === 'notion';
+
+  function providerCredentialPlaceholder(
+    name: string,
+    label: string,
+    kind: 'apiKey' | 'authToken',
+  ): string {
+    if (name === 'bedrock') {
+      return kind === 'apiKey' ? 'e.g. AKIAIOSFODNN7EXAMPLE' : 'e.g. wJalrXUtnFEMI/K7MDENG/…';
+    }
+    if (name === 'notion') return 'e.g. ntn_a1b2c3d4…';
+    if (kind === 'authToken') {
+      return providersStore.tokenPlaceholders[name]
+        ? `e.g. ${providersStore.tokenPlaceholders[name]}`
+        : `e.g. a1b2c3d4e5f6… (${label} token)`;
+    }
+    return providersStore.apiKeyPlaceholders[name]
+      ? `e.g. ${providersStore.apiKeyPlaceholders[name]}`
+      : `e.g. a1b2c3d4e5f6… (${label} API key)`;
+  }
 
   // ─── AWS system-credential banner (Bedrock) ─────────────────────────────
   // The backend scans for credential *sources* on the machine (env vars,
@@ -521,16 +581,26 @@
     }
   });
 
-  function loadProviderSection() {
-    if (providersStore.availableProviderTypes.length === 0) void loadAvailableProviders();
-    void loadProvidersFromApi();
-    void loadDetectedClis();
+  async function loadProviderSection() {
+    providersLoading = true;
+    try {
+      if (providersStore.availableProviderTypes.length === 0) await loadAvailableProviders();
+      await loadProvidersFromApi();
+      await loadDetectedClis();
+    } finally {
+      providersLoading = false;
+    }
   }
 
-  function refreshProviderSection() {
-    if (providersStore.availableProviderTypes.length === 0) void loadAvailableProviders();
-    void loadProvidersFromApi({ forceRefreshModels: true });
-    void loadDetectedClis();
+  async function refreshProviderSection() {
+    providersLoading = true;
+    try {
+      if (providersStore.availableProviderTypes.length === 0) await loadAvailableProviders();
+      await loadProvidersFromApi({ forceRefreshModels: true });
+      await loadDetectedClis();
+    } finally {
+      providersLoading = false;
+    }
   }
 
   $effect(() => {
@@ -543,7 +613,7 @@
     if (activeTab === 'providers') {
       if (!providersLoadAttempted) {
         providersLoadAttempted = true;
-        loadProviderSection();
+        void loadProviderSection();
       }
     } else {
       providersLoadAttempted = false;
@@ -599,9 +669,12 @@
     'codex',
     'grok',
     'antigravity',
+    'kimicode',
     'cursor',
     'devin',
-    'copilot',
+    'freebuff',
+    'omnirush',
+    'opencode',
   ]);
   const LOCAL_ENDPOINT_PROVIDER_KEYS = new Set(['local', 'ollama', 'lmstudio', 'llamacpp']);
   const isCliExecutionProvider = (providerKey: string): boolean =>
@@ -680,9 +753,7 @@
       return 'Cloud sandboxes or a local agent · chosen per thread';
     }
     if (deployment === 'local') {
-      return isCliExecutionProvider(providerKey)
-        ? 'CLI provider. Runs via local CLI'
-        : 'Local endpoint';
+      return isCliExecutionProvider(providerKey) ? null : 'Local endpoint';
     }
     return null;
   }
@@ -727,6 +798,15 @@
   let customIconDialog = $state<HTMLDivElement | null>(null);
   let customIconPreviouslyFocused = $state<HTMLElement | null>(null);
   let customIconEditorError = $state('');
+  let providerIconContextMenu = $state<{
+    id: string;
+    providerKey: string;
+    providerLabel: string;
+    hasCustomIcon: boolean;
+    x: number;
+    y: number;
+    returnFocus: HTMLElement | null;
+  } | null>(null);
   let copiedEndpoint = $state(false);
   let pendingDeleteProvider = $state<{ id: string; label: string } | null>(null);
 
@@ -793,6 +873,67 @@
     customIconDraft = undefined;
     customIconEditorError = '';
     void tick().then(() => customIconDialog?.focus());
+  }
+
+  function providerIconMenuId(providerKey: string): string {
+    return `provider-icon-menu-${providerKey.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+  }
+
+  function openProviderIconContextMenu(
+    event: MouseEvent,
+    providerKey: string,
+    providerLabel: string,
+    returnFocus?: HTMLElement | null,
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    providerIconContextMenu = {
+      id: providerIconMenuId(providerKey),
+      providerKey,
+      providerLabel,
+      hasCustomIcon: Boolean(providersStore.getCustomProviderIcon(providerKey)),
+      x: event.clientX,
+      y: event.clientY,
+      returnFocus: returnFocus ?? (event.currentTarget as HTMLElement | null),
+    };
+  }
+
+  function openProviderIconContextMenuFromKeyboard(
+    event: KeyboardEvent,
+    providerKey: string,
+    providerLabel: string,
+  ) {
+    if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const trigger = event.currentTarget as HTMLElement;
+    const rect = trigger.getBoundingClientRect();
+    providerIconContextMenu = {
+      id: providerIconMenuId(providerKey),
+      providerKey,
+      providerLabel,
+      hasCustomIcon: Boolean(providersStore.getCustomProviderIcon(providerKey)),
+      x: rect.left,
+      y: rect.bottom + 4,
+      returnFocus: trigger,
+    };
+  }
+
+  function closeProviderIconContextMenu() {
+    providerIconContextMenu = null;
+  }
+
+  function editProviderIconFromContextMenu(providerKey: string, providerLabel: string) {
+    openCustomIconEditor(providerKey, providerLabel);
+  }
+
+  async function removeProviderIconFromContextMenu(providerKey: string) {
+    await removeCustomProviderIcon(providerKey);
+  }
+
+  function openProviderSettingsFromContextMenu(providerKey: string) {
+    selectSettingsTab('providers');
+    expandedProvider = providerKey;
   }
 
   function finishCustomIconEditorClose() {
@@ -925,6 +1066,49 @@
     }
   }
 
+  // The CodeBuddy CLI and WorkBuddy Desktop catalogs publish their own
+  // selectable context tiers. The vendor defaults to a smaller tier (e.g.
+  // 300K on a 1M model), so Koryphaios pins the maximum unless the user (or
+  // the backend through the same provider API) chooses another value.
+  function contextWindowOptionsFor(status: any): number[] {
+    const options = status?.contextWindowOptions;
+    return Array.isArray(options)
+      ? options.filter(
+          (n: unknown): n is number =>
+            typeof n === 'number' && Number.isSafeInteger(n) && n > 0,
+        )
+      : [];
+  }
+
+  function contextWindowValueFor(status: any): string {
+    const options = contextWindowOptionsFor(status);
+    if (options.length < 2) return '';
+    const maximum = options[options.length - 1];
+    const configured = status?.contextWindow;
+    return String(
+      typeof configured === 'number' && options.includes(configured) ? configured : maximum,
+    );
+  }
+
+  function contextWindowSelectOptions(status: any) {
+    const options = contextWindowOptionsFor(status);
+    const maximum = options[options.length - 1];
+    return options.map((tokens) => ({
+      value: String(tokens),
+      label: formatContextWindowOption(tokens),
+      description:
+        tokens === maximum
+          ? 'Maximum tier (Koryphaios default)'
+          : `${formatContextWindowOption(tokens)} token session budget`,
+    }));
+  }
+
+  async function handleContextWindowChange(name: string, value: string) {
+    const tokens = Number(value);
+    if (!Number.isSafeInteger(tokens) || tokens <= 0) return;
+    await saveContextWindow(name, tokens);
+  }
+
   function modelSelectorTarget(status: any) {
     const accounts = getProviderAccounts(status.name).filter(
       (account) => account.source === 'cli-autodetect',
@@ -952,6 +1136,13 @@
   function openModelSelector(status: any) {
     selectorTarget = modelSelectorTarget(status);
     showModelSelector = true;
+    if ((selectorTarget.allAvailableModels?.length ?? 0) === 0) {
+      void refreshProvider(status.name, { silent: true }).then((result) => {
+        const latest = result.status;
+        if (!latest || !showModelSelector || selectorTarget?.name !== status.name) return;
+        selectorTarget = modelSelectorTarget(latest);
+      });
+    }
   }
 
   $effect(() => {
@@ -1000,6 +1191,7 @@
       toastStore.error('Provider is not connected');
       return;
     }
+    showAccountManageDialog = false;
     openModelSelector(status);
   }
 
@@ -1021,6 +1213,17 @@
     editingShortcutId = id;
     capturedKeys = [];
   }
+  function commitCapturedShortcut(keys: string[]) {
+    const shortcuts = shortcutStore.list;
+    const idx = shortcuts.findIndex((s) => s.id === editingShortcutId);
+    if (idx >= 0) {
+      shortcuts[idx] = { ...shortcuts[idx], keys };
+      shortcutStore.list = [...shortcuts];
+      shortcutStore.save();
+    }
+    editingShortcutId = null;
+    capturedKeys = [];
+  }
   function handleShortcutKeydown(e: KeyboardEvent) {
     if (!editingShortcutId) return;
     e.preventDefault();
@@ -1037,17 +1240,7 @@
       keys.push(key.length === 1 ? key.toUpperCase() : key);
     if (keys.length === 0) return;
     capturedKeys = keys;
-    if (!['Control', 'Shift', 'Alt', 'Meta'].includes(key)) {
-      const shortcuts = shortcutStore.list;
-      const idx = shortcuts.findIndex((s) => s.id === editingShortcutId);
-      if (idx >= 0) {
-        shortcuts[idx] = { ...shortcuts[idx], keys: capturedKeys };
-        shortcutStore.list = [...shortcuts];
-        shortcutStore.save();
-      }
-      editingShortcutId = null;
-      capturedKeys = [];
-    }
+    if (!['Control', 'Shift', 'Alt', 'Meta'].includes(key)) commitCapturedShortcut(keys);
   }
   function resetShortcuts() {
     shortcutStore.reset();
@@ -1058,6 +1251,10 @@
   // ─── Billing ─────────────────────────────────────────────────────────
   let billingLoading = $state(false);
   let billingCredits = $state<any>(null);
+  // Environment scope belongs to the billing dashboard, where it filters real
+  // usage data. It is intentionally not a global Settings-header control.
+  let settingsEnvironmentScope = $state('all');
+  let billingViewMode = $state<UsageViewMode>('cost');
   let billingError = $state<string | null>(null);
   let billingRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   let expandedSubscriptionTrends = $state<Record<string, boolean>>({});
@@ -1369,19 +1566,21 @@
   <div
     bind:this={settingsDialog}
     tabindex="-1"
-    class="fixed inset-0 z-50 flex min-h-0 flex-col"
+    class="fixed inset-0 z-[var(--z-modal)] flex min-h-0 flex-col"
     style="background: var(--color-surface-1);"
     role="dialog"
     aria-modal="true"
     aria-labelledby="settings-title"
     data-testid="settings-drawer"
+    in:fly={{ y: 14, duration: 200 }}
+    out:fade={{ duration: 140 }}
   >
     <!-- Header -->
     <div
-      class="flex h-14 shrink-0 items-center justify-between border-b px-5"
-      style="border-color: var(--color-border); background: var(--color-surface-0);"
+      class="settings-frame-header flex h-14 shrink-0 items-center justify-between border-b px-5"
+      style="background: var(--color-surface-0);"
     >
-      <div class="flex min-w-0 items-center gap-3">
+      <div class="flex min-w-0 flex-wrap items-center gap-x-3.5 gap-y-1">
         <h2
           id="settings-title"
           class="text-[15px] font-semibold tracking-tight"
@@ -1402,7 +1601,7 @@
 
     <div class="flex min-h-0 flex-1 overflow-hidden">
       <aside
-        class="flex w-16 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface-0)] sm:w-60"
+        class="settings-navigation flex w-16 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface-0)] sm:w-60"
         aria-label="Settings navigation"
       >
         <div class="hidden p-3 pb-1 sm:block">
@@ -1496,27 +1695,7 @@
            shrink, grows past the clipped parent, and its own scrollbar never
            engages (scrolling the page appears to do nothing). `overflow-x-hidden`
            keeps a stray horizontal scrollbar from appearing at all. -->
-      <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {#if activeTab !== 'mcp' && activeTab !== 'archived'}
-          <div
-            class="flex min-h-14 shrink-0 items-center justify-between gap-4 border-b border-[var(--color-border)] bg-[var(--color-surface-1)] px-6 py-3"
-          >
-            <div class="min-w-0">
-              <h3 class="truncate text-sm font-semibold text-[var(--color-text-primary)]">
-                {selectedSettingsEntry.label}
-              </h3>
-              <p class="mt-0.5 truncate text-xs text-[var(--color-text-muted)]">
-                {selectedSettingsEntry.description}
-              </p>
-            </div>
-            <span
-              class="hidden shrink-0 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 py-1 text-[10.5px] font-medium text-[var(--color-text-muted)] sm:inline-flex"
-              title="Where this setting applies"
-            >
-              {selectedSettingsEntry.scope}
-            </span>
-          </div>
-        {/if}
+      <div class="settings-content flex min-w-0 flex-1 flex-col overflow-hidden">
         <!-- Providers Tab -->
         <div
           class={activeTab === 'providers'
@@ -1930,25 +2109,56 @@
           {/if}
 
           {#if filteredProviderList.length === 0}
-            <div
-              class="rounded-xl border border-[var(--color-border)] p-8 text-center bg-[var(--color-surface-1)]"
-            >
-              <Search
-                size={24}
-                class="mx-auto mb-3 opacity-40"
-                style="color: var(--color-text-muted);"
-              />
-              <p class="text-sm text-[var(--color-text-secondary)] mb-1">No providers found</p>
-              <p class="text-xs text-[var(--color-text-muted)]">
-                {#if providerSearchQuery.trim()}
-                  Try a different search term or clear the filter.
-                {:else}
-                  No providers in the "{PROVIDER_CATEGORIES.find((c) => c.id === providerCategory)
-                    ?.label ?? providerCategory}" category. Try switching to "All" or add a custom
-                  provider.
-                {/if}
-              </p>
-            </div>
+            {#if providersLoading}
+              <!-- Placeholders hold the pane's shape while the catalog loads so
+                   the list does not appear as a sudden content jump. -->
+              <div
+                class="divide-y divide-[var(--color-border)] border-y border-[var(--color-border)]"
+                aria-hidden="true"
+              >
+                {#each PROVIDER_SKELETON_ROWS as index (index)}
+                  <div class="flex min-h-12 items-center gap-3 px-2 py-2">
+                    <div
+                      class="h-8 w-8 shrink-0 animate-pulse rounded-lg bg-[var(--color-surface-3)]"
+                    ></div>
+                    <div class="min-w-0 flex-1">
+                      <div
+                        class="h-3 animate-pulse rounded bg-[var(--color-surface-3)]"
+                        style="width: {140 + ((index * 37) % 90)}px;"
+                      ></div>
+                      <div
+                        class="mt-2 h-2 animate-pulse rounded bg-[var(--color-surface-3)] opacity-70"
+                        style="width: {200 + ((index * 53) % 120)}px;"
+                      ></div>
+                    </div>
+                    <div
+                      class="h-6 w-16 shrink-0 animate-pulse rounded-full bg-[var(--color-surface-3)]"
+                    ></div>
+                  </div>
+                {/each}
+              </div>
+              <p class="pt-3 text-xs text-[var(--color-text-muted)]">Loading providers…</p>
+            {:else}
+              <div
+                class="rounded-xl border border-[var(--color-border)] p-8 text-center bg-[var(--color-surface-1)]"
+              >
+                <Search
+                  size={24}
+                  class="mx-auto mb-3 opacity-40"
+                  style="color: var(--color-text-muted);"
+                />
+                <p class="text-sm text-[var(--color-text-secondary)] mb-1">No providers found</p>
+                <p class="text-xs text-[var(--color-text-muted)]">
+                  {#if providerSearchQuery.trim()}
+                    Try a different search term or clear the filter.
+                  {:else}
+                    No providers in the "{PROVIDER_CATEGORIES.find((c) => c.id === providerCategory)
+                      ?.label ?? providerCategory}" category. Try switching to "All" or add a custom
+                    provider.
+                  {/if}
+                </p>
+              </div>
+            {/if}
           {:else}
             <div
               class="divide-y divide-[var(--color-border)] border-y border-[var(--color-border)]"
@@ -1960,196 +2170,288 @@
                 {@const deployment = deploymentDescription(status?.deployment, prov.key)}
                 {@const badge = deploymentLabel(status?.deployment, prov.key)}
                 <div class="flex flex-col">
-                  <button
-                    type="button"
-                    onclick={() =>
-                      (expandedProvider = expandedProvider === prov.key ? null : prov.key)}
-                    class="group flex min-h-12 w-full items-center justify-between gap-3 rounded-md px-2 py-2 text-left transition-colors hover:bg-[var(--color-surface-2)]"
-                    aria-expanded={expandedProvider === prov.key}
-                    aria-controls={`provider-details-${prov.key}`}
-                  >
-                    <div class="flex min-w-0 items-center gap-3">
-                      <div
-                        class="w-8 h-8 rounded-lg bg-[var(--color-surface-3)] flex items-center justify-center p-1.5 shrink-0 overflow-hidden"
-                      >
-                        <ProviderIcon provider={prov.key} size={20} class="w-full h-full" />
-                      </div>
-                      <div class="min-w-0">
-                        <span
-                          class="block truncate text-sm font-semibold text-[var(--color-text-primary)]"
-                          title={status?.label ?? prov.label}>{status?.label ?? prov.label}</span
+                  <div class="provider-row-header">
+                    <button
+                      type="button"
+                      onclick={() =>
+                        (expandedProvider = expandedProvider === prov.key ? null : prov.key)}
+                      oncontextmenu={prov.key.startsWith('custom:')
+                        ? (event) =>
+                            openProviderIconContextMenu(
+                              event,
+                              prov.key,
+                              status?.label ?? prov.label,
+                              event.currentTarget as HTMLElement,
+                            )
+                        : undefined}
+                      onkeydown={prov.key.startsWith('custom:')
+                        ? (event) =>
+                            openProviderIconContextMenuFromKeyboard(
+                              event,
+                              prov.key,
+                              status?.label ?? prov.label,
+                            )
+                        : undefined}
+                      class="provider-row-toggle group flex min-h-12 min-w-0 flex-1 items-center justify-between gap-3 rounded-md px-2 py-2 text-left transition-colors hover:bg-[var(--color-surface-2)]"
+                      aria-expanded={expandedProvider === prov.key}
+                      aria-controls={`provider-details-${prov.key}`}
+                    >
+                      <div class="flex min-w-0 items-center gap-3">
+                        <div
+                          class="w-8 h-8 rounded-lg bg-[var(--color-surface-3)] flex items-center justify-center p-1.5 shrink-0 overflow-hidden"
                         >
-                        <p
-                          class="line-clamp-2 text-xs leading-5 text-[var(--color-text-muted)] group-hover:text-[var(--color-text-secondary)]"
-                        >
-                          {#if status?.configurationBlocked}
-                            Unavailable in this build
-                          {:else if status?.connectionState === 'verified'}
-                            {@const selectedCount = status.models?.length ?? 0}
-                            {@const availableCount = status.allAvailableModels?.length ?? 0}
-                            Connected{availableCount > 0
-                              ? ` · ${selectedCount > 0 ? selectedCount : 'Not available'}/${availableCount} models enabled`
-                              : ''}
-                          {:else if status?.connectionState === 'failed'}
-                            Connection failed
-                          {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog' && prov.key.startsWith('custom:')}
-                            {@const selectedCount = status.models?.length ?? 0}
-                            {@const availableCount = status.allAvailableModels?.length ?? 0}
-                            Connected{availableCount > 0
-                              ? ` · ${selectedCount > 0 ? selectedCount : 'Not available'}/${availableCount} models enabled`
-                              : ''}
-                          {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog'}
-                            Catalog access detected · inference unverified
-                          {:else if installedCli}
-                            Found on system · not connected
-                          {:else if status?.credentialDetected ?? status?.authenticated}
-                            Configuration saved · not connected
-                          {:else if deployment}
-                            {deployment}
-                          {:else}
-                            Not configured
-                          {/if}
-                        </p>
-                        {#if capabilityKinds(prov.key).length > 0}
-                          <div class="mt-1 flex flex-wrap items-center gap-1">
-                            {#each capabilityKinds(prov.key) as kind (kind)}
-                              <span
-                                class="rounded-full bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]"
-                              >
-                                {CAPABILITY_SURFACE_LABELS[kind] ?? kind}
-                              </span>
-                            {/each}
+                          <ProviderIcon
+                            provider={prov.key}
+                            size={20}
+                            class="w-full h-full"
+                            oncontextmenu={prov.key.startsWith('custom:')
+                              ? (event) =>
+                                  openProviderIconContextMenu(
+                                    event,
+                                    prov.key,
+                                    status?.label ?? prov.label,
+                                    event.currentTarget as HTMLElement,
+                                  )
+                              : undefined}
+                          />
+                        </div>
+                        <div class="min-w-0">
+                          <div class="flex min-w-0 items-center gap-2">
                             <span
-                              class="text-[10px] text-[var(--color-text-muted)]"
-                              title="This provider has no chat-completions endpoint. Its key powers the surfaces above, and it is deliberately absent from the chat model list."
+                              class="block truncate text-sm font-semibold text-[var(--color-text-primary)]"
+                              title={status?.label ?? prov.label}
+                              >{status?.label ?? prov.label}</span
                             >
-                              · no chat models
-                            </span>
+                            {#if isCliExecutionProvider(prov.key) && badge}
+                              <span
+                                class="inline-flex shrink-0 items-center gap-1 rounded-full bg-[var(--color-success-bg)] px-1.5 py-px text-[10px] font-medium text-[var(--color-success)]"
+                                >{badge}</span
+                              >
+                            {/if}
                           </div>
-                        {/if}
+                          <p
+                            class="line-clamp-2 text-xs leading-5 text-[var(--color-text-muted)] group-hover:text-[var(--color-text-secondary)]"
+                          >
+                            {#if status?.configurationBlocked}
+                              Unavailable in this build
+                            {:else if status?.connectionState === 'verified'}
+                              {@const selectedCount = status.models?.length ?? 0}
+                              {@const availableCount = status.allAvailableModels?.length ?? 0}
+                              Connected{availableCount > 0 && selectedCount > 0
+                                ? ` · ${selectedCount}/${availableCount} models enabled`
+                                : ''}
+                            {:else if status?.connectionState === 'failed'}
+                              Connection failed
+                            {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog' && prov.key.startsWith('custom:')}
+                              {@const selectedCount = status.models?.length ?? 0}
+                              {@const availableCount = status.allAvailableModels?.length ?? 0}
+                              Connected{availableCount > 0 && selectedCount > 0
+                                ? ` · ${selectedCount}/${availableCount} models enabled`
+                                : ''}
+                            {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog'}
+                              Catalog access detected · inference unverified
+                            {:else if installedCli}
+                              Found on system · not connected
+                            {:else if status?.credentialDetected ?? status?.authenticated}
+                              Configuration saved · not connected
+                            {:else if deployment}
+                              {deployment}
+                            {:else}
+                              Not configured
+                            {/if}
+                          </p>
+                          {#if capabilityKinds(prov.key).length > 0}
+                            <div class="mt-1 flex flex-wrap items-center gap-1">
+                              {#each capabilityKinds(prov.key) as kind (kind)}
+                                <span
+                                  class="rounded-full bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]"
+                                >
+                                  {CAPABILITY_SURFACE_LABELS[kind] ?? kind}
+                                </span>
+                              {/each}
+                              <span
+                                class="text-[10px] text-[var(--color-text-muted)]"
+                                title="This provider has no chat-completions endpoint. Its key powers the surfaces above, and it is deliberately absent from the chat model list."
+                              >
+                                · no chat models
+                              </span>
+                            </div>
+                          {/if}
+                        </div>
                       </div>
-                    </div>
-                    <div class="flex shrink-0 items-center gap-2">
-                      {#if status?.connectionState === 'verified'}
-                        <div
-                          class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-success-bg)] text-[var(--color-success)] text-xs font-medium"
-                          title="Connected to Koryphaios and working"
-                        >
-                          <span class="w-1 h-1 rounded-full bg-[var(--color-success)]"></span>
-                          Connected
-                        </div>
-                      {:else if status?.connectionState === 'failed'}
-                        <div
-                          class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-error-bg)] text-[var(--color-error)] text-xs font-medium"
-                          title={status.verificationError ?? 'The last connection attempt failed'}
-                        >
-                          <span class="w-1 h-1 rounded-full bg-[var(--color-error)]"></span>
-                          Failed
-                        </div>
-                      {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog' && prov.key.startsWith('custom:')}
-                        <div
-                          class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-success-bg)] text-[var(--color-success)] text-xs font-medium"
-                          title="Endpoint added and model catalog confirmed. Inference verifies on first use"
-                        >
-                          <span class="w-1 h-1 rounded-full bg-[var(--color-success)]"></span>
-                          Connected
-                        </div>
-                      {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog'}
-                        <div
-                          class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-info-bg)] text-[var(--color-info)] text-xs font-medium"
-                          title="Model catalog access succeeded. Inference is checked on first use"
-                        >
-                          <span class="w-1 h-1 rounded-full bg-[var(--color-info)]"></span>
-                          Catalog
-                        </div>
-                      {:else if installedCli}
-                        <div
-                          class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-warning-bg)] text-[var(--color-warning)] text-xs font-medium"
-                          title="CLI found on this system but not connected"
-                        >
-                          <span class="w-1 h-1 rounded-full bg-[var(--color-warning)]"></span>
-                          Detected
-                        </div>
-                      {:else if status?.credentialDetected ?? status?.authenticated}
-                        <div
-                          class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-surface-3)] text-[var(--color-text-secondary)] text-xs font-medium"
-                          title="Configuration is saved but has not been verified"
-                        >
-                          <span class="w-1 h-1 rounded-full bg-[var(--color-text-muted)]"></span>
-                          Configured
-                        </div>
-                      {:else}
-                        <div
-                          class="w-2 h-2 rounded-full bg-[var(--color-text-muted)] opacity-50"
-                        ></div>
-                      {/if}
-                      <ChevronDown
-                        size={15}
-                        class="text-[var(--color-text-muted)] transition-transform {expandedProvider ===
-                        prov.key
-                          ? 'rotate-180'
-                          : ''}"
+                      <div class="flex shrink-0 items-center gap-2">
+                        {#if status?.connectionState === 'verified'}
+                          <div
+                            class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-success-bg)] text-[var(--color-success)] text-xs font-medium"
+                            title="Connected"
+                          >
+                            <span class="w-1 h-1 rounded-full bg-[var(--color-success)]"></span>
+                            Connected
+                          </div>
+                        {:else if status?.connectionState === 'failed'}
+                          <div
+                            class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-error-bg)] text-[var(--color-error)] text-xs font-medium"
+                            title={status.verificationError ?? 'The last connection attempt failed'}
+                          >
+                            <span class="w-1 h-1 rounded-full bg-[var(--color-error)]"></span>
+                            Failed
+                          </div>
+                        {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog' && prov.key.startsWith('custom:')}
+                          <div
+                            class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-success-bg)] text-[var(--color-success)] text-xs font-medium"
+                            title="Endpoint added and model catalog confirmed. Inference verifies on first use"
+                          >
+                            <span class="w-1 h-1 rounded-full bg-[var(--color-success)]"></span>
+                            Connected
+                          </div>
+                        {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog'}
+                          <div
+                            class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-info-bg)] text-[var(--color-info)] text-xs font-medium"
+                            title="Model catalog access succeeded. Inference is checked on first use"
+                          >
+                            <span class="w-1 h-1 rounded-full bg-[var(--color-info)]"></span>
+                            Catalog
+                          </div>
+                        {:else if installedCli}
+                          <div
+                            class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-warning-bg)] text-[var(--color-warning)] text-xs font-medium"
+                            title="CLI found on this system but not connected"
+                          >
+                            <span class="w-1 h-1 rounded-full bg-[var(--color-warning)]"></span>
+                            Detected
+                          </div>
+                        {:else if status?.credentialDetected ?? status?.authenticated}
+                          <div
+                            class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-surface-3)] text-[var(--color-text-secondary)] text-xs font-medium"
+                            title="Configuration is saved but has not been verified"
+                          >
+                            <span class="w-1 h-1 rounded-full bg-[var(--color-text-muted)]"></span>
+                            Configured
+                          </div>
+                        {:else}
+                          <div
+                            class="w-2 h-2 rounded-full bg-[var(--color-text-muted)] opacity-50"
+                          ></div>
+                        {/if}
+                        <ChevronDown
+                          size={15}
+                          class="text-[var(--color-text-muted)] transition-transform {expandedProvider ===
+                          prov.key
+                            ? 'rotate-180'
+                            : ''}"
+                        />
+                     </div>
+                    </button>
+                    {#if prov.key.startsWith('custom:')}
+                      <button
+                        type="button"
+                        class="provider-row-refresh inline-flex shrink-0 items-center justify-center rounded-md px-2 py-1.5 text-xs text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/70"
+                        aria-label={`Provider logo actions for ${status?.label ?? prov.label}`}
+                        aria-haspopup="menu"
+                        aria-expanded={providerIconContextMenu?.providerKey === prov.key}
+                        aria-controls={providerIconContextMenu?.providerKey === prov.key
+                          ? providerIconContextMenu.id
+                          : undefined}
+                        title="Provider logo actions"
+                        onclick={(event) => {
+                          event.stopPropagation();
+                          const trigger = event.currentTarget as HTMLElement;
+                          const rect = trigger.getBoundingClientRect();
+                          providerIconContextMenu = {
+                            id: providerIconMenuId(prov.key),
+                            providerKey: prov.key,
+                            providerLabel: status?.label ?? prov.label,
+                            hasCustomIcon: Boolean(providersStore.getCustomProviderIcon(prov.key)),
+                            x: rect.left,
+                            y: rect.bottom + 4,
+                            returnFocus: trigger,
+                          };
+                        }}
+                        oncontextmenu={(event) =>
+                          openProviderIconContextMenu(
+                            event,
+                            prov.key,
+                            status?.label ?? prov.label,
+                            event.currentTarget as HTMLElement,
+                          )}
+                        onkeydown={(event) =>
+                          openProviderIconContextMenuFromKeyboard(
+                            event,
+                            prov.key,
+                            status?.label ?? prov.label,
+                          )}
+                      >
+                        <ImagePlus size={13} />
+                      </button>
+                    {/if}
+                    <!-- Sits outside the row's toggle button: a button nested in a
+                       button is invalid HTML and unreachable by keyboard. -->
+                    <button
+                      type="button"
+                      class="provider-row-refresh inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1.5 text-xs text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)] disabled:opacity-50"
+                      disabled={providersStore.refreshingProviders[prov.key] === true}
+                      aria-busy={providersStore.refreshingProviders[prov.key] === true}
+                      onclick={() => providersStore.refreshProvider(prov.key)}
+                      title="Re-check this provider and reload its model list"
+                      aria-label="Re-check {status?.label ?? prov.label} and reload its model list"
+                    >
+                      <RefreshCw
+                        size={12}
+                        class={providersStore.refreshingProviders[prov.key] === true
+                          ? 'animate-spin'
+                          : ''}
                       />
-                    </div>
-                  </button>
+                      <span
+                        class="provider-action-label"
+                        class:busy={providersStore.refreshingProviders[prov.key] === true}
+                      >
+                        <span class="provider-action-idle">Refresh</span>
+                        <span
+                          class="provider-action-busy"
+                          aria-hidden={providersStore.refreshingProviders[prov.key] !== true}
+                          >Checking…</span
+                        >
+                      </span>
+                    </button>
+                  </div>
                   {#if expandedProvider === prov.key}
                     {@const caps = getProviderCaps(prov.key)}
                     {@const configurationBlocked = status?.configurationBlocked === true}
+                    {@const isCustomProvider = prov.key.startsWith('custom:')}
+                    {@const currentCustomIcon = isCustomProvider
+                      ? providersStore.getCustomProviderIcon(prov.key)
+                      : undefined}
                     <div
                       id={`provider-details-${prov.key}`}
-                      class="space-y-3 px-2 pb-4 pt-2 sm:pl-13"
+                      class="provider-details space-y-2 px-2 pb-4 pt-2 sm:pl-13"
                     >
-                      {#if status?.description}
-                        <p class="text-[10px] text-[var(--color-text-muted)] leading-relaxed">
-                          {status.description}
-                        </p>
-                      {/if}
-                      {#if badge}
-                        <div
-                          class={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
-                            status?.deployment === 'cloud'
-                              ? 'bg-[var(--color-info-bg)] text-[var(--color-info)]'
-                              : status?.deployment === 'hybrid'
-                                ? 'bg-[var(--color-warning-bg)] text-[var(--color-warning)]'
-                                : status?.deployment === 'local'
-                                  ? 'bg-[var(--color-success-bg)] text-[var(--color-success)]'
-                                  : 'bg-[var(--color-surface-3)] text-[var(--color-text-secondary)]'
-                          }`}
-                        >
-                          {badge}
+                      {#if badge && !isCliExecutionProvider(prov.key)}
+                        <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <span
+                            class={`inline-flex items-center gap-1 px-1.5 py-px rounded-full text-[10px] font-medium ${
+                              status?.deployment === 'cloud'
+                                ? 'bg-[var(--color-info-bg)] text-[var(--color-info)]'
+                                : status?.deployment === 'hybrid'
+                                  ? 'bg-[var(--color-warning-bg)] text-[var(--color-warning)]'
+                                  : status?.deployment === 'local'
+                                    ? 'bg-[var(--color-success-bg)] text-[var(--color-success)]'
+                                    : 'bg-[var(--color-surface-3)] text-[var(--color-text-secondary)]'
+                            }`}
+                          >
+                            {badge}
+                          </span>
                         </div>
                       {/if}
                       <ProviderExecutionModes capabilities={status?.execution} />
-                      {#if prov.key.startsWith('custom:')}
-                        {@const currentCustomIcon = providersStore.getCustomProviderIcon(prov.key)}
-                        <div
-                          class="flex items-center justify-between gap-3 border-b border-[var(--color-border)] pb-3"
-                        >
-                          <div class="flex min-w-0 items-center gap-2.5">
-                            <div
-                              class="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[var(--color-surface-3)] p-1.5"
-                            >
-                              <ProviderIcon provider={prov.key} size={24} class="h-full w-full" />
-                            </div>
-                            <div class="min-w-0">
-                              <p class="text-[11px] font-semibold text-[var(--color-text-primary)]">
-                                Custom icon
-                              </p>
-                              <p class="truncate text-[10px] text-[var(--color-text-muted)]">
-                                {currentCustomIcon
-                                  ? 'Private uploaded image'
-                                  : 'Using the default provider mark'}
-                              </p>
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            onclick={() =>
-                              openCustomIconEditor(prov.key, status?.label ?? prov.label)}
-                            class="btn btn-secondary shrink-0 px-3 py-1.5 text-[10px]"
-                          >
-                            {currentCustomIcon ? 'Edit icon' : 'Add icon'}
-                          </button>
+                      {#if contextWindowOptionsFor(status).length >= 2}
+                        <div class="px-1 pt-1">
+                          <KorySelect
+                            value={contextWindowValueFor(status)}
+                            label="Context window"
+                            description="Real context tiers reported by this provider's models. Maximum is the default; a smaller tier reduces the session budget."
+                            options={contextWindowSelectOptions(status)}
+                            onchange={(value) => handleContextWindowChange(prov.key, value)}
+                          />
                         </div>
                       {/if}
                       {#if status?.credentialDetected ?? status?.authenticated}
@@ -2157,34 +2459,66 @@
                              row: "Run safe check" sits beside "Manage Models". The
                              grey text below explains the state they act on, so it
                              must never render above the controls. -->
-                        <div class="flex flex-wrap items-center gap-2">
+                        <div class="provider-actions">
                           {#if usesLocalCliConnection(prov.key)}
                             <button
                               type="button"
                               onclick={() => handleConnectProvider(prov.key)}
                               disabled={providersStore.saving === prov.key}
-                              class="btn btn-secondary text-[10px] py-1 px-3"
-                              >{providersStore.saving === prov.key
-                                ? 'Checking…'
-                                : 'Check login again'}</button
+                              aria-busy={providersStore.saving === prov.key}
+                              class="btn btn-secondary"
+                              ><span
+                                class="provider-action-label"
+                                class:busy={providersStore.saving === prov.key}
+                              >
+                                <span class="provider-action-idle"
+                                  >{getLocalCliConnectLabel(prov.key)}</span
+                                >
+                                <span
+                                  class="provider-action-busy"
+                                  aria-hidden={providersStore.saving !== prov.key}>Checking…</span
+                                >
+                              </span></button
                             >
                           {:else if status.connectionState !== 'verified'}
                             <button
                               type="button"
                               onclick={() => handleConnectProvider(prov.key)}
                               disabled={providersStore.saving === prov.key}
-                              class="btn btn-secondary text-[10px] py-1 px-3"
-                              >{providersStore.saving === prov.key
-                                ? 'Checking…'
-                                : 'Run safe check'}</button
+                              aria-busy={providersStore.saving === prov.key}
+                              class="btn btn-secondary"
+                              ><span
+                                class="provider-action-label"
+                                class:busy={providersStore.saving === prov.key}
+                              >
+                                <span class="provider-action-idle">Run safe check</span>
+                                <span
+                                  class="provider-action-busy"
+                                  aria-hidden={providersStore.saving !== prov.key}>Checking…</span
+                                >
+                              </span></button
                             >
                           {/if}
-                          {#if (status.connectionState === 'verified' || (prov.key.startsWith('custom:') && status.connectionState === 'detected' && status.verificationScope === 'catalog' && (status.allAvailableModels?.length ?? 0) > 0)) && !status.hideModelSelector}
+                          {#if (status.connectionState === 'verified' || (status.connectionState === 'detected' && status.verificationScope === 'catalog' && (status.allAvailableModels?.length ?? 0) > 0)) && !status.hideModelSelector}
                             <button
                               type="button"
                               onclick={() => openModelSelector(status)}
-                              class="btn btn-secondary text-[10px] py-1 px-3">Manage Models</button
+                              class="btn btn-secondary">Manage Models</button
                             >
+                          {/if}
+                          {#if isCustomProvider}
+                            <button
+                              type="button"
+                              onclick={() =>
+                                openCustomIconEditor(prov.key, status?.label ?? prov.label)}
+                              class="btn btn-secondary provider-icon-button"
+                              title={currentCustomIcon ? 'Edit provider icon' : 'Add provider icon'}
+                              aria-label={currentCustomIcon
+                                ? 'Edit provider icon'
+                                : 'Add provider icon'}
+                            >
+                              <ImagePlus size={14} />
+                            </button>
                           {/if}
                           {#if caps.supportsApiKey && !usesBrowserAuth(prov.key)}
                             <button
@@ -2193,7 +2527,7 @@
                                 rotateProvider = { name: prov.key, keyType: 'apiKey' };
                                 showRotateDialog = true;
                               }}
-                              class="inline-flex items-center gap-1 text-[10px] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] font-medium transition-colors"
+                              class="inline-flex items-center gap-1 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] font-medium transition-colors"
                               title="Replace the stored API key without disconnecting"
                             >
                               <RotateCcw size={10} /> Rotate key
@@ -2202,37 +2536,39 @@
                           <button
                             type="button"
                             onclick={() => disconnectProvider(prov.key)}
-                            class="text-[10px] text-[var(--color-error)] hover:opacity-80 font-medium transition-opacity"
+                            class="text-[var(--color-error)] hover:opacity-80 font-medium transition-opacity"
                             >Disconnect</button
                           >
                         </div>
-                        <div class="text-xs leading-relaxed text-[var(--color-text-muted)]">
-                          {#if status?.connectionState === 'verified'}
-                            Connected to Koryphaios and working{status.verificationScope
-                              ? ` · ${status.verificationScope} scope`
-                              : ''}.
-                          {:else if status?.connectionState === 'failed'}
+                        {#if status?.connectionState === 'failed'}
+                          <div class="text-xs leading-relaxed text-[var(--color-text-muted)]">
                             Connection failed{status.verificationError
                               ? `: ${status.verificationError}`
                               : '.'}
-                          {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog'}
-                            The provider catalog accepted this process's credentials. Runtime
-                            inference permission, model entitlement, quota, and request success are
-                            still unverified.
-                          {:else}
-                            Found on this system but not yet connected. This does not prove the
-                            credential, account, entitlement, quota, or provider endpoint is usable.
-                          {/if}
-                        </div>
-                        <div class="text-[10px] text-[var(--color-text-muted)]">
-                          {status.connectionState === 'verified' ||
-                          (prov.key.startsWith('custom:') &&
-                            status.connectionState === 'detected' &&
-                            status.verificationScope === 'catalog' &&
-                            (status.allAvailableModels?.length ?? 0) > 0)
-                            ? `${(status.models?.length ?? 0) > 0 ? status.models?.length : 'Not available'} enabled of ${(status.allAvailableModels?.length ?? 0) > 0 ? status.allAvailableModels?.length : 'Not available'} listed`
-                            : 'Model availability unverified'}
-                        </div>
+                          </div>
+                        {:else if status?.error}
+                          <div
+                            class="mt-2 flex items-start gap-2 rounded-lg border border-[var(--color-error)] bg-[var(--color-error-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--color-error)]"
+                          >
+                            <AlertTriangle size={14} class="mt-0.5 shrink-0" />
+                            <span>
+                              {status.error}
+                              {#if status.modelCatalogUrl}
+                                <span class="mt-1 block text-[10px] opacity-80"
+                                  >Model catalog: {status.modelCatalogUrl}</span
+                                >
+                              {/if}
+                            </span>
+                          </div>
+                        {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog'}
+                          <div class="text-xs leading-relaxed text-[var(--color-text-muted)]">
+                            Catalog verified · inference checks on first use.
+                          </div>
+                        {:else if status?.connectionState !== 'verified'}
+                          <div class="text-xs leading-relaxed text-[var(--color-text-muted)]">
+                            Not connected.
+                          </div>
+                        {/if}
                       {:else if configurationBlocked}
                         <div
                           class="flex items-start gap-2 rounded-lg border border-[var(--color-warning)] bg-[var(--color-warning-bg)] px-3 py-2 text-xs text-[var(--color-warning)]"
@@ -2303,33 +2639,22 @@
                             {/if}
                           {/if}
                           {#if caps.supportsApiKey}
-                            <div class="flex items-center justify-between gap-3">
-                              <label class="settings-field-label" for={`provider-key-${prov.key}`}
+                            <div class="relative">
+                              <label class="sr-only" for={`provider-key-${prov.key}`}
                                 >{isBedrock(prov.key)
                                   ? 'AWS Access Key ID'
                                   : isNotion(prov.key)
                                     ? 'Personal Access Token'
                                     : 'API Key'}</label
                               >
-                              {#if status?.credentialUrl}
-                                <a
-                                  href={status.credentialUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  class="text-[10px] text-[var(--color-accent)] hover:underline"
-                                  >{isNotion(prov.key) ? 'Get PAT' : 'Get API key'}</a
-                                >
-                              {/if}
-                            </div>
-                            <div class="relative">
                               <input
                                 id={`provider-key-${prov.key}`}
                                 type={secretInputType(`provider-key-${prov.key}`)}
-                                placeholder={isBedrock(prov.key)
-                                  ? 'AKIA… (access key ID)'
-                                  : isNotion(prov.key)
-                                    ? 'ntn_… (personal access token)'
-                                    : prov.placeholder}
+                                placeholder={providerCredentialPlaceholder(
+                                  prov.key,
+                                  prov.label,
+                                  'apiKey',
+                                )}
                                 bind:value={providersStore.keyInputs[prov.key]}
                                 class="input w-full text-xs"
                                 style="padding-right: 2.75rem;"
@@ -2360,18 +2685,31 @@
                                   />{:else}<Eye size={15} />{/if}
                               </button>
                             </div>
+                            {#if status?.credentialUrl}
+                              <div class="text-right">
+                                <a
+                                  href={status.credentialUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  class="text-[10px] text-[var(--color-accent)] hover:underline"
+                                  >{isNotion(prov.key) ? 'Get PAT' : 'Get API key'}</a
+                                >
+                              </div>
+                            {/if}
                           {/if}
                           {#if showTokenInput(prov.key, caps)}
-                            <label class="settings-field-label" for={`provider-token-${prov.key}`}
-                              >{isBedrock(prov.key) ? 'Secret Access Key' : 'Auth Token'}</label
-                            >
                             <div class="relative">
+                              <label class="sr-only" for={`provider-token-${prov.key}`}
+                                >{isBedrock(prov.key) ? 'Secret Access Key' : 'Auth Token'}</label
+                              >
                               <input
                                 id={`provider-token-${prov.key}`}
                                 type={secretInputType(`provider-token-${prov.key}`)}
-                                placeholder={isBedrock(prov.key)
-                                  ? 'Secret access key'
-                                  : (providersStore.tokenPlaceholders[prov.key] ?? 'Auth token')}
+                                placeholder={providerCredentialPlaceholder(
+                                  prov.key,
+                                  prov.label,
+                                  'authToken',
+                                )}
                                 bind:value={providersStore.tokenInputs[prov.key]}
                                 class="input w-full pr-11 text-xs"
                                 onkeydown={(e) =>
@@ -2539,8 +2877,8 @@
                                 >
                                   {providersStore.browserAuthBusy === prov.key &&
                                   !providersStore.browserAuthPending[prov.key]
-                                    ? 'Opening...'
-                                    : 'Auth'}
+                                    ? 'Opening sign-in…'
+                                    : 'Sign in'}
                                 </button>
                                 {#if providersStore.browserAuthPending[prov.key] && prov.key !== 'copilot' && prov.key !== 'kimicode' && prov.key !== 'codex-auth'}
                                   <button
@@ -2558,20 +2896,17 @@
                               </div>
                             </div>
                           {/if}
-                          {#if usesLocalCliConnection(prov.key)}
-                            <div
-                              class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)]/80 p-3 text-[10px] leading-relaxed text-[var(--color-text-muted)]"
-                            >
-                              Runs through the provider CLI. Koryphaios detects local sign-in
-                              material and checks the CLI without storing a provider token.
-                              Detection alone is not an account or entitlement verdict.
-                            </div>
+                          {#if usesLocalCliConnection(prov.key) && prov.key === 'freebuff'}
+                            <p class="text-[10px] leading-relaxed text-[var(--color-text-muted)]">
+                              First-time Freebuff setup can take a few minutes while its isolated
+                              runtime is prepared.
+                            </p>
                           {/if}
                           {#if usesBrowserAuth(prov.key) && caps.supportsApiKey}
                             <div class="flex items-center gap-3 py-1">
                               <div class="flex-1 border-t border-[var(--color-border)]"></div>
                               <span class="text-xs font-medium text-[var(--color-text-secondary)]"
-                                >or use API key</span
+                                >Alternative sign-in</span
                               >
                               <div class="flex-1 border-t border-[var(--color-border)]"></div>
                             </div>
@@ -2582,7 +2917,7 @@
                               class="btn btn-primary w-full text-xs py-2 shadow-lg shadow-[var(--color-accent)]/10"
                               >{providersStore.saving === prov.key
                                 ? 'Testing...'
-                                : 'Connect with API Key'}</button
+                                : 'Connect'}</button
                             >
                           {:else if !usesBrowserAuth(prov.key)}
                             <button
@@ -2592,13 +2927,13 @@
                               class="btn btn-primary w-full text-xs py-2 shadow-lg shadow-[var(--color-accent)]/10"
                               >{providersStore.saving === prov.key
                                 ? usesLocalCliConnection(prov.key)
-                                  ? 'Checking CLI…'
+                                  ? prov.key === 'freebuff'
+                                    ? 'Preparing Freebuff…'
+                                    : 'Checking CLI…'
                                   : 'Connecting…'
                                 : usesLocalCliConnection(prov.key)
                                   ? getLocalCliConnectLabel(prov.key)
-                                  : caps.supportsApiKey
-                                    ? 'Connect with API Key'
-                                    : 'Connect Provider'}</button
+                                  : 'Connect'}</button
                             >
                           {/if}
                           {#if prov.key.startsWith('custom:')}
@@ -2763,7 +3098,15 @@
                                 <div class="relative">
                                   <input
                                     type={secretInputType(`account-key-${prov.key}`)}
-                                    placeholder={prov.placeholder}
+                                    placeholder={isBedrock(prov.key)
+                                      ? 'AKIA… (access key ID)'
+                                      : isNotion(prov.key)
+                                        ? 'ntn_… (personal access token)'
+                                        : providerCredentialPlaceholder(
+                                            prov.key,
+                                            prov.label,
+                                            'apiKey',
+                                          )}
                                     bind:value={providersStore.accountKeyInputs[prov.key]}
                                     class="input w-full pr-11 text-xs"
                                   />
@@ -2786,8 +3129,11 @@
                                 <div class="relative">
                                   <input
                                     type={secretInputType(`account-token-${prov.key}`)}
-                                    placeholder={providersStore.tokenPlaceholders[prov.key] ??
-                                      'Auth token'}
+                                    placeholder={providerCredentialPlaceholder(
+                                      prov.key,
+                                      prov.label,
+                                      'authToken',
+                                    )}
                                     bind:value={providersStore.accountTokenInputs[prov.key]}
                                     class="input w-full pr-11 text-xs"
                                   />
@@ -2826,8 +3172,12 @@
                                   class="btn btn-primary w-full text-[10px] py-2 shadow-lg shadow-[var(--color-accent)]/10"
                                 >
                                   {providersStore.browserAuthBusy === prov.key
-                                    ? 'Opening...'
-                                    : 'Auth'}
+                                    ? isCliExecutionProvider(prov.key)
+                                      ? 'Checking CLI Login…'
+                                      : 'Opening sign-in…'
+                                    : isCliExecutionProvider(prov.key)
+                                      ? providersStore.getCliLoginLabel(prov.key)
+                                      : 'Sign in'}
                                 </button>
                               {:else}
                                 <div class="flex gap-2">
@@ -2954,27 +3304,41 @@
           {/if}
         </div>
 
-        <!-- Appearance Tab -->
-        <div class={activeTab === 'voice' ? 'flex-1 min-h-0 overflow-y-auto' : 'hidden'}>
-          <VoiceSettings attention={voiceSetupRequired} />
-        </div>
-        <div class={activeTab === 'images' ? 'flex-1 min-h-0 overflow-y-auto' : 'hidden'}>
-          <ImageSettings />
-        </div>
-        <div class={activeTab === 'video' ? 'flex-1 min-h-0 overflow-y-auto' : 'hidden'}>
-          <VideoSettings />
-        </div>
-        <div class={activeTab === 'mcp' ? 'flex-1 min-h-0 overflow-y-auto' : 'hidden'}>
-          <McpServersSettings />
-        </div>
+        <!-- Panes below mount on first visit. Speech, images, video, MCP and
+             the welcome cards all fetch on mount, so rendering them with the
+             drawer fired those requests before the user had opened them. -->
+        {#if open && visitedSettingsTabs.has('voice')}
+          <div class={activeTab === 'voice' ? 'flex-1 min-h-0 overflow-y-auto' : 'hidden'}>
+            <VoiceSettings attention={voiceSetupRequired} />
+          </div>
+        {/if}
+        {#if open && visitedSettingsTabs.has('images')}
+          <div class={activeTab === 'images' ? 'flex-1 min-h-0 overflow-y-auto' : 'hidden'}>
+            <ImageSettings />
+          </div>
+        {/if}
+        {#if open && visitedSettingsTabs.has('video')}
+          <div class={activeTab === 'video' ? 'flex-1 min-h-0 overflow-y-auto' : 'hidden'}>
+            <VideoSettings />
+          </div>
+        {/if}
+        {#if open && visitedSettingsTabs.has('mcp')}
+          <div class={activeTab === 'mcp' ? 'flex-1 min-h-0 overflow-y-auto' : 'hidden'}>
+            <McpServersSettings />
+          </div>
+        {/if}
 
-        <div class={activeTab === 'appearance' ? 'flex-1 min-h-0 overflow-y-auto' : 'hidden'}>
-          <AppearanceSettings bind:showColorPicker bind:colorPickerTarget />
-        </div>
+        {#if open && visitedSettingsTabs.has('appearance')}
+          <div class={activeTab === 'appearance' ? 'flex-1 min-h-0 overflow-y-auto' : 'hidden'}>
+            <AppearanceSettings bind:showColorPicker bind:colorPickerTarget />
+          </div>
+        {/if}
 
-        <div class={activeTab === 'welcome' ? 'flex-1 min-h-0 overflow-y-auto' : 'hidden'}>
-          <WelcomeSettings onReplayWalkthrough={() => requestSettingsClose()} />
-        </div>
+        {#if open && visitedSettingsTabs.has('welcome')}
+          <div class={activeTab === 'welcome' ? 'flex-1 min-h-0 overflow-y-auto' : 'hidden'}>
+            <WelcomeSettings onReplayWalkthrough={() => requestSettingsClose()} />
+          </div>
+        {/if}
 
         <!-- Shortcuts Tab -->
         <div
@@ -3000,7 +3364,7 @@
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
             {#each shortcutStore.list as shortcut (shortcut.id)}
               <div
-                class="group flex items-center justify-between gap-3 p-4 bg-[var(--color-surface-2)] rounded-xl border border-[var(--color-border)] transition-colors hover:border-[var(--color-text-muted)]"
+                class="settings-panel group flex items-center justify-between gap-3 p-4 bg-[var(--color-surface-2)] rounded-xl border border-[var(--color-border)] transition-colors hover:border-[var(--color-text-muted)]"
                 data-testid="shortcut-row"
                 data-shortcut-id={shortcut.id}
               >
@@ -3009,15 +3373,6 @@
                     {shortcut.action}
                   </div>
                   <div class="text-xs text-[var(--color-text-muted)]">{shortcut.description}</div>
-                  {#if (shortcut.altKeys ?? []).length > 0}
-                    <div class="mt-1 text-[10px] text-[var(--color-text-muted)]">
-                      also
-                      {#each shortcut.altKeys ?? [] as chord, chordIndex (chordIndex)}
-                        <span class="font-mono">{chord.map(formatKey).join('+')}</span
-                        >{#if chordIndex < (shortcut.altKeys?.length ?? 1) - 1},
-                        {/if}{/each}
-                    </div>
-                  {/if}
                 </div>
                 <button
                   type="button"
@@ -3045,1016 +3400,904 @@
         <!-- Billing Tab -->
         <div
           class={activeTab === 'billing'
-            ? 'flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-6 py-5 space-y-8 w-full'
+            ? 'flex-1 min-h-0 overflow-y-auto overflow-x-hidden w-full'
             : 'hidden'}
         >
-          {#if billingError}
-            <div
-              class="p-4 rounded-xl border text-xs"
-              style="border-color: var(--color-error); color: var(--color-error); background: var(--color-error-bg);"
-            >
-              Billing data unavailable: {billingError}
-              <button type="button" class="ml-2 underline" onclick={() => loadBillingCredits(true)}
-                >Retry</button
+          <UsageAnalyticsDashboard
+            {billingCredits}
+            {billingLoading}
+            {showSubscriptionApiEquivalent}
+            bind:selectedEnvironment={settingsEnvironmentScope}
+            bind:viewMode={billingViewMode}
+            {getProviderDisplayLabel}
+            onRefresh={() => {
+              loadBillingCredits(true);
+              void loadApiUsage();
+            }}
+          />
+
+          <div class="mx-auto w-full max-w-5xl space-y-8 px-6 pb-10 pt-5">
+            {#if billingError}
+              <div
+                class="p-4 rounded-xl border text-xs"
+                style="border-color: var(--color-error); color: var(--color-error); background: var(--color-error-bg);"
               >
-            </div>
-          {/if}
-          <div class="flex items-center justify-between gap-4">
-            <div>
-              <h3 class="text-sm font-bold text-[var(--color-text-primary)]">Usage and billing</h3>
-              <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">
-                Recorded provider usage and account-reported balances
-              </p>
-            </div>
-            <button
-              type="button"
-              class="inline-flex min-h-9 items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-xs font-semibold text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] disabled:opacity-50"
-              disabled={billingLoading}
-              onclick={() => {
-                loadBillingCredits(true);
-                void loadApiUsage();
-              }}
-              aria-label="Refresh billing data"
-            >
-              <RefreshCw size={14} class={billingLoading ? 'animate-spin' : ''} />
-              {billingLoading ? 'Refreshing…' : 'Refresh'}
-            </button>
-          </div>
-          {#snippet apiUsagePanel()}
-            <div
-              class="p-5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] space-y-4"
-            >
-              <div class="flex items-start justify-between gap-4">
-                <div>
-                  <h4 class="text-xs font-medium text-[var(--color-text-secondary)]">
-                    Image &amp; voice API usage
-                  </h4>
-                  <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">
-                    Estimated cost from this app's image and voice calls. Estimates only. This is
-                    not a bill. Entries older than 90 days are pruned.
-                  </p>
-                </div>
-                <div class="flex gap-2">
-                  <button
-                    type="button"
-                    class="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-2.5 py-1.5 text-[10px] font-semibold text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)]"
-                    onclick={() => void loadApiUsage()}
-                  >
-                    <RefreshCw size={12} class={apiUsageLoading ? 'animate-spin' : ''} />
-                    Refresh
-                  </button>
-                  <button
-                    type="button"
-                    class="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-2.5 py-1.5 text-[10px] font-semibold text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)]"
-                    onclick={() => void exportUsageCsv()}
-                  >
-                    <Download size={12} /> CSV
-                  </button>
-                </div>
-              </div>
-              {#if apiUsageError}
-                <div
-                  class="p-3 rounded-xl border text-xs"
-                  style="border-color: var(--color-error); color: var(--color-error); background: var(--color-error-bg);"
+                Billing data unavailable: {billingError}
+                <button
+                  type="button"
+                  class="ml-2 underline"
+                  onclick={() => loadBillingCredits(true)}>Retry</button
                 >
-                  Usage data unavailable: {apiUsageError}
-                  <button type="button" class="ml-2 underline" onclick={() => void loadApiUsage()}
-                    >Retry</button
-                  >
+              </div>
+            {/if}
+            {#snippet apiUsagePanel()}
+              <div
+                class="billing-panel space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5"
+              >
+                <div class="flex items-start justify-between gap-4">
+                  <div>
+                    <h4 class="text-xs font-medium text-[var(--color-text-secondary)]">
+                      Image &amp; voice API usage
+                    </h4>
+                    <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">
+                      Estimated cost from this app's image and voice calls. Estimates only. This is
+                      not a bill. Entries older than 90 days are pruned.
+                    </p>
+                  </div>
+                  <div class="flex gap-2">
+                    <button
+                      type="button"
+                      class="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-2.5 py-1.5 text-[10px] font-semibold text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)]"
+                      onclick={() => void loadApiUsage()}
+                    >
+                      <RefreshCw size={12} class={apiUsageLoading ? 'animate-spin' : ''} />
+                      Refresh
+                    </button>
+                    <button
+                      type="button"
+                      class="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-2.5 py-1.5 text-[10px] font-semibold text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)]"
+                      onclick={() => void exportUsageCsv()}
+                    >
+                      <Download size={12} /> CSV
+                    </button>
+                  </div>
                 </div>
-              {:else if apiUsage}
-                <div class="flex flex-wrap gap-4 text-xs">
-                  <span class="text-[var(--color-text-secondary)]">
-                    Total calls <span class="font-bold text-[var(--color-text-primary)]"
-                      >{apiUsage.totals.totalCount}</span
-                    >
-                  </span>
-                  <span class="text-[var(--color-text-secondary)]">
-                    Images <span class="font-bold text-[var(--color-text-primary)]"
-                      >{apiUsage.totals.byKind.image ?? 0}</span
-                    >
-                  </span>
-                  <span class="text-[var(--color-text-secondary)]">
-                    Speech <span class="font-bold text-[var(--color-text-primary)]"
-                      >{apiUsage.totals.byKind.tts ?? 0}</span
-                    >
-                  </span>
-                  <span class="text-[var(--color-text-secondary)]">
-                    Transcribe <span class="font-bold text-[var(--color-text-primary)]"
-                      >{apiUsage.totals.byKind.stt ?? 0}</span
-                    >
-                  </span>
-                  <span class="text-[var(--color-text-secondary)]">
-                    Estimated
-                    <span class="font-bold text-[var(--color-text-primary)]">
-                      {apiUsage.totals.estimatedCostUsd !== undefined
-                        ? `$${apiUsage.totals.estimatedCostUsd.toFixed(4)}`
-                        : 'Not available'}
-                    </span>
-                  </span>
-                </div>
-                {#if apiUsage.entries.length > 0}
+                {#if apiUsageError}
                   <div
-                    class="divide-y divide-[var(--color-border)] rounded-xl border border-[var(--color-border)]"
+                    class="p-3 rounded-xl border text-xs"
+                    style="border-color: var(--color-error); color: var(--color-error); background: var(--color-error-bg);"
                   >
-                    {#each apiUsage.entries.slice(0, 10) as entry (entry.id)}
-                      <div class="flex items-center justify-between gap-3 px-3 py-2 text-[11px]">
-                        <div class="min-w-0">
-                          <span class="font-semibold text-[var(--color-text-primary)]"
-                            >{formatApiUsageKind(entry.kind)}</span
+                    Usage data unavailable: {apiUsageError}
+                    <button type="button" class="ml-2 underline" onclick={() => void loadApiUsage()}
+                      >Retry</button
+                    >
+                  </div>
+                {:else if apiUsage}
+                  <div class="flex flex-wrap gap-4 text-xs">
+                    <span class="text-[var(--color-text-secondary)]">
+                      Total calls <span class="font-bold text-[var(--color-text-primary)]"
+                        >{apiUsage.totals.totalCount}</span
+                      >
+                    </span>
+                    <span class="text-[var(--color-text-secondary)]">
+                      Images <span class="font-bold text-[var(--color-text-primary)]"
+                        >{apiUsage.totals.byKind.image ?? 0}</span
+                      >
+                    </span>
+                    <span class="text-[var(--color-text-secondary)]">
+                      Speech <span class="font-bold text-[var(--color-text-primary)]"
+                        >{apiUsage.totals.byKind.tts ?? 0}</span
+                      >
+                    </span>
+                    <span class="text-[var(--color-text-secondary)]">
+                      Transcribe <span class="font-bold text-[var(--color-text-primary)]"
+                        >{apiUsage.totals.byKind.stt ?? 0}</span
+                      >
+                    </span>
+                    <span class="text-[var(--color-text-secondary)]">
+                      Estimated
+                      <span class="font-bold text-[var(--color-text-primary)]">
+                        {apiUsage.totals.estimatedCostUsd !== undefined
+                          ? `$${apiUsage.totals.estimatedCostUsd.toFixed(4)}`
+                          : 'Not available'}
+                      </span>
+                    </span>
+                  </div>
+                  {#if apiUsage.entries.length > 0}
+                    <div
+                      class="divide-y divide-[var(--color-border)] rounded-xl border border-[var(--color-border)]"
+                    >
+                      {#each apiUsage.entries.slice(0, 10) as entry (entry.id)}
+                        <div class="flex items-center justify-between gap-3 px-3 py-2 text-[11px]">
+                          <div class="min-w-0">
+                            <span class="font-semibold text-[var(--color-text-primary)]"
+                              >{formatApiUsageKind(entry.kind)}</span
+                            >
+                            <span class="text-[var(--color-text-muted)]">
+                              · {entry.provider} · {entry.model}{entry.detail
+                                ? ` · ${entry.detail}`
+                                : ''}</span
+                            >
+                          </div>
+                          <div
+                            class="flex shrink-0 items-center gap-3 text-[var(--color-text-muted)]"
                           >
-                          <span class="text-[var(--color-text-muted)]">
-                            · {entry.provider} · {entry.model}{entry.detail
-                              ? ` · ${entry.detail}`
-                              : ''}</span
+                            <span>{new Date(entry.ts).toLocaleString()}</span>
+                            <span
+                              class="w-14 text-right font-semibold text-[var(--color-text-primary)]"
+                            >
+                              {entry.estimatedCostUsd !== undefined
+                                ? `$${entry.estimatedCostUsd.toFixed(4)}`
+                                : 'Not available'}
+                            </span>
+                          </div>
+                        </div>
+                      {/each}
+                    </div>
+                  {:else}
+                    <p class="text-[11px] text-[var(--color-text-muted)]">
+                      No image or voice API calls recorded yet.
+                    </p>
+                  {/if}
+                {:else}
+                  <div class="h-16 rounded-xl bg-[var(--color-surface-3)] animate-pulse"></div>
+                {/if}
+              </div>
+            {/snippet}
+            {@render apiUsagePanel()}
+            {#if billingCredits?.refreshing}
+              <div
+                class="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-xs text-[var(--color-text-secondary)]"
+                role="status"
+              >
+                <RefreshCw size={13} class="animate-spin text-[var(--color-accent)]" />
+                Updating subscription usage and provider balances in the background. Recorded API usage
+                remains available while this finishes.
+              </div>
+            {/if}
+            <!-- CLI subscriptions: account-separated local usage + quota burn -->
+            {#if billingCredits?.cliUsage?.length}
+              <div class="space-y-4">
+                <div class="ml-1 flex flex-wrap items-end justify-between gap-3">
+                  <div>
+                    <h3 class="text-sm font-bold text-[var(--color-text-primary)]">
+                      CLI subscriptions
+                    </h3>
+                    <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">
+                      Each detected profile is shown separately, with usage, quota, and provider
+                      credits when reported by the account.
+                    </p>
+                  </div>
+                </div>
+                <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                  {#each billingCredits.cliUsage as cli (`${cli.provider}:${cli.accountId ?? 'aggregate'}`)}
+                    <div
+                      class="billing-panel space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5"
+                    >
+                      <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                          <div
+                            class="w-8 h-8 rounded-lg bg-[var(--color-surface-3)] flex items-center justify-center p-1.5"
                           >
+                            <ProviderIcon provider={cli.provider} size={20} class="w-full h-full" />
+                          </div>
+                          <div>
+                            <div class="text-sm font-semibold">
+                              {getProviderDisplayLabel(cli.provider)}{cli.accountLabel
+                                ? ` · ${cli.accountLabel}`
+                                : ''}
+                            </div>
+                            {#if cli.accountEmail || cli.accountLabel}
+                              <div class="text-[10px] text-[var(--color-text-muted)]">
+                                {cli.accountEmail || 'CLI profile'}
+                              </div>
+                            {/if}
+                          </div>
+                          {#if cli.planType}
+                            <span
+                              class="px-2 py-0.5 rounded-full text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-text-secondary)]"
+                              >{cli.planType}</span
+                            >
+                          {/if}
+                          {#if cli.apiProviderName}
+                            <span
+                              class="px-2 py-0.5 rounded-full text-xs font-medium bg-[var(--color-accent)]/10 text-[var(--color-accent)]"
+                              title="Raw inference API provider backing this CLI subscription"
+                              >API: {cli.apiProviderName}</span
+                            >
+                          {/if}
                         </div>
                         <div
-                          class="flex shrink-0 items-center gap-3 text-[var(--color-text-muted)]"
+                          class="flex flex-col items-end gap-0.5 text-[10px] text-[var(--color-text-muted)]"
                         >
-                          <span>{new Date(entry.ts).toLocaleString()}</span>
-                          <span
-                            class="w-14 text-right font-semibold text-[var(--color-text-primary)]"
-                          >
-                            {entry.estimatedCostUsd !== undefined
-                              ? `$${entry.estimatedCostUsd.toFixed(4)}`
-                              : 'Not available'}
-                          </span>
+                          {#if cli.usageSource}
+                            <span
+                              >{cli.usageSource === 'codex-app-server'
+                                ? 'Tokens: live Codex account data'
+                                : cli.usageSource === 'kory-provider-events'
+                                  ? 'Tokens: Freebuff request logs'
+                                  : 'Tokens: local Koryphaios history'}</span
+                            >
+                          {:else}
+                            <span title="No metered token activity recorded for this account yet"
+                              >Tokens: none recorded yet</span
+                            >
+                          {/if}
+                          {#if cli.quotaSource === 'live-cli-account'}
+                            <span
+                              class="font-medium text-[var(--color-success)]"
+                              title="Current account quota from agy /usage. It is not estimated from local token history"
+                              >Limits: live Antigravity account</span
+                            >
+                          {/if}
                         </div>
                       </div>
-                    {/each}
-                  </div>
-                {:else}
-                  <p class="text-[11px] text-[var(--color-text-muted)]">
-                    No image or voice API calls recorded yet.
-                  </p>
-                {/if}
-              {:else}
-                <div class="h-16 rounded-xl bg-[var(--color-surface-3)] animate-pulse"></div>
-              {/if}
-            </div>
-          {/snippet}
-          {@render apiUsagePanel()}
-          {#if billingCredits?.refreshing}
-            <div
-              class="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-xs text-[var(--color-text-secondary)]"
-              role="status"
-            >
-              <RefreshCw size={13} class="animate-spin text-[var(--color-accent)]" />
-              Updating subscription usage and provider balances in the background. Recorded API usage
-              remains available while this finishes.
-            </div>
-          {/if}
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div
-              class="p-6 rounded-2xl bg-gradient-to-br from-[var(--color-surface-2)] to-[var(--color-surface-1)] border border-[var(--color-border)] shadow-xl relative"
-            >
-              <div
-                class="absolute -top-4 -right-4 w-24 h-24 bg-[var(--color-accent)]/5 rounded-full blur-3xl"
-              ></div>
-              <div class="relative mb-3 flex items-start justify-between gap-4">
-                <div>
-                  <div class="text-xs font-medium text-[var(--color-text-secondary)]">
-                    API Spend
-                  </div>
-                  <div class="mt-1 text-[9px] text-[var(--color-text-muted)]">
-                    Metered API-key providers only
-                  </div>
+
+                      {#if cli.provider === 'freebuff'}
+                        <FreebuffBalance account={cli.freebuffAccount} />
+                      {/if}
+                      {#if cli.attribution === 'unavailable'}
+                        <div
+                          class="rounded-xl border border-[var(--color-warning)] bg-[var(--color-warning-bg)] px-3 py-2 text-[11px] text-[var(--color-text-secondary)]"
+                        >
+                          Usage unavailable for this account: {cli.attributionNote}. Point this CLI
+                          profile at its own session directory to enable account-separated usage.
+                        </div>
+                      {:else}
+                        {#if cli.usagePrecision === 'input-context-only'}
+                          <div
+                            class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 py-2 text-[11px] text-[var(--color-text-secondary)]"
+                          >
+                            {#if cli.provider === 'freebuff'}
+                              Freebuff reports the input context before each model request. Its
+                              current log does not expose upstream output-token usage, so these
+                              token totals and API-equivalent values are input side only. These are
+                              not charges or invented output estimates.
+                            {:else}
+                              {cli.provider} exposes input-context usage without upstream output-token
+                              totals. Its OpenRouter equivalent is therefore input side only. This is
+                              not an invented full inference value.
+                            {/if}
+                          </div>
+                        {/if}
+                        {#if cli.creditBalance != null}
+                          <div
+                            class="flex items-center justify-between rounded-xl bg-[var(--color-surface-1)] px-3 py-2 text-[11px]"
+                          >
+                            <span class="text-[var(--color-text-secondary)]">Codex credits</span>
+                            <span class="font-mono font-semibold text-[var(--color-text-primary)]"
+                              >{cli.creditBalance}</span
+                            >
+                          </div>
+                        {/if}
+                        {#if showSubscriptionApiEquivalent && cli.apiValueMinUsd !== undefined && cli.apiValueMaxUsd !== undefined}
+                          <div
+                            class="flex items-center justify-between gap-3 rounded-xl bg-[var(--color-surface-1)] px-3 py-2 text-[11px]"
+                          >
+                            <span class="text-[var(--color-text-secondary)]"
+                              >OpenRouter {cli.apiValueCoverage === 'full' ? 'inference' : 'input'} value
+                              range · 30d</span
+                            >
+                            <div class="text-right">
+                              <div class="font-mono font-semibold text-[var(--color-text-primary)]">
+                                ${cli.apiValueMinUsd.toFixed(4)} to ${cli.apiValueMaxUsd.toFixed(4)}
+                              </div>
+                              {#if (cli.apiValueCoverage === 'full' ? cli.apiFreshValueUsd : cli.apiFreshInputValueUsd) !== undefined}
+                                <div class="text-[9px] text-[var(--color-text-muted)]">
+                                  fresh-rate value ${(cli.apiValueCoverage === 'full'
+                                    ? cli.apiFreshValueUsd
+                                    : cli.apiFreshInputValueUsd
+                                  ).toFixed(4)}
+                                </div>
+                              {/if}
+                              {#if cli.apiCacheAdjustedValueUsd !== undefined}
+                                <div class="text-[9px] text-[var(--color-accent)]">
+                                  observed cache reads ${cli.apiCacheAdjustedValueUsd.toFixed(4)}
+                                </div>
+                              {/if}
+                            </div>
+                          </div>
+                          <div class="px-1 text-[9px] text-[var(--color-text-muted)]">
+                            Comparison value from OpenRouter’s official catalog, not the CLI’s
+                            actual subscription charge. The range includes published cache-read,
+                            fresh-input, and cache-write scenarios when available.{#if cli.cacheAccounting === 'provider-reported'}
+                              The observed-cache figure applies the CLI’s reported cache-read
+                              tokens.{/if}
+                          </div>
+                        {:else if showSubscriptionApiEquivalent && cli.apiValueUsd !== undefined}
+                          <div
+                            class="flex items-center justify-between rounded-xl bg-[var(--color-surface-1)] px-3 py-2 text-[11px]"
+                          >
+                            <span class="text-[var(--color-text-secondary)]"
+                              >API-equivalent input value · 30d</span
+                            >
+                            <span class="font-mono font-semibold text-[var(--color-text-primary)]"
+                              >${cli.apiValueUsd.toFixed(4)}</span
+                            >
+                          </div>
+                        {/if}
+                        {#each cli.quotas as q (q.label)}
+                          {@const remainingPercent = Math.max(0, 100 - q.usedPercent)}
+                          <div>
+                            <div class="flex items-center justify-between text-[11px] mb-1">
+                              <span class="text-[var(--color-text-secondary)] font-medium"
+                                >{q.label}</span
+                              >
+                              <span
+                                class="font-mono font-bold"
+                                style="color: {q.usedPercent >= 90
+                                  ? 'var(--color-error)'
+                                  : q.usedPercent >= 70
+                                    ? 'var(--color-warning)'
+                                    : 'var(--color-text-secondary)'};"
+                              >
+                                {remainingPercent.toFixed(0)}% left{q.resetsAt
+                                  ? ` · resets ${new Date(q.resetsAt).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}`
+                                  : ''}
+                              </span>
+                            </div>
+                            <div
+                              class="h-2 w-full bg-[var(--color-surface-3)] rounded-full overflow-hidden"
+                            >
+                              <div
+                                class="h-full rounded-full transition-all"
+                                style="width: {Math.min(
+                                  100,
+                                  remainingPercent,
+                                )}%; background: {q.usedPercent >= 90
+                                  ? 'var(--color-error)'
+                                  : q.usedPercent >= 70
+                                    ? 'var(--color-warning)'
+                                    : 'var(--color-accent)'};"
+                              ></div>
+                            </div>
+                          </div>
+                        {/each}
+
+                        <div class="grid grid-cols-4 gap-2 text-center">
+                          {#each cli.windows as w (w.period)}
+                            <div
+                              class="p-2.5 rounded-xl bg-[var(--color-surface-1)] border border-[var(--color-border)]"
+                            >
+                              <div class="text-xs font-medium text-[var(--color-text-secondary)]">
+                                {w.period}
+                              </div>
+                              <div
+                                class="mt-1 text-xs font-mono font-bold text-[var(--color-text-primary)]"
+                              >
+                                {formatTokens(w.tokensIn + w.tokensOut)}
+                              </div>
+                              <div class="text-[9px] text-[var(--color-text-muted)]">tokens</div>
+                            </div>
+                          {/each}
+                        </div>
+
+                        {#if cli.dailyUsage?.length}
+                          {@const trendKey = subscriptionTrendKey(cli)}
+                          {@const trendExpanded = expandedSubscriptionTrends[trendKey] ?? false}
+                          {@const trend = shownUsageTrend(cli)}
+                          {@const activeTrendIndex = activeSubscriptionTrendPoints[trendKey]}
+                          {@const activeTrendPoint =
+                            activeTrendIndex == null ? undefined : trend[activeTrendIndex]}
+                          <div
+                            class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-3"
+                          >
+                            <div class="flex items-center justify-between gap-3 text-[10px]">
+                              <span class="font-semibold text-[var(--color-text-secondary)]"
+                                >Usage trend</span
+                              >
+                              <div class="flex items-center gap-1.5">
+                                {#each [7, 14, 30] as days (days)}
+                                  <button
+                                    type="button"
+                                    class="rounded-md border px-1.5 py-0.5 font-mono transition-colors"
+                                    class:border-[var(--color-accent)]={(subscriptionTrendRanges[
+                                      trendKey
+                                    ] ?? 14) === days}
+                                    class:text-[var(--color-accent)]={(subscriptionTrendRanges[
+                                      trendKey
+                                    ] ?? 14) === days}
+                                    class:border-[var(--color-border)]={(subscriptionTrendRanges[
+                                      trendKey
+                                    ] ?? 14) !== days}
+                                    class:text-[var(--color-text-muted)]={(subscriptionTrendRanges[
+                                      trendKey
+                                    ] ?? 14) !== days}
+                                    aria-pressed={(subscriptionTrendRanges[trendKey] ?? 14) ===
+                                      days}
+                                    onclick={() => {
+                                      subscriptionTrendRanges[trendKey] = days;
+                                      activeSubscriptionTrendPoints[trendKey] = undefined;
+                                    }}>{days}d</button
+                                  >
+                                {/each}
+                                <button
+                                  type="button"
+                                  class="ml-1 rounded-md border border-[var(--color-border)] px-1.5 py-0.5 font-medium text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+                                  aria-expanded={trendExpanded}
+                                  onclick={() =>
+                                    (expandedSubscriptionTrends[trendKey] = !trendExpanded)}
+                                  >{trendExpanded ? 'Collapse' : 'Expand'}</button
+                                >
+                              </div>
+                            </div>
+                            <!-- Reserve this row so showing a hover value never moves the SVG out
+                           from under the pointer (which used to produce a leave/re-enter loop). -->
+                            <div class="mt-2 h-6">
+                              {#if activeTrendPoint}
+                                <div
+                                  class="flex items-center justify-between rounded-md bg-[var(--color-surface-2)] px-2 py-1 text-[10px]"
+                                >
+                                  <span class="text-[var(--color-text-secondary)]"
+                                    >{formatUsageTrendDate(activeTrendPoint.date)}</span
+                                  >
+                                  <span
+                                    class="font-mono font-semibold text-[var(--color-text-primary)]"
+                                    >{formatTokens(activeTrendPoint.tokens ?? 0)} tokens</span
+                                  >
+                                </div>
+                              {/if}
+                            </div>
+                            <svg
+                              class="w-full overflow-visible {trendExpanded ? 'h-32' : 'h-16'}"
+                              viewBox={trendExpanded ? '0 0 280 128' : '0 0 280 64'}
+                              preserveAspectRatio="none"
+                              role="img"
+                              aria-label={`Daily token usage from ${formatUsageTrendDate(trend[0]?.date)} to ${formatUsageTrendDate(trend[trend.length - 1]?.date)}`}
+                              onpointermove={(event) =>
+                                updateUsageTrendPoint(event, trendKey, trend)}
+                              onpointerleave={() =>
+                                (activeSubscriptionTrendPoints[trendKey] = undefined)}
+                            >
+                              <line
+                                x1="0"
+                                y1={trendExpanded ? 127 : 63}
+                                x2="280"
+                                y2={trendExpanded ? 127 : 63}
+                                stroke="var(--color-border)"
+                                stroke-width="1"
+                              />
+                              <polyline
+                                points={usageTrendPoints(trend, trendExpanded ? 128 : 64)}
+                                fill="none"
+                                stroke="var(--color-accent)"
+                                stroke-width="2.5"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                              />
+                            </svg>
+                            <div
+                              class="mt-1 flex justify-between text-[9px] text-[var(--color-text-muted)]"
+                            >
+                              <span>{formatUsageTrendDate(trend[0]?.date)}</span>
+                              <span>{formatUsageTrendDate(trend[trend.length - 1]?.date)}</span>
+                            </div>
+                          </div>
+                        {/if}
+
+                        {#if cli.byModel?.length}
+                          <div class="space-y-1.5">
+                            {#each cli.byModel.slice(0, 4) as m (m.model)}
+                              <div class="rounded-lg bg-[var(--color-surface-1)] px-2.5 py-1.5">
+                                <div class="flex items-center justify-between text-[11px]">
+                                  <span
+                                    class="font-mono text-[var(--color-text-secondary)] truncate"
+                                    >{m.model}</span
+                                  >
+                                  <span
+                                    class="font-mono text-[var(--color-text-muted)] shrink-0 ml-3"
+                                  >
+                                    {formatTokens(m.tokensIn + m.tokensOut)} tokens
+                                  </span>
+                                </div>
+                                {#if showSubscriptionApiEquivalent && (m.apiEquivalent || m.apiProvider)}
+                                  <div
+                                    class="mt-0.5 flex items-center gap-1 text-[9px] text-[var(--color-text-muted)]"
+                                  >
+                                    <span class="font-medium">API equivalent</span>
+                                    <span
+                                      class="font-mono text-[var(--color-accent)]/80 truncate"
+                                      title={m.apiEquivalent ?? m.apiProvider ?? ''}
+                                    >
+                                      {m.apiProvider ? `${m.apiProvider}/` : ''}{m.apiEquivalent ??
+                                        '(unmapped)'}
+                                    </span>
+                                    {#if m.apiEquivalent && m.apiEquivalent === m.model}
+                                      <span class="text-[var(--color-text-muted)] italic"
+                                        >(same)</span
+                                      >
+                                    {/if}
+                                  </div>
+                                {/if}
+                                <!-- Model context is catalog metadata, not usage;
+                                     it is deliberately absent from Billing. -->
+                                {#if showSubscriptionApiEquivalent &&
+                                  (m.apiValueUsd !== undefined ||
+                                    m.apiValueMinUsd !== undefined ||
+                                    m.apiCacheAdjustedValueUsd !== undefined)}
+                                  <div
+                                    class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[9px] text-[var(--color-text-muted)]"
+                                  >
+                                    {#if showSubscriptionApiEquivalent && m.apiValueMinUsd !== undefined && m.apiValueMaxUsd !== undefined}
+                                      <span
+                                        >OpenRouter {m.apiValueCoverage === 'full'
+                                          ? 'inference'
+                                          : 'input'}
+                                        <span class="font-mono text-[var(--color-text-secondary)]"
+                                          >${m.apiValueMinUsd.toFixed(4)} to ${m.apiValueMaxUsd.toFixed(
+                                            4,
+                                          )}</span
+                                        ></span
+                                      >
+                                    {:else if showSubscriptionApiEquivalent && m.apiValueUsd !== undefined}
+                                      <span
+                                        >API input value
+                                        <span class="font-mono text-[var(--color-text-secondary)]"
+                                          >${m.apiValueUsd.toFixed(4)}</span
+                                        ></span
+                                      >
+                                    {/if}
+                                    {#if showSubscriptionApiEquivalent && m.apiCacheAdjustedValueUsd !== undefined}
+                                      <span
+                                        >Observed cache
+                                        <span class="font-mono text-[var(--color-text-secondary)]"
+                                          >${m.apiCacheAdjustedValueUsd.toFixed(4)}</span
+                                        ></span
+                                      >
+                                    {/if}
+                                  </div>
+                                {/if}
+                                {#if showSubscriptionApiEquivalent && m.promptUsdPerMillion !== undefined}
+                                  <div
+                                    class="mt-0.5 text-[9px] text-[var(--color-text-muted)]"
+                                    title={m.pricingHasThresholds
+                                      ? 'OpenRouter publishes prompt size pricing thresholds. Koryphaios applies them to each recorded request.'
+                                      : 'Official OpenRouter per-token pricing'}
+                                  >
+                                    OpenRouter $/M: fresh
+                                    <span class="font-mono"
+                                      >${formatUsdRate(m.promptUsdPerMillion)}</span
+                                    >{#if m.completionUsdPerMillion !== undefined}, output
+                                      <span class="font-mono"
+                                        >${formatUsdRate(m.completionUsdPerMillion)}</span
+                                      >{/if}{#if m.cacheReadUsdPerMillion !== undefined}, cache read
+                                      <span class="font-mono"
+                                        >${formatUsdRate(m.cacheReadUsdPerMillion)}</span
+                                      >{/if}{#if m.cacheWriteUsdPerMillion !== undefined}, cache
+                                      write
+                                      <span class="font-mono"
+                                        >${formatUsdRate(m.cacheWriteUsdPerMillion)}</span
+                                      >{/if}{#if m.pricingHasThresholds}
+                                      <span class="italic"> · size-tiered</span>{/if}
+                                  </div>
+                                {/if}
+                              </div>
+                            {/each}
+                          </div>
+                        {/if}
+
+                      {/if}
+                    </div>
+                  {/each}
                 </div>
               </div>
-              <div
-                class="text-4xl font-black text-[var(--color-text-primary)] flex items-baseline gap-1"
-              >
-                {#if billingLoading && !billingCredits}
-                  <div class="h-10 w-32 bg-[var(--color-surface-3)] animate-pulse rounded-lg"></div>
-                {:else if billingCredits?.refreshing && !billingCredits?.byProvider?.length}
-                  <span class="text-xl text-[var(--color-text-muted)] font-semibold"
-                    >Calculating…</span
-                  >
-                {:else if billingCredits?.hasKnownSpend === false}
-                  <span class="text-2xl font-semibold text-[var(--color-text-muted)]">$?.??</span>
-                {:else}
-                  <span
-                    >{formatBillingUsd(
-                      billingCredits?.totalSpendUsd ?? (billingCredits?.totalSpendCents ?? 0) / 100,
-                      2,
-                    )}</span
-                  >
-                {/if}
-              </div>
-              <p class="text-[10px] text-[var(--color-text-muted)] mt-4">
-                {billingCredits?.pricingIncomplete
-                  ? 'Known spend shown. Some usage still has no verified price.'
-                  : 'Computed from recorded metered tokens at verified model prices'}
-              </p>
-            </div>
-
-            <div
-              class="p-6 rounded-2xl bg-[var(--color-surface-2)] border border-[var(--color-border)]"
-            >
-              <div class="text-xs font-medium text-[var(--color-text-secondary)] mb-2">
-                Provider Balance
-              </div>
-              <div
-                class="text-4xl font-black text-[var(--color-success)] flex items-baseline gap-1"
-              >
-                {#if billingLoading && !billingCredits}
-                  <div class="h-10 w-32 bg-[var(--color-surface-3)] animate-pulse rounded-lg"></div>
-                {:else if typeof billingCredits?.remainingCents === 'number'}
-                  <span class="text-2xl opacity-50">$</span>{(
-                    billingCredits.remainingCents / 100
-                  ).toFixed(2)}
-                {:else if billingCredits?.refreshing && !billingCredits?.balances?.length}
-                  <span class="text-xl text-[var(--color-text-muted)] font-semibold">Checking…</span
-                  >
-                {:else}
-                  <span class="text-2xl text-[var(--color-text-muted)] font-semibold"
-                    >Not reported</span
-                  >
-                {/if}
-              </div>
-              <p class="text-[10px] text-[var(--color-text-muted)] mt-4">
-                {typeof billingCredits?.remainingCents === 'number'
-                  ? `Live available balance${billingCredits?.balanceProviders?.length > 1 ? ` across ${billingCredits.balanceProviders.length} providers` : ' from your reporting provider'}`
-                  : 'No configured API-key provider returned a queryable balance'}
-              </p>
-            </div>
-          </div>
-
-          <!-- CLI subscriptions: account-separated local usage + quota burn -->
-          {#if billingCredits?.cliUsage?.length}
-            <div class="space-y-4">
-              <div class="ml-1 flex flex-wrap items-end justify-between gap-3">
+            {:else if billingCredits?.refreshing && billingCredits?.detectedCliAccounts?.length}
+              <div class="space-y-4">
                 <div>
                   <h3 class="text-sm font-bold text-[var(--color-text-primary)]">
                     CLI subscriptions
                   </h3>
                   <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">
-                    Each detected profile is shown separately. These plans report usage and quota,
-                    not API charges or balances.
+                    CLI profiles are being checked while usage history is indexed. Connected means a
+                    provider probe succeeded; a detected profile has not been connected in
+                    Koryphaios yet.
                   </p>
                 </div>
-              </div>
-              <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                {#each billingCredits.cliUsage as cli (`${cli.provider}:${cli.accountId ?? 'aggregate'}`)}
-                  <div
-                    class="p-5 bg-[var(--color-surface-2)] rounded-2xl border border-[var(--color-border)] space-y-4"
-                  >
-                    <div class="flex items-center justify-between">
-                      <div class="flex items-center gap-3">
-                        <div
-                          class="w-8 h-8 rounded-lg bg-[var(--color-surface-3)] flex items-center justify-center p-1.5"
-                        >
-                          <ProviderIcon provider={cli.provider} size={20} class="w-full h-full" />
-                        </div>
-                        <div>
-                          <div class="text-sm font-semibold">
-                            {getProviderDisplayLabel(cli.provider)}{cli.accountLabel
-                              ? ` · ${cli.accountLabel}`
-                              : ''}
-                          </div>
-                          {#if cli.accountEmail || cli.accountLabel}
-                            <div class="text-[10px] text-[var(--color-text-muted)]">
-                              {cli.accountEmail || 'CLI profile'}
-                            </div>
-                          {/if}
-                        </div>
-                        {#if cli.planType}
-                          <span
-                            class="px-2 py-0.5 rounded-full text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-text-secondary)]"
-                            >{cli.planType}</span
-                          >
-                        {/if}
-                        {#if cli.apiProviderName}
-                          <span
-                            class="px-2 py-0.5 rounded-full text-xs font-medium bg-[var(--color-accent)]/10 text-[var(--color-accent)]"
-                            title="Raw inference API provider backing this CLI subscription"
-                            >API: {cli.apiProviderName}</span
-                          >
-                        {/if}
-                      </div>
+                <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                  {#each billingCredits.detectedCliAccounts as account (`${account.provider}:${account.id}`)}
+                    <div
+                      class="billing-panel flex items-center gap-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5"
+                    >
                       <div
-                        class="flex flex-col items-end gap-0.5 text-[10px] text-[var(--color-text-muted)]"
+                        class="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-surface-3)] p-2"
                       >
-                        {#if cli.usageSource}
-                          <span
-                            >{cli.usageSource === 'codex-app-server'
-                              ? 'Tokens: live Codex account data'
-                              : cli.usageSource === 'kory-provider-events'
-                                ? 'Tokens: Freebuff request logs'
-                                : 'Tokens: local Koryphaios history'}</span
-                          >
-                        {:else}
-                          <span title="No metered token activity recorded for this account yet"
-                            >Tokens: none recorded yet</span
-                          >
-                        {/if}
-                        {#if cli.quotaSource === 'live-cli-account'}
-                          <span
-                            class="font-medium text-[var(--color-success)]"
-                            title="Current account quota from agy /usage. It is not estimated from local token history"
-                            >Limits: live Antigravity account</span
-                          >
-                        {/if}
+                        <ProviderIcon provider={account.provider} size={20} />
+                      </div>
+                      <div class="min-w-0 flex-1">
+                        <div
+                          class="truncate text-sm font-semibold text-[var(--color-text-primary)]"
+                        >
+                          {account.email || account.label}
+                        </div>
+                        <div class="text-[10px] text-[var(--color-text-muted)]">
+                          {account.plan
+                            ? `${account.plan.toUpperCase()} plan · `
+                            : ''}{account.connectionState === 'connected'
+                            ? 'Connected · indexing usage…'
+                            : account.connectionState === 'failed'
+                              ? 'Connection failed · indexing usage…'
+                              : 'Detected · not connected · indexing usage…'}
+                        </div>
+                      </div>
+                      <RefreshCw size={14} class="animate-spin text-[var(--color-accent)]" />
+                    </div>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+
+            {#if billingCredits?.balances?.length}
+              <div class="space-y-4">
+                <h3 class="text-sm font-bold text-[var(--color-text-primary)] ml-1">
+                  API account balances
+                </h3>
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {#each billingCredits.balances as bal (bal.provider)}
+                    <div
+                      class="billing-panel rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4 text-center"
+                    >
+                      <div
+                        class="w-8 h-8 mx-auto rounded-lg bg-[var(--color-surface-3)] flex items-center justify-center p-1.5 mb-2"
+                      >
+                        <ProviderIcon provider={bal.provider} size={20} class="w-full h-full" />
+                      </div>
+                      <div class="text-lg font-black font-mono text-[var(--color-success)]">
+                        {bal.availableUsd != null
+                          ? `$${bal.availableUsd.toFixed(2)}`
+                          : 'Not available'}
+                      </div>
+                      <div class="text-xs font-medium text-[var(--color-text-muted)] mt-1">
+                        {getProviderDisplayLabel(bal.provider)}
                       </div>
                     </div>
-
-                    {#if cli.attribution === 'unavailable'}
-                      <div
-                        class="rounded-xl border border-[var(--color-warning)] bg-[var(--color-warning-bg)] px-3 py-2 text-[11px] text-[var(--color-text-secondary)]"
-                      >
-                        Usage unavailable for this account: {cli.attributionNote}. Point this CLI
-                        profile at its own session directory to enable account-separated usage.
-                      </div>
-                    {:else}
-                      {#if cli.usagePrecision === 'input-context-only'}
-                        <div
-                          class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 py-2 text-[11px] text-[var(--color-text-secondary)]"
-                        >
-                          {#if cli.provider === 'freebuff'}
-                            Freebuff reports the input context before each model request. Its
-                            current log does not expose upstream output-token usage, so these token
-                            totals and API-equivalent values are input side only. These are not
-                            charges or invented output estimates.
-                          {:else}
-                            {cli.provider} exposes input-context usage without upstream output-token totals.
-                            Its OpenRouter equivalent is therefore input side only. This is not an invented
-                            full inference value.
-                          {/if}
-                        </div>
-                      {/if}
-                      {#if cli.creditBalance != null}
-                        <div
-                          class="flex items-center justify-between rounded-xl bg-[var(--color-surface-1)] px-3 py-2 text-[11px]"
-                        >
-                          <span class="text-[var(--color-text-secondary)]">Codex credits</span>
-                          <span class="font-mono font-semibold text-[var(--color-text-primary)]"
-                            >{cli.creditBalance}</span
-                          >
-                        </div>
-                      {/if}
-                      {#if showSubscriptionApiEquivalent && cli.apiValueMinUsd !== undefined && cli.apiValueMaxUsd !== undefined}
-                        <div
-                          class="flex items-center justify-between gap-3 rounded-xl bg-[var(--color-surface-1)] px-3 py-2 text-[11px]"
-                        >
-                          <span class="text-[var(--color-text-secondary)]"
-                            >OpenRouter {cli.apiValueCoverage === 'full' ? 'inference' : 'input'} value
-                            range · 30d</span
-                          >
-                          <div class="text-right">
-                            <div class="font-mono font-semibold text-[var(--color-text-primary)]">
-                              ${cli.apiValueMinUsd.toFixed(4)} to ${cli.apiValueMaxUsd.toFixed(4)}
-                            </div>
-                            {#if (cli.apiValueCoverage === 'full' ? cli.apiFreshValueUsd : cli.apiFreshInputValueUsd) !== undefined}
-                              <div class="text-[9px] text-[var(--color-text-muted)]">
-                                fresh-rate value ${(cli.apiValueCoverage === 'full'
-                                  ? cli.apiFreshValueUsd
-                                  : cli.apiFreshInputValueUsd
-                                ).toFixed(4)}
-                              </div>
-                            {/if}
-                            {#if cli.apiCacheAdjustedValueUsd !== undefined}
-                              <div class="text-[9px] text-[var(--color-accent)]">
-                                observed cache reads ${cli.apiCacheAdjustedValueUsd.toFixed(4)}
-                              </div>
-                            {/if}
-                          </div>
-                        </div>
-                        <div class="px-1 text-[9px] text-[var(--color-text-muted)]">
-                          Comparison value from OpenRouter’s official catalog, not the CLI’s actual
-                          subscription charge. The range includes published cache-read, fresh-input,
-                          and cache-write scenarios when available.{#if cli.cacheAccounting === 'provider-reported'}
-                            The observed-cache figure applies the CLI’s reported cache-read tokens.{/if}
-                        </div>
-                      {:else if showSubscriptionApiEquivalent && cli.apiValueUsd !== undefined}
-                        <div
-                          class="flex items-center justify-between rounded-xl bg-[var(--color-surface-1)] px-3 py-2 text-[11px]"
-                        >
-                          <span class="text-[var(--color-text-secondary)]"
-                            >API-equivalent input value · 30d</span
-                          >
-                          <span class="font-mono font-semibold text-[var(--color-text-primary)]"
-                            >${cli.apiValueUsd.toFixed(4)}</span
-                          >
-                        </div>
-                      {/if}
-                      {#each cli.quotas as q (q.label)}
-                        {@const remainingPercent = Math.max(0, 100 - q.usedPercent)}
-                        <div>
-                          <div class="flex items-center justify-between text-[11px] mb-1">
-                            <span class="text-[var(--color-text-secondary)] font-medium"
-                              >{q.label}</span
-                            >
-                            <span
-                              class="font-mono font-bold"
-                              style="color: {q.usedPercent >= 90
-                                ? 'var(--color-error)'
-                                : q.usedPercent >= 70
-                                  ? 'var(--color-warning)'
-                                  : 'var(--color-text-secondary)'};"
-                            >
-                              {remainingPercent.toFixed(0)}% left{q.resetsAt
-                                ? ` · resets ${new Date(q.resetsAt).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}`
-                                : ''}
-                            </span>
-                          </div>
-                          <div
-                            class="h-2 w-full bg-[var(--color-surface-3)] rounded-full overflow-hidden"
-                          >
-                            <div
-                              class="h-full rounded-full transition-all"
-                              style="width: {Math.min(
-                                100,
-                                remainingPercent,
-                              )}%; background: {q.usedPercent >= 90
-                                ? 'var(--color-error)'
-                                : q.usedPercent >= 70
-                                  ? 'var(--color-warning)'
-                                  : 'var(--color-accent)'};"
-                            ></div>
-                          </div>
-                        </div>
-                      {/each}
-
-                      <div class="grid grid-cols-4 gap-2 text-center">
-                        {#each cli.windows as w (w.period)}
-                          <div
-                            class="p-2.5 rounded-xl bg-[var(--color-surface-1)] border border-[var(--color-border)]"
-                          >
-                            <div class="text-xs font-medium text-[var(--color-text-secondary)]">
-                              {w.period}
-                            </div>
-                            <div
-                              class="mt-1 text-xs font-mono font-bold text-[var(--color-text-primary)]"
-                            >
-                              {formatTokens(w.tokensIn + w.tokensOut)}
-                            </div>
-                            <div class="text-[9px] text-[var(--color-text-muted)]">tokens</div>
-                          </div>
-                        {/each}
-                      </div>
-
-                      {#if cli.dailyUsage?.length}
-                        {@const trendKey = subscriptionTrendKey(cli)}
-                        {@const trendExpanded = expandedSubscriptionTrends[trendKey] ?? false}
-                        {@const trend = shownUsageTrend(cli)}
-                        {@const activeTrendIndex = activeSubscriptionTrendPoints[trendKey]}
-                        {@const activeTrendPoint =
-                          activeTrendIndex == null ? undefined : trend[activeTrendIndex]}
-                        <div
-                          class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-3"
-                        >
-                          <div class="flex items-center justify-between gap-3 text-[10px]">
-                            <span class="font-semibold text-[var(--color-text-secondary)]"
-                              >Usage trend</span
-                            >
-                            <div class="flex items-center gap-1.5">
-                              {#each [7, 14, 30] as days (days)}
-                                <button
-                                  type="button"
-                                  class="rounded-md border px-1.5 py-0.5 font-mono transition-colors"
-                                  class:border-[var(--color-accent)]={(subscriptionTrendRanges[
-                                    trendKey
-                                  ] ?? 14) === days}
-                                  class:text-[var(--color-accent)]={(subscriptionTrendRanges[
-                                    trendKey
-                                  ] ?? 14) === days}
-                                  class:border-[var(--color-border)]={(subscriptionTrendRanges[
-                                    trendKey
-                                  ] ?? 14) !== days}
-                                  class:text-[var(--color-text-muted)]={(subscriptionTrendRanges[
-                                    trendKey
-                                  ] ?? 14) !== days}
-                                  aria-pressed={(subscriptionTrendRanges[trendKey] ?? 14) === days}
-                                  onclick={() => {
-                                    subscriptionTrendRanges[trendKey] = days;
-                                    activeSubscriptionTrendPoints[trendKey] = undefined;
-                                  }}>{days}d</button
-                                >
-                              {/each}
-                              <button
-                                type="button"
-                                class="ml-1 rounded-md border border-[var(--color-border)] px-1.5 py-0.5 font-medium text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
-                                aria-expanded={trendExpanded}
-                                onclick={() =>
-                                  (expandedSubscriptionTrends[trendKey] = !trendExpanded)}
-                                >{trendExpanded ? 'Collapse' : 'Expand'}</button
-                              >
-                            </div>
-                          </div>
-                          <!-- Reserve this row so showing a hover value never moves the SVG out
-                           from under the pointer (which used to produce a leave/re-enter loop). -->
-                          <div class="mt-2 h-6">
-                            {#if activeTrendPoint}
-                              <div
-                                class="flex items-center justify-between rounded-md bg-[var(--color-surface-2)] px-2 py-1 text-[10px]"
-                              >
-                                <span class="text-[var(--color-text-secondary)]"
-                                  >{formatUsageTrendDate(activeTrendPoint.date)}</span
-                                >
-                                <span
-                                  class="font-mono font-semibold text-[var(--color-text-primary)]"
-                                  >{formatTokens(activeTrendPoint.tokens ?? 0)} tokens</span
-                                >
-                              </div>
-                            {/if}
-                          </div>
-                          <svg
-                            class="w-full overflow-visible {trendExpanded ? 'h-32' : 'h-16'}"
-                            viewBox={trendExpanded ? '0 0 280 128' : '0 0 280 64'}
-                            preserveAspectRatio="none"
-                            role="img"
-                            aria-label={`Daily token usage from ${formatUsageTrendDate(trend[0]?.date)} to ${formatUsageTrendDate(trend[trend.length - 1]?.date)}`}
-                            onpointermove={(event) => updateUsageTrendPoint(event, trendKey, trend)}
-                            onpointerleave={() =>
-                              (activeSubscriptionTrendPoints[trendKey] = undefined)}
-                          >
-                            <line
-                              x1="0"
-                              y1={trendExpanded ? 127 : 63}
-                              x2="280"
-                              y2={trendExpanded ? 127 : 63}
-                              stroke="var(--color-border)"
-                              stroke-width="1"
-                            />
-                            <polyline
-                              points={usageTrendPoints(trend, trendExpanded ? 128 : 64)}
-                              fill="none"
-                              stroke="var(--color-accent)"
-                              stroke-width="2.5"
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                            />
-                          </svg>
-                          <div
-                            class="mt-1 flex justify-between text-[9px] text-[var(--color-text-muted)]"
-                          >
-                            <span>{formatUsageTrendDate(trend[0]?.date)}</span>
-                            <span>{formatUsageTrendDate(trend[trend.length - 1]?.date)}</span>
-                          </div>
-                        </div>
-                      {/if}
-
-                      {#if cli.byModel?.length}
-                        <div class="space-y-1.5">
-                          {#each cli.byModel.slice(0, 4) as m (m.model)}
-                            <div class="rounded-lg bg-[var(--color-surface-1)] px-2.5 py-1.5">
-                              <div class="flex items-center justify-between text-[11px]">
-                                <span class="font-mono text-[var(--color-text-secondary)] truncate"
-                                  >{m.model}</span
-                                >
-                                <span
-                                  class="font-mono text-[var(--color-text-muted)] shrink-0 ml-3"
-                                >
-                                  {formatTokens(m.tokensIn + m.tokensOut)} tokens
-                                </span>
-                              </div>
-                              {#if showSubscriptionApiEquivalent && (m.apiEquivalent || m.apiProvider)}
-                                <div
-                                  class="mt-0.5 flex items-center gap-1 text-[9px] text-[var(--color-text-muted)]"
-                                >
-                                  <span class="font-medium">API equivalent</span>
-                                  <span
-                                    class="font-mono text-[var(--color-accent)]/80 truncate"
-                                    title={m.apiEquivalent ?? m.apiProvider ?? ''}
-                                  >
-                                    {m.apiProvider ? `${m.apiProvider}/` : ''}{m.apiEquivalent ??
-                                      '(unmapped)'}
-                                  </span>
-                                  {#if m.apiEquivalent && m.apiEquivalent === m.model}
-                                    <span class="text-[var(--color-text-muted)] italic">(same)</span
-                                    >
-                                  {/if}
-                                </div>
-                              {/if}
-                              {#if m.contextWindow || m.apiValueUsd !== undefined}
-                                <div
-                                  class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[9px] text-[var(--color-text-muted)]"
-                                >
-                                  {#if m.contextWindow}
-                                    <span
-                                      >Context
-                                      <span class="font-mono text-[var(--color-text-secondary)]"
-                                        >{formatTokens(m.contextWindow)}</span
-                                      ></span
-                                    >
-                                  {/if}
-                                  {#if showSubscriptionApiEquivalent && m.apiValueMinUsd !== undefined && m.apiValueMaxUsd !== undefined}
-                                    <span
-                                      >OpenRouter {m.apiValueCoverage === 'full'
-                                        ? 'inference'
-                                        : 'input'}
-                                      <span class="font-mono text-[var(--color-text-secondary)]"
-                                        >${m.apiValueMinUsd.toFixed(4)} to ${m.apiValueMaxUsd.toFixed(
-                                          4,
-                                        )}</span
-                                      ></span
-                                    >
-                                  {:else if showSubscriptionApiEquivalent && m.apiValueUsd !== undefined}
-                                    <span
-                                      >API input value
-                                      <span class="font-mono text-[var(--color-text-secondary)]"
-                                        >${m.apiValueUsd.toFixed(4)}</span
-                                      ></span
-                                    >
-                                  {/if}
-                                  {#if showSubscriptionApiEquivalent && m.apiCacheAdjustedValueUsd !== undefined}
-                                    <span
-                                      >Observed cache
-                                      <span class="font-mono text-[var(--color-text-secondary)]"
-                                        >${m.apiCacheAdjustedValueUsd.toFixed(4)}</span
-                                      ></span
-                                    >
-                                  {/if}
-                                </div>
-                              {/if}
-                              {#if showSubscriptionApiEquivalent && m.promptUsdPerMillion !== undefined}
-                                <div
-                                  class="mt-0.5 text-[9px] text-[var(--color-text-muted)]"
-                                  title={m.pricingHasThresholds
-                                    ? 'OpenRouter publishes prompt size pricing thresholds. Koryphaios applies them to each recorded request.'
-                                    : 'Official OpenRouter per-token pricing'}
-                                >
-                                  OpenRouter $/M: fresh
-                                  <span class="font-mono"
-                                    >${formatUsdRate(m.promptUsdPerMillion)}</span
-                                  >{#if m.completionUsdPerMillion !== undefined}, output
-                                    <span class="font-mono"
-                                      >${formatUsdRate(m.completionUsdPerMillion)}</span
-                                    >{/if}{#if m.cacheReadUsdPerMillion !== undefined}, cache read
-                                    <span class="font-mono"
-                                      >${formatUsdRate(m.cacheReadUsdPerMillion)}</span
-                                    >{/if}{#if m.cacheWriteUsdPerMillion !== undefined}, cache write
-                                    <span class="font-mono"
-                                      >${formatUsdRate(m.cacheWriteUsdPerMillion)}</span
-                                    >{/if}{#if m.pricingHasThresholds}
-                                    <span class="italic"> · size-tiered</span>{/if}
-                                </div>
-                              {/if}
-                            </div>
-                          {/each}
-                        </div>
-                      {/if}
-
-                      {#if cli.modelCatalog?.length}
-                        <div class="space-y-1.5">
-                          <div class="text-xs font-medium text-[var(--color-text-secondary)]">
-                            Installed model context{showSubscriptionApiEquivalent
-                              ? ' and OpenRouter rates'
-                              : ''}
-                          </div>
-                          {#each cli.modelCatalog as model (model.model)}
-                            <div
-                              class="rounded-lg bg-[var(--color-surface-1)] px-2.5 py-1.5 text-[10px]"
-                            >
-                              <div class="flex items-center justify-between gap-3">
-                                <div class="min-w-0">
-                                  <div
-                                    class="truncate font-semibold text-[var(--color-text-secondary)]"
-                                  >
-                                    {model.name}
-                                  </div>
-                                  <div class="truncate font-mono text-[var(--color-text-muted)]">
-                                    {model.model}
-                                  </div>
-                                </div>
-                                <span
-                                  class="shrink-0 font-mono font-semibold text-[var(--color-text-primary)]"
-                                >
-                                  {model.contextWindow
-                                    ? `${formatTokens(model.contextWindow)} context`
-                                    : 'Not reported'}
-                                </span>
-                              </div>
-                              {#if showSubscriptionApiEquivalent && model.promptUsdPerMillion !== undefined}
-                                <div class="mt-1 text-[9px] text-[var(--color-text-muted)]">
-                                  OpenRouter
-                                  {#if model.apiEquivalent && model.apiEquivalent !== model.model}
-                                    <span class="font-mono text-[var(--color-accent)]/80"
-                                      >{model.apiEquivalent}</span
-                                    > ·
-                                  {/if}
-                                  fresh
-                                  <span class="font-mono"
-                                    >${formatUsdRate(model.promptUsdPerMillion)}/M</span
-                                  >{#if model.completionUsdPerMillion !== undefined}, output
-                                    <span class="font-mono"
-                                      >${formatUsdRate(model.completionUsdPerMillion)}/M</span
-                                    >{/if}{#if model.cacheReadUsdPerMillion !== undefined}, cache
-                                    read
-                                    <span class="font-mono"
-                                      >${formatUsdRate(model.cacheReadUsdPerMillion)}/M</span
-                                    >{/if}{#if model.cacheWriteUsdPerMillion !== undefined}, cache
-                                    write
-                                    <span class="font-mono"
-                                      >${formatUsdRate(model.cacheWriteUsdPerMillion)}/M</span
-                                    >{/if}{#if model.pricingHasThresholds}
-                                    <span class="italic"> · size-tiered</span>{/if}
-                                </div>
-                              {/if}
-                            </div>
-                          {/each}
-                        </div>
-                      {/if}
-                    {/if}
-                  </div>
-                {/each}
+                  {/each}
+                </div>
               </div>
-            </div>
-          {:else if billingCredits?.refreshing && billingCredits?.detectedCliAccounts?.length}
+            {/if}
+
             <div class="space-y-4">
-              <div>
+              <div class="ml-1">
                 <h3 class="text-sm font-bold text-[var(--color-text-primary)]">
-                  CLI subscriptions
+                  Tracked API spend by provider
                 </h3>
                 <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">
-                  CLI profiles are being checked while usage history is indexed. Connected means a
-                  provider probe succeeded; a detected profile has not been connected in Koryphaios
-                  yet.
+                  Expand a provider for exact model-level tracked spend. Unknown pricing stays
+                  unknown.
                 </p>
               </div>
-              <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                {#each billingCredits.detectedCliAccounts as account (`${account.provider}:${account.id}`)}
-                  <div
-                    class="flex items-center gap-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5"
-                  >
+              <div class="space-y-2">
+                {#if billingCredits?.byProvider?.length}
+                  {#each billingCredits.byProvider as prov (prov.name)}
                     <div
-                      class="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-surface-3)] p-2"
+                      class="billing-panel overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)]"
                     >
-                      <ProviderIcon provider={account.provider} size={20} />
-                    </div>
-                    <div class="min-w-0 flex-1">
-                      <div class="truncate text-sm font-semibold text-[var(--color-text-primary)]">
-                        {account.email || account.label}
-                      </div>
-                      <div class="text-[10px] text-[var(--color-text-muted)]">
-                        {account.plan
-                          ? `${account.plan.toUpperCase()} plan · `
-                          : ''}{account.connectionState === 'connected'
-                          ? 'Connected · indexing usage…'
-                          : account.connectionState === 'failed'
-                            ? 'Connection failed · indexing usage…'
-                            : 'Detected · not connected · indexing usage…'}
-                      </div>
-                    </div>
-                    <RefreshCw size={14} class="animate-spin text-[var(--color-accent)]" />
-                  </div>
-                {/each}
-              </div>
-            </div>
-          {/if}
-
-          {#if billingCredits?.balances?.length}
-            <div class="space-y-4">
-              <h3 class="text-sm font-bold text-[var(--color-text-primary)] ml-1">
-                API account balances
-              </h3>
-              <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {#each billingCredits.balances as bal (bal.provider)}
-                  <div
-                    class="p-4 bg-[var(--color-surface-2)] rounded-xl border border-[var(--color-border)] text-center"
-                  >
-                    <div
-                      class="w-8 h-8 mx-auto rounded-lg bg-[var(--color-surface-3)] flex items-center justify-center p-1.5 mb-2"
-                    >
-                      <ProviderIcon provider={bal.provider} size={20} class="w-full h-full" />
-                    </div>
-                    <div class="text-lg font-black font-mono text-[var(--color-success)]">
-                      {bal.availableUsd != null
-                        ? `$${bal.availableUsd.toFixed(2)}`
-                        : 'Not available'}
-                    </div>
-                    <div class="text-xs font-medium text-[var(--color-text-muted)] mt-1">
-                      {getProviderDisplayLabel(bal.provider)}
-                    </div>
-                  </div>
-                {/each}
-              </div>
-            </div>
-          {/if}
-
-          <div class="space-y-4">
-            <div class="ml-1">
-              <h3 class="text-sm font-bold text-[var(--color-text-primary)]">
-                Tracked API spend by provider
-              </h3>
-              <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">
-                Expand a provider for exact model-level tracked spend. Unknown pricing stays
-                unknown.
-              </p>
-            </div>
-            <div class="space-y-2">
-              {#if billingCredits?.byProvider?.length}
-                {#each billingCredits.byProvider as prov (prov.name)}
-                  <div
-                    class="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)]"
-                  >
-                    <button
-                      type="button"
-                      class="flex w-full items-center gap-3 p-4 text-left transition-colors hover:bg-[var(--color-surface-3)]"
-                      aria-expanded={expandedBillingProviders[prov.name] ?? false}
-                      onclick={() =>
-                        (expandedBillingProviders[prov.name] = !(
-                          expandedBillingProviders[prov.name] ?? false
-                        ))}
-                    >
-                      <span
-                        class="w-4 shrink-0 text-[10px] text-[var(--color-text-muted)]"
-                        aria-hidden="true"
+                      <button
+                        type="button"
+                        class="flex w-full items-center gap-3 p-4 text-left transition-colors hover:bg-[var(--color-surface-3)]"
+                        aria-expanded={expandedBillingProviders[prov.name] ?? false}
+                        onclick={() =>
+                          (expandedBillingProviders[prov.name] = !(
+                            expandedBillingProviders[prov.name] ?? false
+                          ))}
                       >
-                        {expandedBillingProviders[prov.name] ? '▼' : '▶'}
-                      </span>
-                      <span
-                        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-3)] p-1.5"
-                      >
-                        <ProviderIcon provider={prov.name} size={20} class="h-full w-full" />
-                      </span>
-                      <span class="min-w-0 flex-1">
                         <span
-                          class="block truncate text-xs font-semibold text-[var(--color-text-primary)]"
-                          >{getProviderDisplayLabel(prov.name)}</span
+                          class="w-4 shrink-0 text-[10px] text-[var(--color-text-muted)]"
+                          aria-hidden="true"
                         >
-                        <span class="text-[10px] font-mono text-[var(--color-text-muted)]"
-                          >{formatTokens((prov.tokensIn ?? 0) + (prov.tokensOut ?? 0))} tokens</span
-                        >
-                      </span>
-                      <span class="text-right">
-                        <span
-                          class="block text-xs font-mono font-bold text-[var(--color-text-secondary)]"
-                        >
-                          {prov.hasKnownCost === false
-                            ? '$?.??'
-                            : formatBillingUsd(prov.spendUsd ?? (prov.spendCents ?? 0) / 100)}
+                          {expandedBillingProviders[prov.name] ? '▼' : '▶'}
                         </span>
-                        {#if prov.pricingIncomplete}<span
-                            class="text-[9px] text-[var(--color-warning)]">pricing incomplete</span
-                          >{/if}
-                      </span>
-                    </button>
-                    {#if expandedBillingProviders[prov.name]}
-                      <div
-                        class="border-t border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-2"
+                        <span
+                          class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-3)] p-1.5"
+                        >
+                          <ProviderIcon provider={prov.name} size={20} class="h-full w-full" />
+                        </span>
+                        <span class="min-w-0 flex-1">
+                          <span
+                            class="block truncate text-xs font-semibold text-[var(--color-text-primary)]"
+                            >{getProviderDisplayLabel(prov.name)}</span
+                          >
+                          <span class="text-[10px] font-mono text-[var(--color-text-muted)]"
+                            >{formatTokens((prov.tokensIn ?? 0) + (prov.tokensOut ?? 0))} tokens</span
+                          >
+                        </span>
+                        <span class="text-right">
+                          <span
+                            class="block text-xs font-mono font-bold text-[var(--color-text-secondary)]"
+                          >
+                            {prov.hasKnownCost === false
+                              ? '$?.??'
+                              : formatBillingUsd(prov.spendUsd ?? (prov.spendCents ?? 0) / 100)}
+                          </span>
+                          {#if prov.pricingIncomplete}<span
+                              class="text-[9px] text-[var(--color-warning)]"
+                              >pricing incomplete</span
+                            >{/if}
+                        </span>
+                      </button>
+                      {#if expandedBillingProviders[prov.name]}
+                        <div
+                          class="border-t border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-2"
+                        >
+                          {#each prov.models ?? [] as model (model.model)}
+                            <div class="flex items-center justify-between gap-3 py-2 text-[11px]">
+                              <div class="min-w-0">
+                                <div class="truncate font-mono text-[var(--color-text-secondary)]">
+                                  {model.model}
+                                </div>
+                                <div class="text-[9px] text-[var(--color-text-muted)]">
+                                  {formatTokens((model.tokensIn ?? 0) + (model.tokensOut ?? 0))} tokens
+                                </div>
+                              </div>
+                              <div
+                                class="shrink-0 text-right font-mono font-semibold text-[var(--color-text-primary)]"
+                              >
+                                {model.hasKnownCost === false
+                                  ? '$?.??'
+                                  : formatBillingUsd(
+                                      model.spendUsd ?? (model.spendCents ?? 0) / 100,
+                                    )}
+                                {#if model.pricingIncomplete}<div
+                                    class="text-[9px] font-sans font-normal text-[var(--color-warning)]"
+                                  >
+                                    incomplete
+                                  </div>{/if}
+                              </div>
+                            </div>
+                          {/each}
+                        </div>
+                      {/if}
+                    </div>
+                  {/each}
+                {:else}
+                  <div
+                    class="py-12 text-center border-2 border-dashed border-[var(--color-border)] rounded-2xl"
+                  >
+                    <p class="text-xs text-[var(--color-text-muted)]">
+                      No tracked API usage recorded yet
+                    </p>
+                  </div>
+                {/if}
+              </div>
+            </div>
+
+            <div
+              class="billing-panel space-y-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4"
+            >
+              <button
+                type="button"
+                class="flex w-full items-center gap-3 text-left"
+                aria-expanded={billingControlsExpanded}
+                aria-controls="billing-controls-body"
+                onclick={() => (billingControlsExpanded = !billingControlsExpanded)}
+              >
+                <span class="min-w-0 flex-1">
+                  <span class="block text-sm font-bold text-[var(--color-text-primary)]"
+                    >Billing controls</span
+                  >
+                  <span class="mt-1 block text-[10px] text-[var(--color-text-muted)]">
+                    Choose which providers contribute to Billing totals and live balance probes.
+                    {#if billingCredits?.availableBillingProviders?.length}
+                      {billingCredits.availableBillingProviders.filter((provider: string) =>
+                        billingProviderIncluded(provider),
+                      ).length} of {billingCredits.availableBillingProviders.length} included.
+                    {/if}
+                  </span>
+                </span>
+                <span
+                  class="shrink-0 text-[10px] font-semibold text-[var(--color-text-muted)]"
+                  aria-hidden="true"
+                >
+                  {billingControlsExpanded ? 'Hide' : 'Show'}
+                </span>
+                <ChevronDown
+                  size={16}
+                  class="shrink-0 text-[var(--color-text-muted)] transition-transform {billingControlsExpanded
+                    ? 'rotate-180'
+                    : ''}"
+                />
+              </button>
+              {#if billingControlsExpanded}
+                <div id="billing-controls-body" class="space-y-3">
+                  <SettingsSwitch
+                    compact
+                    checked={showSubscriptionApiEquivalent}
+                    label="Show subscription API-equivalent values"
+                    description="Comparison value only. It is never added to tracked API spend."
+                    onchange={toggleSubscriptionApiEquivalent}
+                  />
+                  {#if billingCredits?.availableBillingProviders?.length}
+                    <div class="relative">
+                      <Search
+                        size={13}
+                        class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
+                      />
+                      <label for="billing-controls-search" class="sr-only"
+                        >Search billing providers</label
                       >
-                        {#each prov.models ?? [] as model (model.model)}
-                          <div class="flex items-center justify-between gap-3 py-2 text-[11px]">
-                            <div class="min-w-0">
-                              <div class="truncate font-mono text-[var(--color-text-secondary)]">
-                                {model.model}
-                              </div>
-                              <div class="text-[9px] text-[var(--color-text-muted)]">
-                                {formatTokens((model.tokensIn ?? 0) + (model.tokensOut ?? 0))} tokens
-                              </div>
-                            </div>
-                            <div
-                              class="shrink-0 text-right font-mono font-semibold text-[var(--color-text-primary)]"
-                            >
-                              {model.hasKnownCost === false
-                                ? '$?.??'
-                                : formatBillingUsd(model.spendUsd ?? (model.spendCents ?? 0) / 100)}
-                              {#if model.pricingIncomplete}<div
-                                  class="text-[9px] font-sans font-normal text-[var(--color-warning)]"
-                                >
-                                  incomplete
-                                </div>{/if}
-                            </div>
-                          </div>
+                      <input
+                        id="billing-controls-search"
+                        type="search"
+                        bind:value={billingControlsSearch}
+                        placeholder="Search providers..."
+                        class="h-9 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] pl-8 pr-8 text-xs text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-muted)] hover:border-[var(--color-border-bright)] focus-visible:border-[var(--color-accent)]"
+                      />
+                      {#if billingControlsSearch}
+                        <button
+                          type="button"
+                          aria-label="Clear billing provider search"
+                          onclick={() => (billingControlsSearch = '')}
+                          class="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+                        >
+                          <X size={12} />
+                        </button>
+                      {/if}
+                    </div>
+                    {@const billingControlsQuery = billingControlsSearch.trim().toLocaleLowerCase()}
+                    {@const filteredBillingProviders = (
+                      billingCredits.availableBillingProviders as string[]
+                    ).filter((provider: string) => {
+                      if (!billingControlsQuery) return true;
+                      return (
+                        provider.toLocaleLowerCase().includes(billingControlsQuery) ||
+                        getProviderDisplayLabel(provider)
+                          .toLocaleLowerCase()
+                          .includes(billingControlsQuery)
+                      );
+                    })}
+                    {#if filteredBillingProviders.length}
+                      <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                        {#each filteredBillingProviders as provider (provider)}
+                          <SettingsSwitch
+                            compact
+                            checked={billingProviderIncluded(provider)}
+                            label={getProviderDisplayLabel(provider)}
+                            description="Include this provider in Billing"
+                            onchange={() => void toggleBillingProvider(provider)}
+                          />
                         {/each}
                       </div>
+                    {:else}
+                      <div
+                        class="rounded-xl border border-dashed border-[var(--color-border)] px-3 py-5 text-center"
+                      >
+                        <p class="text-xs font-medium text-[var(--color-text-secondary)]">
+                          No providers match “{billingControlsSearch.trim()}”
+                        </p>
+                        <button
+                          type="button"
+                          class="mt-2 min-h-9 rounded-lg px-3 text-[10px] font-medium text-[var(--color-accent)] hover:bg-[var(--color-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+                          onclick={() => (billingControlsSearch = '')}>Clear search</button
+                        >
+                      </div>
                     {/if}
-                  </div>
-                {/each}
-              {:else}
-                <div
-                  class="py-12 text-center border-2 border-dashed border-[var(--color-border)] rounded-2xl"
-                >
-                  <p class="text-xs text-[var(--color-text-muted)]">
-                    No tracked API usage recorded yet
-                  </p>
+                  {/if}
                 </div>
               {/if}
             </div>
           </div>
-
-          <div
-            class="space-y-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4"
-          >
-            <button
-              type="button"
-              class="flex w-full items-center gap-3 text-left"
-              aria-expanded={billingControlsExpanded}
-              aria-controls="billing-controls-body"
-              onclick={() => (billingControlsExpanded = !billingControlsExpanded)}
-            >
-              <span class="min-w-0 flex-1">
-                <span class="block text-sm font-bold text-[var(--color-text-primary)]"
-                  >Billing controls</span
-                >
-                <span class="mt-1 block text-[10px] text-[var(--color-text-muted)]">
-                  Choose which providers contribute to Billing totals and live balance probes.
-                  {#if billingCredits?.availableBillingProviders?.length}
-                    {billingCredits.availableBillingProviders.filter((provider: string) =>
-                      billingProviderIncluded(provider),
-                    ).length} of {billingCredits.availableBillingProviders.length} included.
-                  {/if}
-                </span>
-              </span>
-              <span
-                class="shrink-0 text-[10px] font-semibold text-[var(--color-text-muted)]"
-                aria-hidden="true"
-              >
-                {billingControlsExpanded ? 'Hide' : 'Show'}
-              </span>
-              <ChevronDown
-                size={16}
-                class="shrink-0 text-[var(--color-text-muted)] transition-transform {billingControlsExpanded
-                  ? 'rotate-180'
-                  : ''}"
-              />
-            </button>
-            {#if billingControlsExpanded}
-              <div id="billing-controls-body" class="space-y-3">
-                <SettingsSwitch
-                  compact
-                  checked={showSubscriptionApiEquivalent}
-                  label="Show subscription API-equivalent values"
-                  description="Comparison value only. It is never added to tracked API spend."
-                  onchange={toggleSubscriptionApiEquivalent}
-                />
-                {#if billingCredits?.availableBillingProviders?.length}
-                  <div class="relative">
-                    <Search
-                      size={13}
-                      class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
-                    />
-                    <label for="billing-controls-search" class="sr-only"
-                      >Search billing providers</label
-                    >
-                    <input
-                      id="billing-controls-search"
-                      type="search"
-                      bind:value={billingControlsSearch}
-                      placeholder="Search providers..."
-                      class="h-9 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] pl-8 pr-8 text-xs text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-muted)] hover:border-[var(--color-border-bright)] focus-visible:border-[var(--color-accent)]"
-                    />
-                    {#if billingControlsSearch}
-                      <button
-                        type="button"
-                        aria-label="Clear billing provider search"
-                        onclick={() => (billingControlsSearch = '')}
-                        class="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-                      >
-                        <X size={12} />
-                      </button>
-                    {/if}
-                  </div>
-                  {@const billingControlsQuery = billingControlsSearch.trim().toLocaleLowerCase()}
-                  {@const filteredBillingProviders = (
-                    billingCredits.availableBillingProviders as string[]
-                  ).filter((provider: string) => {
-                    if (!billingControlsQuery) return true;
-                    return (
-                      provider.toLocaleLowerCase().includes(billingControlsQuery) ||
-                      getProviderDisplayLabel(provider)
-                        .toLocaleLowerCase()
-                        .includes(billingControlsQuery)
-                    );
-                  })}
-                  {#if filteredBillingProviders.length}
-                    <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                      {#each filteredBillingProviders as provider (provider)}
-                        <SettingsSwitch
-                          compact
-                          checked={billingProviderIncluded(provider)}
-                          label={getProviderDisplayLabel(provider)}
-                          description="Include this provider in Billing"
-                          onchange={() => void toggleBillingProvider(provider)}
-                        />
-                      {/each}
-                    </div>
-                  {:else}
-                    <div
-                      class="rounded-xl border border-dashed border-[var(--color-border)] px-3 py-5 text-center"
-                    >
-                      <p class="text-xs font-medium text-[var(--color-text-secondary)]">
-                        No providers match “{billingControlsSearch.trim()}”
-                      </p>
-                      <button
-                        type="button"
-                        class="mt-2 min-h-9 rounded-lg px-3 text-[10px] font-medium text-[var(--color-accent)] hover:bg-[var(--color-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-                        onclick={() => (billingControlsSearch = '')}>Clear search</button
-                      >
-                    </div>
-                  {/if}
-                {/if}
-              </div>
-            {/if}
-          </div>
         </div>
 
         <!-- Memory Tab -->
+        {#if open && activeTab === 'devices'}
+          <div class="flex-1 min-h-0 overflow-y-auto"><LinkDevicePanel /></div>
+        {/if}
+        {#if open && activeTab === 'project'}
+          <ProjectIdentitySettings />
+        {/if}
         {#if open && activeTab === 'memory'}
           <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             <MemoryEditor />
+          </div>
+        {/if}
+
+        <!-- Keep skill drafts mounted while navigating between settings panes. -->
+        {#if open && skillsVisited}
+          <div
+            class={activeTab === 'skills'
+              ? 'skills-settings-workspace flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden'
+              : 'hidden'}
+          >
+            <SkillsWorkspace active={activeTab === 'skills'} />
           </div>
         {/if}
 
@@ -4096,7 +4339,9 @@
         >
           <div class="mx-auto flex w-full max-w-5xl flex-1 flex-col pb-8">
             <div class="mb-5">
-              <h3 class="flex items-center gap-2 text-base font-semibold text-[var(--color-text-primary)]">
+              <h3
+                class="flex items-center gap-2 text-base font-semibold text-[var(--color-text-primary)]"
+              >
                 <Users size={18} class="text-[var(--color-accent)]" />
                 Team Collaboration
               </h3>
@@ -4105,9 +4350,7 @@
               </p>
             </div>
 
-            <div
-              class="mb-5 w-full border-b border-[var(--color-border)] pb-3"
-            >
+            <div class="mb-5 w-full border-b border-[var(--color-border)] pb-3">
               <SettingsSwitch
                 checked={showTeamSidebarShortcut}
                 label="Show Teams shortcut in sidebar"
@@ -4183,19 +4426,17 @@
                       </div>
                     </div>
                   {:else}
-                    <!-- Relay not configured — show legacy join code -->
-                    <div class="text-center">
-                      <p class="mb-2 block text-xs font-medium text-[var(--color-text-secondary)]">
-                        Join Code (local network only)
+                    <!-- A host without an enforced relay is not shareable. Do not
+                         present the historical local join code as usable. -->
+                    <div
+                      class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4"
+                    >
+                      <p class="text-xs font-semibold text-[var(--color-text-primary)]">
+                        Sharing is not configured
                       </p>
-                      <code
-                        class="block rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] py-4 text-3xl font-black tracking-[0.3em] text-[var(--color-accent)]"
-                      >
-                        {collaborationStore.activeCollab.joinCode || '••••••'}
-                      </code>
-                      <p class="mt-3 text-[11px] text-[var(--color-text-muted)]">
-                        Configure RELAY_URL and RELAY_HOST_SECRET in your environment for
-                        internet-accessible invite links.
+                      <p class="mt-1 text-[11px] leading-5 text-[var(--color-text-muted)]">
+                        Configure the collaboration relay to create an invite, or use Linked Devices
+                        for a direct connection. This workspace remains available locally.
                       </p>
                     </div>
                   {/if}
@@ -4276,9 +4517,7 @@
             {:else}
               <!-- ── NOT HOSTING ── -->
               {#if collaborationStore.joinedSessions.length}
-                <div
-                  class="mb-5 w-full border-b border-[var(--color-border)] pb-5"
-                >
+                <div class="mb-5 w-full border-b border-[var(--color-border)] pb-5">
                   <div class="mb-5">
                     <h4 class="text-sm font-bold text-[var(--color-text-primary)]">
                       Team sessions
@@ -4319,9 +4558,7 @@
                 <div
                   class="flex flex-col rounded-lg border border-transparent p-5 transition-colors hover:border-[var(--color-border-bright)] focus-within:border-[var(--color-border-bright)]"
                 >
-                  <div
-                    class="mb-3 text-[var(--color-success)]"
-                  >
+                  <div class="mb-3 text-[var(--color-success)]">
                     <Zap size={20} />
                   </div>
                   <h4 class="mb-1 text-sm font-semibold">Team session</h4>
@@ -4331,13 +4568,15 @@
                   </p>
                   <label class="mb-4 block text-xs text-[var(--color-text-secondary)]">
                     Your name shown to teammates
-                    <input bind:value={teamHostName} maxlength="80" placeholder="Host name"
-                      class="mt-1.5 min-h-10 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]" />
+                    <input
+                      bind:value={teamHostName}
+                      maxlength="80"
+                      placeholder="Host name"
+                      class="mt-1.5 min-h-10 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]"
+                    />
                   </label>
 
-                  <div
-                    class="mb-4 flex-1 border-t border-[var(--color-border)] pt-4"
-                  >
+                  <div class="mb-4 flex-1 border-t border-[var(--color-border)] pt-4">
                     <div class="mb-4 flex items-start justify-between gap-4">
                       <div>
                         <div class="text-xs font-bold text-[var(--color-text-primary)]">
@@ -4410,9 +4649,7 @@
                 <div
                   class="flex flex-col rounded-lg border border-transparent p-5 transition-colors hover:border-[var(--color-border-bright)] focus-within:border-[var(--color-border-bright)]"
                 >
-                  <div
-                    class="mb-3 text-[var(--color-info)]"
-                  >
+                  <div class="mb-3 text-[var(--color-info)]">
                     <Keyboard size={20} />
                   </div>
                   <h4 class="mb-1 text-sm font-semibold">Connect to a team</h4>
@@ -4438,7 +4675,9 @@
                       bind:value={teamJoinCode}
                       aria-label="Team join code"
                       aria-invalid={!!collaborationStore.joinError}
-                      aria-describedby={collaborationStore.joinError ? 'team-join-error' : undefined}
+                      aria-describedby={collaborationStore.joinError
+                        ? 'team-join-error'
+                        : undefined}
                       oninput={() => collaborationStore.clearJoinError()}
                       autocomplete="off"
                       spellcheck="false"
@@ -4473,7 +4712,11 @@
             <!-- ── SECOND SECTION: Share Models ── separate from collaboration;
                its own models-only invite link so it never grants session access. -->
             <div class="mt-6 w-full border-t border-[var(--color-border)] pt-6">
-              <ModelSharingPanel hostName={collaborationStore.activeCollab?.policy.hostName || teamHostName.trim() || 'Host'} />
+              <ModelSharingPanel
+                hostName={collaborationStore.activeCollab?.policy.hostName ||
+                  teamHostName.trim() ||
+                  'Host'}
+              />
             </div>
           </div>
         </div>
@@ -4481,69 +4724,117 @@
         <!-- Notes Tab -->
         <div
           class={activeTab === 'notes'
-            ? 'flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-6 py-5 space-y-8 w-full max-w-7xl mx-auto'
+            ? 'notes-settings-scroll flex-1 min-h-0 overflow-y-auto overflow-x-hidden'
             : 'hidden'}
         >
-          <div>
-            <h3 class="text-base font-semibold mb-1" style="color: var(--color-text-primary);">
-              Note Network
-            </h3>
-            <p class="text-xs" style="color: var(--color-text-muted);">
-              Obsidian style note network. Link notes with [[wikilinks]], visualise connections, and
-              explicitly choose which notes enter agent context. Pinning only changes list order.
-            </p>
-          </div>
-
-          <!-- Enable / disable -->
-          <div class="space-y-5">
-            <div class="settings-field-label">General</div>
-
-            <SettingsSwitch
-              checked={notesStore.settings.enabled}
-              label="Enable Notes"
-              description="Show the Notes panel button and enable note creation"
-              onchange={() =>
-                void notesStore.updateSettings({ enabled: !notesStore.settings.enabled })}
-              flat
-            />
-
-            <SettingsSwitch
-              checked={notesStore.settings.autoIncludeInContext}
-              label="Include selected notes in agent context"
-              description="Only notes explicitly marked In context are eligible. Pinned notes are unaffected"
-              onchange={() =>
-                void notesStore.updateSettings({
-                  autoIncludeInContext: !notesStore.settings.autoIncludeInContext,
-                })}
-              flat
-            />
-
-            <!-- Max context tokens with enable/disable toggle -->
-            <div class="flex items-start justify-between gap-4">
-              <div class="min-w-0">
-                <div class="text-sm font-medium" style="color: var(--color-text-primary);">
-                  Max context tokens
-                </div>
-                <div class="text-xs mt-1" style="color: var(--color-text-muted);">
-                  {(notesStore.settings.maxContextTokensEnabled ?? true)
-                    ? 'Use a custom 100 to 100,000 token limit for explicitly selected notes'
-                    : 'Custom limit off. The 100,000 token safety ceiling still applies'}
-                </div>
+          <div class="notes-settings-page">
+            <header class="notes-page-header">
+              <div>
+                <h3>Notes</h3>
+                <p>Your project’s documents, research, and saved findings.</p>
+                <KnowledgeScope
+                  compact
+                  scope="Project"
+                  description="Notes belong to the selected project folder. Subfolders organize its collection. Markdown and HTML files can appear as live documents. Pinning changes list order; inclusion in agent context is a separate choice."
+                />
               </div>
-              <div class="flex items-start gap-4">
-                {#if notesStore.settings.maxContextTokensEnabled ?? true}
-                  <div class="w-52 shrink-0">
-                    <NumberStepper
-                      value={notesStore.settings.maxContextTokens}
-                      min={100}
-                      max={100000}
-                      step={100}
-                      label="Maximum note context tokens"
-                      onchange={(value) => notesStore.updateSettings({ maxContextTokens: value })}
-                    />
-                  </div>
-                {/if}
-                <div class="shrink-0">
+              <button
+                type="button"
+                class="notes-open-action"
+                disabled={!notesStore.settings.enabled}
+                onclick={() =>
+                  requestSettingsCloseWith(() => {
+                    window.dispatchEvent(new CustomEvent('open-project-notes'));
+                  })}>Open project notes<ArrowUpRight size={15} /></button
+              >
+            </header>
+
+            <section class="notes-section" aria-labelledby="notes-collection-title">
+              <div class="notes-section-heading">
+                <h4 id="notes-collection-title">Collection</h4>
+                <p>Where your notes live and how new notes are organized.</p>
+              </div>
+
+              <div class="notes-setting-row">
+                <div>
+                  <span class="notes-row-label">Enable Notes</span>
+                  <p>Make project notes available in your workspace.</p>
+                </div>
+                <SettingsSwitch
+                  checked={notesStore.settings.enabled}
+                  label="Enable Notes"
+                  description=""
+                  onchange={() =>
+                    void notesStore.updateSettings({ enabled: !notesStore.settings.enabled })}
+                  minimal
+                  flat
+                  quiet
+                />
+              </div>
+              <div class="notes-setting-row">
+                <div>
+                  <label for="notes-default-folder">Default folder</label>
+                  <p>New notes start here, inside this project’s collection.</p>
+                </div>
+                <input
+                  id="notes-default-folder"
+                  type="text"
+                  placeholder="/"
+                  class="notes-folder-input"
+                  value={notesStore.settings.defaultFolderPath}
+                  onchange={(e) =>
+                    notesStore.updateSettings({ defaultFolderPath: e.currentTarget.value || '/' })}
+                />
+              </div>
+            </section>
+
+            <section class="notes-section" aria-labelledby="notes-context-title">
+              <div class="notes-section-heading">
+                <h4 id="notes-context-title">Agent context</h4>
+                <p>Choose what agents can draw on during a conversation.</p>
+              </div>
+              <div class="notes-setting-row">
+                <div>
+                  <span class="notes-row-label">Include selected notes</span>
+                  <p>Only notes marked In context. Pinning does not include a note.</p>
+                </div>
+                <SettingsSwitch
+                  checked={notesStore.settings.autoIncludeInContext}
+                  label="Include selected notes in agent context"
+                  description=""
+                  onchange={() =>
+                    void notesStore.updateSettings({
+                      autoIncludeInContext: !notesStore.settings.autoIncludeInContext,
+                    })}
+                  minimal
+                  flat
+                  quiet
+                />
+              </div>
+              <div class="notes-setting-row">
+                <div>
+                  <span class="notes-row-label">Context budget</span>
+                  <p>
+                    {(notesStore.settings.maxContextTokensEnabled ?? true)
+                      ? 'Maximum tokens from explicitly selected notes.'
+                      : 'Custom limit off · the 100,000-token ceiling still applies.'}
+                  </p>
+                </div>
+                <div class="notes-row-controls">
+                  {#if notesStore.settings.maxContextTokensEnabled ?? true}
+                    <div class="notes-budget-control">
+                      <NumberStepper
+                        compact
+                        quiet
+                        value={notesStore.settings.maxContextTokens}
+                        min={100}
+                        max={100000}
+                        step={100}
+                        label="Maximum note context tokens"
+                        onchange={(value) => notesStore.updateSettings({ maxContextTokens: value })}
+                      />
+                    </div>
+                  {/if}
                   <SettingsSwitch
                     checked={notesStore.settings.maxContextTokensEnabled ?? true}
                     label="Max context tokens"
@@ -4556,242 +4847,82 @@
                       })}
                     minimal
                     flat
+                    quiet
                   />
                 </div>
               </div>
-            </div>
+            </section>
 
-            <div class="flex items-center justify-between gap-4">
-              <div>
-                <div class="text-sm font-medium" style="color: var(--color-text-primary);">
-                  Default folder path
+            <!-- Graph tuning is secondary to everyday Notes setup. -->
+            <section class="notes-section" aria-labelledby="notes-graph-title">
+              <details class="notes-disclosure">
+                <summary
+                  ><div>
+                    <h4 id="notes-graph-title">Graph appearance</h4>
+                    <p>Adjust the spacing and motion of connected notes.</p>
+                  </div>
+                  <ChevronDown size={14} /></summary
+                >
+                <div class="notes-disclosure-body notes-graph-controls">
+                  <KorySlider
+                    id="notes-gravity"
+                    label="Gravity"
+                    value={notesStore.settings.graphPhysics.gravity}
+                    min={-500}
+                    max={0}
+                    step={10}
+                    valueText={`${notesStore.settings.graphPhysics.gravity} gravity strength`}
+                    onchange={(gravity) =>
+                      notesStore.updateSettings({
+                        graphPhysics: { ...notesStore.settings.graphPhysics, gravity },
+                      })}
+                  />
+                  <KorySlider
+                    id="notes-link-distance"
+                    label="Link distance"
+                    value={notesStore.settings.graphPhysics.linkDistance}
+                    min={50}
+                    max={300}
+                    step={10}
+                    valueText={`${notesStore.settings.graphPhysics.linkDistance} pixels`}
+                    onchange={(linkDistance) =>
+                      notesStore.updateSettings({
+                        graphPhysics: { ...notesStore.settings.graphPhysics, linkDistance },
+                      })}
+                  />
+                  <KorySlider
+                    id="notes-charge"
+                    label="Charge strength"
+                    value={notesStore.settings.graphPhysics.chargeStrength}
+                    min={-500}
+                    max={-50}
+                    step={10}
+                    valueText={`${notesStore.settings.graphPhysics.chargeStrength} charge strength`}
+                    onchange={(chargeStrength) =>
+                      notesStore.updateSettings({
+                        graphPhysics: { ...notesStore.settings.graphPhysics, chargeStrength },
+                      })}
+                  />
                 </div>
-                <div class="text-xs mt-1" style="color: var(--color-text-muted);">
-                  New notes are created here by default.
-                </div>
-              </div>
-              <input
-                type="text"
-                placeholder="/"
-                class="input h-8 w-32 text-sm"
-                value={notesStore.settings.defaultFolderPath}
-                onchange={(e) =>
-                  notesStore.updateSettings({
-                    defaultFolderPath: (e.currentTarget as HTMLInputElement).value || '/',
-                  })}
-              />
-            </div>
-          </div>
+              </details>
+            </section>
 
-          <!-- Separator -->
-          <div class="border-t" style="border-color: var(--color-border);"></div>
-
-          <!-- Agent permissions -->
-          <div class="space-y-5">
-            <div class="flex items-start justify-between gap-4">
-              <div>
-                <div class="flex items-center gap-2">
-                  <Shield size={14} style="color: var(--color-accent);" />
-                  <div class="settings-field-label">Agent permissions</div>
-                </div>
-                <p class="text-xs mt-1.5" style="color: var(--color-text-muted);">
-                  Control what agents can do in the note network. Hidden tools are removed entirely
-                  Agents will not see them. YOLO mode still bypasses "Ask" prompts.
-                </p>
-              </div>
+            <footer class="notes-settings-footer">
               <button
                 type="button"
-                class="shrink-0 px-2.5 py-1 rounded-lg text-[11px] border transition-colors hover:bg-[var(--color-surface-3)]"
-                style="border-color: var(--color-border); color: var(--color-text-muted);"
-                onclick={() => void notesStore.resetAgentPermissions()}
+                class="notes-text-action"
+                onclick={() =>
+                  requestSettingsCloseWith(() =>
+                    window.dispatchEvent(new CustomEvent('open-notes-graph')),
+                  )}>Open graph<ArrowUpRight size={13} /></button
               >
-                Reset
-              </button>
-            </div>
-
-            <div class="flex flex-wrap gap-2">
-              {#each NOTE_PERMISSION_PRESETS as preset (preset.id)}
-                <button
-                  type="button"
-                  class="px-3 py-2 rounded-xl text-left border transition-colors min-w-[120px]"
-                  style="
-                  background: {notesStore.agentPermissions.preset === preset.id
-                    ? 'var(--color-accent-transparent)'
-                    : 'var(--color-surface-2)'};
-                  border-color: {notesStore.agentPermissions.preset === preset.id
-                    ? 'var(--color-accent)'
-                    : 'var(--color-border)'};
-                  color: var(--color-text-primary);
-                "
-                  onclick={() => void notesStore.applyAgentPermissionPreset(preset.id)}
-                >
-                  <div class="text-xs font-semibold">{preset.label}</div>
-                  <div class="text-[10px] mt-0.5" style="color: var(--color-text-muted);">
-                    {preset.description}
-                  </div>
-                </button>
-              {/each}
-              {#if notesStore.agentPermissions.preset === 'custom'}
-                <div
-                  class="px-3 py-2 rounded-xl border min-w-[120px]"
-                  style="background: var(--color-surface-2); border-color: var(--color-accent); color: var(--color-text-primary);"
-                >
-                  <div class="text-xs font-semibold">Custom</div>
-                  <div class="text-[10px] mt-0.5" style="color: var(--color-text-muted);">
-                    Per-action overrides
-                  </div>
-                </div>
-              {/if}
-            </div>
-
-            {#if notesStore.agentPermissionsSaving}
-              <p class="text-[11px]" style="color: var(--color-text-muted);">Saving permissions…</p>
-            {/if}
-
-            <div class="grid gap-4 lg:grid-cols-2">
-              {#each ['read', 'write'] as category (category)}
-                <div
-                  class="rounded-2xl border p-4 space-y-3"
-                  style="background: var(--color-surface-2); border-color: var(--color-border);"
-                >
-                  <div
-                    class="text-xs font-semibold capitalize"
-                    style="color: var(--color-text-primary);"
-                  >
-                    {category === 'read' ? 'Read actions' : 'Write actions'}
-                  </div>
-                  <div class="space-y-2">
-                    {#each NOTE_TOOL_DEFINITIONS.filter((d) => d.category === category) as tool (tool.name)}
-                      <div class="flex items-center justify-between gap-3 py-1">
-                        <div class="min-w-0">
-                          <div
-                            class="text-xs font-medium truncate"
-                            style="color: var(--color-text-primary);"
-                          >
-                            {tool.label}
-                          </div>
-                          <div class="text-[10px] truncate" style="color: var(--color-text-muted);">
-                            {tool.description}
-                          </div>
-                        </div>
-                        <div
-                          class="flex shrink-0 rounded-xl border p-0.5"
-                          style="background: var(--color-surface-1); border-color: var(--color-border);"
-                        >
-                          {#each ['auto', 'ask', 'block'] as level (level)}
-                            <button
-                              type="button"
-                              class="rounded-lg px-2 py-1 text-[10px] font-semibold transition-colors"
-                              style="background: {notesStore.agentPermissions.tools[tool.name] ===
-                              level
-                                ? 'var(--color-surface-4)'
-                                : 'transparent'}; color: {notesStore.agentPermissions.tools[
-                                tool.name
-                              ] === level
-                                ? 'var(--color-text-primary)'
-                                : 'var(--color-text-muted)'}; box-shadow: {notesStore
-                                .agentPermissions.tools[tool.name] === level
-                                ? 'inset 0 0 0 1px var(--color-border)'
-                                : 'none'};"
-                              onclick={() =>
-                                void notesStore.setAgentToolPermission(
-                                  tool.name,
-                                  level as NotePermissionLevel,
-                                )}
-                              aria-pressed={notesStore.agentPermissions.tools[tool.name] === level}
-                            >
-                              {permissionLevelLabels[level as NotePermissionLevel]}
-                            </button>
-                          {/each}
-                        </div>
-                      </div>
-                    {/each}
-                  </div>
-                </div>
-              {/each}
-            </div>
-          </div>
-
-          <!-- Separator -->
-          <div class="border-t" style="border-color: var(--color-border);"></div>
-
-          <!-- Graph physics -->
-          <div class="space-y-4">
-            <div class="settings-field-label">Graph physics</div>
-
-            <KorySlider
-              id="notes-gravity"
-              label="Gravity"
-              value={notesStore.settings.graphPhysics.gravity}
-              min={-500}
-              max={0}
-              step={10}
-              valueText={`${notesStore.settings.graphPhysics.gravity} gravity strength`}
-              onchange={(gravity) =>
-                notesStore.updateSettings({
-                  graphPhysics: { ...notesStore.settings.graphPhysics, gravity },
-                })}
-            />
-
-            <KorySlider
-              id="notes-link-distance"
-              label="Link distance"
-              value={notesStore.settings.graphPhysics.linkDistance}
-              min={50}
-              max={300}
-              step={10}
-              valueText={`${notesStore.settings.graphPhysics.linkDistance} pixels`}
-              onchange={(linkDistance) =>
-                notesStore.updateSettings({
-                  graphPhysics: { ...notesStore.settings.graphPhysics, linkDistance },
-                })}
-            />
-
-            <KorySlider
-              id="notes-charge"
-              label="Charge strength"
-              value={notesStore.settings.graphPhysics.chargeStrength}
-              min={-500}
-              max={-50}
-              step={10}
-              valueText={`${notesStore.settings.graphPhysics.chargeStrength} charge strength`}
-              onchange={(chargeStrength) =>
-                notesStore.updateSettings({
-                  graphPhysics: { ...notesStore.settings.graphPhysics, chargeStrength },
-                })}
-            />
-          </div>
-
-          <!-- Separator -->
-          <div class="border-t" style="border-color: var(--color-border);"></div>
-
-          <!-- Actions -->
-          <div class="space-y-3">
-            <div class="settings-field-label">Actions</div>
-
-            <button
-              type="button"
-              class="w-full flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors border hover:bg-[var(--color-surface-3)]"
-              style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-primary);"
-              onclick={() => {
-                requestSettingsCloseWith(() =>
-                  window.dispatchEvent(new CustomEvent('open-notes-graph')),
-                );
-              }}
-            >
-              <StickyNote size={14} style="color: var(--color-accent);" />
-              Open Graph View
-            </button>
-
-            <button
-              type="button"
-              class="w-full flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors border hover:bg-[var(--color-surface-3)]"
-              style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-primary);"
-              onclick={() => void notesStore.importMemoryAsNotes()}
-            >
-              <Brain size={14} style="color: var(--color-text-muted);" />
-              Import Memory as Notes
-            </button>
+              <button
+                type="button"
+                class="notes-text-action"
+                onclick={() => void notesStore.importMemoryAsNotes()}
+                >Import memory as reference notes</button
+              >
+            </footer>
           </div>
         </div>
       </div>
@@ -4876,6 +5007,22 @@
     onClose={() => {
       showColorPicker = false;
     }}
+  />
+{/if}
+
+{#if providerIconContextMenu}
+  {@const contextMenu = providerIconContextMenu}
+  <ProviderIconContextMenu
+    id={contextMenu.id}
+    providerLabel={contextMenu.providerLabel}
+    hasCustomIcon={contextMenu.hasCustomIcon}
+    x={contextMenu.x}
+    y={contextMenu.y}
+    returnFocus={contextMenu.returnFocus}
+    onedit={() => editProviderIconFromContextMenu(contextMenu.providerKey, contextMenu.providerLabel)}
+    onremove={() => void removeProviderIconFromContextMenu(contextMenu.providerKey)}
+    onsettings={() => openProviderSettingsFromContextMenu(contextMenu.providerKey)}
+    onclose={closeProviderIconContextMenu}
   />
 {/if}
 
@@ -5062,6 +5209,399 @@
 />
 
 <style>
+  .provider-row-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .provider-row-refresh {
+    min-height: 32px;
+    margin-right: 4px;
+    white-space: nowrap;
+  }
+  .provider-details {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .provider-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+  .provider-actions > button {
+    flex: 0 0 auto;
+    min-height: 34px;
+    padding: 6px 12px;
+    font-size: 12px;
+    line-height: 20px;
+    white-space: nowrap;
+    transition:
+      background-color 150ms ease,
+      border-color 150ms ease,
+      color 150ms ease;
+  }
+  .provider-actions > .provider-icon-button {
+    width: 34px;
+    padding-inline: 6px;
+  }
+  .provider-actions > button:focus-visible,
+  .provider-row-refresh:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+  /* Both labels occupy the same grid cell, reserving the larger intrinsic
+     width. Busy updates cannot move adjacent controls or leave WebKit paint
+     artifacts from an animated size change. */
+  .provider-action-label {
+    display: inline-grid;
+  }
+  .provider-action-label > span {
+    grid-area: 1 / 1;
+  }
+  .provider-action-busy {
+    visibility: hidden;
+  }
+  .provider-action-label.busy > .provider-action-idle {
+    visibility: hidden;
+  }
+  .provider-action-label.busy > .provider-action-busy {
+    visibility: visible;
+  }
+  @media (max-width: 640px) {
+    .provider-row-header {
+      gap: 2px;
+    }
+    .provider-row-toggle {
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .provider-row-toggle > div:last-child {
+      margin-left: 44px;
+    }
+    .provider-row-refresh {
+      padding-inline: 6px;
+    }
+  }
+  .notes-settings-scroll {
+    container: notes-settings / inline-size;
+  }
+  .notes-settings-page {
+    width: min(100% - 80px, 880px);
+    margin: 0 auto;
+    padding: 36px 0;
+    color: var(--color-text-primary);
+  }
+  .notes-page-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 24px;
+    margin-bottom: 26px;
+  }
+  .notes-page-header h3 {
+    font-size: 26px;
+    font-weight: 600;
+    letter-spacing: -0.035em;
+    line-height: 1.2;
+  }
+  .notes-page-header p {
+    margin: 8px 0;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--color-text-secondary);
+  }
+  .notes-open-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    flex-shrink: 0;
+    min-height: 36px;
+    margin-top: 2px;
+    padding: 0 12px;
+    border-radius: 7px;
+    background: var(--color-surface-3);
+    color: var(--color-text-primary);
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .notes-open-action:hover {
+    background: var(--color-surface-4);
+  }
+  .notes-section {
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid color-mix(in srgb, var(--color-text-muted) 14%, transparent);
+  }
+  .notes-page-header + .notes-section {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0;
+  }
+  .notes-section-heading {
+    margin-bottom: 12px;
+  }
+  .notes-section h4 {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .notes-section-heading p,
+  .notes-disclosure summary p {
+    margin-top: 4px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--color-text-muted);
+  }
+  .notes-section-heading-actions {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  .notes-setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 28px;
+    min-height: 64px;
+    padding: 10px 0;
+  }
+  .notes-setting-row > div:first-child {
+    min-width: 0;
+  }
+  .notes-row-label,
+  .notes-setting-row label {
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .notes-setting-row p {
+    margin-top: 5px;
+    font-size: 12px;
+    line-height: 1.65;
+    color: var(--color-text-muted);
+  }
+  .notes-setting-row > :global(button[aria-checked]),
+  .notes-row-controls :global(button[aria-checked]) {
+    width: auto;
+    flex-shrink: 0;
+    padding: 6px 0;
+  }
+  .notes-row-controls {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+  }
+  .notes-budget-control {
+    width: 178px;
+  }
+  .notes-folder-input {
+    width: 240px;
+    max-width: 45%;
+    flex-shrink: 0;
+    height: 36px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 7px;
+    background: var(--color-surface-2);
+    font-size: 13px;
+    color: var(--color-text-primary);
+  }
+  .notes-profile-control {
+    width: 200px;
+    flex-shrink: 0;
+  }
+  .notes-profile-control :global(button[aria-haspopup='listbox']) {
+    border-color: transparent;
+    border-radius: 7px;
+    background: var(--color-surface-2);
+  }
+  .notes-text-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 30px;
+    border-radius: 5px;
+    font-size: 12px;
+    color: var(--color-text-muted);
+  }
+  .notes-text-action:hover {
+    color: var(--color-text-primary);
+  }
+  .notes-disclosure summary {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 40px;
+    cursor: pointer;
+    list-style: none;
+    border-radius: 5px;
+  }
+  .notes-disclosure summary::-webkit-details-marker {
+    display: none;
+  }
+  .notes-disclosure summary > :global(svg:last-child) {
+    margin-left: auto;
+    flex-shrink: 0;
+    color: var(--color-text-muted);
+  }
+  .notes-disclosure[open] summary > :global(svg:last-child) {
+    transform: rotate(180deg);
+  }
+  .notes-disclosure-meta {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--color-text-muted);
+  }
+  .notes-disclosure-body {
+    padding: 16px 0 4px;
+  }
+  .notes-graph-controls {
+    display: grid;
+    gap: 20px;
+    max-width: 560px;
+    padding-top: 24px;
+  }
+  .notes-settings-footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 24px;
+    margin-top: 24px;
+  }
+  .notes-settings-page button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .settings-frame-header {
+    border-bottom-color: color-mix(in srgb, var(--color-text-muted) 14%, transparent);
+  }
+  .settings-navigation {
+    border-right-color: color-mix(in srgb, var(--color-text-muted) 14%, transparent);
+  }
+  .settings-content {
+    background: var(--color-surface-1);
+  }
+  /* Switching sections is a cross-fade, not a hard swap of opaque blocks. The
+     class switches between the pane's layout and `hidden`, so the same element
+     re-entering is what replays the animation. */
+  .settings-content > div:not(.hidden) {
+    animation: settings-pane-in var(--duration-normal) var(--ease-out);
+  }
+  @keyframes settings-pane-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  .settings-content > div:not(.hidden):not(.notes-settings-scroll):not(.skills-settings-workspace) {
+    width: min(100%, 1120px);
+    margin-inline: auto;
+  }
+  .settings-content :global(.input),
+  .settings-content :global(input),
+  .settings-content :global(textarea) {
+    border-color: color-mix(in srgb, var(--color-text-muted) 17%, transparent);
+    border-radius: 7px;
+    background: var(--color-surface-2);
+  }
+  .settings-content :global(.rounded-2xl.border),
+  .settings-content :global(.rounded-xl.border) {
+    border-color: color-mix(in srgb, var(--color-text-muted) 14%, transparent);
+    border-radius: 9px;
+    box-shadow: none;
+  }
+  .settings-content :global(.rounded-2xl.border:hover),
+  .settings-content :global(.rounded-xl.border:hover) {
+    border-color: color-mix(in srgb, var(--color-text-muted) 24%, transparent);
+  }
+  /* Structural settings sections use surface changes and spacing for grouping.
+     Borders stay available for fields, buttons, selected options, and alerts. */
+  .settings-content :global(.settings-panel) {
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+  .settings-content :global(.billing-panel) {
+    border: 1px solid color-mix(in srgb, var(--color-text-muted) 14%, transparent) !important;
+    border-radius: 12px !important;
+    background: var(--color-surface-2) !important;
+    box-shadow: none !important;
+  }
+  .settings-content :global(button:focus-visible),
+  .settings-content :global(input:focus-visible),
+  .settings-content :global(textarea:focus-visible) {
+    outline: 2px solid color-mix(in srgb, var(--color-accent) 68%, transparent);
+    outline-offset: 2px;
+  }
+  .notes-open-action:focus-visible,
+  .notes-text-action:focus-visible,
+  .notes-disclosure summary:focus-visible,
+  .notes-folder-input:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 3px;
+  }
+  @container notes-settings (max-width: 600px) {
+    .notes-settings-page {
+      width: calc(100% - 40px);
+      padding-top: 26px;
+    }
+    .notes-page-header {
+      flex-direction: column;
+      gap: 14px;
+      margin-bottom: 28px;
+    }
+    .notes-setting-row {
+      gap: 16px;
+    }
+    .notes-row-controls {
+      gap: 12px;
+    }
+    .notes-budget-control {
+      width: 150px;
+    }
+  }
+  @container notes-settings (max-width: 420px) {
+    .notes-setting-row:has(.notes-row-controls),
+    .notes-setting-row:has(.notes-folder-input) {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .notes-row-controls {
+      align-self: flex-end;
+    }
+    .notes-folder-input {
+      width: 100%;
+      max-width: none;
+    }
+    .notes-profile-control {
+      width: 100%;
+    }
+    .notes-section-heading-actions {
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .notes-permission-row {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .notes-permission-controls {
+      align-self: flex-end;
+    }
+    .notes-disclosure-meta {
+      display: none;
+    }
+  }
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }

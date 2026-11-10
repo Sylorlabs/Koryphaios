@@ -48,7 +48,7 @@ test('Notes then Bases resolves the first Base query instead of spinning forever
     // 2. Switch to the Bases view (the user's second step).
     await page.getByRole('tab', { name: 'Bases' }).click();
 
-    const emptyState = page.getByRole('button', { name: '+ Create your first Base' });
+    const emptyState = page.getByRole('button', { name: 'Create your first Base' });
     await expect(emptyState).toBeVisible({ timeout: 20_000 });
     await emptyState.click();
 

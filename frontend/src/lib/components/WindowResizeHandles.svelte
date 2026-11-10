@@ -1,4 +1,8 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
+  import { invoke } from '@tauri-apps/api/core';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
+
   type ResizeDirection = 'East' | 'North' | 'NorthEast' | 'NorthWest' | 'South' | 'SouthEast' | 'SouthWest' | 'West';
 
   const directions: Array<{ direction: ResizeDirection; className: string }> = [
@@ -19,29 +23,40 @@
   // safe to check synchronously at component init.
   const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
-  // Resolve the Tauri window handle once, up front. Importing lazily inside
-  // the pointerdown handler delayed `startResizeDragging` by a round trip,
-  // which made every first grab feel dead.
-  const tauriWindow: Promise<import('@tauri-apps/api/window').Window> | null = inTauri
-    ? import('@tauri-apps/api/window').then((m) => m.getCurrentWindow())
-    : null;
+  // No async import/await before starting the native gesture. PointerEvent.buttons
+  // is a snapshot, not a live indication that the button is still held later.
+  const tauriWindow = inTauri ? getCurrentWindow() : null;
 
   let resizeActive = false;
+  let expanded = $state(false);
+  let expansionRequest = 0;
+  let disposed = false;
+
+  async function refreshExpansion() {
+    if (!tauriWindow || disposed) return;
+    const request = ++expansionRequest;
+    try {
+      const value = await invoke<boolean>('is_window_expanded');
+      if (!disposed && request === expansionRequest) expanded = value;
+    } catch (err) {
+      console.warn('Window expansion state check failed:', err);
+    }
+  }
+
+  onMount(() => {
+    void refreshExpansion();
+    return () => { disposed = true; };
+  });
 
   async function resize(direction: ResizeDirection, event: PointerEvent) {
-    if (event.button !== 0 || !tauriWindow || resizeActive) return;
+    if (event.button !== 0 || !event.isPrimary || !(event.buttons & 1) || !tauriWindow || expanded || resizeActive) return;
     // Must happen before any await, or the browser starts a text selection /
     // scroll alongside the native resize.
     event.preventDefault();
+    event.stopPropagation();
     resizeActive = true;
     try {
-      const win = await tauriWindow;
-      // If the pointer was released during the IPC round trip, a native
-      // resize would start with no button held and never stop until the next
-      // click — the classic "stuck resize". Bail instead.
-      if (event.buttons & 1) {
-        await win.startResizeDragging(direction);
-      }
+      await tauriWindow.startResizeDragging(direction);
     } catch (err) {
       console.warn('Window resize drag failed:', err);
     } finally {
@@ -50,7 +65,10 @@
   }
 </script>
 
-{#if tauriWindow}
+<!-- OS fullscreen/restore and titlebar double-clicks also change this state. -->
+<svelte:window onresize={refreshExpansion} onfocus={refreshExpansion} />
+
+{#if tauriWindow && !expanded}
   {#each directions as handle (handle.direction)}
     <div
       class={`window-resize-handle ${handle.className}`}

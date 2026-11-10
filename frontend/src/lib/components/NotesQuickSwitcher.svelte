@@ -143,7 +143,7 @@
   import Search from 'lucide-svelte/icons/search';
   import Star from 'lucide-svelte/icons/star';
   import X from 'lucide-svelte/icons/x';
-  import { getModKeyName } from '$lib/utils/platform';
+  import { formatChord, formatKey, formatShortcut } from '$lib/utils/platform';
 
   interface Props {
     open: boolean;
@@ -387,7 +387,7 @@
         />
         <kbd
           class="hidden rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)] sm:block"
-          >Esc</kbd
+          >{formatKey('Esc')}</kbd
         >
         <button
           type="button"
@@ -506,7 +506,7 @@
                 </span>
                 <kbd
                   class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]"
-                  >{getModKeyName()}↵</kbd
+                  >{formatShortcut('Mod+Enter')}</kbd
                 >
               </button>
             {/if}
@@ -518,7 +518,8 @@
         class="flex items-center justify-between gap-4 border-t border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-2 text-[10px] text-[var(--color-text-muted)]"
       >
         <span>
-          <kbd>↑↓</kbd> move · <kbd>↵</kbd> open · <kbd>Alt F</kbd> favorite
+          <kbd>{formatChord('ArrowUp', 'ArrowDown')}</kbd> move · <kbd>{formatKey('Enter')}</kbd>
+          open · <kbd>{formatChord('Alt', 'F')}</kbd> favorite
         </span>
         <span class="shrink-0">
           {Math.min(rows.length, NOTES_QUICK_SWITCHER_RESULT_LIMIT)} of {notes.length}

@@ -4,19 +4,19 @@
   import ChevronRight from 'lucide-svelte/icons/chevron-right';
   import ChevronLeft from 'lucide-svelte/icons/chevron-left';
   import ChevronDown from 'lucide-svelte/icons/chevron-down';
-  import ChevronUp from 'lucide-svelte/icons/chevron-up';
   import Trash2 from 'lucide-svelte/icons/trash-2';
   import EyeOff from 'lucide-svelte/icons/eye-off';
   import Eye from 'lucide-svelte/icons/eye';
   import Copy from 'lucide-svelte/icons/copy';
+  import BookmarkPlus from 'lucide-svelte/icons/bookmark-plus';
   import Check from 'lucide-svelte/icons/check';
   import Volume2 from 'lucide-svelte/icons/volume-2';
   import Square from 'lucide-svelte/icons/square';
   import Terminal from 'lucide-svelte/icons/terminal';
   import Undo from 'lucide-svelte/icons/undo';
   import RotateCcw from 'lucide-svelte/icons/rotate-ccw';
+  import GitFork from 'lucide-svelte/icons/git-fork';
   import X from 'lucide-svelte/icons/x';
-  import Globe from 'lucide-svelte/icons/globe';
   import FileText from 'lucide-svelte/icons/file-text';
   import Folder from 'lucide-svelte/icons/folder';
   import FilePlus from 'lucide-svelte/icons/file-plus';
@@ -25,7 +25,6 @@
   import Server from 'lucide-svelte/icons/server';
   import ShieldCheck from 'lucide-svelte/icons/shield-check';
   import FlaskConical from 'lucide-svelte/icons/flask-conical';
-  import Layers from 'lucide-svelte/icons/layers';
   import AlertTriangle from 'lucide-svelte/icons/alert-triangle';
   import LoaderCircle from 'lucide-svelte/icons/loader-circle';
   import { fly, fade } from 'svelte/transition';
@@ -39,8 +38,12 @@
   import { toastStore } from '$lib/stores/toast.svelte';
   import { copyText } from '$lib/utils/clipboard';
   import { requestExpandAnchor } from '$lib/utils/expand-anchor';
+  import { openAgentThread } from '$lib/utils/agent-thread-navigation';
+  import { portalToBody } from '$lib/utils/portal';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
   import ThinkingBlock from './ThinkingBlock.svelte';
+  import ToolActivity from './ToolActivity.svelte';
+  import ToolActivityIcon from './ToolActivityIcon.svelte';
   import MediaAttachment from './MediaAttachment.svelte';
   import GeneratedVideo from './GeneratedVideo.svelte';
   import { chatMediaKind, chatMediaMimeType } from '@koryphaios/shared';
@@ -72,7 +75,10 @@
   import { renderKoryChart } from '$lib/utils/chart-renderer';
   import { renderKoryColors } from '$lib/utils/color-renderer';
   import { htmlSandboxPlaceholder, expandHtmlSandboxes } from '$lib/utils/html-sandbox';
-  import { computeStreamingSegments } from '$lib/utils/streaming-segments';
+import {
+  computeStreamingSegmentsIncrementalFast,
+  type StreamingSegmentsSnapshot,
+} from '$lib/utils/streaming-segments';
   import { playVoiceResponse, stopVoicePlayback } from '$lib/utils/voice-playback';
   import { exactModelSelection, observedRunOutcome } from '$lib/utils/message-variants';
 
@@ -110,43 +116,8 @@
   };
 
   // ── Wikilink extension: [[Note Title]] → clickable link ─────────────────
-  const wikilinkExtension = {
-    name: 'wikilink',
-    level: 'inline' as const,
-    start(src: string) {
-      return src.indexOf('[[');
-    },
-    tokenizer(src: string) {
-      const match = /^\[\[([^\]|#]+?)(?:\|([^\]]+?))?\]\]/.exec(src);
-      if (match) {
-        return {
-          type: 'wikilink',
-          raw: match[0],
-          title: match[1].trim(),
-          display: match[2]?.trim() ?? match[1].trim(),
-        };
-      }
-    },
-    renderer(token: { title: string; display: string }) {
-      const safe = token.title.replace(/'/g, "\\'");
-      return `<a class="wikilink" data-note-title="${token.title}" href="#" onclick="event.preventDefault();window.openNoteByTitle('${safe}')">${token.display}</a>`;
-    },
-  };
-
-  // Private parser. Never mutate the global `marked` singleton: other
-  // consumers share it, and this component mounts once per feed row.
-  // createChatMarkdown supplies TeX/KaTeX (inline, display, and math
-  // fences), tables, task checkboxes and the chart/color/html blocks;
-  // the renderers below layer the feed-only behaviour on top.
+  // Shared chat Markdown owns safe note links across complete and streaming rows.
   const feedParser = createChatMarkdown(true);
-  feedParser.use({ extensions: [wikilinkExtension] });
-
-  // Global handler: dispatches 'open-note' event so the Notes panel can intercept
-  if (typeof window !== 'undefined') {
-    (window as unknown as Record<string, unknown>).openNoteByTitle = (title: string) => {
-      window.dispatchEvent(new CustomEvent('open-note', { detail: { title } }));
-    };
-  }
 
   // Feed-only renderer overrides layered onto the shared parser. Built from the
   // default Renderer purely as a typed bag of overrides; `feedParser.use`
@@ -283,10 +254,12 @@
   let regenerating = $state(false);
   let activatingVariant = $state(false);
   let deleting = $state(false);
+  let forking = $state(false);
   let pendingRegeneration = $state<{ sessionId: string; runId: string } | null>(null);
   let selectedVariant = $state(-1);
   let selectedVariantKey = $state('');
   let toolDetailsOpen = $state(false);
+  let isToolActivity = $derived(entry.type === 'tool_call' || entry.type === 'tool_result' || entry.type === 'tool_group');
   const detailsId = $props.id();
   let contextMenu = $state<{ x: number; y: number } | null>(null);
   // Capture the live text selection at context-menu-open time.  Clicking the
@@ -337,9 +310,6 @@
     currentVariant?.provider ??
       (typeof entry.metadata?.provider === 'string' ? entry.metadata.provider : undefined),
   );
-  let selectedVariantIsActive = $derived(
-    !!currentMessageId && !!activeVariantId && currentMessageId === activeVariantId,
-  );
   let variantIdentityAuthoritative = $derived(
     entry.metadata?.variantIdentityAuthoritative === true,
   );
@@ -356,38 +326,6 @@
       /^Created At:.*(?:Task:|Task logs are available)/ims.test(currentText.trim()),
   );
 
-  function toolDetailText(subEntry: FeedEntryLocal): string {
-    const metadata = subEntry.metadata as
-      | {
-          toolCall?: { input?: Record<string, unknown> };
-          toolResult?: { output?: string };
-        }
-      | undefined;
-    const output = metadata?.toolResult?.output;
-    if (typeof output === 'string' && output.trim()) return output.trim();
-    const input = metadata?.toolCall?.input;
-    if (!input || Object.keys(input).length === 0) return '';
-    try {
-      return JSON.stringify(input, null, 2);
-    } catch (err: unknown) {
-      console.debug(
-        'Failed to stringify tool call input:',
-        err instanceof Error ? err.message : String(err),
-      );
-      return '';
-    }
-  }
-
-  function clippedToolDetail(subEntry: FeedEntryLocal): string {
-    const detail = toolDetailText(subEntry);
-    return detail.length > 4_000 ? `${detail.slice(0, 4_000)}\n\n…output clipped` : detail;
-  }
-
-  function detailText(): string {
-    if (rawTaskTranscript) return currentText;
-    return clippedToolDetail(entry);
-  }
-
   // Sub-agent rows in the manager feed are a progress log, not a transcript.
   // Collapsing whitespace and capping the length keeps one verbose tool dump
   // from rendering as thousands of wrapped lines inside the feed.
@@ -397,13 +335,6 @@
     return flat.length > SUB_AGENT_SUMMARY_LIMIT
       ? `${flat.slice(0, SUB_AGENT_SUMMARY_LIMIT)}…`
       : flat;
-  }
-
-  let toolOutputCopied = $state(false);
-  async function copyToolOutput(text: string) {
-    await copyText(text);
-    toolOutputCopied = true;
-    setTimeout(() => (toolOutputCopied = false), 1600);
   }
 
   function openContextMenu(event: MouseEvent) {
@@ -491,7 +422,15 @@
     const sessionId = entry.metadata?.sessionId as string | undefined;
     const messageId = currentMessageId;
     if (!sessionId || !messageId || regenerating) return;
+    const model = exactModelSelection(currentProvider, currentModel);
     regenerating = true;
+    contextMenu = null;
+    zoomedImage = null;
+    zoomedRawImage = null;
+    // Regeneration replays the prompt without adding a second user row. Close
+    // the previous turn explicitly so incoming deltas cannot append to it.
+    wsStore.closeStreamTurn('kory-manager');
+    wsStore.invalidateManagerContextUsage(sessionId);
     try {
       const response = await apiFetch(apiUrl('/api/messages/regenerate'), {
         method: 'POST',
@@ -499,7 +438,7 @@
         body: JSON.stringify({
           sessionId,
           messageId,
-          model: exactModelSelection(currentProvider, currentModel),
+          model,
         }),
       });
       const result = await parseJsonResponse<{
@@ -520,18 +459,27 @@
     }
   }
 
-  async function activateSelectedVariant() {
+  async function activateVariant(index: number) {
+    const variant = responseVariants[index];
+    if (!variant || activatingVariant || regenerating || deleting) return;
+
+    // Selecting a response is the branch switch. There is no separate
+    // confirmation state: the response shown in the picker is the one that
+    // becomes the context sent on the next turn.
+    const previousVariant = selectedVariant;
+    selectedVariant = index;
     const sessionId = entry.metadata?.sessionId as string | undefined;
     const expectedActiveMessageId = entry.metadata?.activeMessageId;
     const expectedProviderConversationRevision = entry.metadata?.providerConversationRevision;
     const conversationRevision = entry.metadata?.conversationRevision;
-    if (!sessionId || !currentMessageId || activatingVariant || selectedVariantIsActive) return;
+    if (!sessionId || !variant.id || variant.id === activeVariantId) return;
     if (
       !variantIdentityAuthoritative ||
       typeof expectedActiveMessageId !== 'string' ||
       typeof expectedProviderConversationRevision !== 'number' ||
       typeof conversationRevision !== 'number'
     ) {
+      selectedVariant = previousVariant;
       toastStore.error(
         'This chat does not have authoritative branch metadata yet. Reload after updating the backend; no branch was changed.',
       );
@@ -545,7 +493,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sessionId,
-          messageId: currentMessageId,
+          messageId: variant.id,
           expectedActiveMessageId,
           expectedProviderConversationRevision,
         }),
@@ -559,13 +507,34 @@
               : `Response branch activation failed (${response.status}).`),
         );
       }
+      // The previous usage measurement belongs to the old active lineage.
+      // Clear it before the history/context refresh so the meter cannot show
+      // option 1 while option 2 (or 3) is now the selected branch.
+      wsStore.invalidateManagerContextUsage(sessionId);
       await refreshAuthoritativeHistory(sessionId);
-      toastStore.success('This response is now the active conversation branch.');
     } catch (error) {
+      selectedVariant = previousVariant;
       const detail = error instanceof Error ? error.message : 'Response branch activation failed.';
       toastStore.error(detail);
     } finally {
       activatingVariant = false;
+    }
+  }
+
+  async function forkChat() {
+    const sessionId =
+      (entry.metadata?.sessionId as string | undefined) ?? sessionStore.activeSessionId;
+    // Fork at the response currently shown. When the picker is on a sibling
+    // variant, that variant (not the active branch) becomes the fork's head.
+    const messageId = currentMessageId;
+    if (!sessionId || !messageId || forking) return;
+    forking = true;
+    contextMenu = null;
+    try {
+      const forkedId = await sessionStore.forkSession(sessionId, messageId);
+      if (forkedId) toastStore.success('Forked into a new chat');
+    } finally {
+      forking = false;
     }
   }
 
@@ -633,6 +602,37 @@
     } catch (err) {
       console.error('Failed to copy text: ', err);
     }
+  }
+
+  /** Suggest a note title from the response's first meaningful line. */
+  function findingTitle(text: string): string {
+    const line =
+      text
+        .split('\n')
+        .map((row) => row.replace(/^#+\s*/, '').replace(/[`*_>]/g, '').trim())
+        .find((row) => row.length > 0) ?? 'Chat finding';
+    return line.length > 120 ? `${line.slice(0, 117)}...` : line;
+  }
+
+  /** Capture this response as a sourced note; the host records the provenance. */
+  function saveAsNote() {
+    const sessionId = (entry.metadata?.sessionId as string | undefined) ?? sessionStore.activeSessionId;
+    if (!sessionId || !currentText) return;
+    window.dispatchEvent(
+      new CustomEvent('kory-notes-save-finding', {
+        detail: {
+          title: findingTitle(currentText),
+          body: currentText,
+          source: {
+            sessionId,
+            messageId: currentMessageId ?? undefined,
+            role: 'assistant',
+            provider: (entry.metadata?.provider as string | undefined) ?? undefined,
+            model: (entry.metadata?.model as string | undefined) ?? undefined,
+          },
+        },
+      }),
+    );
   }
 
   function base64ToBlob(base64: string, mimeType: string): Blob {
@@ -741,11 +741,15 @@
   let timer: ReturnType<typeof setTimeout>;
 
   $effect(() => {
-    // If the text is short or not streaming (no cursor/status check available here easily, so we just check length diff),
-    // we can update immediately. But for safety during streaming, we debounce.
-    // If the text has changed:
+    // Persisted chat rows are already complete: render them immediately. Only
+    // live token streams need the small debounce that prevents markdown from
+    // being reparsed on every token.
     if (currentText !== debouncedText) {
       clearTimeout(timer);
+      if (!isStreaming) {
+        debouncedText = currentText;
+        return;
+      }
       timer = setTimeout(() => {
         debouncedText = currentText;
       }, 32); // 32ms debounce for smoother streaming
@@ -810,9 +814,19 @@
   // incomplete fences). This lets color/chart/html blocks render the moment
   // their closing fence arrives — mid-stream — instead of waiting for the
   // full response to complete.
+  let streamingSegmentsSnapshot: StreamingSegmentsSnapshot | null = null;
   let streamingSegments = $derived.by(() => {
-    if (!(isStreaming && entry.type === 'content')) return [];
-    return computeStreamingSegments(currentText);
+    if (!(isStreaming && entry.type === 'content')) {
+      streamingSegmentsSnapshot = null;
+      return [];
+    }
+    // Reuse completed rich blocks and parse only the unstable tail. The
+    // debounced text also prevents a full Markdown pass for every token.
+    streamingSegmentsSnapshot = computeStreamingSegmentsIncrementalFast(
+      streamingSegmentsSnapshot,
+      debouncedText,
+    );
+    return streamingSegmentsSnapshot.segments;
   });
 
   function getEntryColor(type: FeedEntryType): string {
@@ -850,238 +864,6 @@
     );
   }
 
-  type ToolCategory = 'bash' | 'read' | 'write' | 'note' | 'web' | 'search' | 'checklist' | 'other';
-
-  // Analyzing/reading → eyeball. Editing/writing → pencil. Names cover both
-  // Koryphaios tools and CLI-harness tool names (grok/claude-code/antigravity).
-  const READ_TOOLS = new Set(['read_file', 'read', 'view_file', 'view_image', 'read_note']);
-  // Search/find tools → always an inline magnifier, never the terminal box.
-  const SEARCH_TOOLS = new Set([
-    'grep',
-    'grep_search',
-    'glob',
-    'glob_search',
-    'ls',
-    'list_directory',
-    'find',
-    'search_notes',
-    'recall_notes',
-    'get_note_backlinks',
-    'codebase_search',
-  ]);
-  const WRITE_TOOLS = new Set([
-    'write_file',
-    'write',
-    'write_to_file',
-    'edit_file',
-    'edit',
-    'str_replace',
-    'batch_edit',
-    'multi_replace_file_content',
-    'replace_file_content',
-    'patch',
-    'apply_patch',
-    'diff',
-    'delete_file',
-    'move_file',
-    'create_note',
-    'update_note',
-  ]);
-  const NOTE_WRITE_TOOLS = new Set(['record_work_note']);
-  // Matched before the search regex below, which would otherwise swallow
-  // `list_checklists` and render a checklist edit as a magnifier.
-  const CHECKLIST_TOOLS = new Set([
-    'create_checklist',
-    'list_checklists',
-    'read_checklist',
-    'add_checklist_item',
-    'check_checklist_item',
-    'update_checklist',
-    'delete_checklist',
-    'edit_goal_checklist',
-  ]);
-  const WEB_TOOLS = new Set(['web_search', 'web_fetch']);
-  const BASH_TOOLS = new Set([
-    'bash',
-    'shell',
-    'shell_manage',
-    'run_terminal_command',
-    'run_command',
-    'terminal',
-  ]);
-
-  function getToolNameFromMeta(meta?: Record<string, unknown>): string {
-    const m = meta as { toolCall?: { name?: string }; toolResult?: { name?: string } } | undefined;
-    return (m?.toolCall?.name ?? m?.toolResult?.name ?? '').toLowerCase();
-  }
-
-  function getToolCategory(meta?: Record<string, unknown>): ToolCategory {
-    const name = getToolNameFromMeta(meta);
-    if (NOTE_WRITE_TOOLS.has(name)) return 'note';
-    if (CHECKLIST_TOOLS.has(name)) return 'checklist';
-    if (WEB_TOOLS.has(name)) return 'web';
-    if (SEARCH_TOOLS.has(name) || /grep|glob|search|find|list_dir/i.test(name)) return 'search';
-    if (BASH_TOOLS.has(name)) return 'bash';
-    if (READ_TOOLS.has(name)) return 'read';
-    if (WRITE_TOOLS.has(name)) return 'write';
-    return 'other';
-  }
-
-  interface ToolDisplay {
-    label: string;
-    resultLabel: string;
-    colorClass: string;
-  }
-
-  function getToolDisplay(category: ToolCategory): ToolDisplay {
-    switch (category) {
-      case 'read':
-        return { label: 'Reading File', resultLabel: 'File Contents', colorClass: 'text-cyan-400' };
-      case 'write':
-        return { label: 'Editing File', resultLabel: 'File Written', colorClass: 'text-amber-400' };
-      case 'note':
-        return {
-          label: 'Recording Work Note',
-          resultLabel: 'Work Note Recorded',
-          colorClass: 'text-violet-400',
-        };
-      case 'checklist':
-        return {
-          label: 'Updating Checklist',
-          resultLabel: 'Checklist Updated',
-          // fuchsia, not teal: teal-400 sits between the emerald-400 (bash) and
-          // cyan-400 (read) already in this palette, and those three calls
-          // alternate constantly within one agent turn.
-          colorClass: 'text-fuchsia-400',
-        };
-      case 'web':
-        return { label: 'Searching Web', resultLabel: 'Web Results', colorClass: 'text-sky-400' };
-      case 'bash':
-        return {
-          label: 'Executing Command',
-          resultLabel: 'Terminal Output',
-          colorClass: 'text-emerald-400',
-        };
-      default:
-        return {
-          label: 'Running Tool',
-          resultLabel: 'Tool Output',
-          colorClass: 'text-emerald-400',
-        };
-    }
-  }
-
-  function getToolShortLabel(meta?: Record<string, unknown>): string {
-    const m = meta as
-      | {
-          toolCall?: { name?: string; input?: Record<string, unknown> };
-          toolResult?: { name?: string };
-        }
-      | undefined;
-    const name = (m?.toolCall?.name ?? m?.toolResult?.name ?? '').toLowerCase();
-    const input = (m?.toolCall?.input ?? {}) as Record<string, unknown>;
-    const rawPath = (input.path ??
-      input.file_path ??
-      input.filepath ??
-      input.target_file ??
-      '') as string;
-    const base = rawPath ? (rawPath.split('/').pop() ?? rawPath) : '';
-    switch (name) {
-      case 'read_file':
-        return base || rawPath;
-      case 'write_file':
-      case 'edit_file':
-      case 'delete_file':
-        return base || rawPath;
-      case 'move_file': {
-        const src = ((input.source ?? input.src ?? '') as string).split('/').pop() ?? '';
-        const dst = ((input.dest ?? input.destination ?? '') as string).split('/').pop() ?? '';
-        return src && dst ? `${src} → ${dst}` : name;
-      }
-      case 'read':
-      case 'view_file':
-      case 'write':
-      case 'edit':
-      case 'str_replace':
-        return base || rawPath;
-      case 'grep':
-      case 'grep_search': {
-        const pat = (input.pattern ?? input.regex ?? input.query ?? '') as string;
-        return base ? `"${pat}" in ${base}` : `"${pat}"`;
-      }
-      case 'glob':
-        return (input.pattern ?? '') as string;
-      case 'batch_edit': {
-        const files = (input.files ?? []) as Array<{ path?: string }>;
-        return files.length === 1
-          ? ((files[0]?.path ?? '').split('/').pop() ?? '')
-          : `${files.length} files`;
-      }
-      case 'ls':
-        return base || '.';
-      case 'patch':
-      case 'diff':
-        return base || name;
-      case 'record_work_note':
-        return typeof input.title === 'string' ? input.title : 'work note';
-      default:
-        return name;
-    }
-  }
-
-  function getToolVerb(meta?: Record<string, unknown>): string {
-    const m = meta as { toolCall?: { name?: string }; toolResult?: { name?: string } } | undefined;
-    const name = (m?.toolCall?.name ?? m?.toolResult?.name ?? '').toLowerCase();
-    switch (name) {
-      case 'read_file':
-      case 'read':
-      case 'view_file':
-        return 'read';
-      case 'view_image':
-        return 'viewed';
-      case 'write_file':
-      case 'write':
-      case 'write_to_file':
-        return 'write';
-      case 'edit_file':
-      case 'edit':
-      case 'str_replace':
-        return 'edit';
-      case 'batch_edit':
-      case 'multi_replace_file_content':
-        return 'batch edit';
-      case 'delete_file':
-        return 'delete';
-      case 'move_file':
-        return 'move';
-      case 'grep':
-      case 'grep_search':
-        return 'grep';
-      case 'glob':
-      case 'glob_search':
-        return 'glob';
-      case 'ls':
-      case 'list_directory':
-        return 'list';
-      case 'find':
-        return 'find';
-      case 'search_notes':
-      case 'recall_notes':
-        return 'search notes';
-      case 'record_work_note':
-        return 'record work note';
-      case 'patch':
-      case 'apply_patch':
-        return 'patch';
-      case 'diff':
-        return 'diff';
-    }
-    if (/grep/i.test(name)) return 'grep';
-    if (/glob|find/i.test(name)) return 'find';
-    if (/search/i.test(name)) return 'search';
-    return name || 'tool';
-  }
-
   const DOMAIN_STYLES: Record<string, { color: string; label: string }> = {
     frontend: { color: 'text-sky-400', label: 'Frontend' },
     ui: { color: 'text-sky-400', label: 'UI' },
@@ -1110,52 +892,6 @@
     return DOMAIN_ICONS[agentDomain(meta)] ?? Bot;
   }
 
-  function getWebQuery(meta?: Record<string, unknown>): string {
-    const m = meta as { toolCall?: { input?: Record<string, unknown> } } | undefined;
-    const i = m?.toolCall?.input ?? {};
-    return (i.query ?? i.q ?? i.search ?? i.url ?? '') as string;
-  }
-
-  function getBashCommand(meta?: Record<string, unknown>): string {
-    const m = meta as { toolCall?: { input?: Record<string, unknown> } } | undefined;
-    const input = m?.toolCall?.input;
-    const command =
-      input?.command ??
-      input?.cmd ??
-      input?.commandLine ??
-      input?.command_line ??
-      input?.script ??
-      input?.shell_command;
-    return typeof command === 'string' ? command : '';
-  }
-
-  // When the input is nothing but the command we already render on its own
-  // line, the JSON dump would repeat it.
-  function isCommandOnlyInput(meta?: Record<string, unknown>): boolean {
-    const m = meta as { toolCall?: { input?: Record<string, unknown> } } | undefined;
-    const input = m?.toolCall?.input;
-    if (!input) return false;
-    const keys = Object.keys(input);
-    return keys.length === 1 && typeof input[keys[0]] === 'string';
-  }
-
-  function getToolCallDetail(meta?: Record<string, unknown>): string {
-    const m = meta as { toolCall?: { name?: string; input?: Record<string, unknown> } } | undefined;
-    const input = m?.toolCall?.input;
-    if (!input || Object.keys(input).length === 0) return currentText;
-    const command = getBashCommand(meta);
-    if (command) return `$ ${command}`;
-    try {
-      return JSON.stringify(input, null, 2);
-    } catch (err: unknown) {
-      console.debug(
-        'Failed to stringify tool call input:',
-        err instanceof Error ? err.message : String(err),
-      );
-      return currentText;
-    }
-  }
-
   function getStatusForType(
     type: FeedEntryType,
     meta?: Record<string, unknown>,
@@ -1176,16 +912,8 @@
         return 'streaming';
       case 'thinking':
         return 'thinking';
-      case 'tool_call': {
-        const cat = getToolCategory(meta);
-        if (cat === 'read') return 'reading';
-        if (cat === 'write') return 'writing';
-        if (cat === 'note') return 'writing';
-        if (cat === 'web') return 'searching';
-        if (cat === 'search') return 'verifying';
-        if (cat === 'bash') return 'tool_calling';
-        return 'analyzing';
-      }
+      case 'tool_call':
+        return 'tool_calling';
       case 'tool_result':
         return isToolError(meta) ? 'error' : 'done';
       case 'routing':
@@ -1211,62 +939,58 @@
       class="flex items-center gap-2 py-1 px-[var(--space-md)] -mx-[var(--space-md)] rounded text-[11px] opacity-40 hover:opacity-80 transition-opacity text-left"
       style="color: var(--color-text-muted);"
       onclick={toggleUserHidden}
-      title="Hidden from your view — click to show (agent still has it unless also hidden from agent)"
+      title="Hidden from your view. Click to show (agent still has it unless also hidden from agent)"
     >
       <EyeOff size={11} />
       <span class="truncate">Hidden — {entry.type.replace('_', ' ')} (click to show)</span>
     </button>
   {:else}
     <div
-      class="flex items-start gap-2 py-1.5 text-sm leading-relaxed rounded px-2 -mx-2 transition-colors cursor-default
+      class="relative flex items-start gap-2 py-1.5 text-sm leading-relaxed rounded px-2 -mx-2 transition-colors cursor-default
            {isSelected
         ? 'bg-[var(--color-accent)]/10 ring-1 ring-[var(--color-accent)]/30'
         : 'hover:bg-surface-2/30'}"
       onclick={(e) => {
-        if (entry.type === 'tool_group' || entry.type === 'agent_group') {
+        if (entry.type === 'agent_group') {
           requestExpandAnchor(e.currentTarget);
         }
-        entry.type === 'tool_group'
-          ? (toolDetailsOpen = true)
-          : entry.type === 'agent_group'
-            ? onToggleGroup()
-            : onSelect(e);
+        entry.type === 'agent_group'
+          ? onToggleGroup()
+          : onSelect(e);
       }}
       onkeydown={(e) => {
         // Nested buttons own their keyboard activation; do not also toggle the row.
         if (e.target !== e.currentTarget) return;
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          if (entry.type === 'tool_group' || entry.type === 'agent_group') {
+          if (entry.type === 'agent_group') {
             requestExpandAnchor(e.currentTarget);
           }
-          entry.type === 'tool_group'
-            ? (toolDetailsOpen = true)
-            : entry.type === 'agent_group'
-              ? onToggleGroup()
-              : onSelect(e as unknown as MouseEvent);
+          entry.type === 'agent_group'
+            ? onToggleGroup()
+            : onSelect(e as unknown as MouseEvent);
         }
       }}
       oncontextmenu={openContextMenu}
       role="row"
-      aria-expanded={entry.type === 'tool_group' ? toolDetailsOpen : entry.type === 'agent_group' ? isExpanded : undefined}
-      aria-controls={entry.type === 'tool_group' && toolDetailsOpen ? detailsId : entry.type === 'agent_group' && isExpanded ? `${detailsId}-agent` : undefined}
+      aria-expanded={entry.type === 'agent_group' ? isExpanded : undefined}
+      aria-controls={entry.type === 'agent_group' && isExpanded ? `${detailsId}-agent` : undefined}
       tabindex="0"
     >
-      <span class="w-12 shrink-0 whitespace-nowrap text-[11px] leading-6 tabular-nums text-text-muted">
-        {new Date(entry.timestamp).toLocaleTimeString([], {
+      <span class="w-12 shrink-0 whitespace-nowrap text-[11px] leading-6 tabular-nums text-text-muted" aria-hidden={isToolActivity}>
+        {#if !isToolActivity}{new Date(entry.timestamp).toLocaleTimeString([], {
           hour: '2-digit',
           minute: '2-digit',
-        })}
+        })}{/if}
       </span>
 
       {#if entry.type === 'user_message'}
         <div class="shrink-0 flex items-center justify-center w-5 h-6">
           <Send size={14} class="text-accent" />
         </div>
-      {:else if entry.type === 'tool_group'}
-        <div class="shrink-0 flex items-center justify-center w-5 h-6">
-          <ChevronRight size={14} class="text-blue-400" />
+      {:else if isToolActivity}
+        <div class="shrink-0 flex items-center justify-center w-5 h-7">
+          <ToolActivityIcon {entry} />
         </div>
       {:else if entry.type === 'agent_group'}
         {@const ds = domainStyle(entry.metadata)}
@@ -1322,8 +1046,7 @@
               }
             | undefined}
           <div
-            class="w-full border-y px-2 py-2"
-            style="border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-border)); background: color-mix(in srgb, var(--color-accent) 6%, transparent);"
+            class="w-full px-1 py-1"
           >
             <button
               type="button"
@@ -1351,7 +1074,7 @@
               >
             </button>
             <div
-              class="mt-2 h-1 overflow-hidden bg-[var(--color-surface-3)]"
+              class="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--color-surface-3)]"
               role="progressbar"
               aria-label="Compaction progress"
               aria-valuemin="0"
@@ -1359,7 +1082,7 @@
               aria-valuenow={Math.max(0, Math.min(100, compaction?.progress ?? 100))}
             >
               <div
-                class="h-full transition-all duration-500"
+                class="h-full rounded-full transition-all duration-500"
                 style="width: {Math.max(
                   0,
                   Math.min(100, compaction?.progress ?? 100),
@@ -1387,6 +1110,22 @@
               </div>
             {/if}
           </div>
+        {:else if entry.type === 'agent_group'}
+          <div class="mt-1 flex flex-wrap items-center gap-3">
+            <span class={getEntryColor(entry.type)}>{currentText}</span>
+            {#if entry.metadata?.domain === 'critic'}
+              <button
+                type="button"
+                class="agent-chat-button"
+                onclick={(event) => {
+                  event.stopPropagation();
+                  const sessionId = typeof entry.metadata?.sessionId === 'string'
+                    ? entry.metadata.sessionId : sessionStore.activeSessionId;
+                  if (sessionId) openAgentThread(sessionId, entry.agentId);
+                }}
+              ><MessageSquare size={12} /> Open Critic chat</button>
+            {/if}
+          </div>
         {:else if entry.type === 'thinking'}
           <ThinkingBlock
             text={currentText}
@@ -1395,7 +1134,10 @@
             agentName={entry.agentName}
             defaultExpanded={agentSettingsStore.settings.reasoningExpandedByDefault ?? false}
             finalized={entry.thinkingFinalized ?? false}
+            thinkingTokens={entry.metadata?.thinkingTokens as number | undefined}
           />
+        {:else if entry.type === 'tool_group'}
+          <ToolActivity {entry} bind:open={toolDetailsOpen} showIcon={false} />
         {:else if entry.type === 'tool_result' && generatedVideoId(entry.metadata)}
           <GeneratedVideo historyId={generatedVideoId(entry.metadata)!} />
         {:else if entry.type === 'tool_result' && viewImagePath(entry.metadata)}
@@ -1425,111 +1167,20 @@
             </button>
           </div>
         {:else if entry.type === 'tool_call' || entry.type === 'tool_result'}
-          {@const toolCat = getToolCategory(entry.metadata)}
-          {@const toolDisplay = getToolDisplay(toolCat)}
-          {@const toolFailed = entry.type === 'tool_result' && isToolError(entry.metadata)}
-          {@const isSimple = toolCat === 'read' || toolCat === 'write'}
-          {#if toolFailed}
-            <section
-              class="mt-1 overflow-hidden border-l"
-              style="border-color: var(--color-error);"
-            >
-              <div
-                class="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-[var(--color-error)]"
-              >
-                <AlertTriangle size={12} />
-                <span>{getToolNameFromMeta(entry.metadata) || 'Tool'} failed</span>
-                {#if entry.metadata?.sourceProvider}<span
-                    class="ml-auto font-mono font-normal normal-case opacity-60"
-                    >{entry.metadata.sourceProvider}</span
-                  >{/if}
-              </div>
-              <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-              <pre class="error-box-body" tabindex="0" aria-label="Tool error">{currentText ||
-                'The tool failed without returning diagnostic output.'}</pre>
-            </section>
-          {:else if toolCat === 'search'}
-            {@const label = getToolShortLabel(entry.metadata)}
-            <div class="mt-0.5 flex items-center gap-1.5 text-[11px]">
-              <span class="opacity-40 font-medium text-text-secondary"
-                >{getToolVerb(entry.metadata)}</span
-              >
-              {#if label}<span class="text-text-muted opacity-60 truncate max-w-md font-mono"
-                  >{label}</span
-                >{/if}
-            </div>
-          {:else if toolCat === 'web'}
-            {@const q = getWebQuery(entry.metadata)}
-            {@const searching = entry.type === 'tool_call'}
-            <div class="mt-1 flex items-center gap-2 text-xs">
-              <Globe size={14} class="shrink-0 text-[var(--color-info)] {searching ? 'globe-spin' : ''}" />
-              <div class="min-w-0 flex-1">
-                <div class="text-xs text-[var(--color-text-secondary)]">
-                  {searching ? 'Searching the web' : 'Web results'}
-                </div>
-                {#if q}
-                  <div class="truncate text-[12px] text-[var(--color-text-secondary)]">{q}</div>
-                {/if}
-              </div>
-            </div>
-          {:else if isSimple}
-            {#if entry.type === 'tool_call'}
-              <div class="mt-0.5 flex items-center gap-1.5 text-[11px]">
-                <span class="opacity-40 font-medium text-text-secondary"
-                  >{getToolVerb(entry.metadata)}</span
-                >
-                <span class="text-text-muted opacity-50 truncate max-w-xs"
-                  >{getToolShortLabel(entry.metadata)}</span
-                >
-              </div>
-            {/if}
-          {:else}
-            <div class="mt-0.5 flex min-w-0 items-center gap-2 text-[11px]">
-              {#if toolCat === 'bash'}<Terminal size={12} class={toolDisplay.colorClass} />{/if}
-              <span class="font-medium {toolDisplay.colorClass}"
-                >{entry.type === 'tool_call' ? toolDisplay.label : 'Completed'}</span
-              >
-              {#if entry.type === 'tool_call' && getBashCommand(entry.metadata)}
-                <span class="min-w-0 truncate font-mono text-[var(--color-text-muted)]"
-                  >$ {getBashCommand(entry.metadata)}</span
-                >
-              {:else}
-                <span class="min-w-0 truncate text-[var(--color-text-muted)]"
-                  >{getToolNameFromMeta(entry.metadata) || toolDisplay.resultLabel}</span
-                >
-              {/if}
-              <button
-                type="button"
-                class="detail-toggle ml-auto"
-                aria-expanded={toolDetailsOpen}
-                aria-controls={toolDetailsOpen ? detailsId : undefined}
-                onclick={(event) => {
-                  event.stopPropagation();
-                  requestExpandAnchor(event.currentTarget);
-                  toolDetailsOpen = !toolDetailsOpen;
-                }}>{toolDetailsOpen ? 'Hide' : 'Details'}</button
-              >
-            </div>
-          {/if}
+          <ToolActivity {entry} bind:open={toolDetailsOpen} showIcon={false} />
         {:else if entry.type === 'user_message' || entry.type === 'content' || entry.type === 'thought'}
-          {#if rawTaskTranscript}
-            <div class="mt-1 flex items-center gap-2 py-1 text-xs">
-              <Terminal size={13} class="text-[var(--color-text-muted)]" />
-              <span class="font-medium text-[var(--color-text-secondary)]"
-                >Background task completed</span
-              >
-              <button
-                type="button"
-                class="detail-toggle ml-auto"
-                aria-expanded={toolDetailsOpen}
-                aria-controls={toolDetailsOpen ? detailsId : undefined}
-                onclick={(event) => {
-                  event.stopPropagation();
-                  requestExpandAnchor(event.currentTarget);
-                  toolDetailsOpen = !toolDetailsOpen;
-                }}>{toolDetailsOpen ? 'Hide' : 'Details'}</button
-              >
+          {#if regenerating && entry.type === 'content'}
+            <div
+              class="mt-1 flex items-center gap-2 text-[var(--color-text-muted)]"
+              role="status"
+              aria-live="polite"
+            >
+              <RotateCcw size={12} class="animate-spin" />
+              Regenerating response…
             </div>
+          {:else}
+          {#if rawTaskTranscript}
+            <ToolActivity {entry} bind:open={toolDetailsOpen} transcript={currentText} />
           {:else}<div class="{getEntryColor(entry.type)} break-words mt-1 markdown-content">
               {#if isStreaming && entry.type === 'content'}
                 {#if streamingSegments.length > 0}
@@ -1675,7 +1326,7 @@
             </div>
           {/if}
 
-          {#if entry.type === 'content' && !isStreaming && currentText}
+          {#if (entry.type === 'content' || entry.type === 'user_message') && !isStreaming && !regenerating && currentText}
             <div class="response-actions mt-2 flex flex-wrap items-center gap-1" in:fade>
               <button
                 type="button"
@@ -1695,9 +1346,24 @@
                   Copy image
                 {:else}
                   <Copy size={10} />
-                  Copy response
+                  {entry.type === 'content' ? 'Copy response' : 'Copy'}
                 {/if}
               </button>
+
+              {#if entry.type === 'content' && !isImageResponse}
+                <button
+                  type="button"
+                  class="response-action"
+                  onclick={(e) => {
+                    e.stopPropagation();
+                    saveAsNote();
+                  }}
+                  title="Save this chat finding as a sourced note"
+                >
+                  <BookmarkPlus size={10} />
+                  Save as note
+                </button>
+              {/if}
 
               {#if !isImageResponse}
                 <button
@@ -1719,6 +1385,28 @@
                   class="response-action disabled:opacity-40"
                   onclick={(e) => {
                     e.stopPropagation();
+                    void forkChat();
+                  }}
+                  disabled={forking || regenerating || activatingVariant || deleting}
+                  title="Fork"
+                  aria-label="Fork"
+                  data-testid="fork-chat"
+                >
+                  {#if forking}
+                    <LoaderCircle size={10} class="animate-spin" />
+                  {:else}
+                    <GitFork size={10} />
+                  {/if}
+                  Fork
+                </button>
+              {/if}
+
+              {#if entry.type === 'content' && currentMessageId}
+                <button
+                  type="button"
+                  class="response-action disabled:opacity-40"
+                  onclick={(e) => {
+                    e.stopPropagation();
                     void regenerateResponse();
                   }}
                   disabled={regenerating || activatingVariant || deleting}
@@ -1729,18 +1417,18 @@
                 </button>
               {/if}
 
-              {#if responseVariants.length > 1}
+              {#if entry.type === 'content' && responseVariants.length > 1}
                 <div
                   class="flex items-center text-[var(--color-text-muted)]"
                 >
                   <button
-                    type="button"
-                    class="p-1 hover:text-[var(--color-text-primary)] disabled:opacity-30"
-                    disabled={selectedVariant <= 0}
-                    onclick={(e) => {
-                      e.stopPropagation();
-                      selectedVariant = Math.max(0, selectedVariant - 1);
-                    }}
+                     type="button"
+                     class="p-1 hover:text-[var(--color-text-primary)] disabled:opacity-30"
+                     disabled={selectedVariant <= 0 || activatingVariant || regenerating}
+                     onclick={(e) => {
+                       e.stopPropagation();
+                       void activateVariant(Math.max(0, selectedVariant - 1));
+                     }}
                     aria-label="Previous response"
                   >
                     <ChevronLeft size={12} />
@@ -1749,42 +1437,27 @@
                     >{selectedVariant + 1}/{responseVariants.length}</span
                   >
                   <button
-                    type="button"
-                    class="p-1 hover:text-[var(--color-text-primary)] disabled:opacity-30"
-                    disabled={selectedVariant >= responseVariants.length - 1}
-                    onclick={(e) => {
-                      e.stopPropagation();
-                      selectedVariant = Math.min(responseVariants.length - 1, selectedVariant + 1);
-                    }}
+                     type="button"
+                     class="p-1 hover:text-[var(--color-text-primary)] disabled:opacity-30"
+                     disabled={
+                       selectedVariant >= responseVariants.length - 1 ||
+                       activatingVariant ||
+                       regenerating
+                     }
+                     onclick={(e) => {
+                       e.stopPropagation();
+                       void activateVariant(
+                         Math.min(responseVariants.length - 1, selectedVariant + 1),
+                       );
+                     }}
                     aria-label="Next response"
                   >
                     <ChevronRight size={12} />
                   </button>
                 </div>
-                {#if selectedVariantIsActive}
-                  <span
-                    class="px-2 py-1 text-xs text-[var(--color-success)]"
-                    title="Follow-up messages continue from this response">Active branch</span
-                  >
-                {:else}
-                  <button
-                    type="button"
-                    class="response-action disabled:cursor-not-allowed disabled:opacity-40"
-                    disabled={activatingVariant || regenerating || !variantIdentityAuthoritative}
-                    onclick={(event) => {
-                      event.stopPropagation();
-                      void activateSelectedVariant();
-                    }}
-                    title={variantIdentityAuthoritative
-                      ? 'Make the response currently shown the active branch for follow-up messages'
-                      : 'Authoritative branch metadata is unavailable; preview only'}
-                  >
-                    {activatingVariant ? 'Switching' : 'Use this response'}
-                  </button>
-                {/if}
-              {/if}
+               {/if}
 
-              {#if entry.ghostHash}
+              {#if entry.type === 'content' && entry.ghostHash}
                 <button
                   type="button"
                   class="response-action disabled:opacity-40"
@@ -1806,6 +1479,7 @@
                 </button>
               {/if}
             </div>
+          {/if}
           {/if}
         {:else if entry.type === 'error'}
           <section
@@ -1832,7 +1506,7 @@
       </div>
 
       <div
-        class="shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-60 group-focus-within:opacity-100 hover:!opacity-100 transition-opacity"
+        class="shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-60 group-focus-within:opacity-100 hover:!opacity-100 transition-opacity {isToolActivity ? 'absolute right-2 top-1.5 bg-[var(--color-surface-1)] rounded' : ''}"
       >
         {#if archiveId}
           <button
@@ -1904,7 +1578,7 @@
           <div class="flex-1 min-w-0">
             <span
               class="{getEntryColor(subEntry.type)} block truncate"
-              title={subEntry.text}>{summarizeSubAgentText(subEntry.text)}</span
+              >{summarizeSubAgentText(subEntry.text)}</span
             >
           </div>
         </div>
@@ -1917,6 +1591,7 @@
   <button
     type="button"
     class="fixed inset-0 z-[150] cursor-default"
+    use:portalToBody
     aria-label="Close message actions"
     onclick={() => (contextMenu = null)}
     oncontextmenu={(event) => {
@@ -1926,6 +1601,7 @@
   ></button>
   <div
     class="fixed z-[151] w-52 overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-1.5 shadow-2xl shadow-black/50"
+    use:portalToBody
     style={`left:${contextMenu.x}px;top:${contextMenu.y}px;`}
     role="menu"
     aria-label="Message actions"
@@ -1937,7 +1613,18 @@
       class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]"
       onclick={() => void copyEntryText()}><Copy size={13} /> Copy</button
     >
-    {#if entry.type === 'tool_call' || entry.type === 'tool_result' || rawTaskTranscript}
+    {#if currentMessageId}
+      <button
+        type="button"
+        role="menuitem"
+        class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]"
+        onclick={() => {
+          contextMenu = null;
+          void forkChat();
+        }}><GitFork size={13} /> Fork</button
+      >
+    {/if}
+    {#if isToolActivity || rawTaskTranscript}
       <button
         type="button"
         role="menuitem"
@@ -1972,148 +1659,13 @@
   </div>
 {/if}
 
-{#if toolDetailsOpen && (entry.type === 'tool_group' || entry.type === 'tool_call' || entry.type === 'tool_result' || rawTaskTranscript)}
-  {@const detailToolCat = getToolCategory(entry.metadata)}
-  {@const detailDisplay = getToolDisplay(detailToolCat)}
-  {@const detailToolName = getToolNameFromMeta(entry.metadata)}
-  {@const detailCommand = getBashCommand(entry.metadata)}
-  {@const detailFailed = entry.type === 'tool_result' && isToolError(entry.metadata)}
-  {@const detailIsInput = entry.type === 'tool_call' && !rawTaskTranscript}
-  {@const detailRaw = entry.type === 'tool_group' ? '' : detailText()}
-  {@const detailBody =
-    detailIsInput && detailCommand && isCommandOnlyInput(entry.metadata) ? '' : detailRaw}
-  {@const detailLines = detailBody ? detailBody.split('\n').length : 0}
-  <div
-    id={detailsId}
-    class="tool-output-panel ml-14 mt-1.5 mb-2 min-w-0 overflow-hidden border-l"
-    role="region"
-    aria-label="Tool details"
-    class:tool-output-panel-failed={detailFailed}
-  >
-    <header class="flex min-h-9 flex-wrap items-center gap-2 px-3 py-1.5">
-      {#if entry.type === 'tool_group'}
-        <Layers size={13} class="shrink-0 text-blue-400" />
-      {:else}
-        <Terminal
-          size={13}
-          class="shrink-0 {detailFailed ? 'text-red-400' : detailDisplay.colorClass}"
-        />
-      {/if}
-      <span class="tool-output-kicker shrink-0">
-        {entry.type === 'tool_group'
-          ? 'Routine actions'
-          : rawTaskTranscript
-            ? 'Background task'
-            : detailFailed
-              ? 'Tool error'
-              : detailIsInput
-                ? 'Tool input'
-                : detailDisplay.resultLabel}
-      </span>
-      {#if entry.type === 'tool_group'}
-        <span class="tool-output-meta">{entry.entries?.length ?? 0} steps</span>
-      {:else}
-        {#if detailToolName && !rawTaskTranscript}
-          <span class="tool-output-chip min-w-0 truncate font-mono">{detailToolName}</span>
-        {/if}
-        {#if detailBody}
-          <span class="tool-output-meta ml-auto shrink-0 tabular-nums">
-            {detailLines}
-            {detailLines === 1 ? 'line' : 'lines'}
-          </span>
-        {/if}
-      {/if}
-      <div
-        class="flex shrink-0 items-center gap-0.5 {entry.type === 'tool_group' || !detailBody
-          ? 'ml-auto'
-          : ''}"
-      >
-        {#if detailBody}
-          <button
-            type="button"
-            class="tool-output-action"
-            onclick={() => void copyToolOutput(detailBody)}
-            aria-label="Copy output"
-            title="Copy output"
-          >
-            {#if toolOutputCopied}<Check size={13} class="text-emerald-400" />{:else}<Copy
-                size={13}
-              />{/if}
-          </button>
-        {/if}
-        <button
-          type="button"
-          class="tool-output-action"
-          onclick={(event) => {
-            requestExpandAnchor(event.currentTarget);
-            toolDetailsOpen = false;
-            (entryElement?.querySelector<HTMLElement>('.detail-toggle') ??
-              entryElement?.querySelector<HTMLElement>('[role="row"]'))?.focus();
-          }}
-          aria-label="Collapse details"
-          title="Collapse"
-        >
-          <ChevronUp size={14} />
-        </button>
-      </div>
-    </header>
-    {#if entry.type === 'tool_group'}
-      <div class="tool-output-scroll max-h-80 overflow-y-auto">
-        {#each entry.entries || [] as subEntry (subEntry.id)}
-          {@const detail = clippedToolDetail(subEntry)}
-          <article class="tool-output-step border-b px-3 py-2.5 last:border-b-0">
-            <p class="text-[11px] font-medium {getEntryColor(subEntry.type)}">
-              {subEntry.text.replace(/^Calling tool: /, '')}
-            </p>
-            {#if detail}
-              <!-- Scrollable output must be reachable with the keyboard. -->
-              <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-              <pre
-                tabindex="0"
-                aria-label="Step output"
-                class="tool-output-pre mt-2 max-h-40 overflow-auto py-2">{detail}</pre>
-            {/if}
-          </article>
-        {/each}
-      </div>
-    {:else}
-      {#if detailCommand && !rawTaskTranscript}
-        <!-- Scrollable commands must be reachable with the keyboard. -->
-        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-        <div
-          class="tool-output-command flex max-h-40 overflow-auto items-start gap-2 px-3 py-2 font-mono text-xs leading-relaxed"
-          role="region"
-          aria-label="Command"
-          tabindex="0"
-        >
-          <span class="shrink-0 select-none text-emerald-400/80">$</span>
-          <span
-            class="min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere] text-[var(--color-text-primary)]"
-            >{detailCommand}</span
-          >
-        </div>
-      {/if}
-      {#if detailBody}
-        <!-- Scrollable output must be reachable with the keyboard. -->
-        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-        <pre
-          tabindex="0"
-          aria-label="Tool output"
-          class="tool-output-pre tool-output-scroll max-h-80 overflow-auto px-3 py-2">{detailBody}</pre>
-      {:else if !detailCommand}
-        <p class="px-3.5 py-4 text-center text-[11px] text-[var(--color-text-muted)]">
-          {detailIsInput ? 'No input was recorded.' : 'No output was reported.'}
-        </p>
-      {/if}
-    {/if}
-  </div>
-{/if}
-
 {#if zoomedImage || zoomedRawImage}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm cursor-zoom-out"
+    data-scrollbar-overlay
+    use:portalToBody
     transition:fade={{ duration: 150 }}
     onclick={(e) => {
       e.stopPropagation();
@@ -2146,6 +1698,26 @@
 {/if}
 
 <style>
+  .agent-chat-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface-2);
+    color: var(--color-text-secondary);
+    font-size: 11px;
+  }
+  .agent-chat-button:hover {
+    background: var(--color-surface-3);
+    color: var(--color-accent);
+  }
+  .agent-chat-button:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
   /* Expanded sub-agent group: bounded, softly scrollable. Keeps a long worker
      activity log from turning the manager feed into a wall of text. */
   .agent-group-scroll {
@@ -2176,8 +1748,7 @@
     color: color-mix(in srgb, var(--color-error) 30%, var(--color-text-primary));
   }
 
-  .response-action,
-  .detail-toggle {
+  .response-action {
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -2191,92 +1762,30 @@
   .response-action.copied {
     color: var(--color-success);
   }
-  .response-action:hover,
-  .detail-toggle:hover {
+  .response-action:hover {
     color: var(--color-text-primary);
     background: var(--color-surface-2);
   }
+  .response-action-icon {
+    justify-content: center;
+    min-width: 28px;
+    padding: 4px;
+  }
+  .response-action-icon:hover:not(:disabled) {
+    color: var(--color-accent);
+  }
+  .response-action-icon :global(svg) {
+    transition: transform 150ms ease;
+  }
+  .response-action-icon:hover:not(:disabled) :global(svg) {
+    transform: scale(1.12);
+  }
   .response-actions button:focus-visible,
   .error-box-body:focus-visible,
-  .agent-group-scroll:focus-visible,
-  .detail-toggle:focus-visible,
-  .tool-output-panel :is(button, pre, [tabindex]):focus-visible {
+  .agent-group-scroll:focus-visible {
     outline: 2px solid var(--color-accent);
     outline-offset: -2px;
   }
-
-  /* Expanded details continue the transcript rather than adding another card. */
-  .tool-output-panel {
-    border-color: var(--color-border);
-  }
-  .tool-output-panel-failed {
-    border-color: color-mix(in srgb, var(--color-error) 40%, var(--color-border));
-  }
-  .tool-output-panel > header,
-  .tool-output-command,
-  .tool-output-step {
-    border-color: var(--color-border);
-  }
-  .tool-output-kicker {
-    font-size: var(--text-sm);
-    font-weight: 500;
-    color: var(--color-text-secondary);
-  }
-  .tool-output-meta {
-    font-size: var(--text-sm);
-    color: var(--color-text-muted);
-  }
-  .tool-output-chip {
-    font-size: var(--text-sm);
-    color: var(--color-text-muted);
-  }
-  .tool-output-action {
-    display: inline-flex;
-    height: 1.75rem;
-    width: 1.75rem;
-    align-items: center;
-    justify-content: center;
-    border-radius: 6px;
-    color: var(--color-text-muted);
-    transition:
-      color 120ms ease,
-      background-color 120ms ease;
-  }
-  .tool-output-action:hover,
-  .tool-output-action:focus-visible {
-    color: var(--color-text-primary);
-    background: var(--color-surface-3);
-  }
-  .tool-output-pre {
-    margin: 0;
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    line-height: 1.6;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-    tab-size: 4;
-    color: var(--color-text-secondary);
-    background: transparent;
-  }
-  .tool-output-scroll {
-    scrollbar-width: thin;
-    scrollbar-color: var(--color-surface-4) transparent;
-  }
-
-  /* Web search: globe spins while searching, then settles. */
-  :global(.globe-spin) {
-    animation: globe-rotate 1.4s linear infinite;
-  }
-  @keyframes globe-rotate {
-    from {
-      transform: rotate(0);
-    }
-    to {
-      transform: rotate(360deg);
-    }
-  }
-
   :global(.markdown-content table) {
     width: 100%;
     min-width: 520px;
@@ -2340,6 +1849,10 @@
     min-width: 520px;
     max-height: 360px;
   }
+  :global(.markdown-content .kory-chart-pie svg) {
+    min-width: 0;
+    max-width: 380px;
+  }
   :global(.markdown-content .chart-grid) {
     stroke: var(--color-border);
     stroke-width: 1;
@@ -2365,6 +1878,19 @@
   :global(.markdown-content .chart-donut-hole) {
     fill: var(--color-surface-2);
   }
+  :global(.markdown-content .chart-pie-center-value) {
+    fill: var(--color-text-primary);
+    font-size: 16px;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  :global(.markdown-content .chart-pie-center-label) {
+    fill: var(--color-text-muted);
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
   :global(.markdown-content .kory-chart-legend) {
     display: flex;
     flex-wrap: wrap;
@@ -2384,9 +1910,17 @@
     border-radius: 3px;
   }
   :global(.markdown-content .kory-chart-pie) {
-    display: grid;
-    grid-template-columns: minmax(320px, 1fr) minmax(160px, auto);
+    display: flex;
+    flex-direction: column;
     align-items: center;
+    justify-content: center;
+    max-width: 100%;
+    margin: 0 auto;
+    overflow: visible;
+  }
+  :global(.markdown-content .kory-chart-pie svg) {
+    max-width: 100%;
+    height: auto;
   }
   :global(.markdown-content .kory-chart-pie-legend) {
     flex-direction: column;
@@ -2429,6 +1963,64 @@
     font-size: 10px;
     opacity: 0.85;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  }
+
+  /* Agent inline styling: validated spans carry their own inline styles;
+     defaults (highlight, links) track the user's theme accent. */
+  :global(.markdown-content .kory-inline) {
+    font-size: inherit;
+  }
+  :global(.markdown-content .kory-mark) {
+    background: color-mix(in srgb, var(--color-accent) 24%, transparent);
+    color: inherit;
+    border-radius: 4px;
+    padding: 0.05em 0.25em;
+  }
+  :global(.markdown-content .kory-underline) {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  /* External links: accent-colored with the destination site's icon. */
+  :global(.markdown-content .kory-external-link) {
+    color: #3b82f6;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  :global(.markdown-content .kory-external-link:hover) {
+    opacity: 0.85;
+  }
+  :global(.markdown-content .kory-link-favicon) {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    margin-right: 4px;
+    border-radius: 3px;
+    vertical-align: text-bottom;
+  }
+  :global(:root[data-theme='dark'] .markdown-content .kory-link-favicon) {
+    mix-blend-mode: multiply;
+  }
+  :global(.markdown-content .kory-file-link),
+  :global(.markdown-content .kory-session-link) {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 3px;
+    color: var(--color-text-primary);
+    font-weight: 500;
+    text-decoration: none;
+    border-bottom: 1.5px dotted color-mix(in srgb, var(--color-text-secondary) 65%, transparent);
+    padding-bottom: 1px;
+    cursor: pointer;
+  }
+  :global(.markdown-content .kory-file-link:hover),
+  :global(.markdown-content .kory-session-link:hover) {
+    color: var(--color-accent);
+    border-bottom-color: var(--color-accent);
+  }
+  :global(.markdown-content .kory-file-link-lines) {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85em;
+    color: var(--color-text-muted);
   }
 
   /* Sandboxed HTML iframe (fenced `html` / `kory-html` blocks). */

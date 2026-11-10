@@ -83,7 +83,11 @@ describe('Koryphaios settings controls', () => {
         .filter(({ source }) => /role\s*=\s*['"]switch['"]/.test(source))
         .map(({ path }) => path)
         .sort(),
-    ).toEqual(['lib/components/SettingsSwitch.svelte', 'lib/components/SettingsToggle.svelte']);
+    ).toEqual([
+      'lib/components/AgentSettings.svelte',
+      'lib/components/SettingsSwitch.svelte',
+      'lib/components/SettingsToggle.svelte',
+    ]);
 
     for (const component of ['SettingsSwitch.svelte', 'SettingsToggle.svelte']) {
       const source = readFileSync(join(process.cwd(), 'src/lib/components', component), 'utf8');
@@ -167,6 +171,33 @@ describe('Koryphaios settings controls', () => {
     await fireEvent.keyDown(trigger, { key: 'Enter' });
     expect(onchange).toHaveBeenCalledWith('fast');
     expect(trigger.hasAttribute('aria-controls')).toBe(false);
+  });
+
+  it('portals searchable selects and filters provider/model options', async () => {
+    const onchange = vi.fn();
+    render(KorySelect, {
+      props: {
+        value: 'cline:nvidia/model',
+        label: 'Worker model',
+        searchable: true,
+        options: [
+          { value: 'cline:nvidia/model', label: 'Cline · nvidia/model', provider: 'cline' },
+          { value: 'openai:gpt-5', label: 'OpenAI · gpt-5', provider: 'openai' },
+        ],
+        onchange,
+      },
+    });
+
+    await fireEvent.click(screen.getByRole('combobox', { name: 'Worker model' }));
+    const listbox = screen.getByRole('listbox', { name: 'Worker model' });
+    expect(listbox.parentElement).toBe(document.body);
+    expect(listbox.classList.contains('fixed')).toBe(true);
+    expect(listbox.className).toContain('z-[var(--z-popover)]');
+
+    const search = screen.getByRole('textbox', { name: 'Search Worker model' });
+    await fireEvent.input(search, { target: { value: 'openai' } });
+    expect(screen.getByRole('option', { name: /OpenAI · gpt-5/ })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: /Cline · nvidia\/model/ })).toBeNull();
   });
 
   it('accepts a custom KorySelect response', async () => {

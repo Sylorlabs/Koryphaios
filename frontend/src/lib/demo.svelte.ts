@@ -62,8 +62,8 @@ const WORKERS = [
     id: 'w-be',
     name: 'backend',
     domain: 'backend',
-    model: 'jules-gemini-3.1-pro',
-    provider: 'jules',
+    model: 'claude-code-opus',
+    provider: 'claude',
     glow: 'rgba(66,133,244,0.5)',
   },
   {
@@ -80,7 +80,7 @@ const WORKERS = [
 // registry. Models are intentionally not invented for disconnected providers:
 // the real app fills those from each provider at runtime.
 const AVAILABLE_DEMO_PROVIDERS = [
-  ['anthropic', 'Anthropic', 'api_key_or_auth'],
+  ['anthropic', 'Anthropic', 'api_key'],
   ['openai', 'OpenAI', 'api_key'],
   ['google', 'Google', 'api_key'],
   ['aistudio', 'Google AI Studio', 'api_key'],
@@ -94,10 +94,10 @@ const AVAILABLE_DEMO_PROVIDERS = [
   ['codex-auth', 'OpenAI Codex', 'auth_only'],
   ['grok', 'Grok Build', 'auth_only'],
   ['antigravity', 'Antigravity', 'auth_only'],
+  ['opencode', 'OpenCode', 'auth_only'],
   ['cursor', 'Cursor', 'auth_only'],
   ['devin', 'Devin', 'auth_only'],
   ['cline', 'Cline', 'api_key'],
-  ['jules', 'Google Jules', 'api_key'],
   ['azure', 'Azure OpenAI', 'api_key_or_auth'],
   ['bedrock', 'AWS Bedrock', 'env_auth'],
   ['vertexai', 'Vertex AI', 'env_auth'],
@@ -167,7 +167,6 @@ const AVAILABLE_DEMO_PROVIDERS = [
   ['wandb', 'Weights & Biases', 'api_key'],
   ['poe', 'Poe', 'api_key'],
   ['workbuddy', 'Work Buddy', 'api_key'],
-  ['autoclaw', 'AutoClaw', 'api_key'],
   ['github-models', 'GitHub Models', 'api_key'],
   ['requesty', 'Requesty', 'api_key'],
   ['inference', 'Inference.net', 'api_key'],
@@ -309,42 +308,6 @@ const CONNECTED_DEMO_PROVIDERS = [
     supportsAuthToken: true,
     requiresBaseUrl: false,
   },
-  {
-    name: 'jules',
-    label: 'Google Jules',
-    enabled: true,
-    authenticated: true,
-    authSource: 'Demo cloud connection',
-    models: ['jules-gemini-3-flash', 'jules-gemini-3.1-pro'],
-    selectedModels: ['jules-gemini-3-flash', 'jules-gemini-3.1-pro'],
-    allAvailableModels: [
-      {
-        id: 'jules-gemini-3-flash',
-        name: 'Jules · Gemini 3 Flash (cloud)',
-        provider: 'jules',
-        contextWindow: 1_000_000,
-        maxOutputTokens: 64_000,
-        contextVerified: true,
-        canReason: true,
-        reasoningLevels: [],
-      },
-      {
-        id: 'jules-gemini-3.1-pro',
-        name: 'Jules · Gemini 3.1 Pro (cloud)',
-        provider: 'jules',
-        contextWindow: 1_000_000,
-        maxOutputTokens: 128_000,
-        contextVerified: true,
-        canReason: true,
-        reasoningLevels: [],
-      },
-    ],
-    hideModelSelector: false,
-    authMode: 'api_key',
-    supportsApiKey: true,
-    supportsAuthToken: false,
-    requiresBaseUrl: false,
-  },
 ] as const;
 
 const connectedDemoProviders = new Map<string, (typeof CONNECTED_DEMO_PROVIDERS)[number]>(
@@ -475,7 +438,7 @@ function playTurn(prompt: string, opts: { loop: boolean; clear: boolean }) {
       agentId: 'kory-manager',
       agentName: 'Kory',
       glowClass: 'glow-kory',
-      text: 'Routing: frontend → Codex CLI / GPT-5.6-Sol · backend → Google Jules / Gemini 3.1 Pro · tests → Claude Code / Claude Sonnet 5',
+      text: 'Routing: frontend → Codex CLI / GPT-5.6-Sol · backend → Claude Code / Claude Opus 4.8 · tests → Claude Code / Claude Sonnet 5',
       metadata: { phase: 'routing' },
     });
     // Workers spawn now — they fly in from the top of the agent rail.

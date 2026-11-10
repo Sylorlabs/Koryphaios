@@ -1,7 +1,8 @@
 // Session management store — Svelte 5 runes
 // Handles CRUD, rename, search, date grouping, message history
 
-import type { Session, SessionAgentOverrides, CreateGitWorkspaceRequest } from '@koryphaios/shared';
+import type { Session, SessionAgentOverrides, CreateGitWorkspaceRequest, SessionRunSnapshot } from '@koryphaios/shared';
+import { runStateStore } from './run-state.svelte';
 import { toastStore } from './toast.svelte';
 import { projectStore } from './project.svelte';
 import { resolveSessionSelection } from './session-selection';
@@ -10,9 +11,8 @@ import { friendlyHttpError } from '$lib/utils/http-error';
 import { apiUrl } from '$lib/utils/api-url';
 import { apiFetch } from '$lib/api.svelte';
 import { wsStore } from './websocket.svelte';
-import { notifySessionRemoved } from './session-removal';
+import { notifySessionRemoved, notifySessionsRemoved } from './session-removal';
 import { loadLastSessionId, saveLastSessionId } from './navigation-preferences';
-import { homeDir } from '@tauri-apps/api/path';
 import {
   parseMessageDisplayProjection,
   type DisplayMessage,
@@ -31,12 +31,18 @@ export type LifecycleSession = Session & {
 let sessions = $state<LifecycleSession[]>([]);
 let archivedSessions = $state<LifecycleSession[]>([]);
 let activeSessionId = $state<string>('');
+let selectionGeneration = $state(0);
+function selectSession(id: string) {
+  if (activeSessionId !== id) selectionGeneration += 1;
+  activeSessionId = id;
+}
 let searchQuery = $state<string>('');
 let loading = $state<boolean>(false);
 let archivedLoading = $state<boolean>(false);
 let archivedLoaded = $state<boolean>(false);
 let archivedError = $state<string | null>(null);
 let createSessionPromise: Promise<string | null> | null = null;
+let fetchSessionsPromise: Promise<boolean> | null = null;
 let fetchGeneration = 0;
 let archivedFetchGeneration = 0;
 let hasRestoredInitialSession = false;
@@ -53,6 +59,11 @@ const latestSessionVersions = new Map<string, number>();
 // session-keyed cache lets concurrent reloads pair an older message array with
 // a newer CAS boundary (or vice versa), which is unsafe for branch activation.
 const messageDisplayBoundaries = new WeakMap<DisplayMessage[], MessageDisplayBoundary>();
+interface MessagePageInfo {
+  hasMore: boolean;
+  oldestMessageId: string | null;
+}
+const messagePageInfo = new WeakMap<DisplayMessage[], MessagePageInfo>();
 
 function lifecycleVersion(session: LifecycleSession): number | null {
   return typeof session.version === 'number' ? session.version : null;
@@ -107,7 +118,7 @@ function removeFromActiveProjection(id: string): void {
   sessions = sessions.filter((session) => session.id !== id);
   wsStore.unsubscribeFromSession(id);
   if (activeSessionId === id) {
-    activeSessionId = replacementSessionId(sessions);
+    selectSession(replacementSessionId(sessions));
     saveLastSession(activeSessionId);
   }
 }
@@ -180,8 +191,22 @@ function saveLastSession(id: string): void {
 
 // ─── API calls ──────────────────────────────────────────────────────────────
 
-/** Returns true if sessions loaded successfully, false otherwise (e.g. backend down). */
+/** Coalesce refreshes triggered by rapid sends, completions, reconnects, and
+ * startup. Only one full session-list request and one reactive replacement may
+ * be in flight at a time. */
 async function fetchSessions(): Promise<boolean> {
+  if (fetchSessionsPromise) return fetchSessionsPromise;
+  const request = fetchSessionsRequest();
+  fetchSessionsPromise = request;
+  try {
+    return await request;
+  } finally {
+    if (fetchSessionsPromise === request) fetchSessionsPromise = null;
+  }
+}
+
+/** Returns true if sessions loaded successfully, false otherwise (e.g. backend down). */
+async function fetchSessionsRequest(): Promise<boolean> {
   if (!browser) return false;
   const myGeneration = ++fetchGeneration;
   try {
@@ -210,7 +235,7 @@ async function fetchSessions(): Promise<boolean> {
       return false;
     }
     if (!text.trim()) return false;
-    let data: { ok?: boolean; data?: LifecycleSession[] };
+    let data: { ok?: boolean; data?: LifecycleSession[]; runStates?: SessionRunSnapshot[] };
     try {
       data = JSON.parse(text);
     } catch (err: unknown) {
@@ -237,20 +262,30 @@ async function fetchSessions(): Promise<boolean> {
         else archivedSessionIds.add(session.id);
       }
       sessions = sortActive(
-        data.data.filter(
+        [...data.data, ...sessions.filter((session) => session.id.startsWith('linked-'))].filter(
           (session) =>
             session.status !== 'archived' &&
             !deletedSessionIds.has(session.id) &&
             !archivedSessionIds.has(session.id),
         ),
       );
+      const activeIds = new Set(sessions.map((session) => session.id));
+      for (const snapshot of data.runStates ?? []) {
+        if (!activeIds.has(snapshot.sessionId)) continue;
+        // The same revision guard as WS delivery prevents a delayed HTTP
+        // response from overwriting a more recent live failure/status.
+        runStateStore.applyEvent({
+          type: 'run.state', sessionId: snapshot.sessionId,
+          timestamp: snapshot.updatedAt, payload: { snapshot, transition: null },
+        });
+      }
       const storedSessionId = hasRestoredInitialSession ? '' : loadLastSession();
       hasRestoredInitialSession = true;
-      activeSessionId = resolveSessionSelection({
+      selectSession(resolveSessionSelection({
         storedSessionId,
         currentActiveId: activeSessionId,
         sessionIds: sessions.map((s) => s.id),
-      });
+      }));
       // Selection invariants live in resolveSessionSelection (session-selection.ts):
       // stored restore wins, vanished actives clear, empty stays empty.
 
@@ -304,7 +339,7 @@ async function fetchArchivedSessions(): Promise<boolean> {
     sessions = sessions.filter((session) => !archivedIds.has(session.id));
     if (activeWasArchived) {
       wsStore.unsubscribeFromSession(activeSessionId);
-      activeSessionId = replacementSessionId(sessions);
+      selectSession(replacementSessionId(sessions));
       saveLastSession(activeSessionId);
     }
     archivedLoaded = true;
@@ -318,30 +353,9 @@ async function fetchArchivedSessions(): Promise<boolean> {
   }
 }
 
-/** Plain New Chat behaves like opening a fresh terminal: start at the OS home directory. */
-async function resolveNewChatWorkingDirectory(): Promise<string | undefined> {
-  if (!browser) return undefined;
-  const inTauri = '__TAURI_INTERNALS__' in window || '__TAURI__' in window;
-  if (!inTauri) return undefined;
-  try {
-    const home = await homeDir();
-    return home.trim() || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/** User-initiated "new chat".
- *
- *  Behavior:
- *  - shift=true → always create a brand-new session.
- *  - Always create is the default behavior for this app: no untouched composer
- *    reuse is performed from the new-chat control.
- *  - Starts from the user's normal OS home directory when the desktop runtime
- *    exposes it, matching a fresh terminal window.
- *  - Browser fallback stays unscoped because browsers cannot read the OS home path. */
+/** Create a fresh chat in the explicitly selected project. */
 async function newChat(_opts: { shift?: boolean } = {}): Promise<string | null> {
-  return createSession({ workingDirectory: await resolveNewChatWorkingDirectory() });
+  return createSession();
 }
 
 async function createSession(
@@ -360,7 +374,11 @@ async function createSessionRequest(
   opts: { workingDirectory?: string | null; git?: CreateGitWorkspaceRequest } = {},
 ): Promise<string | null> {
   try {
-    const workingDirectory = opts.workingDirectory ?? null;
+    const workingDirectory = opts.workingDirectory ?? projectStore.currentPath ?? null;
+    if (!workingDirectory) {
+      toastStore.error('Choose a project folder before starting a chat');
+      return null;
+    }
     const res = await apiFetch(apiUrl('/api/sessions'), {
       method: 'POST',
       headers: {
@@ -395,8 +413,9 @@ async function createSessionRequest(
       // current sidebar view (e.g. it's workspace-level but the slider is on
       // 'project'), flip the slider to 'all' so the user can always see the
       // chat they just created.
-      sessions = [data.data, ...sessions];
-      activeSessionId = data.data.id;
+      invalidateSessionFetches();
+      sessions = upsertSession(sessions, data.data, sortActive);
+      selectSession(data.data.id);
       saveLastSession(activeSessionId);
       if (
         projectStore.workspaceRoot &&
@@ -412,6 +431,40 @@ async function createSessionRequest(
     toastStore.error('Failed to create session');
   }
   return null;
+}
+
+/**
+ * Fork a chat at one message: the backend copies that message and every
+ * ancestor into a new chat, which then becomes the active session. The source
+ * chat is left untouched.
+ */
+async function forkSession(sourceSessionId: string, messageId: string): Promise<string | null> {
+  try {
+    const res = await apiFetch(apiUrl(`/api/sessions/${encodeURIComponent(sourceSessionId)}/fork`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messageId }),
+    });
+    const text = await res.text();
+    const data = parseResponseBody(text);
+    const session = (data as { data?: Session }).data;
+    if (!res.ok || data.ok !== true || !session?.id) {
+      toastStore.error(responseDetail(data) || friendlyHttpError(res.status, 'fork'));
+      return null;
+    }
+    invalidateSessionFetches();
+    sessions = upsertSession(sessions, session, sortActive);
+    selectSession(session.id);
+    saveLastSession(activeSessionId);
+    if (projectStore.workspaceRoot && projectStore.scope === 'project' && !session.workingDirectory) {
+      projectStore.setScope('all');
+    }
+    return session.id;
+  } catch (err: unknown) {
+    console.warn('Failed to fork:', err instanceof Error ? err.message : String(err));
+    toastStore.error('Failed to fork');
+    return null;
+  }
 }
 
 async function renameSession(id: string, title: string): Promise<boolean> {
@@ -647,19 +700,21 @@ async function deleteAllSessions(): Promise<boolean> {
       return false;
     }
 
-    const erased = [...sessions, ...archivedSessions];
+    const erased = [...sessions.filter((session) => !session.id.startsWith('linked-')), ...archivedSessions];
     for (const session of erased) {
       deletedSessionIds.add(session.id);
       wsStore.unsubscribeFromSession(session.id);
     }
-    sessions = [];
+    sessions = sessions.filter((session) => session.id.startsWith('linked-'));
     archivedSessions = [];
     archivedSessionIds.clear();
     archivedLoaded = true;
     archivedError = null;
-    activeSessionId = '';
-    saveLastSession('');
-    for (const session of erased) notifySessionRemoved(session.id);
+    if (!activeSessionId.startsWith('linked-')) {
+      selectSession('');
+      saveLastSession('');
+    }
+    notifySessionsRemoved(erased.map((session) => session.id));
     toastStore.success(
       data.deleted === 1 ? '1 session deleted' : `${data.deleted ?? 0} sessions deleted`,
     );
@@ -671,8 +726,26 @@ async function deleteAllSessions(): Promise<boolean> {
   }
 }
 
-async function fetchMessages(sessionId: string, signal?: AbortSignal): Promise<DisplayMessage[]> {
-  const res = await apiFetch(apiUrl(`/api/messages/${sessionId}`), { signal });
+// Transcripts load newest-first and page backwards. Opening a chat must not
+// fetch (or lay out) the whole conversation: the newest page is deliberately
+// small, and scrolling up pulls the previous page on demand through
+// feedStore.loadOlderSessionMessages, which passes a `before` cursor.
+const INITIAL_MESSAGE_PAGE_SIZE = 50;
+const OLDER_MESSAGE_PAGE_SIZE = 120;
+
+async function fetchMessages(
+  sessionId: string,
+  signal?: AbortSignal,
+  options: { beforeMessageId?: string; limit?: number } = {},
+): Promise<DisplayMessage[]> {
+  const params = new URLSearchParams({
+    limit: String(
+      options.limit ??
+        (options.beforeMessageId ? OLDER_MESSAGE_PAGE_SIZE : INITIAL_MESSAGE_PAGE_SIZE),
+    ),
+  });
+  if (options.beforeMessageId) params.set('before', options.beforeMessageId);
+  const res = await apiFetch(apiUrl(`/api/messages/${sessionId}?${params.toString()}`), { signal });
   const text = await res.text();
   let data: { ok?: boolean; data?: unknown; error?: string };
   try {
@@ -690,6 +763,10 @@ async function fetchMessages(sessionId: string, signal?: AbortSignal): Promise<D
   try {
     const projection = parseMessageDisplayProjection(data.data);
     messageDisplayBoundaries.set(projection.messages, projection.boundary);
+    messagePageInfo.set(projection.messages, {
+      hasMore: projection.hasMore,
+      oldestMessageId: projection.oldestMessageId,
+    });
     return projection.messages;
   } catch (error) {
     if (error instanceof Error) throw error;
@@ -746,14 +823,17 @@ function handleSessionUpdate(session: LifecycleSession) {
     return;
   }
 
-  const wasArchived = archivedSessionIds.has(session.id);
-  if (wasArchived) invalidateSessionFetches();
+  // A list request started before a new chat/update must not erase it when
+  // that older response arrives (including cross-window creation notices).
+  invalidateSessionFetches();
   archivedSessionIds.delete(session.id);
   archivedSessions = archivedSessions.filter((item) => item.id !== session.id);
   sessions = upsertSession(sessions, session, sortActive);
 }
 
 function handleSessionDeleted(sessionId: string) {
+  if (deletedSessionIds.has(sessionId)) return;
+  invalidateSessionFetches();
   deletedSessionIds.add(sessionId);
   archivedSessionIds.delete(sessionId);
   archivedSessions = archivedSessions.filter((session) => session.id !== sessionId);
@@ -764,6 +844,9 @@ function handleSessionDeleted(sessionId: string) {
 // ─── Exported Store ─────────────────────────────────────────────────────────
 
 export const sessionStore = {
+  attachDeviceSession(session: LifecycleSession) {
+    sessions = [session, ...sessions.filter((item) => item.id !== session.id)];
+  },
   get sessions() {
     return sessions;
   },
@@ -782,8 +865,11 @@ export const sessionStore = {
   get activeSessionId() {
     return activeSessionId;
   },
+  get selectionGeneration() {
+    return selectionGeneration;
+  },
   set activeSessionId(id: string) {
-    activeSessionId = id;
+    selectSession(id);
     saveLastSession(id);
   },
   get searchQuery() {
@@ -803,9 +889,9 @@ export const sessionStore = {
   get filteredSessions(): Session[] {
     // Project scope first: only the open project's chats (legacy sessions with
     // no workingDirectory stay visible in the 'all' scope, never lost).
-    let scoped = sessions;
+    let scoped = sessions.filter((session) => !session.id.startsWith('linked-'));
     if (projectStore.scope === 'project' && projectStore.currentPath) {
-      scoped = sessions.filter((s) => s.workingDirectory === projectStore.currentPath);
+      scoped = scoped.filter((s) => s.workingDirectory === projectStore.currentPath);
     }
     if (!searchQuery.trim()) return scoped;
     const q = searchQuery.toLowerCase();
@@ -825,7 +911,7 @@ export const sessionStore = {
   seedDemoSessions(list: LifecycleSession[], activeId: string) {
     sessions = list;
     archivedSessions = [];
-    activeSessionId = activeId;
+    selectSession(activeId);
     archivedError = null;
     archivedLoaded = false;
     archivedSessionIds.clear();
@@ -836,6 +922,7 @@ export const sessionStore = {
   fetchSessions,
   fetchArchivedSessions,
   createSession,
+  forkSession,
   newChat,
   renameSession,
   archiveSession,
@@ -845,6 +932,15 @@ export const sessionStore = {
   deleteSession,
   deleteAllSessions,
   fetchMessages,
+  getMessagePageInfo(messages: DisplayMessage[]): MessagePageInfo | undefined {
+    return messagePageInfo.get(messages);
+  },
+  copyMessageDisplayMetadata(target: DisplayMessage[], source: DisplayMessage[], page?: MessagePageInfo) {
+    const boundary = messageDisplayBoundaries.get(source);
+    if (boundary) messageDisplayBoundaries.set(target, boundary);
+    const sourcePage = page ?? messagePageInfo.get(source);
+    if (sourcePage) messagePageInfo.set(target, sourcePage);
+  },
   getMessageDisplayBoundary(messages: DisplayMessage[]): MessageDisplayBoundary | undefined {
     return messageDisplayBoundaries.get(messages);
   },

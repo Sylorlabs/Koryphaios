@@ -15,6 +15,7 @@
 {#if open}
   <div
     class="fixed inset-0 z-[95] flex items-start justify-center pt-[12vh] px-4 backdrop-blur-sm"
+    data-scrollbar-overlay
     style="background: rgba(0,0,0,0.45);"
     onmousedown={onClose}
     role="presentation"

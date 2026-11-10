@@ -72,7 +72,10 @@ export function useSessionSync(options: SessionSyncOptions = {}) {
       // during effect evaluation.
       const feedGeneration = wsStore.activateSessionFeed(activeId);
       if (activatingSessionId === activeId) activatingSessionId = '';
-      if (wsStore.status === 'connected') wsStore.subscribeToSession(activeId);
+      // HTTP history contains chat messages, not the full operational
+      // transcript. Replay the durable event log as well so tools, reasoning,
+      // and worker activity survive a refresh or app relaunch.
+      wsStore.subscribeToSession(activeId);
       try {
         const messages = await sessionStore.fetchMessages(activeId, controller.signal);
         // A newer switch has happened — drop this stale result.

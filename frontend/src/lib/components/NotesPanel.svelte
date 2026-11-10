@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { NoteLinkTarget } from '$lib/utils/kory-link-favicon';
   import { onMount, onDestroy, tick, type Component } from 'svelte';
   import Search from 'lucide-svelte/icons/search';
   import Plus from 'lucide-svelte/icons/plus';
@@ -11,6 +12,7 @@
   import BookOpen from 'lucide-svelte/icons/book-open';
   import Paperclip from 'lucide-svelte/icons/paperclip';
   import Trash2 from 'lucide-svelte/icons/trash-2';
+  import ConfirmDialog from './ConfirmDialog.svelte';
   import History from 'lucide-svelte/icons/history';
   import X from 'lucide-svelte/icons/x';
   import ChevronRight from 'lucide-svelte/icons/chevron-right';
@@ -31,17 +33,30 @@
   import LoaderCircle from 'lucide-svelte/icons/loader-circle';
   import Settings from 'lucide-svelte/icons/settings';
   import Upload from 'lucide-svelte/icons/upload';
+  import Bold from 'lucide-svelte/icons/bold';
+  import Italic from 'lucide-svelte/icons/italic';
+  import Heading2 from 'lucide-svelte/icons/heading-2';
+  import List from 'lucide-svelte/icons/list';
+  import KnowledgeScope from './KnowledgeScope.svelte';
+  import '$lib/styles/document.css';
   import { notesStore } from '$lib/stores/notes.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
   import { apiUrl } from '$lib/utils/api-url';
   import { apiFetch } from '$lib/api.svelte';
   import { projectDisplayName, projectStore } from '$lib/stores/project.svelte';
   import { noteBasesStore } from '$lib/stores/note-bases.svelte';
+  import { NOTE_WORKSPACE_TEMPLATES } from '@koryphaios/shared';
   import { selectProjectNavigation } from '$lib/utils/project-navigation';
+  import { formatShortcut } from '$lib/utils/platform';
+  import ClipboardCheck from 'lucide-svelte/icons/clipboard-check';
   import NotesQuickSwitcher from './NotesQuickSwitcher.svelte';
   import NotesNetworkWorkspace from './NotesNetworkWorkspace.svelte';
+  import NotesChangeReview from './NotesChangeReview.svelte';
+  import NoteAppearances from './NoteAppearances.svelte';
   import NotesRecoveryDialog, { type NotesRecoveryTab } from './NotesRecoveryDialog.svelte';
   import NotePropertiesPanel from './NotePropertiesPanel.svelte';
+  import NoteIconContextMenu from './NoteIconContextMenu.svelte';
+  import NoteIcon from './NoteIcon.svelte';
   import VirtualList from './VirtualList.svelte';
   import { Marked } from 'marked';
   import markedKatex from 'marked-katex-extension';
@@ -175,17 +190,21 @@
   });
 
   // ── State ──────────────────────────────────────────────────────────────────
-  let activeView = $state<'editor' | 'preview' | 'bases' | 'graph' | 'network' | 'canvas'>(
-    'editor',
-  );
+  let activeView = $state<
+    'editor' | 'preview' | 'bases' | 'graph' | 'network' | 'review' | 'canvas'
+  >('editor');
+  let reviewCount = $state(0);
   let NotesGraphComponent = $state<Component<{
     onNodeClick: (noteId: string) => void;
   }> | null>(null);
   let NotesCanvasComponent = $state<Component<{
     onOpenNote?: (noteId: string) => void;
+    initialNoteId?: string | null;
   }> | null>(null);
   let NotesBasesComponent = $state<Component<{
     onOpenNote: (noteId: string) => void;
+    onOpenCanvas?: (noteId: string) => void;
+    onAskAgent?: (prompt: string) => void;
   }> | null>(null);
   let NotesVaultRestoreComponent = $state<Component<{
     open: boolean;
@@ -193,6 +212,11 @@
     onClose: () => void;
     onRestored: (result: VaultRestoreResult) => void | Promise<void>;
   }> | null>(null);
+  let selectedCanvasId = $state<string | null>(null);
+  function askAgent(prompt: string) {
+    window.dispatchEvent(new CustomEvent('kory-notes-ask-agent', { detail: { prompt } }));
+  }
+  function openCanvas(id: string) { selectedCanvasId = id; activeView = 'canvas'; }
   let graphComponentError = $state<string | null>(null);
   let canvasComponentError = $state<string | null>(null);
   let graphComponentLoading = false;
@@ -206,6 +230,11 @@
   let tagsInput = $state('');
   let tags = $state<string[]>([]);
   let showTagMenu = $state(false);
+  let editorIconMenu = $state<{ x: number; y: number } | null>(null);
+  function openEditorIconMenu(event: MouseEvent): void {
+    event.preventDefault();
+    editorIconMenu = { x: event.clientX, y: event.clientY };
+  }
   let availableTags = $derived(
     [...new Set(notesStore.notes.flatMap((note) => note.tags ?? []))]
       .filter((tag) => !tags.includes(tag))
@@ -214,6 +243,10 @@
   let pinned = $state(false);
   let includeInContext = $state(false);
   let isDirty = $state(false);
+  // In-app confirmation dialog state for the trash-can delete (shift-click skips it).
+  let showDeleteConfirm = $state(false);
+  let notePendingDelete = $state<NoteWithLinks | null>(null);
+  let notePendingDeleteWarning = $state('');
   let saveState = $state<'idle' | 'dirty' | 'saving' | 'saved' | 'error' | 'conflict'>('idle');
   let baseRevision = $state<number | null>(null);
   let editVersion = 0;
@@ -288,8 +321,10 @@
   let wikilinkActiveIndex = $state(0);
   const attachmentUrlRegistry = new AttachmentObjectUrlRegistry((path) => apiFetch(apiUrl(path)));
   function updateNarrow() {
+    const wasNarrow = isNarrow;
     isNarrow = typeof window !== 'undefined' && window.innerWidth < 700;
     if (!isNarrow) showSidebar = true;
+    else if (!wasNarrow && notesStore.currentNote) showSidebar = false;
   }
 
   async function loadGraphComponent(): Promise<void> {
@@ -470,6 +505,22 @@
     scheduleAutosave();
   }
 
+  async function insertMarkdown(prefix: string, suffix = '', placeholder = 'text') {
+    const editor = contentAreaEl;
+    if (!editor) return;
+    const start = editor.selectionStart;
+    const end = editor.selectionEnd;
+    const selected = contentInput.slice(start, end) || placeholder;
+    const replacement = prefix + selected + suffix;
+    editor.focus();
+    let inserted = false;
+    try { inserted = document.execCommand('insertText', false, replacement); } catch { /* Webview fallback. */ }
+    contentInput = inserted ? editor.value : contentInput.slice(0, start) + replacement + contentInput.slice(end);
+    await tick();
+    editor.setSelectionRange(start + prefix.length, start + prefix.length + selected.length);
+    onContentInput();
+  }
+
   function handleContentKeydown(event: KeyboardEvent) {
     if (!showWikilinkMenu || wikilinkSuggestions.length === 0) return;
     if (event.key === 'ArrowDown') {
@@ -532,6 +583,8 @@
     notesStore.isPanelOpen = true;
     window.addEventListener('keydown', handleGlobalKeydown);
     window.addEventListener('open-notes-graph', handleOpenGraphEvent);
+    window.addEventListener('kory-notes-open-target', handleOpenNoteTarget);
+    window.addEventListener('kory-notes-review-draft', handleReviewDraftEvent);
     document.addEventListener('visibilitychange', handleVisibilityChange);
     updateNarrow();
     window.addEventListener('resize', updateNarrow);
@@ -552,10 +605,27 @@
     void notesStore.fetchGraph();
   }
 
+  /** Resolve chat links, then use the same draft protection as sidebar navigation. */
+  async function handleOpenNoteTarget(event: Event): Promise<void> {
+    const target = (event as CustomEvent<NoteLinkTarget>).detail;
+    if (!target) return;
+    const project = projectStore.currentPath;
+    const id = await notesStore.resolveNoteTarget(target);
+    if (id && project === projectStore.currentPath) await openNote(id);
+  }
+
+  function handleReviewDraftEvent(event: Event) {
+    const draftId = (event as CustomEvent<{ draftId?: string }>).detail?.draftId;
+    const draft = durableDrafts.find((row) => row.id === draftId);
+    if (draft) void recoverDurableDraft(draft);
+  }
+
   onDestroy(() => {
     notesStore.isPanelOpen = false;
     window.removeEventListener('keydown', handleGlobalKeydown);
     window.removeEventListener('open-notes-graph', handleOpenGraphEvent);
+    window.removeEventListener('kory-notes-open-target', handleOpenNoteTarget);
+    window.removeEventListener('kory-notes-review-draft', handleReviewDraftEvent);
     document.removeEventListener('visibilitychange', handleVisibilityChange);
     window.removeEventListener('resize', updateNarrow);
     cancelAutosave();
@@ -616,6 +686,7 @@
     notesStore.beginProjectTransition();
     noteBasesStore.beginProjectTransition();
     if (projectPath && activeView === 'bases') void noteBasesStore.refresh();
+    selectedCanvasId = null;
     lastOpenedNoteId = null;
     titleInput = '';
     folderInput = '';
@@ -708,6 +779,7 @@
     // note id keeps the editor stable during saves of the note you're editing.
     if (id === lastOpenedNoteId) return;
     lastOpenedNoteId = id;
+    editorIconMenu = null;
     if (note) {
       titleInput = note.title;
       folderInput = note.folderPath;
@@ -721,7 +793,8 @@
       recoveredDraftRequiresExplicitSave = false;
       startDurableDraftForCurrentNote();
       notesStore.clearConflict();
-      activeView = note.format === 'html' ? 'preview' : 'editor';
+      if (note.tags.includes('canvas')) openCanvas(note.id);
+      else activeView = note.format === 'html' ? 'preview' : 'editor';
     } else {
       if (activeView === 'preview') {
         // The Preview tab only exists for an open note. Keep the roving tab stop
@@ -874,8 +947,16 @@
     await tick();
     restoreHeldDraft(projectStore.currentPath, id);
     recentNoteIds = [id, ...recentNoteIds.filter((noteId) => noteId !== id)].slice(0, 30);
-    activeView = notesStore.currentNote?.format === 'html' ? 'preview' : 'editor';
+    if (notesStore.currentNote?.tags.includes('canvas')) openCanvas(id);
+    else activeView = notesStore.currentNote?.format === 'html' ? 'preview' : 'editor';
     if (isNarrow) showSidebar = false; // reveal the editor full-width on phones
+  }
+
+  async function createTemplate(templateId: string) {
+    const template = NOTE_WORKSPACE_TEMPLATES.find((item) => item.id === templateId);
+    if (!template || !(await canLeaveCurrentNote())) return;
+    const note = await notesStore.createNote({ title: template.title, content: template.content, tags: [...template.tags], folderPath: '/work' });
+    if (note) await openNote(note.id);
   }
 
   async function createNewNote(initialTitle = 'Untitled') {
@@ -1058,11 +1139,22 @@
     return savePromise;
   }
 
-  async function deleteCurrentNote() {
+  async function deleteCurrentNote(e?: MouseEvent) {
     const note = notesStore.currentNote;
     if (!note) return;
-    const dirtyWarning = isDirty ? ' Unsaved changes will remain available in Draft recovery.' : '';
-    if (!confirm(`Move "${note.title}" to Trash? You can restore it later.${dirtyWarning}`)) return;
+    // Shift-click bypasses confirmation (power-user escape hatch).
+    if (!e?.shiftKey) {
+      const dirtyWarning = isDirty ? ' Unsaved changes will remain available in Draft recovery.' : '';
+      notePendingDelete = note;
+      notePendingDeleteWarning = dirtyWarning;
+      showDeleteConfirm = true;
+      return;
+    }
+    await performDeleteCurrentNote(note);
+  }
+
+  /** Performs the actual deletion after the confirmation dialog is accepted. */
+  async function performDeleteCurrentNote(note: NoteWithLinks): Promise<void> {
     cancelAutosave();
     if (savePromise) await savePromise;
     if (isDirty && !(await durableDraftBackup.flush())) {
@@ -1249,7 +1341,7 @@
     activeView = 'canvas';
   }
 
-  const viewOrder = ['editor', 'preview', 'bases', 'graph', 'network', 'canvas'] as const;
+  const viewOrder = ['editor', 'preview', 'bases', 'graph', 'network', 'review', 'canvas'] as const;
   function handleViewTabKeydown(event: KeyboardEvent, current: (typeof viewOrder)[number]) {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
@@ -1553,7 +1645,14 @@
   }
 </script>
 
-<div class="relative flex h-full min-h-0 min-w-0" style="background: var(--color-surface-1);">
+{#if editorIconMenu && currentNote && (activeView === 'editor' || activeView === 'preview')}
+  {#key `${currentNote.id}:${editorIconMenu.x}:${editorIconMenu.y}`}
+  <NoteIconContextMenu noteId={currentNote.id} icon={currentNote.icon} {...editorIconMenu}
+    onclose={() => (editorIconMenu = null)} />
+  {/key}
+{/if}
+
+<div class="notes-workspace relative flex h-full min-h-0 min-w-0" style="background: var(--color-surface-1);">
   <NotesQuickSwitcher
     open={showQuickSwitcher}
     notes={notesStore.catalog}
@@ -1609,14 +1708,18 @@
   >
     <!-- Header -->
     <div
-      class="flex items-center justify-between px-4 py-3 border-b shrink-0"
+      class="flex flex-col gap-3 px-3 py-3 border-b shrink-0"
       style="border-color: var(--color-border);"
     >
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 px-1">
         <StickyNote size={15} style="color: var(--color-accent);" />
         <span class="text-sm font-semibold" style="color: var(--color-text-primary);">Notes</span>
+        <span class="ml-auto truncate text-xs text-[var(--color-text-muted)]" title={projectStore.currentPath ?? ''}>{projectDisplayName(projectStore.currentPath) || 'No project'}</span>
       </div>
-      <div class="flex items-center gap-1">
+      <button type="button" class="new-note-action" onclick={() => void createNewNote()} aria-label="New note">
+        <Plus size={15} />New note
+      </button>
+      <div class="flex flex-wrap items-center gap-1">
         <button
           type="button"
           class="p-1.5 rounded-lg transition-colors hover:bg-[var(--color-surface-3)]"
@@ -1656,7 +1759,7 @@
           class="p-1.5 rounded-lg transition-colors hover:bg-[var(--color-surface-3)]"
           style="color: var(--color-text-muted);"
           onclick={() => (showQuickSwitcher = true)}
-          title="Quick switcher (Ctrl/⌘ O)"
+          title="Quick switcher ({formatShortcut('Mod+O')})"
           aria-label="Open note quick switcher"
         >
           <Search size={13} />
@@ -1713,16 +1816,6 @@
         >
           <Share2 size={13} />
         </button>
-        <button
-          type="button"
-          class="p-1.5 rounded-lg transition-colors hover:bg-[var(--color-surface-3)]"
-          style="color: var(--color-text-secondary);"
-          onclick={() => void createNewNote()}
-          title="New note"
-          aria-label="New note"
-        >
-          <Plus size={13} />
-        </button>
       </div>
     </div>
 
@@ -1768,7 +1861,7 @@
           class="text-[10px] font-semibold uppercase tracking-widest px-2 mb-1"
           style="color: var(--color-text-muted);"
         >
-          Folders
+          Folders in this project
         </div>
         {#snippet folderNode(node: (typeof notesStore.folderTree)[0], depth: number)}
           <div style="padding-left: {depth * 12}px;">
@@ -1914,7 +2007,9 @@
               onclick={() => void openNote(note.id)}
             >
               <div class="flex items-start gap-2 min-w-0">
-                {#if note.pinned}
+                {#if note.icon}
+                  <NoteIcon icon={note.icon} size={14} />
+                {:else if note.pinned}
                   <Pin size={10} class="mt-0.5 shrink-0" style="color: var(--color-accent);" />
                 {:else}
                   <FileText
@@ -1960,9 +2055,13 @@
 
   <!-- ── Main area ───────────────────────────────────────────────────────────── -->
   <div class="flex-1 min-h-0 min-w-0 flex flex-col">
+    <KnowledgeScope
+      scope="Project"
+      description="This collection belongs to the selected project folder. Markdown and HTML documents beneath it can appear as live project files. Notes folders organize the collection; sibling projects have separate collections. Pinning only changes order. In context is a separate choice. Memory and skill packages have their own libraries."
+    />
     <!-- Tab bar -->
     <div
-      class="flex items-center gap-1 px-4 py-2 border-b shrink-0"
+      class="flex flex-wrap items-center gap-1 px-4 py-2 border-b shrink-0"
       style="border-color: var(--color-border); background: var(--color-surface-0);"
     >
       {#if isNarrow}
@@ -1977,7 +2076,10 @@
           Notes
         </button>
       {/if}
-      <div class="flex items-center gap-1" role="tablist" aria-label="Notes views">
+      <div class="w-44 shrink-0">
+        <KorySelect compact label="Create from template" value="" options={NOTE_WORKSPACE_TEMPLATES.map((template) => ({ value: template.id, label: template.label }))} onchange={(value) => void createTemplate(value)} />
+      </div>
+      <div class="flex min-w-0 max-w-full overflow-x-auto items-center gap-1" role="tablist" aria-label="Notes views">
         <button
           id="notes-tab-editor"
           type="button"
@@ -2083,6 +2185,32 @@
           Network
         </button>
         <button
+          id="notes-tab-review"
+          type="button"
+          role="tab"
+          aria-selected={activeView === 'review'}
+          aria-controls="notes-view-panel"
+          tabindex={activeView === 'review' ? 0 : -1}
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+          style="background: {activeView === 'review'
+            ? 'var(--color-surface-3)'
+            : 'transparent'}; color: {activeView === 'review'
+            ? 'var(--color-text-primary)'
+            : 'var(--color-text-muted)'};"
+          onclick={() => (activeView = 'review')}
+          onkeydown={(event) => handleViewTabKeydown(event, 'review')}
+        >
+          <ClipboardCheck size={12} />
+          Review
+          {#if reviewCount > 0}
+            <span
+              class="rounded-full px-1.5 text-[10px] tabular-nums"
+              style="background: rgba(var(--color-accent-rgb), 0.18); color: var(--color-accent);"
+              >{reviewCount}</span
+            >
+          {/if}
+        </button>
+        <button
           id="notes-tab-canvas"
           type="button"
           role="tab"
@@ -2106,7 +2234,14 @@
 
       {#if (activeView === 'editor' || activeView === 'preview') && currentNote}
         <!-- Note actions -->
-        <div class="ml-auto flex items-center gap-1">
+        <div class="ml-auto flex flex-wrap items-center gap-1">
+          <button type="button" class="rounded-lg p-1.5 hover:bg-[var(--color-surface-3)]"
+            aria-label="Customize note icon" title="Customize note icon"
+            onclick={(event) => {
+              const rect = event.currentTarget.getBoundingClientRect();
+              editorIconMenu = { x: rect.left, y: rect.bottom + 6 };
+            }} oncontextmenu={openEditorIconMenu}><NoteIcon icon={currentNote.icon} size={15} /></button>
+          <button type="button" class="rounded-lg px-2 py-1 text-xs text-[var(--color-accent)] hover:bg-[var(--color-surface-3)]" onclick={() => askAgent(`Investigate note "${currentNote!.title}" [${currentNote!.id}] at revision ${currentNote!.revision}. Retrieve focused evidence, cite revisions, and follow Notes permissions for any edits.`)}>Ask agent</button>
           <!-- Format toggle: HTML notes render charts/diagrams in the sandboxed preview -->
           <button
             type="button"
@@ -2242,7 +2377,7 @@
               color: {isDirty ? 'var(--color-surface-0)' : 'var(--color-text-muted)'};
             "
             onclick={() => void saveCurrentNote()}
-            title="Save (Ctrl+S)"
+            title="Save ({formatShortcut('Mod+S')})"
             disabled={saveState === 'saving' || overNoteBudget}
           >
             {#if saveState === 'saving'}<LoaderCircle size={12} class="animate-spin" /> Saving…{:else if !isDirty}<Check
@@ -2255,7 +2390,7 @@
             type="button"
             class="p-1.5 rounded-lg text-xs transition-colors hover:bg-[var(--color-surface-3)]"
             style="color: var(--color-text-muted);"
-            onclick={() => void deleteCurrentNote()}
+            onclick={(event) => void deleteCurrentNote(event)}
             title="Move note to Trash"
             aria-label="Move note to Trash"
           >
@@ -2361,7 +2496,7 @@
             <button
               type="button"
               class="rounded-lg border border-[var(--color-warning)]/30 px-2.5 py-1.5 text-xs text-[var(--color-warning)] hover:bg-[var(--color-warning-bg)]"
-              onclick={() => void deleteCurrentNote()}>Accept deletion</button
+              onclick={(event) => void deleteCurrentNote(event)}>Accept deletion</button
             >
           {:else}
             <button
@@ -2458,9 +2593,18 @@
             onOpenNote={openNote}
           />
         {/key}
+      {:else if activeView === 'review'}
+        {#key projectStore.currentPath}
+          <NotesChangeReview
+            projectPath={projectStore.currentPath}
+            onOpenNote={openNote}
+            onOpenNetwork={() => (activeView = 'network')}
+            onPendingCount={(count) => (reviewCount = count)}
+          />
+        {/key}
       {:else if activeView === 'bases'}
         {#if NotesBasesComponent}
-          <NotesBasesComponent onOpenNote={handleBaseOpenNote} />
+          <NotesBasesComponent onOpenNote={handleBaseOpenNote} onOpenCanvas={openCanvas} onAskAgent={askAgent} />
         {:else if basesComponentError}
           <div class="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
             <p class="text-xs" style="color: var(--color-error);">{basesComponentError}</p>
@@ -2482,7 +2626,7 @@
         {/if}
       {:else if activeView === 'canvas'}
         {#if NotesCanvasComponent}
-          <NotesCanvasComponent onOpenNote={handleCanvasOpenNote} />
+          <NotesCanvasComponent onOpenNote={handleCanvasOpenNote} initialNoteId={selectedCanvasId} />
         {:else if canvasComponentError}
           <div class="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
             <p class="text-xs" style="color: var(--color-error);">{canvasComponentError}</p>
@@ -2562,7 +2706,7 @@
         <div class="h-full overflow-y-auto" style="background: var(--color-surface-1);">
           <div
             bind:this={previewContainer}
-            class="note-markdown max-w-3xl mx-auto w-full px-8 py-8 text-sm leading-relaxed"
+            class="note-markdown kory-document max-w-3xl mx-auto w-full px-8 py-8 text-sm leading-relaxed"
             style="color: var(--color-text-primary);"
             use:previewLinks
           >
@@ -2574,7 +2718,7 @@
         <div
           bind:this={editorAreaEl}
           class="h-full overflow-y-auto flex flex-col"
-          style="background: var(--color-surface-1);"
+          style="background: var(--color-surface-0);"
           ondragover={handleDragOver}
           ondragleave={handleDragLeave}
           ondrop={handleDrop}
@@ -2592,8 +2736,16 @@
             </div>
           {/if}
 
-          <div class="max-w-3xl mx-auto w-full px-8 pt-8 pb-4 flex flex-col gap-4">
+          <div class="note-document-page flex flex-col gap-4">
             <!-- Title -->
+            <div class="flex items-center gap-3">
+              <button type="button" class="shrink-0 rounded-lg p-1 hover:bg-[var(--color-surface-2)]"
+                aria-label="Customize note icon" title="Customize note icon"
+                oncontextmenu={openEditorIconMenu}
+                onclick={(event) => {
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  editorIconMenu = { x: rect.left, y: rect.bottom + 6 };
+                }}><NoteIcon icon={currentNote.icon} size={30} /></button>
             <input
               bind:this={titleInputEl}
               type="text"
@@ -2603,7 +2755,9 @@
               bind:value={titleInput}
               disabled={Boolean(currentNote.sourcePath)}
               oninput={scheduleAutosave}
+              oncontextmenu={openEditorIconMenu}
             />
+            </div>
 
             {#if currentNote.sourcePath}
               <div
@@ -2714,13 +2868,27 @@
             <!-- Divider -->
             <div class="border-t" style="border-color: var(--color-border);"></div>
 
-            <!-- Content textarea + [[ wikilink autocomplete -->
-            <div class="relative">
+            <!-- Source editing retains note-specific wikilink autocomplete. -->
+            <div class="note-writing-surface">
+              <div class="note-writing-toolbar" role="toolbar" aria-label="Note formatting">
+                {#if currentNote.format !== 'html'}
+                  <button type="button" title="Bold" aria-label="Bold note text" onclick={() => void insertMarkdown('**', '**')}><Bold size={15} /></button>
+                  <button type="button" title="Italic" aria-label="Italic note text" onclick={() => void insertMarkdown('*', '*')}><Italic size={15} /></button>
+                  <span class="note-toolbar-divider"></span>
+                  <button type="button" title="Heading" aria-label="Insert note heading" onclick={() => void insertMarkdown('\n## ', '\n', 'Heading')}><Heading2 size={16} /></button>
+                  <button type="button" title="List" aria-label="Insert note list" onclick={() => void insertMarkdown('\n- ', '\n', 'List item')}><List size={16} /></button>
+                  <button type="button" title="Code" aria-label="Code in note" onclick={() => void insertMarkdown('`', '`', 'code')}><Code2 size={15} /></button>
+                  <button type="button" title="Link another note" aria-label="Insert note link" onclick={() => void insertMarkdown('[[', ']]', '')}><Share2 size={15} /></button>
+                {/if}
+                <span class="ml-auto text-[11px] text-[var(--color-text-muted)]">{currentNote.format === 'html' ? 'HTML source' : 'Markdown · [[note links]]'}</span>
+              </div>
+              <div class="relative">
               <textarea
                 bind:this={contentAreaEl}
-                class="w-full min-h-[400px] bg-transparent border-none outline-none resize-none text-sm leading-relaxed font-mono"
+                class="note-source-input w-full min-h-[400px] bg-transparent border-none outline-none resize-none text-sm font-mono"
                 style="color: var(--color-text-primary); font-family: var(--font-mono, monospace);"
-                placeholder="Start writing... Use [[Note Title]] to link notes."
+                placeholder="Capture your findings, ideas, or research…"
+                aria-label="Note content"
                 bind:value={contentInput}
                 oninput={onContentInput}
                 onkeydown={handleContentKeydown}
@@ -2769,6 +2937,7 @@
                   {/each}
                 </div>
               {/if}
+              </div>
             </div>
 
             <div
@@ -2780,7 +2949,7 @@
                 <span
                   >{notesStore.settings.autosaveEnabled
                     ? `Autosave after ${(notesStore.settings.autosaveDelayMs / 1000).toFixed(1)}s`
-                    : 'Autosave off · only Ctrl/⌘ S or Save writes to disk'}</span
+                    : `Autosave off · only ${formatShortcut('Mod+S')} or Save writes to disk`}</span
                 >
                 {#if isDirty}
                   <span aria-hidden="true">·</span>
@@ -2915,32 +3084,14 @@
               {/if}
             </div>
 
-            <!-- Backlinks -->
-            {#if currentNote && currentNote.backlinks && currentNote.backlinks.length > 0}
-              <div class="border-t pt-4" style="border-color: var(--color-border);">
-                <div
-                  class="text-xs font-semibold uppercase tracking-widest mb-2"
-                  style="color: var(--color-text-muted);"
-                >
-                  Backlinks ({currentNote.backlinks.length})
-                </div>
-                <div class="space-y-1">
-                  {#each currentNote.backlinks as backlinkId (backlinkId)}
-                    {@const backNote = notesStore.notes.find((n) => n.id === backlinkId)}
-                    {#if backNote}
-                      <button
-                        type="button"
-                        class="flex items-center gap-2 w-full text-left px-3 py-1.5 rounded-lg text-xs transition-colors hover:bg-[var(--color-surface-3)]"
-                        style="color: var(--color-text-secondary);"
-                        onclick={() => void openNote(backlinkId)}
-                      >
-                        <FileText size={11} style="color: var(--color-text-muted);" />
-                        {backNote.title}
-                      </button>
-                    {/if}
-                  {/each}
-                </div>
-              </div>
+            <!-- Where this note appears: backlinks, relationships, canvases, Bases -->
+            {#if currentNote}
+              <NoteAppearances
+                noteId={currentNote.id}
+                onOpenNote={(id) => void openNote(id)}
+                onOpenCanvas={openCanvas}
+                onShowBases={() => (activeView = 'bases')}
+              />
             {/if}
 
             <!-- Outlinks -->
@@ -3032,7 +3183,7 @@
         <SettingsSwitch
           checked={notesStore.settings.autosaveEnabled}
           label="Autosave drafts"
-          description="On saves while editing. When off, only Save or Ctrl/⌘ S writes to disk"
+          description={`On saves while editing. When off, only Save or ${formatShortcut('Mod+S')} writes to disk`}
           onchange={() => {
             void notesStore.updateSettings({
               autosaveEnabled: !notesStore.settings.autosaveEnabled,
@@ -3182,6 +3333,22 @@
 </div>
 
 <style>
+  .notes-workspace { container: notes / inline-size; }
+  .new-note-action { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; border-radius: 7px; background: var(--color-surface-3); color: var(--color-text-primary); font-size: 12px; font-weight: 600; }
+  .new-note-action:hover { background: var(--color-surface-4); }
+  .note-document-page { width: calc(100% - 48px); max-width: 880px; margin: 24px auto; padding: 32px; }
+  .note-writing-surface { overflow: hidden; }
+  .note-writing-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; border-bottom: 1px solid color-mix(in srgb, var(--color-text-muted) 12%, transparent); padding: 8px 4px; }
+  .note-writing-toolbar button { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; min-height: 32px; border-radius: 6px; color: var(--color-text-secondary); }
+  .note-writing-toolbar button:hover { background: var(--color-surface-3); color: var(--color-text-primary); }
+  .note-writing-toolbar button:focus-visible, .new-note-action:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+  .note-toolbar-divider { width: 1px; height: 18px; margin: 0 4px; background: var(--color-border); }
+  .note-source-input { display: block; padding: 22px 4px; line-height: 1.9; }
+  .note-source-input::placeholder { color: var(--color-text-muted); }
+  @container notes (max-width: 640px) {
+    .note-document-page { width: calc(100% - 24px); margin: 12px auto; padding: 12px; }
+    .note-source-input { padding: 16px; }
+  }
   /* Rendered Markdown preview typography */
   .note-markdown :global(h1) {
     font-size: 1.5rem;
@@ -3375,3 +3542,24 @@
     border-left-color: var(--color-accent);
   }
 </style>
+
+{#if showDeleteConfirm && notePendingDelete}
+  <ConfirmDialog
+    open={showDeleteConfirm}
+    title="Move to Trash"
+    message={`Move "${notePendingDelete.title}" to Trash? You can restore it later.${notePendingDeleteWarning}`}
+    confirmLabel="Move to Trash"
+    cancelLabel="Cancel"
+    variant="danger"
+    onConfirm={() => {
+      const note = notePendingDelete;
+      showDeleteConfirm = false;
+      notePendingDelete = null;
+      if (note) void performDeleteCurrentNote(note);
+    }}
+    onCancel={() => {
+      showDeleteConfirm = false;
+      notePendingDelete = null;
+    }}
+  />
+{/if}

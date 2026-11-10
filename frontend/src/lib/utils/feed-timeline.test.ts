@@ -120,10 +120,26 @@ describe('feed timeline reconciliation', () => {
       ...entry('stale-analysis', 200, 'thought'),
       metadata: { phase: 'analyzing' },
     };
+    const prep = {
+      ...entry('prep-request', 250, 'thought'),
+      text: 'Preparing provider request...',
+    };
     const stopped = entry('stopped', 300, 'system');
 
-    expect(withoutAnalyzingThoughts([stale, stopped], null).map((item) => item.id)).toEqual([
+    expect(withoutAnalyzingThoughts([stale, prep, stopped], null).map((item) => item.id)).toEqual([
       'stopped',
+    ]);
+  });
+
+  test('operationalEntriesForReload excludes ephemeral analyzing thoughts', () => {
+    const analyzing = {
+      ...entry('prep', 100, 'thought'),
+      text: 'Preparing provider request...',
+      metadata: { phase: 'analyzing' },
+    };
+    const tool = entry('tool', 200, 'tool_call');
+    expect(operationalEntriesForReload([analyzing, tool]).map((item) => item.id)).toEqual([
+      'tool',
     ]);
   });
 

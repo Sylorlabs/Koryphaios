@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolveCriticMode } from '@koryphaios/shared';
   // Goal Mode is a steering bar, not a dashboard. The composer keeps one slim
   // row: which goal you are steering, how far along it is, how long it has run,
   // and the three controls that actually change its fate. Everything else --
@@ -29,7 +30,7 @@
   import { fly } from 'svelte/transition';
   import { goalStore } from '$lib/stores/goals.svelte';
   import { goalProgress, type Goal, type GoalItemStatus } from '@koryphaios/shared';
-  import { projectStore, projectDisplayName } from '$lib/stores/project.svelte';
+  import { projectStore } from '$lib/stores/project.svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
   import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
   import { goalDisplayStore } from '$lib/stores/goal-display.svelte';
@@ -93,12 +94,13 @@
   let steeredInThisChat = $derived(
     !!steered && goalChatId(steered) === sessionStore.activeSessionId,
   );
-  let steeredCriticActive = $derived(
-    steered?.execution?.sessionId
-      ? (sessionStore.sessions.find((session) => session.id === steered.execution?.sessionId)
-          ?.agentOverrides?.criticGateEnabled ?? agentSettingsStore.criticActive)
-      : agentSettingsStore.criticActive,
+  let steeredCriticMode = $derived(
+    resolveCriticMode(
+      sessionStore.sessions.find((session) => session.id === steered?.execution?.sessionId)?.agentOverrides,
+      resolveCriticMode(agentSettingsStore.settings),
+    ),
   );
+  let steeredCriticActive = $derived(steeredCriticMode !== 'off');
   // A goal is stated once. The badge, the blocker banner, and the activity log
   // all carried the same word -- a paused goal read "Paused / Paused: … /
   // Paused because …". The badge owns the state, the banner shows only the
@@ -128,7 +130,7 @@
     goal.scope === 'workspace'
       ? 'Every chat in this workspace'
       : goal.scope === 'project'
-        ? `Project · ${projectDisplayName(goal.projectPath) || 'unknown project'}`
+        ? 'Every chat in this project'
         : 'This chat only';
   const executionDescription = (goal: Goal) =>
     !goal.execution?.sessionId
@@ -388,10 +390,8 @@
     <!-- ── Slide-over detail panel ─────────────────────────────────────── -->
     {#if open && steered}
       <section
-        class="absolute bottom-full left-0 z-40 mb-2 w-[min(38rem,100%)] overflow-y-auto rounded-xl border p-4 shadow-2xl"
-        style="background: var(--color-surface-1); border-color: color-mix(in srgb, {steeredPhase
-          ? PHASE_COLOR[steeredPhase]
-          : 'var(--color-accent)'} 30%, var(--color-border)); max-height: min(62vh, 34rem);"
+        class="absolute bottom-full left-0 z-40 mb-2 w-[min(38rem,100%)] overflow-y-auto rounded-xl p-4 shadow-2xl"
+        style="background: color-mix(in srgb, var(--color-surface-2) 88%, var(--color-surface-1)); box-shadow: 0 18px 42px color-mix(in srgb, var(--color-surface-0) 48%, transparent); max-height: min(62vh, 34rem);"
         aria-label="Goal details"
         transition:fly={{ y: 8, duration: 160 }}
       >
@@ -433,7 +433,7 @@
              title rather than as a paragraph under every goal. -->
         <div class="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--color-text-secondary)]">
           <span class="flex items-center gap-1.5">
-            {#if steeredCriticActive}<ShieldCheck size={12} /> Critic quality gate on{:else}<ShieldOff
+            {#if steeredCriticActive}<ShieldCheck size={12} /> Critic quality gate {steeredCriticMode === 'auto' ? 'auto' : 'on'}{:else}<ShieldOff
                 size={12}
               /> Critic quality gate off{/if}
           </span>
@@ -483,7 +483,7 @@
             {@const meta = ITEM_STATUS[item.status]}
             {@const Glyph = meta.glyph}
             <li
-              class="group/check flex items-start gap-2 border-t border-[var(--color-border)] py-1.5 text-[11px] text-[var(--color-text-secondary)] first:border-t-0"
+              class="group/check flex items-start gap-2 rounded-md px-1 py-1.5 text-[11px] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-3)]"
             >
               <Glyph size={13} class="mt-px shrink-0" style="color: {meta.color};" />
               <span class="min-w-0 flex-1">
@@ -660,7 +660,7 @@
         {/if}
 
         {#if steered.linkedSessionIds.length}
-          <div class="border-t border-[var(--color-border)] pt-2">
+          <div class="pt-2">
             <div class="mb-1 flex items-center gap-1.5 text-[10px] font-medium text-[var(--color-text-muted)]">
               <Link2 size={11} /> Chats used by this goal
             </div>
@@ -671,7 +671,7 @@
         {/if}
 
         {#if activity.length}
-          <div class="mt-2 border-t border-[var(--color-border)] pt-2">
+          <div class="mt-2 pt-2">
             <div class="mb-1 text-[10px] font-medium text-[var(--color-text-muted)]">
               Recent activity
             </div>
@@ -690,8 +690,8 @@
     <!-- ── Goal switcher ────────────────────────────────────────────────── -->
     {#if switching}
       <div
-        class="absolute bottom-full left-0 z-40 mb-2 max-h-72 w-[min(24rem,80vw)] overflow-y-auto rounded-lg border p-1 shadow-xl"
-        style="background: var(--color-surface-2); border-color: var(--color-border);"
+        class="absolute bottom-full left-0 z-40 mb-2 max-h-72 w-[min(24rem,80vw)] overflow-y-auto rounded-lg p-1 shadow-xl"
+        style="background: var(--color-surface-2); box-shadow: 0 14px 32px color-mix(in srgb, var(--color-surface-0) 40%, transparent);"
         role="menu"
         aria-label="Switch goal"
         transition:fly={{ y: 6, duration: 140 }}
@@ -710,7 +710,7 @@
                 role="menuitemradio"
                 aria-checked={goal.id === steered?.id}
                 class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] transition-colors hover:bg-[var(--color-surface-3)]"
-                aria-label={`Open goal in its chat: ${goal.objective} — ${GOAL_PHASE_LABEL[goalPhase(goal)]}, ${formatGoalRuntimeLong(goal, now)} going`}
+                aria-label={`Open goal in its chat: ${goal.objective}. ${GOAL_PHASE_LABEL[goalPhase(goal)]}, ${formatGoalRuntimeLong(goal, now)} going`}
                 title={goal.objective}
                 onclick={() => redirectTo(goal)}
               >
@@ -737,7 +737,7 @@
         <button
           type="button"
           role="menuitem"
-          class="mt-1 flex w-full items-center gap-2 border-t border-[var(--color-border)] px-2 py-1.5 text-left text-[11px] text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]"
+          class="mt-1 flex w-full items-center gap-2 px-2 py-1.5 text-left text-[11px] text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]"
           onclick={() => {
             switching = false;
             window.dispatchEvent(new CustomEvent('kory:goal-action', { detail: 'goal_create' }));
@@ -754,10 +754,10 @@
          clicks would make Pause / Resume / Close unusable the moment anyone
          looked at the details. -->
     <div
-      class="relative z-40 flex items-center gap-2 rounded-lg border px-2 py-1.5"
-      style="background: var(--color-surface-1); border-color: color-mix(in srgb, {steeredPhase
+      class="relative z-40 flex items-center gap-2 rounded-lg px-2 py-1.5"
+      style="background: color-mix(in srgb, var(--color-surface-2) 55%, var(--color-surface-1)); box-shadow: inset 0 0 0 1px color-mix(in srgb, {steeredPhase
         ? PHASE_COLOR[steeredPhase]
-        : 'var(--color-accent)'} 30%, var(--color-border));"
+        : 'var(--color-accent)'} 16%, transparent);"
     >
       {#if steered}
         <Target size={13} class="shrink-0 text-[var(--color-text-muted)]" />
@@ -770,7 +770,7 @@
           class="flex min-w-0 items-center gap-2 rounded px-1 py-0.5 text-left transition-colors hover:bg-[var(--color-surface-3)]"
           aria-haspopup="menu"
           aria-expanded={switching}
-          aria-label={`Open goal in its chat: ${steered.objective} — ${steeredPhase
+          aria-label={`Open goal in its chat: ${steered.objective}. ${steeredPhase
             ? GOAL_PHASE_LABEL[steeredPhase]
             : ''}, ${formatGoalRuntimeLong(steered, now)} going`}
           title={steered.objective}

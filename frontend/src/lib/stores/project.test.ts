@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, test } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { projectStore, type WorkspaceNavigationSnapshot } from './project.svelte';
+import {
+  projectIdentityProjection,
+  projectStore,
+  type WorkspaceNavigationSnapshot,
+} from './project.svelte';
 
 function snapshot(
   projects: string[],
@@ -41,6 +45,40 @@ describe('projectStore filesystem reconciliation', () => {
     );
     expect(newer.changed).toBe(true);
     expect(projectStore.currentPath).toBe('/workspace/gamma');
+  });
+
+  test('projects path-based entries into a stable shared identity and automatic icon', () => {
+    const entry = { path: '/workspace/design-lab', name: 'Design Lab', modifiedAt: 1 };
+
+    const first = projectIdentityProjection(entry);
+    const second = projectIdentityProjection({ ...entry });
+
+    expect(first).toEqual(second);
+    expect(first.identity).toEqual({
+      id: 'path:/workspace/design-lab',
+      name: 'Design Lab',
+      icon: { mode: 'automatic' },
+    });
+    expect(first.icon.mode).toBe('monogram');
+    if (first.icon.mode === 'monogram') expect(first.icon.value).toBe('DL');
+    expect(first.icon.color).toBeDefined();
+  });
+
+  test('preserves a saved project name and icon when projecting a workspace entry', () => {
+    const result = projectIdentityProjection({
+      path: '/workspace/design-lab',
+      name: 'Design Lab folder',
+      modifiedAt: 1,
+      identity: {
+        id: 'design-lab',
+        name: '✨ Design Lab',
+        icon: { mode: 'emoji', value: '✨', color: 'purple' },
+      },
+    });
+
+    expect(result.identity.name).toBe('✨ Design Lab');
+    expect(result.identity.icon).toEqual({ mode: 'emoji', value: '✨', color: 'purple' });
+    expect(result.icon).toEqual({ mode: 'emoji', value: '✨', color: 'purple' });
   });
 
   test('snapshots without a seq are always applied', () => {

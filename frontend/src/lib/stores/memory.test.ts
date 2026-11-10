@@ -93,15 +93,16 @@ describe('Memory source loading', () => {
     });
     mocks.apiFetch
       .mockImplementationOnce(() => oldResponse)
-      .mockResolvedValueOnce(jsonResponse({ ok: true, data: memoryFile('newest') }));
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: memoryFile('newest'), scope: { kind: 'workspace', name: 'Current workspace' } }));
 
     const oldLoad = memoryStore.loadProjectMemory();
     const newLoad = memoryStore.loadProjectMemory();
     await newLoad;
-    resolveOld(jsonResponse({ ok: true, data: memoryFile('stale') }));
+    resolveOld(jsonResponse({ ok: true, data: memoryFile('stale'), scope: { kind: 'project', name: 'Old project' } }));
     await oldLoad;
 
     expect(memoryStore.project?.content).toBe('newest');
+    expect(memoryStore.storageScope).toEqual({ kind: 'workspace', name: 'Current workspace' });
   });
 
   it('does not reuse a request identity for a global source after a project transition', async () => {

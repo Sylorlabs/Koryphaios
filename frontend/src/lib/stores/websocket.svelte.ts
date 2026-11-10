@@ -16,10 +16,10 @@ import type {
   ProviderStatusPayload,
   ChangeSummary,
   KorySessionChangesPayload,
-  KorySessionChangesResolvedPayload,
   AgentSpawnedPayload,
   AgentStatusPayload,
   AgentThreadMessagePayload,
+  AgentSteeringQueuePayload,
   PermissionRequest,
   Session,
   NotificationPayload,
@@ -41,6 +41,12 @@ import { authStore } from './auth.svelte';
 import { browser } from '$app/environment';
 import type { FeedEntry } from '$lib/types';
 import { apiUrl, getWsUrl } from '$lib/utils/api-url';
+import {
+  deviceRouting,
+  deviceSessionKey,
+  isDeviceSessionKey,
+  mapDeviceSessionIds,
+} from './device-routing.svelte';
 import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 import { toastStore } from './toast.svelte';
 import { providersStore, loadProvidersFromApi } from './providers.svelte';
@@ -51,6 +57,8 @@ import { goalStore } from './goals.svelte';
 import { checklistStore } from './checklists.svelte';
 import { isDemoMode } from '$lib/demo-flags';
 import { runStateStore } from './run-state.svelte';
+import { applyDesktopUiSettings } from './desktop-ui-settings-sync';
+import type { DesktopUiSettings } from '@koryphaios/shared';
 import {
   createWebSocketPong,
   isWebSocketPing,
@@ -64,6 +72,12 @@ import {
   sequencedTerminalRunFailure,
 } from '$lib/utils/run-failure-feed';
 import { TimelineRewriteEpochGate } from '$lib/utils/timeline-rewrite-gate';
+import {
+  readReview,
+  sameReview,
+  reviewResolutionMatches,
+  questionResolutionMatches,
+} from '$lib/utils/review-protocol';
 
 export type { FeedEntry };
 export { feedStore } from './feed.svelte';
@@ -85,10 +99,194 @@ let pendingPermissions = $state<PermissionRequest[]>([]);
 // session that asked — not whichever chat happens to be open.
 let pendingQuestions = $state<Map<string, KoryAskUserPayload>>(new Map());
 let sessionChanges = $state<Map<string, ChangeSummary[]>>(new Map());
-// The displayed review body intentionally remains a simple ChangeSummary[];
-// retain its durable identity alongside it so an older resolution cannot clear
-// a newer review during replay/reconnect races.
-let sessionChangeReviewIds = $state<Map<string, string>>(new Map());
+export interface ReviewPublication extends KorySessionChangesPayload {
+  sessionId: string;
+}
+export interface ReviewSelection {
+  review: ReviewPublication;
+  selectionGeneration: number;
+  routingGeneration: number;
+  origin: string;
+  target: { deviceId: string; id: string } | null;
+}
+export interface ReviewResponse {
+  review: ReviewPublication;
+  phase: 'submitting' | 'awaiting_confirmation' | 'uncertain' | 'failed';
+  error?: string;
+}
+let sessionReviews = $state<Map<string, ReviewPublication>>(new Map());
+let reviewResponses = $state<Map<string, ReviewResponse>>(new Map());
+
+type CancellationKey = string;
+let pendingCancellations = $state<Map<CancellationKey, Promise<void>>>(new Map());
+
+function sessionCancellationKey(sessionId: string): CancellationKey {
+  return `session:${sessionId}`;
+}
+
+function agentCancellationKey(sessionId: string, agentId: string): CancellationKey {
+  return `agent:${sessionId}:${agentId}`;
+}
+
+function cancellationFailure(error: unknown, subject: string): Error {
+  const detail = error instanceof Error && error.message ? error.message : String(error);
+  return new Error(`Could not stop ${subject}: ${detail}`);
+}
+
+function cancelWithKey(
+  key: CancellationKey,
+  path: string,
+  subject: string,
+  body?: Record<string, string>,
+  onAcknowledged?: () => void,
+): Promise<void> {
+  const existing = pendingCancellations.get(key);
+  if (existing) return existing;
+
+  let completion!: Promise<void>;
+  completion = (async () => {
+    try {
+      const response = await apiFetch(apiUrl(path), {
+        method: 'POST',
+        ...(body
+          ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+          : {}),
+      });
+      const result = await parseJsonResponse<{ ok?: boolean; error?: string }>(response);
+      if (!response.ok || result.ok === false || result.error) {
+        throw new Error(
+          result.error || `Request failed: ${response.status} ${response.statusText}`,
+        );
+      }
+      // The HTTP response is the cancellation acknowledgment. Reconcile only
+      // after it succeeds; a rejected stop must leave the live run visible and
+      // retryable.
+      onAcknowledged?.();
+    } catch (error) {
+      const failure = cancellationFailure(error, subject);
+      toastStore.error(failure.message);
+      throw failure;
+    } finally {
+      if (pendingCancellations.get(key) === completion) {
+        const next = new Map(pendingCancellations);
+        next.delete(key);
+        pendingCancellations = next;
+      }
+    }
+  })();
+  pendingCancellations = new Map(pendingCancellations).set(key, completion);
+  return completion;
+}
+
+async function waitForCancellation(sessionId: string, agentId?: string): Promise<boolean> {
+  const keys = [sessionCancellationKey(sessionId)];
+  if (agentId) keys.push(agentCancellationKey(sessionId, agentId));
+  const pending = keys
+    .map((key) => pendingCancellations.get(key))
+    .filter((completion): completion is Promise<void> => !!completion);
+  if (!pending.length) return true;
+  try {
+    await Promise.all(pending);
+    return true;
+  } catch {
+    // cancelWithKey already reports the failure. Returning false is important:
+    // send callers leave the draft untouched and do not start a new run.
+    return false;
+  }
+}
+
+function cancelSession(sessionId: string, purpose: 'stop' | 'steer' = 'stop'): Promise<void> {
+  if (!sessionId) return Promise.resolve();
+  return cancelWithKey(
+    sessionCancellationKey(sessionId),
+    `/api/sessions/${encodeURIComponent(sessionId)}/cancel`,
+    'this session',
+    purpose === 'steer' ? { purpose } : undefined,
+    () => markSessionAgentsStopped(sessionId),
+  );
+}
+
+function cancelAgent(sessionId: string, agentId: string): Promise<void> {
+  if (!sessionId || !agentId) return Promise.resolve();
+  return cancelWithKey(
+    agentCancellationKey(sessionId, agentId),
+    `/api/agent/${encodeURIComponent(agentId)}/cancel`,
+    'this agent',
+    undefined,
+    () => {
+      runStateStore.markAgentStopped(sessionId, agentId);
+      agentStore.markAgentStopped(agentId);
+    },
+  );
+}
+
+function publishReview(sessionId: string, value: unknown, fromSnapshot = false): boolean {
+  const review = readReview(value);
+  if (!review) return false;
+  const current = sessionReviews.get(sessionId);
+  if (
+    fromSnapshot &&
+    current &&
+    sameReview(current, review) &&
+    JSON.stringify(current.changes) === JSON.stringify(review.changes)
+  )
+    return true;
+  const publication = { ...review, sessionId };
+  sessionReviews = new Map(sessionReviews).set(sessionId, publication);
+  sessionChanges = new Map(sessionChanges).set(sessionId, publication.changes);
+  const response = reviewResponses.get(sessionId);
+  if (response && !sameReview(response.review, publication)) {
+    const next = new Map(reviewResponses);
+    next.delete(sessionId);
+    reviewResponses = next;
+  }
+  return true;
+}
+
+function clearReview(sessionId: string) {
+  const reviews = new Map(sessionReviews);
+  const changes = new Map(sessionChanges);
+  const responses = new Map(reviewResponses);
+  reviews.delete(sessionId);
+  changes.delete(sessionId);
+  responses.delete(sessionId);
+  sessionReviews = reviews;
+  sessionChanges = changes;
+  reviewResponses = responses;
+}
+
+function resolveReview(sessionId: string, value: unknown): boolean {
+  const current = sessionReviews.get(sessionId);
+  if (!current || !reviewResolutionMatches(current, value)) return false;
+  clearReview(sessionId);
+  return true;
+}
+
+function captureReview(sessionId: string): ReviewSelection | null {
+  const review = sessionReviews.get(sessionId);
+  if (!review) return null;
+  const chat = deviceRouting.chat;
+  return {
+    review,
+    selectionGeneration: sessionStore.selectionGeneration,
+    routingGeneration: deviceRouting.generation,
+    origin: apiUrl('/api'),
+    target:
+      chat && deviceSessionKey(chat) === sessionId
+        ? { deviceId: chat.deviceId, id: chat.id }
+        : null,
+  };
+}
+
+function ownsReview(selection: ReviewSelection): boolean {
+  return (
+    sessionReviews.get(selection.review.sessionId) === selection.review &&
+    sessionStore.activeSessionId === selection.review.sessionId &&
+    sessionStore.selectionGeneration === selection.selectionGeneration &&
+    deviceRouting.generation === selection.routingGeneration &&
+    apiUrl('/api') === selection.origin
+  );
+}
 export interface RewindPreview {
   sessionId: string;
   currentHash: string;
@@ -159,6 +357,7 @@ function providerDisplayName(provider: string): string {
   if (provider === 'vertexai') return 'Vertex AI';
   if (provider === 'copilot') return 'Copilot';
   if (provider === 'kimicode') return 'Kimi Code';
+  if (provider === 'opencode') return 'OpenCode';
   return provider.charAt(0).toUpperCase() + provider.slice(1);
 }
 
@@ -215,7 +414,6 @@ function addBackendErrorToSessionFeed(
     if (feedStore.isDuplicateError(errorText, msg.timestamp) || orderedDuplicate) {
       return;
     }
-    toastStore.error(errorText);
   }
   if (orderedDuplicate) return;
   feedStore.addFeedEntryForSession(sessionId, {
@@ -278,7 +476,8 @@ function handleMessage(msg: WSMessage) {
     }
 
     case 'run.state': {
-      const snapshot = (msg.payload as { snapshot?: { phase?: string } })?.snapshot;
+      const snapshot = (msg.payload as { snapshot?: { phase?: string; updatedAt?: number } })
+        ?.snapshot;
       // The durable run aggregate is authoritative after a reload. Keep
       // worker cards inspectable, but terminalize any stale active cards that
       // predate the replayed terminal snapshot so a renderer cannot show a
@@ -288,6 +487,13 @@ function handleMessage(msg: WSMessage) {
         snapshot &&
         (snapshot.phase === 'done' || snapshot.phase === 'error' || snapshot.phase === 'cancelled')
       ) {
+        feedStore.removeAnalyzingThoughtEntries(msg.sessionId);
+        if (isForActiveSession) feedStore.removeAnalyzingThoughtEntries();
+        const endedAt =
+          typeof snapshot.updatedAt === 'number' && Number.isFinite(snapshot.updatedAt)
+            ? snapshot.updatedAt
+            : null;
+        finalizeSessionThinking(msg.sessionId, undefined, endedAt, true);
         agentStore.terminalizeSessionSubAgents(
           msg.sessionId,
           snapshot.phase as 'done' | 'error' | 'cancelled',
@@ -315,15 +521,38 @@ function handleMessage(msg: WSMessage) {
         agentStore.ensureAgentThreadFeed(msg.sessionId, p.agent.id);
       }
 
-      if (isForActiveSession) {
-        feedStore.addFeedEntry({
+      // Critic work has its own durable `critic_review` tool card. Adding the
+      // generic delegation card as well leaves two rows for one review and
+      // makes the link users need compete with a transient "Delegating" row.
+      // Keep the spawned identity in the rail/thread store; the evaluation
+      // card remains the persistent chat/evaluation entry.
+      if (msg.sessionId && p.agent.role !== 'critic') {
+        feedStore.addFeedEntryForSession(msg.sessionId, {
           timestamp: msg.timestamp,
-          type: 'system',
-          agentId: p.agent.id,
-          agentName: p.agent.name,
-          glowClass: feedStore.resolveGlowClass(p.agent),
-          text: `Worker spawned: ${p.agent.name} (${providerDisplayName(p.agent.provider)} · ${p.agent.model})`,
-          metadata: { ...orderedEventMetadata(msg), domain: p.agent.domain },
+          type: 'tool_call',
+          agentId: 'kory-manager',
+          agentName: 'Kory',
+          glowClass: 'glow-kory',
+          text: `Delegating to ${p.agent.name}: ${p.task}`,
+          metadata: {
+            ...orderedEventMetadata(msg),
+            domain: p.agent.domain,
+            source: 'agent.spawned',
+            delegatedAgentId: p.agent.id,
+            delegatedAgentName: p.agent.name,
+            toolCall: {
+              id: `agent-spawn-${p.agent.id}`,
+              name: 'delegate_to_worker',
+              input: {
+                agentId: p.agent.id,
+                agentName: p.agent.name,
+                domain: p.agent.domain,
+                model: p.agent.model,
+                provider: p.agent.provider,
+                task: p.task,
+              },
+            },
+          },
         });
       }
       break;
@@ -380,6 +609,18 @@ function handleMessage(msg: WSMessage) {
       break;
     }
 
+    case 'agent.steering_queue': {
+      const p = msg.payload as AgentSteeringQueuePayload;
+      if (msg.sessionId && p?.agentId)
+        agentStore.setAgentSteeringQueue(msg.sessionId, p.agentId, p.commands ?? []);
+      break;
+    }
+
+    case 'device.event': {
+      if (typeof window !== 'undefined')
+        window.dispatchEvent(new CustomEvent('kory:device-event', { detail: msg.payload }));
+      break;
+    }
     case 'agent.status': {
       const p = msg.payload as AgentStatusPayload;
       // Suppression of active statuses after a user stop is handled by
@@ -394,6 +635,34 @@ function handleMessage(msg: WSMessage) {
         break;
       }
       agentStore.updateAgentStatus(p.agentId, p.status, msg.sessionId ?? undefined);
+      if (
+        msg.sessionId &&
+        p.agentId !== 'kory-manager' &&
+        ['done', 'idle', 'error'].includes(p.status)
+      ) {
+        const agent = agents.get(p.agentId);
+        feedStore.completeToolCall(
+          `agent-spawn-${p.agentId}`,
+          `${agent?.identity.name ?? 'Agent'} ${p.status}`,
+          {
+            callId: `agent-spawn-${p.agentId}`,
+            name: 'delegate_to_worker',
+            output: `${agent?.identity.name ?? 'Agent'} ${p.status}`,
+            isError: p.status === 'error',
+            durationMs: 0,
+          },
+          msg.timestamp,
+          { sessionId: msg.sessionId, source: 'agent.status' },
+          'kory-manager',
+        );
+      }
+      if (msg.sessionId && ['done', 'idle', 'error'].includes(p.status)) {
+        finalizeSessionThinking(msg.sessionId, p.agentId, msg.timestamp, true);
+      }
+      if (p.status !== 'analyzing') {
+        if (isForActiveSession) feedStore.removeAnalyzingThoughtEntries();
+        if (msg.sessionId) feedStore.removeAnalyzingThoughtEntries(msg.sessionId);
+      }
       if (isForActiveSession) {
         if (p.status === 'thinking') feedStore.beginThinking(p.agentId, msg.timestamp);
         else feedStore.finalizeThinking(p.agentId, msg.timestamp);
@@ -421,6 +690,17 @@ function handleMessage(msg: WSMessage) {
       break;
     }
 
+    case 'agent.updated': {
+      const p = msg.payload as {
+        agentId: string;
+        model?: string;
+        provider?: string;
+        reasoningLevel?: string;
+      };
+      agentStore.updateAgentControls(p.agentId, p, msg.sessionId ?? undefined);
+      break;
+    }
+
     case 'system.info': {
       // Cancel notification → live stop marker as plain system text, not a
       // Kory message. The backend persists a matching system row for reloads.
@@ -431,6 +711,12 @@ function handleMessage(msg: WSMessage) {
       const isPromptDiagnostic =
         info?.message?.startsWith('Prompt ') && info.message.includes('Instructions:');
       if (isPromptDiagnostic) break;
+      if (msg.sessionId && info?.message === 'Session cancelled') {
+        // The backend publishes this cancellation marker before the HTTP stop
+        // response reaches the browser. Finalize here as well as on the HTTP
+        // acknowledgment so the stopwatch cannot keep running in that gap.
+        markSessionAgentsStopped(msg.sessionId);
+      }
       if (isForActiveSession && info?.message) {
         // applyEvent already handled the "Session cancelled" stop suppression
         // and phase transition; here we just render the feed marker.
@@ -451,6 +737,7 @@ function handleMessage(msg: WSMessage) {
     case 'agent.completed':
     case 'stream.complete': {
       const p = msg.payload as { agentId: string };
+      if (msg.sessionId) finalizeSessionThinking(msg.sessionId, p.agentId, msg.timestamp, true);
       if (isForActiveSession) feedStore.finalizeThinking(p.agentId, msg.timestamp);
       agentStore.completeAgent(p.agentId, msg.sessionId ?? undefined);
       if (isForActiveSession) feedStore.removeAnalyzingThoughtEntries();
@@ -462,6 +749,7 @@ function handleMessage(msg: WSMessage) {
       const p = msg.payload as { agentId?: string; error?: string };
       const isSubAgent = isSpawnedSubAgent(p.agentId);
       // Run-phase error transition is handled by applyEvent above.
+      if (msg.sessionId) finalizeSessionThinking(msg.sessionId, p.agentId, msg.timestamp, true);
       if (msg.sessionId) {
         if (isForActiveSession) feedStore.removeAnalyzingThoughtEntries();
         feedStore.addFeedEntryForSession(msg.sessionId, {
@@ -486,6 +774,7 @@ function handleMessage(msg: WSMessage) {
       const p = msg.payload as StreamDeltaPayload;
       const isSubAgent = isSpawnedSubAgent(p.agentId);
       // Answer text starting = the provider is done reasoning: freeze timers.
+      if (msg.sessionId) finalizeSessionThinking(msg.sessionId, p.agentId, msg.timestamp);
       if (isForActiveSession) feedStore.finalizeThinking(p.agentId, msg.timestamp);
       agentStore.appendAgentContent(p.agentId, p.content, msg.sessionId ?? undefined);
       const alreadyPersisted =
@@ -543,6 +832,7 @@ function handleMessage(msg: WSMessage) {
           glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
           text: p.thinking,
           thinkingStartedAt: feedStore.getThinkingStart(p.agentId, msg.timestamp),
+          ...(msg.replayed && { thinkingFinalized: true }),
           metadata: {
             ...orderedEventMetadata(msg),
             ...(isSubAgent && { isSubAgent: true }),
@@ -559,6 +849,7 @@ function handleMessage(msg: WSMessage) {
           glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
           text: p.thinking,
           thinkingStartedAt: feedStore.getThinkingStart(p.agentId, msg.timestamp),
+          ...(msg.replayed && { thinkingFinalized: true }),
           metadata: { ...orderedEventMetadata(msg), sessionId: msg.sessionId },
         });
       }
@@ -568,14 +859,20 @@ function handleMessage(msg: WSMessage) {
     case 'stream.tool_call': {
       const p = msg.payload as StreamToolCallPayload;
       const isSubAgent = isSpawnedSubAgent(p.agentId);
-      if (isForActiveSession) feedStore.finalizeThinking(p.agentId, msg.timestamp);
+      if (msg.sessionId) finalizeSessionThinking(msg.sessionId, p.agentId, msg.timestamp);
+      if (isForActiveSession) {
+        feedStore.finalizeThinking(p.agentId, msg.timestamp);
+        feedStore.removeAnalyzingThoughtEntries();
+      }
+      if (msg.sessionId) feedStore.removeAnalyzingThoughtEntries(msg.sessionId);
       const existingToolCall =
-        isForActiveSession && feedStore.updateToolCall(p.toolCall, msg.timestamp);
+        !!msg.sessionId &&
+        feedStore.updateToolCall(p.toolCall, msg.timestamp, msg.sessionId, p.agentId);
       if (!existingToolCall)
         agentStore.addToolCall(p.agentId, p.toolCall.name, msg.sessionId ?? undefined);
-      if (isForActiveSession) {
+      if (msg.sessionId) {
         if (!existingToolCall)
-          feedStore.addFeedEntry({
+          feedStore.addFeedEntryForSession(msg.sessionId, {
             timestamp: msg.timestamp,
             type: 'tool_call',
             agentId: p.agentId,
@@ -664,45 +961,64 @@ function handleMessage(msg: WSMessage) {
 
     case 'stream.tool_result': {
       const p = msg.payload as StreamToolResultPayload;
+      if (isForActiveSession) feedStore.removeAnalyzingThoughtEntries();
+      if (msg.sessionId) feedStore.removeAnalyzingThoughtEntries(msg.sessionId);
       const isSubAgent = isSpawnedSubAgent(p.agentId);
       const resultText = p.toolResult.isError
         ? `Tool error: ${p.toolResult.output}`
         : p.toolResult.durationMs > 0
           ? `Tool result (${p.toolResult.durationMs.toFixed(0)}ms): ${p.toolResult.output}`
           : `Tool result (time not reported by provider): ${p.toolResult.output}`;
-      if (isForActiveSession) {
-        const toolCall = feedStore.findToolCallInput(p.toolResult.callId);
-        feedStore.addFeedEntry({
-          timestamp: msg.timestamp,
-          type: 'tool_result',
-          agentId: p.agentId,
-          agentName: agents.get(p.agentId)?.identity.name ?? 'Worker',
-          glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
-          text: resultText,
-          metadata: {
-            ...orderedEventMetadata(msg),
-            ...(isSubAgent && { isSubAgent: true }),
-            ...(toolCall && { toolCall }),
-            toolResult: p.toolResult,
-            sourceProvider: p.sourceProvider,
-          },
-        });
+      if (msg.sessionId) {
+        const completed = feedStore.completeToolCall(
+          p.toolResult.callId,
+          resultText,
+          p.toolResult,
+          msg.timestamp,
+          orderedEventMetadata(msg),
+          p.agentId,
+        );
+        if (!completed)
+          feedStore.addFeedEntryForSession(msg.sessionId, {
+            timestamp: msg.timestamp,
+            type: 'tool_result',
+            agentId: p.agentId,
+            agentName: agents.get(p.agentId)?.identity.name ?? 'Worker',
+            glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
+            text: resultText,
+            metadata: {
+              ...orderedEventMetadata(msg),
+              ...(isSubAgent && { isSubAgent: true }),
+              toolResult: p.toolResult,
+              sourceProvider: p.sourceProvider,
+            },
+          });
       }
       if (msg.sessionId) {
-        agentStore.upsertAgentThreadEntry(msg.sessionId, p.agentId, {
-          timestamp: msg.timestamp,
-          type: 'tool_result',
-          agentId: p.agentId,
-          agentName: agentStore.getAgentFeedLabel(p.agentId),
-          glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
-          text: resultText,
-          metadata: {
-            ...orderedEventMetadata(msg),
-            toolResult: p.toolResult,
-            sessionId: msg.sessionId,
-            sourceProvider: p.sourceProvider,
-          },
-        });
+        const completed = agentStore.completeAgentThreadEntry(
+          msg.sessionId,
+          p.agentId,
+          p.toolResult.callId,
+          resultText,
+          p.toolResult,
+          msg.timestamp,
+          orderedEventMetadata(msg),
+        );
+        if (!completed)
+          agentStore.upsertAgentThreadEntry(msg.sessionId, p.agentId, {
+            timestamp: msg.timestamp,
+            type: 'tool_result',
+            agentId: p.agentId,
+            agentName: agentStore.getAgentFeedLabel(p.agentId),
+            glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
+            text: resultText,
+            metadata: {
+              ...orderedEventMetadata(msg),
+              toolResult: p.toolResult,
+              sessionId: msg.sessionId,
+              sourceProvider: p.sourceProvider,
+            },
+          });
       }
       break;
     }
@@ -782,7 +1098,11 @@ function handleMessage(msg: WSMessage) {
           agentName: 'Kory',
           glowClass: 'glow-kory',
           text: p.thought,
-          metadata: { ...orderedEventMetadata(msg), phase: p.phase },
+          metadata: {
+            ...orderedEventMetadata(msg),
+            phase: p.phase,
+            ...(msg.sessionId && { sessionId: msg.sessionId }),
+          },
         });
       }
       break;
@@ -832,10 +1152,7 @@ function handleMessage(msg: WSMessage) {
       const sid = msg.sessionId;
       if (!sid) break;
       const current = pendingQuestions.get(sid);
-      // A durable terminal control can only clear the question it names. A
-      // legacy/no-id control means the server has authoritatively established
-      // that this session has no waiting question.
-      if (!p.questionId || !current?.questionId || current.questionId === p.questionId) {
+      if (current && questionResolutionMatches(current, p)) {
         const next = new Map(pendingQuestions);
         next.delete(sid);
         pendingQuestions = next;
@@ -860,7 +1177,7 @@ function handleMessage(msg: WSMessage) {
       feedStore.upsertCompaction(payload, orderedEventMetadata(msg));
       // Run-phase transitions for compaction are handled by applyEvent above.
       if (msg.type === 'compaction.completed') {
-        toastStore.success('Context compacted — the manager will start fresh on the next turn');
+        toastStore.success('Context compacted. The manager will start fresh on the next turn.');
       } else if (msg.type === 'compaction.failed') {
         toastStore.error(payload.error ?? 'Compaction failed');
       }
@@ -869,6 +1186,8 @@ function handleMessage(msg: WSMessage) {
 
     case 'notes.updated': {
       notesStore.handleRealtimeUpdate(msg.payload as NotesRealtimeUpdate);
+      if (typeof window !== 'undefined')
+        window.dispatchEvent(new CustomEvent('kory-notes-updated', { detail: msg.payload }));
       break;
     }
 
@@ -877,6 +1196,17 @@ function handleMessage(msg: WSMessage) {
       // replaces the high-frequency workspace polling fallback.
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('kory-workspace-snapshot', { detail: msg.payload }));
+      }
+      break;
+    }
+
+    case 'desktop.ui.updated': {
+      const payload = msg.payload as {
+        settings?: DesktopUiSettings;
+        replayWalkthrough?: boolean;
+      };
+      if (payload.settings) {
+        applyDesktopUiSettings(payload.settings, payload.replayWalkthrough === true);
       }
       break;
     }
@@ -953,48 +1283,18 @@ function handleMessage(msg: WSMessage) {
     }
 
     case 'session.changes': {
-      const p = msg.payload as KorySessionChangesPayload;
-      if (msg.sessionId) {
-        // Reassign — Map mutation alone is not reactive under $state.
-        const next = new Map(sessionChanges);
-        next.set(msg.sessionId, p.changes);
-        sessionChanges = next;
-        const reviewIds = new Map(sessionChangeReviewIds);
-        if (p.reviewId) reviewIds.set(msg.sessionId, p.reviewId);
-        else reviewIds.delete(msg.sessionId);
-        sessionChangeReviewIds = reviewIds;
-      }
+      if (msg.sessionId) publishReview(msg.sessionId, msg.payload);
       break;
     }
 
     case 'session.changes_resolved': {
-      const p = msg.payload as KorySessionChangesResolvedPayload;
-      const sid = msg.sessionId;
-      if (!sid) break;
-      const currentReviewId = sessionChangeReviewIds.get(sid);
-      // Preserve a newer review when an old durable resolution is replayed.
-      if (!p.reviewId || !currentReviewId || currentReviewId === p.reviewId) {
-        const next = new Map(sessionChanges);
-        next.delete(sid);
-        sessionChanges = next;
-        const reviewIds = new Map(sessionChangeReviewIds);
-        reviewIds.delete(sid);
-        sessionChangeReviewIds = reviewIds;
-      }
+      if (msg.sessionId) resolveReview(msg.sessionId, msg.payload);
       break;
     }
 
     case 'session.accept_changes': {
-      if (msg.sessionId && sessionChanges.has(msg.sessionId)) {
-        const next = new Map(sessionChanges);
-        next.delete(msg.sessionId);
-        sessionChanges = next;
-      }
-      if (msg.sessionId) {
-        const reviewIds = new Map(sessionChangeReviewIds);
-        reviewIds.delete(msg.sessionId);
-        sessionChangeReviewIds = reviewIds;
-      }
+      const current = msg.sessionId ? sessionReviews.get(msg.sessionId) : null;
+      if (current && !current.reviewId && !current.reviewRevision) clearReview(current.sessionId);
       break;
     }
 
@@ -1058,7 +1358,7 @@ function handleMessage(msg: WSMessage) {
       const text = p.title
         ? `${p.title}: ${p.message ?? ''}`.trim()
         : (p.message ?? 'Notification');
-      pushToast(notificationType, text);
+      if (notificationType !== 'error') pushToast(notificationType, text);
       feedStore.addFeedEntry({
         timestamp: msg.timestamp,
         type: notificationType === 'error' ? 'error' : 'system',
@@ -1187,13 +1487,18 @@ async function connectAuthenticated(url: string | undefined, generation: number)
       hasShownMalformedWsMessage = false;
       wsConnection = ws;
       sentSessionSubscriptions.clear();
+      // Recover membership and durable outcomes missed while disconnected,
+      // not just the selected transcript/workspace listing.
+      void sessionStore.fetchSessions?.();
       // Re-subscribe to every session viewed this app run, not just the
       // active one — the server keeps per-connection subscriptions, so a
       // reconnect would otherwise silently stop delivering events for
       // background chats that are still running.
       const activeSid = sessionStore.activeSessionId;
       if (activeSid) subscribedSessions.add(activeSid);
-      for (const sid of subscribedSessions) subscribeToSession(sid);
+      for (const sid of subscribedSessions) {
+        subscribeToSession(sid);
+      }
       // A fresh renderer otherwise knows only its active chat. Ask for the
       // compact durable index of background chats waiting on the user, then
       // subscribe to precisely those sessions so their ask/review controls
@@ -1321,6 +1626,25 @@ function requestSessionReplay(cursor: {
   epoch: number;
   sequence: number;
 }): void {
+  const target = deviceRouting.chat;
+  if (isDeviceSessionKey(cursor.sessionId)) {
+    if (!target || deviceSessionKey(target) !== cursor.sessionId) return;
+    void apiFetch(apiUrl(`/api/devices/${target.deviceId}/rpc`), {
+      method: 'POST',
+      body: JSON.stringify({
+        operation: 'events',
+        input: { sessionId: target.id, epoch: cursor.epoch, sequence: cursor.sequence },
+      }),
+    })
+      .then((response) => response.json())
+      .then((result) => {
+        if (result.ok && Array.isArray(result.data))
+          for (const message of result.data)
+            ingestRealtimeMessage(mapDeviceSessionIds(message, target, true));
+      })
+      .catch(() => undefined);
+    return;
+  }
   if (wsConnection?.readyState !== WebSocket.OPEN) return;
   wsConnection.send(
     JSON.stringify({
@@ -1357,6 +1681,7 @@ function applyTimelineRewrite(
   }
 
   const rewriteGeneration = feedStore.resetSessionFeed(sessionId);
+  agentStore.invalidateManagerContextUsage(sessionId);
   if (options.adoptIngress) adoptRewrittenSessionEpoch(sessionId, epoch);
 
   const completion = (async () => {
@@ -1377,9 +1702,6 @@ function applyTimelineRewrite(
       const detail = error instanceof Error ? error.message : 'Unknown history refresh failure';
       console.error('Failed to reload rewritten session history:', error);
       if (sessionId === sessionStore.activeSessionId) {
-        toastStore.error(
-          `Session rewound, but its refreshed history could not be loaded: ${detail}`,
-        );
         feedStore.addClientError(`Rewritten chat history failed to load: ${detail}`);
       }
     }
@@ -1390,6 +1712,54 @@ function applyTimelineRewrite(
 
 function subscribeToSession(sessionId: string) {
   if (!sessionId) return;
+  if (isDeviceSessionKey(sessionId)) {
+    const target = deviceRouting.chat;
+    if (
+      !target ||
+      deviceSessionKey(target) !== sessionId ||
+      sentSessionSubscriptions.has(sessionId) ||
+      wsConnection?.readyState !== WebSocket.OPEN
+    )
+      return;
+    subscribedSessions.add(sessionId);
+    sentSessionSubscriptions.add(sessionId);
+    const ownConnection = connectGeneration;
+    const ownRouting = deviceRouting.generation;
+    const ownSelection = sessionStore.selectionGeneration;
+    const origin = apiUrl('/api');
+    const current = () =>
+      ownConnection === connectGeneration &&
+      ownRouting === deviceRouting.generation &&
+      ownSelection === sessionStore.selectionGeneration &&
+      deviceRouting.chat === target &&
+      origin === apiUrl('/api');
+    // Reconnect uses the same guarded snapshot projection as opening and polling.
+    // A second reducer here previously resurrected reviews resolved during open.
+    void import('./devices.svelte')
+      .then(async ({ deviceStore }) => {
+        if (!current()) return;
+        const owner = deviceStore.captureChat();
+        if (!owner || !deviceStore.ownsChat(owner)) {
+          sentSessionSubscriptions.delete(sessionId);
+          return;
+        }
+        const applied = await deviceStore.refreshChat(owner, 'open_chat');
+        if (!current()) return;
+        if (!applied) {
+          sentSessionSubscriptions.delete(sessionId);
+          return;
+        }
+        const cursor = orderedSessionIngress.getCursor(sessionId);
+        if (cursor) requestSessionReplay({ sessionId, ...cursor });
+      })
+      .catch((error) => {
+        if (current()) {
+          sentSessionSubscriptions.delete(sessionId);
+          toastStore.error(error.message);
+        }
+      });
+    return;
+  }
   subscribedSessions.add(sessionId);
   if (wsConnection?.readyState !== WebSocket.OPEN) return;
   // WebSocket open and Svelte's queued session activation can race during a
@@ -1400,6 +1770,9 @@ function subscribeToSession(sessionId: string) {
   if (sessionId === sessionStore.activeSessionId && !feedStore.ownsFeed(sessionId)) return;
   if (sentSessionSubscriptions.has(sessionId)) return;
   sentSessionSubscriptions.add(sessionId);
+  // A fresh renderer has no cursor and must recover the complete transcript.
+  // HTTP message/context history cannot replace reasoning and tool events.
+  // An in-app reconnect resumes after the last event actually applied.
   const cursor = orderedSessionIngress.getCursor(sessionId);
   wsConnection.send(
     JSON.stringify({
@@ -1455,6 +1828,10 @@ async function sendMessage(
   fastMode?: boolean,
   imageInputMode: 'reject' | 'omit' | 'allow' = 'reject',
 ): Promise<boolean> {
+  // Stop is an HTTP handoff, not a local UI transition. A terminal run.state
+  // can arrive before the cancel response, so wait on the captured session's
+  // cancellation before adding a user message or starting the next run.
+  if (!(await waitForCancellation(sessionId))) return false;
   const optimisticEntryId = feedStore.addUserMessage(sessionId, content, attachments);
   runStateStore.startRun(sessionId);
   detectedContext = [];
@@ -1493,12 +1870,43 @@ async function sendMessage(
       error instanceof Error && error.message
         ? error.message
         : 'Message send failed. Check your connection and retry.';
-    toastStore.error(message);
     if (optimisticEntryId) feedStore.removeEntries(new Set([optimisticEntryId]));
     feedStore.addClientError(message);
     runStateStore.markUserStopped(sessionId);
     return false;
   }
+}
+
+/** Replace the active manager turn with the instruction currently in the
+ * composer. Cancellation is deliberately awaited before sendMessage: a
+ * provider stream must release its run ownership before the continuation is
+ * admitted, otherwise the backend correctly rejects it as a concurrent turn. */
+async function steerMessage(
+  sessionId: string,
+  content: string,
+  model?: string,
+  reasoningLevel?: string,
+  attachments?: Array<{ type: string; data: string; name: string; mimeType?: string }>,
+  fastMode?: boolean,
+  imageInputMode: 'reject' | 'omit' | 'allow' = 'reject',
+): Promise<boolean> {
+  if (!sessionId) return false;
+  try {
+    await cancelSession(sessionId, 'steer');
+  } catch {
+    // cancelSession already reports the failure and sendMessage must not
+    // consume the draft or accidentally start a concurrent turn.
+    return false;
+  }
+  return sendMessage(
+    sessionId,
+    content,
+    model,
+    reasoningLevel,
+    attachments,
+    fastMode,
+    imageInputMode,
+  );
 }
 
 async function sendAgentMessage(
@@ -1509,6 +1917,7 @@ async function sendAgentMessage(
   reasoningLevel?: string,
 ): Promise<boolean> {
   if (!sessionId || !agentId || !content.trim()) return false;
+  if (!(await waitForCancellation(sessionId, agentId))) return false;
   try {
     const res = await apiFetch(apiUrl(`/api/agent/${agentId}/message`), {
       method: 'POST',
@@ -1526,18 +1935,47 @@ async function sendAgentMessage(
       error instanceof Error && error.message
         ? error.message
         : 'Agent message send failed. Check your connection and retry.';
-    toastStore.error(message);
     feedStore.addClientError(message);
     return false;
   }
 }
 
 function respondToPermission(id: string, approved: boolean) {
+  const permission = pendingPermissions.find((perm) => perm.id === id);
+  const target = deviceRouting.chat;
+  if (target && permission?.sessionId === deviceSessionKey(target)) {
+    void apiFetch(apiUrl(`/api/devices/${target.deviceId}/rpc`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        operation: 'permission',
+        input: {
+          sessionId: target.id,
+          permissionId: id,
+          selection: approved ? 'granted' : 'denied',
+        },
+      }),
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const body = await parseJsonResponse<{ error?: string }>(response).catch(
+            () => ({ error: undefined }) as { error?: string },
+          );
+          throw new Error(body.error || 'Could not send the permission response to the target.');
+        }
+        pendingPermissions = pendingPermissions.filter((perm) => perm.id !== id);
+      })
+      .catch((error) =>
+        toastStore.error(error instanceof Error ? error.message : 'Permission response failed.'),
+      );
+    return;
+  }
   if (wsConnection?.readyState === WebSocket.OPEN) {
     wsConnection.send(
       JSON.stringify({
         type: 'permission.response',
         payload: { id, response: approved ? 'granted' : 'denied' },
+        sessionId: permission?.sessionId,
         timestamp: Date.now(),
       }),
     );
@@ -1546,6 +1984,26 @@ function respondToPermission(id: string, approved: boolean) {
 }
 
 function sendUserInput(sessionId: string, selection: string, text?: string) {
+  const target = deviceRouting.chat;
+  if (target && sessionId === deviceSessionKey(target)) {
+    void apiFetch(apiUrl(`/api/devices/${target.deviceId}/rpc`), {
+      method: 'POST',
+      body: JSON.stringify({
+        operation: 'answer',
+        input: {
+          sessionId: target.id,
+          selection,
+          text,
+          questionId: pendingQuestions.get(sessionId)?.questionId,
+        },
+      }),
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('Could not send the answer to the target.');
+      })
+      .catch((error) => toastStore.error(error.message));
+    return;
+  }
   if (wsConnection?.readyState === WebSocket.OPEN) {
     try {
       wsConnection.send(
@@ -1573,38 +2031,105 @@ function sendUserInput(sessionId: string, selection: string, text?: string) {
   }
 }
 
-function respondToChanges(sessionId: string, accepted: boolean) {
-  // Browser trials have no websocket, but review decisions must still mutate
-  // their tab-scoped virtual repository before the pending-review UI closes.
-  if (isDemoMode) {
-    void import('$lib/demo-api').then((demo) => demo.resolveDemoReview(accepted));
-  }
-  if (wsConnection?.readyState === WebSocket.OPEN) {
+async function respondToChanges(
+  sessionId: string,
+  accepted: boolean,
+  selection: ReviewSelection,
+): Promise<void> {
+  if (!selection || selection.review.sessionId !== sessionId || !ownsReview(selection)) return;
+  const prior = reviewResponses.get(sessionId);
+  if (prior && prior.phase !== 'failed') return;
+  const review = selection.review;
+  let attempt: ReviewResponse = { review, phase: 'submitting' };
+  reviewResponses = new Map(reviewResponses).set(sessionId, attempt);
+  let sent = false;
+  const update = (phase: ReviewResponse['phase'], error?: string) => {
+    if (reviewResponses.get(sessionId) !== attempt) return;
+    attempt = { review, phase, error };
+    reviewResponses = new Map(reviewResponses).set(sessionId, attempt);
+  };
+  try {
+    if (isDemoMode && !selection.target) {
+      const demo = await import('$lib/demo-api');
+      if (!ownsReview(selection)) {
+        update('failed', 'The displayed review changed.');
+        return;
+      }
+      await demo.resolveDemoReview(accepted);
+      if (sessionReviews.get(sessionId) === review && apiUrl('/api') === selection.origin)
+        clearReview(sessionId);
+      return;
+    }
+    if (!review.reviewId || !review.reviewRevision)
+      throw new Error(
+        'Refresh this review before responding; its publication identity is missing.',
+      );
+    if (isDeviceSessionKey(sessionId) && !selection.target)
+      throw new Error('Open this review on its linked desktop before responding.');
+    if (selection.target) {
+      sent = true;
+      const response = await apiFetch(
+        apiUrl(`/api/devices/${encodeURIComponent(selection.target.deviceId)}/rpc`),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            operation: 'review',
+            input: {
+              sessionId: selection.target.id,
+              accept: accepted,
+              reviewId: review.reviewId,
+              reviewRevision: review.reviewRevision,
+            },
+          }),
+        },
+      );
+      const result = await parseJsonResponse<{
+        ok?: boolean;
+        error?: string;
+        data?: { reviewed?: boolean; reviewId?: string; reviewRevision?: string; status?: string };
+      }>(response);
+      if (!response.ok || !result.ok)
+        throw new Error(result.error || 'Could not confirm the review on the target.');
+      const data = result.data;
+      if (
+        !data?.reviewed ||
+        data.reviewId !== review.reviewId ||
+        data.reviewRevision !== review.reviewRevision ||
+        !reviewResolutionMatches(review, data)
+      )
+        throw new Error(
+          'The target did not confirm this review revision. Check its status before retrying.',
+        );
+      // A result belongs to its captured publication even if the user navigated away.
+      if (apiUrl('/api') === selection.origin && reviewResponses.get(sessionId) === attempt)
+        resolveReview(sessionId, data);
+      return;
+    }
+    if (wsConnection?.readyState !== WebSocket.OPEN)
+      throw new Error('Connection lost. Reconnect before responding.');
     wsConnection.send(
       JSON.stringify({
         type: accepted ? 'session.accept_changes' : 'session.reject_changes',
         sessionId,
+        reviewId: review.reviewId,
+        reviewRevision: review.reviewRevision,
         timestamp: Date.now(),
       }),
     );
+    sent = true;
+    update('awaiting_confirmation');
+  } catch (error) {
+    update(
+      sent ? 'uncertain' : 'failed',
+      error instanceof Error ? error.message : 'Review could not be confirmed.',
+    );
   }
-  sessionChanges.delete(sessionId);
-  sessionChanges = new Map(sessionChanges);
-  const reviewIds = new Map(sessionChangeReviewIds);
-  reviewIds.delete(sessionId);
-  sessionChangeReviewIds = reviewIds;
 }
 
 function setDemoSessionChanges(sessionId: string, changes: ChangeSummary[]) {
-  const next = new Map(sessionChanges);
-  if (changes.length) next.set(sessionId, changes);
-  else next.delete(sessionId);
-  sessionChanges = next;
-  if (!changes.length) {
-    const reviewIds = new Map(sessionChangeReviewIds);
-    reviewIds.delete(sessionId);
-    sessionChangeReviewIds = reviewIds;
-  }
+  if (changes.length) publishReview(sessionId, { changes });
+  else clearReview(sessionId);
 }
 
 function clearFeed() {
@@ -1648,6 +2173,22 @@ async function loadSessionMessages(
   options: { generation?: number; signal?: AbortSignal } = {},
 ) {
   if (!feedStore.ownsFeed(sessionId, options.generation)) return;
+  const boundary = sessionStore.getMessageDisplayBoundary?.(messages);
+  const priorRevision = feedStore.feed.find((entry) =>
+    Number.isSafeInteger(entry.metadata?.providerConversationRevision),
+  )?.metadata?.providerConversationRevision;
+  if (
+    boundary?.authoritative &&
+    typeof priorRevision === 'number' &&
+    typeof boundary.providerConversationRevision === 'number' &&
+    boundary.providerConversationRevision > priorRevision
+  ) {
+    // An actual branch rewrite invalidates occupancy. An empty archive response
+    // during an ordinary refresh does not: it may precede a usage persistence
+    // write or describe an older boundary than the live report already shown.
+    agentStore.invalidateManagerContextUsage(sessionId);
+  }
+  const usageRevision = agentStore.managerUsageRevision;
   // Reset ancillary per-session UI state up front, but leave the feed itself
   // alone — feedStore.loadSessionMessages swaps it in atomically once the
   // fetched history is ready, avoiding a blank flash during the round trip.
@@ -1658,7 +2199,13 @@ async function loadSessionMessages(
   koryPhase = '';
   await feedStore.loadSessionMessages(sessionId, messages, {
     ...options,
-    onUsage: (usage) => agentStore.seedManagerUsage(sessionId, usage),
+    onUsage: (usage) => {
+      // History is a request-time snapshot. A newer live report, preview, or
+      // branch invalidation wins while that request is in flight.
+      if (usage && agentStore.managerUsageRevision === usageRevision) {
+        agentStore.seedManagerUsage(sessionId, usage);
+      }
+    },
   });
 }
 
@@ -1761,17 +2308,36 @@ function setYoloMode(enabled: boolean) {
   }
 }
 
+function finalizeSessionThinking(
+  sessionId: string,
+  agentId?: string,
+  endedAt: number | null = null,
+  closeTurn = false,
+) {
+  // Main-feed and drill-down entries are separate mutable lanes. Finalizing
+  // only the visible feed leaves an agent's reasoning stopwatch live after a
+  // stop or terminal event, especially when the chat is reopened later.
+  feedStore.finalizeThinking(agentId, endedAt, sessionId);
+  agentStore.finalizeThreadThinking(sessionId, agentId, endedAt);
+  if (closeTurn) {
+    feedStore.closeStreamTurn(agentId, sessionId);
+    agentStore.closeAgentThreadTurn(sessionId, agentId);
+  }
+}
+
 function markSessionAgentsStopped(sessionId: string) {
   // Run-phase stop is owned by runStateStore; agentStore still marks its
   // agent entries done for content-streaming indicators (ManagerFeed etc.).
   runStateStore.markUserStopped(sessionId);
+  finalizeSessionThinking(sessionId, undefined, null, true);
   agentStore.markSessionAgentsStopped(sessionId);
-  if (sessionId === sessionStore.activeSessionId) feedStore.removeAnalyzingThoughtEntries();
+  feedStore.removeAnalyzingThoughtEntries(sessionId);
 }
 
 // ─── Exported Store ─────────────────────────────────────────────────────────
 
 export const wsStore = {
+  ingestLinkedMessage: ingestRealtimeMessage,
   get connection() {
     return wsConnection;
   },
@@ -1814,6 +2380,23 @@ export const wsStore = {
   get sessionChanges() {
     return sessionChanges;
   },
+  get sessionReviews() {
+    return sessionReviews;
+  },
+  get reviewResponses() {
+    return reviewResponses;
+  },
+  captureReview,
+  publishReview,
+  resolveReview,
+  cancelSession,
+  cancelAgent,
+  steerMessage,
+  isCancellationPending(sessionId: string, agentId?: string): boolean {
+    return pendingCancellations.has(
+      agentId ? agentCancellationKey(sessionId, agentId) : sessionCancellationKey(sessionId),
+    );
+  },
   get rewindPreview() {
     return rewindPreview;
   },
@@ -1844,8 +2427,10 @@ export const wsStore = {
   isSessionRunning: runStateStore.isRunning,
   isSessionWaiting: runStateStore.isWaiting,
   isSessionBusy: runStateStore.isBusy,
+  isSessionStoppedByUser: runStateStore.isStoppedByUser,
   getManagerStatusForSession: runStateStore.getAgentStatusForSession,
-  getAgentStatusesForSession: agentStore.getAgentStatusesForSession,
+  getAgentStatusesForSession: (sessionId: string) =>
+    agentStore.getAgentStatusesForSession?.(sessionId) ?? [],
   markSessionAgentsStopped,
   markAgentStopped: (agentId: string) => {
     // Single-agent cancel: find the session and delegate to runStateStore.
@@ -1864,17 +2449,19 @@ export const wsStore = {
   respondToChanges,
   setDemoSessionChanges,
   loadSessionMessages,
-  loadAgentThreads: agentStore.loadAgentThreads,
-  loadAgentThreadMessages: agentStore.loadAgentThreadMessages,
-  getAgentThreadFeed: agentStore.getAgentThreadFeed,
+  loadAgentThreads: agentStore?.loadAgentThreads,
+  loadAgentThreadMessages: agentStore?.loadAgentThreadMessages,
+  getAgentThreadFeed: agentStore?.getAgentThreadFeed,
   removeEntries: feedStore.removeEntries,
   setEntryVisibility: feedStore.setEntryVisibility,
   setUserEntryVisibility: feedStore.setUserEntryVisibility,
+  closeStreamTurn: feedStore.closeStreamTurn,
   finalizeThinking: feedStore.finalizeThinking,
-  beginManagerContextPreview: agentStore.beginManagerContextPreview,
-  applyManagerContextPreview: agentStore.applyManagerContextPreview,
-  clearManagerContextPreview: agentStore.clearManagerContextPreview,
-  setManagerContextWindow: agentStore.setManagerContextWindow,
+  beginManagerContextPreview: agentStore?.beginManagerContextPreview,
+  applyManagerContextPreview: agentStore?.applyManagerContextPreview,
+  clearManagerContextPreview: agentStore?.clearManagerContextPreview,
+  invalidateManagerContextUsage: agentStore?.invalidateManagerContextUsage,
+  setManagerContextWindow: agentStore?.setManagerContextWindow,
   respondToPermission,
   subscribeToSession,
   unsubscribeFromSession,

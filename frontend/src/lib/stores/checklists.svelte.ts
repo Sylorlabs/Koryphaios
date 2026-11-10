@@ -4,10 +4,15 @@ import { apiFetch } from '$lib/api.svelte';
 import { apiUrl } from '$lib/utils/api-url';
 import { browser } from '$app/environment';
 import { sessionStore } from './sessions.svelte';
+import { projectStore } from './project.svelte';
 
 let checklists = $state<Checklist[]>([]);
 let loaded = $state(false);
 let error = $state('');
+// Bumped on every local write so a reload cannot clobber a checklist that a
+// live event or a user action landed while the GET was still in flight.
+let revision = 0;
+const revisions = new Map<string, number>();
 
 async function request(path: string, init?: RequestInit): Promise<Checklist> {
   const res = await apiFetch(apiUrl(path), {
@@ -25,16 +30,31 @@ function upsert(checklist: Checklist): Checklist {
   checklists = checklists.some((entry) => entry.id === checklist.id)
     ? checklists.map((entry) => (entry.id === checklist.id ? checklist : entry))
     : [checklist, ...checklists];
+  revisions.set(checklist.id, ++revision);
   return checklist;
 }
 
 async function refresh() {
   if (!browser) return;
-  const res = await apiFetch(apiUrl('/api/checklists'));
-  const data = await res.json().catch(() => null);
-  if (data?.ok) {
-    checklists = data.data;
+  error = '';
+  const startedAt = revision;
+  try {
+    const res = await apiFetch(apiUrl('/api/checklists'));
+    const data = await res.json().catch(() => null);
+    if (!data?.ok) throw new Error(data?.error ?? 'Checklist request failed');
+    // Keep anything written locally after the request went out: the panel opens
+    // on mount, so a live checklist often arrives before this GET resolves and
+    // replacing the array would make it vanish mid-read.
+    const fresh = (data.data as Checklist[]).filter(
+      (checklist) => (revisions.get(checklist.id) ?? 0) <= startedAt,
+    );
+    const localDuringLoad = checklists.filter(
+      (checklist) => (revisions.get(checklist.id) ?? 0) > startedAt,
+    );
+    checklists = [...localDuringLoad, ...fresh];
     loaded = true;
+  } catch (err) {
+    error = err instanceof Error ? err.message : 'Checklist request failed';
   }
 }
 
@@ -45,10 +65,18 @@ async function create(input: {
   projectPath?: string;
   sessionId?: string;
 }) {
+  const sessionId = input.sessionId ?? sessionStore.activeSessionId ?? undefined;
   return upsert(
     await request('/api/checklists', {
       method: 'POST',
-      body: JSON.stringify({ sessionId: sessionStore.activeSessionId, ...input }),
+      // A list started from a chat belongs to that chat. Workspace scope is
+      // reachable from every chat by design, so leaving it as the default made
+      // a plan the user opened in one chat turn up in all of them.
+      body: JSON.stringify({
+        ...input,
+        ...(sessionId ? { sessionId } : {}),
+        scope: input.scope ?? (sessionId ? 'session' : 'workspace'),
+      }),
     }),
   );
 }
@@ -99,6 +127,7 @@ async function remove(id: string) {
   const data = await res.json().catch(() => null);
   if (!data?.ok) throw new Error(data?.error ?? 'Could not delete checklist');
   checklists = checklists.filter((entry) => entry.id !== id);
+  revisions.set(id, ++revision);
 }
 
 /** Wrap a mutation so a failed request surfaces its message instead of silently
@@ -116,19 +145,30 @@ async function guard<T>(run: () => Promise<T>): Promise<T | undefined> {
 function handleUpdated(payload: { checklist?: Checklist; deletedId?: string }) {
   if (payload.deletedId) {
     checklists = checklists.filter((entry) => entry.id !== payload.deletedId);
+    revisions.set(payload.deletedId, ++revision);
     return;
   }
   if (payload.checklist) upsert(payload.checklist);
 }
 
-/** Lists this chat should see: workspace-wide, plus the ones scoped to it. */
+/** Lists this chat should see: its own, plus its project's.
+ *
+ * Checklists are chat-local. A list opened in one chat must never appear in
+ * another, so `workspace` scope is deliberately not docked here: that scope
+ * exists for lists an agent writes with an explicit opt-in, and docking it in
+ * every chat was how a plan drafted in one conversation leaked into all of
+ * them. Project checklists belong to the checkout they were written in rather
+ * than to whichever chat happens to be open.
+ */
 function visible(): Checklist[] {
   const sessionId = sessionStore.activeSessionId;
-  return checklists.filter(
-    (checklist) =>
-      checklist.scope === 'workspace' ||
-      (checklist.scope === 'session' && checklist.sessionId === sessionId),
-  );
+  const projectPath = projectStore.currentPath;
+  return checklists.filter((checklist) => {
+    if (checklist.scope === 'session') return !!sessionId && checklist.sessionId === sessionId;
+    if (checklist.scope === 'project')
+      return !!projectPath && checklist.projectPath === projectPath;
+    return false;
+  });
 }
 
 export const checklistStore = {

@@ -1,5 +1,3 @@
-export const CUSTOM_PROVIDER_ICON_MAX_BYTES = 5 * 1024 * 1024;
-export const CUSTOM_PROVIDER_ICON_MAX_PIXELS = 40_000_000;
 export const CUSTOM_PROVIDER_ICON_OUTPUT_SIZE = 256;
 export const CUSTOM_PROVIDER_ICON_VIEWPORT_SIZE = 184;
 export const CUSTOM_PROVIDER_ICON_MIN_ZOOM = 100;
@@ -43,23 +41,23 @@ interface IconFileLike {
   type: string;
 }
 
+/**
+ * Only the container and emptiness are rejected. A large or high-resolution
+ * image is not: the crop editor decides the frame and the render step writes a
+ * 256 x 256 PNG, so sizing is the editor's job rather than a gate that leaves
+ * the user with an error and no way to fix it.
+ */
 export function validateCustomProviderIconFile(file: IconFileLike): string | null {
   if (!CUSTOM_PROVIDER_ICON_MIME_TYPES.includes(file.type as CustomProviderIconMimeType)) {
     return 'Choose a PNG, JPEG, or WebP image.';
   }
   if (!(file.size > 0)) return 'That image is empty. Choose another file.';
-  if (file.size > CUSTOM_PROVIDER_ICON_MAX_BYTES) {
-    return 'Choose an image smaller than 5 MiB.';
-  }
   return null;
 }
 
 export function validateCustomProviderIconDimensions(width: number, height: number): string | null {
   if (!Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) {
     return 'That image could not be decoded. Choose another file.';
-  }
-  if (width * height > CUSTOM_PROVIDER_ICON_MAX_PIXELS) {
-    return 'Choose an image smaller than 40 megapixels.';
   }
   return null;
 }

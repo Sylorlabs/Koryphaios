@@ -1,12 +1,25 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
-const { store } = vi.hoisted(() => ({ store: {
-  joinedSessions: [{ sessionId: 'team-1', sessionName: 'Design review', hostName: 'Micah', tierId: 'viewer',
-    sharedFolders: [{ id: 'workspace-1', name: 'koryphaios' }, { id: 'workspace-2', name: 'docs' }] }],
-  activeJoinedSession: null,
-  activeJoinedFolder: null,
-  openJoinedSession: vi.fn(), leaveJoinedSession: vi.fn(),
-} }));
+const { store } = vi.hoisted(() => ({
+  store: {
+    joinedSessions: [
+      {
+        sessionId: 'team-1',
+        sessionName: 'Design review',
+        hostName: 'Micah',
+        tierId: 'viewer',
+        sharedFolders: [
+          { id: 'workspace-1', name: 'koryphaios' },
+          { id: 'workspace-2', name: 'docs' },
+        ],
+      },
+    ],
+    activeJoinedSession: null,
+    activeJoinedFolder: null,
+    openJoinedSession: vi.fn(),
+    leaveJoinedSession: vi.fn(),
+  },
+}));
 vi.mock('$lib/stores/collaboration.svelte', () => ({ collaborationStore: store }));
 import JoinedTeamTree from './JoinedTeamTree.svelte';
 

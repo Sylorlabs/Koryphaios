@@ -20,12 +20,6 @@ describe('Provider execution location controls', () => {
     expect(showsExecutionModeSelector(caps)).toBe(false);
     expect(showsExecutionModeSelector()).toBe(false);
   });
-  it('does not offer a selector for cloud-only Jules', () => {
-    render(ProviderExecutionModes, {
-      capabilities: providerExecutionCapabilities('jules', 'cloud'),
-    });
-    expect(screen.queryByTestId('provider-execution-modes')).toBeNull();
-  });
   it('shows both-mode capability but never enables unsupported Hoplite execution', () => {
     render(ProviderExecutionModes, {
       capabilities: providerExecutionCapabilities('hoplite', 'hybrid'),

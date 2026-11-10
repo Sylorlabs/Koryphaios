@@ -24,20 +24,32 @@ const respond = (data: unknown) =>
   new Response(JSON.stringify({ ok: true, data }), { status: 200 });
 
 beforeEach(() => apiFetch.mockReset());
+beforeEach(() => window.localStorage.removeItem('koryphaios-computer-use-safety-ack-v1'));
 afterEach(cleanup);
 
 describe('Computer-use settings', () => {
-  it('starts off with no grants and never discovers apps on render or expansion', async () => {
+  it('starts available with no grants and never discovers apps on render or expansion', async () => {
     const { onchange } = await open();
     expect(
       screen.getByRole('switch', { name: 'Enable computer use' }).getAttribute('aria-checked'),
-    ).toBe('false');
+    ).toBe('true');
     expect(
       screen.getByText('No app grants. Agents cannot observe or control any app.'),
     ).toBeTruthy();
     expect(apiFetch).not.toHaveBeenCalled();
     await fireEvent.click(screen.getByRole('switch', { name: 'Enable computer use' }));
-    expect(onchange).toHaveBeenCalledWith(expect.objectContaining({ enabled: true, apps: [] }));
+    expect(onchange).toHaveBeenCalledWith(expect.objectContaining({ enabled: false, apps: [] }));
+  });
+
+  it('remembers the safety acknowledgement across openings', async () => {
+    await open();
+    await fireEvent.click(screen.getByRole('button', { name: 'I understand' }));
+    expect(screen.queryByRole('complementary', { name: 'Computer use safety notice' })).toBeNull();
+    expect(window.localStorage.getItem('koryphaios-computer-use-safety-ack-v1')).toBe('1');
+
+    cleanup();
+    await open();
+    expect(screen.queryByRole('complementary', { name: 'Computer use safety notice' })).toBeNull();
   });
 
   it('edits preset and role gates independently, including YOLO', async () => {
@@ -58,21 +70,21 @@ describe('Computer-use settings', () => {
     expect(settings.byTier.yolo.observe).toBe('allow');
   });
 
-  it('allows Plan and Critic role policy customization while keeping unimplemented capabilities blocked', async () => {
+  it('allows approval-tier and Critic role customization while keeping unimplemented capabilities blocked', async () => {
     const settings = defaultComputerUseSettings();
-    settings.byTier.plan.interact = 'allow';
+    settings.byTier.ask.interact = 'allow';
     settings.byRole.critic.manageWindows = 'allow';
     const { container } = await open(settings);
-    await choose('Computer permission preset', 'Plan');
+    await choose('Computer permission preset', 'Ask');
     await choose('Computer agent role', 'Critic');
     for (const name of [
-      'Click, type, keys & scroll · Plan',
+      'Semantic controls, pointer, typing & keys · Ask',
       'Focus windows · Critic',
-      'Read clipboard · Plan',
+      'Read clipboard · Ask',
     ]) {
       const control = screen.getByRole('combobox', { name }) as HTMLButtonElement;
-      expect(control.disabled).toBe(name === 'Read clipboard · Plan');
-      if (name === 'Read clipboard · Plan') expect(control.textContent).toContain('Block');
+      expect(control.disabled).toBe(name === 'Read clipboard · Ask');
+      if (name === 'Read clipboard · Ask') expect(control.textContent).toContain('Block');
     }
     expect(
       (

@@ -118,6 +118,25 @@ describe('reasoning timers stop when the run ends, not seconds later', () => {
     expect(entry.durationMs).toBe(0);
   });
 
+  it('freezes at the last server duration when Stop has no server end timestamp', () => {
+    feedStore.activateSessionFeed('reason-stop');
+    feedStore.beginThinking('kory-manager', 1000);
+    feedStore.accumulateFeedEntry({
+      ...thinkingRow('kory-manager', 1000, 'reason-stop'),
+      thinkingStartedAt: feedStore.getThinkingStart('kory-manager', 1000),
+    });
+    feedStore.accumulateFeedEntry({
+      ...thinkingRow('kory-manager', 2400, 'reason-stop'),
+      thinkingStartedAt: 1000,
+    });
+
+    feedStore.finalizeSessionThinking('reason-stop');
+
+    const entry = feedEntryById(feedStore.feed, 'considering…');
+    expect(entry.thinkingFinalized).toBe(true);
+    expect(entry.durationMs).toBe(1400);
+  });
+
   it('re-opens a sealed block when live reasoning resumes after a reconnect', () => {
     feedStore.activateSessionFeed('reason-6');
     feedStore.beginThinking('kory-manager', 1000);

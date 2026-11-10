@@ -10,6 +10,10 @@
   import ChevronLeft from 'lucide-svelte/icons/chevron-left';
   import ChevronRight from 'lucide-svelte/icons/chevron-right';
   import KorySelect from './KorySelect.svelte';
+  import NoteBaseFilterEditor from './NoteBaseFilterEditor.svelte';
+  import { canvasFromNotes } from '@koryphaios/shared';
+  import { notesStore } from '$lib/stores/notes.svelte';
+  import { toastStore } from '$lib/stores/toast.svelte';
   import { noteBasesStore, DEFAULT_NOTE_BASE_DEFINITION } from '$lib/stores/note-bases.svelte';
   import {
     defaultNoteBaseFilterValue,
@@ -21,6 +25,7 @@
     NoteBase,
     NoteBaseDefinition,
     NoteBaseField,
+    NoteBaseFilter,
     NoteBaseOperator,
     NoteBaseQueryRow,
     NotePropertyType,
@@ -28,13 +33,16 @@
 
   interface Props {
     onOpenNote: (noteId: string) => void;
+    onOpenCanvas?: (noteId: string) => void;
+    onAskAgent?: (prompt: string) => void;
   }
 
-  let { onOpenNote }: Props = $props();
+  let { onOpenNote, onOpenCanvas, onAskAgent }: Props = $props();
   let draftName = $state('');
   let draftDefinition = $state<NoteBaseDefinition>($state.snapshot(DEFAULT_NOTE_BASE_DEFINITION));
   let dirty = $state(false);
   let lastActiveId: string | null = null;
+  let lastActiveRevision = 0;
 
   const systemFields = [
     ['title', 'Title'],
@@ -87,8 +95,9 @@
 
   $effect(() => {
     const active = noteBasesStore.active;
-    if (active?.id === lastActiveId) return;
+    if (active?.id === lastActiveId && (dirty || active?.revision === lastActiveRevision)) return;
     lastActiveId = active?.id ?? null;
+    lastActiveRevision = active?.revision ?? 0;
     if (active) {
       draftName = active.name;
       // `$state.snapshot` unwraps reactive proxies. `structuredClone` alone
@@ -107,6 +116,11 @@
 
   onMount(() => {
     void noteBasesStore.refresh();
+    const changed = () => {
+      if (!dirty && !noteBasesStore.saving) void reloadBases();
+    };
+    window.addEventListener('kory-notes-updated', changed);
+    return () => window.removeEventListener('kory-notes-updated', changed);
   });
 
   function encodeField(field: NoteBaseField): string {
@@ -250,7 +264,36 @@
     };
   }
 
+  async function createCanvasFromView(): Promise<void> {
+    const rows = noteBasesStore.result?.rows;
+    if (!rows?.length) return;
+    const doc = canvasFromNotes(`${draftName || 'Base'} canvas`.slice(0, 200), rows);
+    const note = await notesStore.createNote({
+      title: doc.name,
+      content: JSON.stringify(doc),
+      tags: ['canvas'],
+      folderPath: '/canvases',
+    });
+    if (note) {
+      toastStore.success(`Canvas created from ${rows.length} notes on this page`);
+      onOpenCanvas?.(note.id);
+    }
+  }
+
+  function askAboutView(): void {
+    const rows = noteBasesStore.result?.rows ?? [];
+    onAskAgent?.(
+      `Investigate these notes from the saved Base "${draftName}" (current result page). Read focused context, cite note revisions, distinguish evidence from claims, and record findings only according to Notes permissions.\n${rows.map((row) => `- ${row.title} [${row.id}]`).join('\n')}`,
+    );
+  }
+
+  async function selectBase(base: NoteBase): Promise<void> {
+    if (dirty && !confirm('Discard unsaved Base changes and open another Base?')) return;
+    await noteBasesStore.select(base);
+  }
+
   async function createBase(): Promise<void> {
+    if (dirty && !confirm('Discard unsaved Base changes and create a Base?')) return;
     const names = new Set(noteBasesStore.bases.map((base) => base.name.toLowerCase()));
     let index = 1;
     let name = 'New Base';
@@ -276,17 +319,20 @@
     if (saved) dirty = false;
   }
 
-  async function removeBase(base: NoteBase): Promise<void> {
+  async function removeBase(base: NoteBase, e?: MouseEvent): Promise<void> {
     const unsavedWarning =
       dirty && noteBasesStore.active?.id === base.id
-        ? ' Unsaved view edits will be discarded.'
+        ? ' Unsaved Base edits will be discarded.'
         : '';
-    if (
-      !confirm(
-        `Move the Base "${base.name}" to Trash? Its history remains recoverable.${unsavedWarning}`,
-      )
-    ) {
-      return;
+    // Shift-click bypasses confirmation (power-user escape hatch).
+    if (!e?.shiftKey) {
+      if (
+        !confirm(
+          `Move the Base "${base.name}" to Trash? Its history remains recoverable.${unsavedWarning}`,
+        )
+      ) {
+        return;
+      }
     }
     if (await noteBasesStore.trash(base)) {
       lastActiveId = null;
@@ -307,6 +353,55 @@
       );
     }
     return systemFields.find(([key]) => key === field.field)?.[1] ?? field.field;
+  }
+
+  function operatorLabel(operator: NoteBaseOperator): string {
+    return (
+      {
+        eq: 'is',
+        neq: 'is not',
+        contains: 'contains',
+        not_contains: 'does not contain',
+        starts_with: 'starts with',
+        gt: 'is greater than',
+        gte: 'is at least',
+        lt: 'is less than',
+        lte: 'is at most',
+        is_empty: 'is empty',
+        is_not_empty: 'is not empty',
+      } satisfies Record<NoteBaseOperator, string>
+    )[operator];
+  }
+
+  function filterValue(value: unknown): string {
+    if (Array.isArray(value)) return value.join(', ');
+    if (typeof value === 'boolean') return value ? 'yes' : 'no';
+    return value === undefined || value === null ? '' : String(value);
+  }
+
+  function baseFilterSummary(filter?: NoteBaseFilter): string {
+    if (!filter) return 'All notes';
+    if (filter.kind === 'group') {
+      return `${filter.operator === 'and' ? 'All' : 'Any'} of ${filter.filters.length} conditions`;
+    }
+    const value = filterValue(filter.value);
+    return `${fieldLabel(filter.field)} ${operatorLabel(filter.operator)}${value ? ` “${value}”` : ''}`;
+  }
+
+  function baseSummary(base: NoteBase): string {
+    const sort = base.definition.sort[0];
+    const parts = [baseFilterSummary(base.definition.filter)];
+    if (sort) {
+      parts.push(`Sorted by ${fieldLabel(sort.field)} ${sort.direction === 'desc' ? '↓' : '↑'}`);
+    }
+    parts.push(
+      base.definition.view.kind === 'card'
+        ? 'Cards'
+        : base.definition.view.kind === 'list'
+          ? 'List'
+          : 'Table',
+    );
+    return parts.join(' · ');
   }
 
   function cellValue(row: NoteBaseQueryRow, field: NoteBaseField): string {
@@ -339,82 +434,106 @@
   }
 </script>
 
-<div class="grid h-full min-h-0 grid-cols-[220px_minmax(0,1fr)] bg-[var(--color-surface-1)]">
+<div
+  class="grid h-full min-h-0 grid-cols-[168px_minmax(0,1fr)] md:grid-cols-[248px_minmax(0,1fr)] bg-[var(--color-surface-1)]"
+>
   <aside
-    class="flex min-h-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface-0)]"
+    class="flex min-h-0 flex-col bg-[var(--color-surface-0)]"
   >
-    <div class="flex items-center gap-2 border-b border-[var(--color-border)] px-3 py-3">
-      <Database size={14} class="text-[var(--color-accent)]" />
-      <span
-        class="text-xs font-semibold text-[var(--color-text-primary)]"
-        title="Saved filter views. Query notes by properties, tags, or status">Saved Bases</span
-      >
-      <button
-        type="button"
-        class="ml-auto rounded-lg bg-[var(--color-surface-3)] p-1.5 text-[var(--color-text-primary)] hover:bg-[var(--color-accent)] hover:text-black disabled:opacity-40"
-        aria-label="Reload Bases"
-        title="Reload Bases and re-run this view's query"
-        disabled={noteBasesStore.saving}
-        onclick={() => void reloadBases()}><RefreshCw size={13} /></button
-      >
-      <button
-        type="button"
-        class="rounded-lg bg-[var(--color-surface-3)] p-1.5 text-[var(--color-text-primary)] hover:bg-[var(--color-accent)] hover:text-black disabled:opacity-40"
-        aria-label="Create Base"
-        title="Create a new Base = saved filter view"
-        disabled={noteBasesStore.saving}
-        onclick={() => void createBase()}><Plus size={13} /></button
-      >
+    <div class="px-4 pb-3 pt-4">
+      <div class="flex items-start gap-2.5">
+        <span class="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--color-accent-transparent)] text-[var(--color-accent)]">
+          <Database size={14} />
+        </span>
+        <div class="min-w-0">
+          <h2 class="text-xs font-semibold text-[var(--color-text-primary)]">Saved Bases</h2>
+          <p class="mt-1 text-[10px] leading-4 text-[var(--color-text-muted)]">
+            Filtered views of your notes
+          </p>
+        </div>
+        <div class="ml-auto flex shrink-0 items-center gap-0.5">
+          <button
+            type="button"
+            class="rounded-md p-1.5 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)] disabled:opacity-40"
+            aria-label="Reload Bases"
+            title="Reload saved Bases"
+            disabled={noteBasesStore.saving}
+            onclick={() => void reloadBases()}><RefreshCw size={13} /></button
+          >
+          <button
+            type="button"
+            class="rounded-md p-1.5 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)] disabled:opacity-40"
+            aria-label="Create Base"
+            title="Create a new Base"
+            disabled={noteBasesStore.saving}
+            onclick={() => void createBase()}><Plus size={14} /></button
+          >
+        </div>
+      </div>
     </div>
-    <div class="min-h-0 flex-1 overflow-y-auto p-2">
+    <div class="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
       {#if noteBasesStore.bases.length === 0 && !noteBasesStore.loading}
         <div class="px-2 py-8 text-center">
           <p class="text-xs font-semibold text-[var(--color-text-primary)]">
-            Bases are filtered views of your notes
+            Start with a Base
           </p>
           <p class="mt-1.5 text-xs leading-5 text-[var(--color-text-muted)]">
-            Create a saved query. For example, “all open tasks sorted by due date” or “notes tagged
-            #project”. Updates live as notes change.
+            Save a filter and sort so the notes you return to are easy to find in a Base.
           </p>
           <button
             type="button"
-            class="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-[var(--color-accent)] px-4 py-2 text-xs font-bold text-black shadow-md hover:brightness-110"
-            onclick={() => void createBase()}>+ Create your first Base</button
+            class="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-[var(--color-accent)] px-3.5 py-2 text-xs font-semibold text-black shadow-md hover:brightness-110"
+            onclick={() => void createBase()}><Plus size={13} /> Create your first Base</button
           >
         </div>
       {/if}
       {#each noteBasesStore.bases as base (base.id)}
         <button
           type="button"
-          class="mb-1 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition-colors hover:bg-[var(--color-surface-3)]"
+          class="group mb-1 flex w-full items-start gap-2 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-[var(--color-surface-2)]"
           style="background: {noteBasesStore.active?.id === base.id
-            ? 'var(--color-surface-3)'
+            ? 'var(--color-surface-2)'
             : 'transparent'}; color: {noteBasesStore.active?.id === base.id
             ? 'var(--color-text-primary)'
             : 'var(--color-text-secondary)'};"
-          onclick={() => void noteBasesStore.select(base)}
+          aria-current={noteBasesStore.active?.id === base.id ? 'page' : undefined}
+          onclick={() => void selectBase(base)}
         >
-          <Database size={12} class="shrink-0 text-[var(--color-accent)]" />
-          <span class="min-w-0 flex-1 truncate">{base.name}</span>
+          <span class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-[var(--color-surface-3)] text-[var(--color-accent)]">
+            <Database size={11} />
+          </span>
+          <span class="min-w-0 flex-1">
+            <span class="block truncate text-xs font-medium">{base.name}</span>
+            <span class="mt-1 block truncate text-[10px] leading-4 text-[var(--color-text-muted)]">
+              {baseSummary(base)}
+            </span>
+          </span>
+          {#if noteBasesStore.active?.id === base.id && noteBasesStore.result}
+            <span class="mt-0.5 shrink-0 text-[10px] tabular-nums text-[var(--color-text-muted)]">
+              {noteBasesStore.result.rows.length === noteBasesStore.result.limit
+                ? `${noteBasesStore.result.rows.length}+`
+                : noteBasesStore.result.rows.length}
+            </span>
+          {/if}
         </button>
       {/each}
     </div>
     {#if noteBasesStore.trashed.length > 0}
       <section
-        class="max-h-44 shrink-0 overflow-y-auto border-t border-[var(--color-border)] p-2"
+        class="mx-3 max-h-44 shrink-0 overflow-y-auto border-t border-[var(--color-border)]/50 py-3"
         aria-label="Trashed Bases"
       >
         <p
-          class="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]"
+          class="px-1 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]"
         >
           Trash
         </p>
         {#each noteBasesStore.trashed as base (base.id)}
-          <div class="flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs">
+          <div class="flex items-center gap-2 rounded-lg px-1 py-1.5 text-xs">
             <span class="min-w-0 flex-1 truncate text-[var(--color-text-muted)]">{base.name}</span>
             <button
               type="button"
-              class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-accent)] disabled:opacity-40"
+              class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-accent)] disabled:opacity-40"
               aria-label={`Restore Base ${base.name}`}
               disabled={noteBasesStore.saving}
               onclick={() => void restoreBase(base)}
@@ -429,97 +548,134 @@
 
   <main class="flex min-h-0 min-w-0 flex-col">
     {#if noteBasesStore.active}
-      <div class="shrink-0 border-b border-[var(--color-border)] bg-[var(--color-surface-0)] p-3">
-        <div class="flex items-center gap-2">
+      <div
+        class="max-h-[55%] shrink-0 overflow-y-auto bg-[var(--color-surface-0)] px-5 py-4"
+      >
+        <div class="flex items-end gap-3">
+          <div class="min-w-0 flex-1">
+            <p class="mb-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-text-muted)]">
+              Base
+            </p>
           <input
             type="text"
             bind:value={draftName}
             maxlength="120"
             oninput={() => (dirty = true)}
             aria-label="Base name"
-            class="h-9 min-w-0 flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 text-sm font-semibold text-[var(--color-text-primary)] outline-none focus:border-[var(--color-accent)]"
+            class="h-9 w-full min-w-0 border-0 border-b border-[var(--color-border)] bg-transparent px-0 text-lg font-semibold text-[var(--color-text-primary)] outline-none focus:border-[var(--color-accent)]"
           />
+          </div>
           <button
             type="button"
-            class="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[var(--color-accent)] px-3 text-xs font-semibold text-[var(--color-accent-foreground)] disabled:opacity-40"
+            class="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[var(--color-accent)] px-3 text-xs font-semibold text-[var(--color-on-accent)] disabled:opacity-40"
             disabled={!dirty || noteBasesStore.saving}
-            onclick={() => void saveBase()}><Save size={12} /> Save view</button
+            onclick={() => void saveBase()}><Save size={12} /> Save Base</button
           >
           <button
             type="button"
-            class="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--color-border)] text-[var(--color-text-muted)] hover:bg-[var(--color-error-bg)] hover:text-[var(--color-error)]"
+            class="flex h-9 w-9 items-center justify-center rounded-lg text-[var(--color-text-muted)] hover:bg-[var(--color-error-bg)] hover:text-[var(--color-error)]"
             aria-label="Move Base to Trash"
-            onclick={() => void removeBase(noteBasesStore.active!)}><Trash2 size={13} /></button
+            onclick={(event) => void removeBase(noteBasesStore.active!, event)}><Trash2 size={13} /></button
           >
         </div>
 
-        <div class="mt-3 grid grid-cols-2 gap-2 xl:grid-cols-4">
-          <KorySelect
-            value={currentFilterField}
-            options={fieldOptions}
-            compact
-            label="Filter field"
-            onchange={setFilterField}
+        <div class="mt-5">
+          <p class="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-text-muted)]">
+            Rules
+          </p>
+          <NoteBaseFilterEditor
+            filter={draftDefinition.filter}
+            fields={fieldOptions}
+            onChange={(filter) => {
+              draftDefinition = { ...draftDefinition, filter };
+              dirty = true;
+            }}
           />
-          {#if draftDefinition.filter?.kind === 'predicate'}
-            <KorySelect
-              value={currentFilterOperator}
-              options={operatorOptions(draftDefinition.filter.field)}
-              compact
-              label="Filter operator"
-              onchange={setFilterOperator}
-            />
-            {#if currentFilterOperator !== 'is_empty' && currentFilterOperator !== 'is_not_empty'}
-              {#if noteBaseFieldType(draftDefinition.filter.field) === 'checkbox'}
-                <KorySelect
-                  value={currentFilterValue || 'true'}
-                  options={[
-                    { value: 'true', label: 'True' },
-                    { value: 'false', label: 'False' },
-                  ]}
-                  compact
-                  label="Filter value"
-                  onchange={setFilterValue}
-                />
-              {:else}
-                <input
-                  type="text"
-                  value={currentFilterValue}
-                  aria-label="Filter value"
-                  placeholder="Filter value"
-                  class="h-9 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 text-xs text-[var(--color-text-primary)] outline-none focus:border-[var(--color-accent)]"
-                  oninput={(event) => setFilterValue(event.currentTarget.value)}
-                />
-              {/if}
-            {/if}
-          {/if}
+        </div>
+        <div class="mt-5 space-y-2" aria-label="Base sort order">
+          <p class="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-text-muted)]">
+            Sort order
+          </p>
+          {#each draftDefinition.sort as sort, index}
+            <div class="flex flex-wrap gap-2">
+              <KorySelect
+                label={`Sort field ${index + 1}`}
+                compact
+                value={encodeField(sort.field)}
+                options={sortFieldOptions.filter((option) => option.value !== 'none')}
+                onchange={(value) => {
+                  const field = decodeField(value);
+                  if (field) {
+                    draftDefinition = {
+                      ...draftDefinition,
+                      sort: draftDefinition.sort.map((entry, i) =>
+                        i === index ? { ...entry, field } : entry,
+                      ),
+                    };
+                    ensureViewField(field);
+                    dirty = true;
+                  }
+                }}
+              />
+              <KorySelect
+                label={`Sort direction ${index + 1}`}
+                compact
+                value={sort.direction}
+                options={[
+                  { value: 'asc', label: 'Ascending' },
+                  { value: 'desc', label: 'Descending' },
+                ]}
+                onchange={(value) => {
+                  draftDefinition = {
+                    ...draftDefinition,
+                    sort: draftDefinition.sort.map((entry, i) =>
+                      i === index ? { ...entry, direction: value as 'asc' | 'desc' } : entry,
+                    ),
+                  };
+                  dirty = true;
+                }}
+              />
+              <button
+                type="button"
+                class="rounded-lg bg-[var(--color-surface-2)] px-3 py-1 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-3)]"
+                aria-label={`Remove sort ${index + 1}`}
+                onclick={() => {
+                  draftDefinition = {
+                    ...draftDefinition,
+                    sort: draftDefinition.sort.filter((_, i) => i !== index),
+                  };
+                  dirty = true;
+                }}>Remove</button
+              >
+            </div>
+          {/each}
+          <button
+            type="button"
+            class="rounded-lg bg-[var(--color-surface-2)] px-3 py-1.5 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-3)]"
+            disabled={draftDefinition.sort.length >= 3}
+            onclick={() => {
+              draftDefinition = {
+                ...draftDefinition,
+                sort: [
+                  ...draftDefinition.sort,
+                  { field: { source: 'system', field: 'title' }, direction: 'asc' },
+                ],
+              };
+              dirty = true;
+            }}>Add sort</button
+          >
+        </div>
+        <div class="mt-5 grid grid-cols-2 gap-2 xl:grid-cols-4">
           <KorySelect
-            value={currentSortField}
+            label="Group by"
+            compact
+            value={draftDefinition.groupBy ? encodeField(draftDefinition.groupBy) : 'none'}
             options={sortFieldOptions}
-            compact
-            label="Sort field"
-            onchange={setSortField}
+            onchange={(value) => {
+              draftDefinition = { ...draftDefinition, groupBy: decodeField(value) ?? undefined };
+              dirty = true;
+            }}
           />
-          {#if currentSortField !== 'none'}
-            <KorySelect
-              value={currentSortDirection}
-              options={[
-                { value: 'asc', label: 'Ascending' },
-                { value: 'desc', label: 'Descending' },
-              ]}
-              compact
-              label="Sort direction"
-              onchange={(value) => {
-                const first = draftDefinition.sort[0];
-                if (!first) return;
-                draftDefinition = {
-                  ...draftDefinition,
-                  sort: [{ ...first, direction: value as 'asc' | 'desc' }],
-                };
-                dirty = true;
-              }}
-            />
-          {/if}
           <KorySelect
             value={draftDefinition.view.kind}
             options={[
@@ -537,6 +693,56 @@
               dirty = true;
             }}
           />
+        </div>
+        <div class="mt-5 flex flex-wrap items-center gap-2">
+          <KorySelect
+            label="Add visible field"
+            compact
+            value="none"
+            options={fieldOptions}
+            onchange={(value) => {
+              const field = decodeField(value);
+              if (field) {
+                ensureViewField(field);
+                dirty = true;
+              }
+            }}
+          />
+          {#each draftDefinition.view.fields as field, index}
+            <button
+              type="button"
+              class="rounded-full bg-[var(--color-surface-2)] px-2 py-1 text-[11px] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-3)]"
+              aria-label={`Remove visible field ${fieldLabel(field)}`}
+              disabled={draftDefinition.view.fields.length <= 1}
+              onclick={() => {
+                draftDefinition = {
+                  ...draftDefinition,
+                  view: {
+                    ...draftDefinition.view,
+                    fields: draftDefinition.view.fields.filter((_, i) => i !== index),
+                  },
+                };
+                dirty = true;
+              }}>{fieldLabel(field)} ×</button
+            >
+          {/each}
+        </div>
+        <div class="mt-5 flex flex-wrap gap-2">
+          <button
+            type="button"
+            class="rounded-lg bg-[var(--color-surface-3)] px-3 py-2 text-xs text-[var(--color-text-primary)] disabled:opacity-40"
+            disabled={!noteBasesStore.result?.rows.length || dirty}
+            onclick={() => void createCanvasFromView()}>Create Canvas from this page</button
+          >
+          {#if onAskAgent}<button
+              type="button"
+              class="rounded-lg bg-[var(--color-surface-3)] px-3 py-2 text-xs text-[var(--color-text-primary)] disabled:opacity-40"
+              disabled={!noteBasesStore.result?.rows.length || dirty}
+              onclick={askAboutView}>Ask agent about this page</button
+            >{/if}
+          {#if dirty}<span class="self-center text-[11px] text-[var(--color-text-muted)]"
+              >Save the Base before using its results.</span
+            >{/if}
         </div>
       </div>
 
@@ -567,7 +773,7 @@
         </div>
       {/if}
 
-      <div class="min-h-0 flex-1 overflow-auto p-4">
+      <div class="min-h-0 flex-1 overflow-auto px-5 py-4">
         {#if noteBasesStore.loading && !noteBasesStore.result}
           <div
             class="flex h-full items-center justify-center gap-2 text-xs text-[var(--color-text-muted)]"
@@ -629,7 +835,7 @@
             {#each noteBasesStore.result.rows as row (row.id)}
               <button
                 type="button"
-                class="flex w-full items-center gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2.5 text-left hover:border-[var(--color-accent)]/50"
+                class="flex w-full items-center gap-3 rounded-lg bg-[var(--color-surface-2)] px-3 py-2.5 text-left transition-colors hover:bg-[var(--color-surface-3)]"
                 onclick={() => onOpenNote(row.id)}
               >
                 <span
@@ -646,7 +852,7 @@
             {#each noteBasesStore.result.rows as row (row.id)}
               <button
                 type="button"
-                class="min-h-28 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4 text-left hover:border-[var(--color-accent)]/50 hover:bg-[var(--color-surface-3)]"
+                class="min-h-28 rounded-xl bg-[var(--color-surface-2)] p-4 text-left transition-colors hover:bg-[var(--color-surface-3)]"
                 onclick={() => onOpenNote(row.id)}
               >
                 <span class="block truncate text-sm font-semibold text-[var(--color-text-primary)]"
@@ -672,7 +878,7 @@
 
       {#if noteBasesStore.result}
         <div
-          class="flex shrink-0 items-center justify-between border-t border-[var(--color-border)] px-4 py-2 text-xs text-[var(--color-text-muted)]"
+          class="flex shrink-0 items-center justify-between bg-[var(--color-surface-0)] px-5 py-2 text-xs text-[var(--color-text-muted)]"
         >
           <span>
             {noteBasesStore.result.rows.length === 0 ? 0 : noteBasesStore.result.offset + 1} to {noteBasesStore
@@ -683,7 +889,7 @@
           <div class="flex items-center gap-1">
             <button
               type="button"
-              class="rounded-lg border border-[var(--color-border)] p-1.5 hover:bg-[var(--color-surface-3)] disabled:opacity-30"
+              class="rounded-lg p-1.5 hover:bg-[var(--color-surface-3)] disabled:opacity-30"
               disabled={noteBasesStore.result.offset === 0 || noteBasesStore.loading}
               aria-label="Previous Base page"
               onclick={() =>
@@ -694,7 +900,7 @@
             >
             <button
               type="button"
-              class="rounded-lg border border-[var(--color-border)] p-1.5 hover:bg-[var(--color-surface-3)] disabled:opacity-30"
+              class="rounded-lg p-1.5 hover:bg-[var(--color-surface-3)] disabled:opacity-30"
               disabled={!noteBasesStore.result.hasMore || noteBasesStore.loading}
               aria-label="Next Base page"
               onclick={() =>

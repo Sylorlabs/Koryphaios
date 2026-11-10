@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { createAuthSession, injectAuthIntoPage } from './helpers/auth';
 import { E2E_BACKEND_URL as BACKEND_URL } from './helpers/urls';
+import { chordLabel } from './helpers/shortcut-labels';
 
 /**
  * Verifies that a reassigned keyboard shortcut takes effect immediately and
@@ -39,7 +40,9 @@ test('a reassigned shortcut takes effect immediately and replaces its old bindin
   await page.keyboard.press('Control+Alt+O');
 
   // Verify the new binding is displayed
-  await expect(openSettings.getByRole('button', { name: 'Ctrl + Alt + O' })).toBeVisible();
+  await expect(
+    openSettings.getByRole('button', { name: chordLabel('Ctrl', 'Alt', 'O') }),
+  ).toBeVisible();
 
   // Close settings
   await page.keyboard.press('Escape');
@@ -54,7 +57,7 @@ test('a reassigned shortcut takes effect immediately and replaces its old bindin
   await expect(shortcutsHeading).toBeVisible({ timeout: 5_000 });
 });
 
-test('voice mode ships a default push-to-talk binding in the shortcuts list', async ({
+test('voice mode ships a default toggle binding in the shortcuts list', async ({
   page,
   request,
 }) => {
@@ -73,11 +76,12 @@ test('voice mode ships a default push-to-talk binding in the shortcuts list', as
 
   const voiceMode = settingsDialog.locator('[data-shortcut-id="voice_mode"]');
   await expect(voiceMode).toBeVisible();
-  // The primary chord is fn, and the chord that always works is listed beside
-  // it, because macOS never reports fn to a webview.
-  await expect(voiceMode.getByRole('button', { name: 'fn' })).toBeVisible();
-  await expect(voiceMode).toContainText(/Ctrl\s*\+\s*Shift\s*\+\s*M|⌘\s*\+\s*Shift\s*\+\s*M/);
-  await expect(voiceMode).toContainText(/hold to record/i);
+  // Control+Space is the default on every platform: a literal Command would be
+  // Spotlight on macOS and could never reach the composer.
+  await expect(voiceMode.getByRole('button', { name: chordLabel('Ctrl', ' ') })).toBeVisible();
+  await expect(voiceMode).not.toContainText(/Ctrl\s*\+\s*Shift\s*\+\s*M|⌘\s*\+\s*Shift\s*\+\s*M/);
+  await expect(voiceMode).toContainText(/press to record/i);
+  await expect(voiceMode).not.toContainText(/hold to record/i);
 });
 
 test('the voice mode binding can be reassigned and the old chord stops firing', async ({
@@ -100,5 +104,7 @@ test('the voice mode binding can be reassigned and the old chord stops firing', 
   const voiceMode = settingsDialog.locator('[data-shortcut-id="voice_mode"]');
   await voiceMode.getByRole('button').click();
   await page.keyboard.press('Control+Alt+G');
-  await expect(voiceMode.getByRole('button', { name: 'Ctrl + Alt + G' })).toBeVisible();
+  await expect(
+    voiceMode.getByRole('button', { name: chordLabel('Ctrl', 'Alt', 'G') }),
+  ).toBeVisible();
 });

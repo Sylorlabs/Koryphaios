@@ -15,6 +15,7 @@
   import { apiUrl } from '$lib/utils/api-url';
   import KorySelect from './KorySelect.svelte';
   import SettingsSwitch from './SettingsSwitch.svelte';
+  import { onMount } from 'svelte';
   import Monitor from 'lucide-svelte/icons/monitor';
   import ChevronRight from 'lucide-svelte/icons/chevron-right';
 
@@ -36,11 +37,31 @@
   let stopping = $state(false);
   let error = $state('');
   let notice = $state('');
+  let showSafetyNotice = $state(true);
+
+  const SAFETY_NOTICE_KEY = 'koryphaios-computer-use-safety-ack-v1';
+
+  onMount(() => {
+    try {
+      showSafetyNotice = localStorage.getItem(SAFETY_NOTICE_KEY) !== '1';
+    } catch {
+      // Keep the notice visible when storage is unavailable.
+    }
+  });
+
+  function acknowledgeSafetyNotice() {
+    showSafetyNotice = false;
+    try {
+      localStorage.setItem(SAFETY_NOTICE_KEY, '1');
+    } catch {
+      // Dismissing remains useful for this visit even if storage is blocked.
+    }
+  }
 
   const names: Record<ComputerCapability, string> = {
     discover: 'Discover apps',
     observe: 'Observe windows',
-    interact: 'Click, type, keys & scroll',
+    interact: 'Semantic controls, pointer, typing & keys',
     manageWindows: 'Focus windows',
     clipboardRead: 'Read clipboard',
     clipboardWrite: 'Write clipboard',
@@ -51,7 +72,7 @@
     discover: 'List running app and window identities; no automatic scanning.',
     observe:
       'Capture an authorized window. Its content may be sent to the selected model provider.',
-    interact: 'Send input to an authorized window; this can submit forms or run commands.',
+    interact: 'Prefer accessible element IDs; pointer coordinates are a fallback. This can submit forms or run commands.',
     manageWindows: 'Bring an authorized window to the foreground.',
     clipboardRead: 'Reserved: no clipboard-read tool is implemented.',
     clipboardWrite: 'Reserved: no clipboard-write tool is implemented.',
@@ -59,7 +80,6 @@
     sensitive: 'Reserved: no dedicated sensitive-action tool is implemented.',
   };
   const tierNames: Record<ComputerTier, string> = {
-    plan: 'Plan',
     ask: 'Ask',
     edits: 'Accept edits',
     guarded: 'Guarded',
@@ -195,10 +215,13 @@
   }
 </script>
 
-<section class="computer-settings" aria-label="Computer use settings">
+<section
+  class="computer-settings rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] overflow-hidden"
+  aria-label="Computer use settings"
+>
   <button
     type="button"
-    class="section-heading"
+    class="section-heading flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
     aria-expanded={expanded}
     onclick={() => (expanded = !expanded)}
   >
@@ -212,45 +235,37 @@
     <ChevronRight size={16} class={expanded ? 'rotate-90' : ''} />
   </button>
   {#if expanded}
-    <div class="section-content">
+    <div class="section-content border-t border-[var(--color-border)]">
       <SettingsSwitch
         checked={settings.enabled}
         disabled={saving}
         label="Enable computer use"
-        description="Off by default. Allow agents to request desktop observation and input, subject to every permission gate below."
+         description="On by default so agents can request desktop observation and input. Every action still requires the preset, role, OS consent, and an explicit app grant."
         onchange={async () => {
           await onchange({ ...settings, enabled: !settings.enabled });
         }}
       />
-      <div class="explanation">
-        <strong>OS consent is not a Kory grant.</strong>
+      {#if showSafetyNotice}
+        <aside class="safety-notice" aria-label="Computer use safety notice">
+          <div>
+             <strong>Before granting computer access</strong>
         <p>
-          macOS may require Screen Recording and Accessibility permission; Windows and Linux need
-          supported desktop APIs and dependencies. OS permission alone never authorizes an agent.
-          Kory also checks the active permission preset, agent role and exact app identity before
-          each action. Grants must be re-enabled after a backend restart; a workspace config file
-          cannot authorize desktop access by itself.
-        </p>
-        <p>
-          <strong>Block wins over Ask; Ask wins over Allow.</strong> All applicable gates must allow an
-          action to skip approval. YOLO skips Kory approval prompts, while explicit blocks remain. Apps not listed
-          below, and app capabilities not explicitly granted, are blocked. Discovery is checked by preset
-          and role without an app grant.
-        </p>
-        <p>
-          <strong>Plan and Critic use their own configurable role/tier policies.</strong> YOLO skips
-          Kory approval prompts, while explicit blocks, missing OS consent, invalid targets, and
-          unsupported native actions still fail. These settings do not bypass platform APIs.
-        </p>
-        <p>
-          <strong>Desktop input is not a guaranteed sandbox.</strong> A permitted app can navigate elsewhere,
-          access files or the network, or perform destructive actions. Sensitive-action blocking does
-          not inspect arbitrary clicks or typed text. Use a dedicated OS account or VM for stronger isolation,
-          and avoid granting terminals or sensitive apps.
-        </p>
-      </div>
+               Computer use being available is separate from Kory’s grants. Each action must pass the selected preset,
+              agent role, and app capability; Block always wins over Ask, and Ask wins over Allow.
+            </p>
+            <p>
+              Element IDs are preferred over pixels and expire when the UI changes. Native control shows a
+              visible Stop button; user input or focus takeover stops active control. Computer use is not a
+              sandbox, so use a dedicated OS account or VM for sensitive work.
+            </p>
+          </div>
+          <button type="button" class="understand" onclick={acknowledgeSafetyNotice}
+            >I understand</button
+          >
+        </aside>
+      {/if}
       <div class="actions">
-        <button type="button" disabled={checking} onclick={checkStatus}
+        <button type="button" class="primary-action" disabled={checking} onclick={checkStatus}
           >{checking ? 'Checking…' : 'Check platform status'}</button
         >
         <button type="button" disabled={discovering} onclick={discoverApps}
@@ -288,16 +303,28 @@
           Platform support has not been checked. Saved grants do not imply runtime support.
         </p>{/if}
 
+      <div class="policy-heading">
+        <div>
+          <h4>Permission rules</h4>
+          <p class="muted">
+            These rules are evaluated for every computer action. Choose a preset and role to see or
+            edit the policy that will apply.
+          </p>
+        </div>
+      </div>
       <div class="policy-grid">
         <div class="policy">
-          <h4>Per permission preset</h4>
+          <h4>By preset</h4>
           <KorySelect
             label="Computer permission preset"
             value={tier}
             options={COMPUTER_TIERS.map((value) => ({ value, label: tierNames[value] }))}
             onchange={(value) => (tier = value as ComputerTier)}
           />
-          <p class="muted">Editing this policy does not switch your active chat preset.</p>
+          <p class="muted">
+            Applies to every computer request using this preset. Editing it does not switch the active
+            chat preset.
+          </p>
           {#each COMPUTER_CAPABILITIES as capability}
             {@const hardBlock = reserved(capability)}
             <KorySelect
@@ -317,14 +344,14 @@
           {/each}
         </div>
         <div class="policy">
-          <h4>Per agent role</h4>
+          <h4>By agent role</h4>
           <KorySelect
             label="Computer agent role"
             value={role}
             options={COMPUTER_ROLES.map((value) => ({ value, label: roleNames[value] }))}
             onchange={(value) => (role = value as ComputerRole)}
           />
-          <p class="muted">The role policy also applies to delegated agents.</p>
+          <p class="muted">Applies to every request from this role, including delegated agents.</p>
           {#each COMPUTER_CAPABILITIES as capability}
             {@const hardBlock = reserved(capability)}
             <KorySelect
@@ -414,10 +441,6 @@
 
 <style>
   .computer-settings {
-    border: 1px solid var(--color-border);
-    border-radius: 1rem;
-    background: var(--color-surface-1);
-    overflow: hidden;
     color: var(--color-text-primary);
   }
   .section-heading {
@@ -426,7 +449,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 0.75rem;
-    padding: 0.75rem 1rem;
+    padding: 0;
     text-align: left;
   }
   .section-heading:hover {
@@ -461,27 +484,59 @@
   .section-content {
     display: grid;
     gap: 1rem;
-    padding: 1.25rem;
-    border-top: 1px solid var(--color-border);
+    padding: 1.25rem 0 0;
     font-size: 0.75rem;
     line-height: 1.6;
   }
-  .explanation,
+  .safety-notice,
   .status,
   .discovered,
   .app-card {
     padding: 1rem;
-    border: 1px solid var(--color-border);
     border-radius: 0.75rem;
     background: var(--color-surface-2);
   }
-  .explanation p + p,
+  .safety-notice {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    background: color-mix(in srgb, var(--color-warning-bg) 62%, var(--color-surface-2));
+    color: var(--color-text-secondary);
+  }
+  .safety-notice strong {
+    display: block;
+    color: var(--color-text-primary);
+    font-size: 0.75rem;
+    font-weight: 650;
+  }
+  .safety-notice p + p,
   .status p,
   .status ul {
     margin-top: 0.5rem;
   }
-  .explanation {
-    color: var(--color-text-secondary);
+  .safety-notice p {
+    max-width: 72ch;
+    margin-bottom: 0;
+  }
+  .understand {
+    flex: 0 0 auto;
+    padding: 0.45rem 0.75rem;
+    border-radius: 0.5rem;
+    background: var(--color-text-primary);
+    color: var(--color-surface-0);
+    font-size: 0.7rem;
+    font-weight: 650;
+    white-space: nowrap;
+  }
+  .understand:hover {
+    opacity: 0.86;
+  }
+  .policy-heading {
+    padding-top: 0.35rem;
+  }
+  .policy-heading h4 {
+    margin-bottom: 0.25rem;
   }
   .actions,
   .app-row {
@@ -496,10 +551,10 @@
   .actions button,
   .app-row button {
     padding: 0.4rem 0.75rem;
-    border: 1px solid var(--color-border);
     border-radius: 0.5rem;
     font-weight: 500;
     background: var(--color-surface-2);
+    color: var(--color-text-secondary);
   }
   .actions button:hover,
   .app-row button:hover {
@@ -507,7 +562,11 @@
   }
   .actions .stop {
     color: var(--color-error);
-    border-color: var(--color-error);
+    background: transparent;
+  }
+  .actions .primary-action {
+    background: var(--color-accent);
+    color: var(--color-surface-0);
   }
   button:disabled {
     opacity: 0.55;
@@ -560,6 +619,10 @@
     margin-top: 0.75rem;
   }
   @media (max-width: 640px) {
+    .safety-notice {
+      flex-direction: column;
+    }
+
     .policy-grid,
     .app-capabilities {
       grid-template-columns: minmax(0, 1fr);

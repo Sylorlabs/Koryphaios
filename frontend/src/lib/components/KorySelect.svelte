@@ -5,13 +5,15 @@
 <script lang="ts">
   import ChevronDown from 'lucide-svelte/icons/chevron-down';
   import Check from 'lucide-svelte/icons/check';
-  import { onMount, tick } from 'svelte';
+  import { onMount, tick, type Snippet } from 'svelte';
+  import { portalToBody } from '$lib/utils/portal';
 
   export interface KorySelectOption {
     value: string;
     label: string;
     description?: string;
     disabled?: boolean;
+    provider?: string;
   }
   interface Props {
     id?: string;
@@ -23,11 +25,13 @@
     placeholder?: string;
     compact?: boolean;
     dense?: boolean;
+    flat?: boolean;
     searchable?: boolean;
     disabled?: boolean;
     allowCustom?: boolean;
     customLabel?: string;
     customPlaceholder?: string;
+    leading?: Snippet<[KorySelectOption | undefined]>;
   }
   let {
     id,
@@ -39,11 +43,13 @@
     placeholder = 'Select…',
     compact = false,
     dense = false,
+    flat = false,
     searchable = false,
     disabled = false,
     allowCustom = false,
     customLabel = 'Custom',
     customPlaceholder = 'Type your own response…',
+    leading,
   }: Props = $props();
   let open = $state(false);
   let activeIndex = $state(0);
@@ -73,16 +79,13 @@
     let left = rect.left;
     const vw = window.innerWidth;
     if (left + width > vw - 8) left = Math.max(8, vw - width - 8);
+    const menuHeight = Math.min(maxH, menuEl.scrollHeight || maxH);
     const spaceBelow = window.innerHeight - rect.bottom - gap;
     const spaceAbove = rect.top - gap;
-    const flip = spaceBelow < 160 && spaceAbove > spaceBelow;
-    let top: number;
-    if (flip) {
-      const estH = Math.min(maxH, menuEl.scrollHeight || maxH);
-      top = Math.max(8, rect.top - estH - gap);
-    } else {
-      top = rect.bottom + gap;
-    }
+    const flip = spaceBelow < menuHeight && spaceAbove > spaceBelow;
+    const top = flip
+      ? Math.max(8, rect.top - menuHeight - gap)
+      : Math.min(rect.bottom + gap, Math.max(8, window.innerHeight - menuHeight - 8));
     menuStyle = `position:fixed;left:${left}px;top:${top}px;width:${width}px;`;
   }
 
@@ -210,17 +213,20 @@
       : undefined}
     onkeydown={handleKeydown}
     onclick={toggleOpen}
-    class="flex w-full items-center justify-between gap-3 border border-[var(--color-border)] bg-[var(--color-surface-1)] text-left text-[var(--color-text-primary)] outline-none transition-all hover:border-[var(--color-accent)]/50 focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-1)] disabled:opacity-50 {dense
+    class="flex w-full items-center justify-between gap-3 border {flat ? 'border-transparent bg-transparent hover:bg-[var(--color-surface-3)]' : 'border-[var(--color-border)] bg-[var(--color-surface-1)] hover:border-[var(--color-accent)]/50'} text-left text-[var(--color-text-primary)] outline-none transition-all focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-1)] disabled:opacity-50 {dense
       ? 'rounded min-h-7 px-2 py-1 text-xs'
-      : 'rounded-xl'} {!dense && compact
+      : compact
+        ? 'rounded-lg'
+        : 'rounded-xl'} {!dense && compact
       ? 'min-h-9 px-3 py-2 text-xs'
       : !dense
         ? 'min-h-11 px-4 py-3 text-sm'
         : ''}"
   >
-    <span class="min-w-0 flex-1 truncate"
-      >{selected?.label ?? (allowCustom && value ? value : placeholder)}</span
-    >
+    <span class="flex min-w-0 flex-1 items-center gap-2">
+      {@render leading?.(selected)}
+      <span class="min-w-0 truncate">{selected?.label ?? (allowCustom && value ? value : placeholder)}</span>
+    </span>
     <ChevronDown
       size={15}
       class="shrink-0 text-[var(--color-text-muted)] transition-transform {open
@@ -239,11 +245,12 @@
   {#if open}
     <div
       bind:this={menuEl}
+      use:portalToBody
       id={listboxId}
       role="listbox"
       aria-label={label}
       style={menuStyle}
-      class="fixed z-[120] max-h-72 min-w-56 overflow-y-auto border border-[var(--color-border)] bg-[var(--color-surface-2)] {dense
+       class="fixed z-[var(--z-popover)] max-h-72 min-w-56 overflow-y-auto border border-[var(--color-border)] bg-[var(--color-surface-2)] {dense
         ? 'rounded p-1 shadow-lg'
         : 'rounded-xl p-1.5 shadow-2xl shadow-black/40'}"
     >
@@ -282,6 +289,7 @@
             ? 'bg-[var(--color-surface-3)]'
             : ''}"
         >
+          {@render leading?.(option)}
           <span
             class="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center text-[var(--color-accent)]"
             >{#if option.value === value}<Check size={14} />{/if}</span

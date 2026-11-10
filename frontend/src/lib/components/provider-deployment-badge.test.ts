@@ -23,6 +23,10 @@ describe('provider deployment badge', () => {
     expect(SOURCE).toMatch(/deployment === 'cloud'\) return 'Cloud agent'/);
   });
 
+  it('classifies Freebuff with the CLI providers', () => {
+    expect(SOURCE).toMatch(/'freebuff',/);
+  });
+
   it('describes hybrid as a per-thread choice between a sandbox and a local agent', () => {
     expect(SOURCE).toMatch(
       /if \(deployment === 'hybrid'\) \{\s*return 'Cloud sandboxes or a local agent · chosen per thread'/,

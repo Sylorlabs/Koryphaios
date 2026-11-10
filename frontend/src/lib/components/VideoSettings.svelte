@@ -21,10 +21,18 @@
     durations?: string[];
     aspectRatios?: string[];
   };
+  type VideoProviderCapabilities = {
+    audio: boolean;
+    resolution: boolean;
+    negativePrompt: boolean;
+    durationSeconds: boolean;
+  };
   type VideoProviderInfo = {
     provider: string;
     label: string;
     configured: boolean;
+    /** Which generation options this provider's request path actually forwards. */
+    capabilities?: VideoProviderCapabilities;
     models: VideoModelInfo[];
   };
   type GeneratedVideo = {
@@ -89,9 +97,14 @@
     const vtt = `WEBVTT\n\n00:00.000 --> 00:03.000\n${caption}\n`;
     return `data:text/vtt;charset=utf-8,${encodeURIComponent(vtt)}`;
   });
-  let activeProvider = $derived(providers.find((provider) => provider.provider === selectedProvider));
-  let supportsResolution = $derived(selectedProvider === 'luma' || selectedProvider === 'replicate');
-  let supportsSound = $derived(selectedProvider === 'klingai' || selectedProvider === 'replicate');
+  let activeProvider = $derived(
+    providers.find((provider) => provider.provider === selectedProvider),
+  );
+  // The picker renders only the controls the selected provider's request path
+  // forwards, as declared by the provider itself — never a provider-name list.
+  let supportsResolution = $derived(activeProvider?.capabilities?.resolution ?? false);
+  let supportsSound = $derived(activeProvider?.capabilities?.audio ?? false);
+  let supportsNegativePrompt = $derived(activeProvider?.capabilities?.negativePrompt ?? false);
   let activeModel = $derived(activeProvider?.models.find((model) => model.id === selectedModel));
   let durationSeconds = $derived(Number(duration.trim()));
   let validDuration = $derived(
@@ -100,7 +113,7 @@
       durationSeconds > 0,
   );
   let requestDuration = $derived(
-    selectedProvider === 'klingai' ? String(durationSeconds) : `${durationSeconds}s`,
+    activeProvider?.capabilities?.durationSeconds ? String(durationSeconds) : `${durationSeconds}s`,
   );
   let aspectRatios = $derived(
     activeModel?.aspectRatios?.length ? activeModel.aspectRatios : FALLBACK_ASPECT_RATIOS,
@@ -205,14 +218,21 @@
       }
       if (result.data.status === 'completed' && result.data.historyId) {
         const restored = await loadHistoryEntry(result.data.historyId);
-        if (!restored && componentMounted) { schedulePoll(jobId); return; }
-        if (componentMounted) { finishJob(jobId); statusMessage = ''; }
+        if (!restored && componentMounted) {
+          schedulePoll(jobId);
+          return;
+        }
+        if (componentMounted) {
+          finishJob(jobId);
+          statusMessage = '';
+        }
         return;
       }
       // The backend restarted and lost the in-process job; the provider may
       // still be rendering, so say so rather than reporting failure.
       finishJob(jobId);
-      statusMessage = 'The backend restarted while this clip was rendering. Check the provider dashboard.';
+      statusMessage =
+        'The backend restarted while this clip was rendering. Check the provider dashboard.';
     } catch (error) {
       finishJob(jobId);
       toastStore.error(
@@ -260,7 +280,9 @@
           duration: requestDuration,
           aspectRatio,
           ...(supportsResolution && resolution ? { resolution } : {}),
-          ...(selectedProvider !== 'luma' && negativePrompt.trim() ? { negativePrompt: negativePrompt.trim() } : {}),
+          ...(selectedProvider !== 'luma' && negativePrompt.trim()
+            ? { negativePrompt: negativePrompt.trim() }
+            : {}),
           ...(supportsSound && sound ? { sound: true } : {}),
         }),
         signal: generationController.signal,
@@ -268,7 +290,13 @@
       const result = (await response.json()) as {
         ok?: boolean;
         error?: string;
-        data?: { videoBase64: string; mimeType: string; provider: string; model: string; historyId?: string };
+        data?: {
+          videoBase64: string;
+          mimeType: string;
+          provider: string;
+          model: string;
+          historyId?: string;
+        };
       };
       if (!response.ok || !result.ok || !result.data) {
         throw new Error(result.error || 'Video generation failed');
@@ -378,7 +406,7 @@
   </header>
 
   <section
-    class="overflow-visible rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)]"
+    class="settings-panel overflow-visible rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)]"
   >
     <div class="grid gap-0 overflow-visible lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
       <div class="space-y-5 p-5">
@@ -464,7 +492,9 @@
                   searchable
                   allowCustom
                   customLabel="Use another model"
-                  customPlaceholder={activeProvider?.provider === 'replicate' ? 'owner/name' : 'model id'}
+                  customPlaceholder={activeProvider?.provider === 'replicate'
+                    ? 'owner/name'
+                    : 'model id'}
                 />
               </div>
             </label>
@@ -515,16 +545,28 @@
               class="mt-1.5 w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--color-accent)]"
               placeholder="What should not appear in the clip"
               bind:value={negativePrompt}
-              disabled={generating || selectedProvider === 'luma'}
+              disabled={generating || !supportsNegativePrompt}
             />
           </label>
 
           <label class="block">
-            <span class="text-xs font-medium text-[var(--color-text-secondary)]">Resolution (model dependent)</span>
+            <span class="text-xs font-medium text-[var(--color-text-secondary)]"
+              >Resolution (model dependent)</span
+            >
             <div class="mt-1.5">
-              <KorySelect value={resolution} onchange={(value: string) => (resolution = value)} disabled={generating || !supportsResolution}
-                options={[{ value: '', label: 'Provider default' }, { value: '540p', label: '540p' }, { value: '720p', label: '720p' }, { value: '1080p', label: '1080p' }]}
-                allowCustom customLabel="Use another resolution" />
+              <KorySelect
+                value={resolution}
+                onchange={(value: string) => (resolution = value)}
+                disabled={generating || !supportsResolution}
+                options={[
+                  { value: '', label: 'Provider default' },
+                  { value: '540p', label: '540p' },
+                  { value: '720p', label: '720p' },
+                  { value: '1080p', label: '1080p' },
+                ]}
+                allowCustom
+                customLabel="Use another resolution"
+              />
             </div>
           </label>
 
@@ -532,7 +574,7 @@
             <SettingsSwitch
               checked={sound}
               label="Synchronized audio"
-              description="Supported Kling and Replicate models can generate audio with the clip"
+              description="Models that support audio generate a soundtrack with the clip"
               onchange={() => {
                 sound = !sound;
               }}

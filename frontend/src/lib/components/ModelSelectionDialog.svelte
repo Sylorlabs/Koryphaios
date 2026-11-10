@@ -6,6 +6,7 @@
   import { onDestroy } from 'svelte';
   import type { ModelDef } from '@koryphaios/shared';
   import SettingsToggle from './SettingsToggle.svelte';
+  import { portalToBody } from '$lib/utils/portal';
 
   interface Props {
     providerName: string;
@@ -32,6 +33,7 @@
   let dontAskAgain = $state(false);
   let initialized = $state(false);
   let dialogRef = $state<HTMLDivElement>();
+  let modelListRef = $state<HTMLDivElement>();
   const previouslyFocused = typeof document === 'undefined' ? null : document.activeElement as HTMLElement | null;
   onDestroy(() => {
     if (previouslyFocused?.isConnected) previouslyFocused.focus();
@@ -76,14 +78,50 @@
     initialized = true;
   });
 
+  function formatTokenCount(value: number): string {
+    if (!Number.isFinite(value) || value <= 0) return '';
+    if (value >= 1_000_000) return `${Math.round(value / 100_000) / 10}M`;
+    if (value >= 1_000) return `${Math.round(value / 1_000)}K`;
+    return String(value);
+  }
+
+  // Render only facts the provider actually reported. An unverified context
+  // window is deliberately absent: showing a guessed number would look like a
+  // real limit. This is also what makes two identically named catalog entries
+  // distinguishable (their raw ids and credit prices differ).
+  function modelDetailLine(model: Pick<ModelDef, 'id' | 'name'> & Partial<ModelDef>): string {
+    const parts: string[] = [];
+    const rawId = model.apiModelId ?? model.id;
+    if (rawId && rawId !== model.name) parts.push(rawId);
+    if (model.contextVerified === true && typeof model.contextWindow === 'number') {
+      const context = formatTokenCount(model.contextWindow);
+      if (context) parts.push(`${context} context`);
+    }
+    if (typeof model.maxOutputTokens === 'number') {
+      const output = formatTokenCount(model.maxOutputTokens);
+      if (output) parts.push(`${output} output`);
+    }
+    if (model.contextWindowOptions && model.contextWindowOptions.length >= 2) {
+      parts.push(`tiers ${model.contextWindowOptions.map(formatTokenCount).join('/')}`);
+    }
+    if (typeof model.contextWindowVendorDefault === 'number') {
+      parts.push(`CLI default ${formatTokenCount(model.contextWindowVendorDefault)}`);
+    }
+    if (model.vision === true) parts.push('vision');
+    if (model.canReason === true) parts.push('reasoning');
+    if (model.creditsLabel) parts.push(model.creditsLabel);
+    return parts.join(' · ');
+  }
+
   let filteredModels = $derived(
     (availableModels || [])
       .filter((m) => m != null && m.id != null)
       .filter((m) => {
         const id = (m.id ?? '').toLowerCase();
         const name = (m.name ?? '').toLowerCase();
+        const apiId = (m.apiModelId ?? '').toLowerCase();
         const q = searchQuery.toLowerCase();
-        return id.includes(q) || name.includes(q);
+        return id.includes(q) || name.includes(q) || apiId.includes(q);
       }),
   );
   // Membership checks run once per rendered row. A Set avoids an O(n²)
@@ -123,7 +161,15 @@
   }
 
   function handleSave() {
-    onSave(localSelected || [], dontAskAgain);
+    // Provider configs use an empty selectedModels array to mean "all models".
+    // Keep Done actionable when the user deselects the last row instead of
+    // leaving them with a button that appears broken. Sharing mode has
+    // different semantics and intentionally preserves an empty selection.
+    const selected =
+      mode === 'provider' && (localSelected || []).length === 0
+        ? (availableModels || []).map((m) => m.id)
+        : localSelected || [];
+    onSave(selected, dontAskAgain);
   }
 
   function skip() {
@@ -132,10 +178,22 @@
       dontAskAgain,
     );
   }
+
+  // Keep wheel/touch overscroll inside the picker. In particular, Safari's
+  // elastic scrolling can otherwise reveal the dialog surface after the last
+  // model, making the list look as though it has an extra blank page.
+  function clampModelListScroll() {
+    const list = modelListRef;
+    if (!list) return;
+    const maxScrollTop = Math.max(0, list.scrollHeight - list.clientHeight);
+    if (list.scrollTop < 0) list.scrollTop = 0;
+    else if (list.scrollTop > maxScrollTop) list.scrollTop = maxScrollTop;
+  }
 </script>
 
 <div
-  class="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+  use:portalToBody
+  class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
   role="presentation"
   onmousedown={(event) => { if (event.target === event.currentTarget) onClose(); }}
   transition:fade={{ duration: 200 }}
@@ -213,7 +271,12 @@
     </div>
 
     <!-- List -->
-    <div class="min-h-0 flex-1 overflow-y-auto px-4 py-2 custom-scrollbar">
+    <div
+      bind:this={modelListRef}
+      data-testid="model-selection-list"
+      class="model-selection-list min-h-0 flex-1 overflow-y-auto px-4 py-2 custom-scrollbar"
+      onscroll={clampModelListScroll}
+    >
       <div>
         {#if (availableModels || []).length === 0}
           <p
@@ -260,29 +323,14 @@
                   >
                     {model.name}
                   </span>
-                  <span class="max-w-full break-all text-[10px] text-[var(--color-text-muted)]">{model.id}</span>
-                  {#if model.supportsFastMode || (model.reasoningLevels?.length ?? 0) > 0}
-                    <!-- Capability chips mirror what Hoplite's own picker exposes:
-                         a fast tier only where the model actually has one, and the
-                         real reasoning ladder the provider reports. -->
-                    <div class="mt-1 flex flex-wrap items-center gap-1 text-left">
-                      {#if model.supportsFastMode}
-                        <span
-                          class="rounded-full border px-1.5 py-px text-[9px] font-bold uppercase tracking-wider"
-                          style="border-color: var(--color-warning); color: var(--color-warning);"
-                          title="Supports the fast tier. Lower latency at the same reasoning effort."
-                          >Fast</span
-                        >
-                      {/if}
-                      {#if (model.reasoningLevels?.length ?? 0) > 0}
-                        <span
-                          class="rounded-full border px-1.5 py-px text-[9px] font-medium leading-tight tracking-wide"
-                          style="border-color: var(--color-border-bright); color: var(--color-text-muted);"
-                          title="Reasoning effort levels: {model.reasoningLevels?.join(', ')}"
-                          >Reasoning · {model.reasoningLevels?.join(' / ')}</span
-                        >
-                      {/if}
-                    </div>
+                  {#if modelDetailLine(model)}
+                    <span
+                      class="max-w-full truncate text-[11px] leading-tight"
+                      style="color: var(--color-text-muted);"
+                      aria-hidden="true"
+                    >
+                      {modelDetailLine(model)}
+                    </span>
                   {/if}
                 </div>
               </div>
@@ -302,11 +350,11 @@
         <div class="flex min-h-10 min-w-0 items-center gap-2 px-2">
           <SettingsToggle
             checked={dontAskAgain}
-            label="Use this model selection by default"
+            label="Automatically show new models exposed by this provider by default"
             onchange={() => (dontAskAgain = !dontAskAgain)}
           />
           <span class="select-none text-xs text-[var(--color-text-muted)]"
-            >Use this model selection by default</span
+            >Automatically show new models exposed by this provider by default</span
           >
         </div>
 
@@ -328,7 +376,6 @@
           type="button"
           class="btn btn-primary flex-1"
           onclick={handleSave}
-          disabled={mode === 'provider' && (localSelected || []).length === 0}
         >
           Done
         </button>
@@ -338,6 +385,12 @@
 </div>
 
 <style>
+  .model-selection-list {
+    /* Do not chain at either edge or show the browser's elastic blank tail. */
+    overscroll-behavior: none;
+    scrollbar-gutter: stable;
+  }
+
   .custom-scrollbar::-webkit-scrollbar {
     width: 4px;
   }

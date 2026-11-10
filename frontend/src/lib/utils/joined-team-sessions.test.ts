@@ -24,7 +24,10 @@ describe('joined team session state', () => {
     ]);
     expect(folders).toEqual([{ id: 'workspace-1', name: 'koryphaios' }]);
     const joined = { ...team('alpha', 1), hostName: 'Micah', sharedFolders: folders };
-    expect(upsertJoinedTeamSession([], joined)[0]).toMatchObject({ hostName: 'Micah', sharedFolders: folders });
+    expect(upsertJoinedTeamSession([], joined)[0]).toMatchObject({
+      hostName: 'Micah',
+      sharedFolders: folders,
+    });
   });
   it('retains multiple teams and refreshes an existing team without duplicating it', () => {
     let sessions = upsertJoinedTeamSession([], team('alpha', 1));

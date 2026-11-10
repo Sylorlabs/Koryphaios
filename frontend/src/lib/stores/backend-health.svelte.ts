@@ -40,11 +40,7 @@ export type BackendHealthReason =
 // (desktop/src-tauri/src/lib.rs). Kept loose-typed because the supervisor is
 // the source of truth and may add reasons without a frontend redeploy.
 export type SupervisorReason =
-  | 'initial-timeout'
-  | 'exited'
-  | 'restart-timeout'
-  | 'restart-failed'
-  | (string & {}); // forward-compatible with future supervisor codes
+  'initial-timeout' | 'exited' | 'restart-timeout' | 'restart-failed' | (string & {}); // forward-compatible with future supervisor codes
 
 export interface BackendHealthSnapshot {
   status: BackendHealthStatus;
@@ -125,8 +121,8 @@ let _consecutiveFailures = $state(0);
 export const POLL_INTERVAL_MS = 5_000;
 // Need this many consecutive failed checks before flipping to 'unhealthy'.
 // At a 5s cadence, 3 failures ~= 15s of sustained regression.
-const UNHEALTHY_FAIL_THRESHOLD = 3;
-const HEALTH_TIMEOUT_MS = 4_000;
+const UNHEALTHY_FAIL_THRESHOLD = 4;
+const HEALTH_TIMEOUT_MS = 10_000;
 
 // ─── Internals ──────────────────────────────────────────────────────────────
 
@@ -332,16 +328,21 @@ function publish(
     _httpStatus = diagnostics.httpStatus ?? null;
     _networkError = diagnostics.networkError ?? null;
     // Don't flap to 'unhealthy' on a single blip — stay 'healthy' until
-    // the threshold is reached.
+    // the threshold is reached. The first blip is not logged either: startup
+    // and network handoffs routinely drop one poll, and a warning that only
+    // ever points at a blip that resolved trains people to ignore it. From
+    // the second failure on, warn until the status flips at the threshold.
     if (_consecutiveFailures < UNHEALTHY_FAIL_THRESHOLD && _status === 'healthy') {
-      console.warn('[Koryphaios] Backend health check failed (transient)', {
-        reason: outcome.reason,
-        detail: failureDetail,
-        healthUrl: _healthUrl,
-        httpStatus: _httpStatus,
-        networkError: _networkError,
-        consecutiveFailures: _consecutiveFailures,
-      });
+      if (_consecutiveFailures >= 2) {
+        console.warn('[Koryphaios] Backend health check failed (transient)', {
+          reason: outcome.reason,
+          detail: failureDetail,
+          healthUrl: _healthUrl,
+          httpStatus: _httpStatus,
+          networkError: _networkError,
+          consecutiveFailures: _consecutiveFailures,
+        });
+      }
       return;
     }
     if (_consecutiveFailures >= UNHEALTHY_FAIL_THRESHOLD) {
@@ -424,7 +425,10 @@ async function attachTauriListeners() {
     tauriUnlistens.push(unDown, unReady);
   } catch (err: unknown) {
     // Not in Tauri or event plugin unavailable — fall back to polling only.
-    console.debug('Failed to attach Tauri listeners:', err instanceof Error ? err.message : String(err));
+    console.debug(
+      'Failed to attach Tauri listeners:',
+      err instanceof Error ? err.message : String(err),
+    );
   }
 }
 
@@ -434,7 +438,10 @@ function detachTauriListeners() {
       un();
     } catch (err: unknown) {
       /* ignore */
-      console.debug('Failed to detach Tauri listener:', err instanceof Error ? err.message : String(err));
+      console.debug(
+        'Failed to detach Tauri listener:',
+        err instanceof Error ? err.message : String(err),
+      );
     }
   }
   tauriUnlistens = [];

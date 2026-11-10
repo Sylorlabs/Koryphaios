@@ -75,7 +75,7 @@ describe('one turn renders as one answer', () => {
     expect(rows[1].type).toBe('tool_call');
   });
 
-  it('keeps reasoning on one row across tool activity', () => {
+  it('starts a new reasoning row after tool activity', () => {
     feedStore.accumulateFeedEntry({
       timestamp: 100,
       type: 'thinking',
@@ -99,8 +99,13 @@ describe('one turn renders as one answer', () => {
     });
 
     const thinking = feedStore.feed.filter((entry) => entry.type === 'thinking');
-    expect(thinking).toHaveLength(1);
-    expect(thinking[0].text).toBe('first second');
+    expect(thinking).toHaveLength(2);
+    expect(thinking.map((entry) => entry.text)).toEqual(['first ', 'second']);
+    expect(feedStore.feed.map((entry) => entry.type)).toEqual([
+      'thinking',
+      'tool_call',
+      'thinking',
+    ]);
   });
 
   it('starts a new row for the next user turn', () => {

@@ -154,6 +154,7 @@ export const browserAuthProviders = new Set([
   'claude',
   'grok',
   'antigravity',
+  'opencode',
 ]);
 
 // These providers read their login straight from the machine's own CLI (e.g.
@@ -162,13 +163,39 @@ export const browserAuthProviders = new Set([
 // generic token entry. Cline is deliberately NOT in this set: it is a hosted
 // API-key provider, so Settings asks for a Cline API key like any other
 // gateway.
-export const localCliConnectProviders = new Set(['codex', 'cursor', 'devin', 'freebuff']);
+export const localCliConnectProviders = new Set([
+  'codex',
+  'cursor',
+  'devin',
+  'freebuff',
+  'omnirush',
+  'opencode',
+  // WorkBuddy Desktop owns its auth: having the app installed is the whole
+  // configuration. Connect must never ask for a token.
+  'workbuddy-desktop',
+]);
+
+// All provider entries backed by a coding CLI, including CLIs that bootstrap
+// or refresh their login through a browser flow.
+export const cliLoginProviders = new Set([
+  'claude',
+  'codex',
+  'grok',
+  'antigravity',
+  'kimicode',
+  'cursor',
+  'devin',
+  'freebuff',
+  'omnirush',
+  'opencode',
+]);
 
 // Provider display labels are sourced from the backend status response
 // (which returns `label` per provider). This fallback is only used before
 // the first status load completes.
 const PROVIDER_LABEL_FALLBACK: Record<string, string> = {
   anthropic: 'Anthropic',
+  beam: 'Reflection AI',
   openai: 'OpenAI',
   google: 'Google',
   aistudio: 'Google AI Studio',
@@ -177,6 +204,12 @@ const PROVIDER_LABEL_FALLBACK: Record<string, string> = {
   openrouter: 'OpenRouter',
   unorouter: 'UnoRouter',
   experientiallabs: 'Experiential Labs',
+  tokenharbor: 'Token Harbor',
+  logfare: 'Logfare',
+  apinex: 'APInex',
+  gwarden: 'Gwarden AI',
+  vyceai: 'Vyce AI',
+  respan: 'Respan',
   tokenrouter: 'TokenRouter',
   groq: 'Groq',
   digitalocean: 'DigitalOcean Inference',
@@ -190,23 +223,24 @@ const PROVIDER_LABEL_FALLBACK: Record<string, string> = {
   lmstudio: 'LM Studio',
   llamacpp: 'Llama.cpp',
   opencodezen: 'OpenCodeZen',
+  opencode: 'OpenCode',
   claude: 'Claude Code',
+  omnirush: 'Omnirush',
   codex: 'Codex CLI',
   'codex-auth': 'OpenAI Codex',
   grok: 'Grok Build',
-  jules: 'Google Jules (cloud)',
   hoplite: 'Hoplite (cloud + local)',
   kimicode: 'Kimi Code',
   moonshot: 'Moonshot AI / Kimi API',
   mistral: 'Mistral AI',
-  workbuddy: 'Work Buddy',
-  autoclaw: 'AutoClaw',
+  workbuddy: 'WorkBuddy',
+  'workbuddy-desktop': 'WorkBuddy Desktop',
 };
 
 const TOKEN_PLACEHOLDERS: Record<string, string> = {
-  jules: 'Jules API key (jules.google.com/settings)',
+  anthropic: 'sk-ant-oat01-a1b2c3d4…',
+  bedrock: 'wJalrXUtnFEMI/K7MDENG/…',
   hoplite: 'Hoplite API key (app.hoplite.sh → organization settings)',
-  anthropic: 'Anthropic auth token',
   copilot: 'GitHub token or Copilot auth token',
   google: 'Gemini API key',
   aistudio: 'Gemini API key (AI Studio)',
@@ -214,14 +248,53 @@ const TOKEN_PLACEHOLDERS: Record<string, string> = {
   commandcode: 'Command Code API key (commandcode.ai/settings/keys)',
   unorouter: 'UnoRouter API key (unorouter.com → Tokens)',
   experientiallabs: 'Experiential Labs API key (platform.experientiallabs.ai)',
+  tokenharbor: 'Token Harbor key (tokenharbor.ai/dashboard/api-keys)',
+  logfare: 'Logfare API key (logfare.ai/register)',
+  apinex: 'APInex API key (apinex.bond/login → API Keys)',
+  gwarden: 'Gwarden AI API key (gwarden.su → dashboard)',
+  vyceai: 'Vyce AI API key (vyceai.com)',
+  respan: 'Respan API key (platform.respan.ai → Gateway → API keys)',
   workbuddy: 'WorkBuddy API key (TokenHub: console.cloud.tencent.com/tokenhub/apikey)',
-  autoclaw: 'AutoClaw gateway token (~/.openclaw-autoclaw/.gateway-token)',
   kimicode: 'Auth with Kimi Code',
-  azure: 'Bearer token',
+  azure: 'eyJhbGciOiJSUzI1NiI…',
+};
+
+// These are deliberately incomplete examples, never real credentials. Keep
+// them recognizable so users can tell which credential format belongs in a
+// provider's field at a glance.
+const API_KEY_PLACEHOLDERS: Record<string, string> = {
+  anthropic: 'sk-ant-api03-a1b2c3d4…',
+  openai: 'sk-proj-a1b2c3d4…',
+  google: 'AIzaSyA1b2C3d4…',
+  aistudio: 'AIzaSyA1b2C3d4…',
+  xai: 'xai-a1b2c3d4…',
+  openrouter: 'sk-or-v1-a1b2c3d4…',
+  tokenharbor: 'thk_live_a1b2c3d4…',
+  groq: 'gsk_a1b2c3d4…',
+  digitalocean: 'dop_v1_a1b2c3d4…',
+  azure: '0123456789abcdef0123456789abcdef',
+  azurecognitive: '0123456789abcdef0123456789abcdef',
+  bedrock: 'AKIAIOSFODNN7EXAMPLE',
+  cerebras: 'csk-a1b2c3d4…',
+  deepseek: 'sk-a1b2c3d4…',
+  fireworks: 'fw_a1b2c3d4…',
+  gitlab: 'glpat-a1b2c3d4…',
+  huggingface: 'hf_a1b2c3d4…',
+  moonshot: 'sk-a1b2c3d4…',
+  mistral: 'a1B2c3D4e5F6g7H8…',
+  scaleway: '12345678-abcd-1234-abcd-123456789abc',
+  togetherai: 'tgp_v1_a1b2c3d4…',
+  vercel: 'vck_a1b2c3d4…',
+  zai: 'a1b2c3d4.e5f6g7h8…',
+  notion: 'ntn_a1b2c3d4…',
+  perplexity: 'pplx-a1b2c3d4…',
+  replicate: 'r8_a1b2c3d4…',
+  voyageai: 'pa-a1b2c3d4…',
 };
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 const CLI_ACCOUNT_NOTICE_DISMISSALS_KEY = 'koryphaios.dismissed-cli-account-notices.v1';
+const PROVIDERS_LOAD_TIMEOUT_MS = 60_000;
 
 type CliAccountNotice = { id: string; provider: string };
 
@@ -303,6 +376,9 @@ function createProvidersStore() {
   let fallbackItems = $state<Record<string, StoredProviderAccount[]>>({});
   let fallbackSaving = $state<string | null>(null);
   let saving = $state<string | null>(null);
+
+  /** Per-provider busy flags for the row-level Refresh button. */
+  let refreshingProviders = $state<Record<string, boolean>>({});
   let verifying = $state<string | null>(null);
   /** Per-provider inline error message from the last connection attempt. */
   let connectErrors = $state<Record<string, string>>({});
@@ -350,7 +426,9 @@ function createProvidersStore() {
       name === 'antigravity' ||
       name === 'cursor' ||
       name === 'devin' ||
-      name === 'freebuff'
+      name === 'freebuff' ||
+      name === 'omnirush' ||
+      name === 'opencode'
     ) {
       return 'auth_only';
     }
@@ -372,12 +450,28 @@ function createProvidersStore() {
     return localCliConnectProviders.has(name);
   }
 
-  function getLocalCliConnectLabel(name: string): string {
+  function getCliLoginLabel(name: string): string {
     const label =
-      { codex: 'Codex', cursor: 'Cursor', devin: 'Devin', freebuff: 'Freebuff' }[
-        name
-      ] ?? name;
-    return `Check ${label} CLI login`;
+      {
+        claude: 'Claude Code',
+        codex: 'Codex',
+        grok: 'Grok',
+        antigravity: 'Antigravity',
+        kimicode: 'Kimi Code',
+        cursor: 'Cursor',
+        devin: 'Devin',
+        freebuff: 'Freebuff',
+        omnirush: 'Omnirush',
+        opencode: 'OpenCode',
+        'workbuddy-desktop': 'WorkBuddy Desktop',
+      }[name] ?? name;
+    // The desktop app has no CLI login to check: installed means ready.
+    if (name === 'workbuddy-desktop') return 'Check WorkBuddy Desktop Install';
+    return `Check ${label} CLI Login`;
+  }
+
+  function getLocalCliConnectLabel(name: string): string {
+    return getCliLoginLabel(name);
   }
 
   function getProviderStatus(name: string): ProviderInfo | undefined {
@@ -429,7 +523,34 @@ function createProvidersStore() {
   }
 
   function setProviderStatusList(list: ProviderInfo[]): void {
-    statusList = Array.isArray(list) ? list : [];
+    if (!Array.isArray(list)) {
+      statusList = [];
+      return;
+    }
+
+    // A status response can race a later WebSocket catalog event. Preserve a
+    // known-good catalog when a newer-looking projection temporarily contains
+    // no models; providers deliberately keep their previous catalog after a
+    // failed discovery. Configuration/auth fields still come from the latest
+    // projection, and disconnected providers are allowed to clear models.
+    const previous = new Map(statusList.map((entry) => [entry.name, entry]));
+    statusList = list.map((entry) => {
+      const old = previous.get(entry.name);
+      if (
+        old?.enabled &&
+        entry.enabled &&
+        entry.modelCatalogAuthoritative !== true &&
+        old.allAvailableModels.length > 0 &&
+        entry.allAvailableModels.length === 0
+      ) {
+        return {
+          ...entry,
+          models: old.models,
+          allAvailableModels: old.allAvailableModels,
+        };
+      }
+      return entry;
+    });
     void syncCustomProviderIcons(statusList);
   }
 
@@ -560,9 +681,23 @@ function createProvidersStore() {
     const revision = ++providerStatusLoadRevision;
 
     const loadOnce = async (refreshModels: '0' | '1'): Promise<boolean> => {
-      const res = await apiFetch(
-        apiUrl(`/api/providers${refreshModels === '1' ? '?refreshModels=1' : ''}`),
-      );
+      const path = `/api/providers${refreshModels === '1' ? '?refreshModels=1' : ''}`;
+      const request = (): Promise<Response> =>
+        apiFetch(apiUrl(path), {}, PROVIDERS_LOAD_TIMEOUT_MS);
+      let res: Response | null;
+      try {
+        res = await request();
+      } catch {
+        res = null;
+      }
+      // The first load races backend/proxy warmup, so a reset or 5xx there is
+      // usually a single dropped beat. One short retry keeps that transient
+      // off the console instead of warning about an HTTP status the next
+      // request will never see.
+      if (res === null || res.status >= 500) {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        res = await request();
+      }
       if (!res.ok) {
         if (import.meta.env.DEV) console.warn(`Failed to load providers: HTTP ${res.status}`);
         return false;
@@ -571,8 +706,10 @@ function createProvidersStore() {
       const list = json?.data;
       if (json?.ok !== true || !Array.isArray(list)) return false;
       if (revision !== providerStatusLoadRevision) return false;
-      statusList = list;
-      void syncCustomProviderIcons(list);
+      // Apply the same catalog-preservation rules used by WebSocket status
+      // events. A transient empty/non-authoritative HTTP projection must not
+      // erase the context window currently shown by the composer.
+      setProviderStatusList(list);
       if (!cliAccountNoticeShown) {
         cliAccountNoticeShown = true;
         void loadCliAccountAmbiguity();
@@ -709,11 +846,87 @@ function createProvidersStore() {
     if (detected && !awsRegionInputs[name]) awsRegionInputs[name] = detected;
   }
 
+  /**
+   * Re-check one provider and reload its model catalog.
+   *
+   * Scoped to a single provider on purpose: the existing `refreshProviderStatus`
+   * path force-refreshes every provider's catalog, which is the wrong cost for a
+   * button on one row. The endpoint also coalesces per provider, so a double
+   * click is harmless.
+   */
+  async function refreshProvider(
+    name: string,
+    options?: { runtimeCheck?: boolean; silent?: boolean },
+  ): Promise<{ ok: boolean; skipped?: string; status?: ProviderInfo; error?: string }> {
+    if (!browser) return { ok: false, error: 'Not ready' };
+    if (refreshingProviders[name]) return { ok: false, skipped: 'in_flight' };
+    refreshingProviders[name] = true;
+    try {
+      const res = await apiFetch(
+        apiUrl(`/api/providers/${name}/refresh`),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ runtimeCheck: options?.runtimeCheck === true }),
+        },
+        name === 'freebuff' ? 12 * 60_000 : undefined,
+      );
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        skipped?: string;
+        status?: ProviderInfo;
+        error?: string;
+      };
+      if (!res.ok || data.ok === false) {
+        const message = data.error ?? 'Refresh failed';
+        if (!options?.silent) {
+          toastStore.error(`${getProviderDisplayLabel(name)}: ${message}`);
+        }
+        return { ok: false, error: message };
+      }
+      // Apply the returned status immediately. The backend also pushes
+      // `provider.status`, but applying it here keeps the click feeling instant
+      // and works even if the socket is reconnecting.
+      if (data.status) {
+        statusList = statusList.map((entry) =>
+          entry.name === data.status!.name ? data.status! : entry,
+        );
+      } else {
+        await loadProvidersFromApi();
+      }
+      if (!options?.silent && !data.skipped) {
+        const label = getProviderDisplayLabel(name);
+        const state = data.status?.connectionState;
+        if (state === 'verified') {
+          toastStore.success(`${label} refreshed`);
+        } else if (state === 'failed') {
+          toastStore.error(
+            `${label}: ${data.status?.verificationError ?? 'provider check failed'}`,
+          );
+        } else {
+          toastStore.info(`${label} refreshed (${state ?? 'status unknown'})`);
+        }
+      }
+      await tick();
+      return { ok: true, skipped: data.skipped, status: data.status ?? getProviderStatus(name) };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!options?.silent) toastStore.error(`${getProviderDisplayLabel(name)}: ${message}`);
+      return { ok: false, error: message };
+    } finally {
+      refreshingProviders[name] = false;
+    }
+  }
+
   async function refreshProviderStatus(
     name: string,
     options?: { warmModelList?: boolean },
   ): Promise<ProviderInfo | undefined> {
-    await loadProvidersFromApi({ forceRefreshModels: options?.warmModelList });
+    // Explicit connect already verifies and warms the selected provider on the
+    // backend. A fleet-wide `?refreshModels=1` here re-ran every CLI probe just
+    // to update one card, which could make the next model dialog appear stuck
+    // (and made Freebuff look detected but unconnected while Docker started).
+    await loadProvidersFromApi();
     if (options?.warmModelList) {
       await new Promise((resolve) => setTimeout(resolve, 700));
       await loadProvidersFromApi();
@@ -1278,11 +1491,15 @@ function createProvidersStore() {
       // actually generate, not just list a model catalog.
       if (reuseStoredConfiguration) body.fullCheck = true;
       verifying = name;
-      const res = await apiFetch(apiUrl(`/api/providers/${name}`), {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
+      const res = await apiFetch(
+        apiUrl(`/api/providers/${name}`),
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        },
+        name === 'freebuff' ? 12 * 60_000 : undefined,
+      );
       verifying = null;
       const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
       if (data.ok) {
@@ -1538,11 +1755,42 @@ function createProvidersStore() {
       });
       const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
       if (data.ok) {
-        await loadProvidersFromApi();
+        // The preference write is already complete at this point. Do not make
+        // the model picker depend on a follow-up fleet-wide provider status
+        // read: a slow CLI/runtime probe (especially Freebuff) or a transient
+        // backend response used to leave the Done button looking broken even
+        // though the selection had been saved successfully. Refresh the
+        // projection in the background so the rest of the UI catches up
+        // without blocking the dialog close.
+        void loadProvidersFromApi().catch(() => {});
         toastStore.success('Models updated');
         return true;
       }
       toastStore.error(data.error ?? 'Failed to update models');
+      return false;
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Network error';
+      toastStore.error(message);
+      return false;
+    }
+  }
+
+  /** Persist a provider-level context budget. `0` clears the choice so the
+   *  adapter falls back to the maximum tier reported by the live catalog. */
+  async function saveContextWindow(name: string, contextWindow: number): Promise<boolean> {
+    try {
+      const res = await apiFetch(apiUrl(`/api/providers/${name}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contextWindow }),
+      });
+      const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
+      if (data.ok) {
+        void loadProvidersFromApi().catch(() => {});
+        toastStore.success('Context window updated');
+        return true;
+      }
+      toastStore.error(data.error ?? 'Failed to update context window');
       return false;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Network error';
@@ -1999,6 +2247,10 @@ function createProvidersStore() {
     get saving() {
       return saving;
     },
+    /** Per-provider refresh busy flags, read by the row-level Refresh button. */
+    get refreshingProviders() {
+      return refreshingProviders;
+    },
     get verifying() {
       return verifying;
     },
@@ -2056,13 +2308,18 @@ function createProvidersStore() {
     get tokenPlaceholders() {
       return TOKEN_PLACEHOLDERS;
     },
+    get apiKeyPlaceholders() {
+      return API_KEY_PLACEHOLDERS;
+    },
 
     browserAuthProviders,
+    cliLoginProviders,
     getProviderDisplayLabel,
     getKnownAuthMode,
     usesBrowserAuth,
     usesLocalCliConnection,
     getLocalCliConnectLabel,
+    getCliLoginLabel,
     getProviderCaps,
     getProviderStatus,
     getCustomProviderIcon,
@@ -2073,6 +2330,7 @@ function createProvidersStore() {
     loadDetectedClis,
     loadAwsCredentialScan,
     refreshAwsScanAndStatus,
+    refreshProvider,
     refreshProviderStatus,
     syncProviderUi,
     loadProviderAccounts,
@@ -2087,6 +2345,7 @@ function createProvidersStore() {
     finishBrowserAuthFlow,
     disconnectProvider,
     saveSelectedModels,
+    saveContextWindow,
     rotateProviderKey,
     saveProviderAccount,
     activateProviderAccount,

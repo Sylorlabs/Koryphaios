@@ -43,8 +43,8 @@ function observerFor(element: Element): ObserverRecord {
  *  Resolves once the component has committed the new height and moved the
  *  scroll offset to compensate for it. The compensation deliberately runs after
  *  the commit — a scroll write that lands before the height it compensates for
- *  is committed gets clamped by the browser — so it is a microtask away, not a
- *  synchronous one. */
+ *  is committed gets clamped by the browser. Measurements commit in an animation
+ *  frame so resize delivery itself cannot trigger another layout cycle. */
 async function measure(element: Element, height: number) {
   const entry = {
     target: element,
@@ -52,6 +52,7 @@ async function measure(element: Element, height: number) {
     contentRect: { height },
   } as unknown as ResizeObserverEntry;
   observerFor(element).callback([entry], {} as ResizeObserver);
+  await new Promise((resolve) => requestAnimationFrame(resolve));
   await tick();
 }
 
@@ -77,6 +78,8 @@ async function setup(rowCount = 12) {
     [{ target: scroller, contentRect: { height: VIEWPORT } }] as unknown as ResizeObserverEntry[],
     {} as ResizeObserver,
   );
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  await tick();
   // Park the reader mid-transcript, then let the window re-derive around it.
   scroller.scrollTop = PARKED_AT;
   scroller.dispatchEvent(new Event('scroll'));

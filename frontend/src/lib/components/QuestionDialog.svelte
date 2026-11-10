@@ -12,35 +12,6 @@
 
   let pendingQuestion = $derived(wsStore.pendingQuestion);
 
-  $effect(() => {
-    if (pendingQuestion && dialogEl) {
-      const focusable = dialogEl.querySelectorAll<HTMLElement>(
-        'button, [href], input, textarea, [tabindex]:not([tabindex="-1"])',
-      );
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      first?.focus();
-
-      function trapFocus(e: KeyboardEvent) {
-        if (e.key !== 'Tab') return;
-        if (e.shiftKey) {
-          if (document.activeElement === first) {
-            e.preventDefault();
-            last?.focus();
-          }
-        } else {
-          if (document.activeElement === last) {
-            e.preventDefault();
-            first?.focus();
-          }
-        }
-      }
-
-      dialogEl.addEventListener('keydown', trapFocus);
-      return () => dialogEl?.removeEventListener('keydown', trapFocus);
-    }
-  });
-
   function select(option: string) {
     if (option.toLowerCase().includes('other') || option.toLowerCase().includes('something else')) {
       showOther = true;
@@ -73,20 +44,19 @@
 </script>
 
 {#if pendingQuestion}
-  <div
-    class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-  >
+  <div class="fixed bottom-24 left-1/2 z-50 w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2">
     <div
-      class="w-full max-w-lg bg-[var(--color-surface-1)] border border-[var(--color-border)] rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200"
+      class="w-full bg-[var(--color-surface-1)] border border-[var(--color-border)] rounded-lg shadow-xl overflow-hidden"
       bind:this={dialogEl}
       role="dialog"
-      aria-modal="true"
+      aria-modal="false"
+      aria-label={`Question for ${sessionStore.sessions.find((session) => session.id === sessionStore.activeSessionId)?.title ?? 'current session'}`}
     >
       <div
         class="px-6 py-5 border-b border-[var(--color-border)] bg-[var(--color-surface-2)] flex items-center gap-3"
       >
         <div
-          class="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-500"
+          class="w-8 h-8 rounded-md bg-amber-500/20 flex items-center justify-center text-amber-500"
         >
           <MessageSquare size={18} />
         </div>
@@ -101,7 +71,7 @@
       </div>
 
       <div class="p-6">
-        <p class="text-sm text-[var(--color-text-secondary)] mb-6 leading-relaxed">
+        <p class="text-sm text-[var(--color-text-secondary)] mb-6 leading-relaxed max-h-64 overflow-y-auto">
           {pendingQuestion.question}
         </p>
 

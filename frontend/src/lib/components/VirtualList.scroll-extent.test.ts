@@ -21,6 +21,15 @@ import VirtualList from './VirtualList.svelte';
 
 type ObserverRecord = { callback: ResizeObserverCallback; elements: Element[] };
 let observers: ObserverRecord[] = [];
+let frames: Map<number, FrameRequestCallback>;
+let nextFrame = 0;
+
+async function advanceFrame() {
+  const pending = [...frames.values()];
+  frames.clear();
+  for (const callback of pending) callback(performance.now());
+  await tick();
+}
 
 class ResizeObserverStub {
   private record: ObserverRecord;
@@ -39,20 +48,6 @@ function observerFor(element: Element): ObserverRecord {
   const record = observers.find((candidate) => candidate.elements.includes(element));
   if (!record) throw new Error('no ResizeObserver is watching this element');
   return record;
-}
-
-async function measure(element: Element, height: number) {
-  observerFor(element).callback(
-    [
-      {
-        target: element,
-        borderBoxSize: [{ blockSize: height }],
-        contentRect: { height },
-      },
-    ] as unknown as ResizeObserverEntry[],
-    {} as ResizeObserver,
-  );
-  await tick();
 }
 
 const VIEWPORT = 800;
@@ -81,7 +76,7 @@ async function setup(rowCount = ROWS) {
     [{ target: scroller, contentRect: { height: VIEWPORT } }] as unknown as ResizeObserverEntry[],
     {} as ResizeObserver,
   );
-  await tick();
+  await advanceFrame();
 
   return { container, scroller, holder };
 }
@@ -99,8 +94,7 @@ function extent(holder: HTMLElement): number {
   // Padding-derived: the spacer contributes no height of its own, so the box is
   // the padding around the rendered rows, floored at the viewport by
   // `min-height: 100%`.
-  const padding =
-    parseFloat(style.paddingTop || '0') + parseFloat(style.paddingBottom || '0');
+  const padding = parseFloat(style.paddingTop || '0') + parseFloat(style.paddingBottom || '0');
   return Math.max(VIEWPORT, padding);
 }
 
@@ -114,10 +108,19 @@ function scrollTo(scroller: HTMLElement, offset: number) {
  *  Rows that a correction has already scrolled out from under us are skipped —
  *  a detached row's measurement is not one the component can act on. */
 async function measureVisible(container: HTMLElement, scroller: HTMLElement, holder: HTMLElement) {
+  const entries: ResizeObserverEntry[] = [];
   for (const row of Array.from(container.querySelectorAll('.virtual-list-item'))) {
     if (!row.isConnected) continue;
-    await measure(row, REAL);
+    entries.push({
+      target: row,
+      borderBoxSize: [{ blockSize: REAL }],
+      contentRect: { height: REAL },
+    } as unknown as ResizeObserverEntry);
   }
+  // Browsers deliver a screenful of row sizes together. Awaiting a separate
+  // frame for every row made a full walk take thousands of frames and time out.
+  if (entries.length) observerFor(entries[0].target).callback(entries, {} as ResizeObserver);
+  await advanceFrame();
   return extent(holder);
 }
 
@@ -140,6 +143,13 @@ async function walk(
 describe('VirtualList scroll extent', () => {
   beforeEach(() => {
     observers = [];
+    frames = new Map();
+    nextFrame = 0;
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frames.set(++nextFrame, callback);
+      return nextFrame;
+    });
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
     vi.stubGlobal('ResizeObserver', ResizeObserverStub);
   });
   afterEach(() => {
@@ -186,12 +196,17 @@ describe('VirtualList scroll extent', () => {
     const { container, scroller, holder } = await setup();
     await walk(container, scroller, holder);
     const settled = extent(holder);
+    expect(settled).toBe(ROWS * REAL);
 
     const seen = new Set<number>();
     for (let offset = 0; offset <= ROWS * REAL; offset += SETTLED_STEP) {
       scrollTo(scroller, offset);
       await tick();
       seen.add(extent(holder));
+      // Remounted rows report their sizes again in a real browser. Cached
+      // measurements must leave both the extent and the reader's offset alone.
+      seen.add(await measureVisible(container, scroller, holder));
+      expect(scroller.scrollTop).toBe(offset);
     }
 
     expect([...seen]).toEqual([settled]);

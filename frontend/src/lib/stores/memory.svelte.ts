@@ -122,6 +122,7 @@ function createMemoryStore() {
     activeTab: 'project',
   });
   let documents = $state<ProjectMemoryDocument[]>([]);
+  let storageScope = $state<{ kind: 'project' | 'workspace'; name: string } | null>(null);
   let conflict = $state<MemoryConflict | null>(null);
   let settingsSaveRevision = 0;
   let settingsSaveQueue: Promise<void> = Promise.resolve();
@@ -181,6 +182,7 @@ function createMemoryStore() {
     state.isLoading = false;
     state.error = null;
     documents = [];
+    storageScope = null;
     conflict = null;
     sourceErrors = {};
     sourceLoading = {};
@@ -447,6 +449,7 @@ function createMemoryStore() {
         const data = await res.json();
         if (data.ok && projectScopeIsCurrent(scope) && sourceRequestIsCurrent(source, requestId)) {
           state.project = data.data;
+          storageScope = data.scope ?? null;
           clearSourceError(source);
         }
       } else if (projectScopeIsCurrent(scope) && sourceRequestIsCurrent(source, requestId)) {
@@ -898,6 +901,9 @@ function createMemoryStore() {
     },
     get documents() {
       return documents;
+    },
+    get storageScope() {
+      return storageScope;
     },
     get error() {
       return state.error;

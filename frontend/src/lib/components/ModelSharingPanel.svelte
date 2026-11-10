@@ -98,6 +98,12 @@
           models: candidate.models ?? [],
         }));
         sharedSet = new Set(data.data.shared);
+        // The candidate list already carries the models this user enabled for
+        // themselves, and `modelsFor()` falls back to it, so an untouched
+        // provider starts in sync with their own picker. Only an explicit
+        // Configure/enable choice is recorded in `sharedModels`; after that the
+        // saved selection is used as-is and never re-synced from the user's own
+        // model list.
         sharedModels = data.data.sharedModels ?? {};
       }
     } catch (err: unknown) {

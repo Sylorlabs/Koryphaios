@@ -33,7 +33,7 @@
 
 <div class="flex-1 overflow-y-auto px-6 py-5 space-y-10 w-full max-w-7xl mx-auto">
   <div
-    class="flex items-center justify-between gap-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4"
+    class="settings-panel flex items-center justify-between gap-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4"
   >
     <div>
       <div class="text-sm font-semibold text-[var(--color-text-primary)]">Device appearance</div>

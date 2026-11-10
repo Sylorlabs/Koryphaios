@@ -49,24 +49,13 @@ describe('provider card control order', () => {
       'Run safe check',
       'Rotate key',
       'Disconnect',
-      'enabled of',
       'Manage Models',
-      'The provider catalog accepted this process',
+      'Catalog verified',
     ]) {
       expect(branch, `the connected branch should still render "${marker}"`).toContain(marker);
     }
 
-    const modelTextIndex = branch.indexOf('enabled of');
-    const verificationNoteIndex = branch.indexOf('The provider catalog accepted this process');
-
-    for (const control of ['Run safe check', 'Rotate key', 'Disconnect', 'Manage Models']) {
-      const controlIndex = branch.indexOf(control);
-      expect(
-        controlIndex,
-        `"${control}" must be declared before the model-availability text, otherwise the ` +
-          'grey model text wraps onto the line above the controls in the narrow provider grid',
-      ).toBeLessThan(modelTextIndex);
-    }
+    const verificationNoteIndex = branch.indexOf('Catalog verified');
 
     // "Run safe check" and "Manage Models" share the action row: nothing closes
     // that container between them, so they render side by side horizontally.

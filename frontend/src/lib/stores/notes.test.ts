@@ -52,6 +52,33 @@ afterEach(() => {
 });
 
 describe('Notes request identity guards', () => {
+  it('saves note icons without changing document revision or losing editor text', async () => {
+    mocks.apiFetch.mockResolvedValueOnce(jsonResponse({ ok: true, data: note('alpha', 'Alpha') }));
+    await notesStore.fetchNote('alpha');
+    const current = notesStore.currentNote!;
+    mocks.apiFetch.mockResolvedValueOnce(jsonResponse({ ok: true, data: { kind: 'builtin', value: '💡' } }));
+    expect(await notesStore.setNoteIcon('alpha', { kind: 'builtin', value: '💡' })).toBe(true);
+    expect(notesStore.currentNote?.icon).toEqual({ kind: 'builtin', value: '💡' });
+    expect(notesStore.currentNote?.revision).toBe(current.revision);
+    expect(notesStore.currentNote?.content).toBe(current.content);
+    const [path, request] = mocks.apiFetch.mock.calls.at(-1)!;
+    expect(path).toBe('/api/notes/alpha/icon');
+    expect(request.headers['X-Koryphaios-Project']).toBe('/notes-project-a');
+    expect(JSON.parse(request.body)).toEqual({ icon: { kind: 'builtin', value: '💡' } });
+  });
+
+  it('ignores a late icon save after changing project', async () => {
+    let finish!: (response: Response) => void;
+    mocks.apiFetch.mockImplementationOnce(() => new Promise<Response>((resolve) => { finish = resolve; }));
+    const pending = notesStore.setNoteIcon('alpha', { kind: 'builtin', value: '⭐' });
+    projectStore.setProject('/notes-project-b');
+    notesStore.beginProjectTransition();
+    finish(jsonResponse({ ok: true, data: { kind: 'builtin', value: '⭐' } }));
+    expect(await pending).toBe(false);
+    expect(notesStore.currentNote).toBeNull();
+    expect(notesStore.graphData.nodes).toEqual([]);
+  });
+
   it('keeps existing notes interactive while a large first index runs in the background', async () => {
     mocks.apiFetch
       .mockResolvedValueOnce(
@@ -438,5 +465,32 @@ describe('Notes recovery and history', () => {
         body: JSON.stringify({ expectedRevision: 2 }),
       }),
     );
+  });
+});
+
+
+describe('note link resolution', () => {
+  it('resolves folder paths and project source paths without choosing duplicate titles', async () => {
+    mocks.apiFetch.mockImplementation(async () => jsonResponse({ ok: true, data: [
+      { ...note('a', 'Guide'), folderPath: '/Findings' },
+      { ...note('b', 'Guide'), folderPath: '/Research' },
+      { ...note('c', 'notes-workspace'), sourcePath: 'docs/notes-workspace.md' },
+    ] }));
+    await notesStore.fetchNotes();
+    expect(await notesStore.resolveNoteTarget({ path: '/Research/Guide' })).toBe('b');
+    expect(await notesStore.resolveNoteTarget({ path: 'docs/notes-workspace.md' })).toBe('c');
+    expect(await notesStore.resolveNoteTarget({ title: 'Guide' })).toBeNull();
+    expect(await notesStore.resolveNoteTarget({ title: 'Missing' })).toBeNull();
+  });
+
+  it('loads a cold catalog and ignores results after a project transition', async () => {
+    let finish!: (response: Response) => void;
+    mocks.apiFetch.mockImplementationOnce(() => new Promise<Response>((resolve) => { finish = resolve; }));
+    const pending = notesStore.resolveNoteTarget({ path: '/Findings/Guide' });
+    projectStore.setProject('/notes-project-b');
+    notesStore.beginProjectTransition();
+    finish(jsonResponse({ ok: true, data: [{ ...note('a', 'Guide'), folderPath: '/Findings' }] }));
+    expect(await pending).toBeNull();
+    expect(notesStore.currentNote).toBeNull();
   });
 });

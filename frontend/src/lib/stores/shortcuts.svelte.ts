@@ -1,16 +1,12 @@
 // Keyboard shortcuts — editable, persisted to localStorage, Svelte 5 runes
 
 import { isMac, formatKey } from '$lib/utils/platform';
+import { browser } from '$app/environment';
+import { apiFetch } from '$lib/api.svelte';
+import { apiUrl } from '$lib/utils/api-url';
+import type { DesktopShortcut } from '@koryphaios/shared';
 
-export interface Shortcut {
-  id: string;
-  keys: string[];
-  /** Extra chords that trigger the same action. Voice mode uses one so the
-   *  push-to-talk key stays reachable when a platform never reports it. */
-  altKeys?: string[][];
-  action: string;
-  description?: string;
-}
+export interface Shortcut extends DesktopShortcut {}
 
 /** Modifiers a chord is built from. Everything else is a target key, including
  *  fn, which is a target even though the platform may also report it as a
@@ -23,6 +19,37 @@ export function isBareKeyChord(keys: string[]): boolean {
 }
 
 const STORAGE_KEY = 'koryphaios-shortcuts';
+
+const VOICE_DESCRIPTION = 'Press to record, press again to transcribe';
+
+/** Voice mode keeps a literal Control on every platform: `Mod` would mean
+ *  Command on macOS, and Command+Space is Spotlight, so the chord would never
+ *  reach the composer. The stored 'Ctrl' → 'Mod' migration must skip it. */
+const VOICE_DEFAULT_KEYS = ['Ctrl', ' '];
+
+function isVoiceDefaultCandidate(keys: string[], description?: string): boolean {
+  const tokens = Array.isArray(keys) ? keys : [];
+  const lowered = tokens.map((key) => key.toLowerCase());
+  const onLegacyChord =
+    tokens.length === 3 &&
+    lowered.includes('mod') &&
+    lowered.includes('shift') &&
+    lowered.includes('m');
+  // A stored bare fn is the old default when it is not already described as a
+  // toggle: that wording is what a release shipped, so an fn the user picked
+  // themselves stays theirs.
+  const onLegacyFn =
+    tokens.length === 1 && lowered[0] === 'fn' && !/press to record/i.test(description ?? '');
+  // Mod+Space is what an older build produced when it rewrote every stored
+  // 'Ctrl' to 'Mod'. Nothing records that chord on its own, so it is damage
+  // from that rewrite rather than a binding anyone picked.
+  const onRetargetedMod = tokens.length === 2 && lowered[0] === 'mod' && lowered[1] === ' ';
+  return onLegacyChord || onLegacyFn || onRetargetedMod;
+}
+
+function voiceDefaultKeys(): string[] {
+  return [...VOICE_DEFAULT_KEYS];
+}
 
 const defaultShortcuts: Shortcut[] = [
   { id: 'send', keys: ['Mod', 'Enter'], action: 'Send message', description: 'Submit task' },
@@ -43,13 +70,9 @@ const defaultShortcuts: Shortcut[] = [
   },
   {
     id: 'voice_mode',
-    // Push to talk: hold to record, release to transcribe. fn is the natural
-    // key for it, but macOS keeps fn/Globe for dictation and never reports it
-    // to a webview, so the chord that always works is kept alongside.
-    keys: ['Fn'],
-    altKeys: [['Mod', 'Shift', 'M']],
+    keys: VOICE_DEFAULT_KEYS,
     action: 'Voice mode',
-    description: 'Hold to record, release to transcribe',
+    description: VOICE_DESCRIPTION,
   },
   { id: 'close', keys: ['Esc'], action: 'Close dialogs', description: 'Back' },
 ];
@@ -60,36 +83,42 @@ function loadShortcuts(): Shortcut[] {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
-      let parsed = JSON.parse(stored) as Shortcut[];
+      // A stored binding may still carry the retired altKeys field, so the
+      // persisted shape is wider than the live Shortcut type.
+      let parsed = JSON.parse(stored) as (Shortcut & { altKeys?: string[][] })[];
 
-      // A stored voice_mode on the old default chord is the untouched default,
-      // so move it to the new push-to-talk binding and keep the old chord as the
-      // fallback rather than leaving the user on the retired behaviour.
+      // Preserve chosen bindings, retire the old altKeys shape, and update
+      // the description now that voice mode is press-to-toggle.
       parsed = parsed.map((s) => {
-        if (s.id !== 'voice_mode' || s.altKeys?.length) return s;
-        const untouchedDefault =
-          s.keys.length === 3 &&
-          s.keys.includes('Mod') &&
-          s.keys.includes('Shift') &&
-          s.keys.includes('M');
-        if (!untouchedDefault) return s;
-        return { ...s, keys: ['Fn'], altKeys: [['Mod', 'Shift', 'M']] };
+        if (s.id !== 'voice_mode') return s;
+        const { altKeys: _retired, ...rest } = s;
+        return {
+          ...rest,
+          keys: isVoiceDefaultCandidate(s.keys, s.description) ? voiceDefaultKeys() : s.keys,
+          description: VOICE_DESCRIPTION,
+        };
       });
 
       // Migrate old 'Ctrl' shortcuts to 'Mod'
       parsed = parsed
         .filter((s) => s.id !== 'toggle_yolo')
-        .map((s) => ({
-          ...s,
-          keys:
-            s.id === 'toggle_zen_mode' &&
-            s.keys.length === 3 &&
-            s.keys.includes('Mod') &&
-            s.keys.includes('Shift') &&
-            s.keys.includes('Y')
-              ? ['Mod', 'Shift', 'Z']
-              : s.keys.map((k) => (k === 'Ctrl' ? 'Mod' : k)),
-        }));
+        .map((s) => {
+          // Voice mode is exempt: its Control is deliberate on every platform,
+          // because 'Mod' means Command on macOS and Command+Space belongs to
+          // Spotlight, so the binding would never reach the composer.
+          if (s.id === 'voice_mode') return s;
+          return {
+            ...s,
+            keys:
+              s.id === 'toggle_zen_mode' &&
+              s.keys.length === 3 &&
+              s.keys.includes('Mod') &&
+              s.keys.includes('Shift') &&
+              s.keys.includes('Y')
+                ? ['Mod', 'Shift', 'Z']
+                : s.keys.map((k) => (k === 'Ctrl' ? 'Mod' : k)),
+          };
+        });
 
       // Merge in missing default shortcuts
       for (const def of defaultShortcuts) {
@@ -110,6 +139,35 @@ function loadShortcuts(): Shortcut[] {
 function createShortcutStore() {
   let shortcuts = $state<Shortcut[]>(loadShortcuts());
 
+  function persistLocal() {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(shortcuts));
+  }
+
+  async function persistToBackend() {
+    if (!browser) return;
+    try {
+      await apiFetch(apiUrl('/api/desktop-ui/shortcuts'), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(shortcuts),
+      });
+    } catch {}
+  }
+
+  function applyRemote(next: DesktopShortcut[]) {
+    shortcuts = next.map((shortcut) => {
+      const keys = [...shortcut.keys];
+      if (shortcut.id !== 'voice_mode') return { ...shortcut, keys };
+      return {
+        ...shortcut,
+        keys: isVoiceDefaultCandidate(keys, shortcut.description) ? voiceDefaultKeys() : keys,
+        description: VOICE_DESCRIPTION,
+      };
+    });
+    persistLocal();
+  }
+
   return {
     get list() {
       return shortcuts;
@@ -119,27 +177,34 @@ function createShortcutStore() {
     },
 
     save() {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(shortcuts));
+      persistLocal();
+      if (browser) void persistToBackend();
     },
 
     reset() {
       shortcuts = $state.snapshot(defaultShortcuts);
       localStorage.removeItem(STORAGE_KEY);
     },
+    applyRemote,
 
-    /** Check if a KeyboardEvent matches a given shortcut id or any of its
-     *  alternative chords. */
+    /** The keys bound to an action, or [] when it has no binding. */
+    keys(id: string): string[] {
+      return shortcuts.find((s) => s.id === id)?.keys ?? [];
+    },
+
+    voiceFallbackKeys(): string[] {
+      return [];
+    },
+
+    matchesVoiceFallback(e: KeyboardEvent): boolean {
+      return keysMatch(this.voiceFallbackKeys(), e);
+    },
+
+    /** Check if a KeyboardEvent matches a given shortcut id. */
     matches(id: string, e: KeyboardEvent): boolean {
       const shortcut = shortcuts.find((s) => s.id === id);
       if (!shortcut) return false;
-      return [shortcut.keys, ...(shortcut.altKeys ?? [])].some((keys) => keysMatch(keys, e));
-    },
-
-    /** Every chord bound to an action, primary first. */
-    chords(id: string): string[][] {
-      const shortcut = shortcuts.find((s) => s.id === id);
-      if (!shortcut) return [];
-      return [shortcut.keys, ...(shortcut.altKeys ?? [])];
+      return keysMatch(shortcut.keys, e);
     },
 
     /** True when the action is bound to a chord with no modifier, which means it
@@ -147,10 +212,10 @@ function createShortcutStore() {
     isBare(id: string): boolean {
       const shortcut = shortcuts.find((s) => s.id === id);
       if (!shortcut) return false;
-      return [shortcut.keys, ...(shortcut.altKeys ?? [])].some(isBareKeyChord);
+      return isBareKeyChord(shortcut.keys);
     },
 
-    /** Human-readable binding for a shortcut, e.g. "⌘+Shift+M" */
+    /** Human-readable binding for a shortcut, e.g. "⌘+Shift+K" */
     label(id: string): string {
       const shortcut = shortcuts.find((s) => s.id === id);
       if (!shortcut) return '';

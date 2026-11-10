@@ -18,12 +18,21 @@ const mocks = vi.hoisted(() => ({
     workspaceRoot: '/ws' as string | null,
     workspaceProjects: [] as Array<{ path: string; name: string; modifiedAt: number }>,
   },
+  projectIdentityProjection: (entry: { path: string; name: string }) => ({
+    identity: { id: `path:${entry.path}`, name: entry.name, icon: { mode: 'automatic' as const } },
+    icon: {
+      mode: 'monogram' as const,
+      value: entry.name.slice(0, 2).toUpperCase(),
+      color: 'accent' as const,
+    },
+  }),
 }));
 
 vi.mock('$lib/stores/sessions.svelte', () => ({ sessionStore: mocks.sessionStore }));
 vi.mock('$lib/stores/project.svelte', () => ({
   projectStore: mocks.projectStore,
   projectDisplayName: (path: string | null) => path?.split('/').at(-1) ?? '',
+  projectIdentityProjection: mocks.projectIdentityProjection,
 }));
 
 import WorkspaceNewChat from './WorkspaceNewChat.svelte';

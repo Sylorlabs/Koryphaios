@@ -19,7 +19,7 @@ describe('settings catalog', () => {
     ).toEqual(['memory']);
     expect(
       filterSettingsCatalog(SETTINGS_CATALOG, 'current project').map((entry) => entry.id),
-    ).toEqual(['agent', 'memory', 'notes']);
+    ).toEqual(['agent', 'project', 'notes', 'memory', 'skills']);
     expect(filterSettingsCatalog(SETTINGS_CATALOG, 'PAUSE').map((entry) => entry.id)).toEqual([
       'experimental',
     ]);
@@ -28,12 +28,15 @@ describe('settings catalog', () => {
     ).toEqual(['archived']);
   });
 
-  it('places archived chats precisely in Workspace after Notes', () => {
+  it('groups the three knowledge destinations separately from workspace management', () => {
     const archivedIndex = SETTINGS_CATALOG.findIndex((entry) => entry.id === 'archived');
     expect(archivedIndex).toBeGreaterThan(0);
-    expect(SETTINGS_CATALOG[archivedIndex - 1]?.id).toBe('notes');
     expect(SETTINGS_CATALOG[archivedIndex]?.group).toBe('Workspace');
     expect(SETTINGS_CATALOG[archivedIndex]?.scope).toBe('This app');
+    expect(
+      SETTINGS_CATALOG.filter((entry) => entry.group === 'Knowledge').map((entry) => entry.id),
+    ).toEqual(['notes', 'memory', 'skills']);
+    expect(resolveSettingsTab('skills', undefined)).toBe('skills');
   });
 
   it('exposes a video pane covering every supported video provider', () => {

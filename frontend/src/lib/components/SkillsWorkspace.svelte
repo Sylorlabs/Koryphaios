@@ -1,7 +1,5 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { marked } from 'marked';
-  import DOMPurify from 'dompurify';
   import {
     agentSettingsStore,
     type SkillConversionPreview,
@@ -11,8 +9,9 @@
   } from '$lib/stores/agent-settings.svelte';
   import KorySelect from './KorySelect.svelte';
   import NumberStepper from './NumberStepper.svelte';
-  import SkillCodeEditor from './SkillCodeEditor.svelte';
-  import SkillVisualEditor from './SkillVisualEditor.svelte';
+  import DocumentEditor from './DocumentEditor.svelte';
+  import KnowledgeScope from './KnowledgeScope.svelte';
+  import { projectDisplayName, projectStore } from '$lib/stores/project.svelte';
   import SkillHierarchy from './SkillHierarchy.svelte';
   import { skillInventoryCounts } from './skill-hierarchy';
   import ArrowLeft from 'lucide-svelte/icons/arrow-left';
@@ -23,6 +22,7 @@
   import Save from 'lucide-svelte/icons/save';
   import Search from 'lucide-svelte/icons/search';
   import X from 'lucide-svelte/icons/x';
+  import Layers from 'lucide-svelte/icons/layers';
 
   let { active = true }: { active?: boolean } = $props();
 
@@ -32,8 +32,8 @@
   type DraftBuffer = { sourceContent: string; coreInstructions: string; dirty: boolean };
 
   let selectedKey = $state('');
-  let detailTab = $state<DetailTab>('overview');
-  let editorMode = $state<EditorMode>('split');
+  let detailTab = $state<DetailTab>('editor');
+  let editorMode = $state<EditorMode>('visual');
   let searchQuery = $state('');
   let sourceFilter = $state('all');
   let statusFilter = $state('all');
@@ -69,7 +69,7 @@
   let newTargetMedium = $state('any');
   let newContextBudget = $state(4000);
 
-  const skillBufferPrefix = (skill: SkillRevision) => `${skill.source}:${skill.name}:`;
+  const skillBufferPrefix = (skill: SkillRevision) => `${skill.source}:${skill.source === 'project' ? projectStore.currentPath : 'personal'}:${skill.name}:`;
   const revisionKey = (skill: SkillRevision) =>
     `${skillBufferPrefix(skill)}${skill.state}:${skill.hash}`;
   const hasDirtySkillBuffer = (skill: SkillRevision) =>
@@ -108,6 +108,7 @@
       agentSettingsStore.skills.find((skill) => skill.state === 'draft') ??
       agentSettingsStore.skills[0],
   );
+  let selectedScope = $derived(creatorOpen ? newSource : (selectedSkill?.source ?? 'personal'));
   let inventory = $derived(skillInventoryCounts(agentSettingsStore.skills));
   let dirtyCount = $derived(Object.values(buffers).filter((buffer) => buffer.dirty).length);
   let creatorDirty = $derived(
@@ -360,23 +361,11 @@
     updateBuffer(legacy ? `${legacy[1]}${sourceContent}` : sourceContent);
   }
 
-  function markdownPreview(source: string): string {
-    return DOMPurify.sanitize(
-      marked.parse(source || '*Nothing written yet.*', { async: false }) as string,
-    );
-  }
-
-  function htmlPreview(source: string): string {
-    const csp =
-      "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'; navigate-to 'none'";
-    return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${csp}"><style>html{color-scheme:light dark}body{font:14px/1.55 system-ui;color:CanvasText;background:Canvas;padding:20px;margin:0}pre{white-space:pre-wrap}</style></head><body>${source}</body></html>`;
-  }
-
   function handleTabKey(event: KeyboardEvent) {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
     const tablist = event.currentTarget as HTMLElement;
-    const tabs: DetailTab[] = ['overview', 'editor', 'evidence'];
+    const tabs: DetailTab[] = ['editor', 'overview', 'evidence', 'health'];
     if (event.key === 'Home') detailTab = tabs[0];
     else if (event.key === 'End') detailTab = tabs.at(-1)!;
     else {
@@ -577,11 +566,8 @@
 <div class="skills-shell">
   <header class="skills-header">
     <div class="min-w-0">
-      <h2>Skills workspace</h2>
-      <p>
-        {inventory.skills} skills · {inventory.activeRevisions} active revisions · {inventory.revisions}
-        total revisions{unsavedCount ? ` · ${unsavedCount} unsaved` : ''}
-      </p>
+      <h2 class="workspace-title"><Layers size={20} />Skills</h2>
+      <p>Reusable playbooks for how your agents work.</p>
     </div>
     <div class="header-actions">
       <button class="secondary-action" type="button" onclick={openRoutingTool}
@@ -598,7 +584,11 @@
     </div>
   </header>
 
-  {#if agentSettingsStore.skillHealth}
+  <KnowledgeScope
+    scope={selectedScope === 'project' ? 'Project' : 'Personal'}
+    description="Personal skills are available to this user across projects. Project skills live with the selected project. Active skills provide instructions when selected for a relevant task; drafts do not run. Keep project facts in Memory and reports or reference documents in Notes." />
+
+  {#if agentSettingsStore.skillHealth && detailTab === 'health'}
     <div class="health-summary" aria-label="Skill library health">
       <span><strong>{agentSettingsStore.skillHealth.summary.stewarded}</strong> stewarded</span>
       <span><strong>{agentSettingsStore.skillHealth.summary.ready}</strong> promotion-ready</span>
@@ -616,6 +606,7 @@
       aria-label="Skill library"
     >
       <div class="library-tools">
+        <div class="library-caption"><span>Skill library</span><span>{inventory.skills} skills{unsavedCount ? ` · ${unsavedCount} unsaved` : ''}</span></div>
         <label class="search-field">
           <Search size={17} />
           <input
@@ -663,7 +654,7 @@
                 onclick={() => selectSkill(skill)}
               >
                 <span class="skill-row-main"
-                  ><strong>{skill.name}</strong><small>{skill.description}</small></span
+                  ><strong class="skill-display-name">{skill.name.replaceAll('-', ' ')}</strong><small>{skill.description}</small></span
                 >
                 <span class="skill-row-meta">
                   {#if buffers[revisionKey(skill)]?.dirty}<span
@@ -696,7 +687,12 @@
             ><ArrowLeft size={17} />Library</button
           >
           <div class="detail-title">
-            <h2>{selectedSkill.name}</h2>
+            <div class="revision-labels">
+              <span>{selectedSkill.source === 'personal' ? 'Personal' : 'Project'}</span>
+              <span class:active-revision={selectedSkill.state === 'active'}>{selectedSkill.state === 'draft' ? 'Inactive draft' : 'Active revision'}</span>
+              {#if selectedBuffer?.dirty}<span class="unsaved-label">Unsaved edits</span>{/if}
+            </div>
+            <h2 class="skill-display-name">{selectedSkill.name.replaceAll('-', ' ')}</h2>
             <p>{selectedSkill.description}</p>
           </div>
           <div class="detail-actions">
@@ -717,7 +713,7 @@
                     dirty: false,
                   },
                 };
-              }}>Reset</button
+              }}>Discard edits</button
             >
             <button
               type="button"
@@ -735,7 +731,7 @@
           aria-label="Skill details"
           onkeydown={handleTabKey}
         >
-          {#each [{ id: 'overview', label: 'Overview' }, { id: 'editor', label: 'Editor' }, { id: 'evidence', label: 'Evidence' }, { id: 'health', label: 'Health' }] as tab (tab.id)}
+          {#each [{ id: 'editor', label: 'Instructions' }, { id: 'overview', label: 'Setup & routing' }, { id: 'evidence', label: 'Test & activate' }, { id: 'health', label: 'Health' }] as tab (tab.id)}
             <button
               type="button"
               role="tab"
@@ -774,7 +770,7 @@
                 <p>
                   {selectedSkill.source === 'personal'
                     ? 'Available across your workspaces.'
-                    : 'Stored with this project.'}
+                    : `Stored with ${projectDisplayName(projectStore.currentPath) || 'this project'}.`}
                 </p>
               </section>
               <section class="info-card">
@@ -916,88 +912,29 @@
                 </div>
               </section>{/if}
           {:else if detailTab === 'editor'}
-            <div class="editor-toolbar-row">
-              <div class="mode-switch" aria-label="Editor mode">
-                {#each ['visual', 'source', 'split'] as mode (mode)}<button
-                    type="button"
-                    class:active={editorMode === mode}
-                    onclick={() => (editorMode = mode as EditorMode)}>{mode}</button
-                  >{/each}
-              </div>
-              <span class="format-label"
-                >{selectedSkill.document.kind} · .{selectedSkill.document.extension}</span
-              >
+            <div class="editing-context">
+              <div><h3>Operating instructions</h3><p>Describe the approach, decisions, and checks an agent should follow.</p></div>
+              <span>{selectedSkill.state === 'active' ? 'Edits save to an inactive draft' : 'Save draft → test → activate'}</span>
             </div>
-            {#if selectedSkill.storageVersion === 1}<div class="migration-note">
-                This legacy SKILL.md remains untouched until you save or convert it. Source mode
-                includes its frontmatter.
-              </div>{/if}
-            {#if editorMode === 'visual'}
-              <div
-                class="visual-editor"
-                class:html-visual={selectedSkill.document.renderer === 'html'}
-              >
-                <SkillVisualEditor
-                  value={previewSource(selectedSkill, selectedSource)}
-                  format={selectedSkill.document.kind}
-                  renderer={selectedSkill.document.renderer}
-                  onchange={updateVisualSource}
-                  onrequestsource={() => (editorMode = 'source')}
-                  onstatus={(message) => (liveStatus = message)}
-                  label={`Visual editor for ${selectedSkill.name}`}
-                />
-                {#if selectedSkill.document.renderer === 'html'}<div class="preview-pane">
-                    <iframe
-                      title="Sandboxed skill HTML preview"
-                      sandbox=""
-                      srcdoc={htmlPreview(previewSource(selectedSkill, selectedSource))}
-                    ></iframe>
-                  </div>{/if}
-              </div>
-            {:else if editorMode === 'source'}
-              <div class="source-editor">
-                <SkillCodeEditor
-                  value={selectedSource}
-                  language={selectedSkill.document.kind}
-                  renderer={selectedSkill.document.renderer}
-                  onchange={(value) => updateBuffer(value)}
-                  ariaLabel="Exact skill source"
-                />
-              </div>
-            {:else}
-              <div class="split-editor">
-                <div class="source-editor">
-                  <SkillCodeEditor
-                    value={selectedSource}
-                    language={selectedSkill.document.kind}
-                    renderer={selectedSkill.document.renderer}
-                    onchange={(value) => updateBuffer(value)}
-                    ariaLabel="Exact skill source"
-                  />
-                </div>
-                <div class="preview-pane">
-                  {#if selectedSkill.document.renderer === 'html'}<iframe
-                      title="Sandboxed skill HTML preview"
-                      sandbox=""
-                      srcdoc={htmlPreview(previewSource(selectedSkill, selectedSource))}
-                    ></iframe>{:else if selectedSkill.document.renderer === 'markdown'}<article
-                      class="rendered-markdown"
-                    >
-                      {@html markdownPreview(previewSource(selectedSkill, selectedSource))}
-                    </article>{:else}<pre>{previewSource(selectedSkill, selectedSource)}</pre>{/if}
-                </div>
-              </div>
-            {/if}
-            {#if selectedSkill.storageVersion === 2}<label class="core-editor"
-                ><span>Compact context contract</span><textarea
+            <DocumentEditor value={selectedSource} visualValue={previewSource(selectedSkill, selectedSource)}
+              format={selectedSkill.document.kind} renderer={selectedSkill.document.renderer} bind:mode={editorMode}
+              onchange={(value) => updateBuffer(value)} onvisualchange={updateVisualSource}
+              onstatus={(message) => (liveStatus = message)} label={`Visual editor for ${selectedSkill.name}`} sourceLabel="Exact skill source" />
+            {#if selectedSkill.storageVersion === 1}<details class="source-details">
+                <summary>Source format &amp; metadata</summary>
+                <p>This legacy SKILL.md remains untouched until you save or convert it. Source mode includes its frontmatter; Write edits the instruction body.</p>
+              </details>{/if}
+            {#if selectedSkill.storageVersion === 2}<details class="core-editor">
+                <summary>Compact instructions <span>Advanced</span></summary>
+                <p>A shorter operating contract used when the full instructions do not fit the available context.</p>
+                <textarea
                   value={selectedCore}
                   oninput={(event) => updateBuffer(selectedSource, event.currentTarget.value)}
                   aria-label="Format-neutral core instructions"
                 ></textarea><small
                   >Compact and minimal loading use this text; full loading uses the native source
                   above.</small
-                ></label
-              >{/if}
+                ></details>{/if}
           {:else if detailTab === 'evidence'}
             {@const evaluation =
               agentSettingsStore.skillEvaluationCards[
@@ -1225,9 +1162,9 @@
                   {
                     value: 'personal',
                     label: 'Personal',
-                    description: 'Available across workspaces',
+                    description: 'Available to you across projects',
                   },
-                  { value: 'project', label: 'Project', description: 'Stored with this workspace' },
+                  { value: 'project', label: 'Project', description: `Only ${projectDisplayName(projectStore.currentPath) || 'the selected project'}`, disabled: !projectStore.currentPath },
                 ]}
                 onchange={(value) => (newSource = value as 'personal' | 'project')}
               /></label
@@ -1274,13 +1211,12 @@
               >{/if}
           </div>
         {:else if creatorStep === 2}<div class="form-grid">
-            <label class="full"
-              ><span>Required operating instructions</span><textarea
-                bind:value={newInstructions}
-                rows="8"
-                placeholder="Describe the workflow, decisions, safety boundaries, and verification steps."
-              ></textarea></label
-            ><label
+            <div class="full">
+              <p class="form-label">Operating instructions</p>
+              <DocumentEditor value={newInstructions} format={newFormat} renderer={documentSpec().renderer}
+                onchange={(value) => (newInstructions = value)} label="New skill instructions" sourceLabel="New skill source" />
+            </div>
+            <label
               ><span>Professional domains</span><textarea
                 bind:value={newDomains}
                 rows="3"
@@ -1486,7 +1422,7 @@
     min-height: 0;
     height: 100%;
     flex-direction: column;
-    background: var(--color-surface-0);
+    background: var(--color-surface-1);
     color: var(--color-text-primary);
   }
   .skills-header,
@@ -1498,14 +1434,14 @@
     justify-content: space-between;
     gap: 16px;
     border-bottom: 1px solid var(--color-border);
-    background: var(--color-surface-2);
-    padding: 14px 18px;
+    background: var(--color-surface-1);
+    padding: 18px 24px;
   }
   .skills-header h2,
   .detail-title h2,
   .tool-title h2 {
-    font-size: 16px;
-    font-weight: 700;
+    font-size: 20px;
+    font-weight: 650;
   }
   .skills-header p,
   .detail-title p,
@@ -1537,13 +1473,14 @@
   .card-actions {
     display: flex;
     align-items: center;
-    gap: 10px;
+    flex-wrap: wrap;
+    gap: 8px;
   }
   .primary-action,
   .secondary-action,
   .activate-action {
     display: inline-flex;
-    min-height: 40px;
+    min-height: 36px;
     align-items: center;
     justify-content: center;
     gap: 8px;
@@ -1580,19 +1517,19 @@
     display: grid;
     min-height: 0;
     flex: 1;
-    grid-template-columns: 320px minmax(0, 1fr);
+    grid-template-columns: 280px minmax(0, 1fr);
   }
   .skill-library {
     display: flex;
     min-height: 0;
     flex-direction: column;
     border-right: 1px solid var(--color-border);
-    background: var(--color-surface-1);
+    background: var(--color-surface-2);
   }
   .library-tools {
     display: grid;
     gap: 10px;
-    border-bottom: 1px solid var(--color-border);
+    border-bottom: 0;
     padding: 12px;
   }
   .search-field {
@@ -1600,9 +1537,9 @@
     min-height: 42px;
     align-items: center;
     gap: 9px;
-    border: 1px solid var(--color-border);
-    border-radius: 10px;
-    background: var(--color-surface-0);
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: var(--color-surface-1);
     padding: 0 12px;
     color: var(--color-text-muted);
   }
@@ -1613,6 +1550,9 @@
     font-size: 14px;
     color: var(--color-text-primary);
     outline: none;
+  }
+  .search-field input::placeholder {
+    color: var(--color-text-muted);
   }
   .filter-grid {
     display: grid;
@@ -1659,8 +1599,8 @@
     background: var(--color-surface-2);
   }
   .skill-row.selected {
-    border-color: var(--color-accent);
-    background: var(--color-surface-3);
+    border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-border));
+    background: var(--color-accent-transparent);
   }
   .skill-row-main {
     min-width: 0;
@@ -1707,6 +1647,7 @@
     min-width: 0;
     min-height: 0;
     flex-direction: column;
+    background: var(--color-surface-1);
   }
   .creator-workspace {
     display: flex;
@@ -1734,9 +1675,9 @@
     flex: 1;
   }
   .detail-title p {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    max-width: 80ch;
+    font-size: 13px;
+    line-height: 1.6;
   }
   .detail-tabs {
     display: flex;
@@ -1756,19 +1697,23 @@
     color: var(--color-text-primary);
   }
   .detail-scroll {
-    padding: 18px;
+    flex: 1;
+    padding: 24px 28px 36px;
   }
   .overview-grid {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 12px;
+    gap: 0 18px;
   }
   .info-card,
   .wide-card {
-    border: 1px solid var(--color-border);
-    border-radius: 14px;
-    background: var(--color-surface-1);
+    border-top: 1px solid color-mix(in srgb, var(--color-text-muted) 14%, transparent);
+    border-radius: 0;
+    background: transparent;
     padding: 16px;
+  }
+  .overview-grid .info-card:nth-child(-n + 4) {
+    border-top-color: transparent;
   }
   .info-card span {
     font-size: 12px;
@@ -1866,106 +1811,6 @@
     justify-content: flex-end;
     border-top: 1px solid var(--color-border);
   }
-  .editor-toolbar-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 12px;
-  }
-  .mode-switch {
-    display: flex;
-    border: 1px solid var(--color-border);
-    border-radius: 10px;
-    background: var(--color-surface-1);
-    padding: 3px;
-  }
-  .mode-switch button {
-    min-height: 40px;
-    border-radius: 7px;
-    padding: 0 13px;
-    font-size: 13px;
-    text-transform: capitalize;
-    color: var(--color-text-muted);
-  }
-  .mode-switch button.active {
-    background: var(--color-surface-3);
-    color: var(--color-text-primary);
-  }
-  .format-label {
-    font-size: 12px;
-    color: var(--color-text-muted);
-  }
-  .migration-note {
-    margin-bottom: 12px;
-    border: 1px solid var(--color-warning);
-    border-radius: 10px;
-    background: var(--color-warning-bg);
-    padding: 10px 12px;
-    font-size: 13px;
-    color: var(--color-warning);
-  }
-  .split-editor {
-    display: grid;
-    min-height: 430px;
-    grid-template-columns: 1fr 1fr;
-    border: 1px solid var(--color-border);
-    border-radius: 14px;
-    overflow: hidden;
-    background: var(--color-surface-1);
-  }
-  .visual-editor {
-    min-height: 430px;
-  }
-  .visual-editor :global(.skill-visual-editor) {
-    min-height: 430px;
-  }
-  .visual-editor.html-visual {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    border: 1px solid var(--color-border);
-    border-radius: 14px;
-    overflow: hidden;
-    background: var(--color-surface-1);
-  }
-  .visual-editor.html-visual :global(.skill-visual-editor) {
-    border: 0;
-    border-right: 1px solid var(--color-border);
-    border-radius: 0;
-  }
-  .source-editor {
-    min-height: 430px;
-    background: var(--color-surface-0);
-  }
-  .source-editor {
-    width: 100%;
-    overflow: hidden;
-    border: 1px solid var(--color-border);
-    border-radius: 14px;
-  }
-  .source-editor :global(.skill-code-editor) {
-    min-height: 430px;
-    border: 0;
-    border-radius: 0;
-  }
-  .split-editor .source-editor {
-    border: 0;
-    border-right: 1px solid var(--color-border);
-    border-radius: 0;
-  }
-  .preview-pane {
-    min-width: 0;
-    overflow: auto;
-    background: var(--color-surface-1);
-    padding: 18px;
-  }
-  .preview-pane iframe {
-    width: 100%;
-    min-height: 390px;
-    border: 0;
-    background: var(--color-surface-0);
-  }
-  .preview-pane pre,
   .comparison-grid pre {
     white-space: pre-wrap;
     font: 13px/1.6 var(--font-mono, monospace);
@@ -1995,30 +1840,31 @@
     font-size: 13px;
     font-weight: 650;
   }
-  .rendered-markdown {
-    font-size: 14px;
-    line-height: 1.65;
-  }
-  .rendered-markdown :global(h1),
-  .rendered-markdown :global(h2),
-  .rendered-markdown :global(h3) {
-    margin: 1em 0 0.5em;
-    font-weight: 700;
-  }
-  .rendered-markdown :global(p),
-  .rendered-markdown :global(ul),
-  .rendered-markdown :global(ol) {
-    margin: 0.65em 0;
-  }
   .core-editor {
     display: block;
-    margin-top: 14px;
+    margin-top: 16px;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    background: var(--color-surface-1);
+    padding: 14px 18px;
   }
-  .core-editor span {
-    display: block;
-    margin-bottom: 7px;
+  .core-editor summary {
+    cursor: pointer;
     font-size: 13px;
-    font-weight: 650;
+    font-weight: 600;
+    color: var(--color-text-primary);
+  }
+  .core-editor summary span {
+    margin-left: 8px;
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--color-text-muted);
+  }
+  .core-editor p {
+    margin: 12px 0;
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--color-text-secondary);
   }
   .core-editor textarea {
     min-height: 130px;
@@ -2182,7 +2028,7 @@
   .form-grid label {
     display: block;
   }
-  .form-grid label.full {
+  .form-grid .full {
     grid-column: 1/-1;
   }
   .form-grid label > span {
@@ -2290,15 +2136,6 @@
     .detail-actions {
       margin-left: auto;
     }
-    .visual-editor.html-visual,
-    .split-editor {
-      grid-template-columns: 1fr;
-    }
-    .visual-editor.html-visual :global(.skill-visual-editor),
-    .split-editor .source-editor {
-      border-right: 0;
-      border-bottom: 1px solid var(--color-border);
-    }
     .wide-card {
       align-items: flex-start;
       flex-direction: column;
@@ -2320,7 +2157,7 @@
     .comparison-grid {
       grid-template-columns: 1fr;
     }
-    .form-grid label.full {
+    .form-grid .full {
       grid-column: auto;
     }
     .comparison-grid > div + div {
@@ -2348,5 +2185,84 @@
     .detail-scroll {
       padding: 12px;
     }
+  }
+  .skills-shell { container: skills / inline-size; }
+  .workspace-title { display: flex; align-items: center; gap: 10px; }
+  .workspace-title :global(svg) { color: var(--color-accent); }
+  .library-caption { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 11px; color: var(--color-text-muted); }
+  .library-caption > span:first-child { color: var(--color-text-secondary); font-weight: 600; }
+  .skill-display-name { text-transform: capitalize; }
+  .revision-labels { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .revision-labels span { border-radius: 4px; background: var(--color-surface-2); padding: 2px 7px; font-size: 11px; color: var(--color-text-muted); }
+  .revision-labels .active-revision { color: var(--color-success); background: var(--color-success-bg); }
+  .revision-labels .unsaved-label { color: var(--color-warning); }
+  .editing-context { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+  .editing-context h3 { font-size: 14px; font-weight: 600; }
+  .editing-context p { margin-top: 4px; font-size: 13px; color: var(--color-text-muted); }
+  .editing-context > span { font-size: 12px; color: var(--color-text-muted); }
+  .source-details { margin-top: 16px; font-size: 12px; color: var(--color-text-muted); }
+  .source-details summary { cursor: pointer; }
+  .source-details p { margin-top: 8px; line-height: 1.7; }
+  .form-label { margin-bottom: 10px; font-size: 13px; font-weight: 600; }
+  .skills-header { border-bottom: 0; padding-bottom: 10px; }
+  .detail-heading, .detail-tabs { border-color: var(--color-border); }
+  .secondary-action { border-color: transparent; border-radius: 7px; background: var(--color-surface-2); }
+  .primary-action { border-color: transparent; }
+  .detail-actions button:disabled { border-color: transparent; background: transparent; opacity: 0.55; }
+  .filter-grid :global(button[aria-haspopup='listbox']) { border-color: var(--color-border); border-radius: 7px; background: var(--color-surface-1); }
+  .health-summary { border-bottom: 0; background: transparent; padding-inline: 0; }
+
+  /* The supporting tabs use rhythm and typography to group content. Keep the
+     main Instructions editor as the visual anchor instead of stacking cards
+     and outlines around every metric. */
+  .overview-grid {
+    gap: 18px;
+  }
+  .info-card,
+  .wide-card,
+  .conversion-preview,
+  .evidence-state {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    padding-inline: 0;
+  }
+  .wide-card {
+    margin-top: 20px;
+  }
+  .conversion-preview {
+    margin-top: 20px;
+  }
+  .conversion-warning,
+  .conversion-confirm {
+    border: 0;
+  }
+  .evidence-state {
+    padding-block: 4px 18px;
+  }
+  .evidence-state.ready {
+    background: transparent;
+  }
+  .evidence-state.blocked {
+    background: transparent;
+  }
+  .activate-action {
+    border-color: transparent;
+  }
+  @container skills (max-width: 820px) {
+    .workspace-body { display: block; }
+    .skill-library, .skill-detail { height: 100%; }
+    .hidden-on-narrow { display: none; }
+    .back-action { display: inline-flex; }
+    .detail-heading { align-items: flex-start; flex-wrap: wrap; }
+    .detail-actions { margin-left: auto; }
+  }
+  @container skills (max-width: 560px) {
+    .detail-heading { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 16px; }
+    .detail-title { width: 100%; }
+    .detail-actions { margin-left: 0; width: 100%; }
+    .detail-actions button { flex: 1; }
+    .detail-tabs { padding: 0 8px; }
+    .detail-tabs button { padding: 8px; font-size: 12px; }
   }
 </style>

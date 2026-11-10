@@ -110,6 +110,16 @@ describe('apiFetch body content type', () => {
     expect(headers.get('X-Koryphaios-Project')).toBe('/explicit-source');
   });
 
+  it('does not synthesize a raw project path beside an explicitly pinned session', async () => {
+    state.project = '/projects/项目/🚀';
+    await apiFetch('/api/git/chat', {
+      headers: { 'X-Koryphaios-Session': 'chat-a' },
+    });
+    const headers = new Headers(lastRequest().headers);
+    expect(headers.get('X-Koryphaios-Session')).toBe('chat-a');
+    expect(headers.get('X-Koryphaios-Project')).toBeNull();
+  });
+
   it('adds no content type when there is no body', async () => {
     await apiFetch('/api/sessions');
     expect(new Headers(lastRequest().headers).get('Content-Type')).toBeNull();

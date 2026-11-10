@@ -2,9 +2,26 @@
 import { describe, expect, it } from 'vitest';
 import {
   computeStreamingSegments,
+  computeStreamingSegmentsIncrementalFast,
   computeStreamingSegmentsIncremental,
   type StreamingSegmentsSnapshot,
 } from './streaming-segments';
+
+describe('streaming fast path', () => {
+  it('does not parse prose on every live update but still renders rich blocks', () => {
+    const before = computeStreamingSegmentsIncrementalFast(null, 'Hello **world**\n');
+    expect(before.segments[0]?.html).toBe('Hello **world**\n');
+
+    const after = computeStreamingSegmentsIncrementalFast(
+      before,
+      'Hello **world**\n```color\n#ff0000 Red\n```\nDone',
+    );
+    expect(after.segments[0]?.html).toBe('Hello **world**');
+    expect(after.segments[1]?.kind).toBe('block');
+    expect(after.segments[1]?.html).toContain('kory-color');
+    expect(after.segments[2]?.html).toBe('Done');
+  });
+});
 
 describe('computeStreamingSegments', () => {
   it('returns empty for empty text', () => {

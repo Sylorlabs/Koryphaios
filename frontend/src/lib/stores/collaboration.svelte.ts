@@ -213,13 +213,26 @@ export const collaborationStore = {
     const team = joinedSessions.find((session) => session.sessionId === activeJoinedSessionId);
     return team?.sharedFolders?.find((folder) => folder.id === activeJoinedFolderId) ?? null;
   },
-  updateJoinedMetadata(sessionId: string, metadata: { hostName?: string; sessionName?: string; sharedFolders?: unknown }) {
-    joinedSessions = joinedSessions.map((team) => team.sessionId !== sessionId ? team : {
-      ...team,
-      hostName: typeof metadata.hostName === 'string' ? metadata.hostName.slice(0, 80) || 'Host' : team.hostName || 'Host',
-      sessionName: typeof metadata.sessionName === 'string' ? metadata.sessionName.slice(0, 160) || team.sessionName : team.sessionName,
-      sharedFolders: parseSharedTeamFolders(metadata.sharedFolders),
-    });
+  updateJoinedMetadata(
+    sessionId: string,
+    metadata: { hostName?: string; sessionName?: string; sharedFolders?: unknown },
+  ) {
+    joinedSessions = joinedSessions.map((team) =>
+      team.sessionId !== sessionId
+        ? team
+        : {
+            ...team,
+            hostName:
+              typeof metadata.hostName === 'string'
+                ? metadata.hostName.slice(0, 80) || 'Host'
+                : team.hostName || 'Host',
+            sessionName:
+              typeof metadata.sessionName === 'string'
+                ? metadata.sessionName.slice(0, 160) || team.sessionName
+                : team.sessionName,
+            sharedFolders: parseSharedTeamFolders(metadata.sharedFolders),
+          },
+    );
     persistJoinedSessions(joinedSessions, activeJoinedSessionId);
   },
   get settingsRequest() {

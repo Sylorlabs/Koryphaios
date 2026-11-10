@@ -37,6 +37,8 @@ export const NATIVE_CLI_PROVIDERS = new Set([
   'cursor',
   'antigravity',
   'kimicode',
+  'omnirush',
+  'opencode',
 ]);
 
 /** Extract the provider id from a composer model selection ("claude:sonnet",

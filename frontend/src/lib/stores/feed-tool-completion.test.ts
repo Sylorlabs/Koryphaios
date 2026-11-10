@@ -129,4 +129,17 @@ describe('running tool cards clear on completion', () => {
     );
     expect(agentStore.getAgentThreadEntries(sid, AGENT)).toHaveLength(0);
   });
+
+  it('keeps a failed grep visible instead of hiding it in explored operations', () => {
+    const sid = 'failed-inspection';
+    state.activeSessionId = sid;
+    feedStore.activateSessionFeed(sid);
+    feedStore.accumulateFeedEntry(toolCallEntry('failed-grep', sid, 'grep'));
+    feedStore.completeToolCall('failed-grep', 'Missing pattern', {
+      callId: 'failed-grep', name: 'grep', output: 'Missing pattern', isError: true,
+    }, 200);
+    expect(feedStore.groupedFeed).toHaveLength(1);
+    expect(feedStore.groupedFeed[0].type).toBe('tool_result');
+    expect(feedStore.groupedFeed[0].metadata?.toolResult).toMatchObject({ isError: true });
+  });
 });

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FeedEntryLocal } from '$lib/types';
+import { OPEN_AGENT_THREAD_EVENT } from '$lib/utils/agent-thread-navigation';
 
 const mocks = vi.hoisted(() => ({ copyText: vi.fn() }));
 
@@ -82,10 +83,8 @@ function renderGroup(isExpanded: boolean, onToggleGroup = vi.fn()) {
   return {
     ...result,
     onToggleGroup,
-    // The clamped summary row. Queried directly rather than via getByTitle,
-    // which cannot match a multi-kilobyte multi-line attribute value.
     summary: () =>
-      result.container.querySelector<HTMLElement>('.agent-group-scroll span[title]'),
+      result.container.querySelector<HTMLElement>('.agent-group-scroll span.truncate'),
   };
 }
 
@@ -109,8 +108,8 @@ describe('sub-agent group rows never dump raw logs into the feed', () => {
     // Whitespace is collapsed so a log's newlines can't re-expand the row.
     expect(summary!.textContent).not.toContain('\n');
     expect(summary!.textContent!.endsWith('…')).toBe(true);
-    // The unclamped text is still reachable.
-    expect(summary!.getAttribute('title')).toBe(RAW_LOG);
+    // Full transcripts belong in the agent chat, never a viewport-sized tooltip.
+    expect(summary!.hasAttribute('title')).toBe(false);
     expect(summary!.className).toContain('truncate');
   });
 
@@ -121,6 +120,20 @@ describe('sub-agent group rows never dump raw logs into the feed', () => {
     expect(scroller).not.toBeNull();
     expect(scroller!.className).toContain('max-h-56');
     expect(scroller!.className).toContain('overflow-y-auto');
+  });
+
+  it.each([false, true])('opens the Critic chat with an explicit button (expanded=%s)', async (expanded) => {
+    const navigate = vi.fn();
+    window.addEventListener(OPEN_AGENT_THREAD_EVENT, navigate);
+    try {
+      const { onToggleGroup } = renderGroup(expanded);
+      await fireEvent.click(screen.getByRole('button', { name: 'Open Critic chat' }));
+      expect(navigate).toHaveBeenCalledTimes(1);
+      expect(navigate.mock.calls[0][0].detail).toEqual({ sessionId: 'session-1', agentId: 'worker-1' });
+      expect(onToggleGroup).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener(OPEN_AGENT_THREAD_EVENT, navigate);
+    }
   });
 
   it('renders no sub-agent rows at all while collapsed, and toggles on click', async () => {

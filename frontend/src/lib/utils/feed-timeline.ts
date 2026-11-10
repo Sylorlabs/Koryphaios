@@ -76,16 +76,27 @@ export function omitArchivedToolDuplicates(
   });
 }
 
+/** Whether an entry is a transient analyzing thought that should never become permanent. */
+export function isAnalyzingThought(entry: FeedEntryLocal): boolean {
+  return (
+    entry.type === 'thought' &&
+    ((entry.metadata as { phase?: string } | undefined)?.phase === 'analyzing' ||
+      entry.text === 'Preparing provider request...')
+  );
+}
+
 /** Keep durable operational events while a message-history refresh replaces
  * persisted chat rows. A completed live row may already be tagged with its
- * persisted message id, so canonical sequence is the stronger discriminator. */
+ * persisted message id, so canonical sequence is the stronger discriminator.
+ * Ephemeral analyzing thoughts must never be preserved across reload. */
 export function operationalEntriesForReload(
   entries: ReadonlyArray<FeedEntryLocal>,
 ): FeedEntryLocal[] {
   return entries.filter(
     (entry) =>
-      Number.isSafeInteger(entry.metadata?.sequenceStart) ||
-      typeof entry.metadata?.messageId !== 'string',
+      !isAnalyzingThought(entry) &&
+      (Number.isSafeInteger(entry.metadata?.sequenceStart) ||
+        typeof entry.metadata?.messageId !== 'string'),
   );
 }
 
@@ -96,12 +107,7 @@ export function withoutAnalyzingThoughts(
   trackedId: string | null,
 ): FeedEntryLocal[] {
   return entries.filter(
-    (entry) =>
-      entry.id !== trackedId &&
-      !(
-        entry.type === 'thought' &&
-        (entry.metadata as { phase?: string } | undefined)?.phase === 'analyzing'
-      ),
+    (entry) => entry.id !== trackedId && !isAnalyzingThought(entry),
   );
 }
 

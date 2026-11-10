@@ -111,7 +111,7 @@
         </section>
       {:else}
         <section
-          class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+          class="settings-panel rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
         >
           <SettingsSwitch
             checked={config.enabled}
@@ -129,7 +129,7 @@
         </section>
 
         <section
-          class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+          class="settings-panel space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
         >
           <div class="flex items-start gap-3">
             <span
@@ -162,6 +162,7 @@
                 <div class="mt-auto pt-3">
                   <NumberStepper
                     compact
+                    quiet
                     value={centsToDollars(config[control.key])}
                     min={0}
                     max={10_000}
@@ -183,7 +184,7 @@
         </section>
 
         <section
-          class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+          class="settings-panel space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
         >
           <div class="flex items-start gap-3">
             <span
@@ -233,7 +234,7 @@
         </section>
 
         <section
-          class="space-y-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+          class="settings-panel space-y-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
         >
           <div class="flex items-start gap-3">
             <PauseCircle size={18} class="mt-0.5 shrink-0 text-[var(--color-text-secondary)]" />

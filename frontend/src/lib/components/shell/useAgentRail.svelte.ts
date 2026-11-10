@@ -5,6 +5,8 @@ import { toastStore } from '$lib/stores/toast.svelte';
 import { ACTIVE_AGENT_STATUSES, TERMINAL_AGENT_STATUSES } from '$lib/stores/run-state-core';
 import { apiUrl } from '$lib/utils/api-url';
 import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
+import { onMount } from 'svelte';
+import { OPEN_AGENT_THREAD_EVENT, type AgentThreadNavigation } from '$lib/utils/agent-thread-navigation';
 
 export function useAgentRail() {
   let selectedAgentId = $state('');
@@ -15,6 +17,7 @@ export function useAgentRail() {
       .filter(
         (a) =>
           a.sessionId === sessionStore.activeSessionId &&
+          !a.closed &&
           a.identity.id !== 'kory-manager' &&
           a.identity.role !== 'manager',
       )
@@ -85,11 +88,24 @@ export function useAgentRail() {
     }
   }
 
+  onMount(() => {
+    const openThread = (event: Event) => {
+      const detail = (event as CustomEvent<AgentThreadNavigation>).detail;
+      if (detail?.sessionId !== sessionStore.activeSessionId) return;
+      const agent = wsStore.agents.get(detail.agentId);
+      if (agent?.sessionId !== detail.sessionId) return;
+      agentStore.reopenAgentCard(detail.agentId);
+      selectAgent(detail.agentId);
+    };
+    window.addEventListener(OPEN_AGENT_THREAD_EVENT, openThread);
+    return () => window.removeEventListener(OPEN_AGENT_THREAD_EVENT, openThread);
+  });
+
   /**
    * Close a sub-agent card. A still-running worker is cancelled on the backend
    * first so the process actually stops; a finished one is only a view concern
-   * and closes locally. Either way the card is removed from the rail and, if it
-   * was the open transcript, the feed returns to the manager.
+   * and closes locally. The rail card is hidden while the identity and thread
+   * remain available from the manager's delegation card.
    *
    * A failed cancel keeps the card and reports the error — dropping a card
    * whose worker is still running would hide live work from the user.
@@ -122,9 +138,18 @@ export function useAgentRail() {
     }
 
     wsStore.markAgentStopped(agentId);
-    agentStore.removeAgent(agentId);
+    agentStore.closeAgentCard(agentId);
     if (selectedAgentId === agentId) clearSelection();
     closingAgentIds = new Set([...closingAgentIds].filter((id) => id !== agentId));
+  }
+
+  async function closeAllAgents(): Promise<void> {
+    // Take a snapshot so closing one agent cannot change the collection while
+    // the clear-all operation is walking it. Sequential calls also keep the
+    // stop requests predictable for running workers.
+    for (const agent of [...sessionAgentChats]) {
+      await closeAgent(agent.identity.id);
+    }
   }
 
   return {
@@ -155,6 +180,7 @@ export function useAgentRail() {
     clearSelection,
     selectAgent,
     closeAgent,
+    closeAllAgents,
   };
 }
 

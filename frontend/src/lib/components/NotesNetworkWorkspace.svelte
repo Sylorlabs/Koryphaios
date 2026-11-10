@@ -84,7 +84,7 @@
 </script>
 
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { untrack, onMount } from 'svelte';
   import { apiFetch } from '$lib/api.svelte';
   import { apiUrl } from '$lib/utils/api-url';
   import KorySelect from './KorySelect.svelte';
@@ -97,6 +97,9 @@
   }: { projectPath: string | null; onOpenNote: (id: string) => void } = $props();
   let relationships = $state<NetworkRelationship[]>([]);
   let removal = $state<NetworkRelationship | null>(null);
+  let refreshingRelationship = $state<NetworkRelationship | null>(null);
+  let relationshipOffset = $state(0);
+  let relationshipsMayHaveMore = $state(false);
   let notes = $state<PickerNote[]>([]);
   let notesTruncated = $state(false);
   let search = $state('');
@@ -145,7 +148,16 @@
   );
   const source = $derived(notes.find((note) => note.id === fromId));
   const target = $derived(notes.find((note) => note.id === toId));
-  const canPropose = $derived(Boolean(source && target && fromId !== toId && evidence.trim()));
+  const canPropose = $derived(
+    Boolean(
+      source &&
+      target &&
+      fromId !== toId &&
+      evidence.trim() &&
+      (!refreshingRelationship ||
+        (refreshingRelationship.fromId === fromId && refreshingRelationship.toId === toId)),
+    ),
+  );
   const visibleRelationships = $derived(
     relationships.filter((row) => !statusFilter || row.status === statusFilter),
   );
@@ -186,7 +198,7 @@
     body?: unknown,
   ): Promise<Envelope<T>> {
     if (!op.scope) throw new Error('Choose a project first.');
-    const response = await apiFetch(apiUrl(`/notes${path}`), {
+    const response = await apiFetch(apiUrl(`/api/notes${path}`), {
       method,
       signal: op.controller.signal,
       headers: {
@@ -223,10 +235,13 @@
     const op = begin('relationships');
     try {
       const result = await request<NetworkRelationship[]>(
-        `/relationships${statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : ''}`,
+        `/relationships${relationshipOffset || statusFilter ? `?${relationshipOffset ? `limit=100&offset=${relationshipOffset}` : ''}${statusFilter ? `${relationshipOffset ? '&' : ''}status=${encodeURIComponent(statusFilter)}` : ''}` : ''}`,
         op,
       );
-      if (op.current()) relationships = result.data;
+      if (op.current()) {
+        relationships = result.data;
+        relationshipsMayHaveMore = result.data.length === 100;
+      }
     } catch (error) {
       failed('relationships', op, error);
     } finally {
@@ -266,16 +281,24 @@
     if (!canPropose || !source || !target || busy.mutation) return;
     const op = begin('mutation');
     try {
-      await request('/relationships', op, 'POST', {
-        fromId,
-        toId,
-        type: relationshipType,
-        evidence: evidence.trim(),
-        expectedSourceRevision: source.revision,
-        expectedTargetRevision: target.revision,
-      });
+      const refreshing = refreshingRelationship;
+      await request(
+        refreshing
+          ? `/relationships/${encodeURIComponent(fromId)}/${encodeURIComponent(toId)}/refresh`
+          : '/relationships',
+        op,
+        'POST',
+        {
+          ...(refreshing ? { expectedRevision: refreshing.revision } : { fromId, toId }),
+          type: relationshipType,
+          evidence: evidence.trim(),
+          expectedSourceRevision: source.revision,
+          expectedTargetRevision: target.revision,
+        },
+      );
       if (op.current()) {
         evidence = '';
+        refreshingRelationship = null;
         void loadRelationships();
       }
     } catch (error) {
@@ -284,6 +307,39 @@
       if (op.current()) busy.mutation = false;
     }
   }
+  async function prepareEvidenceRefresh(row: NetworkRelationship) {
+    const op = begin('notes');
+    try {
+      const [from, to] = await Promise.all([
+        request<PickerNote>(`/${encodeURIComponent(row.fromId)}`, op),
+        request<PickerNote>(`/${encodeURIComponent(row.toId)}`, op),
+      ]);
+      if (!op.current()) return;
+      notes = [
+        ...notes.filter((note) => note.id !== row.fromId && note.id !== row.toId),
+        from.data,
+        to.data,
+      ];
+      fromId = row.fromId;
+      toId = row.toId;
+      relationshipType = row.type;
+      evidence = row.evidence;
+      refreshingRelationship = row;
+    } catch (error) {
+      failed('notes', op, error);
+    } finally {
+      if (op.current()) busy.notes = false;
+    }
+  }
+
+  onMount(() => {
+    const changed = () => {
+      if (!busy.mutation) void loadRelationships();
+    };
+    window.addEventListener('kory-notes-updated', changed);
+    return () => window.removeEventListener('kory-notes-updated', changed);
+  });
+
   async function review(row: NetworkRelationship, status: 'accepted' | 'rejected') {
     if (busy.mutation || row.status !== 'proposed' || (status === 'accepted' && row.stale)) return;
     const op = begin('mutation');
@@ -390,6 +446,9 @@
       requests.clear();
       relationships = [];
       removal = null;
+      refreshingRelationship = null;
+      relationshipOffset = 0;
+      relationshipsMayHaveMore = false;
       notes = [];
       activation = null;
       indexStatus = null;
@@ -434,6 +493,7 @@
           options={statusOptions}
           onchange={(value) => {
             statusFilter = value;
+            relationshipOffset = 0;
             void loadRelationships();
           }}
           label="Relationship status"
@@ -442,11 +502,12 @@
       </div>
       <p>
         Only accepted relationships participate in retrieval. Document links remain references, not
-        typed claims. Acceptance is a human review action, not a similarity score.
+        typed claims. Acceptance follows the dedicated review permission, not a similarity score;
+        critics can challenge claims without modifying the network.
       </p>
       <p class="muted">
-        This is a bounded relationship list, not an exhaustive network inventory. Refresh to see
-        external changes.
+        Showing up to 100 relationships per page. Agent changes refresh this list automatically.
+        Document references and visual Canvas connectors remain separate from evidence claims.
       </p>
       {#if busy.relationships}<p role="status">Loading relationships…</p>{/if}
       <ul class="relationships">
@@ -469,11 +530,17 @@
                   .join(' · ')}
               </p>{/if}
             {#if row.stale}<p class="warning">
-                Stale evidence — an endpoint changed. You can reject a pending proposal. To propose
-                current evidence, explicitly remove the existing relationship and refresh note
-                choices first. Acceptance stays blocked while evidence is stale.
+                Stale evidence — an endpoint changed. Read both notes, then refresh the evidence as
+                a new proposal. Acceptance stays blocked until evidence matches current revisions.
               </p>{/if}
             <blockquote>{row.evidence || 'No evidence recorded.'}</blockquote>
+            <button
+              type="button"
+              disabled={busy.mutation || busy.notes}
+              onclick={() => void prepareEvidenceRefresh(row)}
+              aria-label={`Refresh evidence for ${row.fromTitle} and ${row.toTitle}`}
+              >Refresh evidence</button
+            >
             {#if row.status === 'proposed'}
               <div class="actions">
                 <button
@@ -523,8 +590,42 @@
           </li>
         {:else}<li>No relationships in this view.</li>{/each}
       </ul>
-      <details>
-        <summary>Propose a relationship</summary>
+      <div class="toolbar" aria-label="Relationship pages">
+        <button
+          type="button"
+          disabled={relationshipOffset === 0 || busy.relationships}
+          onclick={() => {
+            relationshipOffset = Math.max(0, relationshipOffset - 100);
+            void loadRelationships();
+          }}>Previous relationships</button
+        >
+        <span class="muted">Page {Math.floor(relationshipOffset / 100) + 1}</span>
+        <button
+          type="button"
+          disabled={!relationshipsMayHaveMore || busy.relationships}
+          onclick={() => {
+            relationshipOffset += 100;
+            void loadRelationships();
+          }}>Next relationships</button
+        >
+      </div>
+      <details open={Boolean(refreshingRelationship)}>
+        <summary
+          >{refreshingRelationship
+            ? 'Refresh evidence as a new proposal'
+            : 'Propose a relationship'}</summary
+        >
+        {#if refreshingRelationship}<p class="muted">
+            Read both updated notes before submitting. The existing decision is retained in history;
+            refreshed evidence must be reviewed again.
+          </p>
+          <button
+            type="button"
+            onclick={() => {
+              refreshingRelationship = null;
+              evidence = '';
+            }}>Cancel evidence refresh</button
+          >{/if}
         <form
           onsubmit={(event) => {
             event.preventDefault();
@@ -554,7 +655,7 @@
             onchange={(value) => (fromId = value)}
             label="Source note"
             placeholder="Choose source note"
-            disabled={busy.notes || busy.mutation}
+            disabled={busy.notes || busy.mutation || Boolean(refreshingRelationship)}
           />
           <KorySelect
             value={relationshipType}
@@ -568,7 +669,7 @@
             onchange={(value) => (toId = value)}
             label="Target note"
             placeholder="Choose target note"
-            disabled={busy.notes || busy.mutation}
+            disabled={busy.notes || busy.mutation || Boolean(refreshingRelationship)}
           />
         </div>
         <label
@@ -582,7 +683,8 @@
         <button
           type="button"
           onclick={propose}
-          disabled={!canPropose || busy.mutation || busy.notes}>Create proposal</button
+          disabled={!canPropose || busy.mutation || busy.notes}
+          >{refreshingRelationship ? 'Save refreshed proposal' : 'Create proposal'}</button
         >
       </details>
     </section>

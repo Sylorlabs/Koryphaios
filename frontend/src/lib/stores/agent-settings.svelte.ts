@@ -9,7 +9,7 @@
 import { apiUrl } from '$lib/utils/api-url';
 import { toastStore } from './toast.svelte';
 import { apiFetch } from '$lib/api.svelte';
-import { defaultComputerUseSettings, type ComputerUseSettings } from '@koryphaios/shared';
+import { defaultComputerUseSettings, resolveCriticMode, type ComputerUseSettings } from '@koryphaios/shared';
 
 // ============================================================================
 // Types
@@ -41,12 +41,13 @@ export const DEFAULT_SANDBOX_SETTINGS: SandboxSettings = {
 };
 
 export interface AgentSettings {
+  criticMode: import('@koryphaios/shared').CriticMode;
   /** Host-issued concurrency token; never persisted as authorization. */
   computerUseRevision?: string;
   ruleEnforcementLevel: 'strict' | 'moderate' | 'lenient';
   agentExecutionMode: 'auto' | 'single' | 'multi';
   /** Default approval behavior exposed in the composer permission picker. */
-  permissionMode: 'yolo' | 'guarded' | 'edits' | 'ask' | 'plan' | 'custom';
+  permissionMode: 'yolo' | 'guarded' | 'edits' | 'ask' | 'custom';
   preferencesEnabled: boolean;
   criticGateEnabled: boolean;
   gateStrictness: 'strict' | 'advisory' | 'off';
@@ -375,6 +376,7 @@ export interface SkillResolutionPreview {
 // ============================================================================
 
 export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
+  criticMode: 'auto',
   ruleEnforcementLevel: 'strict',
   agentExecutionMode: 'auto',
   permissionMode: 'guarded',
@@ -489,7 +491,8 @@ function createAgentSettingsStore() {
     // Keep controls stationary and responsive while the write happens. The
     // server response remains authoritative, but saving no longer blanks the
     // entire panel or waits before moving a switch/stepper.
-    settings = { ...settings, ...newSettings };
+    const criticMode = resolveCriticMode(newSettings, resolveCriticMode(settings));
+    settings = { ...settings, ...newSettings, criticMode, criticGateEnabled: criticMode !== 'off' };
     try {
       const res = await apiFetch(apiUrl('/api/agent/settings'), {
         method: 'PUT',
@@ -1009,6 +1012,15 @@ function createAgentSettingsStore() {
   // Bulk Operations
   // ========================================================================
 
+  async function loadSettingsAndPreferences(): Promise<void> {
+    isLoading = true;
+    try {
+      await Promise.all([loadSettings(), loadPreferences()]);
+    } finally {
+      isLoading = false;
+    }
+  }
+
   async function loadAll(): Promise<void> {
     isLoading = true;
     try {
@@ -1121,6 +1133,7 @@ function createAgentSettingsStore() {
     runCriticReview,
 
     // Bulk
+    loadSettingsAndPreferences,
     loadAll,
     setActiveTab,
   };

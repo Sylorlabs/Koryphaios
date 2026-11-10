@@ -22,6 +22,10 @@
   import SlidersHorizontal from 'lucide-svelte/icons/sliders-horizontal';
   import Sparkles from 'lucide-svelte/icons/sparkles';
   import X from 'lucide-svelte/icons/x';
+  import ArrowLeft from 'lucide-svelte/icons/arrow-left';
+  import KnowledgeScope from './KnowledgeScope.svelte';
+  import DocumentEditor from './DocumentEditor.svelte';
+  import '$lib/styles/document.css';
   import {
     memoryStore,
     type MemoryFile,
@@ -44,6 +48,7 @@
     isCurrentDraftVersion,
     utf8DraftBytes,
   } from '$lib/utils/draft-save';
+  import { formatShortcut } from '$lib/utils/platform';
 
   type BuiltInId = 'universal' | 'project' | 'session' | 'rules';
   type CustomDocument = ProjectMemoryDocument;
@@ -67,7 +72,7 @@
     {
       id: 'project',
       title: 'Project memory',
-      description: 'Shared memory for this workspace',
+      description: 'Durable project facts & decisions',
       icon: FolderOpen,
     },
     {
@@ -79,13 +84,13 @@
     {
       id: 'session',
       title: 'Session memory',
-      description: 'Memory for this conversation',
+      description: 'Continuity for the current chat',
       icon: MessageSquare,
     },
     {
       id: 'universal',
       title: 'Universal memory',
-      description: 'Memory shared across workspaces',
+      description: 'Preferences across your projects',
       icon: Brain,
     },
   ];
@@ -103,6 +108,8 @@
   let content = $state('');
   let savedContent = $state('');
   let editMode = $state(false);
+  let editorMode = $state<'visual' | 'source' | 'split'>('visual');
+  let showDocumentOnNarrow = $state(false);
   let loadingDocument = $state(false);
   let query = $state('');
   let showPolicy = $state(false);
@@ -159,6 +166,42 @@
   let activeError = $derived(memoryStore.errorFor(activeSource));
   let documentsError = $derived(memoryStore.errorFor('documents'));
   let settingsError = $derived(memoryStore.errorFor('settings'));
+  const isRules = $derived(
+    selectedCustom?.kind === 'rules' || (!selectedCustom && selectedBuiltIn === 'rules'),
+  );
+  const projectScope = $derived(
+    memoryStore.storageScope
+      ? `${memoryStore.storageScope.kind === 'workspace' ? 'Workspace' : 'Project'} · ${memoryStore.storageScope.name}`
+      : memoryStore.isLoading
+        ? 'Resolving memory scope…'
+        : `Project / workspace · ${projectDisplayName(projectStore.currentPath) || 'Choose a project'}`,
+  );
+  const currentScope = $derived(
+    !selectedCustom && selectedBuiltIn === 'universal'
+      ? 'Personal'
+      : !selectedCustom && selectedBuiltIn === 'session'
+        ? 'Session'
+        : memoryStore.storageScope?.kind === 'workspace'
+          ? 'Workspace'
+          : 'Project',
+  );
+
+  function sourceTitle(id: BuiltInId): string {
+    if (memoryStore.storageScope?.kind === 'workspace' && (id === 'project' || id === 'rules')) {
+      return id === 'project' ? 'Workspace memory' : 'Workspace rules';
+    }
+    return getBuiltInDefinition(id).title;
+  }
+
+  function scopeExplanation(): string {
+    if (!selectedCustom && selectedBuiltIn === 'universal')
+      return 'Universal memory stores your personal facts and preferences across projects on this computer. It is separate from each project’s Notes collection and from personal Skills.';
+    if (!selectedCustom && selectedBuiltIn === 'session')
+      return 'Session memory belongs to the current conversation. It preserves continuity and compacted summaries, rather than becoming a document in the project’s Notes collection.';
+    return memoryStore.storageScope?.kind === 'workspace'
+      ? `This memory is stored at the ${memoryStore.storageScope.name} workspace root and shared by projects that inherit that root. Notes remain scoped to the selected project folder. Skills are explicitly personal or project-specific.`
+      : 'Project memory belongs to the selected project. Projects that inherit a registered workspace memory root share that root; the scope label shows the resolved location. Notes remain a separate project collection, and Skills are reusable procedures.';
+  }
 
   function getBuiltInFile(id: BuiltInId): MemoryFile | null {
     if (id === 'universal') return memoryStore.universal;
@@ -176,16 +219,14 @@
   }
 
   function currentTitle(): string {
-    return (
-      selectedCustom?.name.replace(/\.md$/i, '') ?? getBuiltInDefinition(selectedBuiltIn).title
-    );
+    return selectedCustom?.name.replace(/\.md$/i, '') ?? sourceTitle(selectedBuiltIn);
   }
 
   function currentDescription(): string {
     return selectedCustom
       ? selectedCustom.kind === 'memory'
-        ? 'Project memory document'
-        : 'Project rules document'
+        ? 'Additional memory document'
+        : 'Additional rules document'
       : getBuiltInDefinition(selectedBuiltIn).description;
   }
 
@@ -480,8 +521,7 @@
     try {
       const response = await apiFetch(apiUrl('/api/memory/external/providers'));
       const result = await response.json();
-      externalMemoryProviders =
-        response.ok && Array.isArray(result.data) ? result.data : [];
+      externalMemoryProviders = response.ok && Array.isArray(result.data) ? result.data : [];
     } catch {
       externalMemoryProviders = [];
     }
@@ -629,14 +669,12 @@
     return `${(value / (1024 * 1024)).toFixed(2)} MiB`;
   }
 
-  function handleEditorKeydown(event: KeyboardEvent) {
-    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+  function handleWindowKeydown(event: KeyboardEvent) {
+    if (editMode && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
       event.preventDefault();
       void saveCurrentDocument(false);
+      return;
     }
-  }
-
-  function handleWindowKeydown(event: KeyboardEvent) {
     if (event.key !== 'Escape') return;
     if (showNewDocument) {
       event.preventDefault();
@@ -792,17 +830,17 @@
   });
 </script>
 
-<div class="flex h-full min-h-0 min-w-0 flex-col bg-[var(--color-surface-0)]">
+<div class="memory-shell flex h-full min-h-0 min-w-0 flex-col bg-[var(--color-surface-0)]">
   <header
-    class="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border)] px-5 py-3.5"
+    class="memory-header flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border)] px-6 py-4"
   >
     <div>
       <div class="flex items-center gap-2">
-        <Brain size={18} class="text-[var(--color-accent)]" />
-        <h3 class="text-base font-semibold text-[var(--color-text-primary)]">Memory</h3>
+        <Brain size={20} class="text-[var(--color-accent)]" />
+        <h3 class="text-xl font-semibold text-[var(--color-text-primary)]">Memory</h3>
       </div>
       <p class="mt-0.5 text-sm text-[var(--color-text-muted)]">
-        Your memories, rules, and working context in one place.
+        Keep the facts, preferences, and decisions worth carrying forward.
       </p>
     </div>
     <div class="flex items-center gap-2">
@@ -818,14 +856,14 @@
         bind:this={policyTriggerEl}
         type="button"
         class:!bg-[var(--color-surface-3)]={showPolicy}
-        class="inline-flex items-center gap-2 rounded-lg border border-[var(--color-border)] px-3 py-2 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-2)]"
+        class="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-2)]"
         onclick={() => {
           showPolicy = !showPolicy;
           if (showPolicy) void tick().then(() => policyCloseEl?.focus());
         }}
         aria-expanded={showPolicy}
       >
-        <SlidersHorizontal size={14} /> Context policy
+        <SlidersHorizontal size={14} /> Context settings
       </button>
       <button
         bind:this={newDocumentTriggerEl}
@@ -841,9 +879,14 @@
     </div>
   </header>
 
-  <div class="flex min-h-0 flex-1">
+  <KnowledgeScope scope={currentScope} description={scopeExplanation()} />
+
+  <div
+    class="memory-layout relative flex min-h-0 flex-1"
+    class:show-document={showDocumentOnNarrow}
+  >
     <aside
-      class="flex w-64 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface-1)]"
+      class="memory-library flex shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface-1)]"
       aria-label="Memory sources"
     >
       <div class="p-3">
@@ -866,7 +909,7 @@
         <p
           class="px-2 pb-2 pt-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-text-muted)]"
         >
-          Memory sources
+          Remembered context
         </p>
         {#if documentsError}
           <div
@@ -883,16 +926,22 @@
             >
           </div>
         {/if}
-        {#each builtInDocuments.filter(matches) as document (document.id)}
+        {#each builtInDocuments
+          .filter((document) => document.id !== 'rules')
+          .filter(matches) as document (document.id)}
           {@const Icon = document.icon}
           <button
             type="button"
             class="mb-1 flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2.5 text-left transition-colors {isSelectedBuiltIn(
               document.id,
             )
-              ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)]'
+              ? 'memory-selected text-[var(--color-text-primary)]'
               : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)]'}"
-            onclick={() => void applyBuiltInDocument(document.id)}
+            aria-current={isSelectedBuiltIn(document.id) ? 'page' : undefined}
+            onclick={() => {
+              showDocumentOnNarrow = true;
+              void applyBuiltInDocument(document.id);
+            }}
           >
             <Icon
               size={16}
@@ -901,8 +950,8 @@
                 : 'text-[var(--color-text-muted)]'}"
             />
             <span class="min-w-0 flex-1"
-              ><span class="block truncate text-sm font-medium">{document.title}</span><span
-                class="mt-0.5 block truncate text-xs text-[var(--color-text-muted)]"
+              ><span class="block truncate text-sm font-medium">{sourceTitle(document.id)}</span
+              ><span class="mt-0.5 block truncate text-xs text-[var(--color-text-muted)]"
                 >{document.description}</span
               ></span
             >
@@ -929,7 +978,10 @@
                   document.path
                     ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)]'
                     : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)]'}"
-                  onclick={() => void selectCustomDocument(document)}
+                  onclick={() => {
+                    showDocumentOnNarrow = true;
+                    void selectCustomDocument(document);
+                  }}
                 >
                   <FileText size={15} class="shrink-0 text-[var(--color-text-muted)]" /><span
                     class="truncate">{document.name.replace(/\.md$/i, '')}</span
@@ -938,7 +990,7 @@
               {/each}
             {:else if !query}
               <p class="px-2.5 py-1 text-xs text-[var(--color-text-muted)]">
-                No extra memory documents
+                Add a document for a focused topic.
               </p>
             {/if}
           {/if}
@@ -951,10 +1003,35 @@
             onclick={() => (rulesGroupOpen = !rulesGroupOpen)}
             aria-expanded={rulesGroupOpen}
           >
-            {#if rulesGroupOpen}<ChevronDown size={14} />{:else}<ChevronRight size={14} />{/if} Rule documents
-            <span class="ml-auto normal-case tracking-normal">{customRuleDocuments.length}</span>
+            {#if rulesGroupOpen}<ChevronDown size={14} />{:else}<ChevronRight size={14} />{/if} Rules
+            &amp; conventions
+            <span class="ml-auto normal-case tracking-normal">{customRuleDocuments.length + 1}</span
+            >
           </button>
           {#if rulesGroupOpen}
+            {#if matches(getBuiltInDefinition('rules'))}
+              <button
+                type="button"
+                class="mb-1 flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2.5 text-left transition-colors {isSelectedBuiltIn(
+                  'rules',
+                )
+                  ? 'memory-selected text-[var(--color-text-primary)]'
+                  : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)]'}"
+                aria-current={isSelectedBuiltIn('rules') ? 'page' : undefined}
+                onclick={() => {
+                  showDocumentOnNarrow = true;
+                  void applyBuiltInDocument('rules');
+                }}
+              >
+                <BookOpen size={16} class="mt-0.5 shrink-0 text-[var(--color-text-muted)]" />
+                <span
+                  ><span class="block text-sm font-medium">{sourceTitle('rules')}</span><span
+                    class="mt-0.5 block text-xs text-[var(--color-text-muted)]"
+                    >Standing instructions, not task playbooks</span
+                  ></span
+                >
+              </button>
+            {/if}
             {#if customRuleDocuments.filter(matches).length}
               {#each customRuleDocuments.filter(matches) as document (document.path)}
                 <button
@@ -963,7 +1040,10 @@
                   document.path
                     ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)]'
                     : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)]'}"
-                  onclick={() => void selectCustomDocument(document)}
+                  onclick={() => {
+                    showDocumentOnNarrow = true;
+                    void selectCustomDocument(document);
+                  }}
                 >
                   <FileText size={15} class="shrink-0 text-[var(--color-text-muted)]" /><span
                     class="truncate">{document.name.replace(/\.md$/i, '')}</span
@@ -978,9 +1058,12 @@
           {/if}
         </div>
       </nav>
+      <div class="px-4 py-3 text-xs leading-5 text-[var(--color-text-muted)]">
+        Keep remembered facts concise and focused.
+      </div>
     </aside>
 
-    <div class="flex min-w-0 flex-1 flex-col">
+    <div class="memory-detail flex min-h-0 min-w-0 flex-1 flex-col">
       {#if showNewDocument}
         <div class="border-b border-[var(--color-border)] bg-[var(--color-surface-1)] px-5 py-3">
           <div class="mx-auto flex max-w-4xl flex-wrap items-center gap-2">
@@ -1031,23 +1114,26 @@
       {/if}
 
       <div
-        class="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border)] px-5 py-3"
+        class="memory-document-heading flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border)] px-6 py-4"
       >
         <div class="min-w-0">
           <div class="flex items-center gap-2">
-            <h4 class="truncate text-base font-semibold text-[var(--color-text-primary)]">
+            <button
+              type="button"
+              class="memory-back rounded-lg p-1.5 text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)]"
+              aria-label="Back to memory sources"
+              onclick={() => (showDocumentOnNarrow = false)}><ArrowLeft size={16} /></button
+            >
+            <h4 class="truncate text-lg font-semibold text-[var(--color-text-primary)]">
               {currentTitle()}
             </h4>
-            {#if selectedCustom}<span
-                class="rounded-md bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-text-muted)]"
-                >{selectedCustom.kind}</span
-              >{/if}
+            <span
+              class="rounded-md bg-[var(--color-surface-2)] px-2 py-0.5 text-[11px] font-medium text-[var(--color-text-secondary)]"
+              >{isRules ? 'Instructions' : 'Context'}</span
+            >
           </div>
           <p class="mt-0.5 truncate text-xs text-[var(--color-text-muted)]">
-            {currentDescription()} · {formatDate(currentFile()?.lastModified)} · {formatBytes(
-              contentBytes,
-            )}{#if memoryStore.settings?.documentSizeLimitEnabled}
-              of {formatBytes(byteLimit)}{/if}
+            {currentDescription()} · {formatDate(currentFile()?.lastModified)}
           </p>
         </div>
         <div class="flex shrink-0 items-center gap-2" aria-live="polite">
@@ -1189,10 +1275,12 @@
           <div class="max-w-sm text-center">
             <Sparkles size={28} class="mx-auto mb-3 text-[var(--color-accent)]" />
             <h5 class="text-base font-semibold text-[var(--color-text-primary)]">
-              Start this memory
+              {isRules ? 'Set your conventions' : 'Start with what matters'}
             </h5>
             <p class="mt-2 text-sm leading-6 text-[var(--color-text-muted)]">
-              Create a guided Markdown file, then make it your own.
+              {isRules
+                ? 'Write standing instructions for this project. Use Skills for procedures that apply to specific tasks.'
+                : 'Capture a few durable facts or preferences. Save long reports and research in Notes.'}
             </p>
             <button
               type="button"
@@ -1204,30 +1292,37 @@
           </div>
         </div>
       {:else if editMode}
-        <textarea
-          bind:value={content}
-          oninput={scheduleAutosave}
-          onkeydown={handleEditorKeydown}
-          class="min-h-0 flex-1 resize-none bg-[var(--color-surface-0)] px-6 py-5 font-mono text-sm leading-6 text-[var(--color-text-primary)] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/45"
-          spellcheck="true"
-          aria-label={`Edit ${currentTitle()}`}
-          aria-describedby="memory-save-hint"
-        ></textarea>
+        <div class="memory-reading-area min-h-0 flex-1 overflow-y-auto">
+          <div class="memory-editor-page">
+            <DocumentEditor
+              value={content}
+              bind:mode={editorMode}
+              label={`Edit ${currentTitle()}`}
+              sourceLabel={`Source of ${currentTitle()}`}
+              onchange={(value) => {
+                content = value;
+                scheduleAutosave();
+              }}
+            />
+          </div>
+        </div>
         <div
           id="memory-save-hint"
           class="flex shrink-0 items-center justify-between border-t border-[var(--color-border)] bg-[var(--color-surface-1)] px-5 py-2 text-[11px] text-[var(--color-text-muted)]"
         >
           <span
-            >Markdown · Ctrl/⌘ S saves · {memoryStore.settings?.autosaveEnabled
+            >Markdown · {formatShortcut('Mod+S')} saves · {memoryStore.settings?.autosaveEnabled
               ? `autosave after ${(memoryStore.settings.autosaveDelayMs / 1000).toFixed(1)}s`
-              : 'autosave off · only Save or Ctrl/⌘ S writes to disk'}</span
-          ><span>{content.split(/\s+/).filter(Boolean).length.toLocaleString()} words</span>
+              : `autosave off · only Save or ${formatShortcut('Mod+S')} writes to disk`}</span
+          ><span
+            >{content.split(/\s+/).filter(Boolean).length.toLocaleString()} words · {formatBytes(
+              contentBytes,
+            )}</span
+          >
         </div>
       {:else}
-        <article class="min-h-0 flex-1 overflow-y-auto px-6 py-7">
-          <div
-            class="kory-markdown max-w-5xl text-[15px] leading-7 text-[var(--color-text-secondary)]"
-          >
+        <article class="memory-reading-area min-h-0 flex-1 overflow-y-auto">
+          <div class="memory-paper kory-document">
             {@html renderedContent}
           </div>
         </article>
@@ -1236,12 +1331,14 @@
 
     {#if showPolicy}
       <aside
-        class="w-80 shrink-0 overflow-y-auto border-l border-[var(--color-border)] bg-[var(--color-surface-1)] p-4"
+        class="memory-policy absolute inset-y-0 right-0 z-30 w-80 max-w-full overflow-y-auto border-l border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
         aria-label="Memory context policy"
       >
         <div class="flex items-start justify-between gap-3">
           <div>
-            <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Context policy</h4>
+            <h4 class="text-base font-semibold text-[var(--color-text-primary)]">
+              Context settings
+            </h4>
             <p class="mt-1 text-xs leading-5 text-[var(--color-text-muted)]">
               Choose what agents receive automatically.
             </p>
@@ -1278,7 +1375,7 @@
           <SettingsSwitch
             checked={memoryStore.settings?.projectMemoryEnabled ?? true}
             label="Project memory"
-            description="Shared workspace context"
+            description={projectScope}
             onchange={() => toggleSetting('projectMemoryEnabled')}
             flat
           />
@@ -1338,7 +1435,9 @@
             </div>{/if}
         </section>
         <section class="mt-5 border-b border-[var(--color-border)] pb-5">
-          <h5 class="text-sm font-medium text-[var(--color-text-primary)]">External long-term memory</h5>
+          <h5 class="text-sm font-medium text-[var(--color-text-primary)]">
+            External long-term memory
+          </h5>
           <p class="mt-1 text-xs leading-5 text-[var(--color-text-muted)]">
             Optionally mirror memories to an external store so they survive a reinstall and follow
             you across machines. Mem0 and Letta are managed memory services, not chat providers, and
@@ -1432,7 +1531,7 @@
             <SettingsSwitch
               checked={memoryStore.settings?.autosaveEnabled ?? true}
               label="Autosave drafts"
-              description="On saves while editing. When off, only Save or Ctrl/⌘ S writes to disk"
+              description={`On saves while editing. When off, only Save or ${formatShortcut('Mod+S')} writes to disk`}
               onchange={() => toggleSetting('autosaveEnabled')}
               flat
             />
@@ -1499,3 +1598,94 @@
     {/if}
   </div>
 </div>
+
+<style>
+  .memory-shell {
+    container: memory / inline-size;
+  }
+  .memory-library {
+    width: 240px;
+    min-height: 0;
+  }
+  .memory-selected {
+    background: var(--color-surface-3);
+  }
+  .memory-back {
+    display: none;
+  }
+  .memory-reading-area {
+    padding: 28px 32px 40px;
+    background: var(--color-surface-0);
+  }
+  .memory-paper {
+    max-width: 780px;
+    min-height: 360px;
+    margin: 0 auto;
+    padding: 24px 32px;
+  }
+  /*
+   * The rendered document reads in one shade of the theme. `document.css` lifts
+   * headings and bold text to `--color-text-primary`, which is a distinctly
+   * lighter (and in tinted themes, bluer) color than the body copy, so a memory
+   * document looked like it was painted in two colors. Hierarchy here comes from
+   * size and weight only; every text element inherits the pane's one shade.
+   */
+  .memory-paper :global(h1),
+  .memory-paper :global(h2),
+  .memory-paper :global(h3),
+  .memory-paper :global(h4),
+  .memory-paper :global(h5),
+  .memory-paper :global(h6),
+  .memory-paper :global(strong),
+  .memory-paper :global(th) {
+    color: inherit;
+  }
+  .memory-editor-page {
+    max-width: 920px;
+    margin: 0 auto;
+  }
+  .memory-header {
+    border-bottom: 0;
+    padding-bottom: 10px;
+  }
+  .memory-library,
+  .memory-document-heading {
+    border-color: color-mix(in srgb, var(--color-text-muted) 12%, transparent);
+  }
+  .memory-library :global(input) {
+    border-color: transparent;
+    background: var(--color-surface-2);
+    box-shadow: none;
+  }
+  .memory-policy {
+    box-shadow: -12px 0 32px color-mix(in srgb, var(--color-surface-0) 40%, transparent);
+  }
+  @container memory (max-width: 720px) {
+    .memory-library {
+      width: 100%;
+      border-right: 0;
+    }
+    .memory-detail {
+      display: none;
+    }
+    .show-document .memory-library {
+      display: none;
+    }
+    .show-document .memory-detail {
+      display: flex;
+    }
+    .memory-back {
+      display: inline-flex;
+    }
+    .memory-header,
+    .memory-document-heading {
+      padding: 16px;
+    }
+    .memory-reading-area {
+      padding: 16px;
+    }
+    .memory-paper {
+      padding: 24px;
+    }
+  }
+</style>

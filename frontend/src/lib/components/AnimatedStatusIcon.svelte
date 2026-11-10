@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { AgentStatus } from '@koryphaios/shared';
+  import Wrench from 'lucide-svelte/icons/wrench';
 
   interface Props {
     status: AgentStatus;
@@ -23,7 +24,7 @@
 
 <div class="status-icon-container {isStatic ? 'static-mode' : ''}" style="width: {size}px; height: {size}px;">
 {#if status === 'thinking'}
-  <!-- Lightbulb bouncing animation -->
+  <!-- Thinking: the glass breathes and sparks rise off it -->
   <div class="status-icon thinking" style="width: {size}px; height: {size}px;">
     <svg viewBox="0 0 24 24" fill="none" width={size} height={size}>
       <defs>
@@ -31,32 +32,31 @@
           <path d="M12 4a5.5 5.5 0 0 1 3.7 9.6V16.5a1 1 0 0 1-1 1h-5.4a1 1 0 0 1-1-1v-2.9A5.5 5.5 0 0 1 12 4z"/>
         </clipPath>
       </defs>
-      <!-- Bulb body -->
-      <path d="M12 4a5.5 5.5 0 0 1 3.7 9.6V16.5a1 1 0 0 1-1 1h-5.4a1 1 0 0 1-1-1v-2.9A5.5 5.5 0 0 1 12 4z"
-            class="text-yellow-400" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-      <g clip-path="url(#bulb-fill-{bulbClipId})">
-        <rect x="6.5" y="4" width="11" height="13.5" class="bulb-fill-rect text-yellow-300" fill="currentColor"/>
+      <g class="bulb-body">
+        <!-- Bulb body -->
+        <path d="M12 4a5.5 5.5 0 0 1 3.7 9.6V16.5a1 1 0 0 1-1 1h-5.4a1 1 0 0 1-1-1v-2.9A5.5 5.5 0 0 1 12 4z"
+              class="text-yellow-400" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <g clip-path="url(#bulb-fill-{bulbClipId})">
+          <rect x="6.5" y="4" width="11" height="13.5" class="bulb-fill-rect text-yellow-300" fill="currentColor"/>
+        </g>
+        <!-- Base lines -->
+        <path d="M10 17.5h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class="text-yellow-400"/>
+        <path d="M10.5 19h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" class="text-yellow-400/60"/>
       </g>
-      <!-- Base lines -->
-      <path d="M10 17.5h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class="text-yellow-400"/>
-      <path d="M10.5 19h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" class="text-yellow-400/60"/>
-      <!-- Glow rays -->
-      <line x1="12" y1="1.5" x2="12" y2="0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class="text-yellow-400 ray"/>
-      <line x1="18.5" y1="4" x2="20" y2="2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class="text-yellow-400 ray"/>
-      <line x1="5.5" y1="4" x2="4" y2="2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class="text-yellow-400 ray"/>
-      <line x1="20.5" y1="9.5" x2="22" y2="9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class="text-yellow-400 ray"/>
-      <line x1="3.5" y1="9.5" x2="2" y2="9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class="text-yellow-400 ray"/>
+      <!-- Sparks. Every path stays inside the 24-unit box: this icon is drawn at
+           12–16px in the sidebar and the agent thread, and a spark that crosses
+           the top edge bleeds into the row above instead of reading as a spark. -->
+
     </svg>
   </div>
 
 {:else if status === 'tool_calling'}
-  <!-- Terminal with typing cursor -->
-  <div class="status-icon terminal" style="width: {size}px; height: {size}px;">
-    <svg viewBox="0 0 24 24" fill="none" width={size} height={size}>
-      <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.5" class="text-emerald-400"/>
-      <path d="M7 9l3 3-3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-400"/>
-      <line x1="13" y1="15" x2="17" y2="15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class="text-emerald-300 cursor-blink"/>
+  <!-- Existing lucide Wrench tapping against a wall -->
+  <div class="status-icon tool-tapping" style="width: {size}px; height: {size}px; position:relative; display:inline-flex; align-items:center; justify-content:center;">
+    <svg viewBox="0 0 24 24" fill="none" width={size} height={size} style="position:absolute; right:0; top:0;" aria-hidden="true">
+      <line x1="22" y1="4" x2="22" y2="20" stroke="currentColor" stroke-width="2" stroke-linecap="round" class="text-slate-400 wall"/>
     </svg>
+    <Wrench size={size} strokeWidth={1.7} class="wrench-icon text-amber-400" />
   </div>
 
 {:else if status === 'streaming'}
@@ -94,6 +94,16 @@
       <!-- Rails -->
       <line x1="6" y1="5" x2="6" y2="19" stroke="currentColor" stroke-width="1" class="text-orange-400/50"/>
       <line x1="18" y1="5" x2="18" y2="19" stroke="currentColor" stroke-width="1" class="text-orange-400/50"/>
+    </svg>
+  </div>
+
+{:else if status === 'waiting'}
+  <!-- Paused circle with a soft pulse while an external provider queue clears. -->
+  <div class="status-icon waiting" style="width: {size}px; height: {size}px;">
+    <svg viewBox="0 0 24 24" fill="none" width={size} height={size}>
+      <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5" class="text-amber-400 pause-ring"/>
+      <line x1="9.5" y1="9" x2="9.5" y2="15" stroke="currentColor" stroke-width="2" stroke-linecap="round" class="text-amber-300"/>
+      <line x1="14.5" y1="9" x2="14.5" y2="15" stroke="currentColor" stroke-width="2" stroke-linecap="round" class="text-amber-300"/>
     </svg>
   </div>
 
@@ -147,23 +157,15 @@
   </div>
 
 {:else if status === 'searching'}
-  <!-- Globe with pulsing signal rings -->
-  <div class="status-icon searching" style="width: {size}px; height: {size}px;">
+  <!-- Exploring: just the magnifying glass, sweeping left and right. The old
+       folder-under-glass composition read as "listing a directory" rather than
+       searching, and at 12–15px the two shapes competed. -->
+  <div class="status-icon exploring" style="width: {size}px; height: {size}px;">
     <svg viewBox="0 0 24 24" fill="none" width={size} height={size}>
-      <!-- Pulse rings -->
-      <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="0.7" class="text-sky-400 search-ring ring-a"/>
-      <circle cx="12" cy="12" r="7" stroke="currentColor" stroke-width="0.7" class="text-sky-400 search-ring ring-b"/>
-      <!-- Globe circle -->
-      <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5" class="text-sky-400"/>
-      <!-- Latitude lines -->
-      <path d="M3 12h18" stroke="currentColor" stroke-width="1" class="text-sky-300/70"/>
-      <path d="M5 7.5h14" stroke="currentColor" stroke-width="0.8" class="text-sky-300/50"/>
-      <path d="M5 16.5h14" stroke="currentColor" stroke-width="0.8" class="text-sky-300/50"/>
-      <!-- Longitude curves -->
-      <path d="M12 3c-3 3-3 12 0 18" stroke="currentColor" stroke-width="1" class="text-sky-300/70"/>
-      <path d="M12 3c3 3 3 12 0 18" stroke="currentColor" stroke-width="1" class="text-sky-300/70"/>
-      <!-- Signal dot -->
-      <circle cx="12" cy="12" r="1.5" fill="currentColor" class="text-sky-300 search-dot"/>
+      <g class="magnifier">
+        <circle cx="10.5" cy="10.5" r="5.75" stroke="currentColor" stroke-width="1.5" class="text-sky-300"/>
+        <path d="M14.8 14.8L19.5 19.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" class="text-sky-300"/>
+      </g>
     </svg>
   </div>
 
@@ -234,27 +236,19 @@
     flex-shrink: 0;
   }
 
-  /* ── Thinking: Lightbulb bounce ─────────────────── */
-  .thinking {
-    animation: lightbulb-bounce 1.2s ease-in-out infinite;
-  }
-  .thinking .ray {
-    animation: ray-appear 1.2s ease-in-out infinite;
-  }
-  .thinking .bulb-fill-rect {
-    animation: bulb-fill 1.2s ease-in-out infinite;
-  }
-  @keyframes lightbulb-bounce {
+  /* A restrained vertical bounce keeps the thinking state lively without glow. */
+  .thinking { animation: bulb-bounce 1.2s ease-in-out infinite; }
+  .thinking .bulb-body { transform-origin: 50% 50%; animation: bulb-tilt 1.2s ease-in-out infinite; }
+  .thinking .bulb-fill-rect { animation: bulb-fill 1.6s ease-in-out infinite; }
+  @keyframes bulb-bounce {
     0%, 100% { transform: translateY(0); }
-    30% { transform: translateY(-3px) rotate(-5deg); }
-    60% { transform: translateY(-1px) rotate(3deg); }
+    32% { transform: translateY(-1.8px); }
+    58% { transform: translateY(0); }
   }
-  @keyframes ray-appear {
-    0%, 100% { opacity: 0; transform: scale(0.5); }
-    20% { opacity: 0.3; transform: scale(0.7); }
-    30% { opacity: 1; transform: scale(1); }
-    40% { opacity:0.3; transform: scale(0.7); }
-    50% { opacity: 0; transform: scale(0.5); }
+  @keyframes bulb-tilt {
+    0%, 100% { transform: rotate(0); }
+    32% { transform: rotate(-4deg); }
+    58% { transform: rotate(2deg); }
   }
   @keyframes bulb-fill {
     0%, 100% { y: 17.5; height: 0; opacity: 0; }
@@ -277,6 +271,35 @@
   @keyframes blink {
     0%, 100% { opacity: 1; }
     50% { opacity: 0; }
+  }
+
+  /* ── Tool tapping: wrench hitting a wall ────────── */
+  .tool-tapping :global(.wrench-icon) {
+    transform-origin: 12px 12px;
+    display: inline-block;
+    animation: wrench-tap 0.9s ease-in-out infinite;
+  }
+  .tool-tapping .wall {
+    animation: wall-pulse 0.9s ease-in-out infinite;
+  }
+  @keyframes wrench-tap {
+    0%, 100% { transform: rotate(0deg) translate(0, 0); }
+    40% { transform: rotate(-18deg) translate(-2px, 1px); }
+    60% { transform: rotate(8deg) translate(1px, -1px); }
+  }
+  @keyframes wall-pulse {
+    0%, 100% { opacity: 0.6; }
+    50% { opacity: 1; }
+  }
+
+  /* ── Exploring: magnifying glass sweeping ────────── */
+  .exploring .magnifier {
+    animation: mag-sweep 1.6s ease-in-out infinite;
+    transform-origin: 12px 12px;
+  }
+  @keyframes mag-sweep {
+    0%, 100% { transform: translateX(-2.5px); }
+    50% { transform: translateX(2.5px); }
   }
 
   /* ── Streaming: flowing lines ───────────────────── */
@@ -337,6 +360,13 @@
   .waiting-user .dot-bounce {
     animation: dot-bob 1s ease-in-out infinite;
   }
+  .waiting .pause-ring {
+    animation: pause-pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes pause-pulse {
+    0%, 100% { opacity: 0.55; transform: scale(0.94); transform-origin: center; }
+    50% { opacity: 1; transform: scale(1); transform-origin: center; }
+  }
   @keyframes question-bounce {
     0%, 100% { transform: translateY(0); }
     50% { transform: translateY(-4px); }
@@ -387,31 +417,6 @@
   @keyframes analyze-pulse {
     0%, 100% { transform: scale(1); }
     50% { transform: scale(1.05); }
-  }
-
-  /* ── Searching: globe with pulsing signal rings ────────── */
-  .searching {
-    animation: globe-spin 4s linear infinite;
-    transform-origin: 12px 12px;
-  }
-  .searching .search-ring {
-    animation: search-pulse 2s ease-out infinite;
-    transform-origin: 12px 12px;
-  }
-  .searching .ring-b { animation-delay: 0.5s; }
-  .searching .search-dot { animation: dot-ping 2s ease-in-out infinite; }
-  @keyframes globe-spin {
-    0%, 100% { transform: rotate(0deg); }
-    50% { transform: rotate(5deg); }
-  }
-  @keyframes search-pulse {
-    0% { opacity: 0.8; transform: scale(0.85); }
-    60% { opacity: 0.15; transform: scale(1.15); }
-    100% { opacity: 0; transform: scale(1.25); }
-  }
-  @keyframes dot-ping {
-    0%, 100% { opacity: 1; r: 1.5; }
-    50% { opacity: 0.4; r: 2.5; }
   }
 
   /* ── Reading: eyeball looking left/right with blink ───── */

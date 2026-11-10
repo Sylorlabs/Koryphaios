@@ -9,8 +9,9 @@
   import X from 'lucide-svelte/icons/x';
   import StickyNote from 'lucide-svelte/icons/sticky-note';
   import Flag from 'lucide-svelte/icons/flag';
+  import Monitor from 'lucide-svelte/icons/monitor';
   import CheckForUpdatesButton from './CheckForUpdatesButton.svelte';
-  import { getModKeyName, isMac } from '$lib/utils/platform';
+  import { formatShortcut, isMac } from '$lib/utils/platform';
   import { formatRecentDate, promptTemplates } from '$lib/utils/projectManager';
   import type { RecentProject } from '$lib/utils/projectManager';
   import { onMount } from 'svelte';
@@ -29,6 +30,7 @@
     notesEnabled?: boolean;
     zenMode: boolean;
     projectName: string | null | undefined;
+    linkedDeviceName?: string;
     activeAgents: Array<{ identity: { id: string } }>;
     recentProjects: RecentProject[];
     onAction: (action: string) => void;
@@ -41,6 +43,7 @@
     notesEnabled = true,
     zenMode,
     projectName,
+    linkedDeviceName,
     activeAgents,
     recentProjects,
     onAction,
@@ -51,6 +54,18 @@
   let usesNativeFullscreen = $state(false);
   let inTauri = $state(false);
   let feedbackOpen = $state(false);
+  let expansionRequest = 0;
+
+  async function refreshExpansion() {
+    if (!browser || !inTauri) return;
+    const request = ++expansionRequest;
+    try {
+      const expanded = await invoke<boolean>('is_window_expanded');
+      if (request === expansionRequest) isWindowExpanded = expanded;
+    } catch (err) {
+      console.warn('Window expansion state check failed:', err);
+    }
+  }
 
   async function minimizeWindow() {
     if (!browser || !inTauri) return;
@@ -63,20 +78,18 @@
 
   async function toggleWindowSizeMode() {
     if (!browser || !inTauri) return;
+    const request = ++expansionRequest;
     try {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window');
-      const currentWindow = getCurrentWindow();
-
+      let expanded: boolean;
       if (usesNativeFullscreen) {
-        // On macOS, the title-bar expansion control should behave like the
-        // native green traffic-light button: enter a fullscreen Space and let
-        // macOS hide the Dock/menu bar instead of merely zooming the window to
-        // the usable desktop area.
-        isWindowExpanded = await invoke<boolean>('toggle_fullscreen');
+        // This is real AppKit fullscreen: it gets its own Space and hides the
+        // Dock. The native window is configured as full-size-content before
+        // AppKit performs the transition, so no titlebar strip is reserved.
+        expanded = await invoke<boolean>('toggle_native_fullscreen');
       } else {
-        await invoke('toggle_maximize');
-        isWindowExpanded = await currentWindow.isMaximized();
+        expanded = await invoke<boolean>('toggle_maximize');
       }
+      if (request === expansionRequest) isWindowExpanded = expanded;
     } catch (e) {
       console.error('Failed to toggle window size mode:', e);
     }
@@ -96,26 +109,7 @@
     inTauri =
       typeof window !== 'undefined' && ('__TAURI_INTERNALS__' in window || '__TAURI__' in window);
     usesNativeFullscreen = isMac();
-
-    if (inTauri) {
-      // Match the state queried by the platform-specific expansion behavior.
-      import('@tauri-apps/api/window')
-        .then(({ getCurrentWindow }) => {
-          const currentWindow = getCurrentWindow();
-          const expandedState = usesNativeFullscreen
-            ? currentWindow.isFullscreen()
-            : currentWindow.isMaximized();
-          expandedState.then((v: boolean) => {
-            isWindowExpanded = v;
-          });
-        })
-        .catch((err: unknown) => {
-          console.warn(
-            'Window expansion state check failed:',
-            err instanceof Error ? err.message : String(err),
-          );
-        });
-    }
+    void refreshExpansion();
 
     function handleWindowClick(e: MouseEvent) {
       const target = e.target as HTMLElement | null;
@@ -132,13 +126,14 @@
     window.addEventListener('click', handleWindowClick);
     window.addEventListener('keydown', handleEscape);
     return () => {
+      ++expansionRequest;
       window.removeEventListener('click', handleWindowClick);
       window.removeEventListener('keydown', handleEscape);
     };
   });
 
   async function startDragging(e: MouseEvent) {
-    if (!inTauri) return;
+    if (!inTauri || e.button !== 0) return;
 
     // Check if we clicked an interactive element (buttons, etc)
     const interactive = (e.target as HTMLElement | null)?.closest(
@@ -175,16 +170,18 @@
   }
 </script>
 
+<svelte:window onresize={refreshExpansion} onfocus={refreshExpansion} />
+
 {#if !zenMode}
   <header
-    class="titlebar flex items-center justify-between gap-3 px-3 border-b shrink-0 select-none"
+    class="titlebar relative flex min-w-0 items-center justify-between gap-3 px-3 border-b shrink-0 select-none"
     style="border-color: var(--color-border); background: var(--color-surface-1);"
     data-tauri-drag-region
     onmousedown={startDragging}
     role="presentation"
   >
     <!-- Left: App menus -->
-    <div class="flex items-center gap-2 min-w-0">
+    <div class="titlebar-menus flex items-center gap-2 min-w-0 shrink-0">
       <div class="flex items-center gap-1" data-top-menu>
         <div class="relative" data-top-menu>
           <button
@@ -199,6 +196,7 @@
           {#if openMenu === 'file'}
             <div
               class="absolute left-0 top-10 z-30 min-w-[260px] border p-1.5 shadow-2xl"
+              data-scrollbar-overlay
               style="background: var(--color-surface-2); border-color: var(--color-border); border-radius: 0.5rem;"
             >
               <button
@@ -274,6 +272,7 @@
           {#if openMenu === 'edit'}
             <div
               class="absolute left-0 top-10 z-30 min-w-[220px] border p-1.5 shadow-2xl"
+              data-scrollbar-overlay
               style="background: var(--color-surface-2); border-color: var(--color-border); border-radius: 0.5rem;"
             >
               <button
@@ -316,6 +315,7 @@
           {#if openMenu === 'view'}
             <div
               class="absolute left-0 top-10 z-30 min-w-[220px] border p-1.5 shadow-2xl"
+              data-scrollbar-overlay
               style="background: var(--color-surface-2); border-color: var(--color-border); border-radius: 0.5rem;"
             >
               <button
@@ -361,36 +361,42 @@
       </div>
     </div>
 
-    <div class="hidden lg:flex flex-1 items-center justify-center h-full" data-tauri-drag-region>
+    <div class="titlebar-center hidden min-w-0 flex-1 items-center justify-center h-full" data-tauri-drag-region>
       <!-- Fixed to the viewport center so the project name stays in the top
            middle regardless of sidebar/panel state. -->
-      {#if projectStore.currentPath}
+      {#if linkedDeviceName}
         <div
-          class="max-w-[360px] truncate px-3 text-xs font-medium pointer-events-none"
-          style="position: fixed; left: 50vw; transform: translateX(-50%); color: var(--color-text-secondary);"
+          class="titlebar-project flex items-center gap-2 truncate px-3 text-xs font-medium pointer-events-none"
+          style="color: var(--color-text-secondary);"
+          title={linkedDeviceName}
+        ><Monitor size={14} />{projectName}</div>
+      {:else if projectStore.currentPath}
+        <div
+          class="titlebar-project truncate px-3 text-xs font-medium pointer-events-none"
+          style="color: var(--color-text-secondary);"
           title={projectStore.currentPath}
         >
           {projectStore.displayName}
         </div>
       {:else if projectStore.workspaceRoot}
         <div
-          class="max-w-[360px] truncate px-3 text-xs font-medium pointer-events-none"
-          style="position: fixed; left: 50vw; transform: translateX(-50%); color: var(--color-text-secondary);"
+          class="titlebar-project truncate px-3 text-xs font-medium pointer-events-none"
+          style="color: var(--color-text-secondary);"
           title={projectStore.workspaceRoot}
         >
           {projectDisplayName(projectStore.workspaceRoot)} (workspace)
         </div>
       {:else}
         <span
-          class="text-xs pointer-events-none"
-          style="position: fixed; left: 50vw; transform: translateX(-50%); color: var(--color-text-muted);"
+          class="titlebar-project text-xs pointer-events-none"
+          style="color: var(--color-text-muted);"
           >No project selected</span
         >
       {/if}
     </div>
 
     <!-- Right: Controls -->
-    <div class="flex items-center gap-1.5">
+    <div class="titlebar-controls flex items-center gap-1 xl:gap-1.5 min-w-0 shrink-0">
       {#if updater.updateAvailable}
         <button
           type="button"
@@ -401,7 +407,7 @@
           title="Update available · v{updater.updateInfo?.version ?? ''}"
         >
           <Download size={14} />
-          <span class="text-xs font-semibold"
+          <span class="titlebar-wide-label text-xs font-semibold"
             >Update{updater.updateInfo?.version ? ` v${updater.updateInfo.version}` : ''}</span
           >
         </button>
@@ -409,50 +415,58 @@
       {#if notesEnabled}
         <button
           type="button"
-          class="group flex items-center gap-1.5 rounded-lg px-3 py-2 text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-2)]"
+          class="group flex items-center gap-1.5 rounded-lg px-2 xl:px-3 py-2 text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-2)]"
           data-tauri-drag-region="false"
-          title="Report feedback via a GitHub issue"
+          aria-label="Open feedback"
+          title="Feedback"
           onclick={sendFeedback}
         >
           <Flag size={14} class="transition-colors group-hover:text-red-400" />
-          <span class="text-xs font-medium">Feedback</span>
+          <span class="titlebar-wide-label text-xs font-medium">Feedback</span>
         </button>
         <button
           type="button"
-          class="flex items-center gap-1.5 px-3 py-2 rounded-lg transition-colors hover:bg-[var(--color-surface-2)]"
+          class="flex items-center gap-1.5 px-2 xl:px-3 py-2 rounded-lg transition-colors hover:bg-[var(--color-surface-2)]"
           style="color: {showNotes ? 'var(--color-accent)' : 'var(--color-text-secondary)'};"
+          aria-pressed={showNotes}
+          aria-label="Notes"
           onclick={() => action('toggle_notes')}
           data-tauri-drag-region="false"
-          title="Notes (Ctrl+Shift+N)"
+          title="Notes ({formatShortcut('Mod+Shift+N')})"
         >
           <StickyNote size={14} />
-          <span class="text-xs font-medium">{showNotes ? 'Notes open' : 'Notes'}</span>
+          <span class="titlebar-wide-label text-xs font-medium">Notes</span>
         </button>
       {/if}
       <button
         type="button"
-        class="flex items-center gap-2 px-3 py-2 rounded-lg transition-colors hover:bg-[var(--color-surface-2)]"
+        class="flex items-center gap-2 px-2 xl:px-3 py-2 rounded-lg transition-colors hover:bg-[var(--color-surface-2)]"
         style="color: var(--color-text-secondary);"
         onclick={() => action('toggle_palette')}
         data-tauri-drag-region="false"
-        title="Command Palette ({getModKeyName()}K)"
+        aria-label="Command Palette"
+        title="Command Palette ({formatShortcut('Mod+K')})"
       >
         <Search size={14} />
-        <span class="text-xs font-medium">Commands</span>
-        <kbd class="kbd">{getModKeyName()}K</kbd>
+        <span class="titlebar-wide-label text-xs font-medium">Commands</span>
+        <kbd class="kbd titlebar-shortcut">{formatShortcut('Mod+K')}</kbd>
       </button>
 
       {#if activeAgents.length > 0}
         <button
           type="button"
-          class="flex items-center gap-1.5 px-3 py-2 rounded-lg transition-colors hover:bg-[var(--color-surface-2)]"
+          class="flex items-center gap-1.5 px-2 xl:px-3 py-2 rounded-lg transition-colors hover:bg-[var(--color-surface-2)]"
           style="background: transparent;"
           onclick={() => action('toggle_agents')}
           data-tauri-drag-region="false"
         >
           <Activity size={12} class="text-emerald-400" />
-          <span class="text-xs font-medium leading-none" style="color: var(--color-text-secondary);"
-            >{activeAgents.length} agent{activeAgents.length !== 1 ? 's' : ''}</span
+          <span
+            class="text-xs font-medium leading-none whitespace-nowrap"
+            style="color: var(--color-text-secondary);"
+            >{activeAgents.length}<span class="titlebar-wide-label"
+              > agent{activeAgents.length !== 1 ? 's' : ''}</span
+            ></span
           >
           <ChevronDown
             size={12}
@@ -463,10 +477,10 @@
       {/if}
       <button
         type="button"
-        class="p-2.5 rounded-lg transition-colors hover:bg-[var(--color-surface-2)] flex items-center justify-center"
+        class="p-2 xl:p-2.5 rounded-lg transition-colors hover:bg-[var(--color-surface-2)] flex items-center justify-center"
         style="color: var(--color-text-secondary);"
         onclick={() => action('open_settings')}
-        title="Settings ({getModKeyName()},)"
+        title="Settings ({formatShortcut('Mod+,')})"
         aria-label="Open settings"
         data-tauri-drag-region="false"
       >
@@ -482,17 +496,19 @@
           class="flex items-center justify-center w-8 h-8 rounded-lg transition-colors hover:bg-[var(--color-surface-3)]"
           style="color: var(--color-text-muted);"
           onclick={minimizeWindow}
+          data-tauri-drag-region="false"
           title="Minimize"
           aria-label="Minimize window"
         >
           <Minus size={14} />
         </button>
-        <!-- Full Screen on macOS; Maximize / Restore elsewhere -->
+        <!-- Native fullscreen on macOS; work-area zoom elsewhere -->
         <button
           type="button"
           class="flex items-center justify-center w-8 h-8 rounded-lg transition-colors hover:bg-[var(--color-surface-3)]"
           style="color: var(--color-text-muted);"
           onclick={toggleWindowSizeMode}
+          data-tauri-drag-region="false"
           title={usesNativeFullscreen
             ? isWindowExpanded
               ? 'Exit Full Screen'
@@ -516,6 +532,7 @@
           class="flex items-center justify-center w-8 h-8 rounded-lg transition-colors hover:bg-red-500/80 hover:text-white"
           style="color: var(--color-text-muted);"
           onclick={closeWindow}
+          data-tauri-drag-region="false"
           title="Close"
           aria-label="Close window"
         >
@@ -536,7 +553,7 @@
 
   <button
     type="button"
-    class="absolute top-1.5 right-4 z-20 px-3.5 py-1.5 text-xs border rounded-full transition-all duration-200 hover:bg-[var(--color-surface-3)] hover:border-[var(--color-border-bright)] hover:scale-105 active:scale-95 shadow-lg"
+    class="absolute top-1.5 right-4 z-20 px-3.5 py-1.5 text-xs border rounded-lg transition-all duration-200 hover:bg-[var(--color-surface-3)] hover:border-[var(--color-border-bright)] hover:scale-105 active:scale-95 shadow-lg"
     style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-secondary); -webkit-app-region: no-drag;"
     onclick={() => action('toggle_zen_mode')}
   >
@@ -550,6 +567,72 @@
   /* Enable window dragging */
   .titlebar {
     height: var(--header-height);
+    container: titlebar / inline-size;
+  }
+
+  .titlebar-center {
+    display: flex;
+  }
+
+  .titlebar-project {
+    min-width: 0;
+  }
+
+  .titlebar-project {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: min(360px, calc(100% - 560px));
+    transform: translate(-50%, -50%);
+    text-align: center;
+  }
+
+  .titlebar-shortcut {
+    display: inline-flex;
+  }
+
+  @container titlebar (max-width: 840px) {
+    .titlebar-wide-label,
+    .titlebar-shortcut,
+    .titlebar-project {
+      display: none;
+    }
+
+    .titlebar-center {
+      display: none;
+    }
+
+    .titlebar {
+      gap: 0.25rem;
+      padding-inline: 0.5rem;
+    }
+
+    .titlebar-menus {
+      gap: 0.25rem;
+    }
+
+    .titlebar-menus > [data-top-menu] > div > button {
+      padding-inline: 0.5rem;
+    }
+
+    .titlebar-controls {
+      gap: 0.125rem;
+    }
+
+    .titlebar-controls > button {
+      padding-inline: 0.5rem;
+    }
+  }
+
+  @container titlebar (max-width: 560px) {
+    .titlebar-menus > [data-top-menu] > div > button {
+      padding-inline: 0.375rem;
+      font-size: 0.75rem;
+    }
+
+    .titlebar-controls > button {
+      padding-inline: 0.375rem;
+    }
   }
 
   /* Ensure buttons and interactive elements are clickable */

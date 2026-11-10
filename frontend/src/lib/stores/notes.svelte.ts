@@ -11,6 +11,7 @@
  */
 
 import { isDemoMode } from '$lib/demo.svelte';
+import type { NoteLinkTarget } from '$lib/utils/kory-link-favicon';
 import type {
   Note,
   NoteWithLinks,
@@ -27,6 +28,8 @@ import type {
   NoteToolName,
   NotePermissionLevel,
   NotesPermissionPreset,
+  NoteAppearances,
+  ChatFindingInput,
   UpdateNoteInput,
 } from '@koryphaios/shared';
 import {
@@ -522,6 +525,7 @@ function buildDemoGraph(source: Note[]): GraphData {
     tags: n.tags ?? [],
     linkCount: 0,
     includeInContext: n.includeInContext,
+    icon: n.icon,
   }));
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
   const edges: GraphEdge[] = [];
@@ -785,6 +789,36 @@ async function readNote(id: string): Promise<NoteWithLinks | null> {
   }
 }
 
+/** Resolve a unique vault destination without changing the active editor or creating notes. */
+async function resolveNoteTarget(target: NoteLinkTarget): Promise<string | null> {
+  const requestProject = projectStore.currentPath;
+  const requestGeneration = _projectGeneration;
+  if (!requestProject) return null;
+  /** Match exact catalog IDs, folder paths, or project source paths. */
+  const matches = (): Note[] => {
+    if ('id' in target) return _notes.filter((note) => note.id === target.id);
+    if ('title' in target) return _notes.filter((note) => note.title.toLowerCase() === target.title.toLowerCase());
+    const path = target.path.replace(/^\//, '');
+    return _notes.filter((note) => {
+      const folderPath = `${note.folderPath.replace(/\/$/, '')}/${note.title}`.replace(/^\//, '');
+      return folderPath === path || note.sourcePath === path;
+    });
+  };
+  // An exact ID can be fetched directly under the active project. Title/path
+  // resolution needs the complete catalog, not a filtered sidebar or search page.
+  if ('id' in target) return target.id;
+  if (!(await fetchNotes(undefined, undefined, { background: true }))) return null;
+  if (!requestScopeIsCurrent(requestProject, requestGeneration)) return null;
+  const found = matches();
+  if (found.length !== 1) {
+    toastStore.error(found.length > 1
+      ? 'Several notes match this link. Use a note ID or a complete note path.'
+      : 'The linked note was not found in this project.');
+    return null;
+  }
+  return found[0].id;
+}
+
 /** Open a note by title (searches notes list, then fetches by ID) */
 async function openNoteByTitle(title: string): Promise<void> {
   const found = _notes.find((n) => n.title.toLowerCase() === title.toLowerCase());
@@ -866,7 +900,117 @@ async function createNote(input: {
   }
 }
 
-/** Update an existing note */
+/** Where a note appears: backlinks, relationship pairs, canvases and saved Bases. */
+async function loadNoteAppearances(id: string): Promise<NoteAppearances | null> {
+  if (isDemoMode) return null;
+  const requestProject = projectStore.currentPath;
+  const requestGeneration = _projectGeneration;
+  // Appearances are project-scoped; without a live project there is nothing
+  // authoritative to scan, and a fallback-root request would fail noisily.
+  if (!requestProject) return null;
+  try {
+    // Explicit project header: an empty session workingDirectory must not let
+    // the request fall back to the server's launch root mid-transition.
+    const res = await apiFetch(apiUrl(`/api/notes/${encodeURIComponent(id)}/appearances`), {
+      headers: requestProject ? { 'X-Koryphaios-Project': requestProject } : {},
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.ok && data.data && requestScopeIsCurrent(requestProject, requestGeneration)) {
+        return data.data as NoteAppearances;
+      }
+    }
+  } catch (err) {
+    console.error('[notesStore] loadNoteAppearances error:', err);
+  }
+  return null;
+}
+
+/** Save a reviewed chat finding as a note with host-recorded provenance. */
+async function createChatFinding(input: ChatFindingInput): Promise<Note | null> {
+  if (isDemoMode) {
+    return createNote({
+      title: input.title,
+      content: input.body,
+      folderPath: '/Findings',
+      tags: ['chat-finding', 'sourced'],
+    });
+  }
+  const requestProject = projectStore.currentPath;
+  const requestGeneration = _projectGeneration;
+  const mutation = beginLocalMutation();
+  let mutationSucceeded = false;
+  _isSaving = true;
+  try {
+    const res = await apiFetch(apiUrl('/api/notes/chat-findings'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(requestProject ? { 'X-Koryphaios-Project': requestProject } : {}),
+        ...mutation.headers,
+      },
+      body: JSON.stringify(input),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.ok && data.data) {
+        mutationSucceeded = true;
+        const note = data.data as Note;
+        if (!requestScopeIsCurrent(requestProject, requestGeneration)) return null;
+        mergeCatalogNotes([note]);
+        if (_isPanelOpen) void fetchFolderTree();
+        clearError();
+        return note;
+      }
+    }
+    if (requestScopeIsCurrent(requestProject, requestGeneration)) {
+      setError(await responseMessage(res, 'Failed to save the chat finding'));
+    }
+    return null;
+  } catch (err) {
+    console.error('[notesStore] createChatFinding error:', err);
+    if (requestScopeIsCurrent(requestProject, requestGeneration)) {
+      setError(err instanceof Error ? err.message : 'Failed to save the chat finding');
+    }
+    return null;
+  } finally {
+    finishLocalMutation(mutation.mutationId, mutationSucceeded);
+    if (requestScopeIsCurrent(requestProject, requestGeneration)) _isSaving = false;
+  }
+}
+
+/** Save presentation metadata without disturbing document revisions or drafts. */
+async function setNoteIcon(id: string, icon: import('@koryphaios/shared').NoteIcon | null): Promise<boolean> {
+  const requestProject = projectStore.currentPath;
+  const requestGeneration = _projectGeneration;
+  const mutation = beginLocalMutation();
+  let succeeded = false;
+  try {
+    if (!isDemoMode) {
+      const response = await apiFetch(apiUrl(`/api/notes/${encodeURIComponent(id)}/icon`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...mutation.headers,
+          ...(requestProject ? { 'X-Koryphaios-Project': requestProject } : {}) },
+        body: JSON.stringify({ icon }),
+      });
+      if (!response.ok) throw new Error(await responseMessage(response, 'Failed to save note icon'));
+    }
+    succeeded = true;
+    if (!requestScopeIsCurrent(requestProject, requestGeneration)) return false;
+    _notes = _notes.map((note) => note.id === id ? { ...note, icon: icon ?? undefined } : note);
+    if (_currentNote?.id === id) _currentNote = { ..._currentNote, icon: icon ?? undefined };
+    _graphData = { ..._graphData, nodes: _graphData.nodes.map((node) =>
+      node.id === id ? { ...node, icon: icon ?? undefined } : node) };
+    return true;
+  } catch (error) {
+    if (requestScopeIsCurrent(requestProject, requestGeneration))
+      toastStore.error(error instanceof Error ? error.message : 'Failed to save note icon');
+    return false;
+  } finally {
+    finishLocalMutation(mutation.mutationId, succeeded);
+  }
+}
+
 async function updateNote(id: string, input: UpdateNoteInput): Promise<Note | null> {
   if (isDemoMode) {
     // No backend in the demo — edit the in-memory note in place. Without this
@@ -1424,8 +1568,13 @@ async function syncProjectDocuments(): Promise<void> {
 
 /** Fetch agent note-tool permissions from backend */
 async function fetchAgentPermissions(): Promise<void> {
+  const projectPath = projectStore.currentPath;
+  const generation = _projectGeneration;
   try {
-    const res = await apiFetch(apiUrl('/api/notes/settings/agent-permissions'));
+    const res = await apiFetch(apiUrl('/api/notes/settings/agent-permissions'), {
+      headers: projectPath ? { 'X-Koryphaios-Project': projectPath } : {},
+    });
+    if (!requestScopeIsCurrent(projectPath, generation)) return;
     if (res.ok) {
       const data = await res.json();
       if (data.ok && data.data) {
@@ -1443,7 +1592,6 @@ async function applyAgentPermissionPreset(
   preset: Exclude<NotesPermissionPreset, 'custom'>,
 ): Promise<void> {
   const next = applyNotesPermissionPreset(preset);
-  _agentPermissions = next;
   await saveAgentPermissions(next);
 }
 
@@ -1456,20 +1604,35 @@ async function setAgentToolPermission(
   const next: NotesAgentPermissions = {
     preset: detectNotesPermissionPreset(tools),
     tools,
+    overrides: { ..._agentPermissions.overrides, [tool]: level },
   };
-  _agentPermissions = next;
+  await saveAgentPermissions(next);
+}
+
+/** Return one operation to inherited, mode-aware defaults. */
+async function resetAgentToolPermission(tool: NoteToolName): Promise<void> {
+  const tools = { ..._agentPermissions.tools, [tool]: DEFAULT_NOTES_AGENT_PERMISSIONS.tools[tool] };
+  const overrides = { ..._agentPermissions.overrides };
+  delete overrides[tool];
+  const next = { preset: detectNotesPermissionPreset(tools), tools, overrides };
   await saveAgentPermissions(next);
 }
 
 /** Persist agent permissions to backend */
 async function saveAgentPermissions(permissions: NotesAgentPermissions): Promise<boolean> {
+  const projectPath = projectStore.currentPath;
+  const generation = _projectGeneration;
   _agentPermissionsSaving = true;
   try {
     const res = await apiFetch(apiUrl('/api/notes/settings/agent-permissions'), {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(projectStore.currentPath ? { 'X-Koryphaios-Project': projectStore.currentPath } : {}),
+      },
       body: JSON.stringify(permissions),
     });
+    if (!requestScopeIsCurrent(projectPath, generation)) return false;
     if (res.ok) {
       const data = await res.json();
       if (data.ok && data.data) {
@@ -1484,16 +1647,20 @@ async function saveAgentPermissions(permissions: NotesAgentPermissions): Promise
     toastStore.error('Failed to save note permissions');
     return false;
   } finally {
-    _agentPermissionsSaving = false;
+    if (requestScopeIsCurrent(projectPath, generation)) _agentPermissionsSaving = false;
   }
 }
 
 /** Reset agent permissions to defaults */
 async function resetAgentPermissions(): Promise<void> {
+  const projectPath = projectStore.currentPath;
+  const generation = _projectGeneration;
   try {
     const res = await apiFetch(apiUrl('/api/notes/settings/agent-permissions/reset'), {
       method: 'POST',
+      headers: projectPath ? { 'X-Koryphaios-Project': projectPath } : {},
     });
+    if (!requestScopeIsCurrent(projectPath, generation)) return;
     if (res.ok) {
       const data = await res.json();
       if (data.ok && data.data) {
@@ -1806,7 +1973,11 @@ async function reconcileCurrentNoteAfterCatalogRefresh(): Promise<void> {
     _conflict = { noteId: current.id, remote: current, sourceDeleted: true };
     return;
   }
-  if (summary.revision <= current.revision) return;
+  if (summary.revision === current.revision) {
+    _currentNote = { ...current, icon: summary.icon };
+    return;
+  }
+  if (summary.revision < current.revision) return;
   const remote = await fetchCatalogNoteDetail(current.id);
   if (remote && _currentNote?.id === current.id && remote.revision > current.revision) {
     // Preserve the editor's local object. NotesPanel deliberately keeps the
@@ -1867,6 +2038,9 @@ async function flushRealtimeUpdates(): Promise<void> {
         continue;
       }
       if (!existing || existing.folderPath !== remote.folderPath) needsFolderRefresh = true;
+      if (currentBeforeRefresh && _currentNote?.id === id && remote.revision === currentBeforeRefresh.revision) {
+        _currentNote = { ..._currentNote, icon: remote.icon };
+      }
       if (
         currentBeforeRefresh &&
         _currentNote?.id === id &&
@@ -1960,6 +2134,9 @@ function clearCurrentNote(): void {
  */
 function beginProjectTransition(): void {
   _projectGeneration++;
+  _agentPermissions = normalizeNotesAgentPermissions(DEFAULT_NOTES_AGENT_PERMISSIONS);
+  _agentPermissionsLoaded = false;
+  _agentPermissionsSaving = false;
   if (isDemoMode) _demoSeeded = false;
   _notes = [];
   _currentNote = null;
@@ -2103,13 +2280,17 @@ export const notesStore = {
   fetchNote,
   readNote,
   openNoteByTitle,
+  resolveNoteTarget,
   createNote,
+  loadNoteAppearances,
+  createChatFinding,
   updateNote,
   deleteNote,
   fetchGraph,
   fetchFolderTree,
   searchNotes,
   uploadAttachment,
+  setNoteIcon,
   deleteAttachment,
   importMemoryAsNotes,
   syncProjectDocuments,
@@ -2131,6 +2312,7 @@ export const notesStore = {
   fetchAgentPermissions,
   applyAgentPermissionPreset,
   setAgentToolPermission,
+  resetAgentToolPermission,
   resetAgentPermissions,
   clearCurrentNote,
   beginProjectTransition,

@@ -1,21 +1,25 @@
 export type SettingsTab =
+  | 'project'
   | 'providers'
   | 'agent'
   | 'memory'
   | 'notes'
+  | 'skills'
   | 'archived'
   | 'appearance'
   | 'welcome'
   | 'shortcuts'
   | 'voice'
   | 'teams'
+  | 'devices'
   | 'billing'
   | 'experimental'
   | 'images'
   | 'video'
   | 'mcp';
 
-export type SettingsGroup = 'Intelligence' | 'Workspace' | 'Experience' | 'Operations';
+export type SettingsGroup =
+  'Intelligence' | 'Workspace' | 'Knowledge' | 'Experience' | 'Operations';
 
 export interface SettingsCatalogEntry {
   id: SettingsTab;
@@ -51,20 +55,20 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
     keywords: ['permission', 'autonomy', 'critic', 'planning', 'skills', 'sandbox', 'tools'],
   },
   {
-    id: 'memory',
-    label: 'Memory',
-    description: 'Universal, project, session, and rule context used by agents.',
+    id: 'project',
+    label: 'Project identity',
+    description: 'Name and icon used for the current project across Koryphaios.',
     scope: 'Current project',
     group: 'Workspace',
-    keywords: ['context', 'remember', 'rules', 'token budget', 'universal', 'session'],
+    keywords: ['project', 'icon', 'emoji', 'monogram', 'identity', 'avatar', 'name'],
   },
   {
-    id: 'notes',
-    label: 'Notes',
-    description: 'Long-form knowledge, agent access, context budgets, and graph behavior.',
-    scope: 'Current project',
+    id: 'devices',
+    label: 'Link device',
+    description: 'Pair a phone or desktop, name this computer, and manage device access.',
+    scope: 'This device',
     group: 'Workspace',
-    keywords: ['essay', 'knowledge', 'wikilink', 'graph', 'budget', 'agent permissions'],
+    keywords: ['link', 'device', 'mobile', 'phone', 'qr', 'remote', 'desktop', 'computer', 'pair'],
   },
   {
     id: 'archived',
@@ -98,6 +102,33 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
     scope: 'Current hosted session',
     group: 'Workspace',
     keywords: ['collaboration', 'guest', 'invite', 'relay', 'access', 'share'],
+  },
+  {
+    id: 'notes',
+    label: 'Notes',
+    description:
+      'Project documents, research, and saved findings. Organize and reference knowledge.',
+    scope: 'Current project',
+    group: 'Knowledge',
+    keywords: ['essay', 'knowledge', 'wikilink', 'graph', 'budget', 'agent permissions'],
+  },
+  {
+    id: 'memory',
+    label: 'Memory',
+    description:
+      'Facts and preferences carried between conversations, with explicit memory scopes.',
+    scope: 'Current project',
+    group: 'Knowledge',
+    keywords: ['context', 'remember', 'rules', 'token budget', 'universal', 'session', 'workspace'],
+  },
+  {
+    id: 'skills',
+    label: 'Skills',
+    description:
+      'Personal and project playbooks: write, test, and activate reusable agent instructions.',
+    scope: 'Current project',
+    group: 'Knowledge',
+    keywords: ['skill', 'playbook', 'instructions', 'editor', 'routing', 'draft', 'personal'],
   },
   {
     id: 'appearance',
@@ -189,6 +220,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
 export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
   'Intelligence',
   'Workspace',
+  'Knowledge',
   'Experience',
   'Operations',
 ];

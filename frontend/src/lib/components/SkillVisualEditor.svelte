@@ -28,6 +28,13 @@
   import Code2 from 'lucide-svelte/icons/code-2';
   import Redo2 from 'lucide-svelte/icons/redo-2';
   import Undo2 from 'lucide-svelte/icons/undo-2';
+  import Bold from 'lucide-svelte/icons/bold';
+  import Italic from 'lucide-svelte/icons/italic';
+  import Heading2 from 'lucide-svelte/icons/heading-2';
+  import List from 'lucide-svelte/icons/list';
+  import ListOrdered from 'lucide-svelte/icons/list-ordered';
+  import Quote from 'lucide-svelte/icons/quote';
+  import Pilcrow from 'lucide-svelte/icons/pilcrow';
   import {
     analyzeHtmlVisualSafety,
     analyzeMarkdownVisualSafety,
@@ -41,6 +48,7 @@
     segmentMarkdownVisualSource,
     type VisualSourceSegment,
   } from './skill-visual-segments';
+  import { formatShortcut } from '$lib/utils/platform';
 
   const lockedRawNodeSpec: NodeSpec = {
     attrs: {
@@ -320,8 +328,10 @@
     if (mode !== 'plain') {
       shortcutCommands['Mod-b'] = toggleMark(visualSchema.marks.strong);
       shortcutCommands['Mod-i'] = toggleMark(visualSchema.marks.em);
-      shortcutCommands['Shift-Ctrl-0'] = setBlockType(visualSchema.nodes.paragraph);
-      shortcutCommands['Shift-Ctrl-2'] = setBlockType(visualSchema.nodes.heading, { level: 2 });
+      // ProseMirror rewrites `Mod` to ⌘ on macOS and Ctrl elsewhere. Naming a
+      // literal Ctrl here would leave those two chords dead on macOS.
+      shortcutCommands['Shift-Mod-0'] = setBlockType(visualSchema.nodes.paragraph);
+      shortcutCommands['Shift-Mod-2'] = setBlockType(visualSchema.nodes.heading, { level: 2 });
     }
 
     const preserveLockedRaw = new Plugin({
@@ -557,52 +567,59 @@
           type="button"
           class:active={markActive('strong')}
           aria-pressed={markActive('strong')}
-          title="Bold (Ctrl or Command + B)"
-          onclick={() => run(bold)}>Bold</button
+          title="Bold ({formatShortcut('Mod+B')})"
+          aria-label="Bold"
+          onclick={() => run(bold)}><Bold size={16} /></button
         >
         <button
           type="button"
           class:active={markActive('em')}
           aria-pressed={markActive('em')}
-          title="Italic (Ctrl or Command + I)"
-          onclick={() => run(italic)}>Italic</button
+          title="Italic ({formatShortcut('Mod+I')})"
+          aria-label="Italic"
+          onclick={() => run(italic)}><Italic size={16} /></button
         >
         <span class="toolbar-separator" aria-hidden="true"></span>
         <button
           type="button"
           class:active={blockActive('paragraph')}
           aria-pressed={blockActive('paragraph')}
-          onclick={() => run(paragraph)}>Text</button
+          title="Paragraph"
+          onclick={() => run(paragraph)}><Pilcrow size={15} />Text</button
         >
         <button
           type="button"
           class:active={blockActive('heading', { level: 2 })}
           aria-pressed={blockActive('heading', { level: 2 })}
-          onclick={() => run(heading)}>Heading</button
+          onclick={() => run(heading)}><Heading2 size={16} />Heading</button
         >
         <button
           type="button"
           class:active={blockActive('bullet_list')}
           aria-pressed={blockActive('bullet_list')}
-          onclick={() => run(bulletList)}>Bullets</button
+          aria-label="Bullets" title="Bulleted list"
+          onclick={() => run(bulletList)}><List size={16} /></button
         >
         <button
           type="button"
           class:active={blockActive('ordered_list')}
           aria-pressed={blockActive('ordered_list')}
-          onclick={() => run(orderedList)}>Numbered</button
+          aria-label="Numbered" title="Numbered list"
+          onclick={() => run(orderedList)}><ListOrdered size={16} /></button
         >
         <button
           type="button"
           class:active={blockActive('blockquote')}
           aria-pressed={blockActive('blockquote')}
-          onclick={() => run(quote)}>Quote</button
+          aria-label="Quote" title="Block quote"
+          onclick={() => run(quote)}><Quote size={16} /></button
         >
         <button
           type="button"
           class:active={blockActive('code_block')}
           aria-pressed={blockActive('code_block')}
-          onclick={() => run(codeBlock)}><Code2 size={15} />Code</button
+          aria-label="Code" title="Code block"
+          onclick={() => run(codeBlock)}><Code2 size={16} /></button
         >
         <span class="toolbar-separator" aria-hidden="true"></span>
       {/if}
@@ -610,13 +627,15 @@
         type="button"
         disabled={!canRun(undo)}
         aria-label="Undo visual edit"
-        onclick={() => run(undo)}><Undo2 size={16} />Undo</button
+        title="Undo"
+        onclick={() => run(undo)}><Undo2 size={16} /></button
       >
       <button
         type="button"
         disabled={!canRun(redo)}
         aria-label="Redo visual edit"
-        onclick={() => run(redo)}><Redo2 size={16} />Redo</button
+        title="Redo"
+        onclick={() => run(redo)}><Redo2 size={16} /></button
       >
     </div>
   {/if}
@@ -659,8 +678,7 @@
     {:else if activeMode === 'plain'}
       Plain text keeps whitespace and line breaks exactly as written.
     {:else}
-      CommonMark changes synchronize to source. Advanced extensions stay locked until edited in
-      Source mode.
+      Write naturally. Changes synchronize to Markdown; Source keeps exact formatting.
     {/if}
   </p>
   <span class="sr-status" aria-live="polite">{liveStatus}</span>
@@ -678,31 +696,32 @@
 
   .format-toolbar {
     display: flex;
-    min-height: 48px;
+    min-height: 44px;
     align-items: center;
-    gap: 6px;
+    gap: 3px;
     overflow-x: auto;
     border-bottom: 1px solid var(--color-border);
-    background: var(--color-surface-2);
-    padding: 6px;
+    background: var(--color-surface-1);
+    padding: 6px 12px;
   }
 
   .format-toolbar button,
   .source-action {
     display: inline-flex;
-    min-height: 40px;
+    min-height: 30px;
+    min-width: 30px;
     flex: 0 0 auto;
     align-items: center;
     justify-content: center;
     gap: 6px;
-    border: 1px solid var(--color-border);
-    border-radius: 9px;
-    background: var(--color-surface-1);
-    padding: 8px 11px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    padding: 6px 8px;
     color: var(--color-text-secondary);
     font: inherit;
-    font-size: 13px;
-    font-weight: 650;
+    font-size: 12px;
+    font-weight: 500;
     cursor: pointer;
   }
 
@@ -721,7 +740,7 @@
   }
 
   .format-toolbar button.active {
-    border-color: var(--color-accent);
+    border-color: transparent;
     background: var(--color-accent-transparent);
     color: var(--color-text-primary);
   }
@@ -735,7 +754,8 @@
 
   .toolbar-separator {
     width: 1px;
-    height: 26px;
+    height: 18px;
+    margin: 0 5px;
     flex: 0 0 auto;
     background: var(--color-border-bright);
   }
@@ -749,11 +769,14 @@
   }
 
   :global(.skill-prosemirror-document) {
-    min-height: 280px;
-    padding: 24px;
+    min-height: 360px;
+    max-width: 78ch;
+    margin: 0 auto;
+    padding: 32px 36px;
     color: var(--color-text-primary);
-    font-size: 14px;
-    line-height: 1.65;
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.8;
     outline: none;
     white-space: normal;
   }
@@ -789,6 +812,14 @@
   :global(.skill-prosemirror-document ol) {
     padding-left: 1.6rem;
   }
+  :global(.skill-prosemirror-document ul) { list-style: disc; }
+  :global(.skill-prosemirror-document ol) { list-style: decimal; }
+  :global(.skill-prosemirror-document h1) { font-size: 1.9rem; font-weight: 650; }
+  :global(.skill-prosemirror-document h2) { font-size: 1.35rem; font-weight: 650; }
+  :global(.skill-prosemirror-document h3) { font-size: 1.1rem; font-weight: 600; }
+  :global(.skill-prosemirror-document li) { margin: 0.25em 0; }
+  :global(.skill-prosemirror-document strong) { font-weight: 650; }
+  :global(.skill-prosemirror-document em) { font-style: italic; }
 
   :global(.skill-prosemirror-document blockquote) {
     border-left: 3px solid var(--color-accent);
@@ -974,11 +1005,13 @@
   }
 
   .editor-help {
-    min-height: 44px;
+    min-height: 32px;
     margin: 0;
     border-top: 1px solid var(--color-border);
-    padding: 11px 14px;
-    background: var(--color-surface-2);
+    padding: 9px 16px;
+    background: var(--color-surface-1);
+    font-size: 11px;
+    color: var(--color-text-muted);
   }
 
   .sr-status {

@@ -33,7 +33,7 @@ vi.mock('$lib/stores/websocket.svelte', () => ({
   },
 }));
 vi.mock('$lib/stores/agents.svelte', () => ({
-  agentStore: { removeAgent: vi.fn() },
+  agentStore: { closeAgentCard: vi.fn(), reopenAgentCard: vi.fn() },
 }));
 vi.mock('$lib/stores/run-state-core', () => ({
   ACTIVE_AGENT_STATUSES: new Set(['thinking', 'streaming', 'tool_calling']),
@@ -75,7 +75,7 @@ describe('agent rail close', () => {
   beforeEach(() => {
     fetchMock.mockReset();
     (wsStore.agents as Map<string, unknown>).clear();
-    (agentStore.removeAgent as ReturnType<typeof vi.fn>).mockReset();
+    (agentStore.closeAgentCard as ReturnType<typeof vi.fn>).mockReset();
     (toastStore.error as ReturnType<typeof vi.fn>).mockReset();
   });
   // @testing-library/svelte unmounts after each test, which tears down the
@@ -96,7 +96,7 @@ describe('agent rail close', () => {
       'http://127.0.0.1:3001/api/agent/w1/cancel',
       { method: 'POST' },
     );
-    expect(agentStore.removeAgent).toHaveBeenCalledWith('w1');
+    expect(agentStore.closeAgentCard).toHaveBeenCalledWith('w1');
   });
 
   it('percent-encodes an agent id that contains URL-significant characters', async () => {
@@ -116,7 +116,7 @@ describe('agent rail close', () => {
     await rail.closeAgent('w2');
 
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(agentStore.removeAgent).toHaveBeenCalledWith('w2');
+    expect(agentStore.closeAgentCard).toHaveBeenCalledWith('w2');
   });
 
   it('keeps the card and reports the error when the cancel fails', async () => {
@@ -132,7 +132,7 @@ describe('agent rail close', () => {
     await rail.closeAgent('w3');
 
     // Dropping a card whose worker is still live would hide running work.
-    expect(agentStore.removeAgent).not.toHaveBeenCalled();
+    expect(agentStore.closeAgentCard).not.toHaveBeenCalled();
     expect(toastStore.error).toHaveBeenCalledWith(expect.stringContaining('Frontend'));
   });
 
@@ -143,7 +143,7 @@ describe('agent rail close', () => {
 
     await rail.closeAgent('w4');
 
-    expect(agentStore.removeAgent).not.toHaveBeenCalled();
+    expect(agentStore.closeAgentCard).not.toHaveBeenCalled();
     expect(toastStore.error).toHaveBeenCalled();
   });
 
@@ -166,6 +166,6 @@ describe('agent rail close', () => {
     await rail.closeAgent('ghost');
 
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(agentStore.removeAgent).not.toHaveBeenCalled();
+    expect(agentStore.closeAgentCard).not.toHaveBeenCalled();
   });
 });

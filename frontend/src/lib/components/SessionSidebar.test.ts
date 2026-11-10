@@ -12,6 +12,7 @@ const session = {
 
 const mocks = vi.hoisted(() => ({
   billingApiFetch: vi.fn(),
+  deviceStore: { openCreator: vi.fn(), closeChat: vi.fn(), chats: [], activeChat: null },
   sessionStore: {
     activeSessionId: 'session-1',
     sessions: [] as (typeof session)[],
@@ -21,6 +22,7 @@ const mocks = vi.hoisted(() => ({
     archivedError: null as string | null,
     searchQuery: '',
     newChat: vi.fn(),
+    createSession: vi.fn(),
     fetchMessages: vi.fn(),
     renameSession: vi.fn(),
     archiveSession: vi.fn(async () => true),
@@ -40,9 +42,18 @@ const mocks = vi.hoisted(() => ({
     workspaceProjects: [] as Array<{ path: string; name: string; modifiedAt: number }>,
     setScope: vi.fn(),
   },
+  projectIdentityProjection: (entry: { path: string; name: string; modifiedAt: number }) => ({
+    identity: { id: `path:${entry.path}`, name: entry.name, icon: { mode: 'automatic' as const } },
+    icon: {
+      mode: 'monogram' as const,
+      value: entry.name.slice(0, 2).toUpperCase(),
+      color: 'accent' as const,
+    },
+  }),
 }));
 
 vi.mock('$lib/stores/sessions.svelte', () => ({ sessionStore: mocks.sessionStore }));
+vi.mock('$lib/stores/devices.svelte', () => ({ deviceStore: mocks.deviceStore }));
 vi.mock('$lib/api.svelte', () => ({ apiFetch: mocks.billingApiFetch, parseJsonResponse: vi.fn() }));
 vi.mock('$lib/utils/api-url', () => ({ apiUrl: (path: string) => path }));
 vi.mock('$lib/stores/websocket.svelte', () => ({
@@ -58,6 +69,7 @@ vi.mock('$lib/stores/websocket.svelte', () => ({
 vi.mock('$lib/stores/project.svelte', () => ({
   projectStore: mocks.projectStore,
   projectDisplayName: (path: string) => path.split('/').at(-1) ?? path,
+  projectIdentityProjection: mocks.projectIdentityProjection,
 }));
 vi.mock('$lib/stores/collaboration.svelte', () => ({
   collaborationStore: {
@@ -155,6 +167,59 @@ describe('SessionSidebar session controls', () => {
     expect(screen.queryByRole('button', { name: /empty-folder/i })).toBeNull();
   });
 
+  it('opens project icon actions from the native context menu and routes identity editing', async () => {
+    const onAction = vi.fn();
+    render(SessionSidebar, { props: { onAction } });
+
+    const trigger = screen.getByRole('button', { name: 'Project actions for project' });
+    await fireEvent.contextMenu(trigger, { clientX: 24, clientY: 48 });
+
+    expect(screen.getByRole('menu', { name: 'Actions for project' })).toBeVisible();
+    await fireEvent.click(screen.getByRole('menuitem', { name: /^Edit/i }));
+
+    expect(onAction).toHaveBeenCalledWith('open_project_identity:%2Ftmp%2Fproject');
+  });
+
+  it('opens project actions when the project icon itself is right-clicked', async () => {
+    render(SessionSidebar);
+
+    const projectRow = screen.getByRole('button', { name: /Collapse project\./i });
+    const projectIcon = projectRow.querySelector('[data-testid="project-icon"]');
+    expect(projectIcon).toBeTruthy();
+
+    await fireEvent.contextMenu(projectIcon as HTMLElement, { clientX: 24, clientY: 48 });
+
+    expect(screen.getByRole('menu', { name: 'Actions for project' })).toBeVisible();
+  });
+
+  it('opens workspace actions when the workspace folder icon is right-clicked', async () => {
+    mocks.projectStore.workspaceRoot = '/tmp/workspace';
+    mocks.projectStore.workspaceProjects = [
+      { path: '/tmp/project', name: 'project', modifiedAt: Date.now() },
+    ];
+
+    render(SessionSidebar);
+
+    const workspaceRow = screen.getByRole('button', { name: /Collapse workspace workspace/i });
+    const folderIcon = workspaceRow.querySelector('.workspace-folder-icon');
+    expect(folderIcon).toBeTruthy();
+
+    await fireEvent.contextMenu(workspaceRow, { clientX: 24, clientY: 48 });
+
+    expect(
+      screen.getByRole('menu', { name: 'Actions for workspace workspace' }),
+    ).toBeVisible();
+  });
+
+  it('opens project icon actions from the keyboard context-menu command', async () => {
+    render(SessionSidebar);
+
+    const trigger = screen.getByRole('button', { name: 'Project actions for project' });
+    await fireEvent.keyDown(trigger, { key: 'F10', shiftKey: true });
+
+    expect(screen.getByRole('menu', { name: 'Actions for project' })).toBeVisible();
+  });
+
   it('attaches workspace-root chats directly to the workspace node, never a "Workspace root" folder', () => {
     const rootSession = {
       ...session,
@@ -214,16 +279,20 @@ describe('SessionSidebar session controls', () => {
     expect(screen.getByText('Join or host a team workspace')).toBeVisible();
   });
 
-  it('keeps the full-row session action and row utilities as sibling controls', async () => {
+  /** Each chat row carries one overflow control; every row action lives in it. */
+  async function chooseChatAction(name: RegExp) {
+    await fireEvent.click(
+      screen.getAllByRole('button', { name: /^Chat actions for / })[0],
+    );
+    await fireEvent.click(screen.getByRole('menuitem', { name }));
+  }
+
+  it('keeps the full-row session action and chat utilities as sibling controls', async () => {
     const { container } = render(SessionSidebar);
 
     const openSession = screen.getByRole('button', { name: 'Open session Accessibility review' });
-    const rename = screen.getByRole('button', { name: 'Rename session' });
-    const archive = screen.getByRole('button', { name: 'Archive chat' });
-    const remove = screen.getByRole('button', { name: 'Delete session' });
-    expect(openSession.contains(rename)).toBe(false);
-    expect(openSession.contains(archive)).toBe(false);
-    expect(openSession.contains(remove)).toBe(false);
+    const actions = screen.getAllByRole('button', { name: /^Chat actions for / })[0];
+    expect(openSession.contains(actions)).toBe(false);
     expect(container.querySelector('button button, [role="button"] button')).toBeNull();
 
     await fireEvent.click(openSession);
@@ -234,16 +303,16 @@ describe('SessionSidebar session controls', () => {
     expect(container.querySelector('button button, [role="button"] button')).toBeNull();
   });
 
-  it('places Archive between Rename and Delete and warns before archiving', async () => {
+  it('orders the chat menu Rename, Copy, Archive, Delete and warns before archiving', async () => {
     render(SessionSidebar);
 
-    const rename = screen.getByRole('button', { name: 'Rename session' });
-    const archive = screen.getByRole('button', { name: 'Archive chat' });
-    const remove = screen.getByRole('button', { name: 'Delete session' });
-    expect(rename.compareDocumentPosition(archive) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(archive.compareDocumentPosition(remove) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await fireEvent.click(screen.getAllByRole('button', { name: /^Chat actions for / })[0]);
+    const labels = screen
+      .getAllByRole('menuitem')
+      .map((item) => item.textContent?.trim() ?? '');
+    expect(labels).toEqual(['Rename', 'Copy chat ID', 'Archive', 'Delete chat']);
 
-    await fireEvent.click(archive);
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Archive' }));
 
     // Nothing is archived until the warning is accepted.
     expect(mocks.sessionStore.archiveSession).not.toHaveBeenCalled();
@@ -261,14 +330,17 @@ describe('SessionSidebar session controls', () => {
   it('shows the same warning with delete wording before deleting', async () => {
     render(SessionSidebar);
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Delete session' }));
+    await chooseChatAction(/^Delete chat$/);
 
     expect(mocks.sessionStore.deleteSession).not.toHaveBeenCalled();
     const warning = screen.getByRole('alertdialog');
     expect(warning).toHaveTextContent(
       'Deleting this session will stop the current agent and all of its sub-agents',
     );
-    expect(warning).toHaveTextContent("Don't show again");
+    // Deleting is destructive and unrecoverable, so the warning offers no
+    // opt-out; only the reversible archive warning does.
+    expect(warning).not.toHaveTextContent("Don't show again");
+    expect(screen.queryByRole('button', { name: "Don't show again" })).toBeNull();
 
     await fireEvent.click(screen.getByRole('button', { name: 'Delete Session' }));
     expect(mocks.sessionStore.deleteSession).toHaveBeenCalledWith('session-2');
@@ -279,11 +351,11 @@ describe('SessionSidebar session controls', () => {
     render(SessionSidebar);
     const warningText = () => screen.getByRole('alertdialog').querySelector('p')?.textContent ?? '';
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Archive chat' }));
+    await chooseChatAction(/^Archive$/);
     const archiveWarning = warningText();
     await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Delete session' }));
+    await chooseChatAction(/^Delete chat$/);
     const deleteWarning = warningText();
 
     expect(archiveWarning).toContain('Archiving');
@@ -293,62 +365,88 @@ describe('SessionSidebar session controls', () => {
   it('remembers "Don\'t show again" per action', async () => {
     render(SessionSidebar);
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Archive chat' }));
+    await chooseChatAction(/^Archive$/);
     await fireEvent.click(screen.getByRole('button', { name: "Don't show again" }));
     await fireEvent.click(screen.getByRole('button', { name: 'Archive Session' }));
     expect(mocks.sessionStore.archiveSession).toHaveBeenCalledWith('session-2');
 
     // Archiving no longer stops to warn.
-    await fireEvent.click(screen.getByRole('button', { name: 'Archive chat' }));
+    await chooseChatAction(/^Archive$/);
     expect(screen.queryByRole('alertdialog')).toBeNull();
     expect(mocks.sessionStore.archiveSession).toHaveBeenCalledTimes(2);
 
     // Dismissing the reversible archive warning must not dismiss the
     // destructive delete warning.
-    await fireEvent.click(screen.getByRole('button', { name: 'Delete session' }));
+    await chooseChatAction(/^Delete chat$/);
     expect(screen.getByRole('alertdialog')).toHaveTextContent('Deleting this session');
     expect(mocks.sessionStore.deleteSession).not.toHaveBeenCalled();
+  });
+
+  it('always asks before deleting, even after the warning was dismissed once', async () => {
+    // A suppression recorded by an older build (or a stale flag) must not turn
+    // a chat deletion into a single-click action.
+    localStorage.setItem(
+      'koryphaios-session-action-warnings-v1',
+      JSON.stringify({ delete: true }),
+    );
+    render(SessionSidebar);
+
+    await chooseChatAction(/^Delete chat$/);
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('Deleting this session');
+    expect(mocks.sessionStore.deleteSession).not.toHaveBeenCalled();
+
+    // Asking again still asks: the stored suppression never turns this into a
+    // single-click delete, and the dialog's own confirm is what deletes.
+    await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await chooseChatAction(/^Delete chat$/);
+    const confirm = screen.getByRole('alertdialog');
+    await fireEvent.click(
+      Array.from(confirm.querySelectorAll('button')).find((button) =>
+        /^Delete session$/i.test(button.textContent ?? ''),
+      ) as HTMLElement,
+    );
+    expect(mocks.sessionStore.deleteSession).toHaveBeenCalledWith('session-2');
+    expect(screen.queryByRole('alertdialog')).toBeNull();
   });
 
   it('does not treat a cancelled warning as "Don\'t show again"', async () => {
     render(SessionSidebar);
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Archive chat' }));
+    await chooseChatAction(/^Archive$/);
     await fireEvent.click(screen.getByRole('button', { name: "Don't show again" }));
     await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(mocks.sessionStore.archiveSession).not.toHaveBeenCalled();
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Archive chat' }));
+    await chooseChatAction(/^Archive$/);
     expect(screen.getByRole('alertdialog')).toBeVisible();
   });
 
-  it('verifies hidden archives and states exact counts before Delete All can proceed', async () => {
-    mocks.sessionStore.archivedSessions = [
-      { ...session, id: 'archived-1', title: 'Archived chat' },
-    ];
+  it('opens the chat actions menu on right-click', async () => {
     render(SessionSidebar);
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Delete all sessions' }));
+    const openSession = screen.getByRole('button', { name: 'Open session Accessibility review' });
+    await fireEvent.contextMenu(openSession, { clientX: 120, clientY: 180 });
 
-    expect(mocks.sessionStore.fetchArchivedSessions).toHaveBeenCalledOnce();
-    expect(screen.getByRole('alertdialog')).toBeVisible();
-    expect(
-      screen.getByText(/permanently deletes 1 active chat and 1 archived chat/i),
-    ).toBeVisible();
-    await fireEvent.click(screen.getByRole('button', { name: 'Delete All Sessions' }));
-    expect(mocks.sessionStore.deleteAllSessions).toHaveBeenCalledOnce();
+    expect(screen.getByRole('menu', { name: 'Actions for Accessibility review' })).toBeVisible();
+    expect(screen.queryByRole('menuitem', { name: /Pin/i })).toBeNull();
+
+    await fireEvent.click(screen.getByRole('menuitem', { name: /^Rename/i }));
+    expect(screen.queryByRole('menu')).toBeNull();
   });
 
-  it('does not expose a global delete confirmation when archives cannot be counted', async () => {
-    mocks.sessionStore.archivedError = 'Archive index unavailable';
-    mocks.sessionStore.fetchArchivedSessions.mockResolvedValueOnce(false);
+  it('opens the chat actions menu with the context-menu key', async () => {
     render(SessionSidebar);
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Delete all sessions' }));
+    const openSession = screen.getByRole('button', { name: 'Open session Accessibility review' });
+    await fireEvent.keyDown(openSession, { key: 'ContextMenu' });
 
-    expect(mocks.sessionStore.fetchArchivedSessions).toHaveBeenCalledOnce();
-    expect(screen.queryByRole('alertdialog')).toBeNull();
-    expect(mocks.sessionStore.deleteAllSessions).not.toHaveBeenCalled();
+    expect(screen.getByRole('menu', { name: 'Actions for Accessibility review' })).toBeVisible();
+  });
+
+  it('does not expose a global delete-all-sessions control', () => {
+    render(SessionSidebar);
+
+    expect(screen.queryByRole('button', { name: 'Delete all sessions' })).toBeNull();
   });
 
   it('lifts the tracked-spend popover out of the sidebar so no window can cover it', async () => {
@@ -372,6 +470,7 @@ describe('SessionSidebar session controls', () => {
     render(SessionSidebar, { props: { onAction } });
 
     const costButton = screen.getByRole('button', { name: /Billing detail for/i });
+    expect(costButton).not.toHaveAttribute('title');
     await fireEvent.mouseEnter(costButton);
     await Promise.resolve();
 
@@ -425,32 +524,100 @@ describe('SessionSidebar session controls', () => {
     expect(tree.className).toContain('overflow-x-hidden');
   });
 
-  it('sizes the launcher menu to the sidebar instead of the "+" button', async () => {
+  it('opens the device/workspace dialog from the big "+" without a clipped sidebar menu', async () => {
     const { container } = render(SessionSidebar);
 
     await fireEvent.click(screen.getByRole('button', { name: 'Create or open' }));
 
-    const menu = container.querySelector('.launcher-menu') as HTMLElement;
-    expect(menu).toBeTruthy();
-    // A fixed 288px panel right-aligned to the 32px "+" button overflowed the
-    // 220-272px sidebar and was clipped by the <nav>'s overflow:hidden, so
-    // "Open Project" rendered as "pen Project". Sizing to the toolbar (the
-    // containing block) makes that impossible at any sidebar width.
-    expect(menu.className).not.toContain('w-72');
-    expect(menu.className).not.toContain('right-0');
-    // The four project/workspace actions are a single column: a two-column
-    // grid cannot fit "Open Workspace" inside a 220px sidebar.
-    expect(menu.querySelector('.grid-cols-2')).toBeNull();
-    expect(screen.getByRole('menuitem', { name: 'Open Workspace' })).toBeVisible();
+    expect(mocks.deviceStore.openCreator).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', { name: 'Create or open' })).toHaveAttribute(
+      'aria-haspopup',
+      'dialog',
+    );
+    expect(container.querySelector('.launcher-menu')).toBeNull();
   });
 
-  it('closes the launcher menu on Escape', async () => {
-    const { container } = render(SessionSidebar);
+  it('keeps the current chat and project until a device/workspace is chosen', async () => {
+    render(SessionSidebar);
 
     await fireEvent.click(screen.getByRole('button', { name: 'Create or open' }));
-    expect(container.querySelector('.launcher-menu')).toBeTruthy();
+    expect(mocks.deviceStore.openCreator).toHaveBeenCalledOnce();
+    expect(mocks.sessionStore.activeSessionId).toBe('session-1');
+    expect(mocks.projectStore.currentPath).toBe('/tmp/project');
+    expect(mocks.sessionStore.newChat).not.toHaveBeenCalled();
+  });
 
-    await fireEvent.keyDown(window, { key: 'Escape' });
-    expect(container.querySelector('.launcher-menu')).toBeNull();
+  it('does not allow another chat while the current chat is still new', async () => {
+    const otherSession = {
+      ...session,
+      id: 'session-other-folder',
+      title: 'Other folder chat',
+      workingDirectory: '/tmp/other',
+    };
+    mocks.sessionStore.sessions = [{ ...session, messageCount: 0 }, otherSession];
+    mocks.sessionStore.filteredSessions = mocks.sessionStore.sessions;
+    mocks.sessionStore.activeSessionId = session.id;
+    mocks.projectStore.workspaceRoot = '/tmp/workspace';
+    mocks.projectStore.workspaceProjects = [
+      { path: '/tmp/project', name: 'project', modifiedAt: Date.now() },
+      { path: '/tmp/other', name: 'other', modifiedAt: Date.now() },
+    ];
+
+    render(SessionSidebar);
+
+    // The guard now sits on the project's New chat button for that folder.
+    const newChatButton = screen
+      .getAllByRole('button', { name: 'New chat' })
+      .find((button) => button.getAttribute('title')?.includes('Finish naming'));
+    expect(newChatButton).toBeDisabled();
+    if (newChatButton) await fireEvent.click(newChatButton);
+
+    expect(mocks.sessionStore.createSession).not.toHaveBeenCalled();
+  });
+
+  it('shows a billing-style skeleton while the agent names a new session', () => {
+    mocks.sessionStore.sessions = [{ ...session, title: 'New Session', messageCount: 1 }];
+    mocks.sessionStore.filteredSessions = mocks.sessionStore.sessions;
+
+    render(SessionSidebar);
+
+    expect(screen.getByRole('status', { name: 'Naming chat' })).toHaveClass('animate-pulse');
+    expect(screen.queryByText('New Session')).toBeNull();
+  });
+
+  it('only spins the project plus that started chat creation', async () => {
+    const otherSession = {
+      ...session,
+      id: 'session-3',
+      title: 'Other chat',
+      workingDirectory: '/tmp/other',
+    };
+    mocks.sessionStore.sessions = [session, otherSession];
+    mocks.sessionStore.filteredSessions = mocks.sessionStore.sessions;
+    mocks.projectStore.workspaceRoot = '/tmp/workspace';
+    mocks.projectStore.workspaceProjects = [
+      { path: '/tmp/project', name: 'project', modifiedAt: Date.now() },
+      { path: '/tmp/other', name: 'other', modifiedAt: Date.now() },
+    ];
+    let resolveCreate!: (id: string) => void;
+    mocks.sessionStore.createSession.mockReturnValue(
+      new Promise<string>((resolve) => {
+        resolveCreate = resolve;
+      }),
+    );
+
+    // New chat now lives as a button next to the project's 3 dots.
+    const onAction = vi.fn();
+    render(SessionSidebar, { props: { onAction } });
+
+    const newChatButton = screen
+      .getAllByRole('button', { name: 'New chat' })
+      .find((button) => button.getAttribute('title') === 'New chat in project');
+    await fireEvent.click(newChatButton!);
+
+    expect(onAction).toHaveBeenCalledTimes(1);
+    expect(onAction).toHaveBeenCalledWith('new_project_chat:%2Ftmp%2Fproject');
+    resolveCreate('new-session');
+    await Promise.resolve();
   });
 });

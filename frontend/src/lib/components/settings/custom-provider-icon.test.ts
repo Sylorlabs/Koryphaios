@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  CUSTOM_PROVIDER_ICON_MAX_BYTES,
   clampIconZoomPercent,
   computeIconCropSourceRect,
   computeIconCropTransform,
@@ -9,28 +8,26 @@ import {
 } from './custom-provider-icon';
 
 describe('custom provider icon input validation', () => {
-  it('accepts supported image types up to the file-size limit', () => {
-    expect(
-      validateCustomProviderIconFile({ size: CUSTOM_PROVIDER_ICON_MAX_BYTES, type: 'image/png' }),
-    ).toBeNull();
+  it('accepts supported image types at any size', () => {
+    expect(validateCustomProviderIconFile({ size: 1024, type: 'image/png' })).toBeNull();
     expect(validateCustomProviderIconFile({ size: 1024, type: 'image/jpeg' })).toBeNull();
     expect(validateCustomProviderIconFile({ size: 1024, type: 'image/webp' })).toBeNull();
+    // A large image opens the crop editor rather than being rejected: the
+    // editor frames it and the render step writes a 256 x 256 PNG.
+    expect(
+      validateCustomProviderIconFile({ size: 64 * 1024 * 1024, type: 'image/png' }),
+    ).toBeNull();
   });
 
-  it('rejects unsupported, empty, and oversized files', () => {
+  it('rejects unsupported and empty files', () => {
     expect(validateCustomProviderIconFile({ size: 1024, type: 'image/svg+xml' })).toMatch(/PNG/);
     expect(validateCustomProviderIconFile({ size: 0, type: 'image/png' })).toMatch(/empty/);
-    expect(
-      validateCustomProviderIconFile({
-        size: CUSTOM_PROVIDER_ICON_MAX_BYTES + 1,
-        type: 'image/png',
-      }),
-    ).toMatch(/5 MiB/);
   });
 
-  it('rejects invalid and excessively large decoded dimensions', () => {
+  it('rejects undecodable dimensions but accepts large ones', () => {
     expect(validateCustomProviderIconDimensions(0, 200)).toMatch(/decoded/);
-    expect(validateCustomProviderIconDimensions(8000, 6000)).toMatch(/40 megapixels/);
+    expect(validateCustomProviderIconDimensions(Number.NaN, 200)).toMatch(/decoded/);
+    expect(validateCustomProviderIconDimensions(8000, 6000)).toBeNull();
     expect(validateCustomProviderIconDimensions(2000, 2000)).toBeNull();
   });
 });

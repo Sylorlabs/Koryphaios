@@ -6,7 +6,12 @@
   import FileText from 'lucide-svelte/icons/file-text';
   import X from 'lucide-svelte/icons/x';
   import StickyNote from 'lucide-svelte/icons/sticky-note';
-  import type { Note } from '@koryphaios/shared';
+  import {
+    validateNoteCanvas,
+    type Note,
+    type NoteCanvasCard as CanvasCard,
+    type NoteCanvasEdge as CanvasEdge,
+  } from '@koryphaios/shared';
   import { notesStore } from '$lib/stores/notes.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
   import { projectDisplayName, projectStore } from '$lib/stores/project.svelte';
@@ -20,24 +25,10 @@
 
   interface Props {
     onOpenNote?: (noteId: string) => void;
+    initialNoteId?: string | null;
   }
-  let { onOpenNote }: Props = $props();
+  let { onOpenNote, initialNoteId = null }: Props = $props();
 
-  interface CanvasCard {
-    id: string;
-    x: number;
-    y: number;
-    w: number;
-    h: number;
-    text: string;
-    noteId?: string;
-    color: string;
-  }
-  interface CanvasEdge {
-    id: string;
-    from: string;
-    to: string;
-  }
   interface CanvasSnapshot {
     draftId: string;
     projectPath: string;
@@ -255,7 +246,9 @@
   let savedCanvases = $derived(notesStore.notes.filter((n) => (n.tags ?? []).includes(CANVAS_TAG)));
 
   function serialize(): string {
-    return JSON.stringify({ v: 1, name: canvasName, cards, edges }, null, 0);
+    return JSON.stringify(
+      validateNoteCanvas({ v: 1, name: canvasName.trim() || 'Untitled canvas', cards, edges }),
+    );
   }
 
   async function save(
@@ -272,7 +265,13 @@
     }
 
     const version = editVersion;
-    const content = serialize();
+    let content: string;
+    try {
+      content = serialize();
+    } catch (error) {
+      toastStore.error(error instanceof Error ? error.message : 'Canvas validation failed');
+      return false;
+    }
     const title = canvasName.trim() || 'Untitled canvas';
     const existingId = canvasNoteId;
     savePromise = (async () => {
@@ -342,52 +341,11 @@
     keyboardConnectFrom = null;
   }
 
-  function isSafeCanvasColor(value: string): boolean {
-    return /^#[0-9a-f]{6}$/i.test(value);
-  }
-
   function applyCanvasDocument(note: Pick<Note, 'id' | 'title' | 'content' | 'revision'>): boolean {
     try {
-      const doc = JSON.parse(note.content) as Record<string, unknown>;
-      const parsedCards = Array.isArray(doc.cards)
-        ? doc.cards.filter(
-            (card): card is CanvasCard =>
-              Boolean(card) &&
-              typeof card === 'object' &&
-              typeof card.id === 'string' &&
-              typeof card.x === 'number' &&
-              Number.isFinite(card.x) &&
-              Math.abs(card.x) <= 1_000_000 &&
-              typeof card.y === 'number' &&
-              Number.isFinite(card.y) &&
-              Math.abs(card.y) <= 1_000_000 &&
-              typeof card.w === 'number' &&
-              card.w >= 80 &&
-              card.w <= 1200 &&
-              typeof card.h === 'number' &&
-              card.h >= 60 &&
-              card.h <= 1200 &&
-              typeof card.text === 'string' &&
-              card.text.length <= 100_000 &&
-              typeof card.color === 'string' &&
-              isSafeCanvasColor(card.color),
-          )
-        : [];
-      const cardIds = new Set(parsedCards.map((card) => card.id));
-      const parsedEdges = Array.isArray(doc.edges)
-        ? doc.edges.filter(
-            (edge): edge is CanvasEdge =>
-              Boolean(edge) &&
-              typeof edge === 'object' &&
-              typeof edge.id === 'string' &&
-              typeof edge.from === 'string' &&
-              typeof edge.to === 'string' &&
-              cardIds.has(edge.from) &&
-              cardIds.has(edge.to),
-          )
-        : [];
-      cards = parsedCards.slice(0, 2000);
-      edges = parsedEdges.slice(0, 5000);
+      const doc = validateNoteCanvas(JSON.parse(note.content));
+      cards = doc.cards;
+      edges = doc.edges;
       canvasName =
         typeof doc.name === 'string' && doc.name.trim()
           ? doc.name.trim().slice(0, 200)
@@ -407,7 +365,11 @@
         'Failed to parse canvas JSON:',
         err instanceof Error ? err.message : String(err),
       );
-      toastStore.error('Could not parse this canvas');
+      toastStore.error(
+        err instanceof Error
+          ? err.message
+          : 'Could not parse this canvas. No cards were loaded or discarded.',
+      );
       return false;
     }
   }
@@ -572,6 +534,11 @@
   onMount(() => {
     window.addEventListener('keydown', handleWindowKeydown);
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    const changed = () => {
+      if (!dirty && canvasNoteId && !savePromise) void loadCanvas(canvasNoteId);
+    };
+    window.addEventListener('kory-notes-updated', changed);
+    return () => window.removeEventListener('kory-notes-updated', changed);
   });
 
   onDestroy(() => {
@@ -580,13 +547,13 @@
     void persistCanvas('destroy');
   });
 
-  let autoOpenedDemoCanvas = $state(false);
+  let openedCanvasScope = $state('');
   $effect(() => {
-    // Notes seed asynchronously in the website demo. Waiting for the reactive
-    // collection avoids an empty canvas caused by mounting before that seed.
-    if (!autoOpenedDemoCanvas && savedCanvases.length > 0) {
-      void loadCanvas(savedCanvases[0].id);
-      autoOpenedDemoCanvas = true;
+    const scope = `${projectStore.currentPath ?? ''}\0${initialNoteId ?? ''}`;
+    const target = initialNoteId ?? savedCanvases[0]?.id;
+    if (target && scope !== openedCanvasScope) {
+      openedCanvasScope = scope;
+      void loadCanvas(target);
     }
   });
 </script>

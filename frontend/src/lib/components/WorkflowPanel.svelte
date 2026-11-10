@@ -142,11 +142,12 @@
 
 {#if open}
   <section
-    class="mx-4 flex max-h-[min(34rem,45dvh)] flex-col overflow-hidden border-t border-[var(--color-border)] bg-[var(--color-surface-1)]"
+    class="mx-2 flex max-h-[min(34rem,45dvh)] flex-col overflow-hidden rounded-lg"
+    style="background: color-mix(in srgb, var(--color-surface-2) 42%, transparent);"
     data-testid="workflow-composer-panel"
     aria-labelledby="workflow-panel-title"
   >
-    <header class="flex items-start gap-3 px-5 pb-2 pt-4">
+    <header class="flex items-start gap-3 px-4 pb-2 pt-3">
       <div class="flex h-8 w-8 shrink-0 items-center justify-center text-[var(--color-accent)]">
         <Workflow size={18} />
       </div>
@@ -171,7 +172,7 @@
         aria-label="Close workflows"><X size={16} /></button
       >
     </header>
-    <div class="min-h-0 overflow-y-auto px-5 pb-4 pt-2">
+    <div class="min-h-0 overflow-y-auto px-4 pb-4 pt-2">
       {#if selectedRun}
         {@const definition = definitions.find((item) => item.id === selectedRun.workflowId)}
         {@const stage = definition?.stages[selectedRun.stageIndex]}

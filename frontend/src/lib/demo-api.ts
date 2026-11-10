@@ -352,6 +352,7 @@ let demoAgentSettings = {
   ruleEnforcementLevel: 'strict',
   agentExecutionMode: 'auto',
   preferencesEnabled: true,
+  criticMode: 'auto',
   criticGateEnabled: true,
   gateStrictness: 'strict',
   intentInterview: 'adaptive',
@@ -389,20 +390,6 @@ const AGENT_PREFERENCES = {
 - Prefer small, reviewable diffs over sweeping rewrites.
 - Ask before adding new dependencies.
 `,
-};
-
-const MODE_CONFIG = {
-  hideGitPanel: false,
-  autoCommit: false,
-  simplifiedPrompts: false,
-  maxWorkers: 8,
-  requireConfirmations: true,
-  toolAccess: 'full',
-  explanations: 'minimal',
-  enableShadowLoggerUI: true,
-  enableCriticGate: true,
-  showAgentDetails: true,
-  showCostTracking: true,
 };
 
 const BILLING_CREDITS = {
@@ -625,19 +612,6 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
   }
   if (/^\/api\/sessions\/[^/]+\/context$/.test(path)) return json({ ok: true, lastUsage: null });
 
-  // Mode (flat response shape, matching the mode store's expectations).
-  if (path === '/api/mode') {
-    const mode = method === 'PUT' ? (parseBody(init).mode ?? 'advanced') : 'advanced';
-    return json({
-      ok: true,
-      mode,
-      config: MODE_CONFIG,
-      context: { mode, config: MODE_CONFIG },
-      shouldWarnNoGit: false,
-      noGitWarning: '',
-    });
-  }
-
   // Memory tab.
   if (path === '/api/memory/documents') {
     if (method === 'POST') return ok(true);
@@ -692,6 +666,7 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
         ...demoAgentSettings,
         ruleEnforcementLevel: 'strict',
         agentExecutionMode: 'auto',
+        criticMode: 'auto',
         criticGateEnabled: true,
         autoRunTools: true,
       };

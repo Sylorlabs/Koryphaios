@@ -1,0 +1,5 @@
+<!-- Official Symbol path from https://developers.reflection.ai/logo/light.svg.
+     Wordmark omitted; viewBox cropped to the symbol; fill normalized for theme adaptation. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 170.36 82.5" fill="currentColor">
+  <path d="M170.36,41.25c0,22.417-18.173,40.59-40.59,40.59s-40.59-18.173-40.59-40.59S107.353.66,129.77.66s40.59,18.173,40.59,40.59ZM40.59.66C18.173.66,0,18.833,0,41.25s18.173,40.59,40.59,40.59,40.59-18.173,40.59-40.59S63.007.66,40.59.66ZM73.18,41.25c0,17.999-14.591,32.59-32.59,32.59S8,59.249,8,41.25,22.591,8.66,40.59,8.66s32.59,14.591,32.59,32.59Z"/>
+</svg>

@@ -14,8 +14,31 @@ let user = $state<AuthUser | null>(null);
 let isInitialized = $state(false);
 let token = $state<string | undefined>(undefined);
 let initialization: Promise<boolean> | null = null;
+// Monotonic timestamp of the most recent successful validation, for the
+// coalescing window below.
+let lastValidatedAt = 0;
 
 const LOCAL_AUTH_TOKEN_KEY = 'koryphaios-local-auth-token';
+
+// How long a successfully validated session is trusted before the next caller
+// revalidates it. Chosen to comfortably outlive a typical UI burst (a session
+// switch issues ~15 requests in well under two seconds) while staying short
+// enough that a restarted backend is noticed almost immediately.
+const AUTH_REVALIDATE_WINDOW_MS = 5_000;
+// Set when a real request failed auth. Forces the next ensureSession() to
+// revalidate (and mint a replacement) instead of trusting the cached window.
+let authInvalidated = false;
+
+/** Structural comparison — an identical user must not produce a new object. */
+function sameAuthUser(a: AuthUser, b: AuthUser): boolean {
+  return a.id === b.id && a.username === b.username && a.isAdmin === b.isAdmin;
+}
+
+/** A 401 proves the backend forgot this session; force the next validation. */
+export function invalidateLocalSession() {
+  authInvalidated = true;
+  lastValidatedAt = 0;
+}
 
 function loadStoredToken(): string | undefined {
   if (!browser) return undefined;
@@ -104,6 +127,21 @@ export const authStore = {
     // Coalesce mount-time and API callers so they create at most one session.
     if (initialization) return initialization;
 
+    // Reuse a recently validated session instead of preflighting a fresh
+    // /api/auth/me on every single API call.
+    //
+    // This store reassigns `user` on every successful validation, and `user` is
+    // a `$state` object — so each reassignment invalidates *every* effect and
+    // derived that reads it. Preflighting each request therefore turned a batch
+    // of UI work into a second, self-sustaining wave of effects. Instead validate
+    // once per window and let a genuine 401 (the signal that a restart really
+    // happened) force the next validation through early.
+    const now = Date.now();
+    if (user && now - lastValidatedAt < AUTH_REVALIDATE_WINDOW_MS && !authInvalidated) {
+      return true;
+    }
+    if (!user && authInvalidated) authInvalidated = false;
+
     initialization = (async () => {
       token = token ?? loadStoredToken();
       try {
@@ -115,7 +153,18 @@ export const authStore = {
           resolvedUser = token ? await validateToken(token) : null;
         }
 
+        // Only publish a new object when it actually differs. A stable identity
+        // keeps effects that read `user` from re-running on every request.
+        if (resolvedUser && user && sameAuthUser(user, resolvedUser)) {
+          lastValidatedAt = Date.now();
+          authInvalidated = false;
+          isInitialized = true;
+          return true;
+        }
+
         user = resolvedUser;
+        lastValidatedAt = Date.now();
+        authInvalidated = false;
         isInitialized = true;
         return !!resolvedUser;
       } catch (err: unknown) {

@@ -7,6 +7,7 @@
     provider: string;
     size?: number;
     class?: string;
+    oncontextmenu?: (event: MouseEvent) => void;
   }
 
   interface IconCandidate {
@@ -14,7 +15,7 @@
     themeAdaptive: boolean;
   }
 
-  let { provider, size = 16, class: className = '' }: Props = $props();
+  let { provider, size = 16, class: className = '', oncontextmenu }: Props = $props();
 
   // The Codex mark paints with `url(#...)`. That reference is resolved against
   // the document, so a hard-coded gradient id is shared by every instance on
@@ -28,15 +29,21 @@
 
   const providerSlugMap: Record<string, string[]> = {
     anthropic: ['anthropic'],
-    autoclaw: ['autoclaw'],
     claude: ['claudecode', 'claude'],
     openai: ['openai'],
+    beam: ['reflection'],
     google: ['google', 'google-brand'],
     aistudio: ['aistudio'],
     xai: ['xai'],
     openrouter: ['openrouter'],
     unorouter: ['unorouter'],
+    respan: ['respan'],
     experientiallabs: ['experientiallabs'],
+    tokenharbor: ['tokenharbor'],
+    logfare: ['logfare'],
+    apinex: ['apinex'],
+    gwarden: ['gwarden'],
+    vyceai: ['vyceai'],
     tokenrouter: ['tokenrouter'],
     groq: ['groq'],
     digitalocean: ['digitalocean'],
@@ -63,6 +70,7 @@
     baichuan: ['baichuan'],
     minimax: ['minimax'],
     kimicode: ['kimicode', 'kimi'],
+    omnirush: ['omnirush'],
     moonshot: ['moonshot'],
     stepfun: ['stepfun'],
     fireworks: ['fireworks'],
@@ -73,6 +81,7 @@
     nebius: ['nebius'],
     together: ['together', 'together-brand'],
     upstage: ['upstage'],
+    opencode: ['opencode'],
     opencodezen: ['opencode'],
     opencodego: ['opencode'],
     copilot: ['githubcopilot'],
@@ -107,9 +116,7 @@
     zenmux: ['zenmux'],
     zai: ['zai'],
     antigravity: ['antigravity'],
-    jules: ['jules'],
     cursor: ['cursor'],
-    chatbase: ['chatbase'],
     hyperbolic: ['hyperbolic'],
     portkey: ['portkey'],
     luma: ['luma'],
@@ -124,6 +131,9 @@
     submodel: ['submodel'],
     synthetic: ['synthetic'],
     moark: ['moark'],
+    // Both WorkBuddy surfaces (cloud API + desktop app) share the official mark.
+    workbuddy: ['workbuddy'],
+    'workbuddy-desktop': ['workbuddy'],
   };
 
   // All monochrome (currentColor) SVGs render black inside an <img> tag
@@ -138,11 +148,24 @@
     'lmstudio',
     'zenmux',
     'grok',
+    'opencode',
     'cursor',
     'cline',
     'cerebras',
     'poe',
   ]);
+
+  // This transparent monochrome mark keeps its legacy -color URL because it
+  // is also published in provider display metadata. Classify the asset itself
+  // rather than relying solely on the filename or recoloring custom uploads.
+  const themeAdaptiveIconPaths = new Set([
+    '/provider-icons/experientiallabs-color.svg',
+  ]);
+
+  // Vyce AI's bundled mark is a full-color SVG (gradients + strokes) that
+  // happens to live at the monochrome-shaped path. It must never be inverted
+  // in dark mode, otherwise the logo collapses to a white blob.
+  const nonAdaptiveIconPaths = new Set(['/provider-icons/vyceai.svg']);
 
   // Cortecs does not publish an icon through the bundled LobeHub set. Use the
   // avatar from its verified Hugging Face organization instead of a fabricated
@@ -180,6 +203,9 @@
     deepgram: 'https://cdn.simpleicons.org/deepgram',
     vultr: 'https://cdn.simpleicons.org/vultr',
     wandb: 'https://cdn.simpleicons.org/weightsandbiases',
+    // Omnirush's first-party compact mark.
+    omnirush: 'https://omnirush.ai/brand/icon.png',
+    respan: 'https://www.respan.ai/favicon.ico',
   };
 
   let loadError = $state(false);
@@ -211,7 +237,12 @@
       seen.add(src);
       // Local assets must respect the SvelteKit base path (e.g. /demo-app on
       // the koryphaios.com embed); remote URLs pass through untouched.
-      candidates.push({ src: remote ? src : `${base}${src}`, themeAdaptive });
+      candidates.push({
+        src: remote ? src : `${base}${src}`,
+        themeAdaptive:
+          (themeAdaptive || themeAdaptiveIconPaths.has(src)) &&
+          !nonAdaptiveIconPaths.has(src),
+      });
     };
 
     const officialIcon = officialProviderIcons[normalized];
@@ -275,6 +306,7 @@
     class={`provider-icon custom-provider-icon ${customIcon.shape === 'circle' ? 'custom-provider-icon-circle' : ''} ${className}`}
     decoding="async"
     onerror={() => (customLoadError = true)}
+    oncontextmenu={oncontextmenu}
   />
 {:else if provider.toLowerCase() === 'codex' || provider.toLowerCase() === 'codex-auth'}
   <svg
@@ -354,6 +386,7 @@
     class={`provider-icon ${currentCandidate.themeAdaptive ? 'theme-adaptive' : ''} ${className}`}
     loading="lazy"
     decoding="async"
+    oncontextmenu={oncontextmenu}
     onerror={() => {
       if (candidateIndex < iconCandidates.length - 1) {
         candidateIndex += 1;
@@ -363,7 +396,7 @@
     }}
   />
 {:else}
-  <div class={`provider-icon-placeholder ${className}`} style="width: {size}px; height: {size}px;" role="img" aria-label={`${provider} logo`}>
+  <div class={`provider-icon-placeholder ${className}`} style="width: {size}px; height: {size}px;" role="img" aria-label={`${provider} logo`} oncontextmenu={oncontextmenu}>
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.5" fill="none" style="color: var(--color-text-muted);" />
       <circle cx="12" cy="12" r="3" fill="currentColor" style="color: var(--color-text-muted);" />

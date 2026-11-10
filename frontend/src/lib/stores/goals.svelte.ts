@@ -4,7 +4,7 @@ import { apiUrl } from '$lib/utils/api-url';
 import { parseProviderModelSelection } from '$lib/utils/model-config';
 import { browser } from '$app/environment';
 import { sessionStore } from './sessions.svelte';
-import { onSessionRemoved } from './session-removal';
+import { onSessionRemoved, onSessionsRemoved } from './session-removal';
 
 let goals = $state<Goal[]>([]);
 let selectedGoalId = $state('');
@@ -61,7 +61,6 @@ async function drive(
     model?: string;
     reasoningLevel?: string;
     instructions?: string;
-    remotePlanApproved?: boolean;
   } = {},
 ) {
   const sessionId = sessionStore.activeSessionId;
@@ -81,7 +80,6 @@ async function drive(
       model,
       reasoningLevel: options.reasoningLevel,
       instructions: options.instructions,
-      remotePlanApproved: options.remotePlanApproved,
     }),
   });
   const data = await res.json();
@@ -180,6 +178,20 @@ function forgetSession(sessionId: string): void {
 }
 
 onSessionRemoved(forgetSession);
+onSessionsRemoved((sessionIds) => {
+  goals = goals
+    .filter((goal) => !goal.sessionId || !sessionIds.has(goal.sessionId))
+    .map((goal) => ({
+      ...goal,
+      linkedSessionIds: goal.linkedSessionIds.filter((id) => !sessionIds.has(id)),
+      execution:
+        goal.execution && sessionIds.has(goal.execution.sessionId)
+          ? undefined
+          : goal.execution,
+    }));
+  if (!goals.some((goal) => goal.id === selectedGoalId)) selectedGoalId = '';
+  scheduleResync();
+});
 
 export const goalStore = {
   get goals() {

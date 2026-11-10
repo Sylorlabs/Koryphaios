@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { hasTrustedImageModel, rememberTrustedImageModel } from '$lib/utils/image-input-fallback';
 
@@ -10,6 +10,7 @@ const { catalog } = vi.hoisted(() => ({
     label: 'Gemini 3.1 Pro',
     vision: true,
     supportsAttachments: false,
+    freebuckCost: undefined as number | undefined,
   },
 }));
 
@@ -33,6 +34,7 @@ vi.mock('$lib/stores/websocket.svelte', () => ({
               name: catalog.label,
               vision: catalog.vision,
               supportsAttachments: catalog.supportsAttachments,
+              freebuckCost: catalog.freebuckCost,
             },
           ],
         },
@@ -83,8 +85,36 @@ async function send(input: HTMLTextAreaElement) {
   await fireEvent.keyDown(input, { key: 'Enter' });
 }
 
+async function attachMedia(file: File) {
+  // fireEvent only flushes Svelte updates, not the queued native FileReader.
+  // Await the real read and its render before querying the attachment controls.
+  const readAsDataURL = FileReader.prototype.readAsDataURL;
+  let finishRead!: () => void;
+  const readFinished = new Promise<void>((resolve) => {
+    finishRead = resolve;
+  });
+  const read = vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(
+    function (this: FileReader, blob) {
+      this.addEventListener('loadend', finishRead, { once: true });
+      readAsDataURL.call(this, blob);
+    },
+  );
+  try {
+    await act(async () => {
+      await fireEvent.change(screen.getByLabelText('Attach images, audio, or video'), {
+        target: { files: [file] },
+      });
+      await readFinished;
+    });
+  } finally {
+    read.mockRestore();
+  }
+}
+
 describe('composer image capability correction', () => {
   beforeEach(() => {
+    vi.mocked(apiFetch).mockReset();
+    vi.mocked(apiFetch).mockResolvedValue(new Response('{}'));
     localStorage.clear();
     Object.assign(catalog, {
       name: 'antigravity',
@@ -174,30 +204,112 @@ describe('composer image capability correction', () => {
     expect(screen.queryByRole('alertdialog')).toBeNull();
   });
 
+  it('keeps the provider model-rate info visible for Freebuff models', async () => {
+    Object.assign(catalog, {
+      name: 'freebuff',
+      id: 'freebuff/catalog-m-fixture',
+      label: 'MiMo 2.6 Flash',
+      vision: false,
+      supportsAttachments: false,
+      freebuckCost: 7,
+    });
+    composer('freebuff:freebuff/catalog-m-fixture');
+
+    await fireEvent.click(screen.getByRole('button', { name: /MiMo 2\.6 Flash/ }));
+
+    // Only one priced model is known, so it is the 1x baseline: a bare "Nx"
+    // figure, never an hours estimate.
+    expect(screen.getByText('1x')).toBeTruthy();
+    expect(screen.queryByText(/h left$/)).toBeNull();
+    expect(screen.queryByText(/hours/)).toBeNull();
+  });
+
+  it('does not invent an hours estimate without a live account snapshot', async () => {
+    Object.assign(catalog, {
+      name: 'freebuff',
+      id: 'freebuff/catalog-m-unpriced',
+      label: 'Unpriced Freebuff model',
+      vision: false,
+      supportsAttachments: false,
+      freebuckCost: undefined,
+    });
+    composer('freebuff:freebuff/catalog-m-unpriced');
+
+    await fireEvent.click(screen.getByRole('button', { name: /Unpriced Freebuff model/ }));
+
+    expect(screen.queryByText(/h left$/)).toBeNull();
+  });
+
+  it('keeps a provider-reported zero rate visible', async () => {
+    Object.assign(catalog, {
+      name: 'freebuff',
+      id: 'freebuff/catalog-m-free',
+      label: 'Free Freebuff model',
+      vision: false,
+      supportsAttachments: false,
+      freebuckCost: 0,
+    });
+    composer('freebuff:freebuff/catalog-m-free');
+
+    await fireEvent.click(screen.getByRole('button', { name: /Free Freebuff model/ }));
+
+    expect(screen.getByText('0x')).toBeTruthy();
+    expect(screen.queryByText(/h left$/)).toBeNull();
+  });
+
+  it('does not show the Freebuff multiplier for another provider even if its catalog row has a Freebuck field', async () => {
+    Object.assign(catalog, {
+      name: 'openai',
+      id: 'gpt-test',
+      label: 'OpenAI fixture',
+      vision: false,
+      supportsAttachments: false,
+      freebuckCost: 25,
+    });
+    composer('openai:gpt-test');
+
+    await fireEvent.click(screen.getByRole('button', { name: /OpenAI fixture/ }));
+
+    expect(screen.queryByText('5x')).toBeNull();
+    expect(screen.queryByText('1x')).toBeNull();
+    expect(screen.queryByText('0x')).toBeNull();
+  });
+
   it('attaches actual video bytes through the media file picker', async () => {
     rememberTrustedImageModel(localStorage, model);
     const { input, onSend } = composer();
     const file = new File(['clip'], 'clip.mp4', { type: 'video/mp4' });
-    await fireEvent.change(screen.getByLabelText('Attach images, audio, or video'), { target: { files: [file] } });
-    await waitFor(() => expect(screen.getByText('clip.mp4')).toBeTruthy());
+    await attachMedia(file);
+    expect(screen.getByText('clip.mp4')).toBeTruthy();
     await send(input);
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
-    expect(onSend.mock.calls[0][3]).toEqual([{ type: 'file', name: 'clip.mp4', mimeType: 'video/mp4', data: 'Y2xpcA==' }]);
+    expect(onSend.mock.calls[0][3]).toEqual([
+      { type: 'file', name: 'clip.mp4', mimeType: 'video/mp4', data: 'Y2xpcA==' },
+    ]);
   });
 
   it('replaces an uploaded audio file with an editable transcript using Voice settings', async () => {
     vi.mocked(apiFetch).mockImplementation(async (path) => {
-      if (String(path).includes('/api/voice/settings')) return Response.json({ data: { input: { provider: 'openai', modelId: 'whisper-1', language: 'en' } } });
-      if (String(path).includes('/api/voice/transcribe')) return Response.json({ data: { text: 'Transcribed audio file' } });
+      if (String(path).includes('/api/voice/settings'))
+        return Response.json({
+          data: { input: { provider: 'openai', modelId: 'whisper-1', language: 'en' } },
+        });
+      if (String(path).includes('/api/voice/transcribe'))
+        return Response.json({ data: { text: 'Transcribed audio file' } });
       return Response.json({});
     });
     const { input } = composer();
     const file = new File(['speech'], 'speech.mp3', { type: 'audio/mpeg' });
-    await fireEvent.change(screen.getByLabelText('Attach images, audio, or video'), { target: { files: [file] } });
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Use transcript' })).toBeTruthy());
+    await attachMedia(file);
+    expect(screen.getByRole('button', { name: 'Use transcript' })).toBeTruthy();
     await fireEvent.click(screen.getByRole('button', { name: 'Use transcript' }));
     await waitFor(() => expect(input.value).toContain('Transcribed audio file'));
     expect(screen.queryByText('speech.mp3')).toBeNull();
-    expect(apiFetch).toHaveBeenCalledWith('/api/voice/transcribe', expect.objectContaining({ body: JSON.stringify({ audioBase64: 'c3BlZWNo', mimeType: 'audio/mpeg', language: 'en' }) }));
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/api/voice/transcribe',
+      expect.objectContaining({
+        body: JSON.stringify({ audioBase64: 'c3BlZWNo', mimeType: 'audio/mpeg', language: 'en' }),
+      }),
+    );
   });
 });

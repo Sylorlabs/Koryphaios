@@ -1,4 +1,6 @@
 <script lang="ts">
+  import CriticModeSelect from './CriticModeSelect.svelte';
+  import { resolveCriticMode } from '@koryphaios/shared';
   /**
    * First-launch walkthrough.
    *
@@ -13,6 +15,7 @@
   import { cubicOut } from 'svelte/easing';
   import SettingsSwitch from './SettingsSwitch.svelte';
   import ColorPickerModal from './ColorPickerModal.svelte';
+  import CliChatImportPanel from './CliChatImportPanel.svelte';
   import { onboardingStore } from '$lib/stores/onboarding.svelte';
   import { theme, THEME_PRESETS, type ThemePreset } from '$lib/stores/theme.svelte';
   import { agentSettingsStore, type AgentSettings } from '$lib/stores/agent-settings.svelte';
@@ -22,11 +25,14 @@
   import MessageSquareText from 'lucide-svelte/icons/message-square-text';
   import ShieldCheck from 'lucide-svelte/icons/shield-check';
   import Plug from 'lucide-svelte/icons/plug';
+  import FolderGit2 from 'lucide-svelte/icons/folder-git-2';
+  import MonitorSmartphone from 'lucide-svelte/icons/monitor-smartphone';
+  import Smartphone from 'lucide-svelte/icons/smartphone';
+  import Monitor from 'lucide-svelte/icons/monitor';
   import Rocket from 'lucide-svelte/icons/rocket';
   import ArrowRight from 'lucide-svelte/icons/arrow-right';
   import ArrowLeft from 'lucide-svelte/icons/arrow-left';
   import Check from 'lucide-svelte/icons/check';
-  import Sun from 'lucide-svelte/icons/sun';
   import X from 'lucide-svelte/icons/x';
 
   interface Props {
@@ -34,11 +40,21 @@
     suspended?: boolean;
     /** Open Settings → Providers without finishing the walkthrough. */
     onOpenProviders: () => void;
+    /** Open Settings → Link device without finishing the walkthrough. */
+    onOpenDevices: () => void;
   }
 
-  let { suspended = false, onOpenProviders }: Props = $props();
+  let { suspended = false, onOpenProviders, onOpenDevices }: Props = $props();
 
-  type StepId = 'welcome' | 'appearance' | 'style' | 'autonomy' | 'providers' | 'done';
+  type StepId =
+    | 'welcome'
+    | 'appearance'
+    | 'style'
+    | 'autonomy'
+    | 'providers'
+    | 'port-chats'
+    | 'devices'
+    | 'done';
 
   interface Step {
     id: StepId;
@@ -52,6 +68,8 @@
     { id: 'style', label: 'Response style', icon: MessageSquareText },
     { id: 'autonomy', label: 'Autonomy', icon: ShieldCheck },
     { id: 'providers', label: 'Providers', icon: Plug },
+    { id: 'port-chats', label: 'Port chats', icon: FolderGit2 },
+    { id: 'devices', label: 'Link device', icon: MonitorSmartphone },
     { id: 'done', label: 'Ready', icon: Rocket },
   ];
 
@@ -60,13 +78,15 @@
   let dialog = $state<HTMLDivElement | null>(null);
   let accentPickerOpen = $state(false);
   let accentPickerTarget = $state<'primary' | 'secondary'>('primary');
+  let cliImportPanel = $state<CliChatImportPanel | null>(null);
+  let portedChatsCount = $state(0);
 
   const step = $derived(steps[index]);
   const isFirst = $derived(index === 0);
   const isLast = $derived(index === steps.length - 1);
   const progress = $derived(((index + 1) / steps.length) * 100);
 
-  // ── Option catalogs ────────────────────────────────────────────────────────
+  // ── Option catalogs ───────────────────────────────────────────────────────
 
   const previewPresets = $derived(theme.presets);
 
@@ -127,10 +147,10 @@
       description: 'Approve file writes and shell commands before Kory runs them.',
     },
     {
-      value: 'plan',
-      label: 'Plan',
-      tagline: 'Read only',
-      description: 'Kory researches and plans. Project files stay unchanged.',
+      value: 'edits',
+      label: 'Accept edits',
+      tagline: 'Automatic edits',
+      description: 'Apply file edits automatically. Ask before other actions.',
     },
     {
       value: 'yolo',
@@ -140,7 +160,7 @@
     },
   ];
 
-  // ── Derived state from real stores ─────────────────────────────────────────
+  // ── Derived state from real stores ────────────────────────────────────────
 
   const settings = $derived(agentSettingsStore.settings);
   // Until the authoritative settings arrive, the cards would show (and merge
@@ -174,7 +194,7 @@
       { label: 'Response style', value: `${interview} · ${plan}` },
       {
         label: 'Autonomy',
-        value: `${permission} · Critic ${settings.criticGateEnabled ? 'on' : 'off'}`,
+        value: `${permission} · Critic ${resolveCriticMode(settings)}`,
       },
       {
         label: 'Providers',
@@ -183,10 +203,17 @@
             ? `${connectedProviders.length} detected`
             : 'None yet. Connect from Settings',
       },
+      {
+        label: 'Ported chats',
+        value:
+          portedChatsCount > 0
+            ? `${portedChatsCount} ${portedChatsCount === 1 ? 'chat' : 'chats'} imported`
+            : 'None imported',
+      },
     ];
   });
 
-  // ── Actions ────────────────────────────────────────────────────────────────
+  // ── Actions ───────────────────────────────────────────────────────────────
 
   function go(next: number) {
     if (next < 0 || next >= steps.length || next === index) return;
@@ -194,7 +221,10 @@
     index = next;
   }
 
-  function nextStep() {
+  async function nextStep() {
+    if (step.id === 'port-chats' && cliImportPanel) {
+      await cliImportPanel.importSelectedIfPending();
+    }
     if (isLast) finish();
     else go(index + 1);
   }
@@ -248,7 +278,7 @@
     } else if (event.key === 'ArrowRight') {
       event.preventDefault();
       event.stopPropagation();
-      nextStep();
+      void nextStep();
     } else if (event.key === 'ArrowLeft') {
       event.preventDefault();
       event.stopPropagation();
@@ -384,8 +414,8 @@
                     A local workspace that coordinates the AI agents and providers you already use.
                     Take one minute to make it yours, or start with the defaults.
                   </p>
-                  <div class="welcome-actions mt-8 grid w-full max-w-lg grid-cols-4 text-left">
-                    {#each steps.slice(1, 5) as entry, quickIndex (entry.id)}
+                  <div class="welcome-actions mt-8 grid w-full max-w-xl grid-cols-5 text-left">
+                    {#each steps.slice(1, 6) as entry, quickIndex (entry.id)}
                       {@const Icon = entry.icon}
                       <button
                         type="button"
@@ -405,18 +435,8 @@
                 <p class="slide-subtitle">
                   Changes apply instantly. You can revisit them in Settings, Appearance.
                 </p>
-                <div class="mt-5 flex items-center justify-between gap-4">
+                <div class="mt-5">
                   <span class="option-heading">Theme</span>
-                  <button
-                    type="button"
-                    class="light-mode-shortcut inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold"
-                    class:is-active={theme.preset === 'light'}
-                    onclick={() => theme.setPreset('light')}
-                    aria-pressed={theme.preset === 'light'}
-                  >
-                    <Sun size={13} />
-                    Prefer light mode
-                  </button>
                 </div>
                 <div class="preset-grid mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
                   {#each previewPresets as preset (preset.id)}
@@ -600,18 +620,10 @@
                     </button>
                   {/each}
                 </fieldset>
-                <div
-                  class="preference-row mt-7 border-t pt-2"
-                  style="border-color: var(--color-border);"
-                >
-                  <SettingsSwitch
-                    flat
-                    checked={settings.criticGateEnabled}
-                    label="Critic review"
-                    description="A read only critic checks finished work against the evidence before it is called done."
-                    disabled={!settingsReady}
-                    onchange={() => applySetting('criticGateEnabled', !settings.criticGateEnabled)}
-                  />
+                <div class="preference-row mt-7">
+                  <CriticModeSelect flat value={resolveCriticMode(settings)} disabled={!settingsReady}
+                    onchange={(mode) => applySetting('criticMode', mode)} />
+                  <p class="option-description mt-1.5">An independent reviewer checks Kory's work before it reaches you.</p>
                 </div>
               {:else if step.id === 'providers'}
                 <h2 id="walkthrough-title" class="slide-title">
@@ -659,7 +671,61 @@
                   <button type="button" class="btn setup-primary" onclick={connectProviders}>
                     <Plug size={14} /> Connect a provider now
                   </button>
-                  <button type="button" class="btn" onclick={nextStep}>I'll do it later</button>
+                  <button type="button" class="btn" onclick={() => void nextStep()}>I'll do it later</button>
+                </div>
+              {:else if step.id === 'port-chats'}
+                <h2 id="walkthrough-title" class="slide-title">
+                  Port existing chats from your projects
+                </h2>
+                <p class="slide-subtitle">
+                  Koryphaios checks all CLI providers on disk. Expand a project to cherry-pick
+                  individual chats or mix providers into your Koryphaios workspace.
+                </p>
+                <div class="mt-4">
+                  <CliChatImportPanel
+                    bind:this={cliImportPanel}
+                    onImportedChange={(count) => {
+                      portedChatsCount = count;
+                    }}
+                  />
+                </div>
+              {:else if step.id === 'devices'}
+                <h2 id="walkthrough-title" class="slide-title">Take Koryphaios with you</h2>
+                <p class="slide-subtitle">
+                  One last optional step: link your phone, tablet, or another desktop. You can
+                  always do this later in Settings → Link device.
+                </p>
+                <div class="mt-6 grid gap-4">
+                  <div class="device-option">
+                    <Smartphone size={22} />
+                    <div>
+                      <h3>Phone or tablet</h3>
+                      <p>
+                        Scan your desktop’s QR code or enter its pairing code to steer your linked
+                        desktops.
+                      </p>
+                    </div>
+                  </div>
+                  <div class="device-option">
+                    <Monitor size={22} />
+                    <div>
+                      <h3>Another desktop</h3>
+                      <p>
+                        Pair with a code, then use the big + to choose a desktop and workspace for
+                        each new chat.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                <p class="device-note mt-5">
+                  Compare the numbers on both screens before linking. After approval, access across
+                  activated devices is on by default, while agent delegation stays off until you
+                  enable each direction. Each desktop keeps its own files and permissions.
+                </p>
+                <div class="mt-5 flex flex-wrap gap-2">
+                  <button type="button" class="btn" onclick={onOpenDevices}
+                    ><MonitorSmartphone size={16} /> Link a device now</button
+                  >
                 </div>
               {:else}
                 <div class="flex h-full flex-col items-center justify-center text-center">
@@ -713,7 +779,7 @@
           >
             <ArrowLeft size={14} /> Back
           </button>
-          <button type="button" class="btn setup-primary" onclick={nextStep} data-primary>
+          <button type="button" class="btn setup-primary" onclick={() => void nextStep()} data-primary>
             {#if isFirst}
               Set up in a minute <ArrowRight size={14} />
             {:else if isLast}
@@ -746,6 +812,7 @@
 
   .walkthrough-card {
     box-shadow: 0 28px 80px -42px rgba(0, 0, 0, 0.82);
+    max-height: calc(100dvh - 32px);
   }
 
   .walkthrough-progress {
@@ -783,7 +850,8 @@
   .slide-stage {
     display: grid;
     min-height: 0;
-    overflow: hidden;
+    overflow-y: auto;
+    overflow-x: hidden;
   }
   .slide {
     grid-area: 1 / 1;
@@ -805,6 +873,33 @@
     font-size: 0.875rem;
     line-height: 1.6;
     color: var(--color-text-secondary);
+  }
+  .device-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 18px;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    background: var(--color-surface-2);
+  }
+  .device-option > :global(svg) {
+    flex-shrink: 0;
+    color: var(--color-accent);
+  }
+  .device-option h3 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+  }
+  .device-option p,
+  .device-note {
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--color-text-muted);
+  }
+  .device-option p {
+    margin-top: 6px;
   }
 
   .welcome-actions {
@@ -848,21 +943,6 @@
   }
   .preset-choice.is-active :global(svg) {
     color: var(--setup-accent);
-  }
-
-  .light-mode-shortcut {
-    color: var(--setup-accent);
-    background: color-mix(in srgb, var(--setup-accent) 8%, transparent);
-    transition:
-      background 150ms,
-      color 150ms;
-  }
-  .light-mode-shortcut:hover,
-  .light-mode-shortcut:focus-visible,
-  .light-mode-shortcut.is-active {
-    background: var(--setup-accent);
-    color: var(--setup-on-accent);
-    outline: none;
   }
 
   .accent-choice {

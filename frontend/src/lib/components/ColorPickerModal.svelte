@@ -11,9 +11,10 @@
     open: boolean;
     onClose: () => void;
     target?: 'primary' | 'secondary';
+    onApply?: (hex: string) => void;
   }
 
-  let { open, onClose, target = 'primary' }: Props = $props();
+  let { open, onClose, target = 'primary', onApply }: Props = $props();
 
   // ---- Color state (HSV internally, hex as the canonical exchange format) ----
   // Start from the current effective accent so the picker opens on a sensible value.
@@ -325,6 +326,11 @@
   });
 
   function apply() {
+    if (onApply) {
+      onApply(currentHex);
+      onClose();
+      return;
+    }
     const custom: CustomAccent = { main: currentHex, hover: effectiveHover };
     if (target === 'secondary') theme.setCustomSecondaryAccent(custom);
     else theme.setCustomAccent(custom);
@@ -374,6 +380,7 @@
 {#if open}
   <div
     class="fixed inset-0 z-[140] flex items-start justify-center pt-[8vh] px-4 backdrop-blur-sm"
+    data-scrollbar-overlay
     style="background: rgba(0,0,0,0.5);"
     onmousedown={onClose}
     role="presentation"

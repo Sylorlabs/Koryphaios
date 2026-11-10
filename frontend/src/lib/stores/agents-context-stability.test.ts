@@ -32,9 +32,12 @@ import {
   beginManagerContextPreview,
   bindManagerSession,
   getContextUsage,
+  invalidateManagerContextUsage,
   seedManagerUsage,
   updateUsage,
 } from './agents.svelte';
+import { notifySessionRemoved } from './session-removal';
+import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 
 const BREAKDOWN = {
   system: 3_000,
@@ -72,6 +75,18 @@ describe('context window denominator stability', () => {
     sessionState.activeSessionId = `ctx-stability-${crypto.randomUUID()}`;
   });
 
+  it('treats legacy Antigravity receipts as estimates rather than measured window occupancy', () => {
+    const sessionId = sessionState.activeSessionId;
+    beginManagerContextPreview(sessionId, 'antigravity', 'minimax-m3', 262_144);
+    updateUsage('kory-manager', liveUsage({ provider: 'antigravity', cachedInputTokens: 100_000 }), sessionId);
+    expect(getContextUsage()).toMatchObject({
+      used: 120_900,
+      max: 262_144,
+      estimated: true,
+      cachedInputTokens: 100_000,
+    });
+  });
+
   it('a planning estimate that cannot resolve a window never erases a verified one', () => {
     const sessionId = sessionState.activeSessionId;
     beginManagerContextPreview(sessionId, 'openai', 'minimax-m3', 262_144);
@@ -99,6 +114,22 @@ describe('context window denominator stability', () => {
 
     expect(manager()).toMatchObject({ contextMax: 262_144, contextKnown: true });
     expect(getContextUsage()).toMatchObject({ used: 120_900, max: 262_144, isReliable: true });
+  });
+
+  it('clears occupancy when the active response branch changes but keeps the model window', () => {
+    const sessionId = sessionState.activeSessionId;
+    beginManagerContextPreview(sessionId, 'openai', 'minimax-m3', 262_144);
+    updateUsage('kory-manager', liveUsage(), sessionId);
+
+    invalidateManagerContextUsage(sessionId);
+
+    expect(manager()).toMatchObject({
+      contextMax: 262_144,
+      contextKnown: true,
+      hasUsageData: false,
+      tokensUsed: 0,
+    });
+    expect(getContextUsage()).toMatchObject({ used: 0, max: 262_144, isReliable: false });
   });
 
   it('a planning estimate may still establish a window it does know', () => {
@@ -149,6 +180,39 @@ describe('context window denominator stability', () => {
 
     expect(getContextUsage()).toMatchObject({ used: 120_900, max: 262_144, isReliable: true });
   });
+
+  it('keeps usage and the model window while the same model catalog temporarily has no metadata', () => {
+    const sessionId = sessionState.activeSessionId;
+    beginManagerContextPreview(sessionId, 'openai', 'minimax-m3', 262_144);
+    updateUsage('kory-manager', liveUsage(), sessionId);
+
+    beginManagerContextPreview(sessionId, 'openai', 'minimax-m3', undefined);
+    expect(getContextUsage()).toMatchObject({
+      used: 120_900,
+      max: 262_144,
+      isReliable: true,
+      breakdown: BREAKDOWN,
+    });
+  });
+
+  it.each([undefined, { usageKnown: false, contextKnown: false }])(
+    'keeps verified context when a same-route preview returns missing telemetry: %j',
+    (preview) => {
+      const sessionId = sessionState.activeSessionId;
+      beginManagerContextPreview(sessionId, 'openai', 'minimax-m3', 262_144);
+      updateUsage('kory-manager', liveUsage(), sessionId);
+      // This is a new preview issued after the live report, rather than a stale
+      // request. The absent data itself must not revoke the previous reading.
+      beginManagerContextPreview(sessionId, 'openai', 'minimax-m3', undefined);
+      expect(applyManagerContextPreview(sessionId, 'openai', 'minimax-m3', preview)).toBe(true);
+      expect(getContextUsage()).toMatchObject({
+        used: 120_900,
+        max: 262_144,
+        isReliable: true,
+        breakdown: BREAKDOWN,
+      });
+    },
+  );
 });
 
 describe('model preview freshness', () => {
@@ -328,5 +392,102 @@ describe('manager session binding', () => {
     // A late event for the previous session must not repopulate it.
     updateUsage('kory-manager', liveUsage(), first);
     expect(getContextUsage()).toMatchObject({ isReliable: false });
+  });
+
+  it.each(['feed-first', 'composer-first'])(
+    'restores the target chat context immediately when returning to it (%s)',
+    (order) => {
+      const first = sessionState.activeSessionId;
+      beginManagerContextPreview(first, 'openai', 'minimax-m3', 262_144);
+      updateUsage('kory-manager', liveUsage(), first);
+      const second = `${first}-other`;
+      sessionState.activeSessionId = second;
+      bindManagerSession(second);
+      beginManagerContextPreview(second, 'anthropic', 'claude-sonnet-4-6', 200_000);
+      seedManagerUsage(second, {
+        used: 30_000,
+        max: 200_000,
+        contextKnown: true,
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-6',
+      });
+
+      sessionState.activeSessionId = first;
+      if (order === 'feed-first') bindManagerSession(first);
+      beginManagerContextPreview(first, 'openai', 'minimax-m3', undefined);
+      bindManagerSession(first);
+      expect(getContextUsage()).toMatchObject({
+        used: 120_900,
+        max: 262_144,
+        isReliable: true,
+        provider: 'openai',
+        breakdown: BREAKDOWN,
+      });
+    },
+  );
+
+  it('does not restore cached occupancy from a discarded background branch', () => {
+    const first = sessionState.activeSessionId;
+    beginManagerContextPreview(first, 'openai', 'minimax-m3', 262_144);
+    updateUsage('kory-manager', liveUsage(), first);
+    sessionState.activeSessionId = `${first}-other`;
+    bindManagerSession(sessionState.activeSessionId);
+    invalidateManagerContextUsage(first);
+
+    sessionState.activeSessionId = first;
+    bindManagerSession(first);
+    expect(getContextUsage()).toMatchObject({ used: 0, max: 262_144, isReliable: false });
+  });
+
+  it('forgets cached context when its chat is removed', () => {
+    const sessionId = sessionState.activeSessionId;
+    beginManagerContextPreview(sessionId, 'openai', 'minimax-m3', 262_144);
+    updateUsage('kory-manager', liveUsage(), sessionId);
+    notifySessionRemoved(sessionId);
+    bindManagerSession(`${sessionId}-other`);
+    bindManagerSession(sessionId);
+    expect(getContextUsage()).toMatchObject({ used: 0, max: 0, isReliable: false });
+  });
+
+  it('restores an Antigravity receipt that replayed before the composer pinned its selection', () => {
+    const sessionId = sessionState.activeSessionId;
+    agentStore.clearManagerContextPreview(sessionId);
+    updateUsage('kory-manager', liveUsage({ provider: 'antigravity', estimated: true }), sessionId);
+    // Pending telemetry is not displayed before its route has been checked.
+    expect(getContextUsage()).toMatchObject({ used: 0, isReliable: false });
+    beginManagerContextPreview(sessionId, 'antigravity', 'minimax-m3', 262_144);
+    expect(getContextUsage()).toMatchObject({ used: 120_900, max: 262_144, estimated: true });
+  });
+
+  it('does not adopt pending replay for a different selected route or a discarded branch', () => {
+    const sessionId = sessionState.activeSessionId;
+    agentStore.clearManagerContextPreview(sessionId);
+    updateUsage('kory-manager', liveUsage({ provider: 'antigravity' }), sessionId);
+    beginManagerContextPreview(sessionId, 'openai', 'minimax-m3', 262_144);
+    expect(getContextUsage()).toMatchObject({ used: 0, isReliable: false });
+
+    agentStore.clearManagerContextPreview(sessionId);
+    updateUsage('kory-manager', liveUsage({ provider: 'antigravity' }), sessionId);
+    invalidateManagerContextUsage(sessionId);
+    beginManagerContextPreview(sessionId, 'antigravity', 'minimax-m3', 262_144);
+    expect(getContextUsage()).toMatchObject({ used: 0, isReliable: false });
+  });
+
+  it('saved agent threads cannot replace the selected manager route or its context composition', async () => {
+    const sessionId = sessionState.activeSessionId;
+    beginManagerContextPreview(sessionId, 'antigravity', 'minimax-m3', 262_144);
+    updateUsage('kory-manager', liveUsage({ provider: 'antigravity', cachedInputTokens: 100_000 }), sessionId);
+    vi.mocked(apiFetch).mockResolvedValue({ ok: true } as Response);
+    vi.mocked(parseJsonResponse).mockResolvedValue({ ok: true, data: [{
+      agent: { ...manager().identity, provider: 'google', model: 'old-model' }, status: 'idle',
+    }] });
+    await agentStore.loadAgentThreads(sessionId);
+    expect(manager().identity).toMatchObject({ provider: 'antigravity', model: 'minimax-m3' });
+    // A catalog refresh requests the same selection again. It must not look
+    // like a model switch just because an old thread identity loaded.
+    beginManagerContextPreview(sessionId, 'antigravity', 'minimax-m3', 262_144);
+    expect(getContextUsage()).toMatchObject({
+      used: 120_900, max: 262_144, breakdown: BREAKDOWN, cachedInputTokens: 100_000,
+    });
   });
 });

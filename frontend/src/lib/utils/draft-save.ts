@@ -33,9 +33,9 @@ export function draftExitAction(options: {
 }
 
 /** One persistence contract for editors with both explicit and lifecycle
- * triggers. Explicit Save/Ctrl-S always writes in the current scope. When
- * autosave is disabled, navigation/destruction holds the draft while passive
- * visibility/autosave events do nothing. */
+ * triggers. Explicit Save or the platform's primary-modifier chord always
+ * writes in the current scope. When autosave is disabled, navigation/destruction
+ * holds the draft while passive visibility/autosave events do nothing. */
 export function draftLifecycleAction(options: {
   trigger: DraftLifecycleTrigger;
   dirty: boolean;

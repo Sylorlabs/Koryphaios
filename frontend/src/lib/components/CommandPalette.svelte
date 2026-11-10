@@ -18,7 +18,7 @@
   import ArrowUp from 'lucide-svelte/icons/arrow-up';
   import Square from 'lucide-svelte/icons/square';
   import RotateCcw from 'lucide-svelte/icons/rotate-ccw';
-  import { getModKeyName } from '$lib/utils/platform';
+  import { formatChord } from '$lib/utils/platform';
   import { notesStore } from '$lib/stores/notes.svelte';
 
   const frontendVersion = __KORYPHAIOS_FRONTEND_VERSION__ ?? '0.5.0';
@@ -115,6 +115,7 @@
 {#if open}
   <div 
     class="fixed inset-0 z-[100] flex items-start justify-center pt-[15vh] px-4 backdrop-blur-sm"
+    data-scrollbar-overlay
     style="background: rgba(0,0,0,0.5);"
     transition:fade={{ duration: 150 }}
     onmousedown={() => open = false}
@@ -175,8 +176,7 @@
                 </div>
                 {#if action.shortcut}
                   <div class="flex items-center gap-0.5 shrink-0 opacity-40 group-hover:opacity-100 transition-opacity">
-                    <span class="text-[10px] px-1 py-0.5 rounded border" style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-muted);">{getModKeyName()}</span>
-                    {#each action.shortcut.split('+') as part}
+                    {#each formatChord('Mod', ...action.shortcut.split('+')).split('+') as part}
                       <span class="text-[10px] px-1 py-0.5 rounded border" style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-muted);">{part}</span>
                     {/each}
                   </div>

@@ -18,6 +18,7 @@ export interface OnboardingRecord {
 
 export const ONBOARDING_VERSION = 1;
 const STORAGE_KEY = 'koryphaios-onboarding-v1';
+const REMOTE_REPLAY_STORAGE_KEY = 'koryphaios-onboarding-remote-replay-v1';
 
 function readRecord(): OnboardingRecord | null {
   if (typeof localStorage === 'undefined') return null;
@@ -43,6 +44,11 @@ function createOnboardingStore() {
   // Explicit replay request from Settings. Distinct from "never seen" so a
   // replay can be cancelled without wiping the original completion record.
   let replayRequested = $state(false);
+  let remoteReplayRevision = (() => {
+    if (typeof localStorage === 'undefined') return 0;
+    const stored = Number(localStorage.getItem(REMOTE_REPLAY_STORAGE_KEY) ?? 0);
+    return Number.isSafeInteger(stored) && stored >= 0 ? stored : 0;
+  })();
 
   function persist(next: OnboardingRecord | null) {
     record = next;
@@ -85,6 +91,15 @@ function createOnboardingStore() {
     },
     /** Re-open the walkthrough on demand (Settings → Home screen). */
     replay() {
+      replayRequested = true;
+    },
+    applyRemoteReplay(revision: number, force = false) {
+      if (!Number.isSafeInteger(revision) || revision < 0) return;
+      if (!force && revision <= remoteReplayRevision) return;
+      remoteReplayRevision = Math.max(remoteReplayRevision, revision);
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(REMOTE_REPLAY_STORAGE_KEY, String(remoteReplayRevision));
+      }
       replayRequested = true;
     },
     /** Cancel a replay without touching the stored completion record. */

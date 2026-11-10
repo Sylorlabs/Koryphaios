@@ -76,5 +76,6 @@ describe('useSessionSync', () => {
       state.calls.indexOf('fetch:session-1'),
     );
     expect(spies.subscribeToSession).toHaveBeenCalledTimes(1);
+    expect(spies.subscribeToSession).toHaveBeenCalledWith('session-1');
   });
 });

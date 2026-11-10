@@ -1,15 +1,27 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import ArrowUpRight from 'lucide-svelte/icons/arrow-up-right';
+  import BookOpen from 'lucide-svelte/icons/book-open';
   import Bug from 'lucide-svelte/icons/bug';
   import CheckCircle2 from 'lucide-svelte/icons/check-circle-2';
   import Flag from 'lucide-svelte/icons/flag';
+  import Gauge from 'lucide-svelte/icons/gauge';
+  import Github from 'lucide-svelte/icons/github';
   import HelpCircle from 'lucide-svelte/icons/help-circle';
   import Lightbulb from 'lucide-svelte/icons/lightbulb';
   import LoaderCircle from 'lucide-svelte/icons/loader-circle';
+  import MessageCircle from 'lucide-svelte/icons/message-circle';
+  import Palette from 'lucide-svelte/icons/palette';
+  import Plug from 'lucide-svelte/icons/plug';
   import X from 'lucide-svelte/icons/x';
-
-  type FeedbackCategory = 'bug' | 'idea' | 'question' | 'other';
+  import { backendHealth } from '$lib/stores/backend-health.svelte';
+  import {
+    buildFeedbackReport,
+    feedbackTitle,
+    type FeedbackCategory,
+    type FeedbackEnvironment,
+  } from '$lib/utils/feedback-report';
+  import { getRuntimeInfo } from '$lib/utils/platform';
 
   const ISSUE_URL = 'https://github.com/Sylorlabs/Koryphaios/issues/new';
 
@@ -25,32 +37,38 @@
   let submitting = $state(false);
   let error = $state('');
   let appVersion = $state<string | undefined>();
+  let tauriVersion = $state<string | undefined>();
   let messageInput = $state<HTMLTextAreaElement | null>(null);
 
   const categories: Array<{ id: FeedbackCategory; label: string; icon: typeof Flag }> = [
     { id: 'bug', label: 'Bug', icon: Bug },
     { id: 'idea', label: 'Idea', icon: Lightbulb },
     { id: 'question', label: 'Question', icon: HelpCircle },
-    { id: 'other', label: 'Other', icon: Lightbulb },
+    { id: 'performance', label: 'Performance', icon: Gauge },
+    { id: 'ux', label: 'UX / UI', icon: Palette },
+    { id: 'documentation', label: 'Documentation', icon: BookOpen },
+    { id: 'integration', label: 'Integration', icon: Plug },
+    { id: 'other', label: 'Other', icon: MessageCircle },
   ];
 
   $effect(() => {
     if (!open) return;
     sent = false;
     error = '';
+    appVersion = undefined;
+    tauriVersion = undefined;
     void tick().then(() => messageInput?.focus());
     if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
-      void import('@tauri-apps/api/app')
-        .then(({ getVersion }) => getVersion())
-        .then((version) => {
-          appVersion = version;
-        })
-        .catch((err: unknown) => {
-          console.warn(
-            'App version check failed:',
-            err instanceof Error ? err.message : String(err),
-          );
-        });
+      void import('@tauri-apps/api/app').then(async ({ getTauriVersion, getVersion }) => {
+        const [version, runtimeVersion] = await Promise.allSettled([getVersion(), getTauriVersion()]);
+        if (version.status === 'fulfilled') appVersion = version.value;
+        if (runtimeVersion.status === 'fulfilled') tauriVersion = runtimeVersion.value;
+      }).catch((err: unknown) => {
+        console.warn(
+          'Desktop version check failed:',
+          err instanceof Error ? err.message : String(err),
+        );
+      });
     }
   });
 
@@ -92,12 +110,16 @@
 
     submitting = true;
     error = '';
-    const type =
-      categories.find((option) => option.id === category)?.label.toLowerCase() ?? 'feedback';
-    const title = `[${type}] ${trimmed.slice(0, 80)}`;
-    const body = [trimmed, ...(appVersion ? [``, `**App version:** ${appVersion}`] : [])].join(
-      '\n',
-    );
+    const runtime = getRuntimeInfo();
+    const environment: FeedbackEnvironment = {
+      appVersion: appVersion ?? backendHealth.frontendVersion,
+      frontendVersion: backendHealth.frontendVersion,
+      backendVersion: backendHealth.backendVersion,
+      tauriVersion: tauriVersion ?? null,
+      ...runtime,
+    };
+    const title = feedbackTitle(category, trimmed);
+    const body = buildFeedbackReport(category, trimmed, environment);
     try {
       const opened = await openIssue(
         `${ISSUE_URL}?title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`,
@@ -227,8 +249,9 @@
           <p
             class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-[10px] leading-5 text-[var(--color-text-muted)]"
           >
-            The report is created on GitHub. It includes only the category, message, and optional
-            app version. Do not include private project details, secrets, or contact information.
+            The report is created on GitHub with a category-specific template and automatically
+            filled-in app, frontend, backend, desktop runtime, and web runtime versions. Do not
+            include private project details, secrets, or contact information.
           </p>
 
           {#if error}<p
@@ -253,9 +276,9 @@
                 disabled={submitting || !message.trim()}
                 class="flex min-w-28 items-center justify-center gap-2 rounded-xl bg-[var(--color-accent)] px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-[var(--color-accent)]/15 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-45"
               >
-                {#if submitting}<LoaderCircle size={14} class="animate-spin" />Opening GitHub{:else}<ArrowUpRight
+                {#if submitting}<LoaderCircle size={14} class="animate-spin" />Opening GitHub{:else}<Github
                     size={14}
-                  />Create issue{/if}
+                  />Create issue<ArrowUpRight size={13} />{/if}
               </button>
             </div>
           </div>

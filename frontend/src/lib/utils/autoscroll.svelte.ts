@@ -42,6 +42,7 @@
 //     });
 
 import { untrack } from 'svelte';
+import { READER_RESIZE_EVENT } from './expand-anchor';
 
 export interface AutoScrollOptions {
   /** Pixels from bottom that still count as "at the bottom". Default 100. */
@@ -92,6 +93,8 @@ function monotonicNow(): number {
 export interface AutoScrollHandle {
   /** Reactive: whether the view should stay pinned to the bottom. */
   readonly follow: boolean;
+  /** Reactive: whether there is scrollable content below the viewport. */
+  readonly hasContentBelow: boolean;
   /** Reactive: number of "new" deltas that arrived while the user was
    *  scrolled away. Resets to 0 when the user returns to the bottom or
    *  calls jumpToBottom(). */
@@ -105,7 +108,14 @@ export interface AutoScrollHandle {
    *  the caller can show a "N new" pill. */
   notifyNewEntry: () => void;
   /** Force the view to the bottom and re-enable follow mode. Used by the
-   *  "Jump to bottom" button. */
+   *  "Jump to bottom" button.
+   *
+   *  Defaults to `instant`. A smooth scroll animates through every offset
+   *  between here and the bottom, which for a long transcript takes several
+   *  seconds and fires a scroll event per frame — the exact "slow autoscroll
+   *  down" a reader reports. Readers asked for the bottom, not a tour of the
+   *  transcript to get there, and `pinToBottom` writes scrollTop directly so
+   *  the motion is a single blip. */
   jumpToBottom: (behavior?: ScrollBehavior) => void;
   /** Manually set follow mode (e.g. when the user wants to pause). */
   setFollow: (v: boolean) => void;
@@ -129,6 +139,7 @@ export function createAutoScroll(
 
   let follow = $state(true);
   let unseenCount = $state(0);
+  let hasContentBelow = $state(false);
   let rafId: number | null = null;
   let resizeObserver: ResizeObserver | null = null;
   let mutationObserver: MutationObserver | null = null;
@@ -155,6 +166,11 @@ export function createAutoScroll(
     return el.scrollHeight - el.scrollTop - el.clientHeight;
   }
 
+  function updateContentBelow() {
+    const el = getEl();
+    hasContentBelow = !!el && getDistanceFromBottom() > 1;
+  }
+
   // ─── Pinning ──────────────────────────────────────────────────────────────
 
   function pinToBottom(el: HTMLDivElement) {
@@ -178,6 +194,7 @@ export function createAutoScroll(
       const el = getEl();
       if (!el) return;
       pinToBottom(el);
+      updateContentBelow();
       // Keep converging while an explicit jump is still settling: the
       // transcript's real bottom moves as rows finish measuring.
       if (settleFrames > 0) {
@@ -193,6 +210,7 @@ export function createAutoScroll(
     if (!el) return;
     if (behavior === 'instant') {
       pinToBottom(el);
+      updateContentBelow();
     } else {
       el.scrollTo({ top: el.scrollHeight, behavior });
       // A smooth scroll walks through every offset on its way down, so there
@@ -246,11 +264,21 @@ export function createAutoScroll(
     settleFrames = 0;
   }
 
+  function onReaderResize() {
+    noteReaderInput();
+    follow = false;
+    // Subsequent scrolls are the disclosure changing layout, not a new scroll
+    // gesture. In particular, collapsing must not re-enable bottom following.
+    readerInputAt = Number.NEGATIVE_INFINITY;
+    pinnedTop = null;
+  }
+
   function onUserScroll() {
     untrack(() => {
       const el = getEl();
       if (!el) return;
       const dist = getDistanceFromBottom();
+      updateContentBelow();
       // A scroll counts as the reader's only when a gesture preceded it *and*
       // the container ended up somewhere our last pin did not put it.
       const readerDriven =
@@ -291,6 +319,7 @@ export function createAutoScroll(
     // effect to re-run when `follow` changes — only when the consumer's
     // own state (e.g. feed length) changes.
     untrack(() => {
+      updateContentBelow();
       if (!follow) return;
       schedulePin();
     });
@@ -298,11 +327,12 @@ export function createAutoScroll(
 
   function notifyNewEntry() {
     untrack(() => {
+      updateContentBelow();
       if (!follow) unseenCount++;
     });
   }
 
-  function jumpToBottom(behavior: ScrollBehavior = 'smooth') {
+  function jumpToBottom(behavior: ScrollBehavior = 'instant') {
     follow = true;
     unseenCount = 0;
     scrollToBottomNow(behavior);
@@ -330,12 +360,14 @@ export function createAutoScroll(
     detach();
 
     currentEl = el;
+    updateContentBelow();
     el.addEventListener('scroll', onUserScroll, { passive: true });
     el.addEventListener('wheel', onWheel, { passive: true });
     el.addEventListener('touchstart', onTouchStart, { passive: true });
     el.addEventListener('touchmove', onTouchMove, { passive: true });
     el.addEventListener('pointerdown', onPointerDown, { passive: true });
     el.addEventListener('keydown', onKeyDown);
+    el.addEventListener(READER_RESIZE_EVENT, onReaderResize);
 
     // Watch the container's size so that streaming tokens (which grow the
     // last row, which in turn grows the inner content height) re-pin the
@@ -343,6 +375,7 @@ export function createAutoScroll(
     // *re-pins*; it never toggles `follow`, so it cannot fight the user.
     resizeObserver = new ResizeObserver(() => {
       untrack(() => {
+        updateContentBelow();
         if (!follow) return;
         schedulePin();
       });
@@ -373,9 +406,11 @@ export function createAutoScroll(
       currentEl.removeEventListener('touchmove', onTouchMove);
       currentEl.removeEventListener('pointerdown', onPointerDown);
       currentEl.removeEventListener('keydown', onKeyDown);
+      currentEl.removeEventListener(READER_RESIZE_EVENT, onReaderResize);
     }
     currentEl = null;
     pinnedTop = null;
+    hasContentBelow = false;
     if (resizeObserver) {
       resizeObserver.disconnect();
       resizeObserver = null;
@@ -394,6 +429,9 @@ export function createAutoScroll(
   return {
     get follow() {
       return follow;
+    },
+    get hasContentBelow() {
+      return hasContentBelow;
     },
     get unseenCount() {
       return unseenCount;

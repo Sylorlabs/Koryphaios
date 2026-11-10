@@ -18,9 +18,14 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('chat media playback', () => {
-  it.each([['clip.mp4', 'video'], ['speech.mp3', 'audio']])('plays %s and releases its blob URL', async (name, tag) => {
+  it.each([
+    ['clip.mp4', 'video'],
+    ['speech.mp3', 'audio'],
+  ])('plays %s and releases its blob URL', async (name, tag) => {
     const view = render(MediaAttachment, { data: 'Y2xpcA==', name });
-    await waitFor(() => expect(view.container.querySelector(tag)).toHaveAttribute('src', 'blob:media-fixture'));
+    await waitFor(() =>
+      expect(view.container.querySelector(tag)).toHaveAttribute('src', 'blob:media-fixture'),
+    );
     expect(view.container.querySelector(tag)).toHaveAttribute('controls');
     expect(view.container.querySelector(tag)).not.toHaveAttribute('autoplay');
     expect(screen.getByRole('link')).toHaveAttribute('download', name);
@@ -31,17 +36,29 @@ describe('chat media playback', () => {
   });
 
   it('loads generated video through the authenticated history API for inline playback', async () => {
-    vi.mocked(apiFetch).mockResolvedValueOnce(Response.json({ ok: true, data: { videoBase64: 'Y2xpcA==', mimeType: 'video/mp4', prompt: 'A cat surfing' } }));
+    vi.mocked(apiFetch).mockResolvedValueOnce(
+      Response.json({
+        ok: true,
+        data: { videoBase64: 'Y2xpcA==', mimeType: 'video/mp4', prompt: 'A cat surfing' },
+      }),
+    );
     const view = render(GeneratedVideo, { historyId: 'clip/id' });
     await waitFor(() => expect(view.container.querySelector('video')).toBeTruthy());
-    expect(apiFetch).toHaveBeenCalledWith('/api/video/history/clip%2Fid', expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/api/video/history/clip%2Fid',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     expect(screen.getByText('A cat surfing')).toBeTruthy();
     expect(view.container.innerHTML).not.toContain('base64');
   });
 
   it('shows an actionable result when the generated clip has expired', async () => {
-    vi.mocked(apiFetch).mockResolvedValueOnce(Response.json({ ok: false, error: 'Video not found in history.' }, { status: 400 }));
+    vi.mocked(apiFetch).mockResolvedValueOnce(
+      Response.json({ ok: false, error: 'Video not found in history.' }, { status: 400 }),
+    );
     render(GeneratedVideo, { historyId: 'expired' });
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Video not found in history.'));
+    await waitFor(() =>
+      expect(screen.getByRole('status')).toHaveTextContent('Video not found in history.'),
+    );
   });
 });

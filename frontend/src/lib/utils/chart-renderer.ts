@@ -139,7 +139,7 @@ function pieChart(spec: ChartSpec): string {
     return `<path d="${path}" fill="${COLORS[index % COLORS.length]}" class="chart-slice"><title>${escapeHtml(`${spec.labels[index]}: ${value} (${((value / total) * 100).toFixed(1)}%)`)}</title></path>`;
   }).join('');
   const labels = spec.labels.map((label, index) => `<span><i style="background:${COLORS[index % COLORS.length]}"></i>${escapeHtml(label)} · ${escapeHtml(values[index])}</span>`).join('');
-  return `<div class="kory-chart-pie"><svg viewBox="0 0 380 300" role="img" aria-label="${escapeHtml(spec.title ?? 'Pie chart')}">${paths}<circle cx="190" cy="150" r="55" class="chart-donut-hole"/></svg><div class="kory-chart-legend kory-chart-pie-legend">${labels}</div></div>`;
+  return `<div class="kory-chart-pie"><svg viewBox="0 0 380 300" role="img" aria-label="${escapeHtml(spec.title ?? 'Pie chart')}">${paths}<circle cx="190" cy="150" r="55" class="chart-donut-hole"/><text x="190" y="146" text-anchor="middle" class="chart-pie-center-value">${escapeHtml(String(total))}</text><text x="190" y="166" text-anchor="middle" class="chart-pie-center-label">total</text></svg><div class="kory-chart-legend kory-chart-pie-legend">${labels}</div></div>`;
 }
 
 export function renderKoryChart(source: string): string | null {

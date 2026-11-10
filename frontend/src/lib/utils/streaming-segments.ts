@@ -2,7 +2,7 @@
 // All prose, including untrusted partial Markdown, crosses the same sanitizer
 // as final chat messages. Never trust model output as executable HTML.
 
-import { createChatMarkdown, renderChatMarkdown } from './chat-markdown';
+import { createChatMarkdown, escapeMarkdownHtml, renderChatMarkdown } from './chat-markdown';
 const streamMarkdown = createChatMarkdown(false);
 import { renderKoryChart } from './chart-renderer';
 import { renderKoryColors } from './color-renderer';
@@ -29,6 +29,7 @@ const RICH_LANGS = new Set([
 const FENCE_OPEN_RE = /^```(\S+)\s*$/;
 // Closing fence: ``` (optional whitespace)
 const FENCE_CLOSE_RE = /^```\s*$/;
+const STREAMING_INLINE_RICH_RE = /\$\$|\$[^\s$][^\n$]*\$|\\\(|\\\[/;
 
 function renderBlock(lang: string, content: string): string | null {
   switch (lang) {
@@ -79,14 +80,44 @@ export interface StreamingSegmentsSnapshot {
   stableLength: number;
   /** Exclusive char end offset of each segment's raw source span (internal). */
   ends: number[];
+  /** Whether prose segments were fully Markdown-rendered. */
+  renderProse: boolean;
 }
 
 export function computeStreamingSegmentsIncremental(
   prev: StreamingSegmentsSnapshot | null | undefined,
   text: string,
 ): StreamingSegmentsSnapshot {
+  return computeIncremental(prev, text, true);
+}
+
+/**
+ * Streaming UI fast path. Prose is escaped rather than reparsed and sanitized
+ * on every debounce tick; the completed response is rendered normally once the
+ * provider finishes. Rich fenced blocks still render as soon as their closing
+ * fence arrives.
+ */
+export function computeStreamingSegmentsFast(
+  text: string,
+): StreamingSegment[] {
+  return scanSegments(text, 0, false).segments;
+}
+
+export function computeStreamingSegmentsIncrementalFast(
+  prev: StreamingSegmentsSnapshot | null | undefined,
+  text: string,
+): StreamingSegmentsSnapshot {
+  return computeIncremental(prev, text, false);
+}
+
+function computeIncremental(
+  prev: StreamingSegmentsSnapshot | null | undefined,
+  text: string,
+  renderProse: boolean,
+): StreamingSegmentsSnapshot {
   if (
     prev &&
+    prev.renderProse === renderProse &&
     prev.stableLength > 0 &&
     prev.stableLength <= text.length &&
     text.startsWith(prev.text)
@@ -99,17 +130,18 @@ export function computeStreamingSegmentsIncremental(
         keptEnds.push(prev.ends[i]);
       }
     }
-    const tail = scanSegments(text.slice(prev.stableLength), kept.length);
+    const tail = scanSegments(text.slice(prev.stableLength), kept.length, renderProse);
     return {
       text,
       segments: [...kept, ...tail.segments],
       ends: [...keptEnds, ...tail.ends.map((e) => e + prev.stableLength)],
       stableLength:
         tail.stableLength > 0 ? prev.stableLength + tail.stableLength : prev.stableLength,
+      renderProse,
     };
   }
-  const full = scanSegments(text, 0);
-  return { text, segments: full.segments, ends: full.ends, stableLength: full.stableLength };
+  const full = scanSegments(text, 0, renderProse);
+  return { text, segments: full.segments, ends: full.ends, stableLength: full.stableLength, renderProse };
 }
 
 interface ScanResult {
@@ -120,7 +152,7 @@ interface ScanResult {
   stableLength: number;
 }
 
-function scanSegments(text: string, idBase: number): ScanResult {
+function scanSegments(text: string, idBase: number, renderProse = true): ScanResult {
   if (!text) return { segments: [], ends: [], stableLength: 0 };
   const lines = text.split('\n');
   // Char offset where each line starts, so segment raw spans can be recorded
@@ -143,7 +175,14 @@ function scanSegments(text: string, idBase: number): ScanResult {
   const flushText = (endLine: number) => {
     if (textBuffer.length) {
       const raw = textBuffer.join('\n');
-      const html = renderChatMarkdown(raw, streamMarkdown);
+      // Math is the one inline rich form that must remain visible while a
+      // response is streaming. Ordinary prose stays escaped until completion;
+      // equations take the slower parser path only when their delimiters are
+      // actually present.
+      const html =
+        renderProse || STREAMING_INLINE_RICH_RE.test(raw)
+          ? renderChatMarkdown(raw, streamMarkdown)
+          : escapeMarkdownHtml(raw);
       segments.push({ id: segId++, kind: 'text', html });
       ends.push(starts[textStart] + raw.length);
       textBuffer = [];

@@ -3,6 +3,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { notesStore } from '$lib/stores/notes.svelte';
   import { theme } from '$lib/stores/theme.svelte';
+  import NoteIconContextMenu from './NoteIconContextMenu.svelte';
   import {
     GRAPH_AUTO_FOCUS_THRESHOLD,
     GRAPH_STATIC_LAYOUT_THRESHOLD,
@@ -11,7 +12,7 @@
     shouldDimGraphNode,
     stableGraphHash,
   } from '$lib/utils/note-graph-view';
-  import type { GraphNode, GraphEdge } from '@koryphaios/shared';
+  import type { GraphNode, GraphEdge, NoteIcon } from '@koryphaios/shared';
   import Share2 from 'lucide-svelte/icons/share-2';
 
   interface Props {
@@ -36,6 +37,7 @@
   let tooltipTitle = $state('');
   let tooltipMeta = $state('');
   let performanceLayout = $state(false);
+  let iconMenu = $state<{ noteId: string; icon?: NoteIcon; x: number; y: number } | null>(null);
 
   const FOLDER_COLOR_TOKENS = [
     '--color-accent',
@@ -68,6 +70,39 @@
     return Math.min(base + (includeInContext ? 2 : 0), 22);
   }
 
+  function nodeRadius(node: SimNode): number {
+    const radius = getNodeRadius(node.linkCount, node.includeInContext);
+    return node.icon ? Math.max(14, radius) : radius;
+  }
+
+  function drawNodeIcon(ctx: CanvasRenderingContext2D, node: SimNode, radius: number): void {
+    const icon = node.icon;
+    if (!icon) return;
+    if (icon.kind === 'builtin') {
+      ctx.save();
+      ctx.font = `${Math.max(8, radius * 1.25)}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(icon.value, node.x, node.y + 0.5);
+      ctx.restore();
+      return;
+    }
+    let image = iconImageCache.get(icon.value);
+    if (!image) {
+      image = new Image();
+      image.onload = () => requestDraw();
+      image.src = icon.value;
+      iconImageCache.set(icon.value, image);
+    }
+    if (!image.complete || image.naturalWidth === 0) return;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, radius - 0.5, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.drawImage(image, node.x - radius, node.y - radius, radius * 2, radius * 2);
+    ctx.restore();
+  }
+
   // ── Canvas render state ─────────────────────────────────────────────────────
   // Canvas 2D scales far beyond an equivalent SVG DOM. Large vaults default to
   // their connected/contextual subset, while All notes uses a stable one-shot
@@ -77,10 +112,12 @@
   let scale = 1;
   let tx = 0;
   let ty = 0;
+  const MIN_ZOOM_SCALE = Number.EPSILON;
   let width = 0;
   let height = 0;
   let dpr = 1;
   const positionCache = new Map<string, { x: number; y: number }>();
+  const iconImageCache = new Map<string, HTMLImageElement>();
   let drawFrame: number | null = null;
   let buildFrame: number | null = null;
 
@@ -98,7 +135,7 @@
     // Search nearest within its radius; iterate in reverse so topmost wins.
     for (let i = simNodes.length - 1; i >= 0; i--) {
       const n = simNodes[i];
-      const r = getNodeRadius(n.linkCount, n.includeInContext) + 3;
+      const r = nodeRadius(n) + 3;
       const dx = n.x - wx;
       const dy = n.y - wy;
       if (dx * dx + dy * dy <= r * r) return n;
@@ -169,7 +206,7 @@
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     for (const n of simNodes) {
-      const r = getNodeRadius(n.linkCount, n.includeInContext);
+      const r = nodeRadius(n);
       const matches = !q || n.title.toLowerCase().includes(q);
       // Isolation is an intentional selection state, never a transient hover
       // state. Keep the hovered node readable even outside the selection.
@@ -204,6 +241,7 @@
           ? colors.textPrimary
           : colors.borderBright;
       ctx.stroke();
+      drawNodeIcon(ctx, n, r);
 
       const explicitlyRelevant =
         n.id === hoveredNodeId ||
@@ -244,7 +282,7 @@
       for (const node of labelCandidates) {
         const forced = isForced(node);
         if (!forced && painted >= budget) continue;
-        const radius = getNodeRadius(node.linkCount, node.includeInContext);
+        const radius = nodeRadius(node);
         const fontSize = 9.5 / Math.max(scale, 0.75);
         ctx.font = `${node.linkCount >= 3 ? '600 ' : ''}${fontSize}px ui-sans-serif, system-ui, sans-serif`;
         const label = node.title.length > 24 ? node.title.slice(0, 22) + '…' : node.title;
@@ -314,7 +352,7 @@
     let minY = Infinity;
     let maxY = -Infinity;
     for (const node of simNodes) {
-      const radius = getNodeRadius(node.linkCount, node.includeInContext) + 18;
+      const radius = nodeRadius(node) + 18;
       minX = Math.min(minX, node.x - radius);
       maxX = Math.max(maxX, node.x + radius);
       minY = Math.min(minY, node.y - radius);
@@ -427,7 +465,7 @@
         'collide',
         d3
           .forceCollide<SimNode>()
-          .radius((d) => getNodeRadius(d.linkCount, d.includeInContext) + 10),
+          .radius((d) => nodeRadius(d) + 10),
       );
     }
     simulation.on('tick', requestDraw).on('end', rememberPositions);
@@ -511,7 +549,7 @@
       const current = simNodes.find((node) => node.id === hoveredNodeId);
       if (current) {
         const [wx, wy] = toWorld(sx, sy);
-        const radius = getNodeRadius(current.linkCount, current.includeInContext) + hoverRetentionScale / scale;
+        const radius = nodeRadius(current) + hoverRetentionScale / scale;
         if ((current.x - wx) ** 2 + (current.y - wy) ** 2 <= radius ** 2) target = current;
       }
     }
@@ -520,7 +558,7 @@
       const current = simNodes.find((node) => node.id === hoveredNodeId);
       if (current) {
         const [wx, wy] = toWorld(sx, sy);
-        const radius = getNodeRadius(current.linkCount, current.includeInContext) + 3 / scale;
+        const radius = nodeRadius(current) + 3 / scale;
         if ((current.x - wx) ** 2 + (current.y - wy) ** 2 <= radius ** 2) return;
       }
     }
@@ -540,6 +578,7 @@
 
   function onPointerDown(event: PointerEvent) {
     if (!canvasEl) return;
+    if (event.button !== 0) return;
     const rect = canvasEl.getBoundingClientRect();
     const sx = event.clientX - rect.left;
     const sy = event.clientY - rect.top;
@@ -588,6 +627,7 @@
   }
 
   function onPointerUp(event: PointerEvent) {
+    if (event.button === 2) return;
     if (canvasEl) canvasEl.releasePointerCapture?.(event.pointerId);
     if (dragNode) {
       if (!event.altKey) {
@@ -617,14 +657,44 @@
     if (selectedNodeId) onNodeClick(selectedNodeId);
   }
 
+  function onContextMenu(event: MouseEvent): void {
+    event.preventDefault();
+    if (!canvasEl) return;
+    const rect = canvasEl.getBoundingClientRect();
+    const node = nodeAt(event.clientX - rect.left, event.clientY - rect.top);
+    if (!node || node.unresolved) {
+      iconMenu = null;
+      return;
+    }
+    selectedNodeId = node.id;
+    iconMenu = {
+      noteId: node.id,
+      icon: node.icon,
+      x: event.clientX,
+      y: event.clientY,
+    };
+    requestDraw();
+  }
+
   function onWheel(event: WheelEvent) {
     if (!canvasEl) return;
     event.preventDefault();
     const rect = canvasEl.getBoundingClientRect();
     const sx = event.clientX - rect.left;
     const sy = event.clientY - rect.top;
-    const factor = Math.exp(-event.deltaY * 0.0015);
-    const next = Math.min(6, Math.max(0.1, scale * factor));
+    // Trackpads report small pixel deltas while mouse wheels commonly report
+    // line deltas. Normalize both, then use a responsive exponential curve so
+    // a normal scroll covers useful ground without making large/page deltas
+    // jump straight to the scale limit.
+    const rawDelta =
+      event.deltaMode === WheelEvent.DOM_DELTA_LINE
+        ? event.deltaY * 16
+        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+          ? event.deltaY * height
+          : event.deltaY;
+    const delta = Math.sign(rawDelta) * Math.min(Math.abs(rawDelta), 180);
+    const factor = Math.exp(-delta * 0.0225);
+    const next = Math.min(6, Math.max(MIN_ZOOM_SCALE, scale * factor));
     // Keep the point under the cursor fixed while zooming.
     const [wx, wy] = toWorld(sx, sy);
     scale = next;
@@ -657,7 +727,14 @@
     const candidates = keyboardCandidates();
     if (!candidates.length) return;
     const current = candidates.findIndex((node) => node.id === selectedNodeId);
-    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+    if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+      const node = candidates[current];
+      if (!node || node.unresolved || !canvasEl) return;
+      event.preventDefault();
+      const rect = canvasEl.getBoundingClientRect();
+      iconMenu = { noteId: node.id, icon: node.icon, x: rect.left + node.x * scale + tx,
+        y: rect.top + node.y * scale + ty };
+    } else if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
       event.preventDefault();
       selectKeyboardNode(current < 0 ? 0 : current + 1);
     } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
@@ -678,7 +755,7 @@
       requestDraw();
     } else if (event.key === '-') {
       event.preventDefault();
-      scale = Math.max(0.1, scale / 1.2);
+      scale = Math.max(MIN_ZOOM_SCALE, scale / 1.2);
       requestDraw();
     } else if (event.key === '0') {
       event.preventDefault();
@@ -739,6 +816,7 @@
     if (buildFrame !== null) cancelAnimationFrame(buildFrame);
     clearHoverIntent();
     clearTooltipUpdate();
+    iconImageCache.clear();
   });
 
   function resetView() {
@@ -903,11 +981,21 @@
       requestDraw();
     }}
     onwheel={onWheel}
+    oncontextmenu={onContextMenu}
     onkeydown={onCanvasKeydown}
     tabindex="0"
     aria-label="Interactive note graph"
     aria-describedby="note-graph-instructions note-graph-selection"
   ></canvas>
+
+  {#if iconMenu}
+    {#key `${iconMenu.noteId}:${iconMenu.x}:${iconMenu.y}`}
+    <NoteIconContextMenu
+      {...iconMenu}
+      onclose={() => (iconMenu = null)}
+    />
+    {/key}
+  {/if}
 
   <p id="note-graph-instructions" class="sr-only">
     Click once to focus a note and double-click to open it. Use arrow keys to move between filtered
@@ -966,7 +1054,7 @@
         class="mt-2 pt-2 border-t text-[10px]"
         style="border-color: var(--color-border); color: var(--color-text-muted);"
       >
-        Ring = agent context · click to focus · double-click to open · scroll to zoom
+        Ring = agent context · click to focus · double-click to open · right-click for icon · scroll to zoom
       </div>
     </div>
   {/if}

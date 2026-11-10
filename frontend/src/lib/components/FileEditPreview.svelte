@@ -1,6 +1,5 @@
 <script lang="ts">
   import { wsStore } from '$lib/stores/websocket.svelte';
-  import Loader from 'lucide-svelte/icons/loader';
   import Check from 'lucide-svelte/icons/check';
   import ChevronRight from 'lucide-svelte/icons/chevron-right';
   import ChevronDown from 'lucide-svelte/icons/chevron-down';
@@ -129,7 +128,7 @@
       >
         <!-- File header -->
         <button
-          class="w-full flex items-center gap-2 px-3 py-2 text-left transition-colors hover:brightness-110 {edit.done ? '' : 'writing-header'}"
+          class="w-full flex items-center gap-2 px-3 py-2 text-left transition-colors hover:brightness-110"
           style="background: var(--color-surface-2);"
           onclick={() => toggleCollapse(edit.path)}
         >
@@ -146,8 +145,8 @@
             {getRelativePath(edit.path)}
           </span>
           {#if !edit.done}
-            <span class="text-[10px] shrink-0 writing-label" style="color: var(--color-accent);">
-              {edit.operation === 'create' ? 'Writing' : 'Editing'}<span class="dots"><span>.</span><span>.</span><span>.</span></span>
+            <span class="text-[10px] shrink-0" style="color: var(--color-accent);">
+              {edit.operation === 'create' ? 'Writing' : 'Editing'}
             </span>
           {/if}
           <span class="text-[10px] tabular-nums shrink-0 ml-auto font-mono">
@@ -166,7 +165,7 @@
           {#if edit.done}
             <Check size={15} class="text-emerald-400 shrink-0" />
           {:else}
-            <Loader size={15} class="text-[var(--color-accent)] shrink-0 animate-spin" />
+            <span class="pulse-dot shrink-0" aria-hidden="true"></span>
           {/if}
         </button>
 
@@ -184,10 +183,6 @@
               style="background: transparent;"
             ><code>{@html bodyHtml(edit)}</code>{#if !edit.done}<span class="caret"></span>{/if}</pre>
 
-            {#if !edit.done}
-              <!-- Glow over the active writing zone (content is pinned to the bottom while streaming) -->
-              <div class="write-glow" aria-hidden="true"></div>
-            {/if}
           </div>
         {/if}
       </div>
@@ -198,16 +193,20 @@
 <style>
   .caret {
     display: inline-block;
-    width: 7px;
-    height: 13px;
-    margin-left: 1px;
+    width: 2px;
+    height: 1.1em;
+    margin-left: 2px;
     vertical-align: text-bottom;
     background: var(--color-accent);
-    animation: kory-blink 1s steps(2, start) infinite;
+    animation: kory-caret 1s ease-in-out infinite;
   }
-  @keyframes kory-blink {
+  @keyframes kory-caret {
+    0%,
+    100% {
+      opacity: 1;
+    }
     50% {
-      opacity: 0;
+      opacity: 0.25;
     }
   }
   /* Live diff colors for edits */
@@ -221,83 +220,27 @@
     text-decoration: line-through;
     text-decoration-color: rgba(239, 68, 68, 0.5);
   }
-  /* Shimmer sweep across the header while the agent is writing */
-  .writing-header {
-    position: relative;
-    overflow: hidden;
+  /* Quiet pulsing dot: the single header affordance while writing */
+  .pulse-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+    background: var(--color-accent);
+    animation: kory-pulse-dot 1.6s ease-in-out infinite;
   }
-  .writing-header::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(
-      105deg,
-      transparent 35%,
-      color-mix(in srgb, var(--color-accent) 12%, transparent) 50%,
-      transparent 65%
-    );
-    background-size: 250% 100%;
-    animation: kory-shimmer 1.8s ease-in-out infinite;
-    pointer-events: none;
-  }
-  @keyframes kory-shimmer {
-    0% {
-      background-position: 120% 0;
-    }
-    100% {
-      background-position: -120% 0;
-    }
-  }
-  /* Animated ellipsis on the Writing/Editing label */
-  .dots span {
-    animation: kory-dot 1.2s infinite;
-    opacity: 0;
-  }
-  .dots span:nth-child(2) {
-    animation-delay: 0.2s;
-  }
-  .dots span:nth-child(3) {
-    animation-delay: 0.4s;
-  }
-  @keyframes kory-dot {
+  @keyframes kory-pulse-dot {
     0%,
-    60%,
     100% {
-      opacity: 0;
-    }
-    30% {
       opacity: 1;
-    }
-  }
-  /* Soft pulsing glow pinned over the newest streamed lines */
-  .write-glow {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    height: 56px;
-    background: linear-gradient(
-      to top,
-      color-mix(in srgb, var(--color-accent) 9%, transparent),
-      transparent
-    );
-    animation: kory-glow 1.6s ease-in-out infinite;
-    pointer-events: none;
-  }
-  @keyframes kory-glow {
-    0%,
-    100% {
-      opacity: 0.55;
     }
     50% {
-      opacity: 1;
+      opacity: 0.5;
     }
   }
   @media (prefers-reduced-motion: reduce) {
     .caret,
-    .writing-header::after,
-    .dots span,
-    .write-glow {
+    .pulse-dot {
       animation: none;
     }
   }

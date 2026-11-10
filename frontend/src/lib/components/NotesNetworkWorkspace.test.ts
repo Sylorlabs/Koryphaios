@@ -7,7 +7,9 @@ import NotesNetworkWorkspace, {
 
 const { apiFetch } = vi.hoisted(() => ({ apiFetch: vi.fn() }));
 vi.mock('$lib/api.svelte', () => ({ apiFetch }));
-vi.mock('$lib/utils/api-url', () => ({ apiUrl: (path: string) => `/api${path}` }));
+// Real `apiUrl` only prefixes the backend origin; components must pass full
+// `/api/...` paths, so the mock mirrors that instead of inventing a prefix.
+vi.mock('$lib/utils/api-url', () => ({ apiUrl: (path: string) => path }));
 const notes = [
   { id: 'note/a', title: 'Alpha', revision: 3 },
   { id: 'note:b', title: 'Beta', revision: 5 },
@@ -150,6 +152,35 @@ afterEach(() => {
 });
 
 describe('Notes network review', () => {
+  it('refreshes evidence at current endpoint revisions without removing the existing claim', async () => {
+    apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/note%2Fa')) return response({ ...notes[0], revision: 8 });
+      if (url.endsWith('/note%3Ab')) return response({ ...notes[1], revision: 9 });
+      return fallback(url, init);
+    });
+    await mount();
+    await fireEvent.click(
+      screen.getByRole('button', { name: 'Refresh evidence for Alpha and Beta' }),
+    );
+    await screen.findByRole('button', { name: 'Save refreshed proposal' });
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Evidence' }), {
+      target: { value: 'New reviewed measurements' },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Save refreshed proposal' }));
+    const call = apiFetch.mock.calls.find(([url]) =>
+      String(url).endsWith('/relationships/note%2Fa/note%3Ab/refresh'),
+    )!;
+    expect(call[1].method).toBe('POST');
+    expect(JSON.parse(call[1].body)).toEqual({
+      expectedRevision: 7,
+      expectedSourceRevision: 8,
+      expectedTargetRevision: 9,
+      type: 'supports',
+      evidence: 'New reviewed measurements',
+    });
+    expect(apiFetch.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
+  });
+
   it('renders typed, attributed evidence safely and reviews with exact relationship CAS', async () => {
     const view = await mount();
     expect(screen.getByText(relationship.evidence)).toBeTruthy();

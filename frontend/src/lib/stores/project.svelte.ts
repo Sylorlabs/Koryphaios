@@ -1,3 +1,4 @@
+import { resolveProjectIcon, type ProjectIdentity, type ProjectIconSpec } from '@koryphaios/shared';
 import { loadSessionScope, saveSessionScope } from './navigation-preferences';
 
 export type SessionScope = 'project' | 'all';
@@ -6,6 +7,14 @@ export interface WorkspaceProjectEntry {
   path: string;
   name: string;
   modifiedAt: number;
+  identity?: ProjectIdentity;
+}
+
+export type ResolvedProjectIcon = Exclude<ProjectIconSpec, { mode: 'automatic' }>;
+
+export interface WorkspaceProjectIdentityProjection {
+  identity: ProjectIdentity;
+  icon: ResolvedProjectIcon;
 }
 
 export interface WorkspaceNavigationSnapshot {
@@ -17,12 +26,54 @@ export interface WorkspaceNavigationSnapshot {
   unavailableProject: string | null;
   /** Monotonic write sequence from the backend — stale snapshots are discarded. */
   seq?: number;
+  projectIdentities?: Record<string, ProjectIdentity>;
 }
 
 export interface WorkspaceReconciliation {
   projectBecameUnavailable: string | null;
   workspaceBecameUnavailable: string | null;
   changed: boolean;
+}
+
+/**
+ * Project listings currently carry a checkout path rather than a durable
+ * project id. Keep that limitation explicit in the temporary identity while
+ * still giving every frontend consumer the shared identity/icon contract.
+ */
+export function projectIdentityFor(entry: WorkspaceProjectEntry): ProjectIdentity {
+  if (entry.identity) return entry.identity;
+  const path = entry.path.trim();
+  const name = entry.name.trim() || projectDisplayName(path);
+  return {
+    id: `path:${path}`,
+    name,
+    icon: { mode: 'automatic' },
+  };
+}
+
+/** Resolve the shared automatic icon fallback for a workspace project. */
+export function projectIconFor(entry: WorkspaceProjectEntry): ResolvedProjectIcon {
+  const identity = projectIdentityFor(entry);
+  return resolveProjectIcon(identity, identity.icon);
+}
+
+/** Stable identity plus its concrete, render-ready icon projection. */
+export function projectIdentityProjection(
+  entry: WorkspaceProjectEntry,
+): WorkspaceProjectIdentityProjection {
+  const identity = projectIdentityFor(entry);
+  return { identity, icon: resolveProjectIcon(identity, identity.icon) };
+}
+
+export function currentProjectIdentity(): ProjectIdentity | null {
+  if (!currentPath) return null;
+  const entry = workspaceProjects.find((project) => project.path === currentPath);
+  if (entry) return projectIdentityFor(entry);
+  return {
+    id: `path:${currentPath}`,
+    name: projectDisplayName(currentPath),
+    icon: { mode: 'automatic' },
+  };
 }
 
 let currentPath = $state<string | null>(null);

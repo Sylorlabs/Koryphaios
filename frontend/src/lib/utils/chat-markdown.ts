@@ -4,6 +4,13 @@ import DOMPurify from 'dompurify';
 import { expandHtmlSandboxes, htmlSandboxPlaceholder } from './html-sandbox';
 import { renderKoryChart } from './chart-renderer';
 import { renderKoryColors } from './color-renderer';
+import {
+  koryHighlightExtension,
+  koryInlineStyleExtension,
+  koryUnderlineExtension,
+  sanitizeInlineHtmlStyles,
+} from './kory-inline-style';
+import { renderChatLink } from './kory-link-favicon';
 
 export function escapeMarkdownHtml(text: string): string {
   return text
@@ -34,6 +41,29 @@ export function createChatMarkdown(richBlocks = true): Marked {
   const math = (text: string, displayMode: boolean) => renderKatex(text, displayMode);
   parser.use({
     extensions: [
+      {
+        name: 'chatWikilink',
+        level: 'inline',
+        start: (src) => src.indexOf('[['),
+        tokenizer(src) {
+          const match = /^\[\[([^\]|#]+?)(?:[|#]([^\]]+?))?\]\]/.exec(src);
+          if (match)
+            return {
+              type: 'chatWikilink',
+              raw: match[0],
+              target: match[1].trim(),
+              text: (match[2] ?? match[1]).trim(),
+            };
+        },
+        renderer(token) {
+          const target = String(token.target);
+          const kind = target.includes('/') ? 'path' : 'title';
+          return renderChatLink({
+            href: `kory-note://${kind}/${encodeURIComponent(target)}`,
+            text: escapeMarkdownHtml(token.text as string),
+          });
+        },
+      },
       {
         name: 'chatDisplayMath',
         level: 'block',
@@ -70,10 +100,22 @@ export function createChatMarkdown(richBlocks = true): Marked {
         },
         renderer: (token) => math(token.text as string, token.display === true),
       },
+      // Agent inline styling: [text]{color, size, flags} plus ==highlight==
+      // and ++underline++. Tokenizers return undefined for input they do not
+      // own so unrelated prose (currency, C++, == comparisons) stays literal.
+      koryInlineStyleExtension,
+      koryHighlightExtension,
+      koryUnderlineExtension,
     ],
     renderer: {
       checkbox({ checked }) {
         return `<input type="checkbox" disabled class="kory-task-check"${checked ? ' checked' : ''} aria-label="${checked ? 'done' : 'to do'}">`;
+      },
+      // External links render with the site's favicon and open in a new tab.
+      // Local file:// and session links render with T3-style interactive metadata.
+      link(token: Tokens.Link) {
+        const label = this.parser.parseInline(token.tokens);
+        return renderChatLink({ href: token.href, title: token.title, text: label });
       },
       table(token: Tokens.Table) {
         const header = this.tablerow({
@@ -107,14 +149,30 @@ const defaultParser = createChatMarkdown();
 /** Same sanitization boundary for drafts, user messages and every stream chunk. */
 export function renderChatMarkdown(text: string, parser: Marked = defaultParser): string {
   try {
-    return expandHtmlSandboxes(
-      DOMPurify.sanitize(parser.parse(text, { async: false }) as string, {
-        // KaTeX's MathML source is inert text, needed for accessible math and
-        // copy/paste round-trips. Do not admit annotation-xml or active content.
-        ADD_TAGS: ['semantics', 'annotation'],
-        ADD_ATTR: ['encoding'],
-      }),
-    );
+    const sanitized = DOMPurify.sanitize(parser.parse(text, { async: false }) as string, {
+      // KaTeX's MathML source is inert text, needed for accessible math and
+      // copy/paste round-trips. Do not admit annotation-xml or active content.
+      // target/referrerpolicy/loading/draggable and data-kory-* keep external
+      // favicon links, file:// links, and session links intact.
+      ADD_TAGS: ['semantics', 'annotation'],
+      ADD_ATTR: [
+        'encoding',
+        'target',
+        'referrerpolicy',
+        'loading',
+        'draggable',
+        'data-kory-file-path',
+        'data-kory-line-start',
+        'data-kory-line-end',
+        'data-kory-session-id',
+      ],
+      ALLOWED_URI_REGEXP:
+        /^(?:(?:https?|mailto|tel|file|kory-note|kory-session|t3-thread|conversation):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+    });
+    // Clamp agent-authored inline styles to the validated subset, then expand
+    // sandboxed HTML blocks (whose escaped srcdoc contains no live markup, so
+    // the style pass cannot disturb it).
+    return expandHtmlSandboxes(sanitizeInlineHtmlStyles(sanitized));
   } catch {
     return escapeMarkdownHtml(text);
   }

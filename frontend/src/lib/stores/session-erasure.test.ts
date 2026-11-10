@@ -29,6 +29,7 @@ import type { Goal } from '@koryphaios/shared';
 import { sessionStore, type LifecycleSession } from './sessions.svelte';
 import { goalStore } from './goals.svelte';
 import { feedStore } from './feed.svelte';
+import { agentStore } from './agents.svelte';
 import { notifySessionRemoved, onSessionRemoved } from './session-removal';
 
 function response(body: unknown, status = 200): Response {
@@ -74,6 +75,58 @@ function goal(id: string, overrides: Partial<Goal> = {}): Goal {
 
 function seedGoal(value: Goal): void {
   goalStore.handleUpdated({ goal: value });
+}
+
+function seedWorker(sessionId: string, agentId: string): void {
+  agentStore.spawnAgent(
+    {
+      id: agentId,
+      name: agentId,
+      role: 'coder',
+      model: 'test-model',
+      provider: 'openai',
+      domain: 'frontend',
+      glowColor: '',
+    },
+    'test task',
+    sessionId,
+  );
+  agentStore.setAgentThreadFeed(sessionId, agentId, [
+    {
+      id: `thread-${agentId}`,
+      timestamp: 1,
+      type: 'content',
+      agentId,
+      agentName: agentId,
+      glowClass: '',
+      text: 'thread content',
+      metadata: { sessionId },
+    },
+  ]);
+  agentStore.setAgentSteeringQueue(sessionId, agentId, [
+    {
+      id: `queue-${agentId}`,
+      sessionId,
+      agentId,
+      content: 'queued instruction',
+      status: 'queued',
+      position: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    },
+  ]);
+}
+
+function workerIdentity(agentId: string) {
+  return {
+    id: agentId,
+    name: agentId,
+    role: 'coder' as const,
+    model: 'test-model',
+    provider: 'openai' as const,
+    domain: 'frontend' as const,
+    glowColor: '',
+  };
 }
 
 /** The server's post-erasure goal projection, once the DELETE has committed. */
@@ -140,6 +193,39 @@ describe('deleting a chat that owns goal state', () => {
     expect(sessionStore.activeSessionId).toBe('two');
   });
 
+  it('clears session feed and agent state on single deletion', async () => {
+    feedStore.activateSessionFeed('one');
+    feedStore.addFeedEntry({
+      type: 'content',
+      agentId: 'kory-manager',
+      agentName: 'Kory',
+      glowClass: '',
+      text: 'session one',
+      timestamp: 5,
+      metadata: { sessionId: 'one' },
+    });
+    seedWorker('one', 'worker-one');
+    mockErasure();
+
+    await expect(sessionStore.deleteSession('one')).resolves.toBe(true);
+
+    expect(feedStore.lastEntryForSession('one')).toBeUndefined();
+    expect(agentStore.agents.has('worker-one')).toBe(false);
+    expect(agentStore.getAgentThreadEntries('one', 'worker-one')).toEqual([]);
+    expect(agentStore.getAgentSteeringQueue('one', 'worker-one')).toEqual([]);
+  });
+
+  it('releases completed worker thread lanes when switching chats', () => {
+    seedWorker('one', 'worker-switch');
+    agentStore.completeAgent('worker-switch', 'one');
+
+    agentStore.clearNonManagerAgents('two');
+
+    expect(agentStore.agents.has('worker-switch')).toBe(false);
+    expect(agentStore.getAgentThreadEntries('one', 'worker-switch')).toEqual([]);
+    expect(agentStore.getAgentSteeringQueue('one', 'worker-switch')).toEqual([]);
+  });
+
   it('reconciles every window when another client deletes the chat', async () => {
     seedGoal(goal('g1', { execution: { sessionId: 'one' } as Goal['execution'] }));
     mocks.apiFetch.mockResolvedValueOnce(response({ ok: true, data: [] }));
@@ -160,6 +246,72 @@ describe('deleting a chat that owns goal state', () => {
     expect(goalStore.goals).toEqual([]);
     expect(sessionStore.activeSessionId).toBe('');
     await vi.waitFor(() => expect(goalFetchCount()).toBe(1));
+  });
+
+  it('clears feed and agent state for every session on delete-all', async () => {
+    seedWorker('one', 'worker-all-one');
+    seedWorker('two', 'worker-all-two');
+    feedStore.activateSessionFeed('one');
+    feedStore.addFeedEntry({
+      type: 'content',
+      agentId: 'kory-manager',
+      agentName: 'Kory',
+      glowClass: '',
+      text: 'session one',
+      timestamp: 5,
+      metadata: { sessionId: 'one' },
+    });
+    mockErasure([], 200, { deleted: 2 });
+
+    await expect(sessionStore.deleteAllSessions()).resolves.toBe(true);
+
+    expect(feedStore.lastEntryForSession('one')).toBeUndefined();
+    expect(agentStore.agents.has('worker-all-one')).toBe(false);
+    expect(agentStore.agents.has('worker-all-two')).toBe(false);
+    expect(agentStore.getAgentThreadEntries('one', 'worker-all-one')).toEqual([]);
+    expect(agentStore.getAgentThreadEntries('two', 'worker-all-two')).toEqual([]);
+    expect(agentStore.getAgentSteeringQueue('one', 'worker-all-one')).toEqual([]);
+    expect(agentStore.getAgentSteeringQueue('two', 'worker-all-two')).toEqual([]);
+  });
+
+  it('ignores late feed and agent loader responses after removal', async () => {
+    feedStore.activateSessionFeed('one');
+    let resolveFeed!: (value: Response) => void;
+    const pendingFeed = new Promise<Response>((resolve) => {
+      resolveFeed = resolve;
+    });
+    mocks.apiFetch.mockImplementation((url: string) =>
+      url === '/api/sessions/one/feed'
+        ? pendingFeed
+        : Promise.resolve(response({ ok: true, data: [] })),
+    );
+
+    const feedLoad = feedStore.loadFeedPersistence('one');
+    notifySessionRemoved('one');
+    resolveFeed(response({ ok: true, data: { entries: [{ id: 'late', kind: 'client_error', text: 'late', timestamp: 1 }] } }));
+
+    await expect(feedLoad).resolves.toBeNull();
+    expect(feedStore.lastEntryForSession('one')).toBeUndefined();
+
+    let resolveThreads!: (value: Response) => void;
+    const pendingThreads = new Promise<Response>((resolve) => {
+      resolveThreads = resolve;
+    });
+    mocks.apiFetch.mockImplementation((url: string) =>
+      url === '/api/agent/threads/one'
+        ? pendingThreads
+        : Promise.resolve(response({ ok: true, data: [] })),
+    );
+
+    const threadLoad = agentStore.loadAgentThreads('one');
+    notifySessionRemoved('one');
+    resolveThreads(
+      response({ ok: true, data: [{ agent: workerIdentity('late-worker'), status: 'done' }] }),
+    );
+
+    await threadLoad;
+    expect(agentStore.agents.has('late-worker')).toBe(false);
+    expect(agentStore.getAgentThreadEntries('one', 'late-worker')).toEqual([]);
   });
 
   it('leaves goal state untouched when the deletion is refused', async () => {

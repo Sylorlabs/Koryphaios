@@ -18,6 +18,7 @@ import type {
   WSMessage,
   AgentStatus,
   AgentHeartbeatPayload,
+  AgentStatusPayload,
   SessionRunStatePayload,
 } from '@koryphaios/shared';
 
@@ -36,7 +37,7 @@ export type RunPhase =
 
 export interface ButtonState {
   /** The single mode the composer button should render. */
-  mode: 'stop' | 'waiting' | 'send' | 'disabled';
+  mode: 'stop' | 'steer' | 'waiting' | 'send' | 'disabled';
   /** Real, event-derived reason for a waiting state — never hardcoded. */
   waitingReason: string;
   /** Underlying phase for status icons / sidebar indicators. */
@@ -186,7 +187,9 @@ export function phaseToAgentStatus(phase: RunPhase): AgentStatus {
  * renders. One derivation, used by every attribute (onclick, disabled,
  * class, aria-label) — they can no longer drift apart.
  *
- *   stop     — a run is alive; click cancels it.
+ *   steer    — a run is alive and the composer has input; replace it with a
+ *              continuation after cancellation settles.
+ *   stop     — a run is alive and the composer is empty; click cancels it.
  *   waiting  — parked on something external; click cancels the wait. Typed
  *              text remains in the composer but cannot bypass durable wait
  *              ownership as a second turn.
@@ -198,7 +201,9 @@ export function deriveButtonState(
   canSend: boolean,
   waitingReason = '',
 ): ButtonState {
-  if (isActivePhase(phase)) return { mode: 'stop', waitingReason: '', phase };
+  if (isActivePhase(phase)) {
+    return { mode: canSend ? 'steer' : 'stop', waitingReason: '', phase };
+  }
   if (isWaitingPhase(phase)) {
     return { mode: 'waiting', waitingReason, phase };
   }
@@ -269,6 +274,10 @@ export interface RunStateEngine {
   isRunning: (sessionId: string | null | undefined) => boolean;
   isWaiting: (sessionId: string | null | undefined) => boolean;
   isBusy: (sessionId: string | null | undefined) => boolean;
+  /** True when the user stopped this session's run and no new user message
+   *  has started one since. Terminal, but NOT a success — consumers must not
+   *  render the done checkmark for it. */
+  isStoppedByUser: (sessionId: string | null | undefined) => boolean;
   getWaitingReason: (sessionId: string | null | undefined) => string;
   getButtonState: (sessionId: string | null | undefined, canSend: boolean) => ButtonState;
   deriveButtonState: (phase: RunPhase, canSend: boolean, waitingReason?: string) => ButtonState;
@@ -362,6 +371,17 @@ export function createRunStateEngine(
     if (msg.type === 'run.state') {
       const { snapshot } = msg.payload as SessionRunStatePayload;
       if (!snapshot || snapshot.sessionId !== sid) return false;
+      // A successful HTTP stop is also a local acknowledgment. Until the
+      // backend's terminal projection catches up, stale active snapshots must
+      // not take authority back from that stop.
+      if (
+        s?.stoppedByUser &&
+        snapshot.phase !== 'done' &&
+        snapshot.phase !== 'error' &&
+        snapshot.phase !== 'cancelled'
+      ) {
+        return permitHistoricalReplay(msg);
+      }
       if (s?.authoritative && (s.revision ?? -1) > snapshot.revision) {
         return permitHistoricalReplay(msg);
       }
@@ -372,7 +392,10 @@ export function createRunStateEngine(
       target.terminalReason = snapshot.terminalReason;
       target.phase = snapshot.phase;
       target.waitingReason = snapshot.waitingReason;
-      target.stoppedByUser = snapshot.phase === 'cancelled';
+      // Preserve the local stop fence through a terminal reconciliation. The
+      // next admitted user message clears it in startRun; an older stream event
+      // therefore cannot revive the stopped run in the meantime.
+      target.stoppedByUser = snapshot.phase === 'cancelled' || target.stoppedByUser;
       target.lastActivityAt = snapshot.updatedAt;
       target.activeAgents = new Set(snapshot.activeAgentIds);
       // The durable aggregate owns liveness. A client timer may improve legacy
@@ -383,20 +406,28 @@ export function createRunStateEngine(
       return true;
     }
 
-    // Compatibility events still feed transcript/agent reducers, but after a
-    // canonical snapshot they cannot mutate the run lifecycle.
-    if (s?.authoritative) return true;
-
-    // Suppression: after user stop, drop buffered non-terminal events.
+    // Suppression must run before the authoritative compatibility bypass below:
+    // a stale active event received after an acknowledged stop is still stale.
     if (s?.stoppedByUser && SUPPRESSED_WHEN_STOPPED.has(msg.type)) {
       return permitHistoricalReplay(msg);
     }
 
-    // Terminal-phase guard: stale resurrecting events after done/error must
-    // not resurrect the run. idle (after done-linger) can still be resurrected.
+    // Terminal-phase guard must run before the authoritative compatibility
+    // bypass below. A canonical terminal snapshot is stronger than any late
+    // stream/status callback; allowing that callback downstream would create a
+    // new live reasoning row after the run is already closed.
     if (s && isTerminalPhase(s.phase) && isResurrectingEvent(msg)) {
       return permitHistoricalReplay(msg);
     }
+
+    // Compatibility events still feed transcript/agent reducers, but after a
+    // canonical snapshot they cannot mutate the run lifecycle. The provider
+    // capacity wait is the one ephemeral exception: it has no durable phase
+    // because the provider stream remains active, but the user must see it.
+    const authoritativeProviderWait =
+      msg.type === 'agent.status' &&
+      WAITING_AGENT_STATUSES.has((msg.payload as { status?: AgentStatus }).status as AgentStatus);
+    if (s?.authoritative && !authoritativeProviderWait) return true;
 
     // Any event for an active session is evidence of life — reset the watchdog.
     if (s && isActivePhase(s.phase)) {
@@ -477,14 +508,23 @@ export function createRunStateEngine(
         const p = msg.payload as { agentId: string; status: AgentStatus };
         if (s?.stoppedByUser && isSuppressedStatus(p.status)) return permitHistoricalReplay(msg);
 
-        if (TERMINAL_AGENT_STATUSES.has(p.status)) {
+        if (p.status === 'error') {
+          removeActiveAgent(sid, p.agentId);
+          const current = getStates().get(sid);
+          if (!current || current.activeAgents.size === 0) setPhase(sid, 'error');
+        } else if (TERMINAL_AGENT_STATUSES.has(p.status)) {
           removeActiveAgent(sid, p.agentId);
         } else if (WAITING_AGENT_STATUSES.has(p.status)) {
           removeActiveAgent(sid, p.agentId);
+          const statusPayload = p as AgentStatusPayload & { detail?: string };
+          const detail =
+            typeof statusPayload.detail === 'string'
+              ? statusPayload.detail.trim()
+              : '';
           setPhase(
             sid,
             p.status === 'waiting_user' ? 'waiting_user' : 'waiting_terminal',
-            p.status === 'waiting_user' ? 'your answer' : 'background terminal',
+            p.status === 'waiting_user' ? 'your answer' : detail || 'waiting for provider capacity',
           );
         } else if (ACTIVE_AGENT_STATUSES.has(p.status)) {
           addActiveAgent(sid, p.agentId);
@@ -618,6 +658,11 @@ export function createRunStateEngine(
     return isWaitingPhase(getPhase(sessionId));
   }
 
+  function isStoppedByUser(sessionId: string | null | undefined): boolean {
+    if (!sessionId) return false;
+    return getStates().get(sessionId)?.stoppedByUser ?? false;
+  }
+
   function isBusy(sessionId: string | null | undefined): boolean {
     if (!sessionId) return false;
     const phase = getPhase(sessionId);
@@ -647,6 +692,7 @@ export function createRunStateEngine(
     isRunning,
     isWaiting,
     isBusy,
+    isStoppedByUser,
     getWaitingReason,
     getButtonState,
     deriveButtonState,

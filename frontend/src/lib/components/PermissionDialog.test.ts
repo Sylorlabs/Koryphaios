@@ -16,8 +16,10 @@ const mocks = vi.hoisted(() => ({
       toolName: string;
       action: string;
       description: string;
-      path?: string;
-      createdAt: number;
+       path?: string;
+       agentName?: string;
+       command?: string;
+       createdAt: number;
     }>,
     respondToPermission: vi.fn(),
   },
@@ -49,7 +51,7 @@ describe('PermissionDialog', () => {
 
   it('labels the modal, starts on the safe action, and wires explicit approve and deny choices', async () => {
     const { container } = render(PermissionDialog);
-    const dialog = screen.getByRole('dialog', { name: 'Tool approval required' });
+    const dialog = screen.getByRole('dialog', { name: 'Approval requests' });
     expect(dialog.getAttribute('aria-describedby')).toBe('permission-dialog-description');
     expect(document.getElementById('permission-dialog-description')?.textContent).toContain(
       'Escape safely denies',
@@ -72,7 +74,7 @@ describe('PermissionDialog', () => {
     ];
     render(PermissionDialog);
 
-    const dialog = screen.getByRole('dialog', { name: 'Tool approval required' });
+    const dialog = screen.getByRole('dialog', { name: 'Approval requests' });
     const firstDeny = screen.getByRole('button', { name: 'Deny bash' });
     await waitFor(() => expect(document.activeElement).toBe(firstDeny));
 
@@ -85,5 +87,19 @@ describe('PermissionDialog', () => {
     expect(mocks.wsStore.respondToPermission).toHaveBeenCalledWith('permission-1', false);
     expect(mocks.wsStore.respondToPermission).toHaveBeenCalledWith('permission-2', false);
     expect(mocks.wsStore.respondToPermission).not.toHaveBeenCalledWith(expect.any(String), true);
+  });
+
+  it('stacks more than three requests and identifies the requesting agent and command', () => {
+    mocks.wsStore.pendingPermissions = [
+      permission('permission-1'),
+      permission('permission-2', 'read_file'),
+      permission('permission-3', 'write_file'),
+      { ...permission('permission-4', 'bash'), agentName: 'Backend worker', command: 'bun test backend' },
+    ];
+    const { container } = render(PermissionDialog);
+
+    expect(container.querySelector('.permission-stack')?.classList.contains('stacked')).toBe(true);
+    expect(screen.getByText('Backend worker')).toBeTruthy();
+    expect(screen.getByText('bun test backend')).toBeTruthy();
   });
 });

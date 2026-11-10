@@ -13,6 +13,7 @@
   import KorySelect from './KorySelect.svelte';
   import { apiFetch } from '$lib/api.svelte';
   import { apiUrl } from '$lib/utils/api-url';
+  import { portalToBody } from '$lib/utils/portal';
   import { gitStore } from '$lib/stores/git.svelte';
   import type { GitFileStatus } from '$lib/stores/git.svelte';
   import type {
@@ -71,6 +72,11 @@
   let trigger = $state<HTMLButtonElement>();
   let panel = $state<HTMLDivElement>();
   let panelStyle = $state('');
+  let repositionFrame: number | null = null;
+  let hoveredFileKey = $state<string | null>(null);
+  let pendingFileHoverKey = $state<string | null>(null);
+  let fileHoverTimer: ReturnType<typeof setTimeout> | null = null;
+  const FILE_HOVER_DELAY_MS = 100;
   const tabs = [
     { value: 'changes', label: 'Changes' },
     { value: 'branches', label: 'Branches' },
@@ -190,15 +196,76 @@
   function positionPanel() {
     if (!root) return;
     const rect = root.getBoundingClientRect();
-    const width = Math.min(380, window.innerWidth - 16);
-    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
-    const above = rect.top > window.innerHeight - rect.bottom;
-    const space = above ? rect.top - 14 : window.innerHeight - rect.bottom - 14;
-    panelStyle = `position:fixed;left:${left}px;width:${width}px;max-height:${Math.max(100, Math.min(460, space))}px;${above ? `bottom:${window.innerHeight - rect.top + 8}px` : `top:${rect.bottom + 8}px`}`;
+    const viewportPadding = 8;
+    const anchorGap = 8;
+    const width = Math.min(380, Math.max(0, window.innerWidth - viewportPadding * 2));
+    const left = Math.max(
+      viewportPadding,
+      Math.min(rect.left, window.innerWidth - width - viewportPadding),
+    );
+    // Clamp the virtual anchor to the viewport. This keeps a fixed panel
+    // visible while a parent scrolls quickly past the trigger instead of
+    // letting its top/bottom coordinate follow the now-offscreen rectangle.
+    const anchorTop = Math.max(
+      viewportPadding,
+      Math.min(window.innerHeight - viewportPadding, rect.top),
+    );
+    const anchorBottom = Math.max(
+      viewportPadding,
+      Math.min(window.innerHeight - viewportPadding, rect.bottom),
+    );
+    const spaceAbove = Math.max(0, anchorTop - viewportPadding - anchorGap);
+    const spaceBelow = Math.max(0, window.innerHeight - anchorBottom - viewportPadding - anchorGap);
+    const above = spaceAbove > spaceBelow;
+    const space = above ? spaceAbove : spaceBelow;
+    const maxHeight = Math.min(460, space);
+    panelStyle = `position:fixed;left:${left}px;width:${width}px;max-height:${maxHeight}px;box-sizing:border-box;${above ? `bottom:${window.innerHeight - anchorTop + anchorGap}px` : `top:${anchorBottom + anchorGap}px`}`;
+  }
+  function scheduleReposition() {
+    if (!expanded || repositionFrame !== null) return;
+    repositionFrame = requestAnimationFrame(() => {
+      repositionFrame = null;
+      if (expanded) positionPanel();
+    });
+  }
+  function clearFileHoverTimer() {
+    if (fileHoverTimer !== null) {
+      clearTimeout(fileHoverTimer);
+      fileHoverTimer = null;
+    }
+  }
+  function scheduleFileHover(fileKey: string) {
+    clearFileHoverTimer();
+    pendingFileHoverKey = fileKey;
+    fileHoverTimer = setTimeout(() => {
+      fileHoverTimer = null;
+      if (pendingFileHoverKey === fileKey) {
+        hoveredFileKey = fileKey;
+        pendingFileHoverKey = null;
+      }
+    }, FILE_HOVER_DELAY_MS);
+  }
+  /** Drop any pending or shown row highlight. Scrolling the list moves rows
+   *  under a stationary pointer, so a highlight that was armed before the
+   *  scroll no longer describes what the reader is pointing at. */
+  function clearFileHover() {
+    clearFileHoverTimer();
+    pendingFileHoverKey = null;
+    hoveredFileKey = null;
+  }
+  function leaveFileHover(fileKey: string) {
+    if (pendingFileHoverKey === fileKey) {
+      clearFileHoverTimer();
+      pendingFileHoverKey = null;
+    }
+    if (hoveredFileKey === fileKey) hoveredFileKey = null;
   }
   async function togglePanel(event: MouseEvent) {
-    expanded = !expanded;
-    if (!expanded) return;
+    if (expanded) {
+      closePanel();
+      return;
+    }
+    expanded = true;
     positionPanel();
     void refreshAll(sessionId);
     await tick();
@@ -210,6 +277,9 @@
   }
   function closePanel(restoreFocus = false) {
     expanded = false;
+    clearFileHoverTimer();
+    pendingFileHoverKey = null;
+    hoveredFileKey = null;
     if (restoreFocus) trigger?.focus();
   }
   function selectTab(value: string) {
@@ -220,11 +290,10 @@
   }
   onMount(() => {
     const outside = (event: PointerEvent) => {
-      if (expanded && !root?.contains(event.target as Node)) closePanel();
+      const target = event.target as Node;
+      if (expanded && !root?.contains(target) && !panel?.contains(target)) closePanel();
     };
-    const reposition = () => {
-      if (expanded) positionPanel();
-    };
+    const reposition = () => scheduleReposition();
     window.addEventListener('pointerdown', outside);
     window.addEventListener('resize', reposition);
     window.addEventListener('scroll', reposition, true);
@@ -232,6 +301,7 @@
       window.removeEventListener('pointerdown', outside);
       window.removeEventListener('resize', reposition);
       window.removeEventListener('scroll', reposition, true);
+      if (repositionFrame !== null) cancelAnimationFrame(repositionFrame);
     };
   });
   async function mutate(path: string, label: string, body?: unknown) {
@@ -306,6 +376,9 @@
       message = '';
       action = notice = '';
       tab = 'changes';
+      clearFileHoverTimer();
+      pendingFileHoverKey = null;
+      hoveredFileKey = null;
       fileGeneration++;
       clearDetails();
       prGeneration++;
@@ -463,7 +536,13 @@
         <GitBranch size={placement === 'composer' ? 17 : 14} />
         <span class="branch-name"
           >{snapshot?.branch ??
-            (snapshot?.head ? 'Detached' : loading ? 'Loading…' : 'Git unavailable')}</span
+            (snapshot?.head
+              ? 'Detached'
+              : snapshot && !snapshot.isRepo
+                ? 'Not a Git repository'
+                : loading
+                  ? 'Loading…'
+                  : 'Git unavailable')}</span
         >
         {#if snapshot?.dirty}<span class="change-count">{snapshot.changedFiles}</span>{/if}
         <ChevronDown size={14} class="toggle-chevron" />
@@ -472,6 +551,7 @@
     {#if expanded}
       <div
         bind:this={panel}
+        use:portalToBody
         id={`git-panel-${sessionId}`}
         class="git-panel"
         style={panelStyle}
@@ -588,18 +668,32 @@
                           })}>{group.staged ? 'Unstage all' : 'Stage all'}</button
                       >
                     </div>
-                    <div class="file-list">
+                    <div class="file-list" onscroll={() => clearFileHover()}>
                       {#each group.items as file (`${file.path}:${file.staged}`)}
-                        <div class="file-row">
-                          <span class="file-status {file.status}" title={file.status}
+                        {@const fileKey = `${file.path}:${file.staged}`}
+                        <div
+                          class="file-row"
+                          role="group"
+                          aria-label={file.path}
+                          class:file-row-hovered={hoveredFileKey === fileKey}
+                          onpointerenter={() => scheduleFileHover(fileKey)}
+                          onpointerleave={() => leaveFileHover(fileKey)}
+                        >
+                          <span class="file-status {file.status}"
                             >{file.status === 'untracked'
                               ? '?'
                               : file.status.slice(0, 1).toUpperCase()}</span
                           >
+                          <!-- The full path stays inside the tray. A native
+                               `title` tooltip is drawn by the OS at the cursor
+                               and leans outside the panel the moment the list
+                               scrolls under the pointer. -->
+                          <span class="file-path-hint" aria-hidden="true"
+                            >{file.status} · {file.path}</span
+                          >
                           <button
                             type="button"
                             class="file-name"
-                            title={file.path}
                             aria-label={`View diff for ${file.path}${file.staged ? ' (staged)' : ''}`}
                             onclick={() => {
                               gitStore.openDiff(file.path, file.staged);
@@ -1090,6 +1184,7 @@
     gap: var(--space-3);
     padding: var(--space-3);
     overflow-y: auto;
+    overscroll-behavior: contain;
     min-height: 0;
   }
   p {
@@ -1149,8 +1244,10 @@
     flex-shrink: 0;
   }
   .file-list {
+    position: relative;
     max-height: var(--size-40);
     overflow-y: auto;
+    overscroll-behavior: contain;
   }
   .file-row {
     display: flex;
@@ -1160,8 +1257,44 @@
     padding: 0 var(--space-1);
     border-radius: var(--radius-lg);
   }
-  .file-row:hover {
+  .file-row.file-row-hovered {
     background: var(--color-surface-3);
+  }
+  /* The hover hint for a truncated path is part of the row, so the list's own
+     clipping applies to it: it can never be drawn outside the tray, however
+     fast the list is scrolled. */
+  .file-row {
+    position: relative;
+  }
+  .file-path-hint {
+    display: none;
+    position: absolute;
+    z-index: 5;
+    top: calc(100% - 2px);
+    left: 0;
+    right: 0;
+    padding: var(--space-1) var(--space-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface-1);
+    color: var(--color-text-primary);
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+    overflow-wrap: anywhere;
+    pointer-events: none;
+  }
+  .file-row.file-row-hovered .file-path-hint {
+    display: block;
+  }
+  /* File-row hover is intent-driven, rather than the browser's immediate
+     :hover state. This prevents fast pointer travel from leaving the wrong
+     row highlighted while still keeping keyboard focus visible immediately. */
+  .file-row .file-name:hover:not(:disabled),
+  .file-row > .icon-button:hover:not(:disabled) {
+    background: transparent;
+  }
+  .file-row > .icon-button:hover:not(:disabled) {
+    color: inherit;
   }
   .file-name {
     min-width: 0;

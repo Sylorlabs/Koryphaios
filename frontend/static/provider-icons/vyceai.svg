@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-labelledby="title desc">
+  <title id="title">Vyce AI</title>
+  <desc id="desc">Vyce AI glowing blue V mark on a deep navy background</desc>
+  <defs>
+    <linearGradient id="vyce-background" x1="8" y1="6" x2="40" y2="43" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#263653"/><stop offset="1" stop-color="#0D1728"/>
+    </linearGradient>
+    <linearGradient id="vyce-v-gradient" x1="12" y1="12" x2="36" y2="36" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#C7EAFF"/><stop offset=".38" stop-color="#63B3FF"/><stop offset=".72" stop-color="#3182F6"/><stop offset="1" stop-color="#4F46E5"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="44" height="44" rx="14" fill="url(#vyce-background)"/>
+  <path d="M11.5 13.5C14.2 13.5 16.6 13.5 19.5 13.5L24 25.6L28.5 13.5C31.4 13.5 33.8 13.5 36.5 13.5L28.1 34.5C25.4 35.3 22.6 35.3 19.9 34.5L11.5 13.5Z" fill="url(#vyce-v-gradient)"/>
+  <path d="M12 14h7.4L24 25.8 28.6 14H36" fill="none" stroke="#E4F3FF" stroke-opacity=".68" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="2.5" y="2.5" width="43" height="43" rx="13.5" fill="none" stroke="#8DBBFF" stroke-opacity=".2"/>
+</svg>

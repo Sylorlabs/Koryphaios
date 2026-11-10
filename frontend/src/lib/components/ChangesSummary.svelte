@@ -9,26 +9,20 @@
   import Minus from "lucide-svelte/icons/minus";
   import Pencil from "lucide-svelte/icons/pencil";
   import { slide } from "svelte/transition";
+  import { capturedClick } from '$lib/utils/captured-click';
 
   let expanded = $state(false);
-  let changes = $derived(wsStore.sessionChanges.get(sessionStore.activeSessionId ?? "") ?? []);
-  let applying = $state(false);
-
-  function keepAll() {
-    const sessionId = sessionStore.activeSessionId;
-    if (!sessionId || applying) return;
-    applying = true;
-    wsStore.respondToChanges(sessionId, true);
-    applying = false;
-  }
-
-  function rejectAll() {
-    const sessionId = sessionStore.activeSessionId;
-    if (!sessionId || applying) return;
-    applying = true;
-    wsStore.respondToChanges(sessionId, false);
-    applying = false;
-  }
+  const selection = $derived(wsStore.captureReview(sessionStore.activeSessionId));
+  const changes = $derived(selection?.review.changes ?? []);
+  const response = $derived(wsStore.reviewResponses.get(sessionStore.activeSessionId));
+  const applying = $derived(!!response && response.phase !== 'failed');
+  const decisions = $derived.by(() => {
+    const displayed = selection;
+    return {
+      keep: () => { if (displayed) void wsStore.respondToChanges(displayed.review.sessionId, true, displayed); },
+      reject: () => { if (displayed) void wsStore.respondToChanges(displayed.review.sessionId, false, displayed); },
+    };
+  });
 
   function getFileName(path: string): string {
     return path.split('/').pop() ?? path;
@@ -56,7 +50,7 @@
         <div class="flex items-center gap-2">
           <button
             class="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold rounded-lg bg-emerald-500 text-black hover:bg-emerald-400 transition-colors disabled:opacity-60"
-            onclick={keepAll}
+            use:capturedClick={decisions.keep}
             disabled={applying}
           >
             <Check size={12} strokeWidth={3} />
@@ -64,7 +58,7 @@
           </button>
           <button
             class="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold rounded-lg bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30 transition-colors disabled:opacity-60"
-            onclick={rejectAll}
+            use:capturedClick={decisions.reject}
             disabled={applying}
           >
             <X size={12} strokeWidth={3} />
@@ -72,6 +66,13 @@
           </button>
         </div>
       </div>
+
+      {#if response}
+        <p class="px-4 py-2 text-xs text-[var(--color-text-secondary)]" role={response.error ? 'alert' : 'status'} aria-live="polite">
+          {response.error ?? (response.phase === 'submitting' ? 'Sending your decision…' : 'Waiting for confirmation from the host…')}
+          {#if response.phase === 'uncertain'} Your decision may have executed. Refresh the host status before retrying.{/if}
+        </p>
+      {/if}
 
       <!-- Change list -->
       {#if expanded}

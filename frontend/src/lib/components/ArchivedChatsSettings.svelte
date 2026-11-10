@@ -124,7 +124,7 @@
     description="Chats removed from the sidebar stay here until you restore or permanently delete them."
   >
     <span
-      class="inline-flex min-h-9 items-center rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 text-xs font-medium text-[var(--color-text-secondary)]"
+      class="inline-flex min-h-9 items-center rounded-xl bg-[var(--color-surface-2)] px-3 text-xs font-medium text-[var(--color-text-secondary)]"
       aria-live="polite"
     >
       {sessionStore.archivedSessions.length}
@@ -238,7 +238,7 @@
       {:else}
         <section
           aria-label="Archived chat list"
-          class="divide-y divide-[var(--color-border)] overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)]"
+          class="settings-panel divide-y divide-[var(--color-border)] overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)]"
         >
           {#each filteredChats as session (session.id)}
             <article class="p-4 sm:p-5" aria-labelledby={`archived-chat-${session.id}`}>

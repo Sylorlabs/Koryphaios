@@ -19,21 +19,22 @@ const drawerSource = readFileSync(
   'utf8',
 );
 const pageSource = readFileSync(join(process.cwd(), 'src/routes/+page.svelte'), 'utf8');
+const editorSource = readFileSync(join(process.cwd(), 'src/lib/components/DocumentEditor.svelte'), 'utf8');
 
 describe('Skills workspace contracts', () => {
   it('is the live Skills settings branch rather than a dormant preview', () => {
-    expect(settingsSource).toContain("agentSettingsStore.activeTab !== 'skills'");
-    expect(settingsSource).toContain(
-      "active={active &&\n          agentSettingsStore.activeTab === 'skills' &&\n          !agentSettingsStore.isLoading}",
-    );
+    expect(settingsSource).not.toContain('Skills library');
+    expect(settingsSource).not.toContain('<SkillsWorkspace');
+    expect(drawerSource).toContain('open && skillsVisited');
+    expect(drawerSource).toContain("active={activeTab === 'skills'}");
     expect(drawerSource).toContain("active={open && activeTab === 'agent'}");
-    expect(settingsSource).toContain('per-revision and in-progress creator edits survive');
+    expect(drawerSource).toContain('Keep skill drafts mounted');
   });
 
   it('keeps the large library searchable, grouped, and readable', () => {
     expect(source).toContain('Search all skills');
     expect(source).toContain("'Needs attention'");
-    expect(source).toContain('grid-template-columns: 320px minmax(0, 1fr)');
+    expect(source).toContain('grid-template-columns: 280px minmax(0, 1fr)');
     expect(source).toMatch(
       /@media \(max-width: 1100px\)[\s\S]*?\.workspace-body \{[\s\S]*?display: block;/,
     );
@@ -63,8 +64,9 @@ describe('Skills workspace contracts', () => {
     expect(source).toContain('Preview conversion');
     expect(source).toContain('Create converted draft');
     expect(source).toContain('Test routing');
-    expect(source).toContain('<SkillCodeEditor');
-    expect(source).toContain('<SkillVisualEditor');
+    expect(source).toContain('<DocumentEditor');
+    expect(editorSource).toContain('<SkillCodeEditor');
+    expect(editorSource).toContain('<SkillVisualEditor');
     expect(source).toContain("{ id: 'health', label: 'Health' }");
     expect(source).toContain('Skill library health');
     expect(source).toContain('Routing precision');
@@ -78,10 +80,10 @@ describe('Skills workspace contracts', () => {
     expect(source).toContain('<KorySelect');
     expect(source).toContain('<NumberStepper');
     expect(source).not.toMatch(/<select\b|type="(?:checkbox|number|range)"/);
-    expect(source).toContain('sandbox=""');
-    expect(source).toContain("default-src 'none'");
-    expect(source).toContain("script-src 'none'");
-    expect(source).toContain("form-action 'none'");
+    expect(editorSource).toContain('sandbox=""');
+    expect(editorSource).toContain("default-src 'none'");
+    expect(editorSource).toContain("script-src 'none'");
+    expect(editorSource).toContain("form-action 'none'");
     expect(visualEditorSource).toContain('Raw source protected');
     expect(visualEditorSource).toContain('data-testid="locked-raw-source"');
   });

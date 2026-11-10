@@ -1,6 +1,98 @@
 .markdown-content {
   min-width: 0;
 }
+.markdown-content pre {
+  background: var(--color-surface-1);
+  color: #000;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 28%, var(--color-border));
+  border-radius: 14px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.5;
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+:root[data-theme='dark'] .markdown-content pre {
+  color: #fff;
+}
+.markdown-content pre code,
+.markdown-content pre code.hljs,
+.markdown-content .hljs {
+  background: transparent !important;
+  border: 0;
+  padding: 0;
+  color: #000 !important;
+}
+:root[data-theme='dark'] .markdown-content .hljs {
+  color: #fff !important;
+}
+/* Agent inline styling. Custom colors/sizes arrive as validated inline
+   styles on .kory-inline spans; everything else defaults to the user's
+   theme accent so agents emphasize without re-theming the chat. */
+.markdown-content .kory-inline {
+  font-size: inherit;
+}
+.markdown-content .kory-mark {
+  background: color-mix(in srgb, var(--color-accent) 24%, transparent);
+  color: inherit;
+  border-radius: 4px;
+  padding: 0.05em 0.25em;
+}
+.markdown-content .kory-underline {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+/* External links: accent-colored by default (the user's chosen accent),
+   with the destination site's icon beside the label. */
+.markdown-content .kory-external-link {
+  color: #3b82f6;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.markdown-content .kory-external-link:hover {
+  opacity: 0.85;
+}
+.markdown-content .kory-link-favicon {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-right: 4px;
+  border-radius: 3px;
+  vertical-align: text-bottom;
+}
+/* Some favicon responses contain an opaque white matte around the logo.
+   Multiply blends that matte into dark surfaces without changing light themes. */
+:root[data-theme='dark'] .markdown-content .kory-link-favicon {
+  mix-blend-mode: multiply;
+}
+/* T3-style local file/symbol & thread navigation links */
+.markdown-content .kory-file-link,
+.markdown-content .kory-session-link,
+.markdown-content .kory-note-link {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  color: var(--color-text-primary);
+  font-weight: 500;
+  text-decoration: none;
+  border-bottom: 1.5px dotted color-mix(in srgb, var(--color-text-secondary) 65%, transparent);
+  padding-bottom: 1px;
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease;
+}
+.markdown-content .kory-file-link:hover,
+.markdown-content .kory-session-link:hover,
+.markdown-content .kory-note-link:hover {
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+}
+.markdown-content .kory-file-link-lines {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85em;
+  color: var(--color-text-muted);
+}
 .markdown-content .katex-display {
   overflow-x: auto;
   overflow-y: hidden;

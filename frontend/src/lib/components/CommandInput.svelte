@@ -6,6 +6,7 @@
   import ChevronRight from 'lucide-svelte/icons/chevron-right';
   import Sparkles from 'lucide-svelte/icons/sparkles';
   import Square from 'lucide-svelte/icons/square';
+  import PauseCircle from 'lucide-svelte/icons/pause-circle';
   import Users from 'lucide-svelte/icons/users';
   import User from 'lucide-svelte/icons/user';
   import ShieldCheck from 'lucide-svelte/icons/shield-check';
@@ -29,7 +30,7 @@
   import SlidersHorizontal from 'lucide-svelte/icons/sliders-horizontal';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
-  import { formatKey } from '$lib/utils/platform';
+  import { formatChord, formatShortcut } from '$lib/utils/platform';
   import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
   import {
     buildReasoningConfigFromLevels,
@@ -41,6 +42,7 @@
   import BrainIcon from '$lib/components/icons/BrainIcon.svelte';
   import ProviderIcon from '$lib/components/icons/ProviderIcon.svelte';
   import ImageInputFallbackDialog from './ImageInputFallbackDialog.svelte';
+  import ConfirmDialog from './ConfirmDialog.svelte';
   import {
     forgetTrustedImageModel,
     hasTrustedImageModel,
@@ -78,16 +80,21 @@
     type ComposerDraftAttachment,
   } from '$lib/stores/composer-drafts';
   import { loadComposerPreference, saveComposerPreference } from '$lib/stores/composer-preferences';
-  import type { SessionAgentOverrides } from '@koryphaios/shared';
+  import type { FreebuffAccountSnapshot, SessionAgentOverrides } from '@koryphaios/shared';
   import {
     loadComposerSessionState,
     saveComposerSessionState,
   } from '$lib/stores/composer-session-state';
   import KorySelect from './KorySelect.svelte';
+  import CriticModeSelect from './CriticModeSelect.svelte';
+  import { CRITIC_MODE_OPTIONS, resolveCriticMode, type CriticMode } from '@koryphaios/shared';
   import MediaAttachment from './MediaAttachment.svelte';
+  import { createVoiceTap, type VoiceTap } from '$lib/utils/voice-tap';
+  import { voiceRecorder } from '$lib/stores/voice-recorder.svelte';
   import { chatMediaKind, chatMediaMimeType, MAX_CHAT_MEDIA_BYTES } from '@koryphaios/shared';
   import { loadLocalFormDraft, saveLocalFormDraft } from '$lib/utils/local-form-drafts';
   import { estimateCacheBreakImpact, formatCompactTokens } from '$lib/utils/cache-break-impact';
+  import { freebuffBaseRate, freebuffRateMultiplier } from '$lib/utils/freebuff-pricing';
 
   export type Attachment = {
     type: 'image' | 'file';
@@ -105,9 +112,18 @@
     for (const file of files) {
       const mimeType = chatMediaMimeType(file.name, file.type);
       const kind = chatMediaKind(mimeType);
-      if (!kind) { toastStore.error(`Unsupported media file: ${file.name}`); continue; }
-      if (!file.size) { toastStore.error(`The media file is empty: ${file.name}`); continue; }
-      const existingBytes = attachments.reduce((sum, attachment) => sum + Math.ceil(attachment.data.length * 3 / 4), 0);
+      if (!kind) {
+        toastStore.error(`Unsupported media file: ${file.name}`);
+        continue;
+      }
+      if (!file.size) {
+        toastStore.error(`The media file is empty: ${file.name}`);
+        continue;
+      }
+      const existingBytes = attachments.reduce(
+        (sum, attachment) => sum + Math.ceil((attachment.data.length * 3) / 4),
+        0,
+      );
       if (existingBytes + file.size > MAX_CHAT_MEDIA_BYTES) {
         toastStore.error('Chat media attachments must total 15 MB or less. Choose a smaller clip.');
         continue;
@@ -115,7 +131,10 @@
       try {
         const data = await blobBase64(file);
         if (sessionStore.activeSessionId !== sessionId || draftKey !== draft) return;
-        attachments = [...attachments, { type: kind === 'image' ? 'image' : 'file', data, name: file.name, mimeType }];
+        attachments = [
+          ...attachments,
+          { type: kind === 'image' ? 'image' : 'file', data, name: file.name, mimeType },
+        ];
       } catch (error) {
         toastStore.error(error instanceof Error ? error.message : `Could not read ${file.name}`);
       }
@@ -127,10 +146,12 @@
     let pending: Promise<void>;
     const sessionId = sessionStore.activeSessionId;
     const draft = draftKey;
-    pending = mediaReadQueue.then(() => {
-      if (sessionStore.activeSessionId !== sessionId || draftKey !== draft) return;
-      return addMediaFiles(files);
-    }).finally(() => pendingAttachmentReads.delete(pending));
+    pending = mediaReadQueue
+      .then(() => {
+        if (sessionStore.activeSessionId !== sessionId || draftKey !== draft) return;
+        return addMediaFiles(files);
+      })
+      .finally(() => pendingAttachmentReads.delete(pending));
     mediaReadQueue = pending.catch(() => {});
     pendingAttachmentReads.add(pending);
   }
@@ -149,7 +170,8 @@
     try {
       const settingsResponse = await apiFetch(apiUrl('/api/voice/settings'));
       const settingsResult = await settingsResponse.json();
-      if (!settingsResponse.ok || !settingsResult.data?.input) throw new Error('Could not load voice settings.');
+      if (!settingsResponse.ok || !settingsResult.data?.input)
+        throw new Error('Could not load voice settings.');
       const settings = settingsResult.data as VoiceSettings;
       let text: string;
       if (settings.input.provider === 'kory-local') {
@@ -167,25 +189,42 @@
             language: settings.input.language,
           });
           text = result.text;
-        } finally { await context.close(); }
+        } finally {
+          await context.close();
+        }
       } else if (settings.input.provider === 'system') {
-        throw new Error('System speech recognition records the microphone. For audio files, choose Kory Voice or a transcription API in Settings → Voice.');
+        throw new Error(
+          'System speech recognition records the microphone. For audio files, choose Kory Voice or a transcription API in Settings → Voice.',
+        );
       } else {
         const response = await apiFetch(apiUrl('/api/voice/transcribe'), {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ audioBase64: attachment.data, mimeType: attachment.mimeType, language: settings.input.language }),
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            audioBase64: attachment.data,
+            mimeType: attachment.mimeType,
+            language: settings.input.language,
+          }),
         });
         const result = await response.json();
-        if (!response.ok || !result.data?.text) throw new Error(result.error || 'Transcription failed.');
+        if (!response.ok || !result.data?.text)
+          throw new Error(result.error || 'Transcription failed.');
         text = result.data.text;
       }
       if (!text?.trim()) throw new Error('No speech was detected.');
-      if (sessionStore.activeSessionId !== sessionId || draftKey !== draft || !attachments.includes(attachment)) return;
+      if (
+        sessionStore.activeSessionId !== sessionId ||
+        draftKey !== draft ||
+        !attachments.includes(attachment)
+      )
+        return;
       appendTranscription(text);
       attachments = attachments.filter((item) => item !== attachment);
     } catch (error) {
       toastStore.error(error instanceof Error ? error.message : 'Transcription failed.');
-    } finally { isTranscribing = false; }
+    } finally {
+      isTranscribing = false;
+    }
   }
 
   interface Props {
@@ -197,9 +236,23 @@
       fastMode?: boolean,
       imageInputMode?: ImageInputMode,
     ) => Promise<boolean> | boolean;
+    /** Submit an instruction to the active run. The parent cancels the current
+     * provider turn and starts the continuation only after cancellation settles. */
+    onSteer?: (
+      message: string,
+      model?: string,
+      reasoningLevel?: string,
+      attachments?: Attachment[],
+      fastMode?: boolean,
+      imageInputMode?: ImageInputMode,
+    ) => Promise<boolean> | boolean;
     onExecuteCommand?: (command: string) => Promise<boolean> | boolean;
-    /** When true, show Stop instead of Send; clicking stops manager and workers for the session. */
+    /** When true, the primary action is Steer when the composer has input and
+     * Stop when it is empty. */
     isRunning?: boolean;
+    /** A stop request is settling. Keep the composer in a stopping state even
+     * if a terminal run.state arrives before the HTTP response. */
+    isStopping?: boolean;
     /** Kory is parked — waiting on a background terminal or your answer. The
      *  owned wait must be answered or cancelled before another turn starts. */
     isWaiting?: boolean;
@@ -246,8 +299,10 @@
 
   let {
     onSend,
+    onSteer,
     onExecuteCommand,
     isRunning = false,
+    isStopping = false,
     isWaiting = false,
     waitingReason = '',
     onStop,
@@ -274,7 +329,6 @@
     clearDraftRequest = 0,
     forcedModel = '',
   }: Props = $props();
-  let actionPanelRef = $state<HTMLDivElement>();
   let showModelPicker = $state(false);
   let modelSearchQuery = $state('');
   let expandedProviders = $state<Set<string>>(new Set());
@@ -294,8 +348,18 @@
     if (!selectedModel && !initialModel && _storedModel) selectedModel = _storedModel;
   });
   let lastContextPreviewKey = $state('');
+  let contextPreviewAbortController: AbortController | null = null;
   let selectedPickerIndex = $state(0);
   let modelSelectionGeneration = 0;
+  let freebuffAccountRows = $state<
+    Array<{
+      accountId: string;
+      label: string;
+      snapshot: FreebuffAccountSnapshot;
+    }>
+  >([]);
+  let freebuffAccountRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  let freebuffAccountRefreshInFlight: Promise<void> | null = null;
   let imageAdmissionPending = $state(false);
   let attachments = $state<Attachment[]>([]);
   let hydratedDraftKey = $state<string | null>(null);
@@ -305,6 +369,40 @@
   let composerUnmounted = false;
   onDestroy(() => {
     composerUnmounted = true;
+    contextPreviewAbortController?.abort();
+    if (freebuffAccountRefreshTimer) clearInterval(freebuffAccountRefreshTimer);
+  });
+
+  async function refreshFreebuffAccount(): Promise<void> {
+    if (freebuffAccountRefreshInFlight) return freebuffAccountRefreshInFlight;
+    if (!wsStore.providers.some((provider) => provider.name === 'freebuff' && provider.enabled)) {
+      freebuffAccountRows = [];
+      return;
+    }
+    freebuffAccountRefreshInFlight = (async () => {
+      try {
+        const response = await apiFetch(apiUrl('/api/providers/freebuff/account'));
+        const payload = (await response.json()) as {
+          ok?: boolean;
+          data?: Array<{ accountId: string; label: string; snapshot: FreebuffAccountSnapshot }>;
+        };
+        if (response.ok && payload.ok === true && Array.isArray(payload.data)) {
+          freebuffAccountRows = payload.data;
+        }
+      } catch {
+        // The model picker remains usable if the separate balance read is offline.
+      } finally {
+        freebuffAccountRefreshInFlight = null;
+      }
+    })();
+    return freebuffAccountRefreshInFlight;
+  }
+
+  onMount(() => {
+    void refreshFreebuffAccount();
+    // Poll more often than the backend's 30s account cache so we pick up the
+    // first fresh snapshot promptly without forcing extra provider requests.
+    freebuffAccountRefreshTimer = setInterval(() => void refreshFreebuffAccount(), 15_000);
   });
 
   function currentDraftKey(): string {
@@ -462,6 +560,7 @@
     chunks: Float32Array[];
     sampleRate: number;
     language: string;
+    tap: VoiceTap | null;
   };
   type LocalVoiceModelStatus = {
     installed: boolean;
@@ -470,19 +569,22 @@
 
   let isRecording = $state(false);
   let isTranscribing = $state(false);
-  // True while a push-to-talk key or button is held down.
-  let holdToTalkActive = $state(false);
+  // Covers microphone/model startup so simultaneous inputs cannot open two recorders.
+  let voiceStarting = $state(false);
   let activeRecorder: MediaRecorder | null = null;
   let activeLocalRecorder: LocalPcmRecorder | null = null;
   let activeSpeechRecognition: BrowserSpeechRecognition | null = null;
+  // Wall-clock ms the current recording has been running, for the timer.
+  let recordingStartedAt = 0;
+  let recordingElapsedMs = $state(0);
+  let recordingTimer: ReturnType<typeof setInterval> | null = null;
   let voiceSettings = $state<VoiceSettings | null>(null);
   let composerMicrophoneEnabled = $derived(voiceSettings?.voiceModeEnabled === true);
-  // Every chord bound to voice mode, so the hint never advertises only the one a
-  // platform might swallow.
   let voiceShortcutHint = $derived(
-    shortcutStore
-      .chords('voice_mode')
-      .map((chord) => chord.map(formatKey).join('+'))
+    [
+      formatChord(...shortcutStore.keys('voice_mode')),
+      formatChord(...shortcutStore.voiceFallbackKeys()),
+    ]
       .filter(Boolean)
       .join(' or '),
   );
@@ -494,6 +596,20 @@
   // Checklists stay behind the more-actions menu until asked for, so an unused
   // list never takes composer space away from the message being written.
   let showChecklists = $state(false);
+  // The panel itself no longer decides visibility, so this chat's existing
+  // lists still reveal it without being asked for — and dismissing it sticks
+  // until the set of lists changes, which is when a new checklist arrives.
+  let checklistRevealKey = $derived(checklistStore.active.map((entry) => entry.id).join(','));
+  $effect(() => {
+    if (checklistRevealKey) {
+      showChecklists = true;
+      return;
+    }
+    // Closing the last list takes the docked panel with it, once the store has
+    // actually loaded — a fresh chat must not close a panel the user just
+    // opened with `/checklist` before its first fetch resolves.
+    if (checklistStore.loaded) showChecklists = false;
+  });
 
   // ─── Goal composer (lives above the chat, not in the sidebar) ───────────────
   const goalScopeOptions = [
@@ -553,6 +669,30 @@
     };
     window.addEventListener('kory:goal-action', command);
     return () => window.removeEventListener('kory:goal-action', command);
+  });
+  // /checklist and the palette route here, since the docked list is owned by the
+  // composer. A bare command reveals whatever this chat already has; a title
+  // creates the list immediately so the command does something on its own.
+  $effect(() => {
+    const command = async (event: Event) => {
+      const title = ((event as CustomEvent<{ title?: string }>).detail?.title ?? '').trim();
+      if (!title) {
+        // A bare `/checklist` is a toggle: running it again takes down the
+        // docked surface the first one opened, so the composer can clear it
+        // without reaching for the pointer.
+        showChecklists = !showChecklists;
+        return;
+      }
+      showChecklists = true;
+      if (!sessionStore.activeSessionId) {
+        toastStore.error('Open a chat before creating a checklist');
+        return;
+      }
+      const created = await checklistStore.create({ title });
+      if (!created) toastStore.error(checklistStore.error || 'Could not create checklist');
+    };
+    window.addEventListener('kory:checklist-action', command);
+    return () => window.removeEventListener('kory:checklist-action', command);
   });
   function toggleGoalComposer() {
     showGoalComposer = !showGoalComposer;
@@ -618,16 +758,21 @@
     if (provider === 'anthropic') return 'Anthropic';
     if (provider === 'claude') return 'Claude Code';
     if (provider === 'antigravity') return 'Antigravity';
-    if (provider === 'jules') return 'Jules (cloud)';
     if (provider === 'google') return 'Google';
     if (provider === 'aistudio') return 'Google AI Studio';
     if (provider === 'xai') return 'xAI';
     if (provider === 'openrouter') return 'OpenRouter';
     if (provider === 'unorouter') return 'UnoRouter';
+    if (provider === 'tokenharbor') return 'Token Harbor';
+    if (provider === 'logfare') return 'Logfare';
+    if (provider === 'apinex') return 'APInex';
+    if (provider === 'gwarden') return 'Gwarden AI';
+    if (provider === 'respan') return 'Respan';
     if (provider === 'vertexai') return 'Vertex AI';
     if (provider === 'copilot') return 'Copilot';
     if (provider === 'kimicode') return 'Kimi Code';
     if (provider === 'grok') return 'Grok Build';
+    if (provider === 'opencode') return 'OpenCode';
     return provider.charAt(0).toUpperCase() + provider.slice(1);
   }
 
@@ -671,6 +816,9 @@
         supportsFastMode?: boolean;
         supportsAttachments?: boolean;
         vision?: boolean;
+        accountId?: string;
+        apiModelId?: string;
+        freebuckCost?: number;
         costPerMInputTokens?: number;
         costPerMInputCached?: number;
       }
@@ -685,6 +833,9 @@
           supportsFastMode?: boolean;
           supportsAttachments?: boolean;
           vision?: boolean;
+          accountId?: string;
+          apiModelId?: string;
+          freebuckCost?: number;
           costPerMInputTokens?: number;
           costPerMInputCached?: number;
           name?: string;
@@ -842,30 +993,55 @@
   });
 
   function setChatAgentOverrides(patch: SessionAgentOverrides) {
-    const next = { ...chatAgentOverrides, ...patch };
+    // Enabling the gate without naming a mode must mean Auto, not the legacy
+    // "always" the shared resolver derives from a bare boolean. Critic Auto is
+    // the default a new chat inherits; "Always" is only ever chosen on purpose.
+    const normalizedPatch =
+      patch.criticGateEnabled === true && !patch.criticMode
+        ? { ...patch, criticMode: 'auto' as const }
+        : patch;
+    const next = { ...chatAgentOverrides, ...normalizedPatch };
     const scope = currentDraftKey();
     pendingAgentOverrides = { scope, overrides: next };
     saveComposerSessionState(scope, {
       ...(next.permissionMode ? { permissionMode: next.permissionMode } : {}),
       ...(next.agentExecutionMode ? { agentExecutionMode: next.agentExecutionMode } : {}),
+      ...(next.criticMode ? { criticMode: next.criticMode } : {}),
       ...(typeof next.criticGateEnabled === 'boolean'
         ? { criticGateEnabled: next.criticGateEnabled }
         : {}),
     });
     const sessionId = sessionStore.activeSessionId;
     if (!sessionId) return;
-    void sessionStore.setSessionAgentOverrides(sessionId, patch).then(() => {
+    void sessionStore.setSessionAgentOverrides(sessionId, normalizedPatch).then(() => {
       // Release the optimistic layer either way: on success the session row is
       // the source of truth, on failure the store has already rolled back.
       if (pendingAgentOverrides?.overrides === next) pendingAgentOverrides = null;
     });
   }
 
+  // A Critic / approval choice made before the chat exists has no session row to
+  // live on yet, so it used to be dropped the moment the first message created
+  // the session: the composer showed "Critic off" while the turn ran with the
+  // project default. Carry that pending choice onto the session creation
+  // produced, once, so the new chat starts with what the composer advertised.
+  // Chats that never made a choice keep inheriting the project default.
+  let pendingOverridesAppliedTo: string | null = null;
+  $effect(() => {
+    const sessionId = sessionStore.activeSessionId;
+    const pending = pendingAgentOverrides;
+    if (!sessionId || !pending) return;
+    if (pending.scope === currentDraftKey()) return;
+    if (pendingOverridesAppliedTo === sessionId) return;
+    pendingOverridesAppliedTo = sessionId;
+    pendingAgentOverrides = null;
+    void sessionStore.setSessionAgentOverrides(sessionId, pending.overrides);
+  });
+
   let permissionMode = $derived(
     (chatAgentOverrides.permissionMode ??
-      (agentSettingsStore.settings.permissionMode === 'plan'
-        ? 'guarded'
-        : (agentSettingsStore.settings.permissionMode ?? 'guarded'))) as PermissionMode,
+      agentSettingsStore.settings.permissionMode ??
+      'guarded') as PermissionMode,
   );
   let permissionModeMeta = $derived(
     PERMISSION_OPTIONS.find((option) => option.value === permissionMode) ?? PERMISSION_OPTIONS[1],
@@ -899,6 +1075,11 @@
     return `${Math.round(tokens / 1000)}k`;
   }
 
+  function formatFreebucks(value: number | undefined): string {
+    if (value === undefined || !Number.isFinite(value)) return '—';
+    return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  }
+
   let availableModels = $derived.by(() => {
     const models: Array<{
       label: string;
@@ -908,6 +1089,11 @@
       contextWindow?: number;
       supportsAttachments?: boolean;
       vision?: boolean;
+      accountId?: string;
+      apiModelId?: string;
+      freebuckCost?: number;
+      reasoningLevels?: string[];
+      maxOutputTokens?: number;
     }> = [];
     for (const p of wsStore.providers) {
       if (p.enabled && (p.adapterAvailable ?? p.authenticated)) {
@@ -920,6 +1106,11 @@
               contextVerified?: boolean;
               supportsAttachments?: boolean;
               vision?: boolean;
+              accountId?: string;
+              apiModelId?: string;
+              freebuckCost?: number;
+              reasoningLevels?: string[];
+              maxOutputTokens?: number;
             }>
           | undefined;
         if (catalog && catalog.length > 0) {
@@ -932,6 +1123,11 @@
                 name: m.name,
                 supportsAttachments: m.supportsAttachments,
                 vision: m.vision,
+                accountId: m.accountId,
+                apiModelId: m.apiModelId,
+                freebuckCost: m.freebuckCost,
+                reasoningLevels: m.reasoningLevels,
+                maxOutputTokens: m.maxOutputTokens,
                 // Verified window size kept internally for the switch-overflow
                 // guard — deliberately NOT shown in the picker.
                 contextWindow: m.contextVerified ? m.contextWindow : undefined,
@@ -971,7 +1167,11 @@
     // Provider list incomplete or catalog still in flight: preserve selection.
     if (!target) return;
     if (target.connectionState === 'detected' || target.connectionState === 'unknown') return;
-    if (!Array.isArray(target.models) || target.models.length === 0) return;
+    if (
+      target.modelCatalogAuthoritative !== true &&
+      (!Array.isArray(target.models) || target.models.length === 0)
+    )
+      return;
     selectedModel = '';
     if (typeof localStorage !== 'undefined') localStorage.removeItem(MODEL_STORAGE_KEY);
   });
@@ -1010,6 +1210,83 @@
     }));
   });
 
+  function freebuffSnapshotForModel(
+    modelId: string | undefined,
+  ): FreebuffAccountSnapshot | undefined {
+    const accountId = modelId ? findModelDef('freebuff', modelId)?.accountId : undefined;
+    return (
+      accountId
+        ? freebuffAccountRows.find((row) => row.accountId === accountId)
+        : freebuffAccountRows[0]
+    )?.snapshot;
+  }
+
+  /** Preserve the provider's live per-model information in the picker. The
+   * account endpoint supplies this through `hours.prices`; the model catalog
+   * carries the same value while the separate account refresh is in flight. */
+  function freebuffProviderRateForSelection(
+    value: string,
+    fallback: number | undefined,
+  ): number | undefined {
+    const { model } = parseProviderModelSelection(value, providerNames);
+    const definition = findModelDef('freebuff', model ?? '');
+    const prices = freebuffSnapshotForModel(model)?.hours?.prices;
+    const normalize = (input: string) => input.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (prices) {
+      const candidates = [model, definition?.id, definition?.apiModelId, definition?.name]
+        .filter((id): id is string => !!id)
+        .flatMap((id) => [id, id.slice(id.lastIndexOf(':') + 1)])
+        .flatMap((id) => [id, id.replace(/^freebuff\/catalog-/, '')]);
+      const candidateSet = new Set(candidates);
+      for (const id of candidateSet) {
+        const rate = prices[id];
+        if (rate !== undefined) return rate;
+      }
+      const normalizedCandidates = new Set(candidates.map(normalize).filter(Boolean));
+      const exactMatches = Object.entries(prices).filter(([key]) =>
+        normalizedCandidates.has(normalize(key)),
+      );
+      if (exactMatches.length === 1) return exactMatches[0][1];
+      if (exactMatches.length > 1) {
+        // Prefer the first unambiguous key if several normalized forms collide.
+        const unique = exactMatches[0];
+        if (exactMatches.every(([key]) => key === unique[0])) return unique[1];
+      }
+      const fuzzyMatches = Object.entries(prices).filter(([key]) => {
+        const normalizedKey = normalize(key);
+        return [...normalizedCandidates].some(
+          (candidate) =>
+            candidate.length > 0 &&
+            (normalizedKey.includes(candidate) || candidate.includes(normalizedKey)),
+        );
+      });
+      if (fuzzyMatches.length === 1) return fuzzyMatches[0][1];
+    }
+    return definition?.freebuckCost ?? fallback;
+  }
+
+  /** The account's 1x baseline, from the live rate table when the account
+   * refresh has landed, otherwise from the catalog's own reported costs. */
+  function freebuffRateBase(): number | undefined {
+    const accountRates = freebuffAccountRows
+      .map((row) => freebuffBaseRate(row.snapshot.hours?.prices))
+      .filter((rate): rate is number => rate !== undefined);
+    if (accountRates.length > 0) return Math.min(...accountRates);
+    const catalogCosts = availableModels
+      .filter((model) => model.provider === 'freebuff')
+      .map((model) => model.freebuckCost)
+      .filter((cost): cost is number => cost !== undefined && Number.isFinite(cost) && cost > 0);
+    return catalogCosts.length > 0 ? Math.min(...catalogCosts) : undefined;
+  }
+
+  /** The model's cost relative to the 1x model, as a bare "Nx" figure. */
+  function formatFreebuffProviderRate(value: number | undefined): string | undefined {
+    const multiplier = freebuffRateMultiplier(value, freebuffRateBase());
+    if (multiplier === undefined) return undefined;
+    const rounded = Math.round(multiplier * 10) / 10;
+    return `${formatFreebucks(rounded)}x`;
+  }
+
   let selectedModelLabel = $derived.by(() => {
     if (!selectedModel) return 'Select model';
     const parsed = parseProviderModelSelection(selectedModel, providerNames);
@@ -1032,6 +1309,9 @@
       wsStore.clearManagerContextPreview(sid);
       return;
     }
+    contextPreviewAbortController?.abort();
+    const abortController = new AbortController();
+    contextPreviewAbortController = abortController;
     // A selection is a new telemetry epoch. Clear the prior provider/model's
     // usage composition immediately; the matching backend response is the only
     // thing allowed to repopulate it.
@@ -1054,6 +1334,7 @@
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ model, provider }),
+            signal: abortController.signal,
           });
           const result = (await response.json()) as {
             error?: string;
@@ -1093,6 +1374,7 @@
           if (result.usage?.contextSource === 'live' || result.usage?.contextSource === 'alias')
             return;
         } catch (err: unknown) {
+          if (abortController.signal.aborted) return;
           console.debug(
             'Context preview request failed:',
             err instanceof Error ? err.message : String(err),
@@ -1301,16 +1583,21 @@
         return;
       }
     }
-    // Ctrl+Shift+V / Cmd+Shift+V → force paste image from clipboard
+    // Mod+Shift+V (Ctrl on Windows/Linux, ⌘ on macOS) → force paste image
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'v' || e.key === 'V')) {
       e.preventDefault();
       void pasteImageFromClipboard();
       return;
     }
 
+    if (isStopping) {
+      e.preventDefault();
+      return;
+    }
     if (isRunning && shortcutStore.matches('send', e)) {
       e.preventDefault();
-      stop();
+      if (canSend) void send();
+      else stop();
       return;
     }
     if (shortcutStore.matches('send', e)) {
@@ -1318,8 +1605,10 @@
       send();
     } else if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
-      if (isRunning) stop();
-      else send();
+      if (isRunning) {
+        if (canSend) void send();
+        else stop();
+      } else send();
     }
   }
 
@@ -1484,8 +1773,9 @@
     contextPreviewGeneration++;
     let accepted = false;
     try {
+      const submit = isRunning && canSend && onSteer ? onSteer : onSend;
       accepted =
-        (await onSend(
+        (await submit(
           trimmed,
           modelValue,
           reasoningLevel,
@@ -1609,7 +1899,13 @@
       ).length;
       const sendSessionId = sessionStore.activeSessionId;
       const sendModelValue = selectedModel;
-      const historicalImages = await authoritativeContextImageCount(sendModelValue);
+      // Text-only sends cannot change image admission. Avoid a redundant
+      // model-preview round trip on every normal message; retain the backend
+      // lookup whenever the transcript or outgoing attachments contain images.
+      const historicalImages =
+        currentImages === 0 && visibleTranscriptImageCount() === 0
+          ? 0
+          : await authoritativeContextImageCount(sendModelValue);
       if (
         sessionStore.activeSessionId !== sendSessionId ||
         selectedModel !== sendModelValue ||
@@ -1651,80 +1947,43 @@
     onStop?.();
   }
 
+  function primaryAction() {
+    if (isStopping) return;
+    if (isRunning) {
+      if (canSend) void send();
+      else stop();
+    } else if (isWaiting) stop();
+    else void send();
+  }
+
   const BASE_MIN_HEIGHT_PX = 88;
   const MAX_HEIGHT_PX = 280;
-  let minHeightPx = $state(BASE_MIN_HEIGHT_PX);
-
-  function syncComposerMinHeight() {
-    if (typeof window === 'undefined') return;
-    const isDesktopTwoColumn = window.innerWidth >= 1280;
-    const actionPanelHeight = actionPanelRef?.getBoundingClientRect().height ?? 0;
-    minHeightPx = isDesktopTwoColumn
-      ? Math.max(BASE_MIN_HEIGHT_PX, Math.ceil(actionPanelHeight))
-      : BASE_MIN_HEIGHT_PX;
-  }
 
   function resizeToMin() {
     if (!inputRef) return;
     inputRef.style.height = 'auto';
-    inputRef.style.height = minHeightPx + 'px';
+    inputRef.style.height = BASE_MIN_HEIGHT_PX + 'px';
   }
 
   function autoResize() {
     if (!inputRef) return;
     inputRef.style.height = 'auto';
     const h = inputRef.scrollHeight;
-    inputRef.style.height = Math.max(minHeightPx, Math.min(h, MAX_HEIGHT_PX)) + 'px';
+    inputRef.style.height = Math.max(BASE_MIN_HEIGHT_PX, Math.min(h, MAX_HEIGHT_PX)) + 'px';
   }
 
   let composerMetricsFrame: number | null = null;
-  let composerResizeObserver: ResizeObserver | null = null;
-  let lastActionPanelHeight = -1;
 
   /**
    * Re-measure the composer on the next frame, coalescing bursts.
-   *
-   * `autoResize()` measures (`scrollHeight`) and then writes `style.height`, so
-   * running it inside a ResizeObserver callback forces a synchronous relayout
-   * during layout delivery. Chromium cannot report the resulting size change
-   * back in the same cycle and logs "ResizeObserver loop completed with
-   * undelivered notifications" on every composer relayout. Deferring to an
-   * animation frame keeps all measurement and style writes outside the
-   * delivery step.
    */
   function scheduleComposerMetrics(): void {
     if (typeof requestAnimationFrame === 'undefined') return;
     if (composerMetricsFrame !== null) return;
     composerMetricsFrame = requestAnimationFrame(() => {
       composerMetricsFrame = null;
-      syncComposerMinHeight();
       autoResize();
     });
-  }
-
-  /**
-   * Point the observer at the current action panel. The panel is rendered
-   * conditionally, so this re-runs whenever `actionPanelRef` changes instead of
-   * latching onto whatever happened to be mounted during `onMount`.
-   */
-  function observeActionPanel(el: HTMLDivElement | undefined): void {
-    if (!composerResizeObserver) {
-      composerResizeObserver = new ResizeObserver((entries) => {
-        const entry = entries[entries.length - 1];
-        if (!entry) return;
-        // `borderBoxSize` is the accurate measurement but is missing in older
-        // engines, so fall back to the content box there.
-        const height = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
-        // Only the panel's height feeds the composer's minimum height, so an
-        // unchanged panel must not schedule more work.
-        if (height === lastActionPanelHeight) return;
-        lastActionPanelHeight = height;
-        scheduleComposerMetrics();
-      });
-    }
-    composerResizeObserver.disconnect();
-    lastActionPanelHeight = -1;
-    if (el) composerResizeObserver.observe(el);
   }
 
   function audioMimeType(): string | undefined {
@@ -1778,7 +2037,11 @@
     return blobBase64(new Blob([bytes.buffer], { type: 'application/octet-stream' }));
   }
 
-  async function transcribeLocalRecording(samples: Float32Array, language: string) {
+  async function transcribeLocalRecording(
+    samples: Float32Array,
+    language: string,
+    elapsedMs: number,
+  ) {
     isTranscribing = true;
     try {
       const pcmBase64 = await pcm16Base64(samples);
@@ -1792,6 +2055,7 @@
       toastStore.error(error instanceof Error ? error.message : String(error));
     } finally {
       isTranscribing = false;
+      finishTranscriptionUi();
     }
   }
 
@@ -1800,8 +2064,60 @@
     recorder.source.disconnect();
     recorder.processor.disconnect();
     recorder.sink.disconnect();
+    recorder.tap?.release();
     recorder.stream.getTracks().forEach((track) => track.stop());
     void recorder.context.close();
+  }
+
+  /** Stop the elapsed-time readout and reset the recording clock. */
+  function endRecordingUi() {
+    if (recordingTimer !== null) {
+      clearInterval(recordingTimer);
+      recordingTimer = null;
+    }
+    recordingElapsedMs = 0;
+    recordingStartedAt = 0;
+    voiceRecorder.end();
+  }
+
+  /**
+   * Keep the last captured waveform visible while the audio is transcribed.
+   * The analyser is no longer read once the phase becomes transcribing, but its
+   * reference lets the existing waveform canvas retain its measured history.
+   */
+  function beginTranscriptionUi(analyser: AnalyserNode | null, elapsedMs: number) {
+    if (recordingTimer !== null) {
+      clearInterval(recordingTimer);
+      recordingTimer = null;
+    }
+    voiceRecorder.begin('transcribing', analyser, elapsedMs);
+  }
+
+  /**
+   * Let the browser paint the frozen waveform before removing the strip. Local
+   * transcription can finish in the same turn as the stop action, which would
+   * otherwise batch the transcribing state away before it is ever visible.
+   */
+  function finishTranscriptionUi() {
+    const clear = () => {
+      // Do not let an older transcription clear a new capture that started
+      // before the scheduled cleanup ran.
+      if (voiceRecorder.state.phase === 'transcribing') voiceRecorder.end();
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(clear);
+    else setTimeout(clear, 0);
+  }
+
+  /** Start the elapsed-time readout for a recording that is now live. */
+  function beginRecordingUi(tap: VoiceTap | null, phase: 'recording' | 'transcribing') {
+    recordingStartedAt = Date.now();
+    recordingElapsedMs = 0;
+    voiceRecorder.begin(phase, tap?.analyser ?? null, 0);
+    if (recordingTimer !== null) clearInterval(recordingTimer);
+    recordingTimer = setInterval(() => {
+      recordingElapsedMs = Date.now() - recordingStartedAt;
+      voiceRecorder.setElapsed(recordingElapsedMs);
+    }, 100);
   }
 
   function stopLocalRecording(transcribe = true) {
@@ -1809,15 +2125,22 @@
     if (!recorder) return;
     activeLocalRecorder = null;
     isRecording = false;
+    const elapsedMs = recordingElapsedMs;
+    const waveformAnalyser = recorder.tap?.analyser ?? null;
     releaseLocalRecorder(recorder);
-    if (!transcribe) return;
     const samples = resampleTo16Khz(combineAudioChunks(recorder.chunks), recorder.sampleRate);
-    if (samples.length) void transcribeLocalRecording(samples, recorder.language);
+    if (transcribe && samples.length) {
+      beginTranscriptionUi(waveformAnalyser, elapsedMs);
+      void transcribeLocalRecording(samples, recorder.language, elapsedMs);
+    } else {
+      endRecordingUi();
+    }
   }
 
   async function startLocalRecording(settings: VoiceSettings) {
     if (!navigator.mediaDevices?.getUserMedia)
       throw new Error('Microphone recording is unavailable in this runtime');
+    if (!(await requestMicrophoneConsent())) return;
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         channelCount: 1,
@@ -1835,6 +2158,9 @@
     processor.onaudioprocess = (event) => {
       chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
     };
+    // The tap hangs off the same context as the recorder so the waveform and the
+    // captured PCM come from one graph.
+    const tapped = createVoiceTap(stream, context);
     source.connect(processor);
     processor.connect(sink);
     sink.connect(context.destination);
@@ -1847,8 +2173,10 @@
       chunks,
       sampleRate: context.sampleRate,
       language: settings.input.language || 'en',
+      tap: tapped?.tap ?? null,
     };
     isRecording = true;
+    beginRecordingUi(tapped?.tap ?? null, 'recording');
   }
 
   async function loadComposerVoiceSettings(): Promise<VoiceSettings> {
@@ -1870,6 +2198,84 @@
     });
   }
 
+  /**
+   * Koryphaios asks first, the way the platform prompt does: a consent sheet
+   * before any getUserMedia call so the microphone is never opened silently.
+   * An OS-level grant skips it; an OS-level denial falls through to
+   * getUserMedia so its actionable System Settings message is what the user
+   * reads, instead of a prompt the platform would ignore anyway.
+   */
+  const MICROPHONE_CONSENT_KEY = 'koryphaios.microphone-consent';
+  let microphoneConsentOpen = $state(false);
+  let resolveMicrophoneConsent: ((granted: boolean) => void) | null = null;
+
+  async function requestMicrophoneConsent(): Promise<boolean> {
+    try {
+      if (localStorage.getItem(MICROPHONE_CONSENT_KEY) === 'granted') return true;
+    } catch {
+      // Private mode blocks storage: fall through to the prompt.
+    }
+    try {
+      const status = navigator.permissions
+        ? await navigator.permissions.query({ name: 'microphone' } as PermissionDescriptor)
+        : null;
+      if (status?.state === 'granted' || status?.state === 'denied') return true;
+    } catch {
+      // Runtimes without the Permissions API still get the consent sheet.
+    }
+    return new Promise<boolean>((resolve) => {
+      resolveMicrophoneConsent = resolve;
+      microphoneConsentOpen = true;
+    });
+  }
+
+  function settleMicrophoneConsent(granted: boolean) {
+    microphoneConsentOpen = false;
+    if (granted) {
+      try {
+        localStorage.setItem(MICROPHONE_CONSENT_KEY, 'granted');
+      } catch {
+        // The choice still applies for this attempt when storage is blocked.
+      }
+    } else {
+      toastStore.info('Microphone access was declined. Press Allow to record a voice prompt.');
+    }
+    const resolve = resolveMicrophoneConsent;
+    resolveMicrophoneConsent = null;
+    resolve?.(granted);
+  }
+
+  /**
+   * Translate a getUserMedia failure into something actionable. The raw
+   * DOMException text ("The request is not allowed by the user agent or the
+   * platform in the current context…") reads like a broken provider, but it
+   * almost always means the OS-level microphone grant for Koryphaios is
+   * missing: macOS never re-prompts once denied, so the user has to flip it in
+   * System Settings themselves.
+   */
+  function microphoneErrorMessage(error: unknown): string {
+    const name =
+      error instanceof DOMException
+        ? error.name
+        : error instanceof Error && error.name
+          ? error.name
+          : '';
+    if (name === 'NotAllowedError')
+      return 'Microphone access was denied. Allow the microphone for Koryphaios in System Settings › Privacy & Security › Microphone, then try again.';
+    if (
+      name === 'NotFoundError' ||
+      name === 'DevicesNotFoundError' ||
+      name === 'OverconstrainedError'
+    )
+      return 'No microphone was found. Connect a microphone and try again.';
+    if (name === 'NotReadableError' || name === 'AbortError')
+      return 'The microphone is already in use by another app. Close it and try again.';
+    if (name === 'SecurityError')
+      return 'Microphone capture is blocked in this window. Restart the desktop app and try again.';
+    if (error instanceof Error && error.message) return error.message;
+    return 'Could not access the microphone';
+  }
+
   function speechRecognitionErrorMessage(error: string): string {
     if (error === 'service-not-allowed')
       return 'Speech recognition is not allowed. Check Koryphaios microphone and speech recognition access in System Settings.';
@@ -1887,10 +2293,16 @@
     };
     const Recognition = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
     if (!Recognition) throw new Error('System speech recognition is unavailable in this runtime');
-    if (navigator.mediaDevices?.getUserMedia) {
-      const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      permissionStream.getTracks().forEach((track) => track.stop());
-    }
+    if (!(await requestMicrophoneConsent())) return;
+    const stream = navigator.mediaDevices?.getUserMedia
+      ? await navigator.mediaDevices.getUserMedia({ audio: true })
+      : null;
+    const tapped = stream ? createVoiceTap(stream) : null;
+    const releaseTap = () => {
+      tapped?.tap.release();
+      if (tapped) void tapped.context.close();
+      stream?.getTracks().forEach((track) => track.stop());
+    };
     const recognition = new Recognition();
     recognition.lang = settings.input.language;
     recognition.continuous = true;
@@ -1906,15 +2318,24 @@
         toastStore.error(speechRecognitionErrorMessage(event.error));
     };
     recognition.onend = () => {
+      releaseTap();
       if (activeSpeechRecognition === recognition) activeSpeechRecognition = null;
       isRecording = false;
+      endRecordingUi();
     };
     activeSpeechRecognition = recognition;
-    recognition.start();
+    try {
+      recognition.start();
+    } catch (error) {
+      activeSpeechRecognition = null;
+      releaseTap();
+      throw error;
+    }
     isRecording = true;
+    beginRecordingUi(tapped?.tap ?? null, 'recording');
   }
 
-  async function transcribeRecording(blob: Blob, language: string) {
+  async function transcribeRecording(blob: Blob, language: string, elapsedMs: number) {
     isTranscribing = true;
     try {
       const audioBase64 = await blobBase64(blob);
@@ -1931,6 +2352,7 @@
       toastStore.error(error instanceof Error ? error.message : 'Transcription failed');
     } finally {
       isTranscribing = false;
+      finishTranscriptionUi();
     }
   }
 
@@ -1951,34 +2373,51 @@
     return false;
   }
 
-  function isRecordingNow(): boolean {
-    return isRecording && !!(activeLocalRecorder || activeSpeechRecognition || activeRecorder);
-  }
-
-  /** Begin a push-to-talk hold from the microphone button. */
-  function beginHoldToTalk() {
-    if (holdToTalkActive || isRecordingNow()) return;
-    holdToTalkActive = true;
-    void startRecording();
-  }
-
-  /** End a push-to-talk hold. Releasing without a recording is a no-op, so a
-   *  hold that was refused (no microphone permission, no model installed) does
-   *  not leave the hold stuck. */
-  function endHoldToTalk() {
-    if (!holdToTalkActive) return;
-    holdToTalkActive = false;
-    stopRecording();
-  }
-
+  /** Clicking the mic toggles capture. */
   async function toggleRecording() {
     if (stopRecording()) return;
-    await startRecording();
+    if (voiceStarting) return;
+    voiceStarting = true;
+    try {
+      await startRecording();
+    } finally {
+      voiceStarting = false;
+    }
   }
 
-  async function startRecording() {
+  /** The voice shortcut is also a press-to-toggle action, including on macOS. */
+  async function toggleVoiceShortcut() {
+    if (disabled || imageAdmissionPending || configurationWarning || isTranscribing) return;
+    if (stopRecording()) return;
+    if (voiceStarting) return;
+    voiceStarting = true;
     try {
-      const settings = await loadComposerVoiceSettings();
+      await startRecording(true);
+    } finally {
+      voiceStarting = false;
+    }
+  }
+
+  async function startRecording(enableVoiceMode = false, stillWanted = () => true) {
+    try {
+      let settings = await loadComposerVoiceSettings();
+      if (!stillWanted()) return;
+      if (!settings.voiceModeEnabled && enableVoiceMode) {
+        const response = await apiFetch(apiUrl('/api/voice/settings'), {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ ...settings, voiceModeEnabled: true }),
+        });
+        const result = await response.json();
+        if (!response.ok || !result.data)
+          throw new Error(result.error || 'Could not enable voice mode');
+        settings = result.data;
+        voiceSettings = settings;
+        window.dispatchEvent(
+          new CustomEvent('koryphaios:voice-settings-changed', { detail: settings }),
+        );
+      }
+      if (!stillWanted()) return;
       if (!settings.voiceModeEnabled)
         throw new Error('Enable the composer microphone in Voice settings first');
       if (settings.input.provider === 'kory-local') {
@@ -1986,17 +2425,14 @@
         try {
           localStatus = await invoke<LocalVoiceModelStatus>('local_voice_model_status');
         } catch {
-          // A refused hold must not stay held, or the next release stops
-          // whatever started later.
-          holdToTalkActive = false;
           onOpenSettings?.('voice');
           return;
         }
         if (!localStatus.installed) {
-          holdToTalkActive = false;
           onOpenSettings?.('voice');
           return;
         }
+        if (!stillWanted()) return;
         await startLocalRecording(settings);
         return;
       }
@@ -2006,10 +2442,14 @@
       }
       if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined')
         throw new Error('Microphone recording is unavailable in this runtime');
+      if (!(await requestMicrophoneConsent())) return;
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const chunks: BlobPart[] = [];
       const type = audioMimeType();
       const recorder = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+      // A tap is only for the waveform, so a context it created is closed with
+      // the recording rather than left running.
+      const tapped = createVoiceTap(stream);
       activeRecorder = recorder;
       recorder.ondataavailable = (event) => {
         if (event.data.size) chunks.push(event.data);
@@ -2019,13 +2459,21 @@
         const blob = new Blob(chunks, { type: recorder.mimeType || type || 'audio/webm' });
         activeRecorder = null;
         isRecording = false;
-        if (blob.size) void transcribeRecording(blob, settings.input.language || 'en');
+        const elapsedMs = recordingElapsedMs;
+        const waveformAnalyser = tapped?.tap.analyser ?? null;
+        if (blob.size) beginTranscriptionUi(waveformAnalyser, elapsedMs);
+        else endRecordingUi();
+        if (tapped) {
+          tapped.tap.release();
+          void tapped.context.close();
+        }
+        if (blob.size) void transcribeRecording(blob, settings.input.language || 'en', elapsedMs);
       };
       recorder.start();
       isRecording = true;
+      beginRecordingUi(tapped?.tap ?? null, 'recording');
     } catch (error) {
-      holdToTalkActive = false;
-      toastStore.error(error instanceof Error ? error.message : 'Could not access the microphone');
+      toastStore.error(microphoneErrorMessage(error));
     }
   }
 
@@ -2045,41 +2493,37 @@
       }
     };
     window.addEventListener('keydown', handleGlobalEsc);
-    // Voice mode is a global action so it works without focusing the composer.
-    // It is push to talk: hold the key to record, release to transcribe.
+    // Keyboard/native edges toggle the same capture as the microphone button.
+    let disposed = false;
     const voiceBlocked = () =>
-      !composerMicrophoneEnabled ||
-      disabled ||
-      imageAdmissionPending ||
-      !!configurationWarning ||
-      isTranscribing;
-    const voiceTargetIsTyping = () => {
-      const target = document.activeElement;
-      if (!target) return false;
-      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return true;
-      return (target as HTMLElement).isContentEditable === true;
+      disabled || imageAdmissionPending || !!configurationWarning || isTranscribing;
+    const voiceOnNativeFn = () => {
+      const keys = shortcutStore.keys('voice_mode');
+      return keys.length === 1 && keys[0].toLowerCase() === 'fn';
     };
     const handleVoiceShortcutDown = (e: KeyboardEvent) => {
       if (e.repeat || !shortcutStore.matches('voice_mode', e)) return;
-      if (voiceBlocked() || isRecordingNow()) return;
-      // A binding with no modifier would otherwise swallow ordinary typing, so
-      // it only acts outside a text field.
-      if (shortcutStore.isBare('voice_mode') && voiceTargetIsTyping()) return;
+      if (voiceBlocked()) return;
       e.preventDefault();
-      beginHoldToTalk();
+      void toggleVoiceShortcut();
     };
-    const handleVoiceShortcutUp = (e: KeyboardEvent) => {
-      if (!holdToTalkActive || !shortcutStore.matches('voice_mode', e)) return;
-      e.preventDefault();
-      endHoldToTalk();
-    };
-    // A key released outside the window never delivers keyup, so the recording
-    // is stopped when focus leaves instead of running forever.
-    const releaseVoiceHold = () => endHoldToTalk();
-    const handleVoiceBlur = () => releaseVoiceHold();
     window.addEventListener('keydown', handleVoiceShortcutDown);
-    window.addEventListener('keyup', handleVoiceShortcutUp);
-    window.addEventListener('blur', handleVoiceBlur);
+    // macOS never delivers fn/Globe to a webview, so the Tauri shell can still
+    // relay a customized Fn binding. It follows toggle semantics as well.
+    const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+    const nativeUnlisteners: (() => void)[] = [];
+    if (inTauri) {
+      void import('@tauri-apps/api/event').then(({ listen }) => {
+        if (disposed) return;
+        const retain = (unlisten: () => void) => {
+          if (disposed) unlisten();
+          else nativeUnlisteners.push(unlisten);
+        };
+        void listen('voice://fn-down', () => {
+          if (voiceOnNativeFn()) void toggleVoiceShortcut();
+        }).then(retain);
+      });
+    }
     const handleVoiceSettingsChanged = (event: Event) => {
       voiceSettings = (event as CustomEvent<VoiceSettings>).detail;
     };
@@ -2087,8 +2531,6 @@
     void loadComposerVoiceSettings().catch(() => {
       voiceSettings = null;
     });
-
-    observeActionPanel(actionPanelRef);
 
     const handleWindowResize = () => {
       scheduleComposerMetrics();
@@ -2098,30 +2540,20 @@
     scheduleComposerMetrics();
 
     return () => {
-      composerResizeObserver?.disconnect();
+      disposed = true;
       if (composerMetricsFrame !== null) cancelAnimationFrame(composerMetricsFrame);
       composerMetricsFrame = null;
       window.removeEventListener('resize', handleWindowResize);
       window.removeEventListener('keydown', handleGlobalEsc);
       window.removeEventListener('keydown', handleVoiceShortcutDown);
-      window.removeEventListener('keyup', handleVoiceShortcutUp);
-      window.removeEventListener('blur', handleVoiceBlur);
       window.removeEventListener('koryphaios:voice-settings-changed', handleVoiceSettingsChanged);
+      nativeUnlisteners.forEach((unlisten) => unlisten());
       activeSpeechRecognition?.abort();
       if (activeLocalRecorder) stopLocalRecording(false);
       if (activeRecorder?.state !== 'inactive') activeRecorder?.stop();
       activeRecorder?.stream.getTracks().forEach((track) => track.stop());
-    };
-  });
-
-  $effect(() => {
-    // The action panel is conditional, so re-point the observer whenever the
-    // bound element changes; observing whatever existed at mount time left the
-    // composer permanently unobserved.
-    observeActionPanel(actionPanelRef);
-    scheduleComposerMetrics();
-    return () => {
-      composerResizeObserver?.disconnect();
+      // An unmount mid-capture must not leave the strip showing live levels.
+      voiceRecorder.end();
     };
   });
 
@@ -2191,11 +2623,9 @@
     selectedModel = value;
     showModelPicker = false;
     if (typeof localStorage !== 'undefined') localStorage.setItem(MODEL_STORAGE_KEY, value);
-    // Re-baseline the context bar immediately (optimistic, from local model
-    // data), then ask the backend for the trusted window — the backend answer
-    // arrives as a normal stream.usage event and always wins. Works for every
-    // harness and API provider.
-    previewSelectedModelContext(value);
+    // The selectedModel effect is the single owner of preview requests. A
+    // second call here used to race the effect and briefly replace the new
+    // model's context meter with an older response.
   }
 
   async function selectModel(value: string) {
@@ -2255,6 +2685,7 @@
     modelPickerVisionOnly = visionOnly;
     showModelPicker = true;
     modelSearchQuery = '';
+    void refreshFreebuffAccount();
     if (selectedModel) {
       const provider =
         parseProviderModelSelection(selectedModel, providerNames).provider ?? currentProvider;
@@ -2344,7 +2775,11 @@
 
   function handleClickOutside(e: MouseEvent) {
     const target = e.target as HTMLElement;
-    if (!target.closest('.model-picker')) showModelPicker = false;
+    // Git's expand/collapse control is a neighboring composer control, not a
+    // model-selection dismissal action. Keep the picker open while the Git
+    // panel is opened or closed.
+    if (!target.closest('.model-picker') && !target.closest('.git-workspace'))
+      showModelPicker = false;
     if (!target.closest('.reasoning-picker')) showReasoningMenu = false;
     if (!target.closest('.reference-picker')) showReferenceMenu = false;
     if (!target.closest('.permission-picker')) showPermissionMenu = false;
@@ -2353,7 +2788,10 @@
   }
 
   let canSend = $derived(
-    !disabled && !isTranscribing && !imageAdmissionPending && (value.trim().length > 0 || attachments.length > 0),
+    !disabled &&
+      !isTranscribing &&
+      !imageAdmissionPending &&
+      (value.trim().length > 0 || attachments.length > 0),
   );
 
   // Dropdown, not a blind cycle button — all three modes stay visible and
@@ -2387,9 +2825,30 @@
       agentSettingsStore.settings.agentExecutionMode ??
       'auto',
   );
-  let effectiveCriticGateEnabled = $derived(
-    chatAgentOverrides.criticGateEnabled ?? agentSettingsStore.settings.criticGateEnabled,
+  let effectiveCriticMode = $derived(
+    resolveCriticMode(chatAgentOverrides, resolveCriticMode(agentSettingsStore.settings)),
   );
+
+  /** The composer's critic control doubles as the default for new chats.
+   *
+   *  It used to be a per-chat override only, so choosing a mode here left every
+   *  later chat on the project default — the choice never reached the value new
+   *  sessions inherit. Persist it as the project default (which a chat without
+   *  its own override reads) while still pinning this chat, and say so: silently
+   *  changing a workspace-wide default would be worse than not changing it. */
+  function selectCriticMode(criticMode: CriticMode) {
+    const criticGateEnabled = criticMode !== 'off';
+    setChatAgentOverrides({ criticMode, criticGateEnabled });
+    const label =
+      CRITIC_MODE_OPTIONS.find((option) => option.value === criticMode)?.label ?? criticMode;
+    void agentSettingsStore
+      .saveSettings({ criticMode, criticGateEnabled }, { quietSuccess: true })
+      .then((saved) => {
+        // A failed save is already reported by the settings store.
+        if (!saved) return;
+        toastStore.success(`Critic ${label} — this chat and new chats`);
+      });
+  }
 
   let agentExecutionModeMeta = $derived.by(() => {
     const mode = effectiveAgentExecutionMode;
@@ -2592,7 +3051,8 @@
     await addClipboardBlob(blob, 'clipboard-image.png');
   }
 
-  /** Force-paste image from OS clipboard (bypasses text). Used by Ctrl+Shift+V and the paste-image button. */
+  /** Force-paste image from OS clipboard (bypasses text). Used by the
+   *  platform-correct Mod+Shift+V chord and the paste-image button. */
   async function pasteImageFromClipboard() {
     if (isReadingClipboard || imageAdmissionPending) return;
     isReadingClipboard = true;
@@ -2720,7 +3180,7 @@
     );
     if (!hasText && typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
       // Some WebKitGTK builds omit images from the paste event. Fall back to
-      // the Tauri clipboard path for ordinary Ctrl+V as well.
+      // the Tauri clipboard path for an ordinary paste as well.
       e.preventDefault();
       void pasteImageFromClipboard();
     }
@@ -2736,7 +3196,14 @@
 <svelte:window onclick={handleClickOutside} />
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="command-input px-4 py-3" onpaste={handlePaste} ondrop={handleMediaDrop} ondragover={(event) => { if (event.dataTransfer?.types.includes('Files')) event.preventDefault(); }}>
+<div
+  class="command-input px-2 py-2 sm:px-4 sm:py-3"
+  onpaste={handlePaste}
+  ondrop={handleMediaDrop}
+  ondragover={(event) => {
+    if (event.dataTransfer?.types.includes('Files')) event.preventDefault();
+  }}
+>
   <!-- No project: show error -->
   {#if disabled}
     <div
@@ -2770,349 +3237,13 @@
   {/if}
 
   <div
-    class="rounded-xl border px-4 py-3"
+    class="composer-card rounded-xl border px-2 py-2 sm:px-4 sm:py-3"
     style="background: var(--color-surface-1); border-color: var(--color-border);"
   >
-    <!-- Controls row: Model picker + Reasoning toggle -->
-    <div class="mb-2 flex flex-wrap items-center gap-2">
-      <!-- Model selector -->
-      <div class="relative model-picker">
-        <button
-          type="button"
-          class="flex min-h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors hover:brightness-110"
-          aria-expanded={showModelPicker}
-          style="background: var(--color-surface-2); color: {selectedModel
-            ? 'var(--color-text-primary)'
-            : 'var(--color-text-muted)'}; border: 1px solid var(--color-border);"
-          onclick={() => {
-            if (showModelPicker) {
-              showModelPicker = false;
-            } else {
-              openModelPicker();
-            }
-          }}
-        >
-          {#if selectedModel}
-            <ProviderIcon provider={currentProvider} size={16} class="shrink-0" />
-          {/if}
-          <span>{selectedModelLabel}</span>
-          <ChevronDown size={14} class="text-text-muted" />
-        </button>
-
-        {#if showModelPicker}
-          <div
-            class="absolute bottom-full left-0 mb-2 w-80 overflow-hidden rounded-xl border shadow-2xl z-50"
-            style="background: var(--color-surface-2); border-color: var(--color-border);"
-          >
-            {#if modelPickerVisionOnly}
-              <div
-                class="border-b border-[var(--color-border)] bg-[var(--color-accent)]/8 px-3 py-2 text-xs text-[var(--color-text-secondary)]"
-              >
-                Showing models with verified image input
-              </div>
-            {/if}
-            <div class="relative border-b p-2.5" style="border-color: var(--color-border);">
-              <Search
-                class="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2"
-                size={15}
-                style="color: var(--color-text-muted);"
-              />
-              <input
-                type="search"
-                bind:value={modelSearchQuery}
-                aria-label="Search quick models"
-                placeholder="Search models…"
-                class="w-full rounded-lg border bg-[var(--color-surface-1)] py-2 pr-3 text-sm text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)]"
-                style="border-color: var(--color-border); padding-left: 2.25rem;"
-              />
-            </div>
-            <div class="max-h-72 overflow-y-auto">
-              {#if availableModels.length === 0}
-                <div
-                  class="px-4 py-4 text-xs leading-relaxed"
-                  style="color: var(--color-text-muted);"
-                >
-                  <div class="font-semibold mb-1" style="color: var(--color-text-secondary);">
-                    No provider connected
-                  </div>
-                  <div class="mb-3">
-                    Open Settings → Providers and connect one to choose a model.
-                  </div>
-                  {#if onOpenSettings}
-                    <button
-                      type="button"
-                      class="text-[var(--color-accent)] hover:underline"
-                      onclick={() => {
-                        showModelPicker = false;
-                        onOpenSettings();
-                      }}
-                    >
-                      Open Settings →
-                    </button>
-                  {/if}
-                </div>
-              {:else if filteredQuickModels.length === 0}
-                <div class="px-4 py-5 text-center text-xs" style="color: var(--color-text-muted);">
-                  {#if modelPickerVisionOnly && !modelSearchQuery.trim()}
-                    No enabled models report verified image input.
-                  {:else}
-                    No models match “{modelSearchQuery}”.
-                  {/if}
-                </div>
-              {:else}
-                <div class="py-1">
-                  {#each groupedModels as group (group.provider)}
-                    <div>
-                      <button
-                        type="button"
-                        class="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left transition-colors hover:bg-[var(--color-surface-3)] {selectedModel?.startsWith(
-                          `${group.provider}:`,
-                        )
-                          ? 'bg-[var(--color-surface-3)]/50'
-                          : ''}"
-                        style="color: var(--color-text-primary);"
-                        onclick={() => toggleProvider(group.provider)}
-                        aria-expanded={isSearchingModels || expandedProviders.has(group.provider)}
-                      >
-                        <div class="flex items-center gap-2 min-w-0">
-                          <ProviderIcon provider={group.provider} size={16} class="shrink-0" />
-                          <span class="text-sm font-medium truncate">{group.label}</span>
-                          <span class="text-xs text-[var(--color-text-muted)]"
-                            >({group.models.length})</span
-                          >
-                        </div>
-                        <span class="shrink-0 text-[var(--color-text-muted)]">
-                          {#if isSearchingModels || expandedProviders.has(group.provider)}
-                            <ChevronDown size={14} />
-                          {:else}
-                            <ChevronRight size={14} />
-                          {/if}
-                        </span>
-                      </button>
-                      {#if isSearchingModels || expandedProviders.has(group.provider)}
-                        <div class="pb-1">
-                          {#each group.models as model (model.value)}
-                            <button
-                              type="button"
-                              class="w-full text-left pl-10 pr-4 py-2 text-sm transition-colors hover:bg-[var(--color-surface-3)] flex items-center gap-2 {selectedModel ===
-                              model.value
-                                ? 'text-[var(--color-accent)]'
-                                : ''}"
-                              style="color: {selectedModel === model.value
-                                ? 'var(--color-accent)'
-                                : 'var(--color-text-secondary)'};"
-                              onclick={() => selectModel(model.value)}
-                            >
-                              <span class="flex-1 min-w-0 truncate">{model.name}</span>
-                              {#if selectedModel === model.value}
-                                <Check size={14} class="shrink-0" />
-                              {/if}
-                            </button>
-                          {/each}
-                        </div>
-                      {/if}
-                    </div>
-                  {/each}
-                </div>
-              {/if}
-            </div>
-          </div>
-        {/if}
-      </div>
-
-      <!-- Reasoning toggle - shows/hides based on provider+model -->
-      {#if reasoningSupported && reasoningConfig}
-        <div class="relative reasoning-picker">
-          <button
-            type="button"
-            class="flex min-h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors hover:brightness-110"
-            aria-expanded={showReasoningMenu}
-            style="background: var(--color-surface-2); color: {reasoningIsValid
-              ? 'var(--color-text-primary)'
-              : 'var(--color-text-muted)'}; border: 1px solid var(--color-border);"
-            onclick={() => (showReasoningMenu = !showReasoningMenu)}
-            title={reasoningIsValid ? 'Set auto effort' : 'Choose reasoning effort for this model'}
-          >
-            <BrainIcon
-              reasoningLevel={reasoningIsValid ? reasoningLevel : ''}
-              size={20}
-              class="text-[var(--color-accent)]"
-            />
-            <span>{reasoningIsValid ? reasoningLabel(reasoningLevel) : 'Choose reasoning'}</span>
-            <ChevronDown size={14} class="text-text-muted" />
-          </button>
-
-          {#if showReasoningMenu}
-            <div
-              class="absolute bottom-full left-0 mb-2 w-72 rounded-xl border shadow-2xl z-50 overflow-hidden backdrop-blur-md"
-              style="background: var(--color-surface-2); border-color: var(--color-border);"
-            >
-              <div
-                class="px-4 py-2.5 text-xs font-medium"
-                style="color: var(--color-text-secondary); border-bottom: 1px solid var(--color-border);"
-              >
-                {`${modelDisplayName} · ${reasoningIsValid ? reasoningLabel(reasoningLevel) : 'Choose reasoning'}`}
-              </div>
-              <div class="py-1">
-                {#each reasoningConfig.options as opt}
-                  <button
-                    type="button"
-                    class="w-full text-left px-4 py-3 transition-all hover:bg-[var(--color-surface-3)] group"
-                    onclick={() => selectReasoning(opt.value)}
-                  >
-                    <div class="flex items-center justify-between mb-0.5">
-                      <span
-                        class="text-sm font-semibold {reasoningLevel === opt.value
-                          ? 'text-[var(--color-accent)]'
-                          : 'text-[var(--color-text-primary)]'}"
-                      >
-                        {opt.label}
-                      </span>
-                      {#if reasoningLevel === opt.value}
-                        <div
-                          class="w-1.5 h-1.5 rounded-full bg-[var(--color-accent)] shadow-[0_0_8px_var(--color-accent)]"
-                        ></div>
-                      {/if}
-                    </div>
-                    <div class="text-xs leading-relaxed" style="color: var(--color-text-muted);">
-                      {opt.description}
-                    </div>
-                  </button>
-                {/each}
-              </div>
-            </div>
-          {/if}
-        </div>
-      {/if}
-
-      {#if fastModeSupported}
-        <button
-          type="button"
-          class="flex min-h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors hover:brightness-110"
-          style="background: {fastMode
-            ? 'color-mix(in srgb, var(--color-accent) 22%, var(--color-surface-3))'
-            : 'var(--color-surface-3)'}; color: {fastMode
-            ? 'var(--color-accent)'
-            : 'var(--color-text-primary)'}; border: 1px solid {fastMode
-            ? 'color-mix(in srgb, var(--color-accent) 65%, var(--color-border))'
-            : 'var(--color-border)'};"
-          onclick={() => (fastMode = !fastMode)}
-          aria-pressed={fastMode}
-          title={fastModeHint}
-        >
-          <Zap size={17} fill={fastMode ? 'currentColor' : 'none'} />
-          <span>{fastModeLabel}</span>
-        </button>
-      {/if}
-
-      <button
-        type="button"
-        class="flex min-h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors hover:brightness-110 {isGuidedDemo
-          ? 'border-[var(--color-border)] bg-[var(--color-surface-3)] text-[var(--color-text-secondary)]'
-          : interactionMode === 'plan'
-            ? 'border-[var(--color-info)]/40 bg-[var(--color-info-bg)] text-[var(--color-info)]'
-            : 'border-[var(--color-border)] bg-[var(--color-surface-3)] text-[var(--color-text-primary)]'}"
-        aria-pressed={!isGuidedDemo && interactionMode === 'plan'}
-        aria-disabled={isGuidedDemo}
-        onclick={() =>
-          isGuidedDemo
-            ? toastStore.info('Not available in this demo')
-            : onInteractionModeChange?.(interactionMode === 'plan' ? 'act' : 'plan')}
-        title={isGuidedDemo
-          ? 'Not available in this demo'
-          : 'Plan mode keeps project files unchanged and preserves a planning note between restarts'}
-      >
-        <ClipboardList size={17} />
-        <span
-          >{isGuidedDemo
-            ? 'Not available in this demo'
-            : interactionMode === 'plan'
-              ? 'Planning'
-              : 'Plan'}</span
-        >
-      </button>
-
-      <div class="permission-picker relative">
-        <button
-          type="button"
-          class="flex min-h-9 items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 text-sm font-medium text-[var(--color-text-primary)] transition-colors hover:brightness-110"
-          onclick={() => (showPermissionMenu = !showPermissionMenu)}
-          title={`Permissions: ${permissionModeMeta.label}`}
-          aria-haspopup="menu"
-          aria-expanded={showPermissionMenu}
-        >
-          <permissionModeMeta.icon size={17} class={permissionModeMeta.tone} />
-          <span>{permissionModeMeta.label}</span>
-          <ChevronDown size={14} class="text-text-muted" />
-        </button>
-        {#if showPermissionMenu}
-          <div
-            class="absolute bottom-full left-0 z-50 mb-2 w-80 overflow-hidden rounded-xl border shadow-2xl"
-            style="background: var(--color-surface-2); border-color: var(--color-border);"
-            role="menu"
-            aria-label="Permission mode"
-          >
-            <div
-              class="flex items-center justify-between gap-3 border-b border-[var(--color-border)] px-4 py-3"
-            >
-              <span class="text-xs font-medium text-[var(--color-text-secondary)]">Permissions</span
-              >
-              <button
-                type="button"
-                class="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-3)]"
-                onclick={() => {
-                  showPermissionMenu = false;
-                  onOpenSettings?.('agent', 'permissions');
-                }}
-                title="Open permission settings"><Settings size={13} /> Settings</button
-              >
-            </div>
-            <div class="py-1">
-              {#each PERMISSION_OPTIONS as option (option.value)}
-                {@const active = permissionMode === option.value}
-                <button
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={active}
-                  class="flex w-full items-start gap-3 px-4 py-2.5 text-left transition-colors hover:bg-[var(--color-surface-3)]"
-                  onclick={() => selectPermissionMode(option.value)}
-                >
-                  <option.icon size={16} class="mt-0.5 shrink-0 {option.tone}" />
-                  <span class="min-w-0 flex-1">
-                    <span
-                      class="block text-sm font-semibold"
-                      style="color: {active ? 'var(--color-accent)' : 'var(--color-text-primary)'};"
-                      >{option.label}</span
-                    >
-                    <span class="block text-[11px] leading-relaxed text-[var(--color-text-muted)]"
-                      >{option.description}</span
-                    >
-                  </span>
-                  {#if active}<Check
-                      size={14}
-                      class="mt-1 shrink-0 text-[var(--color-accent)]"
-                    />{/if}
-                </button>
-              {/each}
-            </div>
-          </div>
-        {/if}
-      </div>
-
-      {#if sessionStore.activeSessionId}
-        <GitWorkspaceControl
-          sessionId={sessionStore.activeSessionId}
-          revision={sessionStore.sessions.find((session) => session.id === sessionStore.activeSessionId)?.version ?? 0}
-          placement="composer"
-          busy={isRunning || isWaiting}
-        />
-      {/if}
-    </div>
-
     {#if goalDisplayStore.composer && showGoalComposer}
       <div
-        class="mb-3 rounded-xl border p-3"
-        style="border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-border)); background: color-mix(in srgb, var(--color-accent) 6%, var(--color-surface-2));"
+        class="mb-3 rounded-lg px-2 py-2"
+        style="background: color-mix(in srgb, var(--color-accent) 4%, var(--color-surface-1));"
         role="group"
         aria-label="New goal"
       >
@@ -3200,283 +3331,664 @@
     {/if}
 
     <!-- Input area -->
-    <div class="flex flex-col gap-3 xl:flex-row xl:items-end">
-      <div class="min-w-0 flex-1">
-        {#if pickerOpen}
+    <div class="min-w-0">
+      {#if pickerOpen}
+        <div
+          class="mb-3 overflow-hidden rounded-xl border"
+          style="background: var(--color-surface-2); border-color: var(--color-border);"
+        >
           <div
-            class="mb-3 overflow-hidden rounded-xl border"
-            style="background: var(--color-surface-2); border-color: var(--color-border);"
+            class="px-3 py-2 text-xs font-medium"
+            style="color: var(--color-text-muted); border-bottom: 1px solid var(--color-border);"
           >
+            {triggerContext?.trigger === '/' ? 'Commands' : 'Files'}
+          </div>
+          <div class="py-1 max-h-56 overflow-y-auto">
+            {#if pickerItems.length === 0}
+              <div class="px-3 py-2 text-xs" style="color: var(--color-text-muted);">
+                {triggerContext?.trigger === '@' ? 'Loading project files…' : 'No matches'}
+              </div>
+            {:else}
+              {#each pickerItems as item, index (item.key)}
+                <button
+                  type="button"
+                  class="flex w-full items-start justify-between gap-3 px-3 py-2 text-left transition-colors {index ===
+                  selectedPickerIndex
+                    ? 'bg-[var(--color-surface-3)]'
+                    : 'hover:bg-[var(--color-surface-3)]'}"
+                  onclick={() => void applyPickerItem(item)}
+                >
+                  <div class="min-w-0">
+                    <div class="text-sm font-medium" style="color: var(--color-text-primary);">
+                      {item.type === 'command' ? `/${item.value}` : `@${item.label}`}
+                    </div>
+                    <div class="truncate text-xs" style="color: var(--color-text-muted);">
+                      {item.description}
+                    </div>
+                  </div>
+                  <div class="shrink-0 text-xs" style="color: var(--color-text-muted);">
+                    {item.type}
+                  </div>
+                </button>
+              {/each}
+            {/if}
+          </div>
+        </div>
+      {/if}
+
+      <!-- Attachments Preview -->
+      {#if attachments.length > 0}
+        <div class="mb-3 flex flex-wrap gap-2">
+          {#each attachments as attachment, i}
             <div
-              class="px-3 py-2 text-xs font-medium"
-              style="color: var(--color-text-muted); border-bottom: 1px solid var(--color-border);"
+              class="relative group rounded-lg overflow-hidden border"
+              style="border-color: var(--color-border); width: {attachment.type === 'image'
+                ? '64px'
+                : 'min(100%, 360px)'};"
             >
-              {triggerContext?.trigger === '/' ? 'Commands' : 'Files'}
-            </div>
-            <div class="py-1 max-h-56 overflow-y-auto">
-              {#if pickerItems.length === 0}
-                <div class="px-3 py-2 text-xs" style="color: var(--color-text-muted);">
-                  {triggerContext?.trigger === '@' ? 'Loading project files…' : 'No matches'}
-                </div>
+              {#if attachment.type === 'image'}
+                <button
+                  type="button"
+                  class="block h-full w-full cursor-zoom-in overflow-hidden bg-[var(--color-surface-2)] outline-none transition-all hover:brightness-110 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]"
+                  aria-label={`Open ${attachment.name} preview`}
+                  aria-haspopup="dialog"
+                  onclick={(event) => openAttachmentPreview(attachment, event.currentTarget)}
+                >
+                  <img
+                    src={`data:${attachment.mimeType ?? 'image/png'};base64,${attachment.data}`}
+                    alt={attachment.name}
+                    class="h-16 w-16 object-cover transition-transform duration-200 group-hover:scale-105"
+                  />
+                </button>
               {:else}
-                {#each pickerItems as item, index (item.key)}
+                <MediaAttachment
+                  data={attachment.data}
+                  name={attachment.name}
+                  mimeType={attachment.mimeType}
+                />
+                {#if chatMediaKind(attachment.mimeType) === 'audio'}
                   <button
                     type="button"
-                    class="flex w-full items-start justify-between gap-3 px-3 py-2 text-left transition-colors {index ===
-                    selectedPickerIndex
-                      ? 'bg-[var(--color-surface-3)]'
-                      : 'hover:bg-[var(--color-surface-3)]'}"
-                    onclick={() => void applyPickerItem(item)}
+                    class="px-3 pb-2 text-xs text-[var(--color-accent)]"
+                    disabled={isTranscribing || imageAdmissionPending}
+                    title="Replace this audio attachment with editable speech-to-text using your Voice settings"
+                    onclick={() => void useAudioTranscript(attachment)}
+                    >{isTranscribing ? 'Transcribing…' : 'Use transcript'}</button
                   >
-                    <div class="min-w-0">
-                      <div class="text-sm font-medium" style="color: var(--color-text-primary);">
-                        {item.type === 'command' ? `/${item.value}` : `@${item.label}`}
-                      </div>
-                      <div class="truncate text-xs" style="color: var(--color-text-muted);">
-                        {item.description}
-                      </div>
+                {/if}
+              {/if}
+              <button
+                type="button"
+                class="absolute right-1 top-1 rounded-full bg-black/70 p-0.5 text-white opacity-0 shadow-md transition-opacity hover:bg-black/90 focus:opacity-100 group-hover:opacity-100"
+                onclick={() => removeAttachment(i)}
+                aria-label={`Remove ${attachment.name}`}
+                disabled={imageAdmissionPending}
+              >
+                <X size={12} />
+              </button>
+            </div>
+          {/each}
+        </div>
+      {/if}
+
+      <textarea
+        bind:this={inputRef}
+        bind:value
+        oninput={autoResize}
+        onkeydown={handleKeydown}
+        onpaste={handlePaste}
+        placeholder={disabled
+          ? disabledMessage
+          : imageAdmissionPending
+            ? 'Checking image input…'
+            : placeholder}
+        rows="1"
+        class="input block w-full"
+        data-testid="composer-input"
+        disabled={disabled || imageAdmissionPending}
+        style="resize: none; min-height: {BASE_MIN_HEIGHT_PX}px; max-height: 280px; font-size: 15px; line-height: 1.6; box-sizing: border-box; padding: 10px 12px; background: transparent; border: none; box-shadow: none; {disabled ||
+        imageAdmissionPending
+          ? 'opacity: 0.6; cursor: not-allowed;'
+          : ''}"
+      ></textarea>
+    </div>
+
+    <!-- Bottom toolbar: Configuration, attachments, agent modes, and send -->
+    <div
+      class="composer-config-row mt-3 flex flex-wrap items-center gap-2"
+      data-testid="composer-config-row"
+    >
+      <!-- Model selector -->
+      <div class="relative model-picker" data-testid="composer-model-control">
+        <button
+          type="button"
+          class="model-picker-trigger flex min-h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors hover:brightness-110"
+          aria-expanded={showModelPicker}
+          style="background: var(--color-surface-2); color: {selectedModel
+            ? 'var(--color-text-primary)'
+            : 'var(--color-text-muted)'}; border: 1px solid var(--color-border);"
+          onclick={() => {
+            if (showModelPicker) {
+              showModelPicker = false;
+            } else {
+              openModelPicker();
+            }
+          }}
+        >
+          {#if selectedModel}
+            <ProviderIcon provider={currentProvider} size={16} class="shrink-0" />
+          {/if}
+          <span class="composer-control-label">{selectedModelLabel}</span>
+          <ChevronDown size={14} class="text-text-muted" />
+        </button>
+
+        {#if showModelPicker}
+          <div
+            class="absolute bottom-full left-0 mb-2 w-80 overflow-hidden rounded-xl border shadow-2xl z-50"
+            style="background: var(--color-surface-2); border-color: var(--color-border);"
+          >
+            {#if modelPickerVisionOnly}
+              <div
+                class="border-b border-[var(--color-border)] bg-[var(--color-accent)]/8 px-3 py-2 text-xs text-[var(--color-text-secondary)]"
+              >
+                Showing models with verified image input
+              </div>
+            {/if}
+            <div class="relative border-b p-2.5" style="border-color: var(--color-border);">
+              <Search
+                class="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2"
+                size={15}
+                style="color: var(--color-text-muted);"
+              />
+              <input
+                type="search"
+                bind:value={modelSearchQuery}
+                aria-label="Search quick models"
+                placeholder="Search models…"
+                class="w-full rounded-lg border bg-[var(--color-surface-1)] py-2 pr-3 text-sm text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)]"
+                style="border-color: var(--color-border); padding-left: 2.25rem;"
+              />
+            </div>
+            <div class="max-h-72 overflow-y-auto">
+              {#if availableModels.length === 0}
+                <div
+                  class="px-4 py-4 text-xs leading-relaxed"
+                  style="color: var(--color-text-muted);"
+                >
+                  <div class="font-semibold mb-1" style="color: var(--color-text-secondary);">
+                    No provider connected
+                  </div>
+                  <div class="mb-3">
+                    Open Settings → Providers and connect one to choose a model.
+                  </div>
+                  {#if onOpenSettings}
+                    <button
+                      type="button"
+                      class="text-[var(--color-accent)] hover:underline"
+                      onclick={() => {
+                        showModelPicker = false;
+                        onOpenSettings();
+                      }}
+                    >
+                      Open Settings →
+                    </button>
+                  {/if}
+                </div>
+              {:else if filteredQuickModels.length === 0}
+                <div class="px-4 py-5 text-center text-xs" style="color: var(--color-text-muted);">
+                  {#if modelPickerVisionOnly && !modelSearchQuery.trim()}
+                    No enabled models report verified image input.
+                  {:else}
+                    No models match “{modelSearchQuery}”.
+                  {/if}
+                </div>
+              {:else}
+                <div class="py-1">
+                  {#each groupedModels as group (group.provider)}
+                    <div>
+                      <button
+                        type="button"
+                        class="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left transition-colors hover:bg-[var(--color-surface-3)] {selectedModel?.startsWith(
+                          `${group.provider}:`,
+                        )
+                          ? 'bg-[var(--color-surface-3)]/50'
+                          : ''}"
+                        style="color: var(--color-text-primary);"
+                        onclick={() => toggleProvider(group.provider)}
+                        aria-expanded={isSearchingModels || expandedProviders.has(group.provider)}
+                      >
+                        <div class="flex min-w-0 flex-1 items-center gap-2">
+                          <ProviderIcon provider={group.provider} size={16} class="shrink-0" />
+                          <span class="min-w-0 truncate text-sm font-medium">{group.label}</span>
+                          <span class="text-xs text-[var(--color-text-muted)]"
+                            >({group.models.length})</span
+                          >
+                        </div>
+                        <div class="ml-auto flex shrink-0 items-center gap-1.5">
+                          <span
+                            class="flex h-5 w-5 shrink-0 items-center justify-center text-[var(--color-text-muted)]"
+                          >
+                            {#if isSearchingModels || expandedProviders.has(group.provider)}
+                              <ChevronDown size={14} />
+                            {:else}
+                              <ChevronRight size={14} />
+                            {/if}
+                          </span>
+                        </div>
+                      </button>
+                      {#if isSearchingModels || expandedProviders.has(group.provider)}
+                        <div class="pb-1">
+                          {#each group.models as model (model.value)}
+                            {@const providerRate =
+                              model.provider === 'freebuff'
+                                ? formatFreebuffProviderRate(
+                                    freebuffProviderRateForSelection(
+                                      model.value,
+                                      model.freebuckCost,
+                                    ),
+                                  )
+                                : undefined}
+                            <button
+                              type="button"
+                              class="w-full text-left pl-10 pr-3 py-2 text-sm leading-tight transition-colors hover:bg-[var(--color-surface-3)] flex items-center gap-2 {selectedModel ===
+                              model.value
+                                ? 'text-[var(--color-accent)]'
+                                : ''}"
+                              style="color: {selectedModel === model.value
+                                ? 'var(--color-accent)'
+                                : 'var(--color-text-secondary)'};"
+                              onclick={() => selectModel(model.value)}
+                            >
+                              <span class="min-w-0 flex-1 truncate">{model.name}</span>
+                              {#if model.provider === 'freebuff'}
+                                {#if providerRate !== undefined}
+                                  <span
+                                    class="shrink-0 text-right text-[10px] font-medium text-[var(--color-accent)]"
+                                    title="Provider-reported model rate"
+                                  >
+                                    {providerRate}
+                                  </span>
+                                {/if}
+                              {/if}
+                              {#if selectedModel === model.value}
+                                <Check size={14} class="shrink-0" />
+                              {/if}
+                            </button>
+                          {/each}
+                        </div>
+                      {/if}
                     </div>
-                    <div class="shrink-0 text-xs" style="color: var(--color-text-muted);">
-                      {item.type}
+                  {/each}
+                </div>
+              {/if}
+            </div>
+          </div>
+        {/if}
+      </div>
+
+      <!-- Reasoning toggle - shows/hides based on provider+model -->
+      {#if reasoningSupported && reasoningConfig}
+        <div class="relative reasoning-picker" data-testid="composer-reasoning-control">
+          <button
+            type="button"
+            class="reasoning-picker-trigger flex min-h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors hover:brightness-110"
+            aria-expanded={showReasoningMenu}
+            style="background: var(--color-surface-2); color: {reasoningIsValid
+              ? 'var(--color-text-primary)'
+              : 'var(--color-text-muted)'}; border: 1px solid var(--color-border);"
+            onclick={() => (showReasoningMenu = !showReasoningMenu)}
+            title={reasoningIsValid ? 'Set reasoning' : 'Choose reasoning effort for this model'}
+          >
+            <BrainIcon
+              reasoningLevel={reasoningIsValid ? reasoningLevel : ''}
+              size={20}
+              class="text-[var(--color-accent)]"
+            />
+            <span class="composer-control-label"
+              >{reasoningIsValid ? reasoningLabel(reasoningLevel) : 'Choose reasoning'}</span
+            >
+            <ChevronDown size={14} class="text-text-muted" />
+          </button>
+
+          {#if showReasoningMenu}
+            <div
+              class="absolute bottom-full left-0 mb-2 w-72 rounded-xl border shadow-2xl z-50 overflow-hidden backdrop-blur-md"
+              style="background: var(--color-surface-2); border-color: var(--color-border);"
+            >
+              <div
+                class="px-4 py-2.5 text-xs font-medium"
+                style="color: var(--color-text-secondary); border-bottom: 1px solid var(--color-border);"
+              >
+                {`${modelDisplayName} · ${reasoningIsValid ? reasoningLabel(reasoningLevel) : 'Choose reasoning'}`}
+              </div>
+              <div class="py-1">
+                {#each reasoningConfig.options as opt}
+                  <button
+                    type="button"
+                    class="w-full text-left px-4 py-3 transition-all hover:bg-[var(--color-surface-3)] group"
+                    onclick={() => selectReasoning(opt.value)}
+                  >
+                    <div class="flex items-center justify-between mb-0.5">
+                      <span
+                        class="text-sm font-semibold {reasoningLevel === opt.value
+                          ? 'text-[var(--color-accent)]'
+                          : 'text-[var(--color-text-primary)]'}"
+                      >
+                        {opt.label}
+                      </span>
+                      {#if reasoningLevel === opt.value}
+                        <div
+                          class="w-1.5 h-1.5 rounded-full bg-[var(--color-accent)] shadow-[0_0_8px_var(--color-accent)]"
+                        ></div>
+                      {/if}
+                    </div>
+                    <div class="text-xs leading-relaxed" style="color: var(--color-text-muted);">
+                      {opt.description}
                     </div>
                   </button>
                 {/each}
-              {/if}
+              </div>
             </div>
-          </div>
-        {/if}
+          {/if}
+        </div>
+      {/if}
 
-        <!-- Attachments Preview -->
-        {#if attachments.length > 0}
-          <div class="mb-3 flex flex-wrap gap-2">
-            {#each attachments as attachment, i}
-              <div
-                class="relative group rounded-lg overflow-hidden border"
-                style="border-color: var(--color-border); width: {attachment.type === 'image' ? '64px' : 'min(100%, 360px)'};"
+      {#if fastModeSupported}
+        <button
+          type="button"
+          class="fast-mode-control flex min-h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors hover:brightness-110"
+          style="background: {fastMode
+            ? 'color-mix(in srgb, var(--color-accent) 22%, var(--color-surface-3))'
+            : 'var(--color-surface-3)'}; color: {fastMode
+            ? 'var(--color-accent)'
+            : 'var(--color-text-primary)'}; border: 1px solid {fastMode
+            ? 'color-mix(in srgb, var(--color-accent) 65%, var(--color-border))'
+            : 'var(--color-border)'};"
+          onclick={() => (fastMode = !fastMode)}
+          aria-pressed={fastMode}
+          title={fastModeHint}
+        >
+          <Zap size={17} fill={fastMode ? 'currentColor' : 'none'} />
+          <span class="composer-control-label">{fastModeLabel}</span>
+        </button>
+      {/if}
+      <button
+        type="button"
+        class="composer-control-button flex min-h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors hover:brightness-110 {isGuidedDemo
+          ? 'border-[var(--color-border)] bg-[var(--color-surface-3)] text-[var(--color-text-secondary)]'
+          : interactionMode === 'plan'
+            ? 'border-[var(--color-info)]/40 bg-[var(--color-info-bg)] text-[var(--color-info)]'
+            : 'border-[var(--color-border)] bg-[var(--color-surface-3)] text-[var(--color-text-primary)]'}"
+        aria-pressed={!isGuidedDemo && interactionMode === 'plan'}
+        aria-disabled={isGuidedDemo}
+        onclick={() =>
+          isGuidedDemo
+            ? toastStore.info('Not available in this demo')
+            : onInteractionModeChange?.(interactionMode === 'plan' ? 'act' : 'plan')}
+        title={isGuidedDemo
+          ? 'Not available in this demo'
+          : 'Plan mode keeps project files unchanged and preserves a planning note between restarts'}
+      >
+        <ClipboardList size={17} />
+        <span class="composer-control-label"
+          >{isGuidedDemo
+            ? 'Not available in this demo'
+            : interactionMode === 'plan'
+              ? 'Planning'
+              : 'Plan'}</span
+        >
+      </button>
+      <div class="permission-picker relative" data-testid="composer-permission-control">
+        <button
+          type="button"
+          class="permission-picker-trigger flex min-h-9 items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 text-sm font-medium text-[var(--color-text-primary)] transition-colors hover:brightness-110"
+          onclick={() => (showPermissionMenu = !showPermissionMenu)}
+          title={`Permissions: ${permissionModeMeta.label}`}
+          aria-haspopup="menu"
+          aria-expanded={showPermissionMenu}
+        >
+          <permissionModeMeta.icon size={17} class={permissionModeMeta.tone} />
+          <span class="composer-control-label">{permissionModeMeta.label}</span>
+          <ChevronDown size={14} class="text-text-muted" />
+        </button>
+        {#if showPermissionMenu}
+          <div
+            class="absolute bottom-full left-0 z-50 mb-2 w-80 overflow-hidden rounded-xl border shadow-2xl"
+            style="background: var(--color-surface-2); border-color: var(--color-border);"
+            role="menu"
+            aria-label="Permission mode"
+          >
+            <div
+              class="flex items-center justify-between gap-3 border-b border-[var(--color-border)] px-4 py-3"
+            >
+              <span class="text-xs font-medium text-[var(--color-text-secondary)]">Permissions</span
               >
-                {#if attachment.type === 'image'}
-                  <button
-                    type="button"
-                    class="block h-full w-full cursor-zoom-in overflow-hidden bg-[var(--color-surface-2)] outline-none transition-all hover:brightness-110 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]"
-                    aria-label={`Open ${attachment.name} preview`}
-                    aria-haspopup="dialog"
-                    onclick={(event) => openAttachmentPreview(attachment, event.currentTarget)}
-                  >
-                    <img
-                      src={`data:${attachment.mimeType ?? 'image/png'};base64,${attachment.data}`}
-                      alt={attachment.name}
-                      class="h-16 w-16 object-cover transition-transform duration-200 group-hover:scale-105"
-                    />
-                  </button>
-                {:else}
-                  <MediaAttachment data={attachment.data} name={attachment.name} mimeType={attachment.mimeType} />
-                  {#if chatMediaKind(attachment.mimeType) === 'audio'}
-                    <button type="button" class="px-3 pb-2 text-xs text-[var(--color-accent)]" disabled={isTranscribing || imageAdmissionPending}
-                      title="Replace this audio attachment with editable speech-to-text using your Voice settings"
-                      onclick={() => void useAudioTranscript(attachment)}>{isTranscribing ? 'Transcribing…' : 'Use transcript'}</button>
-                  {/if}
-                {/if}
+              <button
+                type="button"
+                class="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-3)]"
+                onclick={() => {
+                  showPermissionMenu = false;
+                  onOpenSettings?.('agent', 'permissions');
+                }}
+                title="Open permission settings"><Settings size={13} /> Settings</button
+              >
+            </div>
+            <div class="py-1">
+              {#each PERMISSION_OPTIONS as option (option.value)}
+                {@const active = permissionMode === option.value}
                 <button
                   type="button"
-                  class="absolute right-1 top-1 rounded-full bg-black/70 p-0.5 text-white opacity-0 shadow-md transition-opacity hover:bg-black/90 focus:opacity-100 group-hover:opacity-100"
-                  onclick={() => removeAttachment(i)}
-                  aria-label={`Remove ${attachment.name}`}
-                  disabled={imageAdmissionPending}
+                  role="menuitemradio"
+                  aria-checked={active}
+                  class="flex w-full items-start gap-3 px-4 py-2.5 text-left transition-colors hover:bg-[var(--color-surface-3)]"
+                  onclick={() => selectPermissionMode(option.value)}
                 >
-                  <X size={12} />
+                  <option.icon size={16} class="mt-0.5 shrink-0 {option.tone}" />
+                  <span class="min-w-0 flex-1">
+                    <span
+                      class="block text-sm font-semibold"
+                      style="color: {active ? 'var(--color-accent)' : 'var(--color-text-primary)'};"
+                      >{option.label}</span
+                    >
+                    <span class="block text-[11px] leading-relaxed text-[var(--color-text-muted)]"
+                      >{option.description}</span
+                    >
+                  </span>
+                  {#if active}<Check
+                      size={14}
+                      class="mt-1 shrink-0 text-[var(--color-accent)]"
+                    />{/if}
                 </button>
-              </div>
-            {/each}
+              {/each}
+            </div>
           </div>
         {/if}
+      </div>
 
-        <div class="relative">
-          <textarea
-            bind:this={inputRef}
-            bind:value
-            oninput={autoResize}
-            onkeydown={handleKeydown}
-            onpaste={handlePaste}
-            placeholder={disabled
-              ? disabledMessage
-              : imageAdmissionPending
-                ? 'Checking image input…'
-                : placeholder}
-            rows="1"
-            class="input w-full"
-            data-testid="composer-input"
-            disabled={disabled || imageAdmissionPending}
-            style="resize: none; min-height: {minHeightPx}px; max-height: 280px; font-size: 15px; line-height: 1.6; box-sizing: border-box; padding: 10px 88px 10px 12px; background: transparent; border: none; box-shadow: none; {disabled ||
-            imageAdmissionPending
-              ? 'opacity: 0.6; cursor: not-allowed;'
-              : ''}"
-          ></textarea>
-          <div class="absolute bottom-2 right-1 flex items-center gap-0.5 reference-picker">
-            <input type="file" multiple accept="image/*,audio/*,video/*" class="hidden" aria-label="Attach images, audio, or video" bind:this={mediaFileInputRef}
-              onchange={(event) => { queueMediaFiles(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = ''; }} />
-            <input
-              type="file"
-              multiple
-              class="hidden"
-              bind:this={referenceFileInputRef}
-              onchange={handleReferenceFileInput}
-            />
-            <input
-              type="file"
-              multiple
-              class="hidden"
-              bind:this={referenceFolderInputRef}
-              onchange={handleReferenceFolderInput}
-              webkitdirectory
-            />
-            <div class="relative more-actions-picker">
-              <button
-                type="button"
-                class="flex items-center justify-center w-8 h-8 rounded-lg transition-colors hover:bg-[var(--color-surface-3)] disabled:opacity-40 disabled:cursor-not-allowed"
-                style="color: var(--color-text-muted);"
-                onclick={() => (showGoalActions = !showGoalActions)}
-                disabled={disabled || imageAdmissionPending || !!configurationWarning}
-                aria-label="More composer actions"
-                aria-haspopup="menu"
-                aria-expanded={showGoalActions}
-                title="More actions"><Plus size={16} /></button
-              >
-              {#if showGoalActions}
-                <div
-                  role="menu"
-                  class="absolute bottom-full right-0 mb-1 w-48 rounded-lg border shadow-xl z-50 overflow-hidden"
-                  style="background: var(--color-surface-2); border-color: var(--color-border);"
-                >
-                  {#if goalDisplayStore.composer}<button
-                      type="button"
-                      class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--color-surface-3)]"
-                      style="color: var(--color-text-primary);"
-                      onclick={() => {
-                        showGoalActions = false;
-                        queueMicrotask(() =>
-                          window.dispatchEvent(
-                            new CustomEvent('kory:goal-action', { detail: 'goal_create' }),
-                          ),
-                        );
-                      }}><Target size={14} /> Create verified goal</button
-                    >
-                    <button
-                      type="button"
-                      class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--color-surface-3)]"
-                      style="color: var(--color-text-primary);"
-                      onclick={() => {
-                        showGoalActions = false;
-                        onOpenSettings?.('advanced');
-                      }}><Settings size={14} /> Goal settings</button
-                    >{/if}
-                  <button
-                    type="button"
-                    role="menuitem"
-                    class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--color-surface-3)]"
-                    style="color: var(--color-text-primary);"
-                    onclick={() => {
-                      showGoalActions = false;
-                      showChecklists = true;
-                    }}
-                  >
-                    <ListChecks size={14} />
-                    {checklistStore.active.length > 0 ? 'Checklists' : 'New checklist'}
-                  </button>
-                  <button
-                    type="button"
-                    class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--color-surface-3)]"
-                    style="color: var(--color-text-primary);"
-                    onclick={() => {
-                      showGoalActions = false;
-                      onOpenWorkflows?.();
-                    }}><Workflow size={14} /> Attach workflow</button
-                  >
-                </div>
-              {/if}
-            </div>
-            <div class="relative">
-              <button
-                type="button"
-                class="flex items-center justify-center w-8 h-8 rounded-lg transition-colors hover:bg-[var(--color-surface-3)] disabled:opacity-40 disabled:cursor-not-allowed"
-                style="color: var(--color-text-muted);"
-                onclick={() => (showReferenceMenu = !showReferenceMenu)}
-                disabled={disabled || imageAdmissionPending || !!configurationWarning}
-                title="Attach media or reference a file or folder"
-              >
-                <Paperclip size={16} />
-              </button>
-              {#if showReferenceMenu}
-                <div
-                  class="absolute bottom-full right-0 mb-1 w-40 rounded-lg border shadow-xl z-50 overflow-hidden"
-                  style="background: var(--color-surface-2); border-color: var(--color-border);"
-                >
-                  <button type="button" class="w-full text-left px-3 py-2 text-xs text-[var(--color-text-primary)] hover:bg-[var(--color-surface-3)]"
-                    onclick={() => { showReferenceMenu = false; mediaFileInputRef?.click(); }}>
-                    Attach image, audio, video…
-                  </button>
-                  <button
-                    type="button"
-                    class="w-full text-left px-3 py-2 text-xs hover:bg-[var(--color-surface-3)]"
-                    style="color: var(--color-text-primary);"
-                    onclick={() => void pickReferenceFiles()}
-                  >
-                    Pick file…
-                  </button>
-                  <button
-                    type="button"
-                    class="w-full text-left px-3 py-2 text-xs hover:bg-[var(--color-surface-3)]"
-                    style="color: var(--color-text-primary);"
-                    onclick={() => void pickReferenceFolder()}
-                  >
-                    Pick folder…
-                  </button>
-                </div>
-              {/if}
-            </div>
+      {#if sessionStore.activeSessionId}
+        <GitWorkspaceControl
+          sessionId={sessionStore.activeSessionId}
+          revision={sessionStore.sessions.find(
+            (session) => session.id === sessionStore.activeSessionId,
+          )?.version ?? 0}
+          placement="composer"
+          busy={isRunning || isWaiting}
+        />
+      {/if}
+      <div
+        class="composer-action-row ml-auto flex max-w-full flex-wrap items-center justify-end gap-2"
+        data-testid="composer-action-row"
+      >
+        {#if value.length > 0}
+          <span class="text-xs text-[var(--color-text-muted)]">{value.length} chars</span>
+        {/if}
+        <div class="flex shrink-0 items-center gap-0.5 reference-picker">
+          <input
+            type="file"
+            multiple
+            accept="image/*,audio/*,video/*"
+            class="hidden"
+            aria-label="Attach images, audio, or video"
+            bind:this={mediaFileInputRef}
+            onchange={(event) => {
+              queueMediaFiles(Array.from(event.currentTarget.files ?? []));
+              event.currentTarget.value = '';
+            }}
+          />
+          <input
+            type="file"
+            multiple
+            class="hidden"
+            bind:this={referenceFileInputRef}
+            onchange={handleReferenceFileInput}
+          />
+          <input
+            type="file"
+            multiple
+            class="hidden"
+            bind:this={referenceFolderInputRef}
+            onchange={handleReferenceFolderInput}
+            webkitdirectory
+          />
+          <div class="relative more-actions-picker">
             <button
               type="button"
               class="flex items-center justify-center w-8 h-8 rounded-lg transition-colors hover:bg-[var(--color-surface-3)] disabled:opacity-40 disabled:cursor-not-allowed"
               style="color: var(--color-text-muted);"
-              onclick={() => void pasteImageFromClipboard()}
-              disabled={disabled ||
-                imageAdmissionPending ||
-                !!configurationWarning ||
-                isReadingClipboard}
-              aria-label={isReadingClipboard
-                ? 'Reading image from clipboard'
-                : 'Paste image from clipboard'}
-              title="Paste image from clipboard (Ctrl+Shift+V)"
+              onclick={() => (showGoalActions = !showGoalActions)}
+              disabled={disabled || imageAdmissionPending || !!configurationWarning}
+              aria-label="More composer actions"
+              aria-haspopup="menu"
+              aria-expanded={showGoalActions}
+              title="More actions"><Plus size={16} /></button
             >
-              <Clipboard size={16} />
+            {#if showGoalActions}
+              <div
+                role="menu"
+                class="absolute bottom-full right-0 mb-1 w-48 rounded-lg border shadow-xl z-50 overflow-hidden"
+                style="background: var(--color-surface-2); border-color: var(--color-border);"
+              >
+                {#if goalDisplayStore.composer}<button
+                    type="button"
+                    class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--color-surface-3)]"
+                    style="color: var(--color-text-primary);"
+                    onclick={() => {
+                      showGoalActions = false;
+                      queueMicrotask(() =>
+                        window.dispatchEvent(
+                          new CustomEvent('kory:goal-action', { detail: 'goal_create' }),
+                        ),
+                      );
+                    }}><Target size={14} /> Create verified goal</button
+                  >
+                  <button
+                    type="button"
+                    class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--color-surface-3)]"
+                    style="color: var(--color-text-primary);"
+                    onclick={() => {
+                      showGoalActions = false;
+                      onOpenSettings?.('advanced');
+                    }}><Settings size={14} /> Goal settings</button
+                  >{/if}
+                <button
+                  type="button"
+                  role="menuitem"
+                  class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--color-surface-3)]"
+                  style="color: var(--color-text-primary);"
+                  onclick={() => {
+                    showGoalActions = false;
+                    showChecklists = true;
+                  }}
+                >
+                  <ListChecks size={14} />
+                  {checklistStore.active.length > 0 ? 'Checklists' : 'New checklist'}
+                </button>
+                <button
+                  type="button"
+                  class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--color-surface-3)]"
+                  style="color: var(--color-text-primary);"
+                  onclick={() => {
+                    showGoalActions = false;
+                    onOpenWorkflows?.();
+                  }}><Workflow size={14} /> Attach workflow</button
+                >
+              </div>
+            {/if}
+          </div>
+          <div class="relative">
+            <button
+              type="button"
+              class="flex items-center justify-center w-8 h-8 rounded-lg transition-colors hover:bg-[var(--color-surface-3)] disabled:opacity-40 disabled:cursor-not-allowed"
+              style="color: var(--color-text-muted);"
+              onclick={() => (showReferenceMenu = !showReferenceMenu)}
+              disabled={disabled || imageAdmissionPending || !!configurationWarning}
+              title="Attach media or reference a file or folder"
+            >
+              <Paperclip size={16} />
             </button>
-            {#if composerMicrophoneEnabled}
+            {#if showReferenceMenu}
+              <div
+                class="absolute bottom-full right-0 mb-1 w-40 rounded-lg border shadow-xl z-50 overflow-hidden"
+                style="background: var(--color-surface-2); border-color: var(--color-border);"
+              >
+                <button
+                  type="button"
+                  class="w-full text-left px-3 py-2 text-xs text-[var(--color-text-primary)] hover:bg-[var(--color-surface-3)]"
+                  onclick={() => {
+                    showReferenceMenu = false;
+                    mediaFileInputRef?.click();
+                  }}
+                >
+                  Attach image, audio, video…
+                </button>
+                <button
+                  type="button"
+                  class="w-full text-left px-3 py-2 text-xs hover:bg-[var(--color-surface-3)]"
+                  style="color: var(--color-text-primary);"
+                  onclick={() => void pickReferenceFiles()}
+                >
+                  Pick file…
+                </button>
+                <button
+                  type="button"
+                  class="w-full text-left px-3 py-2 text-xs hover:bg-[var(--color-surface-3)]"
+                  style="color: var(--color-text-primary);"
+                  onclick={() => void pickReferenceFolder()}
+                >
+                  Pick folder…
+                </button>
+              </div>
+            {/if}
+          </div>
+          <button
+            type="button"
+            class="flex items-center justify-center w-8 h-8 rounded-lg transition-colors hover:bg-[var(--color-surface-3)] disabled:opacity-40 disabled:cursor-not-allowed"
+            style="color: var(--color-text-muted);"
+            onclick={() => void pasteImageFromClipboard()}
+            disabled={disabled ||
+              imageAdmissionPending ||
+              !!configurationWarning ||
+              isReadingClipboard}
+            aria-label={isReadingClipboard
+              ? 'Reading image from clipboard'
+              : 'Paste image from clipboard'}
+            title="Paste image from clipboard ({formatShortcut('Mod+Shift+V')})"
+          >
+            <Clipboard size={16} />
+          </button>
+          {#if composerMicrophoneEnabled}
+            <div
+              class="flex shrink-0 items-center"
+              data-testid="composer-voice-recorder"
+              data-state={isRecording ? 'recording' : isTranscribing ? 'transcribing' : 'idle'}
+            >
               <button
                 type="button"
-                class="flex h-8 w-8 items-center justify-center rounded-lg transition-all hover:bg-[var(--color-surface-3)] disabled:cursor-not-allowed disabled:opacity-40 {isRecording
-                  ? 'bg-[var(--color-error-bg)] text-[var(--color-error)] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-error)_36%,transparent)]'
-                  : 'text-[var(--color-text-muted)]'}"
-                onpointerdown={(event) => {
-                  // Push to talk, matching the keyboard shortcut: hold the
-                  // button to record, release to transcribe.
-                  if (event.button !== 0) return;
-                  event.preventDefault();
-                  beginHoldToTalk();
-                }}
-                onpointerup={() => endHoldToTalk()}
-                onpointerleave={() => endHoldToTalk()}
-                onpointercancel={() => endHoldToTalk()}
-                onkeydown={(event) => {
-                  if (event.repeat) return;
-                  if (event.key !== ' ' && event.key !== 'Enter') return;
-                  event.preventDefault();
-                  beginHoldToTalk();
-                }}
-                onkeyup={(event) => {
-                  if (event.key !== ' ' && event.key !== 'Enter') return;
-                  event.preventDefault();
-                  endHoldToTalk();
-                }}
-                onblur={() => endHoldToTalk()}
+                class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-[var(--color-surface-3)] disabled:cursor-not-allowed disabled:opacity-40"
+                style={isRecording
+                  ? 'color: var(--color-accent);'
+                  : 'color: var(--color-text-muted);'}
+                onclick={() => void toggleRecording()}
                 disabled={disabled ||
                   imageAdmissionPending ||
                   !!configurationWarning ||
@@ -3485,180 +3997,161 @@
                 aria-label={isTranscribing
                   ? 'Transcribing recording'
                   : isRecording
-                    ? 'Recording, release to transcribe'
-                    : 'Hold to record a voice prompt'}
+                    ? 'Stop recording and transcribe'
+                    : 'Record a voice prompt'}
                 title={isTranscribing
                   ? 'Transcribing…'
                   : isRecording
-                    ? 'Release to transcribe'
-                    : `Hold to record${voiceShortcutHint ? ` (${voiceShortcutHint})` : ''}`}
+                    ? 'Stop recording and transcribe'
+                    : `Click to record${voiceShortcutHint ? ` · ${voiceShortcutHint} starts and stops recording` : ''}`}
               >
                 <Mic size={16} class={isRecording || isTranscribing ? 'animate-pulse' : ''} />
               </button>
-            {/if}
-          </div>
-        </div>
-      </div>
-      <div class="w-full xl:w-auto xl:self-end">
-        <div
-          bind:this={actionPanelRef}
-          class="flex flex-col gap-2 border-t pt-3 xl:min-w-[188px] xl:border-t-0 xl:border-l xl:pl-3 xl:pt-0"
-          style="border-color: var(--color-border);"
-        >
-          <div class="flex flex-wrap items-center gap-2 xl:justify-end">
-            <div class="agent-mode-picker relative">
-              <button
-                type="button"
-                class="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-md transition-colors {agentExecutionModeMeta.className}"
-                onclick={() => (showAgentModeMenu = !showAgentModeMenu)}
-                title={agentExecutionModeMeta.title}
-                aria-haspopup="menu"
-                aria-expanded={showAgentModeMenu}
-              >
-                <agentExecutionModeMeta.icon size={12} />
-                <span>{agentExecutionModeMeta.label}</span>
-                <ChevronDown size={10} class="opacity-60" />
-              </button>
-              {#if showAgentModeMenu}
-                <div
-                  class="absolute bottom-full right-0 mb-1.5 w-56 rounded-xl border shadow-xl z-30 overflow-hidden"
-                  style="background: var(--color-surface-2); border-color: var(--color-border);"
-                  role="menu"
-                >
-                  {#each AGENT_MODE_OPTIONS as option (option.value)}
-                    {@const active = effectiveAgentExecutionMode === option.value}
-                    <button
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={active}
-                      class="w-full flex items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-[var(--color-surface-3)]"
-                      onclick={() => setAgentExecutionMode(option.value)}
-                    >
-                      <option.icon
-                        size={13}
-                        class="mt-0.5 shrink-0"
-                        style="color: {active ? 'var(--color-accent)' : 'var(--color-text-muted)'};"
-                      />
-                      <span class="min-w-0 flex-1">
-                        <span
-                          class="block text-[11px] font-medium"
-                          style="color: {active
-                            ? 'var(--color-accent)'
-                            : 'var(--color-text-primary)'};">{option.label}</span
-                        >
-                        <span class="block text-[10px]" style="color: var(--color-text-muted);"
-                          >{option.description}</span
-                        >
-                      </span>
-                      {#if active}
-                        <Check
-                          size={12}
-                          class="mt-0.5 shrink-0"
-                          style="color: var(--color-accent);"
-                        />
-                      {/if}
-                    </button>
-                  {/each}
-                </div>
-              {/if}
             </div>
-
-            <button
-              type="button"
-              class="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-md transition-colors {effectiveCriticGateEnabled
-                ? 'bg-[var(--color-warning-bg)] text-[var(--color-warning)] border border-[var(--color-warning)]/30'
-                : 'bg-[var(--color-surface-3)] text-[var(--color-text-muted)] border border-[var(--color-border)] hover:brightness-110'}"
-              onclick={() =>
-                setChatAgentOverrides({ criticGateEnabled: !effectiveCriticGateEnabled })}
-              title="Toggle Critic Agent for this chat"
-              aria-pressed={effectiveCriticGateEnabled}
-            >
-              {#if effectiveCriticGateEnabled}
-                <ShieldCheck size={12} />
-                <span>Critic: On</span>
-              {:else}
-                <ShieldAlert size={12} />
-                <span>Critic: Off</span>
-              {/if}
-            </button>
-          </div>
-          {#if interactionMode === 'plan' && planReady}
-            <button
-              type="button"
-              class="rounded-lg bg-[var(--color-accent)] px-3 py-2 text-xs font-semibold text-[var(--color-on-accent)] hover:opacity-90"
-              onclick={() => onApprovePlan?.()}>Approve plan & implement</button
-            >
           {/if}
-
+        </div>
+        <div class="agent-mode-picker relative" data-testid="composer-agent-mode-control">
           <button
             type="button"
-            onclick={isRunning || isWaiting ? stop : send}
-            disabled={disabled || imageAdmissionPending || (!isRunning && !isWaiting && !canSend)}
-            class="btn flex w-full items-center justify-center gap-2 {isRunning
-              ? 'stop-btn'
+            class="agent-mode-trigger flex min-h-9 items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-md transition-colors {agentExecutionModeMeta.className}"
+            onclick={() => (showAgentModeMenu = !showAgentModeMenu)}
+            title={agentExecutionModeMeta.title}
+            aria-haspopup="menu"
+            aria-expanded={showAgentModeMenu}
+          >
+            <agentExecutionModeMeta.icon size={12} />
+            <span class="composer-control-label">{agentExecutionModeMeta.label}</span>
+            <ChevronDown size={10} class="opacity-60" />
+          </button>
+          {#if showAgentModeMenu}
+            <div
+              class="absolute bottom-full right-0 mb-1.5 w-56 rounded-xl border shadow-xl z-30 overflow-hidden"
+              style="background: var(--color-surface-2); border-color: var(--color-border);"
+              role="menu"
+            >
+              {#each AGENT_MODE_OPTIONS as option (option.value)}
+                {@const active = effectiveAgentExecutionMode === option.value}
+                <button
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={active}
+                  class="w-full flex items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-[var(--color-surface-3)]"
+                  onclick={() => setAgentExecutionMode(option.value)}
+                >
+                  <option.icon
+                    size={13}
+                    class="mt-0.5 shrink-0"
+                    style="color: {active ? 'var(--color-accent)' : 'var(--color-text-muted)'};"
+                  />
+                  <span class="min-w-0 flex-1">
+                    <span
+                      class="block text-[11px] font-medium"
+                      style="color: {active ? 'var(--color-accent)' : 'var(--color-text-primary)'};"
+                      >{option.label}</span
+                    >
+                    <span class="block text-[10px]" style="color: var(--color-text-muted);"
+                      >{option.description}</span
+                    >
+                  </span>
+                  {#if active}
+                    <Check size={12} class="mt-0.5 shrink-0" style="color: var(--color-accent);" />
+                  {/if}
+                </button>
+              {/each}
+            </div>
+          {/if}
+        </div>
+
+        <CriticModeSelect
+          compact
+          value={effectiveCriticMode}
+          onchange={(criticMode) => selectCriticMode(criticMode)}
+        />
+        {#if interactionMode === 'plan' && planReady}
+          <button
+            type="button"
+            class="min-h-9 rounded-lg bg-[var(--color-accent)] px-3 py-2 text-xs font-semibold text-[var(--color-on-accent)] hover:opacity-90"
+            onclick={() => onApprovePlan?.()}>Approve plan & implement</button
+          >
+        {/if}
+
+        <button
+          type="button"
+          data-testid="composer-primary-action"
+          onclick={primaryAction}
+          disabled={disabled ||
+            isStopping ||
+            imageAdmissionPending ||
+            (!isRunning && !isWaiting && !canSend)}
+          class="btn flex shrink-0 items-center justify-center gap-2 {isStopping ||
+          (isRunning && !canSend)
+            ? 'stop-btn'
+            : isRunning && canSend
+              ? 'steer-btn'
               : isWaiting
                 ? 'waiting-btn'
                 : 'btn-primary'}"
-            style="height: 44px; padding: 0 16px; font-size: 14px; {disabled ||
-            imageAdmissionPending ||
-            (!isRunning && !isWaiting && !canSend)
-              ? 'opacity: 0.5; cursor: not-allowed;'
-              : ''}"
-            aria-label={imageAdmissionPending
+          style="height: 36px; padding: 0 16px; font-size: 14px; {disabled ||
+          isStopping ||
+          imageAdmissionPending ||
+          (!isRunning && !isWaiting && !canSend)
+            ? 'opacity: 0.5; cursor: not-allowed;'
+            : ''}"
+          aria-label={isStopping
+            ? 'Stopping the current run'
+            : imageAdmissionPending
               ? 'Checking image input support'
-              : isRunning
-                ? 'Stop the running model'
-                : isWaiting
-                  ? 'Kory is waiting. Click to cancel'
-                  : 'Send message'}
-            title={imageAdmissionPending
+              : isRunning && canSend
+                ? 'Steer the running model'
+                : isRunning
+                  ? 'Stop the running model'
+                  : isWaiting
+                    ? 'Kory is waiting. Click to cancel'
+                    : 'Send message'}
+          title={isStopping
+            ? 'Waiting for the current run to stop'
+            : imageAdmissionPending
               ? 'Checking active image context before sending'
-              : isRunning
-                ? 'Stop (Esc)'
-                : isWaiting
-                  ? waitingReason
-                    ? `Waiting on ${waitingReason}. Click to cancel`
-                    : 'Kory is waiting. Click to cancel'
-                  : !canSend
-                    ? 'Type a message to send'
-                    : configurationWarning
-                      ? 'Run a local command, or open Settings to configure a provider'
-                      : 'Send (Enter)'}
-          >
-            {#if isRunning}
-              <span class="stop-pulse" aria-hidden="true">
-                <Square size={10} fill="currentColor" strokeWidth={0} />
-              </span>
-              <span>Stop</span>
-            {:else if isWaiting}
-              <span class="waiting-dots" aria-hidden="true"
-                ><span></span><span></span><span></span></span
-              >
-              <span>Waiting{waitingReason ? ` · ${waitingReason}` : '…'}</span>
-            {:else}
-              <!-- Empty composer is a plain disabled Send. "Waiting" is reserved
-                   for Kory genuinely parked on something external, so an idle
-                   app never reads as a busy app. -->
-              <Send size={18} />
-              Send
-            {/if}
-          </button>
-        </div>
+              : isRunning && canSend
+                ? 'Steer the running model with this message'
+                : isRunning
+                  ? 'Stop (Esc)'
+                  : isWaiting
+                    ? waitingReason
+                      ? `Waiting on ${waitingReason}. Click to cancel`
+                      : 'Kory is waiting. Click to cancel'
+                    : !canSend
+                      ? 'Type a message to send'
+                      : configurationWarning
+                        ? 'Run a local command, or open Settings to configure a provider'
+                        : 'Send (Enter)'}
+        >
+          {#if isStopping}
+            <span class="stop-pulse" aria-hidden="true">
+              <Square size={10} fill="currentColor" strokeWidth={0} />
+            </span>
+            <span>Stopping…</span>
+          {:else if isRunning && canSend}
+            <Send size={18} aria-hidden="true" />
+            <span>Steer</span>
+          {:else if isRunning}
+            <span class="stop-pulse" aria-hidden="true">
+              <Square size={10} fill="currentColor" strokeWidth={0} />
+            </span>
+            <span>Stop</span>
+          {:else if isWaiting}
+            <PauseCircle size={18} class="animate-pulse" aria-hidden="true" />
+            <span>Waiting{waitingReason ? ` · ${waitingReason}` : '…'}</span>
+          {:else}
+            <!-- Empty composer is a plain disabled Send. "Waiting" is reserved
+                 for Kory genuinely parked on something external, so an idle
+                 app never reads as a busy app. -->
+            <Send size={18} />
+            Send
+          {/if}
+        </button>
       </div>
     </div>
-  </div>
-
-  <div class="flex items-center justify-between mt-[var(--space-sm)]">
-    <span class="text-xs" style="color: var(--color-text-muted);">
-      {#if configurationWarning}
-        Provider messages need setup. Local /commands remain available.
-      {:else}
-        Enter to send · Shift+Enter for new line · Ctrl+V paste text · Ctrl+Shift+V paste image
-      {/if}
-    </span>
-    {#if value.length > 0}
-      <span class="text-xs" style="color: var(--color-text-muted);">{value.length} chars</span>
-    {/if}
   </div>
 </div>
 
@@ -3676,6 +4169,17 @@
     oncancel={() => (imageFallbackWarning = null)}
   />
 {/if}
+
+<ConfirmDialog
+  open={microphoneConsentOpen}
+  title="“Koryphaios” Would Like to Access the Microphone"
+  message="Koryphaios records audio only when you press the microphone button so it can transcribe your prompt."
+  confirmLabel="Allow"
+  cancelLabel="Don't Allow"
+  variant="info"
+  onConfirm={() => settleMicrophoneConsent(true)}
+  onCancel={() => settleMicrophoneConsent(false)}
+/>
 
 {#if previewAttachment}
   <div
@@ -3864,6 +4368,22 @@
     }
   }
 
+  /* A populated composer changes the running action from destructive stop to
+   * a guided continuation. Keep it in the accent family so the distinction is
+   * visible without making steering look like an error state. */
+  :global(.steer-btn) {
+    background: var(--color-accent);
+    color: var(--color-on-accent);
+    border: 1px solid color-mix(in srgb, var(--color-accent) 70%, transparent);
+    font-weight: 600;
+    transition:
+      opacity 0.15s ease,
+      background 0.15s ease;
+  }
+  :global(.steer-btn:hover) {
+    opacity: 0.9;
+  }
+
   /* Stop button — unmistakably "live, click to stop" with a pulsing ring. */
   :global(.stop-btn) {
     background: var(--color-error-bg);
@@ -3911,6 +4431,58 @@
       opacity: 0;
     }
   }
+  .command-input,
+  .composer-card,
+  .composer-config-row,
+  .composer-action-row {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .composer-config-row > *,
+  .composer-action-row > * {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .command-input {
+    container: composer / inline-size;
+  }
+
+  @container composer (max-width: 760px) {
+    .composer-action-row {
+      margin-left: 0;
+      width: 100%;
+      justify-content: flex-start;
+      gap: 0.375rem;
+    }
+
+    .composer-config-row {
+      gap: 0.375rem;
+    }
+
+    .model-picker-trigger,
+    .reasoning-picker-trigger,
+    .agent-mode-trigger,
+    .permission-picker-trigger,
+    .composer-control-button,
+    .fast-mode-control {
+      gap: 0.375rem;
+      padding-inline: 0.5rem;
+      font-size: 0.75rem;
+    }
+  }
+
+  @container composer (max-width: 600px) {
+    .composer-control-label {
+      display: none;
+    }
+
+    .composer-action-row > :global(.reference-picker) {
+      margin-left: 0;
+    }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     :global(.stop-pulse::after),
     :global(.waiting-btn),

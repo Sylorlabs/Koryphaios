@@ -12,8 +12,10 @@
 // still in its temporal dead zone.
 
 export type SessionRemovalListener = (sessionId: string) => void;
+export type SessionBatchRemovalListener = (sessionIds: ReadonlySet<string>) => void;
 
 const listeners: SessionRemovalListener[] = [];
+const batchListeners: SessionBatchRemovalListener[] = [];
 
 /** Subscribe to chat removal. Returns an unsubscribe function. */
 export function onSessionRemoved(listener: SessionRemovalListener): () => void {
@@ -21,6 +23,16 @@ export function onSessionRemoved(listener: SessionRemovalListener): () => void {
   return () => {
     const index = listeners.indexOf(listener);
     if (index >= 0) listeners.splice(index, 1);
+  };
+}
+
+/** Subscribe to bulk chat erasures. Batch subscribers can reconcile once rather
+ * than repeating the same reactive filtering for every deleted row. */
+export function onSessionsRemoved(listener: SessionBatchRemovalListener): () => void {
+  batchListeners.push(listener);
+  return () => {
+    const index = batchListeners.indexOf(listener);
+    if (index >= 0) batchListeners.splice(index, 1);
   };
 }
 
@@ -33,6 +45,20 @@ export function notifySessionRemoved(sessionId: string): void {
       // The row is already gone server-side. One store failing to reconcile must
       // not strand the others, nor surface as a failed deletion.
       console.error('Session removal listener failed:', error);
+    }
+  }
+}
+
+/** Announce one bulk erasure. Stores with per-session cleanup use the batch
+ * subscription so the same reactive collection is not rebuilt once per row. */
+export function notifySessionsRemoved(sessionIds: Iterable<string>): void {
+  const ids = new Set(sessionIds);
+  if (ids.size === 0) return;
+  for (const listener of [...batchListeners]) {
+    try {
+      listener(ids);
+    } catch (error) {
+      console.error('Bulk session removal listener failed:', error);
     }
   }
 }

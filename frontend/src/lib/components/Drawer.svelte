@@ -38,7 +38,7 @@
         <X size={18} />
       </button>
     </div>
-    <div class="drawer-content">
+    <div class="drawer-content" tabindex="-1">
       {#if children}
         {@render children()}
       {/if}

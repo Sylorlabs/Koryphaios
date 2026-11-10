@@ -324,10 +324,19 @@ const STALL_RING_MAX = 10;
 // A stall only counts when the page was visible: background-tab throttling
 // pauses rAF by design and must not masquerade as a freeze.
 const STALL_GAP_THRESHOLD_MS = 3_000;
+// Boot work (font/store hydration, dev transforms) can block the main thread
+// before the first paint. Boot gaps are recorded for diagnostics but not
+// printed, so a normal launch never opens with a red console error.
+const STALL_STARTUP_GRACE_MS = 10_000;
+// Scheduling slack when deciding whether timers were starved alongside the
+// frame loop: a poll normally fires within one frame of the last rAF tick.
+const STALL_POLL_STAGGER_MS = 500;
 
 let stallRing: RendererStall[] = [];
 let stallWorstGapMs = 0;
 let stallLongTaskCount = 0;
+let _stallInitAt = 0;
+let _lastPollAt = 0;
 
 export function recordRendererStall(entry: RendererStall): RendererStall[] {
   stallRing = [...stallRing, entry].slice(-STALL_RING_MAX);
@@ -353,10 +362,26 @@ export function resetStallMonitoring(): void {
   stallRing = [];
   stallWorstGapMs = 0;
   stallLongTaskCount = 0;
+  _stallInitAt = 0;
+  _lastPollAt = 0;
 }
 
-function reportStall(durationMs: number, source: RendererStall['source']): void {
+/** True when a heartbeat gap means the main thread froze: timers stopped
+ *  alongside frames. Timers that outlived frames mean the webview simply
+ *  stopped painting (boot, occluded window), which is not a stall. */
+export function heartbeatGapIsStall(lastPollAt: number, lastFrameAt: number): boolean {
+  return lastPollAt <= lastFrameAt + STALL_POLL_STAGGER_MS;
+}
+
+/** Record a stall and log it once it is past the startup grace window.
+ *  Exported as a test seam; production callers are the heartbeat poll and the
+ *  longtask observer below. */
+export function reportStall(durationMs: number, source: RendererStall['source']): void {
   recordRendererStall({ at: Date.now(), durationMs: Math.round(durationMs), source });
+  // Boot gaps are kept for getStallSnapshot() but stay out of the console:
+  // a launch that compiles/hydrates synchronously is expected noise, and a
+  // red error on every fresh start trains people to ignore real freezes.
+  if (_stallInitAt !== 0 && Date.now() - _stallInitAt < STALL_STARTUP_GRACE_MS) return;
   try {
     console.error('[Koryphaios] Renderer stall detected', {
       durationMs: Math.round(durationMs),
@@ -371,6 +396,8 @@ export function initStallMonitoring(): void {
   if (typeof window === 'undefined' || _stallInitialized) return;
   _stallInitialized = true;
   _lastFrameAt = Date.now();
+  _lastPollAt = _lastFrameAt;
+  _stallInitAt = _lastFrameAt;
 
   try {
     const tick = () => {
@@ -400,17 +427,25 @@ export function initStallMonitoring(): void {
   // threshold instead of waiting for the next unrelated timer.
   _stallTimer = setInterval(() => {
     try {
+      const now = Date.now();
       if (document.visibilityState !== 'visible') {
-        _lastFrameAt = Date.now();
+        _lastFrameAt = now;
+        _lastPollAt = now;
         return;
       }
-      const gap = Date.now() - _lastFrameAt;
+      const gap = now - _lastFrameAt;
+      // A frozen main thread starves timers and rAF together, so the previous
+      // poll predates the last frame. A webview that merely stopped painting
+      // (not shown yet at boot, occluded window) keeps timers running while
+      // rAF pauses — polls outlive frames — and that is not a stall.
+      const timersStarved = heartbeatGapIsStall(_lastPollAt, _lastFrameAt);
       if (gap >= STALL_GAP_THRESHOLD_MS) {
         // Reset the baseline so one long freeze reports once instead of
         // once per poll for its whole duration.
-        _lastFrameAt = Date.now();
-        reportStall(gap, 'heartbeat');
+        _lastFrameAt = now;
+        if (timersStarved) reportStall(gap, 'heartbeat');
       }
+      _lastPollAt = now;
     } catch {
       // ignore
     }

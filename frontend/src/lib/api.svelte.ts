@@ -3,12 +3,21 @@
  * Automatically attaches the current Authorization header when present.
  */
 
-import { authStore } from '$lib/stores/auth.svelte';
+import { authStore, invalidateLocalSession } from '$lib/stores/auth.svelte';
 import { isDemoMode } from '$lib/demo-flags';
 import { demoFetch } from '$lib/demo-api';
 import { untrack } from 'svelte';
 import { projectStore } from '$lib/stores/project.svelte';
 import { sessionStore } from '$lib/stores/sessions.svelte';
+import {
+  deviceRouting,
+  deviceSessionKey,
+  deviceWorkbenchPath,
+  isDeviceWorkbenchPath,
+  mapDeviceSessionIds,
+} from '$lib/stores/device-routing.svelte';
+import { apiUrl } from '$lib/utils/api-url';
+import { remoteRouteDescriptor } from '@koryphaios/shared';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -77,13 +86,51 @@ async function apiFetchUntracked(
   // Capture routing before authentication yields: switching chats while auth
   // refreshes must not redirect an already-started read or mutation.
   const sessionId = sessionStore.activeSessionId;
+  const target = deviceRouting.chat;
+  const originalUrl = new URL(
+    url,
+    typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1',
+  );
+  const method = (init.method ?? 'GET').toUpperCase();
+  const remote =
+    target &&
+    sessionId === deviceSessionKey(target) &&
+    isDeviceWorkbenchPath(originalUrl.pathname, method);
   const session = sessionStore.sessions.find((item) => item.id === sessionId);
-  const projectPath = session?.workingDirectory ?? projectStore.requestPath;
+  // `||`, not `??`: a session with an empty workingDirectory must still fall
+  // back to the selected project instead of sending no project header at all.
+  const projectPath =
+    target && sessionId === deviceSessionKey(target)
+      ? projectStore.requestPath
+      : session?.workingDirectory || projectStore.requestPath;
   const headers = new Headers(init.headers);
-  if (projectPath && !headers.has('X-Koryphaios-Project')) {
+  if (remote) {
+    headers.delete('X-Koryphaios-Project');
+    headers.delete('X-Koryphaios-Session');
+  }
+  // Session-scoped routes resolve their workspace from the session header. Do
+  // not also synthesize a raw filesystem path into an HTTP header when a
+  // caller has explicitly pinned the session: Fetch's ByteString header
+  // conversion rejects Unicode paths before the request reaches the backend.
+  // An explicitly supplied project header remains untouched for callers that
+  // intentionally need both routing dimensions.
+  const callerPinnedSession = headers.has('X-Koryphaios-Session');
+  if (
+    !remote &&
+    !callerPinnedSession &&
+    !originalUrl.pathname.startsWith('/api/devices') &&
+    projectPath &&
+    !headers.has('X-Koryphaios-Project')
+  ) {
     headers.set('X-Koryphaios-Project', projectPath);
   }
-  if (sessionId && !headers.has('X-Koryphaios-Session')) {
+  if (
+    !remote &&
+    !sessionId.startsWith('linked-') &&
+    !originalUrl.pathname.startsWith('/api/devices') &&
+    sessionId &&
+    !headers.has('X-Koryphaios-Session')
+  ) {
     headers.set('X-Koryphaios-Session', sessionId);
   }
 
@@ -119,12 +166,84 @@ async function apiFetchUntracked(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await fetch(url, {
-        ...init,
+      let requestUrl = url;
+      let requestInit = init;
+      if (remote && target) {
+        if (init.body != null && typeof init.body !== 'string')
+          throw new Error('This device control requires a JSON request.');
+        const body =
+          typeof init.body === 'string'
+            ? mapDeviceSessionIds(JSON.parse(init.body), target, false)
+            : undefined;
+        const path = deviceWorkbenchPath(originalUrl.pathname + originalUrl.search, target);
+         const descriptor = remoteRouteDescriptor(originalUrl.pathname, method);
+        const prompt = path === '/api/messages' && (init.method ?? 'GET').toUpperCase() === 'POST';
+        const cancel =
+          path === `/api/sessions/${target.id}/cancel` &&
+          (init.method ?? 'GET').toUpperCase() === 'POST';
+        const generationControl =
+          (init.method ?? 'GET').toUpperCase() === 'POST' &&
+          (path === '/api/messages/regenerate' ||
+            /^\/api\/agent\/[^/]+\/message$/.test(originalUrl.pathname));
+        requestUrl = apiUrl(`/api/devices/${target.deviceId}/rpc`);
+        requestInit = {
+          ...init,
+          method: 'POST',
+          body: JSON.stringify({
+            operation: prompt ? 'prompt' : cancel ? 'cancel' : 'workbench',
+            input: prompt
+              ? { ...body, sessionId: target.id, useLocalProviders: true }
+              : cancel
+                ? { sessionId: target.id }
+                : {
+                    sessionId: target.id,
+                    path,
+                    method,
+                    body,
+                    target: {
+                      kind: 'linked-device',
+                      deviceId: target.deviceId,
+                      sessionId: target.id,
+                    },
+                    ...(descriptor
+                      ? { routeId: descriptor.id, capability: descriptor.capability }
+                      : {}),
+                    ...(generationControl ? { useLocalProviders: true } : {}),
+                  },
+          }),
+        };
+        headers.set('Content-Type', 'application/json');
+      }
+      let response = await fetch(requestUrl, {
+        ...requestInit,
         headers,
         credentials: 'include',
         signal: init.signal ?? controller.signal,
       });
+      if (remote && target && response.ok) {
+        const result = await response.json();
+        if (!result.ok) response = new Response(JSON.stringify(result), { status: 400 });
+        else if (result.data?.body !== undefined) {
+          const projected = result.data.contentType?.includes('json')
+            ? JSON.stringify(mapDeviceSessionIds(JSON.parse(result.data.body), target, true))
+            : result.data.body;
+          response = new Response(projected, {
+            status: result.data.status,
+            headers: { 'Content-Type': result.data.contentType },
+          });
+        } else
+          response = new Response(
+            JSON.stringify({
+              ok: result.data?.accepted !== false,
+              data: result.data,
+              ...(result.data?.accepted === false ? { error: 'The target chat is busy.' } : {}),
+            }),
+            {
+              status: result.data?.accepted === false ? 409 : 200,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          );
+      }
       if (response.status === 400 && projectPath) {
         try {
           const body = (await response.clone().json()) as { error?: string };
@@ -138,6 +257,10 @@ async function apiFetchUntracked(
           // Non-JSON 400 responses are unrelated to project reconciliation.
         }
       }
+      // An unexpected 401 means the backend's in-memory session registry was
+      // reset (a restart, or an eviction). Drop the validated-session window so
+      // the next request revalidates and mints a replacement before it goes out.
+      if (response.status === 401) invalidateLocalSession();
       return response;
     } finally {
       clearTimeout(timeout);

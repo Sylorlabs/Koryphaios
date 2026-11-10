@@ -13,6 +13,12 @@
     // Ceiling on the rows walked back to build up pixel overscan, so a
     // transcript of very short rows cannot render the whole thing.
     const MAX_HEADROOM_ROWS = 60;
+    // Consecutive quiet frames before an opened transcript counts as landed.
+    const LANDING_STABLE_FRAMES = 2;
+    // Hard ceiling so continuous streaming or a wedged measurement can never
+    // hold the caller's loading surface up indefinitely.
+    const LANDING_MAX_FRAMES = 24;
+    const LANDING_FALLBACK_MS = 600;
 
     interface Props {
         items: T[];
@@ -20,9 +26,17 @@
         overscan?: number;
         class?: string;
         onScroll?: (distFromBottom: number) => void;
+        onScrollNearTop?: () => void;
         onScrollNearBottom?: () => void;
-        onLandingChange?: (landing: boolean) => void;
         onReady?: (el: HTMLDivElement) => void;
+        /** Fired once an opened transcript has landed at its initial position
+         *  and its first measurement batches have stopped moving the bottom.
+         *  Callers keep an opaque loading surface over the list until then, so
+         *  the reader sees a spinner and then the finished chat, never the
+         *  estimated rows converging underneath. */
+        onLanded?: () => void;
+        /** Restore the reader's last position when reopening a transcript. */
+        onRestoreState?: (state: { follow: boolean }) => void;
         row?: Snippet<[T, number]>;
         /** When true, keep the view pinned to the bottom authoritatively —
          *  using totalHeight (which accounts for un-rendered rows), not DOM
@@ -36,7 +50,7 @@
         resetKey?: string | number;
     }
 
-    let { items, estimateHeight, overscan = 5, class: className = '', onScroll, onScrollNearBottom, onLandingChange, onReady, row, follow = false, resetKey }: Props = $props();
+    let { items, estimateHeight, overscan = 5, class: className = '', onScroll, onScrollNearTop, onScrollNearBottom, onReady, onLanded, onRestoreState, row, follow = false, resetKey }: Props = $props();
     
     // DOM refs
     let containerEl = $state<HTMLDivElement>();
@@ -62,6 +76,11 @@
 
     // Scroll state
     let scrollTop = $state(0);
+    // True while the transcript is showing a restored reader position. The
+    // `follow` prop arrives one flush after `onRestoreState()` reports the
+    // restore, so without this the bottom-pin effect below would fire once
+    // with the stale `follow: true` and undo the restore.
+    let openingRestore = $state(false);
     let clientHeight = $state(800);
     // Offset the rendered window is drawn at while `follow` is on. Set from the
     // offset a pin actually reached, and mirrored from real scroll events so
@@ -81,67 +100,209 @@
     // while a multi-thousand-pixel tool output must not fling the reader away
     // from where they were reading.
     let anchorBudget = 0;
-    // True while a freshly opened transcript is still finding its real bottom
-    // — the window is drawn from row estimates and the true offsets only
-    // arrive as rows measure. The parent uses this to hold the transcript back
-    // until it is showing the last message for real, rather than letting the
-    // reader watch it crawl there.
-    let landing = $state(false);
-    // Frames the landing may still spend re-pinning. Bounded so a transcript
-    // that never fully converges (a row whose height keeps changing) is
-    // revealed rather than hidden forever.
-    const LANDING_FRAMES = 40;
+
+    // ─── Landing ──────────────────────────────────────────────────────────
+    // Rows mount from estimates and are measured over the next few frames.
+    // While following, every batch that changes the transcript height re-pins
+    // the bottom. The caller keeps an opaque cover over the list until this
+    // loop reports that the landing has stopped moving, so that convergence is
+    // never visible as a fast scroll down the transcript.
+    let landingComplete = false;
+    let landingRaf: number | null = null;
+    let landingTimer: ReturnType<typeof setTimeout> | undefined;
     let landingFrames = 0;
+    let stableFrames = 0;
+    let layoutRevision = 0;
+    let lastLayoutRevision = 0;
+
+    function fireLanded() {
+        if (landingComplete) return;
+        landingComplete = true;
+        if (landingRaf !== null) {
+            cancelAnimationFrame(landingRaf);
+            landingRaf = null;
+        }
+        if (landingTimer !== undefined) {
+            clearTimeout(landingTimer);
+            landingTimer = undefined;
+        }
+        onLanded?.();
+    }
+
+    function checkLandingSettled() {
+        landingRaf = null;
+        if (landingComplete || !onLanded) return;
+        landingFrames++;
+        const el = containerEl;
+        const quiet =
+            measurementFrame === null &&
+            pendingRowSizes.size === 0 &&
+            pendingDeltas.length === 0;
+        const pinned = !follow || !el || el.scrollHeight - el.scrollTop - el.clientHeight <= 2;
+        if (quiet && pinned && layoutRevision === lastLayoutRevision) stableFrames++;
+        else stableFrames = 0;
+        lastLayoutRevision = layoutRevision;
+        if (stableFrames >= LANDING_STABLE_FRAMES || landingFrames >= LANDING_MAX_FRAMES) {
+            fireLanded();
+            return;
+        }
+        landingRaf = requestAnimationFrame(checkLandingSettled);
+    }
+
+    function armLanding() {
+        if (!onLanded || landingComplete) return;
+        landingComplete = false;
+        landingFrames = 0;
+        stableFrames = 0;
+        lastLayoutRevision = layoutRevision;
+        if (landingRaf === null && typeof requestAnimationFrame === 'function') {
+            landingRaf = requestAnimationFrame(checkLandingSettled);
+        }
+        // A backgrounded tab stops delivering frames. The fallback must not
+        // reveal a half-measured transcript while rAF is paused; wait until
+        // the reader can actually see it again.
+        if (landingTimer === undefined) {
+            landingTimer = setTimeout(onLandingFallback, LANDING_FALLBACK_MS);
+        }
+    }
+
+    function onLandingFallback() {
+        landingTimer = undefined;
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+            landingTimer = setTimeout(onLandingFallback, LANDING_FALLBACK_MS);
+            return;
+        }
+        fireLanded();
+    }
+
+    // ─── Prepend / viewport anchoring ─────────────────────────────────────
+    // An older page is prepended while the reader is near the top. The DOM
+    // keeps scrollTop, so the rows they were reading move down by the height
+    // of the new page. Remember the row at the viewport top and put it back
+    // after the layout changes; without this, scroll-up paging feels like a
+    // jump and the next scroll event immediately loads another page.
+    let viewportAnchor: { id: string; offset: number } | null = null;
+
+    function rememberViewportAnchor() {
+        if (!containerEl || follow || positions.length === 0) {
+            viewportAnchor = null;
+            return;
+        }
+        const top = containerEl.scrollTop;
+        let low = 0;
+        let high = positions.length - 1;
+        let found = 0;
+        while (low <= high) {
+            const mid = (low + high) >> 1;
+            if (positions[mid].top <= top) {
+                found = mid;
+                low = mid + 1;
+            } else {
+                high = mid - 1;
+            }
+        }
+        const position = positions[found];
+        viewportAnchor = position ? { id: position.id, offset: top - position.top } : null;
+    }
+
+    function savedScrollState(id: string): { scrollTop: number; follow: boolean } | undefined {
+        return scrollStates.get(id);
+    }
+
+    function rememberScrollState(id: string, top: number, shouldFollow: boolean) {
+        if (!id) return;
+        scrollStates.delete(id);
+        scrollStates.set(id, { scrollTop: Math.max(0, top), follow: shouldFollow });
+        while (scrollStates.size > MEASURED_TRANSCRIPTS) {
+            const oldest = scrollStates.keys().next();
+            if (oldest.done) break;
+            scrollStates.delete(oldest.value);
+        }
+    }
 
     // Initialize scrollTop based on follow prop
     $effect(() => {
         if (follow) {
             scrollTop = Number.MAX_SAFE_INTEGER;
             // A fresh follow starts from the real bottom, not from whatever the
-            // previous transcript's offset was. The pin effect below fills the
-            // real value in; until then the window is derived from the estimated
-            // total so it never blanks.
+            // previous transcript's offset was. The mount pass fills the real
+            // value in before the transcript is shown.
             followBottom = null;
+            // Following is the reader asking for the bottom again, which ends
+            // any restored position they had been parked on.
+            openingRestore = false;
         } else {
             followBottom = null;
-            // The reader scrolled away mid-landing: they are reading, so stop
-            // holding the transcript back and let them read it.
-            if (landing) finishLanding();
         }
     });
 
+    /**
+     * Position a transcript that has just opened.
+     *
+     * Opening a chat is a fresh read, not a resumption: the reader should see
+     * the newest messages. The one exception is a reader who had deliberately
+     * scrolled up out of auto-scroll when they left — that position is theirs,
+     * so it is restored instead of being pulled to the bottom.
+     *
+     * The write is unconditional and instant (no `scrollTo` animation): the
+     * landing must be part of the first paint, not a visible scroll downwards.
+     */
+    function landOnOpen(id: string): void {
+        const restored = savedScrollState(id);
+        // A parked position is only worth restoring when it is genuinely above
+        // the bottom. A saved offset sitting at the bottom with follow off left
+        // the chat looking anchored while nothing followed the agent, so the
+        // first thing that grew (the reader's own next message) arrived to a
+        // frozen view and then moved it by hand. Treat that state as following.
+        const bottomOffset = Math.max(0, totalHeight - clientHeight);
+        const parked = !!restored && !restored.follow && restored.scrollTop < bottomOffset - 8;
+        onRestoreState?.({ follow: !parked });
+        // Arm even when the container has not bound yet: the fallback still
+        // releases the caller's cover instead of stranding the spinner.
+        armLanding();
+        if (!containerEl) return;
+        openingRestore = parked;
+        if (parked) {
+            // The browser clamps this to the transcript's real extent.
+            containerEl.scrollTop = restored!.scrollTop;
+        } else {
+            pinToBottomNow();
+        }
+        scrollTop = containerEl.scrollTop;
+        rememberViewportAnchor();
+    }
+
     // Opening a different chat is a different transcript, not a content change.
     // Row ids can collide across chats, so measurements are filed per
-    // transcript and only the new one's are loaded — which is also what makes
-    // a chat the reader has already opened land on its real bottom instead of
-    // being re-derived from estimates and walked there.
+    // transcript and only the new one's are loaded.
     let lastResetKey: string | number | undefined = untrack(() => resetKey);
     $effect(() => {
         const key = resetKey;
         if (key === lastResetKey) return;
+        if (containerEl) rememberScrollState(transcriptId, containerEl.scrollTop, follow);
         lastResetKey = key;
         const nextId = transcriptKey(key);
         if (nextId !== transcriptId) {
+            pendingRowSizes.clear();
             rememberTranscript(transcriptId, heightCache);
             transcriptId = nextId;
             seedHeights(nextId);
         }
         untrack(() => {
             followBottom = null;
-            scrollTop = 0;
             expandAnchors.clear();
             anchoredTop = null;
-            beginLanding();
+            // A new transcript needs a new landing report; the old anchor id
+            // belongs to rows that may not exist here.
+            landingComplete = false;
+            viewportAnchor = null;
+            landOnOpen(nextId);
         });
     });
 
-    // Mounting *is* an open: a freshly mounted transcript starts at the top of
-    // its content, because the scroll container's scrollTop is still 0. The
-    // bottom pin normally runs inside a rAF, which the browser executes after
-    // it has already painted that frame — so the reader saw the start of their
-    // own conversation flash past before the pin dragged the view down to the
-    // end. Landing the offset here, in the same tick the rows are written,
-    // puts the last message in the very first painted frame.
+    // Mounting is an open. Set the initial position once before the transcript
+    // is revealed; later row measurements must not move the reader through the
+    // restored chat.
     let mounted = false;
     $effect(() => {
         if (mounted) return;
@@ -152,9 +313,26 @@
             // for this frame is derived from it, and the 800px placeholder
             // would put the wrong rows on screen for the first paint.
             if (containerEl) clientHeight = containerEl.clientHeight;
-            beginLanding();
-            pinToBottomNow();
+            landOnOpen(transcriptId);
         });
+    });
+
+    // While the reader is following, the bottom is the invariant.
+    //
+    // Rows are laid out from estimates first and measured afterwards, so an
+    // opened chat grows under the viewport across several measurement batches.
+    // Correcting the offset in the same flush that publishes the new layout —
+    // instead of waiting for the resulting scroll event — is what turns the
+    // landing into a single instant position rather than a crawl of jumps
+    // downwards as each batch of rows settles.
+    //
+    // This stays inert when the reader is parked mid-transcript (follow off),
+    // where the compensation effect below owns the offset instead.
+    $effect(() => {
+        void totalHeight;
+        void clientHeight;
+        if (openingRestore || !follow || !containerEl) return;
+        untrack(() => pinToBottomNow());
     });
     
     // Keep what this transcript taught us about its rows when the view goes
@@ -164,7 +342,16 @@
         rowObserver?.disconnect();
         rowObserver = null;
         rowResizeHandlers.clear();
+        pendingRowSizes.clear();
+        pendingClientHeight = null;
+        if (measurementFrame !== null) cancelAnimationFrame(measurementFrame);
+        measurementFrame = null;
+        if (landingRaf !== null) cancelAnimationFrame(landingRaf);
+        landingRaf = null;
+        if (landingTimer !== undefined) clearTimeout(landingTimer);
+        landingTimer = undefined;
         rememberTranscript(transcriptId, heightCache);
+        if (containerEl) rememberScrollState(transcriptId, containerEl.scrollTop, follow);
     });
 
     // Computed layout: where every row sits and how tall the transcript is.
@@ -174,7 +361,7 @@
     // per changed row, on every frame of a scroll.
     let layout = $derived.by(() => {
         void heightsVersion;
-        const rows: { id: string; top: number; height: number }[] = [];
+        const rows: { id: string; item: T; index: number; top: number; height: number }[] = [];
         const indexById = new Map<string, number>();
         const itemById = new Map<string, T>();
         let top = 0;
@@ -184,7 +371,7 @@
             const height = heightCache.get(item.id) ?? estimateHeight(item);
             indexById.set(item.id, i);
             itemById.set(item.id, item);
-            rows.push({ id: item.id, top, height });
+            rows.push({ id: item.id, item, index: i, top, height });
             top += height;
         }
 
@@ -195,6 +382,27 @@
     let indexById = $derived(layout.indexById);
     let itemById = $derived(layout.itemById);
     let totalHeight = $derived(layout.totalHeight);
+
+    // A new `items` array is a new layout: an older page prepended, a reload
+    // merging tool rows, or a live entry arriving. Put the row the reader was
+    // looking at back at the same screen position when they are parked, and
+    // tell the landing loop the layout moved so it waits for the new rows to
+    // measure before reporting the open as complete.
+    $effect(() => {
+        const list = items;
+        void list;
+        layoutRevision++;
+        untrack(() => {
+            if (!viewportAnchor || !containerEl || follow || openingRestore) return;
+            const index = indexById.get(viewportAnchor.id);
+            const position = index === undefined ? undefined : positions[index];
+            if (!position) return;
+            const target = position.top + viewportAnchor.offset;
+            if (Math.abs(target - containerEl.scrollTop) <= 1) return;
+            containerEl.scrollTop = target;
+            scrollTop = containerEl.scrollTop;
+        });
+    });
 
     // Height of the element that holds the rendered rows.
     //
@@ -268,22 +476,24 @@
     let visibleItems = $derived.by(() => {
         if (visibleRange.end < visibleRange.start) return [];
         
-        return items.slice(visibleRange.start, visibleRange.end + 1).map((item, i) => ({
-            item,
-            index: visibleRange.start + i,
-            position: positions[visibleRange.start + i]
-        }));
+        // Reuse the layout records while scrolling over measured rows. Fresh
+        // wrappers here invalidate every retained keyed row on every scroll,
+        // even though its item, transcript index and position are unchanged.
+        return positions.slice(visibleRange.start, visibleRange.end + 1);
     });
     
     // Handle scroll
     function handleScroll(e: Event) {
         if (!containerEl) return;
         scrollTop = containerEl.scrollTop;
+        // Save positions at transcript switches and on unmount; avoid mutating
+        // the shared position cache on every synthetic scroll event.
         // While following, the rendered window must track the offset the
         // container is actually at — including a reader drag that has not
         // disengaged follow yet — otherwise the window and the scrollbar
         // disagree and the transcript visibly jumps.
         if (follow) followBottom = scrollTop;
+        rememberViewportAnchor();
 
         // A pending expansion only keeps absorbing growth while the reader
         // stays where they were. Landing anywhere else is their own scroll.
@@ -296,21 +506,13 @@
         const { scrollHeight } = containerEl;
         const dist = scrollHeight - scrollTop - clientHeight;
         onScroll?.(dist);
+        if (scrollTop < 200) onScrollNearTop?.();
         if (dist < 200 && onScrollNearBottom) {
             onScrollNearBottom();
         }
     }
 
-    // ─── Landing on the bottom of a freshly opened transcript ──────────────
-
-    /** Move the container to the bottom and remember the offset we reached.
-     *  Synchronous: the caller decides when the write has to land, because
-     *  a write inside a rAF is applied after the browser has already painted
-     *  the frame it was scheduled from.
-     *
-     *  `totalHeight` is the real maximum scrollTop, because the element holding
-     *  the rendered rows is sized to it. Nothing here has to consult the DOM's
-     *  scrollHeight as a second opinion. */
+    /** Move the container to the bottom and remember the offset we reached. */
     function pinToBottomNow() {
         if (!containerEl) return;
         if (Math.abs(containerEl.scrollTop + containerEl.clientHeight - totalHeight) > 1) {
@@ -322,81 +524,6 @@
         followBottom = containerEl.scrollTop;
     }
 
-    function isAtBottom(): boolean {
-        if (!containerEl) return true;
-        return containerEl.scrollHeight - containerEl.scrollTop - containerEl.clientHeight <= 1;
-    }
-
-    /** A transcript just opened: hold the view back until its real bottom is
-     *  known, so the reader never watches it walk there. */
-    function beginLanding() {
-        if (!follow) return;
-        landing = true;
-        landingFrames = LANDING_FRAMES;
-    }
-
-    function finishLanding() {
-        landing = false;
-        landingFrames = 0;
-    }
-    
-    // Authoritative bottom-pin for virtualization. `totalHeight` is the
-    // transcript's real height and updates as real heights are measured, and
-    // the rendered rows live in an element sized to exactly that, so it is also
-    // the real scroll extent — there is no gap between "where the transcript
-    // ends" and "where the container stops scrolling". Only pins while `follow`
-    // is on (the reader has not scrolled up), so it can never fight them.
-    $effect(() => {
-        // Track the signals that move the bottom.
-        void totalHeight;
-        void items.length;
-        void clientHeight;
-        if (!follow || !containerEl) return;
-        // rAF: let padding/layout settle this frame, then pin.
-        requestAnimationFrame(landingLoop);
-
-        // While a landing is in progress, keep re-pinning on consecutive
-        // frames. Every frame measures another screenful of rows, which moves
-        // the true bottom further down, so a single pin leaves the reader
-        // short of it and the view walks the rest of the way. The loop stops
-        // as soon as a pin actually reaches the bottom, or when its frame
-        // budget runs out.
-        function landingLoop() {
-            if (!follow || !containerEl) {
-                if (landing) finishLanding();
-                return;
-            }
-            pinToBottomNow();
-            if (!landing) return;
-            if (isAtBottom() || --landingFrames <= 0) finishLanding();
-            else requestAnimationFrame(landingLoop);
-        }
-    });
-
-    // A gesture on the transcript during a landing means the reader got there
-    // first and is already scrolling it. Reveal it rather than holding back a
-    // viewport they are trying to move through.
-    onMount(() => {
-        if (!containerEl) return;
-        const endLanding = () => {
-            if (landing) finishLanding();
-        };
-        containerEl.addEventListener('wheel', endLanding, { passive: true });
-        containerEl.addEventListener('pointerdown', endLanding, { passive: true });
-        containerEl.addEventListener('touchstart', endLanding, { passive: true });
-        return () => {
-            containerEl?.removeEventListener('wheel', endLanding);
-            containerEl?.removeEventListener('pointerdown', endLanding);
-            containerEl?.removeEventListener('touchstart', endLanding);
-        };
-    });
-
-    // Tell the parent when the transcript is being held back, so it can keep
-    // it out of sight until it is showing the last message for real.
-    $effect(() => {
-        onLandingChange?.(landing);
-    });
-
     // One ResizeObserver for the whole list's rows, rather than one per row.
     // Rows mount and unmount continuously while a transcript is scrolled, and
     // allocating, observing and disconnecting an observer per row was work on
@@ -404,12 +531,35 @@
     // row that produced them.
     let rowObserver: ResizeObserver | null = null;
     const rowResizeHandlers = new Map<Element, (entries: ResizeObserverEntry[]) => void>();
+    const pendingRowSizes = new Map<Element, ResizeObserverEntry>();
+    let pendingClientHeight: number | null = null;
+    let measurementFrame: number | null = null;
+
+    // Resize delivery must only collect measurements. Publishing a reactive
+    // height here re-renders the row window (and adjusts scrollTop) before the
+    // browser finishes delivering sizes, producing an undelivered-notifications
+    // loop in WebKit and Chromium. Commit the latest sizes together next frame;
+    // the compensation effect still runs after the new extent is in the DOM.
+    function scheduleMeasurements() {
+        if (measurementFrame !== null) return;
+        measurementFrame = requestAnimationFrame(() => {
+            measurementFrame = null;
+            const entries = [...pendingRowSizes.values()];
+            pendingRowSizes.clear();
+            const viewportHeight = pendingClientHeight;
+            pendingClientHeight = null;
+            for (const entry of entries) rowResizeHandlers.get(entry.target)?.([entry]);
+            if (viewportHeight !== null) clientHeight = viewportHeight;
+            if (pendingDeltas.length > 0) heightsVersion++;
+        });
+    }
 
     function observeRowSize(element: Element, handler: (entries: ResizeObserverEntry[]) => void) {
         rowResizeHandlers.set(element, handler);
         if (!rowObserver) {
             rowObserver = new ResizeObserver((entries) => {
-                for (const entry of entries) rowResizeHandlers.get(entry.target)?.([entry]);
+                for (const entry of entries) pendingRowSizes.set(entry.target, entry);
+                scheduleMeasurements();
             });
         }
         rowObserver.observe(element);
@@ -417,6 +567,7 @@
 
     function unobserveRowSize(element: Element) {
         rowResizeHandlers.delete(element);
+        pendingRowSizes.delete(element);
         rowObserver?.unobserve(element);
     }
 
@@ -426,7 +577,7 @@
 
     // Measure item heights after render.
     //
-    // The observer only records what changed. Deciding what to do about it —
+    // The measurement frame records what changed. Deciding what to do about it —
     // moving the scroll offset to keep the reader's content where it is — is
     // the effect below, and the split is load-bearing: a `scrollTop` write
     // lands in the same frame as the height change it is compensating for, and
@@ -438,15 +589,14 @@
         let currentId = id;
         const onResize = (entries: ResizeObserverEntry[]) => {
             for (const entry of entries) {
-                const height = entry.borderBoxSize[0]?.blockSize ?? entry.contentRect.height;
+                const height = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
                 if (height <= 0) continue;
                 const item = itemById.get(currentId);
                 const previous = heightCache.get(currentId) ?? (item ? estimateHeight(item) : height);
-                if (previous === height) continue;
+                if (previous === height && heightCache.has(currentId)) continue;
                 heightCache.set(currentId, height);
                 pendingDeltas.push({ id: currentId, amount: height - previous });
             }
-            if (pendingDeltas.length > 0) heightsVersion++;
         };
         observeRowSize(element, onResize);
         // The reader expanding a control inside this row: remember it so the
@@ -540,12 +690,16 @@
         
         const ro = new ResizeObserver((entries) => {
             for (const entry of entries) {
-                clientHeight = entry.contentRect.height;
+                pendingClientHeight = entry.contentRect.height;
             }
+            scheduleMeasurements();
         });
         ro.observe(containerEl);
         
-        return () => ro.disconnect();
+        return () => {
+            ro.disconnect();
+            pendingClientHeight = null;
+        };
     });
     
     // Expose methods
@@ -553,7 +707,7 @@
         return containerEl;
     }
 
-    export function scrollToBottom(behavior: ScrollBehavior = 'smooth') {
+    export function scrollToBottom(behavior: ScrollBehavior = 'instant') {
         if (containerEl) {
             containerEl.scrollTo({ top: containerEl.scrollHeight, behavior });
         }
@@ -572,19 +726,16 @@
 
 <script module lang="ts">
     // Measured row heights, kept per transcript and shared across every mount
-    // of the list.
-    //
-    // Why: a chat opened for the first time can only be laid out from row
-    // *estimates*, so where its bottom really is stays unknown until rows have
-    // been measured. The window opens at the estimated bottom and walks down
-    // the transcript as real heights come back — the "opens at the top and
-    // autoscrolls to the bottom" behaviour. Reusing the measurements means the
-    // second and later opens of a chat are laid out from what is already known
-    // and land on the bottom in the frame they are painted.
+    // of the list. Reusing measurements lets a reopened chat render its saved
+    // position without repeatedly moving the scroll offset as rows settle.
     const measuredHeights = new Map<string, Map<string, number>>();
     // Transcripts kept in the cache, so a window that walks through hundreds
     // of chats cannot grow it without limit.
     const MEASURED_TRANSCRIPTS = 12;
+    // Reader position follows the same bounded lifetime as measured heights.
+    // Keeping it at module scope lets a chat restore its position after the
+    // VirtualList unmounts during a session switch.
+    const scrollStates = new Map<string, { scrollTop: number; follow: boolean }>();
 
     function transcriptKey(key: string | number | undefined): string {
         return key === undefined ? '' : String(key);
@@ -595,7 +746,7 @@
         // Re-inserting moves the transcript to the end, so eviction drops the
         // least recently opened one rather than an arbitrary one.
         measuredHeights.delete(id);
-        measuredHeights.set(id, heights);
+        measuredHeights.set(id, new Map(heights));
         while (measuredHeights.size > MEASURED_TRANSCRIPTS) {
             const oldest = measuredHeights.keys().next();
             if (oldest.done) break;
@@ -604,7 +755,7 @@
     }
 </script>
 
-<div 
+<div
     bind:this={containerEl}
     class="virtual-list {className}"
     onscroll={handleScroll}
@@ -613,23 +764,31 @@
         class="virtual-list-content"
         style="height: {contentHeight}px;"
     >
-        {#each visibleItems as { item, index, position } (item.id)}
-            <div 
-                class="virtual-list-item"
-                style="position: absolute; top: {position?.top ?? 0}px; left: 0; right: 0;"
-                use:measureItem={item.id}
-            >
-                {@render row?.(item, index)}
-            </div>
-        {/each}
+        <!-- Only the rendered window is positioned. Its rows stay in normal
+             flow, so an animated row's neighbors move with it in the same
+             layout pass, rather than overlapping until ResizeObserver's next
+             measurement frame updates a separate absolute top for each row. -->
+        <div class="virtual-list-window" style="top: {visibleItems[0]?.top ?? 0}px;">
+            {#each visibleItems as { item, index } (item.id)}
+                <div class="virtual-list-item" use:measureItem={item.id}>
+                    {@render row?.(item, index)}
+                </div>
+            {/each}
+        </div>
     </div>
 </div>
 
 <style>
     .virtual-list {
         height: 100%;
+        overflow-x: hidden;
         overflow-y: auto;
         position: relative;
+        /* Native overlay scrollbars must stay in the transcript's base layer,
+           including while scrolling/hovering promotes them in the compositor. */
+        z-index: 0;
+        isolation: isolate;
+        contain: paint;
         overflow-anchor: none;
     }
     
@@ -638,9 +797,13 @@
         min-height: 100%;
     }
     
-    .virtual-list-item {
+    .virtual-list-window {
         position: absolute;
         left: 0;
         right: 0;
+    }
+    .virtual-list-item {
+        display: flow-root;
+        min-width: 0;
     }
 </style>

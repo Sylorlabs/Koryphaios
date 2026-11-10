@@ -60,7 +60,6 @@ const providers = [
   'mistralai',
   'claude',
   'codex',
-  'jules',
   'hoplite',
   'mistral',
   'cohere',
@@ -175,23 +174,6 @@ async function run() {
     }
 
     let svg = '';
-    if (p === 'jules') {
-      try {
-        const res = await fetch(
-          'https://raw.githubusercontent.com/homarr-labs/dashboard-icons/main/svg/google-jules.svg',
-        );
-        if (res.ok) {
-          svg = await res.text();
-          await fs.writeFile(targetPath, svg);
-          await fs.writeFile(path.join(OUT_DIR, 'jules-color.svg'), svg);
-          console.log(`Downloaded icon for ${p}`);
-          continue;
-        }
-      } catch {
-        /* fall through to placeholder */
-      }
-    }
-
     if (p === 'hoplite') {
       try {
         const res = await fetch('https://app.hoplite.sh/branding/mark-compact.svg');

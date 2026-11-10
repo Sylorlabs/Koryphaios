@@ -29,25 +29,34 @@
       case 'none':
         return 0;
       case 'minimal':
-      case 'low': return 1;
+      case 'low':
+        return 1;
       case 'default':
-      case 'medium': return 2;
-      case 'high': return 3;
-      case 'xhigh': return 4;
-      case 'max': return 4;
-      default: return 2;
+      case 'medium':
+        return 2;
+      case 'high':
+        return 3;
+      case 'xhigh':
+        return 4;
+      case 'max':
+        return 4;
+      default:
+        return 2;
     }
   }
 
   let normalized = $derived(String(reasoningLevel).toLowerCase().trim());
   let tier = $derived(getTier(normalized));
-  let isXHigh = $derived(tier === 4);
+  let isXHigh = $derived(normalized === 'xhigh');
+  // The CodeBuddy CLI's internal top tier (and any provider that surfaces
+  // 'ultra') gets its own glyph: a brain shaped into a ring with a purple
+  // four-point star at its center.
+  let isUltracode = $derived(normalized === 'ultracode' || normalized === 'ultra');
+  let isMax = $derived(normalized === 'max');
   let isAuto = $derived(normalized === 'adaptive' || normalized === 'auto');
-  let Icon = $derived(
-    tier >= 3 ? BrainCircuit :
-    tier === 2 ? BrainCog :
-    Brain
-  );
+  let isMedium = $derived(normalized === 'default' || normalized === 'medium');
+  let isHigh = $derived(normalized === 'high');
+  let Icon = $derived(tier >= 3 ? BrainCircuit : tier === 2 ? BrainCog : Brain);
   let opacity = $derived(tier === 0 ? 0.45 : 1);
 </script>
 
@@ -56,10 +65,107 @@
   style={`--icon-size: ${size}px; opacity: ${opacity};`}
   aria-hidden="true"
 >
-  {#if isXHigh}
-    <!-- xhigh: standalone filled glyph from a separate icon family -->
-    <svg class="xhigh-glyph" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M21.33,12.91C21.42,14.46 20.71,15.95 19.44,16.86L20.21,18.35C20.44,18.8 20.47,19.33 20.27,19.8C20.08,20.27 19.69,20.64 19.21,20.8L18.42,21.05C18.25,21.11 18.06,21.14 17.88,21.14C17.37,21.14 16.89,20.91 16.56,20.5L14.44,18C13.55,17.85 12.71,17.47 12,16.9C11.5,17.05 11,17.13 10.5,17.13C9.62,17.13 8.74,16.86 8,16.34C7.47,16.5 6.93,16.57 6.38,16.56C5.59,16.57 4.81,16.41 4.08,16.11C2.65,15.47 1.7,14.07 1.65,12.5C1.57,11.78 1.69,11.05 2,10.39C1.71,9.64 1.68,8.82 1.93,8.06C2.3,7.11 3,6.32 3.87,5.82C4.45,4.13 6.08,3 7.87,3.12C9.47,1.62 11.92,1.46 13.7,2.75C14.12,2.64 14.56,2.58 15,2.58C16.36,2.55 17.65,3.15 18.5,4.22C20.54,4.75 22,6.57 22.08,8.69C22.13,9.8 21.83,10.89 21.22,11.82C21.29,12.18 21.33,12.54 21.33,12.91M16.33,11.5C16.9,11.57 17.35,12 17.35,12.57A1,1 0 0,1 16.35,13.57H15.72C15.4,14.47 14.84,15.26 14.1,15.86C14.35,15.95 14.61,16 14.87,16.07C20,16 19.4,12.87 19.4,12.82C19.34,11.39 18.14,10.27 16.71,10.33A1,1 0 0,1 15.71,9.33A1,1 0 0,1 16.71,8.33C17.94,8.36 19.12,8.82 20.04,9.63C20.09,9.34 20.12,9.04 20.12,8.74C20.06,7.5 19.5,6.42 17.25,6.21C16,3.25 12.85,4.89 12.85,5.81V5.81C12.82,6.04 13.06,6.53 13.1,6.56A1,1 0 0,1 14.1,7.56C14.1,8.11 13.65,8.56 13.1,8.56V8.56C12.57,8.54 12.07,8.34 11.67,8C11.19,8.31 10.64,8.5 10.07,8.56V8.56C9.5,8.61 9.03,8.21 9,7.66C8.92,7.1 9.33,6.61 9.88,6.56C10.04,6.54 10.82,6.42 10.82,5.79V5.79C10.82,5.13 11.07,4.5 11.5,4C10.58,3.75 9.59,4.08 8.59,5.29C6.75,5 6,5.25 5.45,7.2C4.5,7.67 4,8 3.78,9C4.86,8.78 5.97,8.87 7,9.25C7.5,9.44 7.78,10 7.59,10.54C7.4,11.06 6.82,11.32 6.3,11.13C5.57,10.81 4.75,10.79 4,11.07C3.68,11.34 3.68,11.9 3.68,12.34C3.68,13.08 4.05,13.77 4.68,14.17C5.21,14.44 5.8,14.58 6.39,14.57C6.24,14.31 6.11,14.04 6,13.76C5.81,13.22 6.1,12.63 6.64,12.44C7.18,12.25 7.77,12.54 7.96,13.08C8.36,14.22 9.38,15 10.58,15.13C11.95,15.06 13.17,14.25 13.77,13C14,11.62 15.11,11.5 16.33,11.5M18.33,18.97L17.71,17.67L17,17.83L18,19.08L18.33,18.97M13.68,10.36C13.7,9.83 13.3,9.38 12.77,9.33C12.06,9.29 11.37,9.53 10.84,10C10.27,10.58 9.97,11.38 10,12.19A1,1 0 0,0 11,13.19C11.57,13.19 12,12.74 12,12.19C12,11.92 12.07,11.65 12.23,11.43C12.35,11.33 12.5,11.28 12.66,11.28C13.21,11.31 13.68,10.9 13.68,10.36Z" />
+  {#if isUltracode}
+    <!-- Brain formed into a ring with a purple 4-point star center. -->
+    <svg
+      class="tier-glyph ultracode-glyph"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <g stroke-width="1.8">
+        <!-- Ring: the brain folding into a closed circle -->
+        <path d="M19.967 17.483A4 4 0 1 1 12 18a4 4 0 1 1-7.967-.517" />
+        <path d="M6 18a4 4 0 0 1-2-7.464" />
+        <path d="M18 18a4 4 0 0 0 2-7.464" />
+        <path d="M6.003 5.125a4 4 0 0 0-2.526 5.77" />
+        <path d="M17.997 5.125a4 4 0 0 1 2.526 5.77" />
+        <path d="M17.598 6.5A3 3 0 1 0 12 5a3 3 0 1 0-5.598 1.5" />
+      </g>
+      <g stroke-width="1.4">
+        <!-- purple 4-point star center -->
+        <path
+          d="M12 8.6c.5 1.9 1.5 2.9 3.4 3.4-1.9.5-2.9 1.5-3.4 3.4-.5-1.9-1.5-2.9-3.4-3.4 1.9-.5 2.9-1.5 3.4-3.4z"
+          fill="var(--color-accent, #a855f7)"
+          stroke="var(--color-accent, #a855f7)"
+        />
+      </g>
+    </svg>
+  {/if}
+  {#if isMax}
+    <!-- Max uses the former High brain-circuit icon. -->
+    <BrainCircuit {size} strokeWidth={1.9} />
+  {:else if isXHigh}
+    <!-- Xhigh uses the former Medium brain-cog icon. -->
+    <BrainCog {size} strokeWidth={1.9} />
+  {:else if isMedium}
+    <!-- Medium uses the denser former Max brain. -->
+    <svg
+      class="tier-glyph medium-glyph"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <g stroke-width="1.8">
+        <path d="M12 18V5" />
+        <path d="M15 13a4.17 4.17 0 0 1-3-4 4.17 4.17 0 0 1-3 4" />
+        <path d="M17.598 6.5A3 3 0 1 0 12 5a3 3 0 1 0-5.598 1.5" />
+        <path d="M17.997 5.125a4 4 0 0 1 2.526 5.77" />
+        <path d="M18 18a4 4 0 0 0 2-7.464" />
+        <path d="M19.967 17.483A4 4 0 1 1 12 18a4 4 0 1 1-7.967-.517" />
+        <path d="M6 18a4 4 0 0 1-2-7.464" />
+        <path d="M6.003 5.125a4 4 0 0 0-2.526 5.77" />
+      </g>
+      <g stroke-width="1.1">
+        <path d="M5.1 8.1c.8-.45 1.65-.25 2.05.4.4.65 1.1.85 1.7.5" />
+        <path d="M18.9 8.1c-.8-.45-1.65-.25-2.05.4-.4.65-1.1.85-1.7.5" />
+        <path d="M5 13.2c.8-.45 1.65-.25 2.05.4.4.65 1.1.85 1.7.5" />
+        <path d="M19 13.2c-.8-.45-1.65-.25-2.05.4-.4.65-1.1.85-1.7.5" />
+      </g>
+    </svg>
+  {:else if isHigh}
+    <!-- High uses the lighter former Xhigh brain. -->
+    <svg
+      class="tier-glyph high-glyph"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <g stroke-width="1.8">
+        <path d="M12 18V5" />
+        <path d="M15 13a4.17 4.17 0 0 1-3-4 4.17 4.17 0 0 1-3 4" />
+        <path d="M17.598 6.5A3 3 0 1 0 12 5a3 3 0 1 0-5.598 1.5" />
+        <path d="M17.997 5.125a4 4 0 0 1 2.526 5.77" />
+        <path d="M18 18a4 4 0 0 0 2-7.464" />
+        <path d="M19.967 17.483A4 4 0 1 1 12 18a4 4 0 1 1-7.967-.517" />
+        <path d="M6 18a4 4 0 0 1-2-7.464" />
+        <path d="M6.003 5.125a4 4 0 0 0-2.526 5.77" />
+      </g>
+      <g stroke-width="1.05">
+        <path d="M5.1 8.1c.8-.45 1.65-.25 2.05.4.4.65 1.1.85 1.7.5" />
+        <path d="M18.9 8.1c-.8-.45-1.65-.25-2.05.4-.4.65-1.1.85-1.7.5" />
+        <path d="M5 11c.75-.4 1.5-.15 1.9.45.4.6 1.05.75 1.6.35" />
+        <path d="M19 11c-.75-.4-1.5-.15-1.9.45-.4.6-1.05.75-1.6.35" />
+        <path d="M5 13.9c.8-.45 1.65-.25 2.05.4.4.65 1.1.85 1.7.5" />
+        <path d="M19 13.9c-.8-.45-1.65-.25-2.05.4-.4.65-1.1.85-1.7.5" />
+        <path d="M7.1 16.15c.75-.35 1.45-.1 1.8.55" />
+        <path d="M16.9 16.15c-.75-.35-1.45-.1-1.8.55" />
+      </g>
     </svg>
   {:else if isAuto}
     <div class="auto-icon-wrapper">
@@ -69,7 +175,7 @@
       </svg>
     </div>
   {:else}
-    <Icon size={size} strokeWidth={1.9} />
+    <Icon {size} strokeWidth={1.9} />
   {/if}
 </span>
 
@@ -102,15 +208,17 @@
     opacity: 0.8;
   }
 
-  @keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+  .tier-glyph {
+    display: block;
+    flex: 0 0 auto;
   }
 
-  .xhigh-glyph {
-    width: 100%;
-    height: 100%;
-    fill: currentColor;
-    display: block;
+  @keyframes spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
   }
 </style>

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatGitState, ChatPullRequest } from '@koryphaios/shared';
 const mocks = vi.hoisted(() => ({
   request: vi.fn(),
@@ -92,6 +92,9 @@ beforeEach(() => {
     return Response.json({ ok: true, data: snapshot });
   });
 });
+afterEach(() => {
+  vi.useRealTimers();
+});
 async function open(tab = 'Branches') {
   await fireEvent.click(await screen.findByRole('button', { name: /^chat-main/ }));
   if (tab !== 'Changes') await fireEvent.click(screen.getByRole('tab', { name: tab }));
@@ -108,6 +111,29 @@ function switchCalls() {
 }
 
 describe('per-chat Git workspace controls', () => {
+  it('distinguishes a healthy non-repository folder from an unavailable Git read', async () => {
+    mocks.request.mockImplementation(async (url: string) =>
+      Response.json({
+        ok: true,
+        data:
+          url === '/api/git/status'
+            ? { isRepo: false, status: [], ahead: 0, behind: 0, remote: null }
+            : {
+                ...snapshot,
+                isRepo: false,
+                branch: null,
+                head: null,
+                refs: [],
+                commits: [],
+                sourceRefs: [],
+                sourceCommits: [],
+              },
+      }),
+    );
+    render(GitWorkspaceControl, { sessionId: 'chat-a' });
+    expect(await screen.findByRole('button', { name: /Not a Git repository/ })).toBeVisible();
+  });
+
   it('switches the same chat and pins its session header and current HEAD', async () => {
     const { container } = render(GitWorkspaceControl, { sessionId: 'chat-a' });
     await open();
@@ -269,6 +295,116 @@ describe('per-chat Git workspace controls', () => {
     for (const [, init] of writes) expect(init.headers['X-Koryphaios-Session']).toBe('chat-a');
   });
 
+  it('delays file-row hover by 100ms and transfers it cleanly to the next row', async () => {
+    const original = mocks.request.getMockImplementation()!;
+    mocks.request.mockImplementation(async (url: string, init: RequestInit) =>
+      url === '/api/git/status'
+        ? Response.json({
+            ok: true,
+            data: {
+              isRepo: true,
+              status: [
+                { path: 'src/one.ts', status: 'modified', staged: false },
+                { path: 'src/two.ts', status: 'modified', staged: false },
+              ],
+            },
+          })
+        : original(url, init),
+    );
+    vi.useFakeTimers();
+    render(GitWorkspaceControl, { sessionId: 'chat-a' });
+    await open('Changes');
+
+    const first = screen
+      .getByRole('button', { name: 'View diff for src/one.ts' })
+      .closest('.file-row')!;
+    const second = screen
+      .getByRole('button', { name: 'View diff for src/two.ts' })
+      .closest('.file-row')!;
+
+    await fireEvent.pointerEnter(first);
+    await vi.advanceTimersByTimeAsync(99);
+    expect(first).not.toHaveClass('file-row-hovered');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(first).toHaveClass('file-row-hovered');
+
+    await fireEvent.pointerLeave(first);
+    await fireEvent.pointerEnter(second);
+    expect(first).not.toHaveClass('file-row-hovered');
+    expect(second).not.toHaveClass('file-row-hovered');
+    await vi.advanceTimersByTimeAsync(99);
+    expect(second).not.toHaveClass('file-row-hovered');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(second).toHaveClass('file-row-hovered');
+  });
+
+  it('keeps hover state and path hints inside the tray while the list scrolls', async () => {
+    const original = mocks.request.getMockImplementation()!;
+    mocks.request.mockImplementation(async (url: string, init: RequestInit) =>
+      url === '/api/git/status'
+        ? Response.json({
+            ok: true,
+            data: {
+              isRepo: true,
+              status: [
+                { path: 'src/one.ts', status: 'modified', staged: false },
+                { path: 'src/two.ts', status: 'modified', staged: false },
+              ],
+            },
+          })
+        : original(url, init),
+    );
+    vi.useFakeTimers();
+    render(GitWorkspaceControl, { sessionId: 'chat-a' });
+    await open('Changes');
+
+    const row = screen
+      .getByRole('button', { name: 'View diff for src/one.ts' })
+      .closest('.file-row')!;
+    // The full path is drawn inside the row (clipped by the list), never as a
+    // native tooltip at the cursor, which is what floated outside the panel.
+    expect(screen.getByRole('button', { name: 'View diff for src/one.ts' })).not.toHaveAttribute(
+      'title',
+    );
+    expect(row.querySelector('.file-path-hint')?.textContent).toContain('src/one.ts');
+
+    await fireEvent.pointerEnter(row);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(row).toHaveClass('file-row-hovered');
+
+    // Rows move under a stationary pointer while scrolling, so the armed
+    // highlight no longer describes what the reader is pointing at.
+    await fireEvent.scroll(row.closest('.file-list')!);
+    expect(row).not.toHaveClass('file-row-hovered');
+  });
+
+  it('cancels a pending row hover when the pointer leaves before the delay', async () => {
+    const original = mocks.request.getMockImplementation()!;
+    mocks.request.mockImplementation(async (url: string, init: RequestInit) =>
+      url === '/api/git/status'
+        ? Response.json({
+            ok: true,
+            data: {
+              isRepo: true,
+              status: [{ path: 'src/one.ts', status: 'modified', staged: false }],
+            },
+          })
+        : original(url, init),
+    );
+    vi.useFakeTimers();
+    render(GitWorkspaceControl, { sessionId: 'chat-a' });
+    await open('Changes');
+    const row = screen
+      .getByRole('button', { name: 'View diff for src/one.ts' })
+      .closest('.file-row')!;
+
+    await fireEvent.pointerEnter(row);
+    await vi.advanceTimersByTimeAsync(99);
+    await fireEvent.pointerLeave(row);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(row).not.toHaveClass('file-row-hovered');
+  });
+
   it('preserves the commit message and shows the Git error on failure', async () => {
     mocks.request.mockImplementation(async (url: string) => {
       if (url === '/api/git/status')
@@ -413,6 +549,41 @@ describe('per-chat Git workspace controls', () => {
     await open();
     await fireEvent.pointerDown(document.body);
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('keeps the fixed panel inside the viewport when scrolling past its trigger', async () => {
+    const workspaceRect = {
+      top: 700,
+      bottom: 740,
+      left: 780,
+      right: 900,
+      width: 120,
+      height: 40,
+      x: 780,
+      y: 700,
+      toJSON: () => ({}),
+    } as DOMRect;
+    const view = render(GitWorkspaceControl, { sessionId: 'chat-a' });
+    const workspace = screen.getByRole('region', { name: 'Git for this chat' });
+    const rect = vi.spyOn(workspace, 'getBoundingClientRect').mockReturnValue(workspaceRect);
+    await open('Changes');
+
+    const panel = screen.getByRole('dialog', { name: 'Git workspace' });
+    expect(panel.parentElement).toBe(document.body);
+    expect(parseFloat(panel.style.left)).toBeGreaterThanOrEqual(8);
+    expect(parseFloat(panel.style.left) + parseFloat(panel.style.width)).toBeLessThanOrEqual(
+      window.innerWidth - 8,
+    );
+    expect(panel.style.bottom).not.toBe('');
+    expect(parseFloat(panel.style.maxHeight)).toBeLessThanOrEqual(window.innerHeight - 16);
+
+    rect.mockReturnValue({ ...workspaceRect, top: 900, bottom: 940 });
+    window.dispatchEvent(new Event('scroll'));
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect(parseFloat(panel.style.bottom)).toBeGreaterThanOrEqual(8);
+    expect(parseFloat(panel.style.maxHeight)).toBeLessThanOrEqual(window.innerHeight - 16);
+
+    view.unmount();
   });
 
   it('ignores late file status after changing chats', async () => {

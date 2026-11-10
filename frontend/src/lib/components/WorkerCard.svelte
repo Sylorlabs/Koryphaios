@@ -2,6 +2,7 @@
   import type { AgentIdentity, AgentStatus } from '@koryphaios/shared';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
   import X from 'lucide-svelte/icons/x';
+  import { agentStore } from '$lib/stores/agents.svelte';
 
   interface WorkerCardAgent {
     identity: AgentIdentity;
@@ -53,10 +54,15 @@
     if (provider === 'xai') return 'xAI';
     if (provider === 'openrouter') return 'OpenRouter';
     if (provider === 'unorouter') return 'UnoRouter';
+    if (provider === 'tokenharbor') return 'Token Harbor';
+    if (provider === 'logfare') return 'Logfare';
+    if (provider === 'apinex') return 'APInex';
+    if (provider === 'gwarden') return 'Gwarden AI';
+    if (provider === 'respan') return 'Respan';
     if (provider === 'vertexai') return 'Vertex AI';
     if (provider === 'copilot') return 'Copilot';
     if (provider === 'kimicode') return 'Kimi Code';
-    if (provider === 'jules') return 'Jules (cloud)';
+    if (provider === 'opencode') return 'OpenCode';
     return provider.charAt(0).toUpperCase() + provider.slice(1);
   }
 
@@ -74,6 +80,9 @@
   );
 
   let isManager = $derived(agent.identity.role === 'manager');
+  let steeringCount = $derived(agent.sessionId && !isManager
+    ? agentStore.getAgentSteeringQueue(agent.sessionId, agent.identity.id).filter((item) => item.status === 'queued').length
+    : 0);
 
   // The tile is name + status glyph only. The hover card is deliberately
   // short: which provider/model the agent is burning and how much of its
@@ -84,6 +93,7 @@
     [
       `${providerLabel(agent.identity.provider)} ${agent.identity.model}`,
       agent.contextKnown && agent.contextMax > 0 ? `Context ${Math.round(contextPercent)}%` : '',
+      steeringCount > 0 ? `${steeringCount} queued steering message${steeringCount === 1 ? '' : 's'}` : '',
     ]
       .filter(Boolean)
       .join('\n'),
@@ -116,6 +126,7 @@
     <AnimatedStatusIcon {status} size={13} {isManager} isStatic={!isActive} />
   </span>
   <span class="text-[11px] font-medium truncate">{agent.identity.name}</span>
+  {#if steeringCount > 0}<span class="queue-badge" aria-label={`${steeringCount} queued steering messages`}>{steeringCount}</span>{/if}
   <button
     type="button"
     class="shrink-0 rounded p-0.5 transition-colors hover:bg-[var(--color-surface-3)] disabled:cursor-default disabled:opacity-40"
@@ -131,3 +142,7 @@
     <X size={11} />
   </button>
 </div>
+
+<style>
+  .queue-badge { min-width: 15px; height: 15px; display: grid; place-items: center; border-radius: 999px; background: var(--color-accent); color: var(--color-surface-0); font-size: 9px; font-weight: 700; }
+</style>

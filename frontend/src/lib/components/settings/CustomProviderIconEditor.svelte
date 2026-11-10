@@ -54,7 +54,10 @@
   let chooseImageButton = $state<HTMLButtonElement>();
   let sourceImage = $state.raw<HTMLImageElement | null>(null);
   let outputBlob = $state.raw<Blob | null>(null);
-  let sourceObjectUrl = $state('');
+  // A data URL rather than a blob: URL. The desktop shell's CSP allows
+  // `img-src 'self' data: https:` and no `blob:`, so a createObjectURL preview
+  // failed to decode on every image and the picker reported a decode error.
+  let sourceUrl = $state('');
   let selectedShape = $state<CustomProviderIconShape | null>(null);
   let zoomPercent = $state(CUSTOM_PROVIDER_ICON_MIN_ZOOM);
   let panX = $state(0);
@@ -92,7 +95,7 @@
   onDestroy(() => {
     clearScheduledRender();
     renderGeneration += 1;
-    if (sourceObjectUrl) URL.revokeObjectURL(sourceObjectUrl);
+    sourceUrl = '';
   });
 
   onMount(() => {
@@ -131,8 +134,19 @@
     renderGeneration += 1;
     sourceImage = null;
     outputBlob = null;
-    if (sourceObjectUrl) URL.revokeObjectURL(sourceObjectUrl);
-    sourceObjectUrl = '';
+    sourceUrl = '';
+  }
+
+  function readFileAsDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string' && reader.result) resolve(reader.result);
+        else reject(new Error('Image read failed'));
+      };
+      reader.onerror = () => reject(reader.error ?? new Error('Image read failed'));
+      reader.readAsDataURL(file);
+    });
   }
 
   function decodeImage(url: string): Promise<HTMLImageElement> {
@@ -154,21 +168,20 @@
 
     loading = true;
     errorMessage = '';
-    const candidateUrl = URL.createObjectURL(file);
     try {
+      const candidateUrl = await readFileAsDataUrl(file);
       const candidateImage = await decodeImage(candidateUrl);
       const dimensionError = validateCustomProviderIconDimensions(
         candidateImage.naturalWidth,
         candidateImage.naturalHeight,
       );
       if (dimensionError) {
-        URL.revokeObjectURL(candidateUrl);
         reportError(dimensionError);
         return;
       }
 
       cleanupLocalSource();
-      sourceObjectUrl = candidateUrl;
+      sourceUrl = candidateUrl;
       sourceImage = candidateImage;
       removed = false;
       existingImageFailed = false;
@@ -177,7 +190,6 @@
       panY = 0;
       scheduleOutputRender(0);
     } catch {
-      URL.revokeObjectURL(candidateUrl);
       reportError('That image could not be decoded. Choose another PNG, JPEG, or WebP file.');
     } finally {
       loading = false;
@@ -193,6 +205,13 @@
 
   function openFilePicker(): void {
     if (!disabled && !loading) fileInput?.click();
+  }
+
+  function handleViewportClick(): void {
+    // With no source image yet the frame is the picker: the whole empty tile
+    // opens the file dialog instead of only the small button below.
+    if (sourceImage) return;
+    openFilePicker();
   }
 
   function clampPan(nextX = panX, nextY = panY): void {
@@ -377,7 +396,8 @@
         Custom icon
       </h4>
       <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
-        PNG, JPEG, or WebP up to 5 MiB. Koryphaios saves a private 256 × 256 PNG.
+        PNG, JPEG, or WebP. Choose any size — the frame below crops it and Koryphaios saves a
+        private 256 × 256 PNG.
       </p>
     </div>
     {#if hasAnyImage && !loading}
@@ -393,16 +413,17 @@
     <button
       bind:this={cropViewport}
       type="button"
-      disabled={!sourceImage || disabled}
-      aria-label="Reposition custom provider icon"
+      disabled={disabled || loading}
+      aria-label={sourceImage ? 'Reposition custom provider icon' : 'Choose an image for your icon'}
       aria-describedby={`${id}-crop-help`}
       aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown + - Home"
-      class="relative h-[184px] w-[184px] touch-none overflow-hidden border-2 border-[var(--color-border-bright)] bg-[var(--color-surface-3)] p-0 outline-none transition-[border-radius,box-shadow] focus-visible:border-[var(--color-accent)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/45 disabled:opacity-100 {cropRadiusClass} {sourceImage &&
+      class="relative h-[184px] w-[184px] touch-none overflow-hidden border-2 border-[var(--color-border-bright)] bg-[var(--color-surface-3)] p-0 outline-none transition-[border-radius,box-shadow] hover:border-[var(--color-accent)]/60 focus-visible:border-[var(--color-accent)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/45 disabled:opacity-100 {cropRadiusClass} {sourceImage &&
       !disabled
         ? draggingPointerId === null
           ? 'cursor-grab'
           : 'cursor-grabbing'
-        : ''}"
+        : 'cursor-pointer'}"
+      onclick={handleViewportClick}
       onkeydown={handleCropKeydown}
       onpointerdown={handlePointerDown}
       onpointermove={handlePointerMove}
@@ -411,7 +432,7 @@
     >
       {#if sourceImage && cropTransform}
         <img
-          src={sourceObjectUrl}
+          src={sourceUrl}
           alt=""
           draggable="false"
           class="pointer-events-none absolute max-w-none select-none"
@@ -437,7 +458,7 @@
             <span class="text-xs">Preparing image…</span>
           {:else}
             <ImagePlus size={28} />
-            <span class="text-xs leading-relaxed">Choose an image to frame your icon</span>
+            <span class="text-xs leading-relaxed">Click to choose an image to frame your icon</span>
           {/if}
         </div>
       {/if}
@@ -453,7 +474,7 @@
     {:else if hasExistingImage}
       Replace the image to change its crop or zoom.
     {:else}
-      Your image stays local until you save the provider.
+      Click the frame or Choose image. Any size works — it is cropped to 256 × 256 here.
     {/if}
   </p>
 

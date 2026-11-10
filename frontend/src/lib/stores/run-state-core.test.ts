@@ -11,6 +11,7 @@ import {
   type RunPhase,
 } from './run-state-core';
 import type { WSMessage, AgentStatus } from '@koryphaios/shared';
+import { createIdleSessionRun } from '@koryphaios/shared';
 
 // ─── Test helpers ───────────────────────────────────────────────────────────
 
@@ -133,10 +134,18 @@ describe('run-state-core: deriveButtonState', () => {
       waitingReason: '',
       phase: 'streaming',
     });
-    expect(deriveButtonState('thinking', true)).toEqual({
+    expect(deriveButtonState('thinking', false)).toEqual({
       mode: 'stop',
       waitingReason: '',
       phase: 'thinking',
+    });
+  });
+
+  test('active phase + composer input → steer', () => {
+    expect(deriveButtonState('streaming', true)).toEqual({
+      mode: 'steer',
+      waitingReason: '',
+      phase: 'streaming',
     });
   });
 
@@ -264,9 +273,45 @@ describe('run-state-core: applyEvent agent.status', () => {
   test('waiting status → waiting_terminal phase with reason', () => {
     const { engine } = makeEngine();
     engine.startRun(SID);
-    engine.applyEvent(msg('agent.status', SID, { agentId: AGENT, status: 'waiting' }));
+    engine.applyEvent(
+      msg('agent.status', SID, {
+        agentId: AGENT,
+        status: 'waiting',
+        detail: 'Waiting for an Omnirush seat',
+      }),
+    );
     expect(engine.getPhase(SID)).toBe('waiting_terminal');
-    expect(engine.getWaitingReason(SID)).toBe('background terminal');
+    expect(engine.getWaitingReason(SID)).toBe('Waiting for an Omnirush seat');
+  });
+
+  test('authoritative runs still expose an ephemeral provider capacity wait', () => {
+    const { engine } = makeEngine();
+    engine.applyEvent(
+      msg('run.state', SID, {
+        snapshot: {
+          sessionId: SID,
+          runId: 'run-authoritative',
+          revision: 1,
+          phase: 'thinking',
+          status: 'active',
+          waitingReason: '',
+          activeAgentIds: [AGENT],
+          startedAt: 10,
+          updatedAt: 20,
+          finishedAt: null,
+          terminalReason: null,
+        },
+      }),
+    );
+    engine.applyEvent(
+      msg('agent.status', SID, {
+        agentId: AGENT,
+        status: 'waiting',
+        detail: 'Waiting for an Omnirush seat',
+      }),
+    );
+    expect(engine.getPhase(SID)).toBe('waiting_terminal');
+    expect(engine.getWaitingReason(SID)).toBe('Waiting for an Omnirush seat');
   });
 
   test('done status → done phase when last agent', () => {
@@ -275,6 +320,17 @@ describe('run-state-core: applyEvent agent.status', () => {
     engine.applyEvent(msg('agent.status', SID, { agentId: AGENT, status: 'done' }));
     expect(engine.getPhase(SID)).toBe('done');
     expect(engine.isRunning(SID)).toBe(false);
+  });
+});
+
+describe('run-state-core: failed status outcomes', () => {
+  test('agent.status error never becomes a successful completion', () => {
+    const { engine } = makeEngine();
+    engine.startRun(SID);
+    engine.applyEvent(msg('agent.status', SID, { agentId: AGENT, status: 'error' }));
+    expect(engine.getPhase(SID)).toBe('error');
+    engine.applyEvent(msg('stream.complete', SID, { agentId: AGENT }));
+    expect(engine.getPhase(SID)).toBe('error');
   });
 });
 
@@ -536,6 +592,36 @@ describe('run-state-core: user stop suppression', () => {
     expect(engine.states.get(SID)?.stoppedByUser).toBe(true);
   });
 
+  test('isStoppedByUser is false for a live run, true after stop, false on the next send', () => {
+    const { engine } = makeEngine();
+    expect(engine.isStoppedByUser(SID)).toBe(false);
+    engine.startRun(SID);
+    expect(engine.isStoppedByUser(SID)).toBe(false);
+    engine.markUserStopped(SID);
+    expect(engine.isStoppedByUser(SID)).toBe(true);
+    engine.startRun(SID);
+    expect(engine.isStoppedByUser(SID)).toBe(false);
+  });
+
+  test('isStoppedByUser is true after a canonical cancelled snapshot', () => {
+    const { engine, states } = makeEngine();
+    expect(engine.isStoppedByUser(SID)).toBe(false);
+    engine.applyEvent(
+      msg('run.state', SID, {
+        snapshot: {
+          ...createIdleSessionRun(SID),
+          runId: 'run-1',
+          revision: 1,
+          phase: 'cancelled' as const,
+          status: 'terminal' as const,
+        },
+        transition: null,
+      }),
+    );
+    expect(engine.isStoppedByUser(SID)).toBe(true);
+    expect(states.get(SID)?.stoppedByUser).toBe(true);
+  });
+
   test('late stream.delta is suppressed after stop', () => {
     const { engine } = makeEngine();
     engine.startRun(SID);
@@ -745,6 +831,24 @@ describe('run-state-core: authoritative run projection', () => {
     });
   }
 
+  test('answer completion keeps sidebar and composer busy until the settled run snapshot', () => {
+    const { engine } = makeEngine();
+    engine.applyEvent(runStateMessage(5, 'streaming', 'active'));
+    engine.applyEvent(msg('stream.delta', SID, { agentId: AGENT, content: 'Finished answer' }));
+    engine.applyEvent(msg('stream.complete', SID, { agentId: AGENT }));
+    engine.applyEvent(msg('agent.status', SID, { agentId: AGENT, status: 'done' }));
+
+    expect(engine.isBusy(SID)).toBe(true);
+    expect(phaseToAgentStatus(engine.getPhase(SID))).toBe('streaming');
+    expect(deriveButtonState(engine.getPhase(SID), true).mode).toBe('steer');
+    expect(deriveButtonState(engine.getPhase(SID), false).mode).toBe('stop');
+
+    engine.applyEvent(runStateMessage(6, 'done', 'terminal'));
+    expect(engine.isBusy(SID)).toBe(false);
+    expect(phaseToAgentStatus(engine.getPhase(SID))).toBe('done');
+    expect(deriveButtonState(engine.getPhase(SID), true).mode).toBe('send');
+  });
+
   test('legacy stream/status traffic cannot contradict a canonical revision', () => {
     const { engine } = makeEngine();
     engine.startRun(SID);
@@ -772,5 +876,37 @@ describe('run-state-core: authoritative run projection', () => {
     expect(engine.isBusy(SID)).toBe(false);
     expect(engine.states.get(SID)?.stoppedByUser).toBe(true);
     expect(doneLingerArms).toHaveLength(0);
+  });
+
+  test('does not let an active snapshot or stale stream revive an acknowledged stop', () => {
+    const { engine } = makeEngine();
+    engine.startRun(SID);
+    engine.markUserStopped(SID);
+
+    expect(engine.applyEvent(runStateMessage(6, 'streaming', 'active'))).toBe(false);
+    expect(engine.getPhase(SID)).toBe('done');
+    expect(engine.applyEvent(msg('stream.delta', SID, { agentId: AGENT, content: 'late' }))).toBe(false);
+    expect(engine.getPhase(SID)).toBe('done');
+    expect(engine.states.get(SID)?.stoppedByUser).toBe(true);
+  });
+
+  test('rejects live stream traffic after an authoritative terminal snapshot', () => {
+    const { engine } = makeEngine();
+    engine.applyEvent(runStateMessage(7, 'done', 'terminal'));
+
+    expect(
+      engine.applyEvent(msg('stream.thinking', SID, { agentId: AGENT, thinking: 'late reasoning' })),
+    ).toBe(false);
+    expect(engine.getPhase(SID)).toBe('done');
+  });
+
+  test('keeps the stop fence when the acknowledged run reaches a terminal snapshot', () => {
+    const { engine } = makeEngine();
+    engine.startRun(SID);
+    engine.markUserStopped(SID);
+
+    expect(engine.applyEvent(runStateMessage(6, 'cancelled', 'terminal'))).toBe(true);
+    expect(engine.getPhase(SID)).toBe('cancelled');
+    expect(engine.states.get(SID)?.stoppedByUser).toBe(true);
   });
 });

@@ -24,6 +24,7 @@
   } from '$lib/stores/mcp-servers.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
+  import { mcpRegistryIconUrl } from '$lib/utils/mcp-registry-icon';
   import KorySelect from './KorySelect.svelte';
   import SettingsPageIntro from './SettingsPageIntro.svelte';
 
@@ -57,6 +58,17 @@
   type McpView = 'list' | 'browse' | 'form';
   let view = $state<McpView>('list');
   let registrySearchInput = $state('');
+  /** Entries whose derived icon failed to load fall back to the transport glyph. */
+  let failedRegistryIcons = $state<Record<string, true>>({});
+
+  function registryIconSrc(result: McpRegistrySearchResult): string {
+    if (failedRegistryIcons[result.id]) return '';
+    return mcpRegistryIconUrl(result);
+  }
+
+  function markRegistryIconFailed(id: string): void {
+    failedRegistryIcons = { ...failedRegistryIcons, [id]: true };
+  }
 
   const transportOptions = [
     {
@@ -883,9 +895,21 @@
                           <div class="min-w-0">
                             <div class="flex flex-wrap items-center gap-2">
                               <span
-                                class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text-secondary)]"
+                                class="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text-secondary)]"
                               >
-                                {#if result.transport === 'sse'}
+                                {#if registryIconSrc(result)}
+                                  <img
+                                    src={registryIconSrc(result)}
+                                    alt=""
+                                    width="20"
+                                    height="20"
+                                    loading="lazy"
+                                    referrerpolicy="no-referrer"
+                                    draggable="false"
+                                    class="h-5 w-5 rounded-[4px] object-cover"
+                                    onerror={() => markRegistryIconFailed(result.id)}
+                                  />
+                                {:else if result.transport === 'sse'}
                                   <Globe size={15} />
                                 {:else}
                                   <Terminal size={15} />
@@ -991,9 +1015,21 @@
                     <div class="min-w-0 flex-1">
                       <div class="flex flex-wrap items-center gap-2">
                         <span
-                          class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text-secondary)]"
+                          class="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text-secondary)]"
                         >
-                          {#if result.transport === 'sse'}
+                          {#if registryIconSrc(result)}
+                            <img
+                              src={registryIconSrc(result)}
+                              alt=""
+                              width="20"
+                              height="20"
+                              loading="lazy"
+                              referrerpolicy="no-referrer"
+                              draggable="false"
+                              class="h-5 w-5 rounded-[4px] object-cover"
+                              onerror={() => markRegistryIconFailed(result.id)}
+                            />
+                          {:else if result.transport === 'sse'}
                             <Globe size={15} />
                           {:else}
                             <Terminal size={15} />

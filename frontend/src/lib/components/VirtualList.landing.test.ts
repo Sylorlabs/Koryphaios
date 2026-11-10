@@ -4,16 +4,10 @@ import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import VirtualList from './VirtualList.svelte';
 
-// Opening a chat must show the chat, not the first message followed by a slide
-// down to the last one. That takes two things this file pins down: the bottom
-// offset has to be written in the same tick the rows are rendered (a pin inside
-// a rAF is applied only after the browser has already painted the frame it was
-// scheduled from), and the row measurements have to outlive the component so a
-// chat the reader has already opened is laid out exactly rather than re-derived
-// from estimates.
-
 type ObserverRecord = { callback: ResizeObserverCallback; elements: Element[] };
 let observers: ObserverRecord[] = [];
+let frames: Map<number, FrameRequestCallback>;
+let nextFrame = 0;
 
 class ResizeObserverStub {
   private record: ObserverRecord;
@@ -21,9 +15,7 @@ class ResizeObserverStub {
     this.record = { callback, elements: [] };
     observers.push(this.record);
   }
-  observe(element: Element) {
-    this.record.elements.push(element);
-  }
+  observe(element: Element) { this.record.elements.push(element); }
   unobserve() {}
   disconnect() {}
 }
@@ -34,223 +26,172 @@ function observerFor(element: Element): ObserverRecord {
   return record;
 }
 
-/** Report a measured height for a row, the way the real observer would. */
 function measure(element: Element, height: number) {
   observerFor(element).callback(
-    [
-      {
-        target: element,
-        borderBoxSize: [{ blockSize: height }],
-        contentRect: { height },
-      },
-    ] as unknown as ResizeObserverEntry[],
+    [{ target: element, borderBoxSize: [{ blockSize: height }], contentRect: { height } }] as unknown as ResizeObserverEntry[],
     {} as ResizeObserver,
   );
 }
 
-function sizeElement(element: HTMLElement, clientHeight: number, scrollHeight: () => number) {
-  Object.defineProperty(element, 'clientHeight', { value: clientHeight, configurable: true });
-  Object.defineProperty(element, 'scrollHeight', { get: scrollHeight, configurable: true });
-}
-
-const ROWS = 40;
-const ESTIMATE = 100;
-const REAL = 300;
-
 function rows() {
-  return Array.from({ length: ROWS }, (_, index) => ({ id: `row-${index}` }));
+  return Array.from({ length: 40 }, (_, index) => ({ id: `row-${index}` }));
 }
 
-/** The height the browser would give the scroll container: the lowest rendered
- *  row's bottom edge, where a row's height is its measurement when it has one
- *  and its estimate until it does. */
-function domBottom(scroller: HTMLElement, measured: Map<Element, number>): number {
-  let lowest = 0;
-  for (const row of Array.from(scroller.querySelectorAll('.virtual-list-item'))) {
-    const top = parseFloat((row as HTMLElement).style.top);
-    lowest = Math.max(lowest, top + (measured.get(row) ?? ESTIMATE));
-  }
-  return lowest;
-}
-
-function reportHeight(
-  measured: Map<Element, number>,
-  element: Element,
-  height: number,
-) {
-  measured.set(element, height);
-  measure(element, height);
-}
-
-/** Drive a cold open the way a browser would: every frame the window draws a
- *  screenful of rows, the observer reports their real heights, and the list
- *  re-pins. Returns the offset the transcript settled on. */
-async function settle(
-  container: HTMLElement,
-  scroller: HTMLElement,
-  measured: Map<Element, number>,
-  onLandingChange: { mock: { calls: unknown[][] } },
-  maxFrames = 60,
-): Promise<number> {
-  for (let frame = 0; frame < maxFrames; frame++) {
-    for (const row of Array.from(container.querySelectorAll('.virtual-list-item'))) {
-      reportHeight(measured, row, REAL);
-    }
-    await tick();
-    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
-    const landing = onLandingChange.mock.calls.at(-1)?.[0];
-    if (landing === false && frame > 0) return scroller.scrollTop;
-  }
-  return scroller.scrollTop;
-}
-
-describe('VirtualList opening at the bottom', () => {
+describe('VirtualList opening behavior', () => {
   beforeEach(() => {
     observers = [];
+    frames = new Map();
+    nextFrame = 0;
     vi.stubGlobal('ResizeObserver', ResizeObserverStub);
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frames.set(++nextFrame, callback);
+      return nextFrame;
+    });
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
   });
+
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it('is already at the bottom in the first frame it renders', () => {
+  it('opens at the current bottom without a deferred landing loop', () => {
     const { container } = render(VirtualList, {
-      props: { items: rows(), estimateHeight: () => ESTIMATE, follow: true, resetKey: 'sync-1' },
+      props: { items: rows(), estimateHeight: () => 100, follow: true, resetKey: 'open-1' },
     });
     const scroller = container.querySelector('.virtual-list') as HTMLDivElement;
-
-    // No rAF, no tick, no waiting: the transcript mounts at the bottom. A pin
-    // deferred to the next animation frame leaves this at 0, which is the
-    // reader looking at the top of their own conversation for one paint.
-    expect(scroller.scrollTop).toBe(ROWS * ESTIMATE);
-
-    // ...and the window drawn for that frame is the end of the transcript, not
-    // its beginning. (Overscan renders a few rows above the viewport, so this
-    // is "near the end" rather than "the last row".)
-    const rendered = Array.from(container.querySelectorAll('.virtual-list-item')) as HTMLElement[];
-    expect(parseFloat(rendered[0].style.top)).toBeGreaterThan((ROWS / 2) * ESTIMATE);
-    expect(parseFloat(rendered[rendered.length - 1].style.top)).toBe((ROWS - 1) * ESTIMATE);
+    expect(scroller.scrollTop).toBe(4000);
+    expect(frames.size).toBe(0);
   });
 
-  it('lands on the real bottom, not the estimated one, once rows measure', async () => {
+  it('absorbs a measurement into the bottom in the same flush, with no landing loop', async () => {
     const { container } = render(VirtualList, {
-      props: { items: rows(), estimateHeight: () => ESTIMATE, follow: true, resetKey: 'settle-1' },
+      props: { items: rows(), estimateHeight: () => 100, follow: true, resetKey: 'measure-1' },
     });
     const scroller = container.querySelector('.virtual-list') as HTMLDivElement;
-    const measured = new Map<Element, number>();
-    sizeElement(scroller, 600, () => domBottom(scroller, measured));
+    const firstRow = container.querySelector('.virtual-list-item');
+    expect(firstRow).toBeTruthy();
 
-    for (const row of Array.from(container.querySelectorAll('.virtual-list-item'))) {
-      reportHeight(measured, row, REAL);
-    }
+    measure(firstRow!, 300);
     await tick();
-    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
-    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    expect(frames.size).toBe(1); // measurement commit only
+    const pending = [...frames.values()];
+    frames.clear();
+    for (const callback of pending) callback(performance.now());
+    await tick();
 
-    // Every row is three times its estimate, so the estimated bottom (4000) is
-    // 8000px short of the real one. The landing has to walk the difference.
-    expect(scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight).toBeLessThanOrEqual(1);
+    // The measured row is 200px taller than its estimate, so the real bottom
+    // moved by 200px. The view is already there in the same flush: the reader
+    // never watches the transcript settle downwards, and no deferred frames
+    // are left queued behind the landing.
+    expect(scroller.scrollTop).toBe(4200);
+    expect(frames.size).toBe(0);
   });
 
-  it('reuses a transcript\'s measurements when it is opened again', async () => {
-    const measured = new Map<Element, number>();
-    const onLandingChange = vi.fn();
-    const first = render(VirtualList, {
-      props: {
-        items: rows(),
-        estimateHeight: () => ESTIMATE,
-        follow: true,
-        resetKey: 'warm-1',
-        onLandingChange,
-      },
-    });
-    const firstScroller = first.container.querySelector('.virtual-list') as HTMLDivElement;
-    sizeElement(firstScroller, 600, () => domBottom(firstScroller, measured));
-
-    // A cold open has to walk down the transcript as each screenful of rows
-    // reports its real height.
-    const settledAt = await settle(first.container, firstScroller, measured, onLandingChange);
-    expect(settledAt).toBeGreaterThan(ROWS * ESTIMATE);
+  it("restores a parked reader's position when auto-scroll was off", async () => {
+    const props = { items: rows(), estimateHeight: () => 100, follow: false, resetKey: 'parked-1' };
+    const first = render(VirtualList, { props });
+    const scroller = first.container.querySelector('.virtual-list') as HTMLDivElement;
+    scroller.scrollTop = 1200;
     first.unmount();
 
+    // The parent's `follow` prop is still true for the first flush of the
+    // reopen (it learns about the restore through onRestoreState), so this
+    // also proves the stale prop cannot pin over the restored position.
+    const restoredFollow = vi.fn();
     const second = render(VirtualList, {
-      props: {
-        items: rows(),
-        estimateHeight: () => ESTIMATE,
-        follow: true,
-        resetKey: 'warm-1',
-        onLandingChange: undefined,
-      },
+      props: { ...props, follow: true, onRestoreState: restoredFollow },
     });
-    const secondScroller = second.container.querySelector('.virtual-list') as HTMLDivElement;
-    sizeElement(secondScroller, 600, () => domBottom(secondScroller, measured));
-
-    // Reopening the same chat starts from the heights the last open measured,
-    // so it lands on the same bottom in its very first frame instead of
-    // rediscovering it row by row.
-    expect(secondScroller.scrollTop).toBe(settledAt);
-  });
-
-  it('holds the transcript back until it has landed, then reveals it', async () => {
-    const onLandingChange = vi.fn();
-    const { container, rerender } = render(VirtualList, {
-      props: {
-        items: rows(),
-        estimateHeight: () => ESTIMATE,
-        follow: true,
-        resetKey: 'reveal-1',
-        onLandingChange,
-      },
-    });
-    const scroller = container.querySelector('.virtual-list') as HTMLDivElement;
-    // A bottom the pins cannot reach yet: the view has to keep correcting it.
-    const measured = new Map<Element, number>();
-    sizeElement(scroller, 600, () => domBottom(scroller, measured) + 5000);
-    onLandingChange.mockClear();
-
-    await rerender({ resetKey: 'reveal-2' });
-    expect(onLandingChange).toHaveBeenLastCalledWith(true);
-
-    // The reader is given the transcript back the moment they touch it, rather
-    // than having to wait out a landing they are trying to scroll through.
-    scroller.dispatchEvent(new Event('wheel'));
+    const restored = second.container.querySelector('.virtual-list') as HTMLDivElement;
     await tick();
-    expect(onLandingChange).toHaveBeenLastCalledWith(false);
+
+    expect(restoredFollow).toHaveBeenCalledWith({ follow: false });
+    expect(restored.scrollTop).toBe(1200);
   });
 
-  it('reveals the transcript once the landing reaches the bottom', async () => {
-    const onLandingChange = vi.fn();
-    const measured = new Map<Element, number>();
+  it('reopens following when the saved position was already at the bottom', async () => {
+    const props = {
+      items: rows(),
+      estimateHeight: () => 100,
+      follow: false,
+      resetKey: 'bottom-parked-1',
+    };
+    const first = render(VirtualList, { props });
+    const scroller = first.container.querySelector('.virtual-list') as HTMLDivElement;
+    // A chat left a hair above the bottom with follow off: restoring this looks
+    // anchored while nothing follows the agent, so it must reopen following.
+    scroller.scrollTop = 3996;
+    first.unmount();
+
+    const restoredFollow = vi.fn();
+    const second = render(VirtualList, {
+      props: { ...props, follow: true, onRestoreState: restoredFollow },
+    });
+    const reopened = second.container.querySelector('.virtual-list') as HTMLDivElement;
+    await tick();
+
+    expect(restoredFollow).toHaveBeenCalledWith({ follow: true });
+    expect(reopened.scrollTop).toBe(4000);
+  });
+
+  it('opens at the bottom when the reader had been following', () => {
+    const props = { items: rows(), estimateHeight: () => 100, follow: true, resetKey: 'followed-1' };
+    const first = render(VirtualList, { props });
+    const scroller = first.container.querySelector('.virtual-list') as HTMLDivElement;
+    scroller.scrollTop = 900;
+    first.unmount();
+
+    const second = render(VirtualList, { props });
+    const reopened = second.container.querySelector('.virtual-list') as HTMLDivElement;
+    expect(reopened.scrollTop).toBe(4000);
+  });
+
+  it('reports the landing after the opening frames settle, exactly once', async () => {
+    const onLanded = vi.fn();
+    render(VirtualList, {
+      props: { items: rows(), estimateHeight: () => 100, follow: true, resetKey: 'landed-1', onLanded },
+    });
+    // The caller must not drop its cover on the same tick as the mount: rows
+    // are still laid out from estimates at this point.
+    expect(onLanded).not.toHaveBeenCalled();
+
+    for (let i = 0; i < 8 && onLanded.mock.calls.length === 0; i++) {
+      const pending = [...frames.values()];
+      frames.clear();
+      for (const callback of pending) callback(performance.now());
+      await tick();
+    }
+    expect(onLanded).toHaveBeenCalledTimes(1);
+
+    // The report is terminal: no landing loop is left queued behind it.
+    const pending = [...frames.values()];
+    frames.clear();
+    for (const callback of pending) callback(performance.now());
+    await tick();
+    expect(onLanded).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the reader on the same row when an older page is prepended', async () => {
+    const items = rows();
     const { container, rerender } = render(VirtualList, {
-      props: {
-        items: rows(),
-        estimateHeight: () => ESTIMATE,
-        follow: true,
-        resetKey: 'reveal-3',
-        onLandingChange,
-      },
+      props: { items, estimateHeight: () => 100, follow: false, resetKey: 'prepend-1' },
     });
     const scroller = container.querySelector('.virtual-list') as HTMLDivElement;
-    // The container keeps reporting a taller scrollHeight than the rows the
-    // window has drawn so far, so no single pin can reach the bottom.
-    let lagging = 300;
-    sizeElement(scroller, 600, () => domBottom(scroller, measured) + lagging);
-    onLandingChange.mockClear();
+    Object.defineProperty(scroller, 'clientHeight', { value: 600, configurable: true });
+    // Parked on row-12 (top 1200), the position that triggers an older page.
+    scroller.scrollTop = 1200;
+    scroller.dispatchEvent(new Event('scroll'));
+    await tick();
 
-    await rerender({ resetKey: 'reveal-4' });
-    expect(onLandingChange).toHaveBeenLastCalledWith(true);
+    await rerender({
+      items: [{ id: 'older-0' }, { id: 'older-1' }, { id: 'older-2' }, ...items],
+      estimateHeight: () => 100,
+      follow: false,
+      resetKey: 'prepend-1',
+    });
+    await tick();
 
-    // Each frame draws and measures more of the transcript, closing the gap
-    // until the pin finally reaches the real bottom.
-    for (let frame = 0; frame < 12 && lagging > 0; frame++) {
-      for (const row of Array.from(container.querySelectorAll('.virtual-list-item'))) {
-        reportHeight(measured, row, REAL);
-      }
-      lagging = Math.max(0, lagging - 200);
-      await tick();
-      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
-    }
-
-    expect(onLandingChange).toHaveBeenLastCalledWith(false);
+    // Three 100px rows were inserted above the anchor. Without the correction
+    // the DOM keeps scrollTop at 1200 and the reader is thrown three rows back.
+    expect(scroller.scrollTop).toBe(1500);
   });
 });

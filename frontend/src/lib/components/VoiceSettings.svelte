@@ -3,9 +3,9 @@
   import Check from 'lucide-svelte/icons/check';
   import Download from 'lucide-svelte/icons/download';
   import FolderOpen from 'lucide-svelte/icons/folder-open';
+  import Trash2 from 'lucide-svelte/icons/trash-2';
   import Mic from 'lucide-svelte/icons/mic';
   import Play from 'lucide-svelte/icons/play';
-  import RefreshCw from 'lucide-svelte/icons/refresh-cw';
   import Square from 'lucide-svelte/icons/square';
   import Volume2 from 'lucide-svelte/icons/volume-2';
   import type { VoiceProviderDescriptor, VoiceSettings } from '@koryphaios/shared';
@@ -62,10 +62,17 @@
     localVoiceSetupVersion: 1,
   };
   let settings = $state<VoiceSettings>($state.snapshot(DEFAULT_SETTINGS));
+  // Voice settings apply as soon as they change — there is no "apply" step to
+  // forget. Edits are persisted on a short debounce so dragging the speed
+  // slider is one request rather than one per pixel.
+  const AUTO_SAVE_DELAY_MS = 400;
+  let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  let autoSaveArmed = false;
+  let lastSavedSignature = $state('');
+  let settingsSignature = $derived(JSON.stringify(settings));
   let providers = $state<VoiceProviderDescriptor[]>([]);
   let systemVoices = $state<Array<{ value: string; label: string }>>([]);
   let loading = $state(true);
-  let saving = $state(false);
   let previewing = $state(false);
   let systemSpeechSupported = $state(false);
   let systemRecognitionSupported = $state(false);
@@ -202,6 +209,22 @@
     }
   }
 
+  async function deleteLocalModel() {
+    if (!localDesktopRuntime || localModelBusy) return;
+    localModelBusy = true;
+    localModelError = '';
+    try {
+      const status = await invoke<LocalVoiceModelStatus>('delete_local_voice_model');
+      localModelStatus = { ...status, formatLabel: FORMAT_LABELS[status.format] ?? status.format };
+      toastStore.success('Voice model deleted');
+    } catch (error) {
+      localModelError = error instanceof Error ? error.message : String(error);
+      toastStore.error(localModelError || 'Could not delete the voice model');
+    } finally {
+      localModelBusy = false;
+    }
+  }
+
   async function attachLocalModel() {
     if (!localDesktopRuntime || localModelBusy) return;
     try {
@@ -223,6 +246,26 @@
     }
   }
 
+  function scheduleAutoSave(): void {
+    if (!autoSaveArmed || loading) return;
+    if (autoSaveTimer) clearTimeout(autoSaveTimer);
+    autoSaveTimer = setTimeout(() => {
+      autoSaveTimer = null;
+      if (settingsSignature === lastSavedSignature) return;
+      void save(false);
+    }, AUTO_SAVE_DELAY_MS);
+  }
+
+  // Any edit that lands in `settings` is applied. `lastSavedSignature` keeps
+  // the load response and our own save response from triggering another round
+  // trip.
+  $effect(() => {
+    void settingsSignature;
+    if (!autoSaveArmed || loading) return;
+    if (settingsSignature === lastSavedSignature) return;
+    scheduleAutoSave();
+  });
+
   async function load() {
     loading = true;
     const [settingsResult, providerResult] = await Promise.allSettled([
@@ -234,10 +277,16 @@
     if (providerResult.status === 'fulfilled' && Array.isArray(providerResult.value.data))
       providers = providerResult.value.data;
     loading = false;
+    // The values just loaded are what the server already has; arm auto-apply
+    // only afterwards so hydration never writes back.
+    lastSavedSignature = JSON.stringify(settings);
+    autoSaveArmed = true;
   }
 
   async function save(showConfirmation = true): Promise<boolean> {
-    saving = true;
+    // Snapshot what is being written: an edit that lands while this request is
+    // in flight must not be overwritten by the response to the older one.
+    const requestSignature = JSON.stringify(settings);
     try {
       const response = await apiFetch(apiUrl('/api/voice/settings'), {
         method: 'PUT',
@@ -246,7 +295,8 @@
       });
       const result = await response.json();
       if (!response.ok || !result.ok) throw new Error(result.error || 'Save failed');
-      settings = result.data;
+      if (JSON.stringify(settings) === requestSignature) settings = result.data;
+      lastSavedSignature = JSON.stringify(result.data);
       window.dispatchEvent(
         new CustomEvent('koryphaios:voice-settings-changed', { detail: settings }),
       );
@@ -255,8 +305,6 @@
     } catch (error) {
       toastStore.error(error instanceof Error ? error.message : 'Could not save voice settings');
       return false;
-    } finally {
-      saving = false;
     }
   }
 
@@ -338,6 +386,13 @@
     return () => {
       disposed = true;
       unlistenProgress?.();
+      // Leaving the panel with an edit still inside the debounce window must
+      // still apply it, otherwise closing the drawer silently discards it.
+      if (autoSaveTimer) {
+        clearTimeout(autoSaveTimer);
+        autoSaveTimer = null;
+        void save(false);
+      }
       stopVoicePlayback();
       if (systemSpeechSupported)
         speechSynthesis.removeEventListener('voiceschanged', refreshSystemVoices);
@@ -355,7 +410,7 @@
   </header>
   {#if localDesktopRuntime || attention}
     <section
-      class="space-y-3 rounded-2xl border bg-[var(--color-surface-2)] p-5 {attention &&
+      class="settings-panel space-y-3 rounded-2xl border bg-[var(--color-surface-2)] p-5 {attention &&
       !localModelStatus?.installed
         ? 'border-[var(--color-accent)]'
         : 'border-[var(--color-border)]'}"
@@ -395,29 +450,31 @@
       </div>
       {#if localDesktopRuntime}
         <div class="flex flex-wrap items-center gap-2">
-          <button
-            class="btn btn-primary"
-            type="button"
-            disabled={localModelBusy}
-            onclick={() => void downloadLocalModel()}
-          >
-            <Download size={14} />
-            {#if localModelBusy && localModelProgress > 0}
-              Downloading {Math.round(localModelProgress)}%
-            {:else if localModelStatus?.installed}
-              Download again
-            {:else}
-              Download Kory Voice
-            {/if}
-          </button>
-          <button
-            class="btn"
-            type="button"
-            disabled={localModelBusy}
-            onclick={() => void attachLocalModel()}
-          >
-            <FolderOpen size={14} /> Attach a voice model
-          </button>
+          {#if localModelStatus?.installed}
+            <button
+              class="btn btn-error"
+              type="button"
+              disabled={localModelBusy}
+              onclick={() => void deleteLocalModel()}
+            >
+              <Trash2 size={14} />
+              Delete it
+            </button>
+          {:else}
+            <button
+              class="btn btn-primary"
+              type="button"
+              disabled={localModelBusy}
+              onclick={() => void downloadLocalModel()}
+            >
+              <Download size={14} />
+              {#if localModelBusy && localModelProgress > 0}
+                Downloading {Math.round(localModelProgress)}%
+              {:else}
+                Download Kory Voice
+              {/if}
+            </button>
+          {/if}
           <span class="text-[10px] text-[var(--color-text-muted)]">
             {#if localModelStatus?.installed && localModelStatus.sizeBytes}
               {localModelStatus.name || 'Voice model'} ·
@@ -427,10 +484,6 @@
             {/if}
           </span>
         </div>
-        <p class="text-[10px] leading-relaxed text-[var(--color-text-muted)]">
-          Attaching an ONNX export? Select the encoder file and Koryphaios picks up the decoder and
-          tokenizer beside it.
-        </p>
       {:else}
         <p class="text-xs text-[var(--color-text-muted)]">
           Local voice models are available in the Koryphaios desktop app.
@@ -446,7 +499,7 @@
   {:else}
     <div class="grid gap-4 md:grid-cols-2">
       <section
-        class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5"
+        class="settings-panel space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5"
       >
         <div class="flex items-start gap-3">
           <div class="rounded-xl bg-[var(--color-surface-3)] p-2 text-[var(--color-accent)]">
@@ -498,7 +551,7 @@
       </section>
 
       <section
-        class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5"
+        class="settings-panel space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5"
       >
         <div class="flex items-start gap-3">
           <div class="rounded-xl bg-[var(--color-surface-3)] p-2 text-[var(--color-accent)]">
@@ -570,7 +623,7 @@
     </div>
 
     <section
-      class="space-y-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5"
+      class="settings-panel space-y-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5"
     >
       <SettingsSwitch
         checked={settings.voiceModeEnabled}
@@ -591,7 +644,7 @@
     </section>
 
     <section
-      class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5"
+      class="settings-panel rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5"
     >
       <h4 class="font-medium text-[var(--color-text-primary)]">Use another local speech server</h4>
       <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
@@ -599,14 +652,22 @@
         speaches, LM Studio, or llama.cpp. Configure its endpoint under Providers &amp; models, then
         select that provider above.
       </p>
+      {#if localDesktopRuntime}
+        <div class="space-y-2 pt-1">
+          <button
+            class="btn"
+            type="button"
+            disabled={localModelBusy}
+            onclick={() => void attachLocalModel()}
+          >
+            <FolderOpen size={14} /> Attach a voice model
+          </button>
+          <p class="text-[10px] leading-relaxed text-[var(--color-text-muted)]">
+            Attaching an ONNX export? Select the encoder file and Koryphaios picks up the decoder and
+            tokenizer beside it.
+          </p>
+        </div>
+      {/if}
     </section>
-
-    <div class="flex justify-end gap-2">
-      <button class="btn" type="button" onclick={() => void load()}
-        ><RefreshCw size={14} /> Reload</button
-      ><button class="btn btn-primary" type="button" disabled={saving} onclick={() => void save()}
-        >{saving ? 'Saving…' : 'Save voice settings'}</button
-      >
-    </div>
   {/if}
 </div>

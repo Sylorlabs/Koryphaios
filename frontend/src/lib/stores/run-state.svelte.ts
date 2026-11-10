@@ -146,6 +146,7 @@ export const getPhase = engine.getPhase;
 export const isRunning = engine.isRunning;
 export const isWaiting = engine.isWaiting;
 export const isBusy = engine.isBusy;
+export const isStoppedByUser = engine.isStoppedByUser;
 export const getWaitingReason = engine.getWaitingReason;
 export const getButtonState = engine.getButtonState;
 export const deriveButtonState = engine.deriveButtonState;
@@ -197,6 +198,7 @@ export const runStateStore = {
   isRunning,
   isWaiting,
   isBusy,
+  isStoppedByUser,
   getWaitingReason,
   getButtonState,
   deriveButtonState,

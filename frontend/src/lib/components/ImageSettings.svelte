@@ -526,7 +526,7 @@
   </header>
 
   <section
-    class="overflow-visible rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)]"
+    class="settings-panel overflow-visible rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)]"
   >
     <div class="grid gap-0 overflow-visible lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
       <div class="space-y-5 p-5">
@@ -753,7 +753,7 @@
 
   {#if history.length > 0}
     <section
-      class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5"
+      class="settings-panel rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5"
     >
       <div class="flex items-center justify-between gap-3">
         <h4 class="font-medium text-[var(--color-text-primary)]">Recent images</h4>
@@ -807,7 +807,7 @@
   {/if}
 
   <section
-    class="flex items-start gap-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5"
+    class="settings-panel flex items-start gap-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5"
   >
     <Eye size={18} class="mt-0.5 shrink-0 text-[var(--color-text-secondary)]" />
     <div>

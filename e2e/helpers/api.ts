@@ -18,48 +18,54 @@ export class ApiClient {
     return h;
   }
 
-  async get(path: string) {
-    return this.request.get(`${this.baseUrl}${path}`, { headers: this.headers() });
+  async get(path: string, extra?: Record<string, string>) {
+    return this.request.get(`${this.baseUrl}${path}`, { headers: this.headers(extra) });
   }
 
-  async post(path: string, body?: unknown) {
+  async post(path: string, body?: unknown, extra?: Record<string, string>) {
     return this.request.post(`${this.baseUrl}${path}`, {
-      headers: this.headers(),
+      headers: this.headers(extra),
       data: body ? JSON.stringify(body) : undefined,
     });
   }
 
-  async put(path: string, body?: unknown) {
+  async put(path: string, body?: unknown, extra?: Record<string, string>) {
     return this.request.put(`${this.baseUrl}${path}`, {
-      headers: this.headers(),
+      headers: this.headers(extra),
       data: body ? JSON.stringify(body) : undefined,
     });
   }
 
-  async delete(path: string) {
-    return this.request.delete(`${this.baseUrl}${path}`, { headers: this.headers() });
+  async delete(path: string, extra?: Record<string, string>) {
+    return this.request.delete(`${this.baseUrl}${path}`, { headers: this.headers(extra) });
   }
 
-  async getJson<T = unknown>(path: string): Promise<T> {
-    const res = await this.get(path);
+  async getJson<T = unknown>(path: string, extra?: Record<string, string>): Promise<T> {
+    const res = await this.get(path, extra);
     if (!res.ok()) throw new Error(`GET ${path} failed: ${res.status()}`);
     return res.json() as Promise<T>;
   }
 
-  async postJson<T = unknown>(path: string, body?: unknown): Promise<T> {
-    const res = await this.post(path, body);
+  async postJson<T = unknown>(
+    path: string,
+    body?: unknown,
+    extra?: Record<string, string>,
+  ): Promise<T> {
+    const res = await this.post(path, body, extra);
     if (!res.ok()) throw new Error(`POST ${path} failed: ${res.status()}`);
     return res.json() as Promise<T>;
   }
 
   /** Creates a session and returns the session ID. */
-  async createSession(title = 'E2E test session'): Promise<string> {
+  async createSession(
+    title = 'E2E test session',
+    workingDirectory = process.cwd(),
+  ): Promise<string> {
     const body = await this.postJson<{ data: { id: string } }>('/api/sessions', {
       title,
-      // The backend state directory is intentionally isolated under /tmp, but
-      // Time Travel must exercise a real Git worktree rather than treating the
-      // disposable state directory as the user's project.
-      workingDirectory: process.cwd(),
+      // Callers can scope a source chat to a fixture project; otherwise
+      // Time Travel exercises a real repository rather than the temp state dir.
+      workingDirectory,
     });
     return body.data.id;
   }

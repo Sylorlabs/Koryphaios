@@ -3,14 +3,19 @@
   import { onMount } from 'svelte';
   import ChevronLeft from 'lucide-svelte/icons/chevron-left';
   import ChevronRight from 'lucide-svelte/icons/chevron-right';
+  import Plus from 'lucide-svelte/icons/plus';
   import StickyNote from 'lucide-svelte/icons/sticky-note';
   import SessionSidebar from '$lib/components/SessionSidebar.svelte';
   import FileEditPreview from '$lib/components/FileEditPreview.svelte';
+  import VoiceWaveform from '$lib/components/VoiceWaveform.svelte';
+  import { voiceRecorder } from '$lib/stores/voice-recorder.svelte';
   import type { RecentProject } from '$lib/utils/projectManager';
+  import { hydrateDesktopUiSettings } from '$lib/stores/desktop-ui-settings-sync';
 
   let {
     showSidebar = true,
     zenMode = false,
+    modalOpen = false,
     showNotes = false,
     activeSessionId = null,
     connectionDot = 'bg-red-500',
@@ -32,6 +37,8 @@
   }: {
     showSidebar?: boolean;
     zenMode?: boolean;
+    /** Hide and inert the workbench while a viewport-level modal owns the UI. */
+    modalOpen?: boolean;
     showNotes?: boolean;
     activeSessionId?: string | null | undefined;
     connectionDot?: string;
@@ -52,33 +59,59 @@
     composer?: Snippet;
   } = $props();
 
-  // On phone-width screens the fixed session sidebar leaves no room for the main
-  // content, so collapse it to the thin rail automatically (users still reach it
-  // via the rail's "show" button). Desktop behaviour is unchanged.
-  let isNarrow = $state(false);
+  // Let the shell respond to the space it actually receives. A parent pane,
+  // split view, or resized native window can be narrower than window.innerWidth.
+  let shellElement: HTMLDivElement | undefined = $state();
+  let shellWidth = $state(1280);
+  let isNarrow = $derived(shellWidth < 700);
+  let isCompact = $derived(shellWidth >= 700 && shellWidth < 1080);
+  let compactSidebarExpanded = $state(false);
   let NotesPanelComponent = $state<Component | null>(null);
   let notesPanelLoading = $state(false);
   let notesPanelLoadError = $state<string | null>(null);
   let mobileClosed = $state(true); // on phones the sidebar starts closed (as an overlay)
-  function updateNarrow() {
-    const narrow = typeof window !== 'undefined' && window.innerWidth < 700;
-    if (narrow && !isNarrow) mobileClosed = true; // collapse when entering narrow
-    isNarrow = narrow;
-  }
   onMount(() => {
-    updateNarrow();
-    window.addEventListener('resize', updateNarrow);
-    return () => window.removeEventListener('resize', updateNarrow);
+    void hydrateDesktopUiSettings();
+    const measureShell = () => {
+      const width = shellElement?.getBoundingClientRect().width ?? window.innerWidth;
+      const narrow = width < 700;
+      const compact = width >= 700 && width < 1080;
+      if (narrow && !isNarrow) mobileClosed = true; // collapse when entering narrow
+      if (!compact || !isCompact) compactSidebarExpanded = false;
+      shellWidth = width;
+    };
+    measureShell();
+    const observer =
+      typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measureShell);
+    if (shellElement) observer?.observe(shellElement);
+    window.addEventListener('resize', measureShell);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', measureShell);
+    };
   });
-  let desktopSidebar = $derived(showSidebar && !isNarrow);
+  let desktopSidebar = $derived(
+    showSidebar && !isNarrow && (!isCompact || compactSidebarExpanded),
+  );
   let mobileSidebar = $derived(isNarrow && !mobileClosed);
   function hideSidebar() {
     if (isNarrow) mobileClosed = true;
+    else if (isCompact) compactSidebarExpanded = false;
     else onHideSidebar?.();
   }
   function revealSidebar() {
     if (isNarrow) mobileClosed = false;
-    else onShowSidebar?.();
+    else if (isCompact) {
+      compactSidebarExpanded = true;
+      onShowSidebar?.();
+    } else onShowSidebar?.();
+  }
+
+  /** Elapsed recording time as m:ss, matching the composer's own readout. */
+  function formatElapsed(ms: number): string {
+    const totalSeconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    return `${minutes}:${(totalSeconds % 60).toString().padStart(2, '0')}`;
   }
 
   async function loadNotesPanel(): Promise<void> {
@@ -100,8 +133,11 @@
 </script>
 
 <div
-  class="flex h-screen min-h-0 min-w-0 overflow-hidden"
-  style="background: var(--color-surface-0);"
+  bind:this={shellElement}
+  class="app-shell flex h-screen min-h-0 min-w-0 overflow-hidden"
+  style="background: var(--color-surface-0); visibility: {modalOpen ? 'hidden' : 'visible'};"
+  aria-hidden={modalOpen}
+  inert={modalOpen}
 >
   {#if mobileSidebar}
     <button
@@ -211,21 +247,30 @@
        short windows instead of inheriting the viewport height and pushing
        the status bar past the bottom edge. -->
   <nav
-    class="hidden md:flex shrink-0 border-r flex-col overflow-hidden min-h-0 transition-[width,opacity] duration-150 ease-out will-change-[width]"
+    class="desktop-sidebar shrink-0 border-r overflow-hidden min-h-0"
     data-testid="session-sidebar"
     style="
-      width: {desktopSidebar ? 'var(--sidebar-width)' : '0px'};
-      min-width: {desktopSidebar ? 'var(--sidebar-min-width)' : '0px'};
-      max-width: {desktopSidebar ? 'var(--sidebar-max-width)' : '0px'};
-      opacity: {desktopSidebar ? '1' : '0'};
+      display: {isNarrow ? 'none' : 'flex'};
+      width: {isCompact && !compactSidebarExpanded
+        ? 'var(--sidebar-width-collapsed)'
+        : desktopSidebar
+          ? 'var(--expanded-sidebar-width)'
+          : zenMode
+            ? '0px'
+            : 'var(--sidebar-width-collapsed)'};
       border-color: var(--color-border);
       background: var(--color-surface-1);
-      pointer-events: {desktopSidebar ? 'auto' : 'none'};
     "
-    aria-hidden={!desktopSidebar}
+    aria-hidden={!desktopSidebar && zenMode}
     aria-label="Session navigation"
-    inert={!desktopSidebar}
+    inert={!desktopSidebar && zenMode}
   >
+    <div
+      class="desktop-sidebar-content flex flex-col min-h-0"
+      style="opacity: {desktopSidebar ? 1 : 0}; pointer-events: {desktopSidebar ? 'auto' : 'none'};"
+      aria-hidden={!desktopSidebar}
+      inert={!desktopSidebar}
+    >
     <div
       class="sidebar-header flex items-center justify-between px-4 border-b shrink-0"
       style="height: var(--header-height); border-color: var(--color-border);"
@@ -308,11 +353,14 @@
         {/if}
       </div>
     </div>
-  </nav>
-  {#if !desktopSidebar && !isNarrow && !zenMode}
+    </div>
     <div
-      class="shrink-0 border-r flex min-h-0 flex-col items-center"
-      style="width: var(--sidebar-width-collapsed); border-color: var(--color-border); background: var(--color-surface-1);"
+      class="desktop-sidebar-rail flex min-h-0 flex-col items-center"
+      style="opacity: {!desktopSidebar && !zenMode ? 1 : 0}; pointer-events: {!desktopSidebar && !zenMode ? 'auto' : 'none'};"
+      aria-hidden={desktopSidebar || zenMode}
+      inert={desktopSidebar || zenMode}
+      data-testid="collapsed-sidebar-rail"
+      data-compact={isCompact}
     >
       <div
         class="w-full border-b flex items-center justify-center"
@@ -320,8 +368,7 @@
       >
         <button
           type="button"
-          class="rounded-lg transition-colors hover:bg-[var(--color-surface-3)]"
-          style="padding: var(--space-2); color: var(--color-text-muted);"
+          class="rail-button"
           onclick={revealSidebar}
           title="Show sidebar"
           aria-label="Show sidebar"
@@ -329,8 +376,21 @@
           <ChevronRight size={14} />
         </button>
       </div>
+      <button
+        type="button"
+        class="rail-button mt-2.5"
+        style="color: var(--color-accent);"
+        onclick={() => onSidebarAction?.('new_session')}
+        title="New chat"
+        aria-label="New chat"
+      >
+        <Plus size={18} />
+      </button>
+      <div class="mt-auto flex w-full justify-center border-t py-3" style="border-color: var(--color-border);" title={connectionStatusLabel}>
+        <span class="h-2 w-2 rounded-full {connectionDot}" role="img" aria-label={connectionStatusLabel}></span>
+      </div>
     </div>
-  {/if}
+  </nav>
 
   <div class="flex-1 flex min-h-0 min-w-0">
     <div class="relative flex flex-1 min-h-0 min-w-0 flex-col">
@@ -338,23 +398,23 @@
 
       {@render fileInputs?.()}
 
-      {#if !zenMode}
+      {#if !zenMode && !showNotes}
         {@render agentRailSlot?.()}
       {/if}
 
       {#if showNotes}
         <div
-          class="absolute inset-0 z-30 flex min-h-0 min-w-0 flex-col"
-          style="top: var(--header-height, 40px); background: var(--color-surface-1);"
+          class="flex flex-1 min-h-0 min-w-0 flex-col"
+          style="background: var(--color-surface-1);"
         >
           <div
-            class="flex items-center justify-between px-4 py-2 border-b shrink-0"
-            style="border-color: var(--color-border); background: var(--color-surface-0);"
+            class="flex items-center justify-between px-4 border-b shrink-0"
+            style="height: var(--header-height); border-color: var(--color-border); background: var(--color-surface-0);"
           >
             <div class="flex items-center gap-2">
               <StickyNote size={14} style="color: var(--color-accent);" />
               <span class="text-sm font-semibold" style="color: var(--color-text-primary);"
-                >Note Network</span
+                >Notes</span
               >
             </div>
             <button
@@ -424,29 +484,143 @@
         </div>
       {/if}
 
-      <section
-        class="flex flex-1 min-h-0 flex-col overflow-hidden"
-        aria-label="Chat feed"
-        data-testid="chat-feed"
-      >
-        {@render feed?.()}
-      </section>
+      {#if !showNotes}
+        <section
+          class="chat-feed flex flex-1 min-h-0 flex-col overflow-hidden"
+          aria-label="Chat feed"
+          data-testid="chat-feed"
+        >
+          {@render feed?.()}
+        </section>
 
-      <!-- Live agent file-edit preview. Anchored just above the context bar, next
+        <!-- Live agent file-edit preview. Anchored just above the context bar, next
            to the composer: edits belong with the turn that is producing them, and
            at the top it pushed the feed down and stole reading room. Height is
            capped and scrolls so a long edit list can never displace the composer. -->
-      <div class="shrink-0 max-h-[38vh] overflow-y-auto">
-        <FileEditPreview />
-      </div>
+        <div class="shrink-0 max-h-[38vh] overflow-y-auto">
+          <FileEditPreview />
+        </div>
 
-      {@render contextBar?.()}
+        <!-- Live voice capture, in flow directly above the context bar. It takes
+           real space instead of overlaying it: an absolutely positioned bubble
+           covered the Context row and the capture was unreadable while it ran.
+           Collapsed to zero height when idle so the composer does not move. -->
+        <div
+          class="shrink-0 overflow-hidden px-4"
+          style="background: var(--color-surface-1); transition: padding var(--duration-normal); {voiceRecorder.active
+            ? 'padding-top: var(--space-sm); padding-bottom: var(--space-sm); border-top: 1px solid var(--color-border);'
+            : 'padding-top: 0; padding-bottom: 0;'}"
+          data-testid="voice-waveform-strip"
+          data-state={voiceRecorder.state.phase}
+          aria-hidden={!voiceRecorder.active}
+        >
+          {#if voiceRecorder.active}
+            <div class="flex items-center gap-3">
+              <span
+                class="shrink-0 font-mono text-[11px] tabular-nums"
+                style="color: var(--color-text-muted);"
+                >{formatElapsed(voiceRecorder.state.elapsedMs)}</span
+              >
+              <VoiceWaveform
+                analyser={voiceRecorder.state.analyser}
+                active={voiceRecorder.state.phase === 'recording'}
+                class="min-w-0 flex-1"
+              />
+              <span
+                class="shrink-0 text-[11px]"
+                style="color: {voiceRecorder.state.phase === 'recording'
+                  ? 'var(--color-error)'
+                  : 'var(--color-text-muted)'};"
+                >{voiceRecorder.state.phase === 'recording' ? 'Recording' : 'Transcribing'}</span
+              >
+            </div>
+            <span class="sr-only" aria-live="polite">
+              {voiceRecorder.state.phase === 'recording'
+                ? 'Recording a voice prompt'
+                : 'Transcribing the recording'}
+            </span>
+          {/if}
+        </div>
 
-      {@render backgroundShells?.()}
+        {@render contextBar?.()}
 
-      <div class="shrink-0" style="background: var(--color-surface-1);">
-        {@render composer?.()}
-      </div>
+        {@render backgroundShells?.()}
+
+        <div class="shrink-0" style="background: var(--color-surface-1);">
+          {@render composer?.()}
+        </div>
+      {/if}
     </div>
   </div>
 </div>
+
+<style>
+  .app-shell {
+    container: app-shell / inline-size;
+  }
+
+  .desktop-sidebar {
+    --expanded-sidebar-width: max(var(--sidebar-min-width), min(var(--sidebar-width), var(--sidebar-max-width)));
+    position: relative;
+    transition: width 320ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .desktop-sidebar-content {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: var(--expanded-sidebar-width);
+    transition: opacity 160ms ease;
+  }
+
+  .desktop-sidebar-rail {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: var(--sidebar-width-collapsed);
+    transition: opacity 200ms ease;
+  }
+
+  .rail-button {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--size-8);
+    height: var(--size-8);
+    border-radius: var(--radius-lg);
+    color: var(--color-text-secondary);
+    transition: background 160ms ease;
+  }
+
+  .rail-button:hover {
+    background: var(--color-surface-3);
+  }
+
+  @container app-shell (max-width: 1079px) {
+    .desktop-sidebar {
+      --expanded-sidebar-width: min(260px, max(var(--sidebar-min-width), calc(100cqi - var(--sidebar-width-collapsed) - 32px)));
+    }
+  }
+
+  @container app-shell (max-width: 699px) {
+    .desktop-sidebar {
+      display: none !important;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .desktop-sidebar,
+    .desktop-sidebar-content,
+    .desktop-sidebar-rail {
+      transition: none;
+    }
+  }
+
+  /* Bound every transcript scroller (including the welcome view) below menus.
+     Viewport message overlays portal to body rather than escaping this layer. */
+  .chat-feed {
+    position: relative;
+    z-index: 0;
+    isolation: isolate;
+    contain: paint;
+  }
+</style>

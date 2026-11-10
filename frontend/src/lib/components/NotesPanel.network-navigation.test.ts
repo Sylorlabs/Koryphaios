@@ -21,3 +21,24 @@ it('routes Network navigation directly through the guarded openNote handler', ()
   expect(switchView).toBeGreaterThan(success);
   expect(handler.match(/activeView\s*=/g)).toHaveLength(1);
 });
+
+it('routes chat note targets through the draft guarded editor after mounting Notes', () => {
+  const panel = readFileSync(join(process.cwd(), 'src/lib/components/NotesPanel.svelte'), 'utf8');
+  const page = readFileSync(join(process.cwd(), 'src/routes/+page.svelte'), 'utf8');
+  const handler = panel.slice(
+    panel.indexOf('  async function handleOpenNoteTarget('),
+    panel.indexOf('  function handleReviewDraftEvent('),
+  );
+  expect(handler).toContain('await notesStore.resolveNoteTarget(target)');
+  expect(handler).toContain('project === projectStore.currentPath');
+  expect(handler).toContain('await openNote(id)');
+  expect(handler).not.toContain('notesStore.fetchNote');
+  const route = page.slice(
+    page.indexOf('    const handleOpenNote ='),
+    page.indexOf("    window.addEventListener('open-note'"),
+  );
+  expect(route.indexOf('showNotes = true')).toBeLessThan(route.indexOf('await tick()'));
+  expect(route.indexOf('await tick()')).toBeLessThan(
+    route.indexOf("new CustomEvent('kory-notes-open-target'"),
+  );
+});

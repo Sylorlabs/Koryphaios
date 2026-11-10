@@ -34,6 +34,8 @@ export interface MessageDisplayBoundary {
 export interface MessageDisplayProjection {
   messages: DisplayMessage[];
   boundary: MessageDisplayBoundary;
+  hasMore: boolean;
+  oldestMessageId: string | null;
 }
 
 export interface VariantChoice {
@@ -116,6 +118,8 @@ export function parseMessageDisplayProjection(value: unknown): MessageDisplayPro
         providerConversationRevision: null,
         authoritative: false,
       },
+      hasMore: false,
+      oldestMessageId: null,
     };
   }
   if (!isRecord(value) || !Array.isArray(value.messages)) {
@@ -149,6 +153,8 @@ export function parseMessageDisplayProjection(value: unknown): MessageDisplayPro
       providerConversationRevision,
       authoritative,
     },
+    hasMore: value.hasMore === true,
+    oldestMessageId: typeof value.oldestMessageId === 'string' ? value.oldestMessageId : null,
   };
 }
 

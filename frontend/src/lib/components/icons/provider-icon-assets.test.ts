@@ -4,6 +4,17 @@ import { describe, expect, it } from 'vitest';
 import { EXISTING_PROVIDER_ICON_PATHS } from './provider-icon-assets';
 
 describe('provider icon assets', () => {
+  it('ships the standalone Reflection symbol at the backend iconPath', () => {
+    expect(EXISTING_PROVIDER_ICON_PATHS.has('/provider-icons/reflection.svg')).toBe(true);
+    const source = readFileSync(join(process.cwd(), 'static/provider-icons/reflection.svg'), 'utf8');
+    const svg = new DOMParser().parseFromString(source, 'image/svg+xml');
+    expect(svg.querySelector('parsererror')).toBeNull();
+    expect(svg.documentElement.getAttribute('viewBox')).toBe('0 0 170.36 82.5');
+    expect(svg.documentElement.getAttribute('fill')).toBe('currentColor');
+    expect(svg.querySelectorAll('path')).toHaveLength(1);
+    expect(svg.querySelector('rect, image, style, script, foreignObject')).toBeNull();
+  });
+
   it('ships the first-party Command Code logomark in the generated manifest', () => {
     // backend/src/providers/provider-display.ts points Command Code at this exact
     // path. ProviderIcon.svelte rejects any local candidate missing from this
@@ -53,15 +64,21 @@ describe('provider icon assets', () => {
     );
   });
 
-  it('maps the experientiallabs provider id to its own icon slug', () => {
-    // The -color variant is tried first: the official logomark is a fixed
-    // light square with a black glyph, so it must never be treated as a
-    // theme-adaptive monochrome asset.
+  it('ships only the transparent, monochrome Experiential Labs mark', () => {
+    // The legacy -color URL is still public, but its full-canvas light rect
+    // must not return: a CSS background cannot remove pixels inside an img.
     const source = readFileSync(
-      join(process.cwd(), 'src/lib/components/icons/ProviderIcon.svelte'),
+      join(process.cwd(), 'static/provider-icons/experientiallabs-color.svg'),
       'utf8',
     );
-    expect(source).toMatch(/experientiallabs:\s*\['experientiallabs'\]/);
+    const svg = new DOMParser().parseFromString(source, 'image/svg+xml');
+    expect(svg.querySelector('parsererror')).toBeNull();
+    expect(svg.documentElement.getAttribute('viewBox')).toBe('0 0 32 32');
+    expect(svg.querySelectorAll('path')).toHaveLength(2);
+    expect(svg.querySelector('rect, image, style, foreignObject')).toBeNull();
+    expect(Array.from(svg.querySelectorAll('[fill]'), (node) => node.getAttribute('fill'))).toEqual(
+      ['currentColor'],
+    );
   });
 
   it('scopes the inline Codex gradient id to the component instance', () => {

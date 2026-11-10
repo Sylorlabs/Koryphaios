@@ -14,6 +14,7 @@
     compact?: boolean;
     disabled?: boolean;
     unit?: string;
+    quiet?: boolean;
   }
 
   let {
@@ -28,6 +29,7 @@
     compact = false,
     disabled = false,
     unit = '',
+    quiet = false,
   }: Props = $props();
 
   let editing = $state(false);
@@ -89,9 +91,10 @@
 </script>
 
 <div
-  class="flex w-full items-center overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-0)] shadow-inner focus-within:border-[var(--color-accent)] {compact
+  class="number-stepper flex w-full items-center overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-0)] shadow-inner focus-within:border-[var(--color-accent)] {compact
     ? 'h-10 min-w-0'
-    : 'h-12 min-w-[170px]'}"
+  : 'h-12 min-w-[170px]'}"
+  class:quiet
 >
   <button
     type="button"
@@ -104,7 +107,7 @@
   >
     <Minus size={compact ? 15 : 18} strokeWidth={2.25} />
   </button>
-  <div class="relative flex min-w-0 flex-1 items-center">
+  <div class="relative flex h-full min-w-0 flex-1 items-center">
     <input
       type="text"
       inputmode={Number.isInteger(step) ? 'numeric' : 'decimal'}
@@ -122,7 +125,7 @@
       }}
       onblur={commitDraft}
       onkeydown={handleKeydown}
-      class="min-w-0 w-full flex-1 bg-transparent px-12 text-center font-semibold tabular-nums text-[var(--color-text-primary)] !border-0 !outline-none !ring-0 !shadow-none focus:!border-0 focus:!outline-none focus:!ring-0 focus-visible:!border-0 focus-visible:!outline-none focus-visible:!ring-0 focus-visible:!shadow-none disabled:cursor-not-allowed disabled:opacity-50 {compact
+    class="stepper-value min-w-0 w-full flex-1 bg-transparent {unit ? 'pl-2 pr-10' : 'px-2'} text-center font-semibold tabular-nums text-[var(--color-text-primary)] !border-0 !outline-none !ring-0 !shadow-none focus:!border-0 focus:!outline-none focus:!ring-0 focus-visible:!border-0 focus-visible:!outline-none focus-visible:!ring-0 focus-visible:!shadow-none disabled:cursor-not-allowed disabled:opacity-50 {compact
         ? 'text-sm'
         : 'text-base'}"
     />
@@ -145,3 +148,17 @@
     <Plus size={compact ? 15 : 18} strokeWidth={2.25} />
   </button>
 </div>
+
+<style>
+  /* The stepper owns the field surface. Settings-wide input styling must not
+     paint a second, rounded textbox inside the composite control. */
+  .number-stepper .stepper-value {
+    height: 100%;
+    margin: 0;
+    border-radius: 0 !important;
+    background: transparent !important;
+  }
+  .number-stepper.quiet { border-color: transparent; border-radius: 8px; background: var(--color-surface-2); box-shadow: none; }
+  .number-stepper.quiet button { border-color: transparent; }
+  .number-stepper.quiet:focus-within { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+</style>

@@ -14,6 +14,13 @@
 // deliberate expansion) or would fight them (passive growth such as a
 // streaming row).
 export const EXPAND_ANCHOR_EVENT = 'koryphaios:expand-anchor';
+export const READER_RESIZE_EVENT = 'koryphaios:reader-resize';
+
+/** A disclosure grows below its summary: pause following so the clicked
+ * summary stays at the same screen position throughout opening and closing. */
+export function requestReaderResize(node: EventTarget | null | undefined): void {
+  node?.dispatchEvent(new CustomEvent(READER_RESIZE_EVENT, { bubbles: true }));
+}
 
 /**
  * Ask the surrounding transcript to keep the content below this element

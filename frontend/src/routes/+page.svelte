@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { onMount, untrack } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
+  import type { NoteLinkTarget } from '$lib/utils/kory-link-favicon';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { theme } from '$lib/stores/theme.svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
@@ -20,13 +21,17 @@
   import AgentThreadFeed from '$lib/components/AgentThreadFeed.svelte';
   import CommandInput from '$lib/components/CommandInput.svelte';
   import DiffEditor from '$lib/components/DiffEditor.svelte';
+  import type { ChatFindingInput } from '@koryphaios/shared';
   import PermissionDialog from '$lib/components/PermissionDialog.svelte';
   import QuestionDialog from '$lib/components/QuestionDialog.svelte';
   import RewindDialog from '$lib/components/RewindDialog.svelte';
+  import SaveFindingDialog from '$lib/components/SaveFindingDialog.svelte';
   import GitConflictDialog from '$lib/components/GitConflictDialog.svelte';
   import TimeTravelPanel from '$lib/components/TimeTravelPanel.svelte';
-  import ChangesSummary from '$lib/components/ChangesSummary.svelte';
+
   import SettingsDrawer from '$lib/components/SettingsDrawer.svelte';
+  import OnboardingWalkthrough from '$lib/components/OnboardingWalkthrough.svelte';
+  import { onboardingStore } from '$lib/stores/onboarding.svelte';
   import ToastContainer from '$lib/components/ToastContainer.svelte';
   import CommandPalette from '$lib/components/CommandPalette.svelte';
   import WorkflowPanel from '$lib/components/WorkflowPanel.svelte';
@@ -48,6 +53,10 @@
   import Clock from 'lucide-svelte/icons/clock';
   import X from 'lucide-svelte/icons/x';
   import TeamWorkspace from '$lib/components/TeamWorkspace.svelte';
+  import WorkspaceNewChat from '$lib/components/WorkspaceNewChat.svelte';
+  import DeviceNewChat from '$lib/components/DeviceNewChat.svelte';
+  import Monitor from 'lucide-svelte/icons/monitor';
+  import { deviceStore } from '$lib/stores/devices.svelte';
   import { invoke } from '@tauri-apps/api/core';
   import {
     type RecentProject,
@@ -78,6 +87,7 @@
     type CacheDiagnostics,
   } from '$lib/utils/cache-diagnostics';
   import { registerEligibleEscape } from '$lib/utils/double-escape';
+  import { buildContextSegments, contextCacheStatus } from '$lib/utils/context-segments';
   import {
     implementationPrompt,
     latestPlanText,
@@ -91,13 +101,29 @@
     type NativeSlashCommand,
   } from '$lib/stores/native-commands.svelte';
   import { runStateStore } from '$lib/stores/run-state.svelte';
+  import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
   import { type SettingsTab } from '$lib/utils/settings-catalog';
 
   let showSettings = $state(false);
+  const showOnboarding = $derived(!isDemoMode && authStore.isAuthenticated && onboardingStore.shouldShow);
+
+  /** Nothing is set up yet: no project, no workspace, no chat.
+   *
+   *  A fresh install opens on the start window alone. The composer dock — the
+   *  context bar, the input, the send controls — would be a dead end there
+   *  (there is no project to run in and nothing to attach), so it stays hidden
+   *  until a project is shown, then returns exactly as before. */
+  const startWindowOnly = $derived(
+    !projectStore.currentPath &&
+      !projectStore.workspaceRoot &&
+      projectStore.workspaceProjects.length === 0 &&
+      sessionStore.sessions.length === 0,
+  );
   let showAgents = $state(false);
   let agentsDismissed = $state(false);
   let showSidebar = $state(true);
   let showNotes = $state(false);
+  let saveFinding = $state<ChatFindingInput | null>(null);
   let showSidebarBeforeZen = $state(true);
   let showAgentsBeforeZen = $state(false);
   let showCommandPalette = $state(false);
@@ -141,106 +167,8 @@
     imageInputMode?: ImageInputMode;
   } | null>(null);
 
-  // Segmented context bar: what's occupying the window (system prompt,
-  // memory notes, skill guidance, tool defs, chat history, generated
-  // output). Segment ratios come from the backend's dispatch-time estimate
-  // (output is patched in from the provider usage report); the TOTAL width
-  // stays pinned to the provider's real token count so estimates can't
-  // overstate usage.
-  // Labels are written for someone who has never seen a token meter, and every
-  // label carries a plain-language `hint` shown on hover so no bucket name is a
-  // mystery.
-  const CONTEXT_SEGMENTS = [
-    {
-      key: 'system',
-      label: 'System prompt',
-      color: '#8b5cf6',
-      hint: 'The standing instructions and persona Kory sends on every request.',
-    },
-    {
-      key: 'memory',
-      label: 'Memory',
-      color: '#14b8a6',
-      hint: 'Durable notes and facts the agent was told to remember.',
-    },
-    {
-      key: 'skills',
-      label: 'Skills',
-      color: '#a78bfa',
-      hint: 'Workflow guidance loaded from the skills attached to this session.',
-    },
-    {
-      key: 'tools',
-      label: 'Tool defs',
-      color: '#f59e0b',
-      hint: 'The schemas for every tool the agent is allowed to call.',
-    },
-    {
-      key: 'chat',
-      label: 'Chat',
-      color: '#3b82f6',
-      hint: 'Your messages and the agent replies in this session.',
-    },
-    {
-      key: 'output',
-      label: 'Output',
-      color: '#f472b6',
-      hint: "Tokens the model generated in the agent's latest reply.",
-    },
-  ] as const;
-  let contextSegments = $derived.by(() => {
-    const usage = wsStore.contextUsage;
-    const b = usage.breakdown;
-    if (!b || !usage.isReliable || usage.max <= 0) return null;
-    // ?? 0 tolerates durable snapshots persisted before skills/output existed.
-    const sum =
-      b.system + b.memory + (b.skills ?? 0) + b.tools + b.chat + (b.output ?? 0);
-    if (sum <= 0) return null;
-    // Unrounded percent — the store's integer percent collapses small
-    // sessions' segments to zero width.
-    const percentFloat = Math.min(100, (usage.used / usage.max) * 100);
-    if (usage.used > sum) {
-      // The provider reports more tokens than our chars/4 category estimate.
-      // That gap may be a CLI harness, tokenizer variance, or hidden
-      // formatting. (Generated output is its own segment once the usage
-      // report lands.) Keep it visible without inventing provider-specific
-      // provenance that the backend did not report.
-      const remainder = usage.used - sum;
-      const perToken = percentFloat / usage.used;
-      return [
-        ...CONTEXT_SEGMENTS.map((s) => ({
-          ...s,
-          // ?? 0 tolerates durable snapshots from before skills/output existed.
-          tokens: (b[s.key] ?? 0),
-          widthPercent: (b[s.key] ?? 0) * perToken,
-        })),
-        {
-          key: 'unattributed',
-          label: 'Unattributed',
-          color: '#9ca3af',
-          hint: 'Tokens the provider counted that we could not map to a bucket — usually a CLI harness, tokenizer differences, or hidden formatting. They are real context.',
-          tokens: remainder,
-          widthPercent: remainder * perToken,
-        },
-      ].filter((s) => s.tokens > 0);
-    }
-    return CONTEXT_SEGMENTS.map((s) => {
-      const share = (b[s.key] ?? 0) / sum;
-      return {
-        ...s,
-        tokens: Math.round(usage.used * share),
-        widthPercent: percentFloat * share,
-      };
-    }).filter((s) => s.tokens > 0);
-  });
-
-  let cachedContextNotice = $derived.by(() => {
-    const usage = wsStore.contextUsage;
-    const cached = usage.cachedInputTokens ?? 0;
-    if (cached <= 0) return '';
-    const provider = usage.provider === 'codex' ? 'Codex' : 'The provider';
-    return `${provider} reused ${formatTokenCount(cached)} cached input tokens. They are already included in the total, still occupy the model window, and are not extra chat messages. Provider usage arrives during or at the end of a turn, so this meter can jump when that report lands.`;
-  });
+  let contextSegments = $derived(buildContextSegments(wsStore.contextUsage));
+  let contextCache = $derived(contextCacheStatus(wsStore.contextUsage));
 
   let cacheTurnReceipt = $derived.by(() => {
     const usage = wsStore.contextUsage;
@@ -389,6 +317,11 @@
     { command: 'zen', label: 'Toggle Zen', description: 'Enter or exit zen mode.' },
     { command: 'goal', label: 'Goal Mode', description: 'Open durable goals and their progress.' },
     {
+      command: 'checklist',
+      label: 'Checklists',
+      description: 'Toggle this chat’s checklist panel; add a title to start a new list.',
+    },
+    {
       command: 'workflow',
       label: 'Workflows',
       description: 'Attach a host-owned workflow to the current task.',
@@ -505,42 +438,12 @@
           void refreshComposerFileMentions();
         }
         if (authStore.isAuthenticated && !sessionStore.activeSessionId) {
-          const hasWorkspaceContext = !!(projectStore.workspaceRoot || projectStore.currentPath);
-          if (!hasWorkspaceContext) {
-            void sessionStore.newChat().catch((err: unknown) => {
-              console.warn(
-                'Failed to auto-create new chat on launch:',
-                err instanceof Error ? err.message : String(err),
-              );
-            });
-          } else {
-            const path = projectStore.currentPath;
-            if (path) {
-              const existing = sessionStore.sessionsForProject(path);
-              if (existing.length > 0) {
-                const latest = existing.reduce((a, b) => (a.updatedAt >= b.updatedAt ? a : b));
-                sessionStore.activeSessionId = latest.id;
-              } else {
-                void sessionStore.newChat().catch((err: unknown) => {
-                  console.warn(
-                    'Failed to auto-create new chat on launch:',
-                    err instanceof Error ? err.message : String(err),
-                  );
-                });
-              }
-            } else {
-              const wsSessions = sessionStore.sessions.filter((s) => !s.workingDirectory);
-              if (wsSessions.length > 0) {
-                const latest = wsSessions.reduce((a, b) => (a.updatedAt >= b.updatedAt ? a : b));
-                sessionStore.activeSessionId = latest.id;
-              } else {
-                void sessionStore.newChat().catch((err: unknown) => {
-                  console.warn(
-                    'Failed to auto-create new chat on launch:',
-                    err instanceof Error ? err.message : String(err),
-                  );
-                });
-              }
+          const path = projectStore.currentPath;
+          if (path) {
+            const existing = sessionStore.sessionsForProject(path);
+            if (existing.length > 0) {
+              const latest = existing.reduce((a, b) => (a.updatedAt >= b.updatedAt ? a : b));
+              sessionStore.activeSessionId = latest.id;
             }
           }
         }
@@ -573,12 +476,19 @@
 
     window.addEventListener('keydown', handleGlobalKeydown);
 
+    // Mount Notes before handing navigation to its unsaved draft guard.
     const handleOpenNote = async (e: Event) => {
-      if (!notesStore.settings.enabled) return;
-      const title = (e as CustomEvent<{ title: string }>).detail?.title;
-      if (!title) return;
+      if (!notesStore.settings.enabled) {
+        toastStore.error('Enable Notes in Settings to open note links.');
+        return;
+      }
+      const target = (e as CustomEvent<NoteLinkTarget>).detail;
+      if (!target) return;
+      const project = projectStore.currentPath;
       showNotes = true;
-      await notesStore.openNoteByTitle(title);
+      await tick();
+      if (project !== projectStore.currentPath) return;
+      window.dispatchEvent(new CustomEvent('kory-notes-open-target', { detail: target }));
     };
     window.addEventListener('open-note', handleOpenNote);
 
@@ -587,6 +497,33 @@
       showNotes = true;
     };
     window.addEventListener('open-notes-graph', handleOpenNotesGraph);
+    window.addEventListener('open-project-notes', handleOpenNotesGraph);
+    const handleKnowledgeSettings = (event: Event) => {
+      const destination = (event as CustomEvent).detail;
+      if (!['notes', 'memory', 'skills'].includes(destination)) return;
+      settingsInitialTab = destination;
+      showSettings = true;
+    };
+    window.addEventListener('open-knowledge-settings', handleKnowledgeSettings);
+    const handleNotesAskAgent = (event: Event) => {
+      const prompt = (event as CustomEvent<{ prompt?: string }>).detail?.prompt;
+      if (!prompt) return;
+      showNotes = false;
+      // Populate the composer for review; never submit or spend tokens silently.
+      void import('svelte').then(({ tick }) => tick()).then(() => {
+        if (!inputRef) return;
+        inputRef.value = prompt;
+        inputRef.dispatchEvent(new Event('input', { bubbles: true }));
+        inputRef.focus();
+      });
+    };
+    window.addEventListener('kory-notes-ask-agent', handleNotesAskAgent);
+    const handleNotesSaveFinding = (event: Event) => {
+      const detail = (event as CustomEvent<ChatFindingInput>).detail;
+      if (!detail?.title || !detail.body || !detail.source?.sessionId) return;
+      saveFinding = detail;
+    };
+    window.addEventListener('kory-notes-save-finding', handleNotesSaveFinding);
     const handleOpenTeamSettings = () => {
       collaborationStore.requestTeamSettings();
       showSettings = true;
@@ -600,7 +537,18 @@
     const handleFocusInput = () => inputRef?.focus();
     window.addEventListener('kory:focus-input', handleFocusInput);
 
+    const handleHomePreset = (event: Event) => {
+      const detail = (event as CustomEvent<{ provider?: string; model?: string; reasoning?: string; permission?: string }>).detail;
+      if (detail?.provider && detail.model) activeComposerModel = `${detail.provider}:${detail.model}`;
+      if (detail?.reasoning) activeComposerReasoning = detail.reasoning;
+      if (detail?.permission && ['yolo', 'guarded', 'edits', 'ask', 'custom'].includes(detail.permission)) {
+        void agentSettingsStore.saveSettings({ permissionMode: detail.permission as 'yolo' | 'guarded' | 'edits' | 'ask' | 'custom' }, { quietSuccess: true });
+      }
+    };
+    window.addEventListener('kory:home-preset', handleHomePreset);
+
     window.addEventListener('kory:open-project-folder', openProjectFolderPicker);
+    window.addEventListener('kory:workspace-new-chat', openWorkspaceNewChat);
 
     const handleWorkspaceSnapshot = (event: Event) => {
       const snapshot = (event as CustomEvent).detail as WorkspaceNavigationSnapshot | undefined;
@@ -641,6 +589,10 @@
       window.removeEventListener('keydown', handleGlobalKeydown);
       window.removeEventListener('open-note', handleOpenNote);
       window.removeEventListener('open-notes-graph', handleOpenNotesGraph);
+      window.removeEventListener('open-project-notes', handleOpenNotesGraph);
+      window.removeEventListener('open-knowledge-settings', handleKnowledgeSettings);
+      window.removeEventListener('kory-notes-ask-agent', handleNotesAskAgent);
+      window.removeEventListener('kory-notes-save-finding', handleNotesSaveFinding);
       window.removeEventListener('open-team-settings', handleOpenTeamSettings);
       window.removeEventListener(
         'open-provider-account-settings',
@@ -648,7 +600,9 @@
       );
       window.removeEventListener('open-team-settings', handleOpenTeamSettings);
       window.removeEventListener('kory:focus-input', handleFocusInput);
+      window.removeEventListener('kory:home-preset', handleHomePreset);
       window.removeEventListener('kory:open-project-folder', openProjectFolderPicker);
+      window.removeEventListener('kory:workspace-new-chat', openWorkspaceNewChat);
       window.removeEventListener('kory-workspace-snapshot', handleWorkspaceSnapshot);
       window.removeEventListener('kory-workspace-refresh', handleWorkspaceRefresh);
       window.clearInterval(workspaceRefreshTimer);
@@ -663,12 +617,14 @@
     {
       requestSnapshot: (path: string, init?: RequestInit) => apiFetch(apiUrl(path), init),
       getActiveSessionWorkingDirectory: () => {
+        if (sessionStore.activeSessionId.startsWith('linked-')) return null;
         const active = sessionStore.sessions.find(
           (session) => session.id === sessionStore.activeSessionId,
         );
         return active?.workingDirectory ?? null;
       },
       clearActiveSession: () => {
+        if (sessionStore.activeSessionId.startsWith('linked-')) return;
         sessionStore.activeSessionId = '';
       },
     },
@@ -680,6 +636,18 @@
   const refreshWorkspaceNavigation = workspace.refreshWorkspaceNavigation;
   const acknowledgeUnavailableProject = workspace.acknowledgeUnavailableProject;
 
+  function openWorkspaceNewChat() {
+    if (isGuidedDemo || !projectStore.workspaceRoot) return;
+    deviceStore.closeCreator();
+    deviceStore.closeChat();
+    collaborationStore.closeJoinedSession();
+    agentRail.selectedAgentId = '';
+    gitStore.closeDiff();
+    workspace.setLastReconciledSessionId('');
+    sessionStore.activeSessionId = '';
+    void refreshWorkspaceNavigation();
+  }
+
   // Seed the session→project fence with the stored last-session id. The
   // boot-restored session is not a user switch, so it must not bulldoze the
   // authoritative backend workspace state (deselecting the open project or
@@ -689,7 +657,7 @@
   $effect(() => {
     const authenticated = appStore.authReady;
     const sessionId = sessionStore.activeSessionId;
-    if (!authenticated || !sessionId || sessionId === workspace.lastReconciledSessionId) return;
+    if (!authenticated || !sessionId || sessionId.startsWith('linked-') || sessionId === workspace.lastReconciledSessionId) return;
     workspace.setLastReconciledSessionId(sessionId);
     const session = sessionStore.sessions.find((item) => item.id === sessionId);
     if (session?.workingDirectory) {
@@ -735,6 +703,7 @@
   }
 
   function handleGlobalKeydown(e: KeyboardEvent) {
+    if (showOnboarding && !showSettings) return;
     if (e.key === 'Escape' && showThemeQuickMenu) {
       showThemeQuickMenu = false;
       return;
@@ -793,8 +762,7 @@
       showSettings = true;
     } else if (shortcutStore.matches('new_session', e)) {
       e.preventDefault();
-      void sessionStore.newChat({ shift: e.shiftKey });
-      inputRef?.focus();
+      deviceStore.openCreator();
     } else if (shortcutStore.matches('focus_input', e)) {
       e.preventDefault();
       inputRef?.focus();
@@ -841,12 +809,32 @@
     ]);
   }
 
+  // The execution context this feed is bound to, and whether auth has landed.
+  //
+  // This effect used to re-run on *any* invalidation of the signals it read and
+  // do the work unconditionally. `authStore.isAuthenticated` reads `user`, which
+  // `ensureSession()` reassigns on every single request it preflights — so this
+  // effect fired once per in-flight API call, each time issuing two more
+  // requests (/api/workspace/files and /api/git/status). That is a closed loop:
+  // request → preflight → new `user` object → this effect → two more requests.
+  // Measured 20 req/s idle, 8 of them `git status`, each spawning 8 git
+  // subprocesses (~60 process spawns/second) at ~25% idle CPU.
+  //
+  // Compare the context and only act when it genuinely changes, with the whole
+  // body untracked so incidental reads cannot re-arm it.
+  let lastComposerContextKey = '';
+  let lastComposerAuthenticated = false;
   $effect(() => {
     const authenticated = authStore.isAuthenticated;
     // Track execution context, not just source project: two chats can use
     // different checkouts of the same project.
-    composerWorkspaceKey();
+    const contextKey = composerWorkspaceKey();
     untrack(() => {
+      if (contextKey === lastComposerContextKey && authenticated === lastComposerAuthenticated) {
+        return;
+      }
+      lastComposerContextKey = contextKey;
+      lastComposerAuthenticated = authenticated;
       composerFilesRequest++;
       composerProjectFiles = [];
       gitStore.resetForContext();
@@ -947,14 +935,13 @@
 
     if (root === 'help') {
       toastStore.info(
-        'Commands: /new, /resume, /compact, /rewind, /activity, /workflow, /goal, /clear, /settings, /theme, /sidebar, /zen',
+        'Commands: /new, /resume, /compact, /rewind, /activity, /workflow, /goal, /checklist, /clear, /settings, /theme, /sidebar, /zen',
       );
       return true;
     }
 
     if (root === 'new') {
-      await sessionStore.newChat();
-      inputRef?.focus();
+      deviceStore.openCreator();
       return true;
     }
 
@@ -1041,6 +1028,18 @@
       queueMicrotask(() =>
         window.dispatchEvent(
           new CustomEvent<GoalActionRequest>('kory:goal-action', { detail: request }),
+        ),
+      );
+      return true;
+    }
+
+    if (root === 'checklist' || root === 'checklists') {
+      // The docked list lives in the composer, so hand the request over the same
+      // way /goal does instead of reaching into another component's state.
+      const title = parts.slice(1).join(' ').trim();
+      queueMicrotask(() =>
+        window.dispatchEvent(
+          new CustomEvent<{ title: string }>('kory:checklist-action', { detail: { title } }),
         ),
       );
       return true;
@@ -1380,6 +1379,18 @@
     return true;
   }
 
+  async function handleNativeFolderSelected(
+    selectedPath: string,
+    mode: 'project' | 'workspace',
+  ) {
+    try {
+      if (mode === 'workspace') await openWorkspaceAtPath(selectedPath);
+      else await openProjectFolderAtPath(selectedPath);
+    } catch (error) {
+      toastStore.error(String(error));
+    }
+  }
+
   async function confirmNewWorkspaceName() {
     const pending = newWorkspacePrompt;
     const workspaceName = newWorkspaceNameInput.trim();
@@ -1396,8 +1407,22 @@
     }
   }
 
+  async function openProjectFolderAtPath(selectedPath: string) {
+    const result = await readFolderFromTauri(selectedPath);
+    if (!result) {
+      toastStore.error('Failed to open folder');
+      return;
+    }
+
+    await openProjectAtPath(selectedPath, {
+      title: result.title,
+      text: result.text,
+      fileName: result.folderName,
+    });
+  }
+
   /** Folder picker for "choose the folder you work in" (sidebar "+" and menu). */
-  async function openProjectFolderPicker() {
+  function openProjectFolderPicker() {
     const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
     if (!inTauri) {
@@ -1405,24 +1430,37 @@
       return;
     }
 
-    try {
-      const selectedPath = await invoke<string | null>('select_folder_dialog');
-      if (!selectedPath) return;
+    deviceStore.openCreator('project');
+  }
 
-      const result = await readFolderFromTauri(selectedPath);
-      if (!result) {
-        toastStore.error('Failed to open folder');
-        return;
-      }
-
-      await openProjectAtPath(selectedPath, {
-        title: result.title,
-        text: result.text,
-        fileName: result.folderName,
-      });
-    } catch (error) {
-      toastStore.error(String(error));
+  async function selectProjectForQuickAction(path: string): Promise<boolean> {
+    if (path === projectStore.currentPath) return true;
+    const selected = await selectAuthoritativeProject(path);
+    if (!selected) {
+      toastStore.error('That project is no longer available. Refresh the workspace and try again.');
     }
+    return selected;
+  }
+
+  async function openProjectIdentityFromQuickAction(encodedPath: string) {
+    const path = decodeURIComponent(encodedPath);
+    if (!(await selectProjectForQuickAction(path))) return;
+    settingsInitialTab = 'project';
+    settingsInitialAgentSection = undefined;
+    showSettings = true;
+  }
+
+  async function openProjectFolderFromQuickAction(encodedPath: string) {
+    const path = decodeURIComponent(encodedPath);
+    if (!(await selectProjectForQuickAction(path))) return;
+    toastStore.success(`Opened ${projectDisplayName(path)}`);
+  }
+
+  async function createProjectChatFromQuickAction(encodedPath: string) {
+    const path = decodeURIComponent(encodedPath);
+    if (!(await selectProjectForQuickAction(path))) return;
+    const newId = await sessionStore.createSession({ workingDirectory: path });
+    if (newId) toastStore.success(`New chat in ${projectDisplayName(path)}`);
   }
 
   async function handleMenuAction(action: string) {
@@ -1478,13 +1516,7 @@
           toastStore.error('Workspace folders require the desktop app');
           break;
         }
-        try {
-          const selectedPath = await invoke<string | null>('select_folder_dialog');
-          if (!selectedPath) break;
-          await openWorkspaceAtPath(selectedPath);
-        } catch (error) {
-          toastStore.error(String(error));
-        }
+        deviceStore.openCreator('workspace');
         break;
       }
       case 'new_workspace': {
@@ -1504,8 +1536,7 @@
         break;
       }
       case 'new_session':
-        await sessionStore.newChat();
-        inputRef?.focus();
+        deviceStore.openCreator();
         break;
       case 'resume_chat':
         resumePreviousChat();
@@ -1560,6 +1591,11 @@
         settingsInitialAgentSection = undefined;
         showSettings = true;
         break;
+      case 'link_device':
+        settingsInitialTab = 'devices';
+        settingsInitialAgentSection = undefined;
+        showSettings = true;
+        break;
       case 'toggle_palette':
         showCommandPalette = !showCommandPalette;
         break;
@@ -1576,7 +1612,13 @@
         insertPromptTemplate('ship', inputRef);
         break;
       default:
-        if (action.startsWith('open_recent:')) {
+        if (action.startsWith('open_project_identity:')) {
+          await openProjectIdentityFromQuickAction(action.slice('open_project_identity:'.length));
+        } else if (action.startsWith('open_project_folder:')) {
+          await openProjectFolderFromQuickAction(action.slice('open_project_folder:'.length));
+        } else if (action.startsWith('new_project_chat:')) {
+          await createProjectChatFromQuickAction(action.slice('new_project_chat:'.length));
+        } else if (action.startsWith('open_recent:')) {
           await openRecentProject(action.slice('open_recent:'.length));
         } else if (action.startsWith('select_project:')) {
           const path = decodeURIComponent(action.slice('select_project:'.length));
@@ -1638,7 +1680,7 @@
       );
       return true;
     }
-    if (!projectStore.currentPath) {
+    if (!projectStore.currentPath && !deviceStore.activeChat) {
       // Fail closed until the user chooses a current folder. Treating HOME as
       // an ephemeral project conflicted with authoritative workspace refresh:
       // the next snapshot correctly rejected the broad path and detached the
@@ -1681,26 +1723,73 @@
     }
     if (!message.trim() && !(attachments && attachments.length > 0)) return false;
 
-    // The welcome screen deliberately has a usable composer. Its first send
-    // creates a correctly scoped chat and continues immediately—requiring a
-    // separate click on "+" made the primary action look broken.
+    // A first send can use an already selected project, but every chat needs
+    // an explicit folder. Returning false preserves the composer draft.
     if (!sessionStore.activeSessionId) {
+      if (!projectStore.currentPath) {
+        deviceStore.openCreator();
+        return false;
+      }
       const createdSessionId = await sessionStore.newChat();
       if (!createdSessionId) return false;
     }
-    if (agentRail.selectedAgentId) {
+    const sessionId = sessionStore.activeSessionId;
+    const agentId = agentRail.selectedAgentId;
+    if (agentId) {
       // Sub-agents get the same controls as the manager: the composer's model
       // and reasoning pickers apply to the selected agent's next turn.
       return wsStore.sendAgentMessage(
-        sessionStore.activeSessionId,
-        agentRail.selectedAgentId,
+        sessionId,
+        agentId,
         message,
         model,
         reasoningLevel,
       );
     }
     return wsStore.sendMessage(
-      sessionStore.activeSessionId,
+      sessionId,
+      message,
+      model,
+      reasoningLevel,
+      attachments,
+      fastMode,
+      imageInputMode,
+    );
+  }
+
+  /** Steering is a cancel-then-continue handoff, not a second concurrent turn.
+   * The websocket store waits for the captured cancellation to settle before
+   * admitting the new instruction, so the provider never has two live turns
+   * competing for the same session. */
+  async function handleSteer(
+    message: string,
+    model?: string,
+    reasoningLevel?: string,
+    attachments?: Array<{ type: string; data: string; name: string }>,
+    fastMode?: boolean,
+    imageInputMode?: ImageInputMode,
+  ): Promise<boolean> {
+    if (isDemoMode) {
+      void import('$lib/demo.svelte').then((m) => {
+        m.demoStop();
+        void m.demoSend(message);
+      });
+      return true;
+    }
+    const sessionId = sessionStore.activeSessionId;
+    if (!sessionId) return false;
+    const agentId = agentRail.selectedAgentId;
+    if (agentId) {
+      if (!message.trim()) return false;
+      try {
+        await wsStore.cancelAgent(sessionId, agentId);
+        return wsStore.sendAgentMessage(sessionId, agentId, message, model, reasoningLevel);
+      } catch {
+        return false;
+      }
+    }
+    return wsStore.steerMessage(
+      sessionId,
       message,
       model,
       reasoningLevel,
@@ -1715,26 +1804,25 @@
       void import('$lib/demo.svelte').then((m) => m.demoStop());
       return;
     }
-    const sid = sessionStore.activeSessionId;
-    if (!sid) return;
-    if (agentRail.selectedAgentId) {
-      wsStore.markAgentStopped(agentRail.selectedAgentId);
-      apiFetch(apiUrl(`/api/agent/${agentRail.selectedAgentId}/cancel`), { method: 'POST' }).catch(
-        (err: unknown) => {
-          console.debug(
-            'Failed to cancel agent:',
-            err instanceof Error ? err.message : String(err),
-          );
-        },
-      );
+    const sessionId = sessionStore.activeSessionId;
+    const agentId = agentRail.selectedAgentId;
+    if (!sessionId) return;
+    if (agentId) {
+      // Capture both identities before the asynchronous request. A late
+      // response belongs to this turn only and cannot cancel a replacement
+      // turn in another session or agent thread.
+      void wsStore.cancelAgent(sessionId, agentId).catch(() => undefined);
       return;
     }
-    wsStore.markSessionAgentsStopped(sid);
-    wsStore.clearAnalyzing();
-    apiFetch(apiUrl(`/api/sessions/${sid}/cancel`), { method: 'POST' }).catch((err: unknown) => {
-      console.warn('Session cancel failed:', err instanceof Error ? err.message : String(err));
-    });
+    void wsStore.cancelSession(sessionId).catch(() => undefined);
   }
+
+  let composerStopping = $derived(
+    !!sessionStore.activeSessionId && wsStore.isCancellationPending(
+      sessionStore.activeSessionId,
+      agentRail.selectedAgentId || undefined,
+    ),
+  );
 
   let activeAgents = $derived(
     [...wsStore.agents.values()].filter(
@@ -1791,7 +1879,8 @@
 <AppShell
   {showSidebar}
   {zenMode}
-  showNotes={notesStore.settings.enabled && showNotes && !collaborationStore.activeJoinedSession}
+  modalOpen={showSettings || showOnboarding}
+  showNotes={notesStore.settings.enabled && showNotes && !collaborationStore.activeJoinedSession && !deviceStore.activeChat}
   activeSessionId={sessionStore.activeSessionId}
   {connectionDot}
   {connectionStatusLabel}
@@ -1810,7 +1899,8 @@
       {showNotes}
       notesEnabled={notesStore.settings.enabled}
       {zenMode}
-      projectName={collaborationStore.activeJoinedSession?.sessionName ?? projectStore.displayName}
+      projectName={deviceStore.activeChat ? 'Micah’s agents' : collaborationStore.activeJoinedSession?.sessionName ?? projectStore.displayName}
+      linkedDeviceName={deviceStore.activeChat?.deviceName}
       {activeAgents}
       {recentProjects}
       onAction={handleMenuAction}
@@ -1844,8 +1934,25 @@
   {/snippet}
 
   {#snippet feed()}
+    {#if deviceStore.activeChat}
+      <div class="flex shrink-0 items-center gap-2 border-b border-[var(--color-border)] px-4 py-2 text-xs text-[var(--color-text-secondary)]">
+        <Monitor size={15} /><strong class="text-[var(--color-text-primary)]">Micah’s agents</strong>
+        <span class="truncate">{deviceStore.activeChat.deviceName} · {deviceStore.activeChat.workspaceName}</span>
+        {#if deviceStore.error}<span role="alert" class="text-[var(--color-error)]">{deviceStore.error}</span>{/if}
+      </div>
+    {/if}
     {#if collaborationStore.activeJoinedSession}
       <TeamWorkspace />
+    {:else if projectStore.workspaceRoot && !sessionStore.activeSessionId}
+      <WorkspaceNewChat
+        onSelectFolder={(path) =>
+          handleMenuAction(`select_project:${encodeURIComponent(path)}`).catch((error) =>
+            toastStore.error(String(error)),
+          )}
+        onBrowseFolder={() => void handleMenuAction('open_project_folder')}
+        onOpenWorkspace={() => void handleMenuAction('open_workspace')}
+        onNewProject={() => void handleMenuAction('new_project')}
+      />
     {:else if !projectStore.currentPath && !sessionStore.activeSessionId}
       <!--
         Welcome screen: centered within the FEED AREA, not the viewport.
@@ -2046,41 +2153,43 @@
         </div>
       </div>
     {:else if gitStore.state.activeDiff}
-      <DiffEditor />
+      <DiffEditor {zenMode} />
     {:else if agentRail.selectedAgent}
       <AgentThreadFeed
         agent={agentRail.selectedAgent}
         feed={agentRail.selectedAgentFeed}
         isStreaming={agentRail.selectedAgentIsRunning}
+        onClose={() => void agentRail.closeAgent(agentRail.selectedAgentId)}
       />
     {:else}
-      <ManagerFeed onUseSuggestion={loadSuggestionIntoComposer} />
+      <ManagerFeed onUseSuggestion={loadSuggestionIntoComposer} centered={startWindowOnly} />
     {/if}
   {/snippet}
 
   {#snippet contextBar()}
+    {#if !startWindowOnly}
     <!-- Context occupancy is informational (not cost tracking) — ALWAYS visible
          for an open session: known window → segmented bar; unknown window →
          tokens-used with an explicit "window unknown" label; no data yet →
          muted awaiting state. Never silently absent. -->
-    {#if !collaborationStore.activeJoinedSession && projectStore.currentPath && sessionStore.activeSessionId}
+    {#if !collaborationStore.activeJoinedSession && (deviceStore.activeChat || projectStore.currentPath) && sessionStore.activeSessionId}
       <div
-        class="shrink-0 px-4"
-        style="padding-top: var(--space-2); padding-bottom: var(--space-2); border-top: 1px solid var(--color-border); background: var(--color-surface-1);"
+        class="context-bar shrink-0 px-2 sm:px-4"
+        style="container-type: inline-size; padding-top: var(--space-2); padding-bottom: var(--space-2); border-top: 1px solid var(--color-border); background: var(--color-surface-1);"
         role="group"
         onmouseenter={() => (contextBarHover = true)}
         onmouseleave={() => (contextBarHover = false)}
       >
-        <div class="flex items-center gap-3" role="group" aria-label="Context window usage">
+        <div class="context-bar-summary flex min-w-0 items-center gap-2 sm:gap-3" role="group" aria-label="Context window usage">
           <span
-            class="w-[74px] shrink-0"
+            class="w-[74px] shrink-0 context-bar-label"
             style="font-size: var(--text-xs); color: var(--color-text-muted);"
-            title="How much of the model's context window this session is using. The bar splits that total by what fills it — hover to see every part."
+            title="How much of the model's context window this session is using. The bar splits that total by what fills it. Hover to see every part."
           >
             Context
           </span>
           <div
-            class="flex-1 rounded-full overflow-hidden flex"
+            class="relative min-w-8 flex-1 rounded-full overflow-hidden flex context-bar-meter"
             style="height: 6px; background: var(--color-surface-3);"
           >
             {#if !wsStore.contextUsage.isReliable}
@@ -2092,7 +2201,7 @@
               {#each contextSegments as seg (seg.key)}
                 <div
                   class="h-full transition-all"
-                  title="{seg.label}: ~{formatTokenCount(seg.tokens)} tokens — {seg.hint}"
+                  title="{seg.label}: ~{formatTokenCount(seg.tokens)} tokens. {seg.hint}"
                   style="width: {seg.widthPercent}%; transition-duration: var(--duration-slower); background: {seg.color};"
                 ></div>
               {/each}
@@ -2111,49 +2220,58 @@
           </div>
           {#if wsStore.contextUsage.isReliable && wsStore.contextUsage.max > 0}
             <span
-              class="shrink-0 tabular-nums"
-              style="font-size: var(--text-xs); color: {wsStore.contextUsage.percent > 85
+              class="shrink-0 tabular-nums context-bar-value"
+              style="font-size: var(--text-xs); color: {!wsStore.contextUsage.estimated && wsStore.contextUsage.percent > 85
                 ? '#ef4444'
                 : 'var(--color-text-muted)'};"
             >
-              {formatTokenCount(wsStore.contextUsage.used)} / {formatTokenCount(
-                wsStore.contextUsage.max,
-              )}
+              {#if wsStore.contextUsage.estimated}
+                ~{formatTokenCount(wsStore.contextUsage.used)} / {formatTokenCount(wsStore.contextUsage.max)}
+                estimate
+              {:else}
+                {formatTokenCount(wsStore.contextUsage.used)} / {formatTokenCount(wsStore.contextUsage.max)}
+              {/if}
             </span>
           {:else if wsStore.contextUsage.used > 0}
             <span
-              class="shrink-0 tabular-nums"
+              class="shrink-0 tabular-nums context-bar-value"
               style="font-size: var(--text-xs); color: var(--color-text-muted);"
-              title="Usage is real (provider-reported). The provider/CLI did not report a verified window size for this model, so no percentage can be shown honestly."
+              title={wsStore.contextUsage.estimated
+                ? 'The provider reported turn-level usage, but did not establish exact live occupancy or a verified window.'
+                : 'The provider reported usage but no verified window size for this model.'}
             >
-              {formatTokenCount(wsStore.contextUsage.used)} used · window not reported by provider
+              {#if wsStore.contextUsage.estimated}
+                live context not reported · window unknown
+              {:else}
+                {formatTokenCount(wsStore.contextUsage.used)} used · window not reported by provider
+              {/if}
             </span>
           {:else if wsStore.contextUsage.reason === 'usage_unknown' && wsStore.contextUsage.max > 0}
             <span
-              class="shrink-0 tabular-nums"
+              class="shrink-0 tabular-nums context-bar-value"
               style="font-size: var(--text-xs); color: var(--color-text-muted);"
-              title="Verified {formatTokenCount(wsStore.contextUsage.max)} window — usage appears after the provider's first token report."
+              title="Verified {formatTokenCount(wsStore.contextUsage.max)} window. Usage appears after the provider's first token report."
             >
-              0 used · {formatTokenCount(wsStore.contextUsage.max)} window
+              {formatTokenCount(wsStore.contextUsage.max)} window · usage not yet reported
             </span>
           {:else if wsStore.contextUsage.reason === 'context_unknown'}
             <span
-              class="shrink-0 tabular-nums"
+              class="shrink-0 tabular-nums context-bar-value"
               style="font-size: var(--text-xs); color: var(--color-text-muted);"
               title="The selected provider or CLI did not report a verified context-window size for this model."
             >
-              0 used · model window not reported
+              usage and model window not reported
             </span>
           {:else}
             <span
-              class="shrink-0"
+              class="shrink-0 context-bar-value"
               style="font-size: var(--text-xs); color: var(--color-text-muted);"
               title="Waiting for the selected provider or CLI to report an authoritative token count. Local character estimates are intentionally not shown as token truth."
             >
               awaiting provider token report
             </span>
           {/if}
-        </div>
+        </div      >
         {#if contextSegments && contextBarHover}
           <div class="flex items-center gap-4 flex-wrap" style="padding-top: var(--space-2);">
             {#each contextSegments as seg (seg.key)}
@@ -2169,11 +2287,21 @@
                 <span class="tabular-nums">~{formatTokenCount(seg.tokens)}</span>
               </span>
             {/each}
-            <span style="font-size: var(--text-xs); color: var(--color-text-muted);">
-              Free {formatTokenCount(
-                Math.max(0, wsStore.contextUsage.max - wsStore.contextUsage.used),
-              )}
-            </span>
+            {#if !wsStore.contextUsage.estimated}
+              <span style="font-size: var(--text-xs); color: var(--color-text-muted);">
+                Free {formatTokenCount(Math.max(0, wsStore.contextUsage.max - wsStore.contextUsage.used))}
+              </span>
+            {/if}
+          </div>
+        {/if}
+        {#if wsStore.contextUsage.estimated}
+          <div style="padding-top: var(--space-1); font-size: var(--text-xs); color: var(--color-text-muted);">
+            Provider totals may span multiple internal requests · category breakdown is estimated
+          </div>
+        {/if}
+        {#if contextCache.label}
+          <div title={contextCache.hint} style="padding-top: var(--space-1); font-size: var(--text-xs); color: var(--color-text-muted);">
+            {contextCache.label}
           </div>
         {/if}
         <!-- Cache health sits in its own group under a hairline so the context
@@ -2188,7 +2316,7 @@
             {#if cacheTurnReceipt}
               <div class="flex items-baseline gap-3">
                 <span class="w-[74px] shrink-0">Cache</span>
-                <span class="min-w-0 truncate" title={cachedContextNotice || cacheTurnReceipt}>
+                <span class="min-w-0 truncate" title={contextCache.label ? contextCache.hint : cacheTurnReceipt}>
                   {cacheTurnReceipt}
                 </span>
               </div>
@@ -2222,10 +2350,11 @@
         {/if}
       </div>
     {/if}
+    {/if}
   {/snippet}
 
   {#snippet composer()}
-    {#if !collaborationStore.activeJoinedSession}
+    {#if !startWindowOnly && !collaborationStore.activeJoinedSession && (deviceStore.activeChat || !(projectStore.workspaceRoot && !sessionStore.activeSessionId))}
       <WorkflowPanel
         open={showWorkflows}
         sessionId={sessionStore.activeSessionId}
@@ -2239,10 +2368,12 @@
         draftKey={sessionStore.activeSessionId || 'welcome'}
         clearDraftRequest={clearComposerDraftRequest}
         onSend={handleSend}
+        onSteer={handleSteer}
         onExecuteCommand={handleSlashCommand}
-        isRunning={agentRail.selectedAgent
-          ? agentRail.selectedAgentIsRunning
-          : runStateStore.isRunning(sessionStore.activeSessionId)}
+         isRunning={agentRail.selectedAgent
+           ? agentRail.selectedAgentIsRunning
+           : runStateStore.isRunning(sessionStore.activeSessionId)}
+         isStopping={composerStopping}
         isWaiting={!agentRail.selectedAgent &&
           runStateStore.isWaiting(sessionStore.activeSessionId)}
         waitingReason={runStateStore.getWaitingReason(sessionStore.activeSessionId)}
@@ -2263,7 +2394,7 @@
         onRefreshFileMentions={refreshComposerFileMentions}
         placeholder={agentRail.inputPlaceholder}
         initialModel={isDemoMode ? 'codex:gpt-5.6-sol' : ''}
-        disableModelPreviewRequests={isDemoMode}
+        disableModelPreviewRequests={isDemoMode || !!deviceStore.activeChat}
         bind:selectedModel={activeComposerModel}
         bind:selectedReasoningLevel={activeComposerReasoning}
         forcedModel={agentRail.selectedAgent
@@ -2310,7 +2441,10 @@
 <QuestionDialog />
 <TimeTravelPanel bind:open={showTimeTravel} />
 <RewindDialog />
-<ChangesSummary />
+{#if saveFinding}
+  <SaveFindingDialog finding={saveFinding} onClose={() => (saveFinding = null)} />
+{/if}
+
 {#if !showGitConflicts && gitStore.state.conflicts.length > 0}
   <button
     type="button"
@@ -2527,6 +2661,22 @@
   </div>
 {/if}
 
+  <DeviceNewChat onAction={handleMenuAction} onSelectFolder={handleNativeFolderSelected} />
+{#if showOnboarding}
+  <OnboardingWalkthrough
+    suspended={showSettings}
+    onOpenProviders={() => {
+      settingsInitialTab = 'providers';
+      settingsInitialAgentSection = undefined;
+      showSettings = true;
+    }}
+    onOpenDevices={() => {
+      settingsInitialTab = 'devices';
+      settingsInitialAgentSection = undefined;
+      showSettings = true;
+    }}
+  />
+{/if}
 <SettingsDrawer
   open={showSettings}
   initialTab={settingsInitialTab}

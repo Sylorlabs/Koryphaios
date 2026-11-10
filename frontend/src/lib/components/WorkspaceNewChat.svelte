@@ -9,9 +9,13 @@
    * project and creates a fresh session (same as the `select_project:` menu
    * action).
    */
-  import { projectStore, projectDisplayName } from '$lib/stores/project.svelte';
+  import {
+    projectIdentityProjection,
+    projectStore,
+    projectDisplayName,
+  } from '$lib/stores/project.svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
-  import FolderToggleIcon from './FolderToggleIcon.svelte';
+  import ProjectIcon from './ProjectIcon.svelte';
   import FolderPlus from 'lucide-svelte/icons/folder-plus';
   import FolderTree from 'lucide-svelte/icons/folder-tree';
   import FolderSearch from 'lucide-svelte/icons/folder-search';
@@ -39,12 +43,11 @@
     name: string;
     chatCount: number;
     lastActivity: number;
+    identity: ReturnType<typeof projectIdentityProjection>;
   }
 
   let query = $state('');
   let selectingPath = $state('');
-  /** Card whose folder should render "open" (hover / keyboard focus). */
-  let openPath = $state('');
   let searchInput = $state<HTMLInputElement | null>(null);
 
   const root = $derived(projectStore.workspaceRoot);
@@ -56,11 +59,13 @@
       .map((project) => {
         const chats = sessionStore.sessionsForProject(project.path);
         const lastChat = chats.reduce((latest, session) => Math.max(latest, session.updatedAt), 0);
+        const identity = projectIdentityProjection(project);
         return {
           path: project.path,
           name: project.name || projectDisplayName(project.path),
           chatCount: chats.length,
           lastActivity: Math.max(lastChat, project.modifiedAt),
+          identity,
         };
       })
       .sort((left, right) => {
@@ -152,13 +157,6 @@
           {root}
         </p>
       </div>
-      <p
-        class="max-w-xs text-sm leading-relaxed sm:text-right"
-        style="color: var(--color-text-secondary);"
-      >
-        Pick the folder this chat should work in. It only appears in the sidebar once it has a
-        chat.
-      </p>
     </header>
 
     <!-- Search -->
@@ -196,7 +194,10 @@
           {@const busy = selectingPath === folder.path}
           <!-- The <li> carries the entrance animation so the card's hover lift
                isn't overridden by a retained animation transform. -->
-          <li class="folder-card-enter min-w-0" style="animation-delay: {Math.min(index, 12) * 22}ms;">
+          <li
+            class="folder-card-enter min-w-0"
+            style="animation-delay: {Math.min(index, 12) * 22}ms;"
+          >
             <button
               type="button"
               class="folder-card group relative flex w-full min-w-0 items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition-all duration-150 hover:-translate-y-0.5 disabled:cursor-wait disabled:opacity-70"
@@ -205,24 +206,31 @@
               title={folder.path}
               disabled={Boolean(selectingPath)}
               onclick={() => void choose(folder.path)}
-              onmouseenter={() => (openPath = folder.path)}
-              onmouseleave={() => {
-                if (openPath === folder.path) openPath = '';
-              }}
-              onfocus={() => (openPath = folder.path)}
-              onblur={() => {
-                if (openPath === folder.path) openPath = '';
-              }}
               aria-label={`Start a new chat in ${folder.name}. ${chatCountLabel(folder.chatCount)}`}
             >
-              <span
-                class="folder-icon flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors"
-                style="background: var(--color-surface-3); color: var(--color-text-secondary);"
-              >
+              <span class="relative flex h-9 w-9 shrink-0 items-center justify-center">
                 {#if busy}
-                  <LoaderCircle size={16} class="animate-spin" />
+                  <ProjectIcon
+                    identity={folder.identity.identity}
+                    icon={folder.identity.identity.icon}
+                    size={36}
+                  />
+                  <span
+                    class="absolute inset-0 flex items-center justify-center rounded-lg"
+                    style="background: color-mix(in srgb, var(--color-surface-2) 70%, transparent);"
+                  >
+                    <LoaderCircle
+                      size={16}
+                      class="animate-spin"
+                      style="color: var(--color-accent);"
+                    />
+                  </span>
                 {:else}
-                  <FolderToggleIcon open={openPath === folder.path} size={16} />
+                  <ProjectIcon
+                    identity={folder.identity.identity}
+                    icon={folder.identity.identity.icon}
+                    size={36}
+                  />
                 {/if}
               </span>
               <span class="min-w-0 flex-1">
@@ -354,16 +362,6 @@
       0 6px 18px -10px rgba(0, 0, 0, 0.6),
       0 0 0 1px rgba(var(--color-accent-rgb), 0.18);
     outline: none;
-  }
-
-  .folder-card:hover .folder-icon,
-  .folder-card:focus-visible .folder-icon {
-    background: rgba(var(--color-accent-rgb), 0.16) !important;
-    color: var(--color-accent) !important;
-  }
-
-  .folder-card.has-chats .folder-icon {
-    color: var(--color-text-primary);
   }
 
   .folder-card:hover .folder-arrow {

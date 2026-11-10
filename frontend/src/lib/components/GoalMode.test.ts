@@ -31,7 +31,7 @@ vi.mock('$lib/stores/project.svelte', () => ({
   projectDisplayName: (path?: string) => path ?? '',
 }));
 vi.mock('$lib/stores/agent-settings.svelte', () => ({
-  agentSettingsStore: { criticActive: false, settings: {} },
+  agentSettingsStore: { criticActive: false, settings: { criticMode: 'off' } },
 }));
 vi.mock('$lib/utils/now-signal.svelte', () => ({
   useSecondClock: () => ({ now: 1_000_000, unsubscribe: vi.fn() }),

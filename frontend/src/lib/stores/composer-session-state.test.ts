@@ -116,6 +116,7 @@ describe('per-chat composer control state', () => {
           criticGateEnabled: 'yes',
         },
         'session-b': { permissionMode: 'ask', agentExecutionMode: 'auto' },
+        'session-c': { permissionMode: 'plan' },
       }),
     );
 
@@ -124,5 +125,6 @@ describe('per-chat composer control state', () => {
       permissionMode: 'ask',
       agentExecutionMode: 'auto',
     });
+    expect(loadComposerSessionState('session-c')).toEqual({});
   });
 });

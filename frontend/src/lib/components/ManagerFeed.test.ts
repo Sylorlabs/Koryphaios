@@ -1,17 +1,19 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   removeEntries: vi.fn(),
   deleteEntry: vi.fn(),
   sessionStore: { activeSessionId: 'session-1' },
+  isLoadingSession: false,
+  feed: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock('$lib/stores/websocket.svelte', () => ({
   wsStore: {
-    groupedFeed: [],
+    get groupedFeed() { return mocks.feed; },
     managerStatus: 'idle',
-    isLoadingSession: false,
+    get isLoadingSession() { return mocks.isLoadingSession; },
     removeEntries: mocks.removeEntries,
   },
 }));
@@ -21,7 +23,7 @@ vi.mock('$lib/stores/sessions.svelte', () => ({
 }));
 
 vi.mock('$lib/stores/feed.svelte', () => ({
-  feedStore: { deleteEntry: mocks.deleteEntry },
+  feedStore: { sessionId: 'session-1', deleteEntry: mocks.deleteEntry },
 }));
 
 vi.mock('$lib/stores/toast.svelte', () => ({
@@ -51,21 +53,70 @@ vi.mock('$lib/stores/project.svelte', () => ({
 vi.mock('$lib/utils/api-url', () => ({ apiUrl: (path: string) => path }));
 vi.mock('$lib/api.svelte', () => ({ apiFetch: vi.fn(), parseJsonResponse: vi.fn() }));
 
+const autoScroll = vi.hoisted(() => ({
+  follow: true,
+  hasContentBelow: false,
+  unseenCount: 0,
+  attach: vi.fn(),
+  requestPin: vi.fn(),
+  notifyNewEntry: vi.fn(),
+  jumpToBottom: vi.fn(),
+  setFollow: vi.fn(),
+}));
+
 vi.mock('$lib/utils/autoscroll.svelte', () => ({
-  createAutoScroll: () => ({
-    follow: true,
-    unseenCount: 0,
-    attach: vi.fn(),
-    requestPin: vi.fn(),
-    notifyNewEntry: vi.fn(),
-    jumpToBottom: vi.fn(),
-  }),
+  createAutoScroll: () => autoScroll,
 }));
 
 import ManagerFeed from './ManagerFeed.svelte';
+import { welcomePreferencesStore } from '$lib/stores/welcome-preferences.svelte';
+
+const BACKGROUND = {
+  source: 'data:image/png;base64,aGk=',
+  fit: 'cover' as const,
+  position: 'center' as const,
+  opacity: 1,
+};
 
 describe('ManagerFeed suggestion controls', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.isLoadingSession = false;
+    mocks.feed = [];
+    welcomePreferencesStore.setBackground(undefined);
+  });
+
+  it('shows the chat loading surface instead of empty-chat suggestions while history loads', () => {
+    mocks.isLoadingSession = true;
+    render(ManagerFeed);
+    expect(screen.getByRole('status').textContent).toContain('Loading chat');
+    expect(screen.queryByRole('button', { name: 'Load Map the codebase into composer' })).toBeNull();
+  });
+
+  it('starts bottom-anchored and covers the transcript until it has landed', async () => {
+    mocks.feed = [
+      {
+        id: 'entry-1',
+        timestamp: Date.now(),
+        type: 'content',
+        agentId: 'agent-1',
+        agentName: 'Agent',
+        glowClass: '',
+        text: 'hello there',
+      },
+    ];
+    const { container } = render(ManagerFeed);
+
+    // A parked position from the previous chat must not make this one paint
+    // from the top and then crawl down to the bottom.
+    expect(autoScroll.setFollow).toHaveBeenCalledWith(true);
+    // The list is mounted underneath but hidden until its rows stop measuring.
+    expect(screen.getByText('hello there')).toBeTruthy();
+    expect(container.querySelector('.chat-loading.cover')).not.toBeNull();
+
+    await waitFor(() => expect(container.querySelector('.chat-loading.cover')).toBeNull());
+    expect(screen.getByText('hello there')).toBeTruthy();
+  });
 
   it('keeps load and edit actions as sibling buttons with independent behavior', async () => {
     const onUseSuggestion = vi.fn();
@@ -87,5 +138,41 @@ describe('ManagerFeed suggestion controls', () => {
       screen.queryByRole('button', { name: 'Load Map the codebase into composer' }),
     ).toBeNull();
     expect(container.querySelector('button button, [role="button"] button')).toBeNull();
+  });
+});
+
+describe('ManagerFeed home background', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.isLoadingSession = false;
+    mocks.feed = [];
+    welcomePreferencesStore.setBackground(undefined);
+  });
+
+  it('renders the home background layer for an empty feed', () => {
+    welcomePreferencesStore.setBackground({ ...BACKGROUND });
+    const { container } = render(ManagerFeed);
+    expect(container.querySelector('.welcome-background-layer')).not.toBeNull();
+  });
+
+  it('keeps the home background mounted after the feed has entries', () => {
+    welcomePreferencesStore.setBackground({ ...BACKGROUND });
+    mocks.feed = [
+      {
+        id: 'entry-1',
+        timestamp: Date.now(),
+        type: 'content',
+        agentId: 'agent-1',
+        agentName: 'Agent',
+        glowClass: '',
+        text: 'hello there',
+      },
+    ];
+    const { container } = render(ManagerFeed);
+    // Invoking a prompt populates the feed; it must not reset the user's
+    // selected background.
+    expect(screen.getByText('hello there')).toBeTruthy();
+    expect(container.querySelector('.welcome-background-layer')).not.toBeNull();
+    expect(container.querySelector('.welcome-background')).toHaveAttribute('src', BACKGROUND.source);
   });
 });

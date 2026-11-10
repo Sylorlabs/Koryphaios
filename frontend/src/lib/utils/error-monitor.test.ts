@@ -5,9 +5,12 @@ vi.mock('$lib/demo-flags', () => ({ isDemoMode: false }));
 import {
   disposeErrorMonitoring,
   getStallSnapshot,
+  heartbeatGapIsStall,
   initErrorMonitoring,
+  initStallMonitoring,
   MONITOR_MAX_BATCH_BYTES,
   recordRendererStall,
+  reportStall,
   resetStallMonitoring,
   summarizeMonitorValue,
 } from './error-monitor';
@@ -96,5 +99,33 @@ describe('renderer stall monitor', () => {
     recordRendererStall({ at: 1, durationMs: 9_000, source: 'heartbeat' });
     resetStallMonitoring();
     expect(getStallSnapshot()).toEqual({ worstFrameGapMs: 0, longTaskCount: 0, recentStalls: [] });
+  });
+
+  test('heartbeat gap is a stall only when timers were starved with frames', () => {
+    // Frozen main thread: the last poll predates the last frame.
+    expect(heartbeatGapIsStall(1_000, 1_500)).toBe(true);
+    // Scheduling slack: a poll a few hundred ms past the last frame still
+    // means it fired while frames were running.
+    expect(heartbeatGapIsStall(1_900, 1_500)).toBe(true);
+    // Not painting (boot/occlusion): timers kept firing long after the last
+    // frame, so the gap is a paused frame loop, not a frozen main thread.
+    expect(heartbeatGapIsStall(5_000, 1_500)).toBe(false);
+  });
+
+  test('records stalls during startup grace without logging a console error', () => {
+    vi.useFakeTimers();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    initStallMonitoring();
+    reportStall(4_200, 'heartbeat');
+    expect(getStallSnapshot().recentStalls).toHaveLength(1);
+    expect(getStallSnapshot().worstFrameGapMs).toBe(4_200);
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  test('logs a stall once monitoring is past the startup grace window', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    // Never initialized here, so the grace window does not apply.
+    reportStall(5_000, 'longtask');
+    expect(errorSpy).toHaveBeenCalledTimes(1);
   });
 });

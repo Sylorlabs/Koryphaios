@@ -5,7 +5,7 @@
   import { slide } from 'svelte/transition';
   import { untrack } from 'svelte';
   import { requestExpandAnchor } from '$lib/utils/expand-anchor';
-
+  import { formatCompactTokens } from '$lib/utils/cache-break-impact';
 
   interface Props {
     text: string;
@@ -16,11 +16,17 @@
     agentName: string;
     /** Provider said reasoning is over — the number is final. */
     finalized?: boolean;
+    /** Tokens used for this reasoning block, shown next to the timer. */
+    thinkingTokens?: number;
     /** Start with the reasoning panel open (user setting). */
     defaultExpanded?: boolean;
   }
 
-  let { text, durationMs, thinkingStartedAt, agentName: _agentName, finalized = false, defaultExpanded = false }: Props = $props();
+  let { text, durationMs, thinkingStartedAt, agentName: _agentName, finalized = false, defaultExpanded = false, thinkingTokens }: Props = $props();
+
+  // Providers often terminate thoughts with several newlines. With pre-wrap,
+  // those become empty line boxes even after the thought has finished.
+  const reasoningText = $derived(text.trim());
   // svelte-ignore state_referenced_locally
   let expanded = $state(defaultExpanded);
   let panelEl = $state<HTMLDivElement>();
@@ -99,8 +105,14 @@
     const s = ms / 1000;
     if (s < 60) return `${s.toFixed(1)}s`;
     const m = Math.floor(s / 60);
-    const rem = Math.round(s % 60);
-    return `${m}m ${rem}s`;
+    const remS = Math.round(s % 60);
+    if (m < 60) return `${m}m ${remS}s`;
+    const h = Math.floor(m / 60);
+    const remM = Math.round(m % 60);
+    if (h < 24) return `${h}h ${remM}m`;
+    const d = Math.floor(h / 24);
+    const remH = Math.round(h % 24);
+    return `${d}d ${remH}h`;
   }
 
   function toggle(event: MouseEvent) {
@@ -135,6 +147,9 @@
     <span class="label done">Thought for</span>
   {/if}
   <span class="stopwatch tabular-nums" class:live={isLive}>{formatDuration(displayMs)}</span>
+  {#if thinkingTokens && thinkingTokens > 0}
+    <span class="thinking-tokens tabular-nums">{formatCompactTokens(thinkingTokens)} tokens</span>
+  {/if}
   <span class="expand-cue {expanded ? 'rotated' : ''}" aria-hidden="true">▸</span>
 </button>
 
@@ -151,7 +166,7 @@
     bind:this={panelEl}
     transition:slide={{ duration: 180 }}
   >
-    <p class="thinking-full-text">{text || 'Reasoning not provided.'}</p>
+    <p class="thinking-full-text">{reasoningText || 'Reasoning not provided.'}</p>
     {#if isLive}
       <span class="live-caret" aria-hidden="true"></span>
     {/if}
@@ -220,6 +235,12 @@
     color: var(--color-text-secondary);
   }
 
+  .thinking-tokens {
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
   .expand-cue {
     display: inline-block;
     font-size: var(--text-sm);
@@ -234,9 +255,9 @@
 
   .thinking-expanded {
     position: relative;
-    padding: var(--space-sm) 0 var(--space-sm) var(--space-md);
+    padding: var(--space-xs) 0 var(--space-xs) var(--space-md);
     border-left: 1px solid var(--color-border);
-    margin: var(--space-sm) 0;
+    margin: var(--space-xs) 0;
     max-width: 100%;
     max-height: 18rem;
     overflow-y: auto;

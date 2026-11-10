@@ -16,10 +16,12 @@
  * so those choices survive the hand-off to the real session.
  */
 
-export type ComposerPermissionMode = 'yolo' | 'guarded' | 'edits' | 'ask' | 'plan' | 'custom';
+import { isCriticMode, type CriticMode } from '@koryphaios/shared';
+export type ComposerPermissionMode = 'yolo' | 'guarded' | 'edits' | 'ask' | 'custom';
 export type ComposerAgentExecutionMode = 'auto' | 'single' | 'multi';
 
 export type ComposerSessionState = {
+  criticMode?: CriticMode;
   model?: string;
   reasoningLevel?: string;
   fastMode?: boolean;
@@ -37,13 +39,13 @@ const PERMISSION_MODES: readonly ComposerPermissionMode[] = [
   'guarded',
   'edits',
   'ask',
-  'plan',
   'custom',
 ];
 const AGENT_EXECUTION_MODES: readonly ComposerAgentExecutionMode[] = ['auto', 'single', 'multi'];
 
 function sanitize(raw: Record<string, unknown>): ComposerSessionState {
   return {
+    ...(isCriticMode(raw.criticMode) ? { criticMode: raw.criticMode } : {}),
     ...(typeof raw.model === 'string' && raw.model
       ? { model: raw.model.slice(0, MAX_MODEL_CHARS) }
       : {}),
@@ -67,6 +69,7 @@ function sanitize(raw: Record<string, unknown>): ComposerSessionState {
 
 function isEmpty(state: ComposerSessionState): boolean {
   return (
+    state.criticMode === undefined &&
     state.model === undefined &&
     state.reasoningLevel === undefined &&
     state.fastMode === undefined &&

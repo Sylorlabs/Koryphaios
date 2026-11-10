@@ -475,4 +475,32 @@ describe('reasoning traces survive relaunch/reload', () => {
     expect(toolResult?.isError).toBe(true);
     expect(toolResult?.output).toContain('exit code 1');
   });
+
+  it('drops ephemeral analyzing thoughts across loadSessionMessages even if not removed before reload', async () => {
+    mockAncillaryEmpty();
+    const sessionId = 'analyzing-purge';
+    sessionState.activeId = sessionId;
+    feedStore.activateSessionFeed(sessionId);
+
+    feedStore.addFeedEntry({
+      timestamp: 100,
+      type: 'thought',
+      agentId: 'kory-manager',
+      agentName: 'Kory',
+      glowClass: 'glow-kory',
+      text: 'Preparing provider request...',
+      metadata: { sessionId, phase: 'analyzing' },
+    });
+
+    expect(feedStore.feed.some((entry) => entry.type === 'thought')).toBe(true);
+
+    const ok = await feedStore.loadSessionMessages(sessionId, [
+      { id: 'm1', role: 'user', content: 'hello', createdAt: 50 },
+      { id: 'm2', role: 'assistant', content: 'Here is the answer.', createdAt: 200 },
+    ]);
+
+    expect(ok).toBe(true);
+    expect(feedStore.feed.some((entry) => entry.type === 'thought')).toBe(false);
+    expect(feedStore.feed.map((entry) => entry.type)).toEqual(['user_message', 'content']);
+  });
 });

@@ -155,18 +155,17 @@
 
 {#if pendingPermissions.length > 0}
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm"
-    style="background: color-mix(in srgb, var(--color-surface-0) 82%, transparent);"
+    class="permission-stack fixed bottom-5 right-5 z-50"
+    class:stacked={pendingPermissions.length > 3}
   >
     <div
       bind:this={dialogEl}
       role="dialog"
       tabindex="-1"
-      aria-modal="true"
       aria-labelledby="permission-dialog-title"
       aria-describedby="permission-dialog-description"
       onkeydown={handleDialogKeydown}
-      class="mx-4 w-full max-w-lg overflow-hidden rounded-2xl border shadow-2xl"
+      class="overflow-hidden rounded-2xl border shadow-2xl"
       style="background: var(--color-surface-2); border-color: var(--color-border);"
     >
       <div
@@ -183,14 +182,14 @@
               id="permission-dialog-title"
               class="text-sm font-semibold text-[var(--color-text-primary)]"
             >
-              Tool approval required
+              Approval requests
             </h2>
           </div>
           <p
             id="permission-dialog-description"
             class="mt-1.5 text-xs leading-relaxed text-[var(--color-text-secondary)]"
           >
-            Review each request before allowing it. Escape safely denies every request shown here.
+             Review what each agent wants to do. Requests stay queued until you allow or deny them. Escape safely denies every request shown here.
           </p>
         </div>
         <span class="shrink-0 text-xs text-[var(--color-text-secondary)]" aria-live="polite">
@@ -198,27 +197,27 @@
         </span>
       </div>
 
-      <div class="max-h-80 space-y-3 overflow-y-auto p-4">
+      <div class="permission-list max-h-[min(70vh,38rem)] space-y-3 overflow-y-auto p-4">
         {#each pendingPermissions as permission, index (permission.id)}
           {@const risk = determineRiskLevel(permission.toolName)}
           {@const RiskIcon = riskIcon(risk)}
           <section
-            class="rounded-xl border p-3"
+            class="permission-card rounded-xl border p-3"
+            style={`--stack-index: ${index}; --stack-count: ${pendingPermissions.length}; border-color: color-mix(in srgb, ${riskColor(risk)} 35%, var(--color-border)); background: var(--color-surface-3);`}
             aria-labelledby={`permission-request-${index}`}
-            style={`border-color: color-mix(in srgb, ${riskColor(risk)} 35%, var(--color-border)); background: var(--color-surface-3);`}
           >
             <div class="mb-2 flex items-start justify-between gap-3">
-              <div class="flex min-w-0 flex-wrap items-center gap-1">
-                <code class="text-xs text-[var(--color-text-secondary)]">{permission.toolName}</code
-                >
-                <ArrowRight
-                  size={11}
-                  class="shrink-0 text-[var(--color-text-muted)]"
-                  aria-hidden="true"
-                />
+              <div class="min-w-0">
+                <div class="mb-1 flex items-center gap-2">
+                  <span class="text-xs font-semibold text-[var(--color-text-primary)]">
+                    {permission.agentName ?? 'Backend agent'}
+                  </span>
+                  <ArrowRight size={11} class="shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" />
+                  <code class="text-[10px] text-[var(--color-text-secondary)]">{permission.toolName}</code>
+                </div>
                 <span
                   id={`permission-request-${index}`}
-                  class="min-w-0 break-words font-mono text-xs font-bold text-[var(--color-text-primary)]"
+                  class="block min-w-0 break-words text-xs font-medium leading-relaxed text-[var(--color-text-primary)]"
                   >{permission.description}</span
                 >
               </div>
@@ -230,6 +229,9 @@
                 {risk}
               </span>
             </div>
+            {#if permission.command}
+              <pre class="mb-3 max-h-24 overflow-auto rounded-lg border px-2.5 py-2 font-mono text-[11px] leading-relaxed text-[var(--color-text-secondary)]" style="border-color: var(--color-border); background: var(--color-surface-2);">{permission.command}</pre>
+            {/if}
             {#if permission.path}
               <p class="mb-3 break-all font-mono text-xs text-[var(--color-text-secondary)]">
                 {permission.path}
@@ -275,3 +277,74 @@
     </div>
   </div>
 {/if}
+
+<style>
+  .permission-stack {
+    width: min(25rem, calc(100vw - 2rem));
+  }
+
+  .permission-stack > [role='dialog'] {
+    animation: permission-dialog-enter 220ms ease-out both;
+  }
+
+  .permission-list {
+    overflow-x: visible;
+  }
+
+  .permission-card {
+    position: relative;
+    z-index: var(--stack-index);
+    transition:
+      margin-top 320ms cubic-bezier(0.22, 1, 0.36, 1),
+      transform 320ms cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 220ms ease;
+    animation: permission-card-enter 260ms ease-out both;
+  }
+
+  .permission-card:nth-child(1) { animation-delay: 20ms; }
+  .permission-card:nth-child(2) { animation-delay: 45ms; }
+  .permission-card:nth-child(3) { animation-delay: 70ms; }
+  .permission-card:nth-child(4) { animation-delay: 95ms; }
+
+  .permission-stack.stacked .permission-card:not(:first-child) {
+    margin-top: -9.2rem;
+    transform: translateY(0.35rem) scale(0.98);
+  }
+
+  .permission-stack.stacked:hover .permission-card:not(:first-child),
+  .permission-stack.stacked:focus-within .permission-card:not(:first-child) {
+    margin-top: 0.75rem;
+    transform: none;
+  }
+
+  .permission-stack.stacked:hover .permission-card,
+  .permission-stack.stacked:focus-within .permission-card {
+    box-shadow: 0 12px 28px color-mix(in srgb, var(--color-surface-0) 20%, transparent);
+  }
+
+  @keyframes permission-dialog-enter {
+    from { opacity: 0; transform: translateY(0.75rem) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  @keyframes permission-card-enter {
+    from { opacity: 0; transform: translateY(0.5rem); }
+    to { opacity: 1; }
+  }
+
+  @media (max-width: 640px) {
+    .permission-stack {
+      right: 0.75rem;
+      bottom: 0.75rem;
+      width: calc(100vw - 1.5rem);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .permission-stack > [role='dialog'],
+    .permission-card {
+      animation: none;
+      transition: none;
+    }
+  }
+</style>

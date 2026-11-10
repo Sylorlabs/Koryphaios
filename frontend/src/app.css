@@ -331,6 +331,26 @@ textarea:focus-visible,
   background: var(--color-border-bright);
 }
 
+/* WebKit can composite native overlay scrollbars above a blurred backdrop,
+   independently of the scroller's z-index. Remove background history scrollbar
+   painting for the entire lifetime of an open overlay (including transitions).
+   Scroll positions and wheel/keyboard scrolling are retained; overlay-owned
+   scrollers keep their own scrollbars. :has also handles nested overlays without
+   a JS counter that can get out of sync on dismissal or unmount. */
+body:has([aria-modal='true'], [role='menu'], [role='listbox'], [data-scrollbar-overlay])
+  :is(.session-tree, .feed-scroll, .virtual-list),
+body:has([aria-modal='true'], [role='menu'], [role='listbox'], [data-scrollbar-overlay])
+  :is(.session-tree, .feed-scroll, .virtual-list) * {
+  scrollbar-width: none;
+}
+
+body:has([aria-modal='true'], [role='menu'], [role='listbox'], [data-scrollbar-overlay])
+  :is(.session-tree, .feed-scroll, .virtual-list)::-webkit-scrollbar,
+body:has([aria-modal='true'], [role='menu'], [role='listbox'], [data-scrollbar-overlay])
+  :is(.session-tree, .feed-scroll, .virtual-list) *::-webkit-scrollbar {
+  display: none;
+}
+
 /* Code */
 pre,
 code {
@@ -338,13 +358,28 @@ code {
 }
 
 pre {
-  background: var(--color-surface-0);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  background: var(--color-surface-1);
+  color: #000;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 28%, var(--color-border));
+  border-radius: var(--radius-xl);
   padding: var(--space-md);
-  overflow-x: auto;
+  overflow: hidden auto;
   font-size: 13px;
   line-height: 1.5;
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+[data-theme='dark'] pre {
+  color: #fff;
+}
+pre code,
+pre code.hljs,
+.hljs {
+  background: transparent !important;
+  border: 0;
+  color: #000 !important;
+}
+[data-theme='dark'] .hljs {
+  color: #fff !important;
 }
 
 /* Drawer / Modal Backdrop */
@@ -396,6 +431,7 @@ pre {
   /* Header is 56px (size-14), so content fills remaining space */
   height: calc(100% - var(--size-14));
   box-sizing: border-box;
+  overscroll-behavior: contain;
 }
 
 /* Keyboard Shortcut Badge */
@@ -894,4 +930,47 @@ a.wikilink {
 a.wikilink:hover {
   background: rgba(var(--color-accent-rgb), 0.12);
   text-decoration-color: var(--color-accent);
+}
+
+/* Context summaries reflow based on the width left by the actual shell, not
+   the physical display (split panes and restored desktop windows can be narrow). */
+.context-bar {
+  container: context-bar / inline-size;
+}
+
+@container context-bar (max-width: 520px) {
+  .context-bar-summary {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.375rem 0.5rem;
+  }
+
+  .context-bar-label {
+    display: none;
+  }
+
+  .context-bar-meter {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    width: 100%;
+  }
+
+  .context-bar-value {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    white-space: normal;
+    font-size: 10px !important;
+  }
+}
+
+@container context-bar (max-width: 360px) {
+  .context-bar-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .context-bar-value {
+    grid-column: 1;
+  }
 }

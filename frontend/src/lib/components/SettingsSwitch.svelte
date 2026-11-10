@@ -9,6 +9,7 @@
     large?: boolean;
     disabled?: boolean;
     minimal?: boolean;
+    quiet?: boolean;
   }
 
   let {
@@ -21,6 +22,7 @@
     large = false,
     disabled = false,
     minimal = false,
+    quiet = false,
   }: Props = $props();
 </script>
 
@@ -31,8 +33,10 @@
   aria-label={label}
   {disabled}
   onclick={onchange}
-  class="group flex w-full items-start {minimal ? 'justify-end' : 'justify-between'} gap-4 text-left transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:cursor-not-allowed disabled:opacity-55 {flat
-    ? 'py-3'
+  class="group flex w-full items-start {minimal
+    ? 'justify-end'
+    : 'justify-between'} gap-4 text-left transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:cursor-not-allowed disabled:opacity-55 {flat
+    ? 'flat py-3'
     : `rounded-xl border ${compact ? 'p-3' : 'p-4'}`}"
   style="border-color: {flat
     ? 'transparent'
@@ -60,7 +64,7 @@
       ? 'var(--color-accent)'
       : 'var(--color-border)'}; background: {checked
       ? 'var(--color-accent)'
-      : 'var(--color-surface-4)'}; box-shadow: {checked
+      : 'var(--color-surface-4)'}; box-shadow: {checked && !quiet
       ? '0 0 0 3px color-mix(in srgb, var(--color-accent) 14%, transparent)'
       : 'none'};"
     aria-hidden="true"

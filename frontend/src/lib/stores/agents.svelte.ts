@@ -7,6 +7,7 @@ import type {
   StreamUsagePayload,
   ContextBreakdown,
   SessionRunTerminalPhase,
+  AgentSteeringCommand,
 } from '@koryphaios/shared';
 import type { FeedEntry } from '$lib/types';
 import { sessionStore } from './sessions.svelte';
@@ -15,11 +16,13 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 import { feedStore, getGroupedEntries } from './feed.svelte';
 import { runStateStore } from './run-state.svelte';
 import { TERMINAL_AGENT_STATUSES } from './run-state-core';
+import { onSessionRemoved, onSessionsRemoved } from './session-removal';
 
 // ─── Agent State ────────────────────────────────────────────────────────────
 
 export interface AgentState {
   identity: AgentIdentity;
+  reasoningLevel?: string;
   status: AgentStatus;
   content: string;
   thinking: string;
@@ -43,6 +46,9 @@ export interface AgentState {
   /** Latest live turn savings estimate from prompt caching. */
   cacheSavingsUsd?: number;
   sessionId: string;
+  /** Hidden from the Activity rail, but retained so its thread can be reopened
+   * from the manager timeline after the user closes the card. */
+  closed?: boolean;
 }
 
 // ─── Reactive State ──────────────────────────────────────────────────────────
@@ -96,6 +102,7 @@ function reactiveAgent(state: AgentState): AgentState {
   return proxied;
 }
 let agentThreadFeeds = $state<Map<string, FeedEntry[]>>(new Map());
+let agentSteeringQueues = $state<Map<string, AgentSteeringCommand[]>>(new Map());
 let agentThreadVersion = $state(0);
 let managerContextSelection: { sessionId: string; provider: string; model: string } | null = null;
 // Monotonic counter bumped by every authoritative occupancy write (a real
@@ -105,6 +112,78 @@ let managerContextSelection: { sessionId: string; provider: string; model: strin
 // landed, so the snapshot is stale and must not overwrite it.
 let managerOccupancyRevision = 0;
 let managerPreviewIssuedAtRevision = 0;
+let sessionRemovalGeneration = 0;
+
+type ManagerContextState = Pick<
+  AgentState,
+  | 'tokensUsed'
+  | 'contextMax'
+  | 'contextKnown'
+  | 'hasUsageData'
+  | 'usageEstimated'
+  | 'contextBreakdown'
+  | 'cachedInputTokens'
+  | 'cacheWriteInputTokens'
+  | 'estimatedCostUsd'
+  | 'cacheSavingsUsd'
+> & { provider: string; model: string };
+// Like the feed cache, context belongs to the chat, not to the currently
+// visible manager object. Switching away must not erase a known reading.
+const sessionManagerContext = new Map<string, ManagerContextState>();
+type ManagerUsageSnapshot = {
+  used: number;
+  max: number;
+  contextKnown: boolean;
+  provider?: string;
+  model?: string;
+  estimated?: boolean;
+  cachedInputTokens?: number;
+  breakdown?: ContextBreakdown;
+};
+// History can beat the composer's selection during startup. Retain that
+// snapshot until it can be checked against the exact selected route.
+const pendingManagerUsage = new Map<string, ManagerUsageSnapshot>();
+// Replay can beat both the composer's selection and the final archive write.
+// Retain the latest receipt without displaying it until its exact route is pinned.
+const pendingManagerLiveUsage = new Map<string, StreamUsagePayload>();
+function rememberManagerContext(agent: AgentState): void {
+  if (
+    !agent.sessionId ||
+    managerContextSelection?.sessionId !== agent.sessionId ||
+    managerContextSelection.provider !== agent.identity.provider ||
+    managerContextSelection.model !== agent.identity.model
+  ) {
+    return;
+  }
+  sessionManagerContext.delete(agent.sessionId);
+  sessionManagerContext.set(agent.sessionId, {
+    provider: agent.identity.provider,
+    model: agent.identity.model,
+    tokensUsed: agent.tokensUsed,
+    contextMax: agent.contextMax,
+    contextKnown: agent.contextKnown,
+    hasUsageData: agent.hasUsageData,
+    usageEstimated: agent.usageEstimated,
+    contextBreakdown: agent.contextBreakdown ? { ...agent.contextBreakdown } : undefined,
+    cachedInputTokens: agent.cachedInputTokens,
+    cacheWriteInputTokens: agent.cacheWriteInputTokens,
+    estimatedCostUsd: agent.estimatedCostUsd,
+    cacheSavingsUsd: agent.cacheSavingsUsd,
+  });
+  if (sessionManagerContext.size > 100) {
+    sessionManagerContext.delete(sessionManagerContext.keys().next().value!);
+  }
+}
+
+function restoreManagerContext(agent: AgentState, sessionId: string): void {
+  const saved = sessionManagerContext.get(sessionId);
+  if (!saved) return;
+  const { provider, model, ...telemetry } = saved;
+  Object.assign(agent, telemetry);
+  agent.identity.provider = provider as AgentIdentity['provider'];
+  agent.identity.model = model;
+  managerContextSelection = { sessionId, provider, model };
+}
 
 // Svelte 5's $state does not proxy Map contents or the plain objects
 // stored in them — mutating an AgentState in place is invisible to the
@@ -115,9 +194,9 @@ function commitAgents() {
 }
 
 const MAX_THREAD_ENTRIES = 2000;
-// Same rule as the main feed: one turn is one answer, even when tool rows land
-// between its text deltas. Track the row each thread's current turn is still
-// filling so a tool call in the middle of a sentence cannot split the answer.
+// Answer text can continue across tool rows, but reasoning after a tool must
+// start a fresh row so the drill-down transcript preserves event order. Track
+// the row each thread's current turn is still filling for text continuation.
 const THREAD_CONTINUATION_TYPES: ReadonlySet<FeedEntry['type']> = new Set(['content', 'thinking']);
 const threadStreamTargets = new Map<
   string,
@@ -138,6 +217,20 @@ function setAgentThreadFeed(sessionId: string, agentId: string, entries: FeedEnt
   agentThreadVersion++;
 }
 
+/** Map values are not deep Svelte proxies. Publish a replacement row with the
+ * same ID so a keyed, open drilldown updates without remounting its details. */
+function patchAgentThreadEntry(
+  sessionId: string,
+  agentId: string,
+  current: FeedEntry[],
+  target: FeedEntry,
+  patch: Partial<FeedEntry>,
+): FeedEntry {
+  const updated = { ...target, ...patch };
+  setAgentThreadFeed(sessionId, agentId, current.map((row) => row.id === target.id ? updated : row));
+  return updated;
+}
+
 function upsertAgentThreadEntry(
   sessionId: string,
   agentId: string,
@@ -148,6 +241,38 @@ function upsertAgentThreadEntry(
   const candidate: FeedEntry = { ...entry, id: feedStore.nextFeedId('aft') };
   const nextEntry = feedStore.visibleEntriesForSession(sessionId, [candidate])[0];
   if (!nextEntry) return undefined;
+  const callId = (entry.metadata?.toolCall as { id?: string } | undefined)?.id;
+  const existingCall =
+    entry.type === 'tool_call' && callId
+      ? current.findLast(
+          (row) =>
+            (row.type === 'tool_call' || row.type === 'tool_result') &&
+            ((row.metadata?.toolCall as { id?: string } | undefined)?.id ??
+              (row.metadata?.toolResult as { callId?: string } | undefined)?.callId) === callId,
+        )
+      : undefined;
+  if (existingCall) {
+    if (existingCall.type === 'tool_result') {
+      const toolCall = nextEntry.metadata?.toolCall as { input?: Record<string, unknown> };
+      if (Object.keys(toolCall?.input ?? {}).length) {
+        return patchAgentThreadEntry(sessionId, agentId, current, existingCall, {
+          metadata: { ...existingCall.metadata, toolCall },
+        });
+      }
+      return existingCall;
+    }
+    return patchAgentThreadEntry(sessionId, agentId, current, existingCall, {
+      timestamp: nextEntry.timestamp,
+      text: nextEntry.text,
+      metadata: {
+        ...existingCall.metadata,
+        ...nextEntry.metadata,
+        ...(Number.isSafeInteger(existingCall.metadata?.sequenceStart) && {
+          sequenceStart: existingCall.metadata?.sequenceStart,
+        }),
+      },
+    });
+  }
   const next = [...current, nextEntry];
   if (next.length > MAX_THREAD_ENTRIES) {
     next.splice(0, next.length - MAX_THREAD_ENTRIES);
@@ -167,6 +292,10 @@ function accumulateAgentThreadEntry(
   const visible = feedStore.visibleEntriesForSession(sessionId, [candidate])[0];
   if (!visible) return;
   entry = visible;
+  if (entry.type !== 'thinking') {
+    threadStreamTargets.delete(`${key}::thinking::visible`);
+    threadStreamTargets.delete(`${key}::thinking::hidden`);
+  }
   const lastIdx = current.length - 1;
   const last = lastIdx >= 0 ? current[lastIdx] : null;
   const targetKey = `${key}::${entry.type}::${entry.userHidden ? 'hidden' : 'visible'}`;
@@ -218,6 +347,20 @@ function openThreadStreamTarget(
   entry: FeedEntry,
 ): FeedEntry | null {
   if (closedThreadTurns.has(threadKey)) return null;
+  // Keep separate reasoning bursts in their real transcript positions. Text
+  // may continue across a tool call, but a thinking block that resumes after
+  // one is a new reasoning segment.
+  if (entry.type === 'thinking') {
+    const latest = current.at(-1);
+    if (
+      !latest ||
+      latest.type !== 'thinking' ||
+      latest.agentId !== entry.agentId ||
+      Boolean(latest.userHidden) !== Boolean(entry.userHidden)
+    ) {
+      return null;
+    }
+  }
   const recorded = threadStreamTargets.get(targetKey);
   if (recorded) {
     const target = current.findLast((row) => row.id === recorded.entryId);
@@ -242,12 +385,19 @@ export function closeAgentThreadTurn(sessionId?: string, agentId?: string) {
     closedThreadTurns.clear();
     return;
   }
+  const closedAgents = new Set<string>();
   for (const [key, target] of [...threadStreamTargets]) {
     if (sessionId && target.sessionId !== sessionId) continue;
     if (agentId && target.agentId !== agentId) continue;
     threadStreamTargets.delete(key);
+    if (sessionId) closedAgents.add(target.agentId);
   }
-  if (sessionId && agentId) closedThreadTurns.add(getAgentThreadKey(sessionId, agentId));
+  if (sessionId) {
+    if (agentId) closedAgents.add(agentId);
+    for (const closedAgent of closedAgents) {
+      closedThreadTurns.add(getAgentThreadKey(sessionId, closedAgent));
+    }
+  }
 }
 
 /** Agent-drilldown mirror of the feed's completion flip: turn the thread's
@@ -261,6 +411,7 @@ function completeAgentThreadEntry(
   resultText: string,
   toolResult: Record<string, unknown>,
   timestamp: number,
+  eventMetadata: Record<string, unknown> = {},
 ): boolean {
   const key = getAgentThreadKey(sessionId, agentId);
   const current = agentThreadFeeds.get(key) ?? [];
@@ -270,11 +421,19 @@ function completeAgentThreadEntry(
       (candidate.metadata as { toolCall?: { id?: string } } | undefined)?.toolCall?.id === callId,
   );
   if (entry) {
-    entry.type = 'tool_result';
-    entry.text = resultText;
-    entry.timestamp = timestamp;
-    entry.metadata = { ...entry.metadata, toolResult };
-    agentThreadVersion++;
+    patchAgentThreadEntry(sessionId, agentId, current, entry, {
+      type: 'tool_result',
+      text: resultText,
+      timestamp,
+      metadata: {
+        ...entry.metadata,
+        ...eventMetadata,
+        ...(Number.isSafeInteger(entry.metadata?.sequenceStart) && {
+          sequenceStart: entry.metadata?.sequenceStart,
+        }),
+        toolResult,
+      },
+    });
     return true;
   }
   return current.some(
@@ -322,12 +481,21 @@ export function spawnAgent(identity: AgentIdentity, task: string, sessionId: str
       hasUsageData: false,
       usageEstimated: false,
       sessionId,
+      closed: false,
     }),
   );
   agents = new Map(agents);
 }
 
+/** The manager object is the visible chat's projection. Background manager
+ * events still populate their session/thread lanes, but cannot take over this
+ * object's ownership and make the foreground context meter disappear. */
+function acceptsAgentSessionEvent(agentId: string, sessionId?: string): boolean {
+  return agentId !== 'kory-manager' || !sessionId || sessionId === sessionStore.activeSessionId;
+}
+
 export function updateAgentStatus(agentId: string, status: AgentStatus, sessionId?: string) {
+  if (!acceptsAgentSessionEvent(agentId, sessionId)) return;
   const agent = agents.get(agentId);
   if (agent) {
     agent.status = status;
@@ -336,7 +504,23 @@ export function updateAgentStatus(agentId: string, status: AgentStatus, sessionI
   }
 }
 
+export function updateAgentControls(
+  agentId: string,
+  patch: { model?: string; provider?: string; reasoningLevel?: string },
+  sessionId?: string,
+) {
+  if (!acceptsAgentSessionEvent(agentId, sessionId)) return;
+  const agent = agents.get(agentId);
+  if (!agent) return;
+  if (patch.model) agent.identity.model = patch.model;
+  if (patch.provider) agent.identity.provider = patch.provider as AgentIdentity['provider'];
+  if (patch.reasoningLevel !== undefined) agent.reasoningLevel = patch.reasoningLevel;
+  if (sessionId) agent.sessionId = sessionId;
+  commitAgents();
+}
+
 export function appendAgentContent(agentId: string, content: string, sessionId?: string) {
+  if (!acceptsAgentSessionEvent(agentId, sessionId)) return;
   const agent = agents.get(agentId);
   if (agent) {
     agent.content += content;
@@ -355,6 +539,7 @@ export function appendAgentContent(agentId: string, content: string, sessionId?:
 }
 
 export function appendAgentThinking(agentId: string, thinking: string, sessionId?: string) {
+  if (!acceptsAgentSessionEvent(agentId, sessionId)) return;
   const agent = agents.get(agentId);
   if (agent) {
     agent.thinking += thinking;
@@ -364,6 +549,7 @@ export function appendAgentThinking(agentId: string, thinking: string, sessionId
 }
 
 export function addToolCall(agentId: string, name: string, sessionId?: string) {
+  if (!acceptsAgentSessionEvent(agentId, sessionId)) return;
   const agent = agents.get(agentId);
   if (agent) {
     agent.toolCalls.push({ name, status: 'running' });
@@ -378,19 +564,32 @@ export function addToolCall(agentId: string, name: string, sessionId?: string) {
 }
 
 export function updateUsage(agentId: string, payload: StreamUsagePayload, sessionId?: string) {
+  if (!acceptsAgentSessionEvent(agentId, sessionId)) return;
   const agent = agents.get(agentId);
   if (!agent) return;
 
   if (agentId === 'kory-manager') {
+    if (
+      sessionId &&
+      (!managerContextSelection || managerContextSelection.sessionId !== sessionId) &&
+      payload.usageKnown === true && payload.provider && payload.model
+    ) {
+      pendingManagerLiveUsage.set(sessionId, {
+        ...payload, breakdown: payload.breakdown ? { ...payload.breakdown } : undefined,
+      });
+      if (pendingManagerLiveUsage.size > 100) {
+        pendingManagerLiveUsage.delete(pendingManagerLiveUsage.keys().next().value!);
+      }
+      managerOccupancyRevision++;
+      return;
+    }
     if (
       !managerContextSelection ||
       sessionId !== managerContextSelection.sessionId ||
       payload.provider !== managerContextSelection.provider ||
       payload.model !== managerContextSelection.model
     ) {
-      // Startup replay can deliver an old usage event before the composer has
-      // selected anything. Fail closed until an exact selection is pinned;
-      // late events from the prior provider/model cannot take ownership.
+      // Late events from the prior provider/model cannot take ownership.
       return;
     }
   }
@@ -433,6 +632,7 @@ export function updateUsage(agentId: string, payload: StreamUsagePayload, sessio
   // provider/model still clears through beginManagerContextPreview, so a prior
   // provider's total can never render under a new selection.
   if (!authoritative) {
+    if (agentId === 'kory-manager') rememberManagerContext(agent);
     commitAgents();
     return;
   }
@@ -453,7 +653,10 @@ export function updateUsage(agentId: string, payload: StreamUsagePayload, sessio
   agent.estimatedCostUsd = payload.estimatedCostUsd;
   agent.cacheSavingsUsd = payload.cacheSavingsUsd;
   // A real provider report supersedes any model preview still in flight.
-  managerOccupancyRevision++;
+  if (agentId === 'kory-manager') {
+    managerOccupancyRevision++;
+    rememberManagerContext(agent);
+  }
   commitAgents();
 }
 
@@ -461,16 +664,7 @@ export function updateUsage(agentId: string, payload: StreamUsagePayload, sessio
  *  context bar shows real data before any new turn runs. */
 export function seedManagerUsage(
   sessionId: string,
-  usage: {
-    used: number;
-    max: number;
-    contextKnown: boolean;
-    provider?: string;
-    model?: string;
-    estimated?: boolean;
-    cachedInputTokens?: number;
-    breakdown?: ContextBreakdown;
-  },
+  usage: ManagerUsageSnapshot,
 ): boolean {
   const agent = agents.get('kory-manager');
   if (!agent) return false;
@@ -478,6 +672,16 @@ export function seedManagerUsage(
   // picker change can resurrect a CLI harness segment under an API provider,
   // so fail closed until this exact selection reports fresh usage.
   if (!usage.provider || !usage.model) return false;
+  if (!managerContextSelection && sessionId === sessionStore.activeSessionId) {
+    pendingManagerUsage.set(sessionId, {
+      ...usage,
+      breakdown: usage.breakdown ? { ...usage.breakdown } : undefined,
+    });
+    if (pendingManagerUsage.size > 100) {
+      pendingManagerUsage.delete(pendingManagerUsage.keys().next().value!);
+    }
+    return false;
+  }
   if (
     !managerContextSelection ||
     managerContextSelection.sessionId !== sessionId ||
@@ -503,6 +707,7 @@ export function seedManagerUsage(
   // A durable seed is a real measurement, so it supersedes in-flight previews
   // for the same reason a live provider report does.
   managerOccupancyRevision++;
+  rememberManagerContext(agent);
   commitAgents();
   return true;
 }
@@ -541,10 +746,16 @@ export function beginManagerContextPreview(
 ) {
   const agent = agents.get('kory-manager');
   if (!agent) return;
-  const selectionChanged =
-    agent.sessionId !== sessionId ||
-    agent.identity.provider !== provider ||
-    agent.identity.model !== model;
+  if (agent.sessionId !== sessionId) {
+    rememberManagerContext(agent);
+    clearManagerUsage(agent);
+    agent.contextMax = 0;
+    agent.contextKnown = false;
+    agent.sessionId = sessionId;
+    restoreManagerContext(agent, sessionId);
+    managerOccupancyRevision++;
+  }
+  const selectionChanged = agent.identity.provider !== provider || agent.identity.model !== model;
   if (selectionChanged) {
     clearManagerUsage(agent);
     managerOccupancyRevision++;
@@ -559,16 +770,23 @@ export function beginManagerContextPreview(
   if (contextWindow && contextWindow > 0) {
     agent.contextMax = contextWindow;
     agent.contextKnown = true;
-  } else {
+  } else if (selectionChanged) {
     agent.contextMax = 0;
     agent.contextKnown = false;
   }
+  const pending = pendingManagerUsage.get(sessionId);
+  pendingManagerUsage.delete(sessionId);
+  if (pending && !agent.hasUsageData) seedManagerUsage(sessionId, pending);
+  const live = pendingManagerLiveUsage.get(sessionId);
+  pendingManagerLiveUsage.delete(sessionId);
+  if (live) updateUsage('kory-manager', live, sessionId);
+  rememberManagerContext(agent);
   commitAgents();
 }
 
 /** Apply a model-preview response only while its provider/model is still the
- *  active selection. Preview data replaces state wholesale; absent or unknown
- *  usage means "awaiting provider report", never "reuse the previous total".
+ *  active selection. Missing telemetry is a discovery gap, not a revocation
+ *  of a reading already verified for this same session/provider/model.
  *
  *  A preview is a request/response snapshot, so it can resolve AFTER a newer
  *  authoritative `stream.usage` event. Applying it then rolled the meter
@@ -605,15 +823,11 @@ export function applyManagerContextPreview(
   if (usage?.contextKnown && usage.contextWindow && usage.contextWindow > 0) {
     agent.contextMax = usage.contextWindow;
     agent.contextKnown = true;
-  } else {
-    agent.contextMax = 0;
-    agent.contextKnown = false;
   }
 
   if (usage?.usageKnown === true && typeof usage.used === 'number') {
     const rawUsed = Math.max(0, usage.used);
-    const windowSize =
-      typeof usage.contextWindow === 'number' && usage.contextWindow > 0 ? usage.contextWindow : 0;
+    const windowSize = agent.contextKnown ? agent.contextMax : 0;
     agent.tokensUsed = windowSize > 0 ? Math.min(rawUsed, windowSize) : rawUsed;
     agent.hasUsageData = true;
     agent.usageEstimated = usage.estimated === true || (windowSize > 0 && rawUsed > windowSize);
@@ -622,12 +836,12 @@ export function applyManagerContextPreview(
     agent.cacheWriteInputTokens = undefined;
     agent.estimatedCostUsd = undefined;
     agent.cacheSavingsUsd = undefined;
-  } else {
-    clearManagerUsage(agent);
+    // Only a measurement supersedes another in-flight usage snapshot. An
+    // empty discovery response must not prevent saved usage from restoring.
+    managerOccupancyRevision++;
   }
-  // The preview itself becomes the newest occupancy fact.
-  managerOccupancyRevision++;
   managerPreviewIssuedAtRevision = managerOccupancyRevision;
+  rememberManagerContext(agent);
   commitAgents();
   return true;
 }
@@ -636,10 +850,41 @@ export function clearManagerContextPreview(sessionId: string) {
   const agent = agents.get('kory-manager');
   if (!agent) return;
   managerContextSelection = null;
+  sessionManagerContext.delete(sessionId);
+  pendingManagerUsage.delete(sessionId);
+  pendingManagerLiveUsage.delete(sessionId);
   agent.sessionId = sessionId;
   agent.contextMax = 0;
   agent.contextKnown = false;
   clearManagerUsage(agent);
+  managerOccupancyRevision++;
+  commitAgents();
+}
+
+/**
+ * Invalidate the occupancy measurement after the conversation branch changes.
+ * Keep the selected model and its known window, but never display usage that
+ * was measured against a response which is no longer in the active context.
+ */
+export function invalidateManagerContextUsage(sessionId: string) {
+  pendingManagerUsage.delete(sessionId);
+  pendingManagerLiveUsage.delete(sessionId);
+  const cached = sessionManagerContext.get(sessionId);
+  if (cached) {
+    cached.tokensUsed = 0;
+    cached.hasUsageData = false;
+    cached.usageEstimated = false;
+    cached.contextBreakdown = undefined;
+    cached.cachedInputTokens = undefined;
+    cached.cacheWriteInputTokens = undefined;
+    cached.estimatedCostUsd = undefined;
+    cached.cacheSavingsUsd = undefined;
+  }
+  const agent = agents.get('kory-manager');
+  if (!agent || agent.sessionId !== sessionId) return;
+  clearManagerUsage(agent);
+  managerOccupancyRevision++;
+  managerPreviewIssuedAtRevision = managerOccupancyRevision;
   commitAgents();
 }
 
@@ -665,6 +910,7 @@ export function setManagerContextWindow(sessionId: string, contextWindow?: numbe
 }
 
 export function completeAgent(agentId: string, sessionId?: string) {
+  if (!acceptsAgentSessionEvent(agentId, sessionId)) return;
   const agent = agents.get(agentId);
   if (agent) {
     agent.status = 'done';
@@ -684,6 +930,7 @@ export function clearAgentContent(agentId: string) {
 }
 
 export function clearAgentStreamingState(agentId: string, sessionId?: string) {
+  if (!acceptsAgentSessionEvent(agentId, sessionId)) return;
   const agent = agents.get(agentId);
   if (agent) {
     agent.content = '';
@@ -704,6 +951,7 @@ export function bindManagerSession(sessionId: string) {
   const manager = agents.get('kory-manager');
   if (!manager) return;
   const changed = manager.sessionId !== sessionId;
+  if (changed) rememberManagerContext(manager);
   manager.sessionId = sessionId;
   if (!changed) return;
   // A selection that already names this exact session stays valid.
@@ -713,6 +961,7 @@ export function bindManagerSession(sessionId: string) {
   manager.contextMax = 0;
   manager.contextKnown = false;
   clearManagerUsage(manager);
+  restoreManagerContext(manager, sessionId);
   managerOccupancyRevision++;
   commitAgents();
 }
@@ -741,6 +990,98 @@ export function removeAgent(agentId: string) {
   }
   agents.delete(agentId);
   agents = new Map(agents);
+}
+
+function clearSessionAgentState(sessionId: string): void {
+  sessionManagerContext.delete(sessionId);
+  pendingManagerUsage.delete(sessionId);
+  pendingManagerLiveUsage.delete(sessionId);
+
+  const threadPrefix = `${sessionId}:`;
+  let threadsChanged = false;
+  const nextThreadFeeds = new Map(agentThreadFeeds);
+  for (const key of [...agentThreadFeeds.keys()]) {
+    if (key.startsWith(threadPrefix)) {
+      nextThreadFeeds.delete(key);
+      threadsChanged = true;
+    }
+  }
+  if (threadsChanged) agentThreadFeeds = nextThreadFeeds;
+  let queuesChanged = false;
+  const nextSteeringQueues = new Map(agentSteeringQueues);
+  for (const key of [...agentSteeringQueues.keys()]) {
+    if (key.startsWith(threadPrefix)) {
+      nextSteeringQueues.delete(key);
+      queuesChanged = true;
+    }
+  }
+  if (queuesChanged) agentSteeringQueues = nextSteeringQueues;
+  for (const [key, target] of [...threadStreamTargets]) {
+    if (target.sessionId === sessionId) threadStreamTargets.delete(key);
+  }
+  for (const key of [...closedThreadTurns]) {
+    if (key.startsWith(threadPrefix)) closedThreadTurns.delete(key);
+  }
+
+  const manager = agents.get('kory-manager');
+  let managerChanged = false;
+  if (managerContextSelection?.sessionId === sessionId) {
+    managerContextSelection = null;
+    managerOccupancyRevision++;
+    managerPreviewIssuedAtRevision = managerOccupancyRevision;
+  }
+  if (manager?.sessionId === sessionId) {
+    manager.sessionId = '';
+    manager.content = '';
+    manager.thinking = '';
+    manager.toolCalls = [];
+    manager.status = 'idle';
+    clearManagerUsage(manager);
+    manager.contextMax = 0;
+    manager.contextKnown = false;
+    managerChanged = true;
+    managerOccupancyRevision++;
+    managerPreviewIssuedAtRevision = managerOccupancyRevision;
+  }
+
+  let agentsChanged = false;
+  for (const [agentId, agent] of agents) {
+    if (agentId !== 'kory-manager' && agent.sessionId === sessionId) {
+      agents.delete(agentId);
+      agentsChanged = true;
+    }
+  }
+
+  if (threadsChanged) agentThreadVersion++;
+  if (threadsChanged || agentsChanged || managerChanged) {
+    agents = new Map(agents);
+  }
+}
+
+onSessionRemoved((sessionId) => {
+  sessionRemovalGeneration++;
+  clearSessionAgentState(sessionId);
+});
+onSessionsRemoved((sessionIds) => {
+  sessionRemovalGeneration++;
+  for (const sessionId of sessionIds) clearSessionAgentState(sessionId);
+});
+
+/** Close only the rail card. Keep the identity and thread so the manager's
+ * delegation card can reopen this agent after the user closes the rail tile. */
+export function closeAgentCard(agentId: string): void {
+  if (agentId === 'kory-manager') return;
+  const agent = agents.get(agentId);
+  if (!agent || agent.closed) return;
+  agent.closed = true;
+  commitAgents();
+}
+
+export function reopenAgentCard(agentId: string): void {
+  const agent = agents.get(agentId);
+  if (!agent || !agent.closed) return;
+  agent.closed = false;
+  commitAgents();
 }
 
 /**
@@ -772,6 +1113,54 @@ export function clearNonManagerAgents(activeSessionId = sessionStore.activeSessi
     }
   }
   agents = next;
+
+  // Completed worker cards are intentionally dropped when leaving a chat, but
+  // their drill-down transcript used to survive in the separate thread map.
+  // That made every chat switch retain up to MAX_THREAD_ENTRIES per worker.
+  // Thread messages and steering queues are durable and are reloaded when the
+  // chat is opened again, so release lanes that no longer have a live/card
+  // owner. Keep manager lanes because the manager is shared across sessions.
+  const retainedWorkerKeys = new Set<string>();
+  for (const [id, agent] of next) {
+    if (id !== 'kory-manager' && agent.sessionId) {
+      retainedWorkerKeys.add(getAgentThreadKey(agent.sessionId, id));
+    }
+  }
+  let threadStateChanged = false;
+  const nextThreadFeeds = new Map(agentThreadFeeds);
+  for (const key of nextThreadFeeds.keys()) {
+    const agentId = key.slice(key.lastIndexOf(':') + 1);
+    if (agentId !== 'kory-manager' && !retainedWorkerKeys.has(key)) {
+      nextThreadFeeds.delete(key);
+      threadStateChanged = true;
+    }
+  }
+  if (threadStateChanged) agentThreadFeeds = nextThreadFeeds;
+
+  const nextSteeringQueues = new Map(agentSteeringQueues);
+  for (const key of nextSteeringQueues.keys()) {
+    if (!retainedWorkerKeys.has(key)) {
+      nextSteeringQueues.delete(key);
+      threadStateChanged = true;
+    }
+  }
+  if (threadStateChanged) agentSteeringQueues = nextSteeringQueues;
+
+  for (const [key, target] of [...threadStreamTargets]) {
+    const threadKey = getAgentThreadKey(target.sessionId, target.agentId);
+    if (target.agentId !== 'kory-manager' && !retainedWorkerKeys.has(threadKey)) {
+      threadStreamTargets.delete(key);
+      threadStateChanged = true;
+    }
+  }
+  for (const key of [...closedThreadTurns]) {
+    const agentId = key.slice(key.lastIndexOf(':') + 1);
+    if (agentId !== 'kory-manager' && !retainedWorkerKeys.has(key)) {
+      closedThreadTurns.delete(key);
+      threadStateChanged = true;
+    }
+  }
+  if (threadStateChanged) agentThreadVersion++;
 }
 
 /** Mark all agents for this session as done (optimistic UI when user clicks Stop). */
@@ -951,6 +1340,7 @@ export function getContextUsage(): {
       percent: 0,
       isReliable: false,
       reason: 'context_unknown',
+      estimated: agent.usageEstimated || agent.identity.provider === 'antigravity',
       breakdown: agent.contextBreakdown,
       cachedInputTokens: agent.cachedInputTokens,
       cacheWriteInputTokens: agent.cacheWriteInputTokens,
@@ -968,7 +1358,9 @@ export function getContextUsage(): {
     max,
     percent,
     isReliable: true,
-    estimated: agent.usageEstimated,
+    // Older saved Antigravity receipts predate the turn-total estimate flag.
+    // They still cannot establish exact live occupancy after a reload.
+    estimated: agent.usageEstimated || agent.identity.provider === 'antigravity',
     breakdown: agent.contextBreakdown,
     cachedInputTokens: agent.cachedInputTokens,
     cacheWriteInputTokens: agent.cacheWriteInputTokens,
@@ -982,6 +1374,7 @@ export function getContextUsage(): {
 
 async function loadAgentThreads(sessionId: string): Promise<void> {
   if (!sessionId) return;
+  const removalGeneration = sessionRemovalGeneration;
   try {
     const res = await apiFetch(apiUrl(`/api/agent/threads/${sessionId}`));
     const data = await parseJsonResponse<{
@@ -996,14 +1389,27 @@ async function loadAgentThreads(sessionId: string): Promise<void> {
     // Agent identities are held in a shared map (not one map per chat). A slow
     // response for the previously viewed chat must never replace the manager
     // or worker identities belonging to the chat now on screen.
-    if (sessionStore.activeSessionId !== sessionId) return;
+    if (
+      sessionRemovalGeneration !== removalGeneration ||
+      sessionStore.activeSessionId !== sessionId
+    ) return;
 
     for (const thread of data.data) {
-      const existing = agents.get(thread.agent.id);
+      const candidate = agents.get(thread.agent.id);
+      const existing = candidate?.sessionId === sessionId ? candidate : undefined;
+      const selectedManager = thread.agent.id === 'kory-manager' &&
+        managerContextSelection?.sessionId === sessionId ? managerContextSelection : null;
       agents.set(
         thread.agent.id,
         reactiveAgent({
-          identity: thread.agent,
+          ...existing,
+          // Thread identity describes the last persisted run. The composer
+          // owns the current manager route, including before the next run.
+          identity: selectedManager ? {
+            ...thread.agent,
+            provider: selectedManager.provider as AgentIdentity['provider'],
+            model: selectedManager.model,
+          } : thread.agent,
           status: thread.status,
           content: existing?.content ?? '',
           thinking: existing?.thinking ?? '',
@@ -1030,6 +1436,7 @@ async function loadAgentThreads(sessionId: string): Promise<void> {
 
 async function loadAgentThreadMessages(sessionId: string, agentId: string): Promise<void> {
   if (!sessionId || !agentId) return;
+  const removalGeneration = sessionRemovalGeneration;
   try {
     await feedStore.loadFeedPersistence(sessionId);
     const res = await apiFetch(
@@ -1044,7 +1451,12 @@ async function loadAgentThreadMessages(sessionId: string, agentId: string): Prom
         createdAt: number;
       }>;
     }>(res);
-    if (!res.ok || data?.ok === false || !Array.isArray(data?.data)) return;
+    if (
+      !res.ok ||
+      data?.ok === false ||
+      !Array.isArray(data?.data) ||
+      sessionRemovalGeneration !== removalGeneration
+    ) return;
     const identity = agents.get(agentId)?.identity;
     const entries = data.data.map((entry) => ({
       id: `ath-${entry.id}`,
@@ -1089,9 +1501,39 @@ function applySessionFeedVisibility(sessionId: string): void {
   if (changed) agentThreadVersion++;
 }
 
+function steeringKey(sessionId: string, agentId: string): string {
+  return `${sessionId}:${agentId}`;
+}
+
+function setAgentSteeringQueue(sessionId: string, agentId: string, commands: AgentSteeringCommand[]): void {
+  agentSteeringQueues = new Map(agentSteeringQueues).set(steeringKey(sessionId, agentId), commands);
+}
+
+function getAgentSteeringQueue(sessionId: string, agentId: string): AgentSteeringCommand[] {
+  return agentSteeringQueues.get(steeringKey(sessionId, agentId)) ?? [];
+}
+
+async function loadAgentSteeringQueue(sessionId: string, agentId: string): Promise<void> {
+  const removalGeneration = sessionRemovalGeneration;
+  const response = await apiFetch(apiUrl(`/api/agent/${encodeURIComponent(agentId)}/steering?sessionId=${encodeURIComponent(sessionId)}`));
+  const data = await parseJsonResponse<{ ok?: boolean; data?: AgentSteeringCommand[]; error?: string }>(response);
+  if (!response.ok || data.ok === false) throw new Error(data.error ?? 'Steering queue could not be loaded.');
+  if (sessionRemovalGeneration !== removalGeneration) return;
+  setAgentSteeringQueue(sessionId, agentId, data.data ?? []);
+}
+
+function removeAgentSteeringQueue(sessionId: string): void {
+  const next = new Map(agentSteeringQueues);
+  for (const key of next.keys()) if (key.startsWith(`${sessionId}:`)) next.delete(key);
+  agentSteeringQueues = next;
+}
+
 // ─── Exported Store ─────────────────────────────────────────────────────────
 
 export const agentStore = {
+  get managerUsageRevision() {
+    return managerOccupancyRevision;
+  },
   get agents() {
     return agents;
   },
@@ -1109,6 +1551,7 @@ export const agentStore = {
   getContextUsage,
   spawnAgent,
   updateAgentStatus,
+  updateAgentControls,
   appendAgentContent,
   appendAgentThinking,
   addToolCall,
@@ -1128,6 +1571,7 @@ export const agentStore = {
   beginManagerContextPreview,
   applyManagerContextPreview,
   clearManagerContextPreview,
+  invalidateManagerContextUsage,
   setManagerContextWindow,
   getAgentThreadKey,
   setAgentThreadFeed,
@@ -1139,7 +1583,13 @@ export const agentStore = {
   getAgentThreadEntries,
   getAgentThreadFeed,
   ensureAgentThreadFeed,
+  closeAgentCard,
+  reopenAgentCard,
   loadAgentThreads,
   loadAgentThreadMessages,
   applySessionFeedVisibility,
+  getAgentSteeringQueue,
+  setAgentSteeringQueue,
+  loadAgentSteeringQueue,
+  removeAgentSteeringQueue,
 };
