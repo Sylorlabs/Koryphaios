@@ -105,6 +105,7 @@ describe('WSManager terminal-event delivery and backpressure', () => {
     manager.broadcast({
       type: 'stream.complete',
       timestamp: 1,
+      sessionId: 'session-1',
       payload: { agentId: 'kory-manager' },
     });
 
@@ -133,6 +134,7 @@ describe('WSManager terminal-event delivery and backpressure', () => {
     manager.broadcast({
       type: 'stream.complete',
       timestamp: 1,
+      sessionId: 'session-1',
       payload: { agentId: 'kory-manager' },
     });
     expect(sent).toEqual([]);
@@ -191,6 +193,7 @@ describe('WSManager terminal-event delivery and backpressure', () => {
     manager.broadcast({
       type: 'stream.delta',
       timestamp: 1,
+      sessionId: 'session-1',
       payload: { agentId: 'kory-manager', content: 'partial' },
     });
 
@@ -224,11 +227,13 @@ describe('WSManager terminal-event delivery and backpressure', () => {
     manager.broadcast({
       type: 'stream.delta',
       timestamp: 1,
+      sessionId: 'session-1',
       payload: { agentId: 'kory-manager', content: 'partial' },
     });
     manager.broadcast({
       type: 'stream.complete',
       timestamp: 2,
+      sessionId: 'session-1',
       payload: { agentId: 'kory-manager' },
     });
 
@@ -266,16 +271,19 @@ describe('WSManager terminal-event delivery and backpressure', () => {
     manager.broadcast({
       type: 'stream.complete',
       timestamp: 1,
+      sessionId: 'session-1',
       payload: { agentId: 'kory-manager' },
     });
     manager.broadcast({
       type: 'agent.completed',
       timestamp: 2,
+      sessionId: 'session-1',
       payload: { agentId: 'kory-manager' },
     });
     manager.broadcast({
       type: 'agent.error',
       timestamp: 3,
+      sessionId: 'session-1',
       payload: { agentId: 'kory-manager', message: 'boom' },
     });
 

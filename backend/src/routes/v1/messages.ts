@@ -1,5 +1,9 @@
 import { Elysia, t } from 'elysia';
-import type { StoredMessage, ProviderName } from '@koryphaios/shared';
+import {
+  legacyTurnParts,
+  type StoredMessage,
+  type ProviderName,
+} from '@koryphaios/shared';
 import { getContext } from '../../context';
 import { nanoid } from 'nanoid';
 import { ID, MESSAGE } from '../../constants';
@@ -147,6 +151,20 @@ async function processImageMessage(
   });
 }
 
+/**
+ * Assistant rows always leave the API with `parts`. Rows written before parts
+ * existed are rendered as [reasoning?, text] so the client has one shape.
+ */
+export function withDisplayParts(message: StoredMessage): StoredMessage {
+  if (message.role !== 'assistant') return message;
+  return {
+    ...message,
+    parts:
+      message.parts ??
+      legacyTurnParts(message.content, message.reasoningContent, message.createdAt),
+  };
+}
+
 export const messageRoutes = new Elysia({ prefix: '/api/messages' })
   .get('/:sessionId', async ({ request, params: { sessionId }, query, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
@@ -156,7 +174,11 @@ export const messageRoutes = new Elysia({ prefix: '/api/messages' })
       ? Math.max(20, Math.min(200, Math.floor(requestedLimit)))
       : 120;
     const beforeMessageId = typeof query?.before === 'string' && query.before ? query.before : undefined;
-    return { ok: true, data: await messages.getDisplayProjection(sessionId, limit, { beforeMessageId }) };
+    const projection = await messages.getDisplayProjection(sessionId, limit, { beforeMessageId });
+    return {
+      ok: true,
+      data: { ...projection, messages: projection.messages.map(withDisplayParts) },
+    };
   })
   .post(
     '/',

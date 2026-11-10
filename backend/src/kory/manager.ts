@@ -134,6 +134,7 @@ import {
   WorkerPipelineService,
 } from './services';
 import type { WorkflowHook, WorkflowHookEvent } from './services/EventEmitterService';
+import { finalizeParts } from './services/TurnTranscriptRecorder';
 import { ProcessCompletionCoordinator } from './services/ProcessCompletionCoordinator';
 import { TimeTravelService } from '../services';
 import { computeCostUsd } from '../pricing';
@@ -5359,6 +5360,10 @@ export class KoryManager implements WorkerPipelineHost {
     const abort = this.managerAbortBySession.get(sessionId) ?? new AbortController();
     this.managerAbortBySession.set(sessionId, abort);
     this.assertRunHandleActive(handle);
+    // The assistant message id is the turn's identity from its first event. Every
+    // manager stream event is stamped with it by the emitter (Invariant 2).
+    const turnMessageId = responseMessageId ?? nanoid(12);
+    this.events.transcript.beginTurn(sessionId, turnMessageId);
 
     try {
       this.emitWSMessage(sessionId, 'agent.status', {
@@ -6170,7 +6175,7 @@ export class KoryManager implements WorkerPipelineHost {
       // so partial answers from a normal stop still persist.
       const stillOwner = this.managerAbortBySession.get(sessionId) === abort;
       if (this.messages && toPersist && stillOwner) {
-        finalMessageId = responseMessageId ?? nanoid(12);
+        finalMessageId = turnMessageId;
         // Persist the provider-reported token usage and computed cost with the
         // assistant message so the session counters (messageCount / totalCost)
         // reflect real spend — not just in the demo. Worker/subagent spend
@@ -6186,11 +6191,18 @@ export class KoryManager implements WorkerPipelineHost {
               cacheWriteTokens: cacheWriteInputTokens,
             })?.costUsd ?? 0) + (workerPending?.cost ?? 0)
           : (workerPending?.cost ?? 0);
+        const createdAt = Date.now();
         const persistedAssistant = {
           id: finalMessageId,
           sessionId,
           role: 'assistant',
           content: toPersist,
+          // Display order. Provider replay keeps using reasoningContent (Invariant 3).
+          parts: finalizeParts(
+            this.events.transcript.snapshotParts(sessionId),
+            toPersist,
+            createdAt,
+          ),
           reasoningContent: lastAssistant?.reasoningContent,
           model: routing.model,
           provider: providerName,
@@ -6199,7 +6211,7 @@ export class KoryManager implements WorkerPipelineHost {
           tokensIn: usageKnown ? totalTokensIn : (workerPending?.tokensIn ?? 0),
           tokensOut: usageKnown ? totalTokensOut : (workerPending?.tokensOut ?? 0),
           cost: assistantCost,
-          createdAt: Date.now(),
+          createdAt,
         } as const;
         if (regenerationBranch) {
           await this.messages.commitRegeneratedResponse(regenerationBranch, persistedAssistant);
@@ -6438,6 +6450,8 @@ export class KoryManager implements WorkerPipelineHost {
         this.scheduleAutoCompaction(sessionId, `${providerName}:${routing.model}`, reasoningLevel);
       }
     } finally {
+      // After the deferred stream.delta above, so that delta is stamped too.
+      this.events.transcript.endTurn(sessionId, turnMessageId);
       this.managerAbortBySession.delete(sessionId);
       this.managerRoutingBySession.delete(sessionId);
       await this.updateWorkflowState(sessionId, 'idle');
@@ -9462,6 +9476,7 @@ export class KoryManager implements WorkerPipelineHost {
 
     // Clear session-specific data
     this.state.cleanupSession(sessionId);
+    this.events.transcript.dispose(sessionId);
     this.sessionRunClaims.delete(sessionId);
     this.managerRoutingBySession.delete(sessionId);
     this.managerAbortBySession.delete(sessionId);

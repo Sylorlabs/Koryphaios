@@ -1,4 +1,4 @@
-import type { MessageAttachment, StoredMessage } from '@koryphaios/shared';
+import type { MessageAttachment, StoredMessage, TranscriptPart } from '@koryphaios/shared';
 import {
   db,
   getDb,
@@ -150,10 +150,22 @@ export interface CompactionCommit {
   checkpointTokens: number;
 }
 
+/** Block type that carries an assistant turn's ordered display parts. Never text. */
+const TRANSCRIPT_PARTS_BLOCK = 'kory_transcript_parts';
+
+function isTranscriptPartsBlock(block: unknown): block is { type: string; parts: unknown } {
+  return (
+    typeof block === 'object' &&
+    block !== null &&
+    (block as { type?: unknown }).type === TRANSCRIPT_PARTS_BLOCK
+  );
+}
+
 function parseStoredContent(raw: string): {
   text: string;
   attachments: MessageAttachment[];
   reasoningContent?: string;
+  parts?: TranscriptPart[];
 } {
   try {
     const blocks = JSON.parse(raw);
@@ -168,13 +180,19 @@ function parseStoredContent(raw: string): {
     const thinking = blocks.filter(
       (block) => block?.type === 'thinking' && typeof block.thinking === 'string',
     );
+    const partsBlock = blocks.find(isTranscriptPartsBlock);
     return {
       text: blocks
-        .filter((block) => block?.type === 'text' || typeof block?.text === 'string')
+        .filter(
+          (block) =>
+            !isTranscriptPartsBlock(block) &&
+            (block?.type === 'text' || typeof block?.text === 'string'),
+        )
         .map((block) => block.text ?? '')
         .join(''),
       attachments,
       reasoningContent: thinking.length ? thinking.map((block) => block.thinking).join('') : undefined,
+      parts: Array.isArray(partsBlock?.parts) ? (partsBlock.parts as TranscriptPart[]) : undefined,
     };
   } catch (err: unknown) {
     serverLog.debug(
@@ -189,6 +207,7 @@ function serializeStoredContent(
   content: string,
   attachments: MessageAttachment[] = [],
   reasoningContent?: string,
+  parts?: TranscriptPart[],
 ): string {
   return JSON.stringify([
     ...(reasoningContent !== undefined ? [{ type: 'thinking', thinking: reasoningContent }] : []),
@@ -208,6 +227,7 @@ function serializeStoredContent(
                 : 'application/octet-stream';
       return { ...attachment, mimeType };
     }),
+    ...(parts !== undefined ? [{ type: TRANSCRIPT_PARTS_BLOCK, parts }] : []),
   ]);
 }
 
@@ -220,6 +240,7 @@ function toStoredMessage(m: DbMessage): StoredMessage {
     role: m.role as StoredMessage['role'],
     content: stored.text,
     reasoningContent: stored.reasoningContent,
+    parts: stored.parts,
     attachments: stored.attachments.length > 0 ? stored.attachments : undefined,
     model: m.model ?? undefined,
     provider: m.provider ?? undefined,
@@ -485,7 +506,7 @@ export class MessageStore implements IMessageStore {
   }
 
   async addIdempotent(sessionId: string, msg: StoredMessage): Promise<'inserted' | 'existing'> {
-    const expectedContent = serializeStoredContent(msg.content, msg.attachments, msg.reasoningContent);
+    const expectedContent = serializeStoredContent(msg.content, msg.attachments, msg.reasoningContent, msg.parts);
     const assertExistingMatches = async (): Promise<boolean> => {
       const [row] = await db.select().from(messages).where(eq(messages.id, msg.id)).limit(1);
       if (!row) return false;
@@ -525,7 +546,7 @@ export class MessageStore implements IMessageStore {
     msg: StoredMessage,
     expected: MessageAppendBoundary,
   ): Promise<'inserted' | 'existing'> {
-    const content = serializeStoredContent(msg.content, msg.attachments, msg.reasoningContent);
+    const content = serializeStoredContent(msg.content, msg.attachments, msg.reasoningContent, msg.parts);
     const tokensIn = msg.tokensIn ?? 0;
     const tokensOut = msg.tokensOut ?? 0;
     const cost = msg.cost ?? 0;
@@ -647,7 +668,7 @@ export class MessageStore implements IMessageStore {
           id: msg.id,
           sessionId,
           role: msg.role,
-          content: serializeStoredContent(msg.content, msg.attachments, msg.reasoningContent),
+          content: serializeStoredContent(msg.content, msg.attachments, msg.reasoningContent, msg.parts),
           model: msg.model ?? null,
           provider: msg.provider ?? null,
           tokensIn: msgTokensIn,
@@ -1515,7 +1536,7 @@ export class MessageStore implements IMessageStore {
           id: message.id,
           sessionId: reservation.sessionId,
           role: 'assistant',
-          content: serializeStoredContent(message.content, message.attachments, message.reasoningContent),
+          content: serializeStoredContent(message.content, message.attachments, message.reasoningContent, message.parts),
           model: message.model ?? null,
           provider: message.provider ?? null,
           tokensIn: msgTokensIn,
@@ -1565,7 +1586,7 @@ export class MessageStore implements IMessageStore {
       const stored = parseStoredContent(pivot.content);
       tx
         .update(messages)
-        .set({ content: serializeStoredContent(content, stored.attachments, stored.reasoningContent) })
+        .set({ content: serializeStoredContent(content, stored.attachments, stored.reasoningContent, stored.parts) })
         .where(and(eq(messages.id, messageId), eq(messages.sessionId, sessionId)))
         .run();
       writeActiveBoundary(tx, {

@@ -1,5 +1,5 @@
 import type { ServerWebSocket } from 'bun';
-import type { WSMessage } from '@koryphaios/shared';
+import { hasRequiredSessionIdentity, type WSMessage } from '@koryphaios/shared';
 import { serverLog } from '../logger';
 import { getOrderedEventLog } from './ordered-event-log';
 
@@ -339,6 +339,11 @@ export class WSManager {
 
   broadcast(message: WSMessage) {
     if (message.sessionId && this.erasedSessions.has(message.sessionId)) return;
+    // Invariant 4: a session-scoped event without its session is never published.
+    if (!hasRequiredSessionIdentity(message)) {
+      serverLog.error({ type: message.type }, 'Dropped session-scoped event without sessionId');
+      return;
+    }
     const ordered = this.persist(message);
     this.notifySessionListeners(ordered);
     const data = JSON.stringify(ordered);

@@ -19,6 +19,7 @@ import type {
 import { resolveTrustedContextWindow } from '../../providers';
 import { wsBroker } from '../../pubsub';
 import { koryLog } from '../../logger';
+import { TurnTranscriptRecorder } from './TurnTranscriptRecorder';
 
 export interface EventEmitterServiceConfig {
   managerAgentId: string;
@@ -54,6 +55,8 @@ export type WorkflowHook = (context: {
 export class EventEmitterService {
   private managerAgentId: string;
   private workflowHooks = new Map<WorkflowHookEvent, Set<WorkflowHook>>();
+  /** Allocates each manager turn's message id and folds its parts. Manager-only. */
+  readonly transcript = new TurnTranscriptRecorder();
 
   constructor(config: EventEmitterServiceConfig) {
     this.managerAgentId = config.managerAgentId;
@@ -260,10 +263,18 @@ export class EventEmitterService {
    * This is the core method all other emit methods use.
    */
   emit(sessionId: string, type: string, payload: WSMessage['payload']): void {
+    const timestamp = Date.now();
+    const published = this.transcript.observe({
+      sessionId,
+      type,
+      payload,
+      timestamp,
+      managerAgentId: this.managerAgentId,
+    }) as WSMessage['payload'];
     wsBroker.publish('custom', {
       type: type as WSMessage['type'],
-      payload,
-      timestamp: Date.now(),
+      payload: published,
+      timestamp,
       sessionId,
       agentId: this.managerAgentId,
     });
