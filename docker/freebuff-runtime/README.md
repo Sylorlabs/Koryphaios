@@ -1,6 +1,13 @@
 # Freebuff real-TUI Linux runtime
 
-Build on macOS with a running Linux/amd64 Docker daemon (Colima works):
+Normal macOS connection prepares the pinned image automatically inside
+Koryphaios using the embedded Dockerfile as the complete stdin build context.
+Only a genuinely missing image triggers a build; transport timeouts do not.
+An existing stopped default Colima profile can be resumed with
+`--activate=false`, preserving Docker's global context.
+
+Developer-only build and diagnostic commands with a native Linux Docker daemon
+(amd64 and arm64 Colima work):
 
 ```sh
 bun scripts/setup-freebuff-runtime.ts
@@ -8,16 +15,24 @@ bun scripts/setup-freebuff-runtime.ts --probe-only
 KORY_FREEBUFF_RUNTIME_SMOKE=1 bun test --timeout 60000 backend/src/providers/__tests__/freebuff-runtime.test.ts
 ```
 
-Linux uses local `bwrap`, `tmux`, Bun, and the native CLI installed by Freebuff. It refuses to run if real kernel isolation fails. macOS uses the pinned Linux image; no Darwin executable is copied into it. Setup never reads credentials, logs in, runs inference, or invokes the auto-updating npm launcher. Only `docker/freebuff-runtime/` is sent as build context.
+Linux uses local `bwrap`, `tmux`, Bun, and the native CLI installed by Freebuff. It refuses to run if real kernel isolation fails. macOS uses the pinned Linux image; no Darwin executable is copied into it. Setup never reads credentials, logs in, runs inference, or invokes the auto-updating npm launcher. The developer script sends only `docker/freebuff-runtime/`; app-owned installation sends only the embedded recipe.
+
+Setup and turns select the active daemon's native `amd64` or `arm64` architecture.
+An emulated container cannot perform the namespace syscalls. This does not change
+Docker's global context. `KORY_FREEBUFF_DOCKER_CONTEXT` selects an explicit context.
+The run container adds Docker's `host-gateway` alias so the MCP relay works with
+Colima as well as Docker Desktop.
 
 ## Release provenance
 
-The installed npm launcher **freebuff 0.0.173** uses `stageBinary(version, targetKey)` in `launcher.js` to download `${appURL}/api/releases/download/${version}/${fileName}`. We use the official default `https://codebuff.com` and native CLI **0.2.12**, not the npm wrapper version. The x64 baseline build avoids an AVX2 requirement. Archive hashes were calculated from the official HTTPS downloads and are enforced during every build:
+The inspected npm launcher **freebuff 0.0.173** uses `stageBinary(version, targetKey)` in `launcher.js` to download `${appURL}/api/releases/download/${version}/${fileName}`. We use the official default `https://codebuff.com` and native CLI **0.2.16**, not the npm wrapper version. The x64 baseline build avoids an AVX2 requirement. Archive hashes were calculated from the official HTTPS downloads and are enforced during every build:
 
 | Artifact                                                                                  | SHA-256                                                            |
 | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `https://codebuff.com/api/releases/download/0.2.12/freebuff-linux-x64-baseline.tar.gz`    | `878e5a7ce680ef760b98cfa0018a6c6d8b8491fd07ce24f2bb22ba7238cd728f` |
+| `https://codebuff.com/api/releases/download/0.2.16/freebuff-linux-x64-baseline.tar.gz`    | `bc6fce99050823b9fdcc9b64a9993525b0c478c45b3bd4460cbab55d9afaf3f3` |
+| `https://codebuff.com/api/releases/download/0.2.16/freebuff-linux-arm64.tar.gz`            | `3d5e9049da25d176eedd8193aef12c1c485096c6a42d3927c3e183c38c62adc1` |
 | `https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-linux-x64-baseline.zip` | `a063908ae08b7852ca10939bbdc6ceed3ddabce8fb9402dce83d65d73b36e6c7` |
+| `https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-linux-aarch64.zip`       | `a27ffb63a8310375836e0d6f668ae17fa8d8d18b88c37c821c65331973a19a3b` |
 
 The Debian base is digest-pinned. Debian runtime packages use signed Debian repositories and current Bookworm security updates rather than frozen vulnerable package versions. Consequently the image is not byte-for-byte reproducible across Debian updates; the native CLI and Bun artifacts are byte-pinned. The shipped tree-sitter WASM remains alongside Freebuff.
 
@@ -50,3 +65,10 @@ No `systempaths=unconfined`, host network, Docker socket, or global Docker/AppAr
 The opt-in test executes the real pinned native binary with a credential-free HOME and disabled network in a private tmux PTY. It proves a host-outside-root sentinel cannot be read or written, system directories are read-only, disposable writes reach the host runRoot, the real tmux socket is inaccessible/unwritable from bwrap, sensitive supplied environment variables are absent, CLI capabilities are zero, no-new-privileges is set, and cleanup is idempotent. It does not submit a prompt or authenticate.
 
 The synchronous status API is a defensive cached snapshot. Refresh is async, deduplicated, and cached for 60 seconds; each new turn still probes bwrap. Docker readiness checks require a shared directory: Darwin `/private/var/folders` is not shared by default Colima, so probes use a new private subdirectory under `~/.koryphaios/freebuff-runs` and mount only its `run` child.
+
+Discovery reads the actual isolated execution binary's embedded version and
+catalog protocol markers. The independent host launcher's auto-update cannot
+change the pinned runtime or falsely invalidate its catalog. Native CLI
+`--version` output can disappear through Docker exec, so it is not the version
+authority. Controller commands drain both output pipes and enforce bounded
+deadlines and output limits.

@@ -31,11 +31,11 @@ pub const LOCAL_PROVIDER: &str = "kory-local";
 pub const LOCAL_MODEL_ID: &str = "kory-local-voice";
 /// Human label for the built-in download.
 pub const BUNDLED_MODEL_NAME: &str = "Kory Voice";
-const BUNDLED_MODEL_ID: &str = "kory-voice-tiny";
-const BUNDLED_MODEL_FILE: &str = "ggml-tiny.bin";
+const BUNDLED_MODEL_ID: &str = "kory-voice-parakeet";
+const BUNDLED_MODEL_FILE: &str = "parakeet-tdt-0.6b-v3";
 const BUNDLED_MODEL_URL: &str =
-    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin?download=true";
-const BUNDLED_DOWNLOAD_BYTES: u64 = 75 * 1024 * 1024;
+    "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/encoder-model.int8.onnx?download=true";
+const BUNDLED_DOWNLOAD_BYTES: u64 = 670 * 1024 * 1024;
 /// Smallest plausible speech-to-text model. A few hundred bytes of weights
 /// cannot transcribe anything, so this only rejects obviously wrong files.
 pub const MIN_MODEL_BYTES: u64 = 1024 * 1024;
@@ -59,6 +59,7 @@ const SAFETENSORS_MAGIC: &[u8] = b"[{\"__metadata__";
 pub enum VoiceModelFormat {
     Ggml,
     Onnx,
+    Parakeet,
     Torch,
     Unknown,
 }
@@ -154,13 +155,63 @@ fn starts_with_magic(path: &Path, magic: &[u8]) -> bool {
     header[..read].starts_with(magic)
 }
 
+/// Whether `dir` is a Parakeet TDT model directory.
+pub fn is_parakeet_dir(dir: &Path) -> bool {
+    if !dir.is_dir() {
+        return false;
+    }
+    let mut has_encoder = false;
+    let mut has_decoder_joint = false;
+    let mut has_vocab = false;
+    let Ok(entries) = fs::read_dir(dir) else {
+        return false;
+    };
+    for entry in entries.filter_map(|entry| entry.ok()) {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if name.starts_with("encoder") && name.ends_with(".onnx") {
+            has_encoder = true;
+        }
+        if name.starts_with("decoder_joint") && name.ends_with(".onnx") {
+            has_decoder_joint = true;
+        }
+        if name == "vocab.txt" {
+            has_vocab = true;
+        }
+    }
+    has_encoder && has_decoder_joint && has_vocab
+}
+
 /// Identify a model file from its header, falling back to the extension for
 /// containers whose magic is ambiguous.
 pub fn detect_format(path: &Path) -> VoiceModelFormat {
+    // A Parakeet model is a directory, not a single file. Recognize it both
+    // when given the directory and when given one of its files.
+    if path.is_dir() {
+        if is_parakeet_dir(path) {
+            return VoiceModelFormat::Parakeet;
+        }
+        return VoiceModelFormat::Unknown;
+    }
     if !path.is_file() {
         return VoiceModelFormat::Unknown;
     }
-    if GGML_MAGICS.iter().any(|magic| starts_with_magic(path, magic)) {
+    if let Some(parent) = path.parent() {
+        if is_parakeet_dir(parent) {
+            return VoiceModelFormat::Parakeet;
+        }
+    }
+    if GGML_MAGICS
+        .iter()
+        .any(|magic| starts_with_magic(path, magic))
+    {
         return VoiceModelFormat::Ggml;
     }
     if starts_with_magic(path, SAFETENSORS_MAGIC) {
@@ -208,13 +259,16 @@ pub fn validate_installed_model(
     files: &[PathBuf],
     format: VoiceModelFormat,
 ) -> Result<(), String> {
-    let primary_size = fs::metadata(path).map(|metadata| metadata.len()).unwrap_or(0);
+    let primary_size = fs::metadata(path)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
     if primary_size < MIN_MODEL_BYTES {
         return Err("That file is too small to be a voice model.".to_string());
     }
     match format {
         VoiceModelFormat::Ggml => ggml_loads(path),
         VoiceModelFormat::Onnx => whisper_onnx::validate_onnx_model(path, tokenizer_path(files)),
+        VoiceModelFormat::Parakeet => crate::parakeet::validate(path),
         // A PyTorch model needs an interpreter the app does not ship; accept it
         // only when one is present and the model set is loadable.
         VoiceModelFormat::Torch => {
@@ -277,12 +331,19 @@ pub fn installed_model(dir: &Path) -> Option<InstalledVoiceModel> {
             .filter_map(|entry| {
                 let path = entry.path();
                 let primary = model_file_in(&path)?;
-                let mut files = vec![primary.clone()];
-                for name in ["tokenizer.json", "config.json", "preprocessor_config.json"] {
-                    let extra = path.join(name);
-                    if extra.is_file() {
-                        files.push(extra);
-                    }
+                let mut files: Vec<PathBuf> = fs::read_dir(&path)
+                    .ok()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|entry| entry.ok())
+                    .map(|entry| entry.path())
+                    .filter(|path| path.is_file())
+                    .collect();
+                if files.is_empty() {
+                    files.push(primary.clone());
+                }
+                if !files.contains(&primary) {
+                    files.insert(0, primary.clone());
                 }
                 let format = detect_format(&primary);
                 let modified = entry
@@ -305,6 +366,28 @@ pub fn installed_model(dir: &Path) -> Option<InstalledVoiceModel> {
         }
     }
     let bundled = bundled_model_path(dir);
+    if bundled.is_dir() {
+        if let Some(primary) = model_file_in(&bundled) {
+            let mut files: Vec<PathBuf> = fs::read_dir(&bundled)
+                .ok()
+                .into_iter()
+                .flatten()
+                .filter_map(|entry| entry.ok())
+                .map(|entry| entry.path())
+                .filter(|path| path.is_file())
+                .collect();
+            files.sort();
+            if files.is_empty() {
+                files.push(primary.clone());
+            }
+            return Some(InstalledVoiceModel {
+                format: detect_format(&primary),
+                primary,
+                files,
+            });
+        }
+    }
+    // Backwards-compatible single-file bundled model.
     bundled.is_file().then(|| InstalledVoiceModel {
         format: detect_format(&bundled),
         primary: bundled.clone(),
@@ -313,7 +396,12 @@ pub fn installed_model(dir: &Path) -> Option<InstalledVoiceModel> {
 }
 
 fn model_file_in(dir: &Path) -> Option<PathBuf> {
-    let preferred = ["encoder.onnx", "model.onnx"];
+    let preferred = [
+        "encoder.onnx",
+        "encoder-model.onnx",
+        "encoder-model.int8.onnx",
+        "model.onnx",
+    ];
     for name in preferred {
         let candidate = dir.join(name);
         if candidate.is_file() {
@@ -356,7 +444,9 @@ pub fn status_from(dir: &Path, model: Option<&InstalledVoiceModel>) -> LocalVoic
                 .file_name()
                 .map(|value| value.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "Voice model".to_string());
-            let is_bundled = model.primary == bundled_model_path(dir);
+            let bundled_dir = bundled_model_path(dir);
+            let is_bundled = model.primary.parent() == Some(bundled_dir.as_path())
+                || model.primary == bundled_dir;
             LocalVoiceModelStatus {
                 installed: installed && unsupported_reason.is_none(),
                 model_id: if is_bundled {
@@ -423,8 +513,24 @@ pub fn install_model_from(dir: &Path, source: &Path) -> Result<InstalledVoiceMod
     // PyTorch model is weights + config + tokenizer. Copy whatever the chosen
     // file's directory provides so the runtime finds a complete model.
     let siblings = match format {
-        VoiceModelFormat::Onnx => siblings_for_onnx(source.parent().unwrap_or(Path::new("")), source)?,
-        VoiceModelFormat::Torch => siblings_for_torch(source.parent().unwrap_or(Path::new("")), source),
+        VoiceModelFormat::Onnx => {
+            siblings_for_onnx(source.parent().unwrap_or(Path::new("")), source)?
+        }
+        VoiceModelFormat::Parakeet => {
+            // A Parakeet model is a directory: copy every companion file.
+            let parent = source.parent().unwrap_or(Path::new(""));
+            fs::read_dir(parent)
+                .ok()
+                .into_iter()
+                .flatten()
+                .filter_map(|entry| entry.ok())
+                .map(|entry| entry.path())
+                .filter(|path| path.is_file() && path != source)
+                .collect()
+        }
+        VoiceModelFormat::Torch => {
+            siblings_for_torch(source.parent().unwrap_or(Path::new("")), source)
+        }
         VoiceModelFormat::Ggml | VoiceModelFormat::Unknown => Vec::new(),
     };
     for sibling in siblings {
@@ -549,6 +655,7 @@ pub fn transcribe(
     match model.format {
         VoiceModelFormat::Ggml => transcribe_ggml(model, samples, language),
         VoiceModelFormat::Onnx => whisper_onnx::transcribe(model, samples, language),
+        VoiceModelFormat::Parakeet => crate::parakeet::transcribe(&model.primary, samples, SAMPLE_RATE),
         VoiceModelFormat::Torch => voice_python::transcribe(model, samples, language),
         VoiceModelFormat::Unknown => Err(unknown_format_message(&model.primary)),
     }
@@ -622,8 +729,11 @@ mod tests {
         // The real bytes a whisper.cpp model starts with: the magic is written as
         // a little-endian u32, so it reads `lmgg` and not `ggml`.
         let ggml = dir.join("model.bin");
-        std::fs::write(&ggml, [b"lmgg", &[0x99, 0xca, 0x00, 0x00][..], &[0u8; 8]].concat())
-            .unwrap();
+        std::fs::write(
+            &ggml,
+            [b"lmgg", &[0x99, 0xca, 0x00, 0x00][..], &[0u8; 8]].concat(),
+        )
+        .unwrap();
         assert_eq!(detect_format(&ggml), VoiceModelFormat::Ggml);
 
         let gguf = dir.join("model.gguf");
@@ -633,8 +743,11 @@ mod tests {
         // The downloaded file keeps a `.download` extension, so only the header
         // can identify it.
         let partial = dir.join("ggml-tiny.bin.download");
-        std::fs::write(&partial, [b"lmgg", &[0x99, 0xca, 0x00, 0x00][..], &[0u8; 8]].concat())
-            .unwrap();
+        std::fs::write(
+            &partial,
+            [b"lmgg", &[0x99, 0xca, 0x00, 0x00][..], &[0u8; 8]].concat(),
+        )
+        .unwrap();
         assert_eq!(detect_format(&partial), VoiceModelFormat::Ggml);
 
         let onnx = dir.join("model.onnx");
@@ -653,7 +766,10 @@ mod tests {
         std::fs::write(&notes, b"just some text, not a model").unwrap();
         assert_eq!(detect_format(&notes), VoiceModelFormat::Unknown);
 
-        assert_eq!(detect_format(&dir.join("missing.bin")), VoiceModelFormat::Unknown);
+        assert_eq!(
+            detect_format(&dir.join("missing.bin")),
+            VoiceModelFormat::Unknown
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -670,7 +786,8 @@ mod tests {
         };
         let source = PathBuf::from(source);
         assert_eq!(detect_format(&source), VoiceModelFormat::Ggml);
-        let staging = std::env::temp_dir().join(format!("kory-voice-ggml-src-{}", std::process::id()));
+        let staging =
+            std::env::temp_dir().join(format!("kory-voice-ggml-src-{}", std::process::id()));
         let target = std::env::temp_dir().join(format!("kory-voice-ggml-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&target);
         std::fs::create_dir_all(&target).unwrap();
@@ -711,8 +828,11 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         // The bundled download, laid down where the built-in install puts it.
         let bundled = dir.join(BUNDLED_MODEL_FILE);
-        std::fs::write(&bundled, [b"lmgg", &[0x99, 0xca, 0x00, 0x00][..], &[0u8; 8]].concat())
-            .unwrap();
+        std::fs::write(
+            &bundled,
+            [b"lmgg", &[0x99, 0xca, 0x00, 0x00][..], &[0u8; 8]].concat(),
+        )
+        .unwrap();
         let status = status_from(&dir, installed_model(&dir).as_ref());
         assert_eq!(status.model_id, BUNDLED_MODEL_ID);
         assert_eq!(status.name, BUNDLED_MODEL_NAME);
@@ -726,7 +846,10 @@ mod tests {
         )
         .unwrap();
         let status = status_from(&dir, installed_model(&dir).as_ref());
-        assert_eq!(status.model_id, LOCAL_MODEL_ID, "attached model was reported as bundled");
+        assert_eq!(
+            status.model_id, LOCAL_MODEL_ID,
+            "attached model was reported as bundled"
+        );
         assert_eq!(status.name, BUNDLED_MODEL_FILE);
         assert_ne!(status.name, BUNDLED_MODEL_NAME);
         std::fs::remove_dir_all(&dir).ok();
@@ -738,8 +861,9 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("tiny.bin");
         std::fs::write(&path, vec![0_u8; 16]).unwrap();
-        let error = validate_installed_model(&path, std::slice::from_ref(&path), VoiceModelFormat::Ggml)
-            .unwrap_err();
+        let error =
+            validate_installed_model(&path, std::slice::from_ref(&path), VoiceModelFormat::Ggml)
+                .unwrap_err();
         assert!(error.contains("too small"), "{error}");
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -763,8 +887,16 @@ mod tests {
         let dir = std::env::temp_dir().join("kory-voice-attach-tests");
         let export = dir.join("export");
         std::fs::create_dir_all(&export).unwrap();
-        std::fs::write(export.join("encoder_model.onnx"), [0x08, 0x07, 0x12, 0x04, 0x00, 0x00]).unwrap();
-        std::fs::write(export.join("decoder_model_merged.onnx"), [0x08, 0x07, 0x12, 0x04, 0x00]).unwrap();
+        std::fs::write(
+            export.join("encoder_model.onnx"),
+            [0x08, 0x07, 0x12, 0x04, 0x00, 0x00],
+        )
+        .unwrap();
+        std::fs::write(
+            export.join("decoder_model_merged.onnx"),
+            [0x08, 0x07, 0x12, 0x04, 0x00],
+        )
+        .unwrap();
         std::fs::write(export.join("tokenizer.json"), "{}").unwrap();
         std::fs::write(export.join("notes.txt"), "ignore me").unwrap();
         let siblings = siblings_for_onnx(&export, &export.join("encoder_model.onnx")).unwrap();
@@ -810,8 +942,14 @@ mod tests {
             .iter()
             .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
             .collect();
-        assert!(names.iter().any(|name| name.contains("decoder")), "{names:?}");
-        assert!(names.iter().any(|name| name == "tokenizer.json"), "{names:?}");
+        assert!(
+            names.iter().any(|name| name.contains("decoder")),
+            "{names:?}"
+        );
+        assert!(
+            names.iter().any(|name| name == "tokenizer.json"),
+            "{names:?}"
+        );
         assert!(installed.size_bytes() > MIN_MODEL_BYTES);
         // The registry must then report the attached model, not the bundled one.
         let status = status_from(&target, installed_model(&target).as_ref());
@@ -836,7 +974,10 @@ mod tests {
             return;
         };
         let previous = std::env::var("PATH").ok();
-        std::env::set_var("PATH", format!("{python}:{}", previous.clone().unwrap_or_default()));
+        std::env::set_var(
+            "PATH",
+            format!("{python}:{}", previous.clone().unwrap_or_default()),
+        );
         let source = PathBuf::from(source);
         let weights = std::fs::read_dir(&source)
             .expect("model folder")
@@ -862,13 +1003,21 @@ mod tests {
             .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
             .collect();
         assert!(names.iter().any(|name| name == "config.json"), "{names:?}");
-        assert!(names.iter().any(|name| name == "preprocessor_config.json"), "{names:?}");
+        assert!(
+            names.iter().any(|name| name == "preprocessor_config.json"),
+            "{names:?}"
+        );
         let status = status_from(&target, installed_model(&target).as_ref());
         assert!(status.installed, "{status:?}");
         assert_eq!(status.format, VoiceModelFormat::Torch);
         assert!(status.unsupported_reason.is_none(), "{status:?}");
         // The installed folder is what the Python runtime is handed.
-        assert!(installed.primary.parent().unwrap().join("config.json").is_file());
+        assert!(installed
+            .primary
+            .parent()
+            .unwrap()
+            .join("config.json")
+            .is_file());
         std::fs::remove_dir_all(&target).ok();
         if let Some(previous) = previous {
             std::env::set_var("PATH", previous);
@@ -879,7 +1028,11 @@ mod tests {
     fn an_onnx_export_without_a_decoder_is_rejected() {
         let dir = std::env::temp_dir().join("kory-voice-attach-missing-tests");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("encoder_model.onnx"), [0x08, 0x07, 0x12, 0x04, 0x00]).unwrap();
+        std::fs::write(
+            dir.join("encoder_model.onnx"),
+            [0x08, 0x07, 0x12, 0x04, 0x00],
+        )
+        .unwrap();
         let error = siblings_for_onnx(&dir, &dir.join("encoder_model.onnx")).unwrap_err();
         assert!(error.contains("decoder"), "{error}");
         std::fs::remove_dir_all(&dir).ok();
@@ -899,63 +1052,130 @@ pub async fn download_local_voice_model(app: AppHandle) -> Result<LocalVoiceMode
     tokio::fs::create_dir_all(&dir)
         .await
         .map_err(|error| format!("Could not create the voice model directory: {error}"))?;
-    let (url, file_name, estimate) = bundled_model();
-    let partial = dir.join(format!("{}.download", file_name.to_string_lossy()));
-    let _ = tokio::fs::remove_file(&partial).await;
+    let bundle_dir = dir.join(BUNDLED_MODEL_FILE);
+    tokio::fs::create_dir_all(&bundle_dir)
+        .await
+        .map_err(|error| format!("Could not create the voice model directory: {error}"))?;
+
+    let base = "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main";
+    let files: [(&str, u64); 4] = [
+        ("encoder-model.int8.onnx", 652 * 1024 * 1024),
+        ("decoder_joint-model.int8.onnx", 18 * 1024 * 1024),
+        ("nemo128.onnx", 140 * 1024),
+        ("vocab.txt", 94 * 1024),
+    ];
+
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(20))
         .timeout(Duration::from_secs(30 * 60))
         .build()
         .map_err(|error| format!("Could not start the voice model download: {error}"))?;
-    let mut response = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|error| format!("Voice model download failed: {error}"))?;
-    if !response.status().is_success() {
-        return Err(format!(
-            "Voice model download failed with HTTP {}.",
-            response.status()
-        ));
-    }
-    let total_bytes = response.content_length().unwrap_or(estimate);
-    let mut file = tokio::fs::File::create(&partial)
-        .await
-        .map_err(|error| format!("Could not create the local voice model: {error}"))?;
+
+    let total_bytes: u64 = files.iter().map(|(_, size)| *size).sum();
     let mut downloaded_bytes = 0_u64;
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|error| format!("Voice model download interrupted: {error}"))?
-    {
-        file.write_all(&chunk)
+
+    for (name, estimate) in files.iter() {
+        let url = format!("{}/{}?download=true", base, name);
+        let destination = bundle_dir.join(name);
+        let partial = bundle_dir.join(format!("{}.download", name));
+        let _ = tokio::fs::remove_file(&partial).await;
+
+        let mut response = client
+            .get(&url)
+            .send()
             .await
-            .map_err(|error| format!("Could not save the voice model: {error}"))?;
-        downloaded_bytes += chunk.len() as u64;
-        let percent = if total_bytes > 0 {
-            (downloaded_bytes as f64 / total_bytes as f64 * 100.0).min(100.0)
-        } else {
-            0.0
-        };
-        let _ = app.emit(
-            "koryphaios:voice-model-download-progress",
-            LocalVoiceDownloadProgress {
-                downloaded_bytes,
-                total_bytes,
-                percent,
-            },
-        );
+            .map_err(|error| format!("Voice model download failed: {error}"))?;
+        if !response.status().is_success() {
+            return Err(format!(
+                "Voice model download failed with HTTP {}.",
+                response.status()
+            ));
+        }
+        let mut file = tokio::fs::File::create(&partial)
+            .await
+            .map_err(|error| format!("Could not create the local voice model: {error}"))?;
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|error| format!("Voice model download interrupted: {error}"))?
+        {
+            file.write_all(&chunk)
+                .await
+                .map_err(|error| format!("Could not save the local voice model: {error}"))?;
+            downloaded_bytes += chunk.len() as u64;
+            let percent = if total_bytes > 0 {
+                (downloaded_bytes as f64 / total_bytes as f64 * 100.0).min(100.0)
+            } else {
+                0.0
+            };
+            let _ = app.emit(
+                "koryphaios:voice-model-download-progress",
+                LocalVoiceDownloadProgress {
+                    downloaded_bytes,
+                    total_bytes,
+                    percent,
+                },
+            );
+        }
+        file.flush()
+            .await
+            .map_err(|error| format!("Could not finish saving the voice model: {error}"))?;
+        drop(file);
+        tokio::fs::rename(&partial, &destination)
+            .await
+            .map_err(|error| format!("Could not install the voice model: {error}"))?;
+        let _ = estimate;
     }
-    file.flush()
-        .await
-        .map_err(|error| format!("Could not finish saving the voice model: {error}"))?;
-    drop(file);
-    // `install_bundled` detects the format from the bytes and validates with the
-    // matching runtime, so this stays correct for any model the app can run.
-    let install_dir = dir.clone();
-    tauri::async_runtime::spawn_blocking(move || install_bundled(&install_dir, &partial))
-        .await
-        .map_err(|error| format!("Could not install the voice model: {error}"))??;
+
+    let bundle_for_validation = bundle_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let encoder = bundle_for_validation
+            .read_dir()
+            .ok()
+            .and_then(|mut entries| {
+                entries.find_map(|entry| {
+                    let path = entry.ok()?.path();
+                    let name = path.file_name()?.to_str()?.to_ascii_lowercase();
+                    if name.starts_with("encoder") && name.ends_with(".onnx") {
+                        Some(path)
+                    } else {
+                        None
+                    }
+                })
+            })
+            .ok_or_else(|| "Parakeet bundle is missing its encoder.".to_string())?;
+        crate::parakeet::validate(&encoder)
+    })
+    .await
+    .map_err(|error| format!("Could not install the voice model: {error}"))??;
+
+    current_status(&app)
+}
+
+/// Delete the installed local voice model so the user can re-download it or
+/// attach a different one later. Never removes the voice directory itself.
+#[tauri::command]
+pub async fn delete_local_voice_model(app: AppHandle) -> Result<LocalVoiceModelStatus, String> {
+    let dir = voice_dir(&app)?;
+    let model = installed_model(&dir);
+
+    if let Some(model) = model {
+        // Remove every file that makes up the installed model.
+        for file in &model.files {
+            if file.is_file() {
+                let _ = tokio::fs::remove_file(file).await;
+            }
+        }
+        // Remove the model's directory when it is one we own (the bundled
+        // model directory or a custom model subdirectory). Never remove the
+        // voice directory itself.
+        if let Some(parent) = model.primary.parent() {
+            if parent != dir && parent.is_dir() {
+                let _ = tokio::fs::remove_dir_all(&parent).await;
+            }
+        }
+    }
+
     current_status(&app)
 }
 
@@ -998,9 +1218,11 @@ pub async fn transcribe_local_voice(
         .file_name()
         .map(|value| value.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let text = tauri::async_runtime::spawn_blocking(move || transcribe(&model, &samples, &inference_language))
-        .await
-        .map_err(|error| format!("Local transcription task failed: {error}"))??;
+    let text = tauri::async_runtime::spawn_blocking(move || {
+        transcribe(&model, &samples, &inference_language)
+    })
+    .await
+    .map_err(|error| format!("Local transcription task failed: {error}"))??;
     Ok(LocalVoiceTranscription {
         text,
         language,

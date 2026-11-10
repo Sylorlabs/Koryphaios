@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Koryphaios V5 native fixture</title>
+  <style>
+    :root { color-scheme: light; font: 16px -apple-system, system-ui, sans-serif; }
+    body { margin: 0; padding: 30px; background: #f2f4f8; color: #182236; }
+    h1 { margin: 0 0 14px; font-size: 25px; }
+    p { font-size: 14px; margin: 0 0 17px; }
+    button { display: block; height: 47px; width: 310px; margin: 10px 0; background: #174c9f; border: 0; border-radius: 6px; color: white; font-size: 15px; font-weight: bold; cursor: pointer; }
+    button:focus-visible { outline: 3px solid orange; }
+    output { display: block; margin-top: 18px; padding: 14px; width: 92%; min-height: 56px; border-radius: 6px; background: white; white-space: pre-wrap; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <h1>Native Tauri dialog and IPC fixture</h1>
+  <p>Host-owned directory picker, checked reads, symlink denial, and restored state.</p>
+  <button id="pick">Choose workspace folder</button>
+  <button id="allowed">Read allowed marker</button>
+  <button id="denied">Try escaped symlink read</button>
+  <button id="reopen">Reopen folder dialog</button>
+  <output id="status">Loading restored state…</output>
+  <script src="./main.js"></script>
+</body>
+</html>

@@ -34,9 +34,14 @@ base64 = "0.22"
 whisper-rs = "0.16.0"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-updater = "2"
+tauri-plugin-autostart = "=2.5.1"
+tauri-plugin-single-instance = "=2.4.0"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_UI_Controls", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 # ONNX Runtime for speech-to-text exports the user brings in ONNX form. The
 # prebuilt runtime is fetched at build time and linked statically, the same way
@@ -55,20 +60,31 @@ ort = { version = "2.0.0-rc.13", default-features = false, features = [
   "tls-rustls",
 ] }
 rustfft = "6.4"
+parakeet-rs = "0.4"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = "2.0"
+gio = "0.18"
+glib = "0.18"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = [
   "std",
   "NSResponder",
+  "NSApplication",
   "NSScreen",
   "NSWindow",
+  "NSButton",
+  "NSView",
+  "NSEvent",
+  "block2",
 ] }
+block2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = [
   "std",
   "NSGeometry",
   "NSThread",
+  "NSAppleEventManager",
+  "NSAppleEventDescriptor",
 ] }

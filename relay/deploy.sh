@@ -1,7 +1,6 @@
 #!/bin/bash
 # Koryphaios Relay — one-shot deploy to Hostodo VPS
 # Usage: bash deploy.sh <server-ip> <root-password>
-# Example: bash deploy.sh 158.51.125.29 'on-LhwYifiDr-hf|'
 
 set -euo pipefail
 
@@ -25,7 +24,9 @@ $SSH "curl -fsSL https://bun.sh/install | bash && ln -sf /root/.bun/bin/bun /usr
 
 echo "==> Copying relay files..."
 $SSH "mkdir -p /opt/koryphaios-relay"
-$SCP "$RELAY_DIR/server.ts" "root@$SERVER:/opt/koryphaios-relay/server.ts"
+$SSH "mkdir -p /opt/koryphaios-relay/relay /opt/koryphaios-relay/shared/src"
+$SCP "$RELAY_DIR/server.ts" "$RELAY_DIR/devices.ts" "$RELAY_DIR/mobile.ts" "$RELAY_DIR/mobile-client.ts" "root@$SERVER:/opt/koryphaios-relay/relay/"
+$SCP "$RELAY_DIR/../shared/src/devices.ts" "$RELAY_DIR/../shared/src/device-client.ts" "root@$SERVER:/opt/koryphaios-relay/shared/src/"
 $SCP "$RELAY_DIR/package.json" "root@$SERVER:/opt/koryphaios-relay/package.json"
 
 echo "==> Generating secrets (if first deploy)..."
@@ -41,7 +42,7 @@ $SSH '
   else
     echo "Secrets already exist, keeping them"
   fi
-  cat "$SECRETS_FILE"
+  chmod 600 "$SECRETS_FILE"
 '
 
 echo "==> Setting up systemd service..."
@@ -55,7 +56,7 @@ Type=simple
 User=root
 WorkingDirectory=/opt/koryphaios-relay
 EnvironmentFile=/opt/koryphaios-relay/.env
-ExecStart=/usr/local/bin/bun run server.ts
+ExecStart=/usr/local/bin/bun run relay/server.ts
 Restart=always
 RestartSec=5
 StandardOutput=journal
@@ -83,19 +84,14 @@ $SSH '
   systemctl status koryphaios-relay --no-pager
 '
 
-echo "==> Getting secrets for Koryphaios config..."
-SECRETS=$($SSH "cat /opt/koryphaios-relay/.env")
-HOST_SECRET=$(echo "$SECRETS" | grep HOST_SECRET | cut -d= -f2)
-
 echo ""
 echo "======================================================"
 echo "  RELAY DEPLOYED SUCCESSFULLY"
 echo "======================================================"
-echo "  Relay URL:   http://$SERVER:8080"
-echo "  Health:      http://$SERVER:8080/health"
-echo "  HOST_SECRET: $HOST_SECRET"
+echo "  Relay upstream: http://$SERVER:8080"
+echo "  Health:         http://$SERVER:8080/health"
 echo ""
-echo "  Add this to your Koryphaios .env or koryphaios.json:"
-echo "    RELAY_URL=http://$SERVER:8080"
-echo "    RELAY_HOST_SECRET=$HOST_SECRET"
+echo "  Configure an HTTPS reverse proxy and set RELAY_URL to its HTTPS URL."
+echo "  Device linking uses per-device keys; no shared host secret is needed."
+echo "  Legacy session relay secrets remain in /opt/koryphaios-relay/.env."
 echo "======================================================"

@@ -137,8 +137,13 @@ fn find_in_dir(dir: &Path, needle: &str) -> Option<PathBuf> {
 }
 
 pub fn load(model: &InstalledVoiceModel) -> Result<OnnxVoiceModel, String> {
-    let tokenizer_path = model.files.iter().find(|path| file_name_of(path) == "tokenizer.json").cloned();
-    let (encoder_path, decoder_path) = encoder_and_decoder(&model.primary, tokenizer_path.as_deref());
+    let tokenizer_path = model
+        .files
+        .iter()
+        .find(|path| file_name_of(path) == "tokenizer.json")
+        .cloned();
+    let (encoder_path, decoder_path) =
+        encoder_and_decoder(&model.primary, tokenizer_path.as_deref());
     let encoder = open_session(
         &encoder_path.ok_or_else(|| "This ONNX model has no encoder graph.".to_string())?,
         "encoder",
@@ -250,7 +255,12 @@ impl OnnxVoiceModel {
             .inputs()
             .iter()
             .find(|input| input.name().contains("feature"))
-            .or_else(|| self.encoder.inputs().iter().find(|input| input.name().contains("audio")))
+            .or_else(|| {
+                self.encoder
+                    .inputs()
+                    .iter()
+                    .find(|input| input.name().contains("audio"))
+            })
             .map(|input| input.name().to_string())
             .ok_or_else(|| "The ONNX encoder has no audio input.".to_string())?;
         let frames = (features.len() / self.num_mel_bins).max(1);
@@ -651,8 +661,8 @@ const LANGUAGE_CODES: [&str; 100] = [
     "hr", "bg", "lt", "la", "mi", "ml", "cy", "sk", "te", "fa", "lv", "bn", "sr", "az", "sl", "kn",
     "et", "mk", "br", "eu", "is", "hy", "ne", "mn", "bs", "kk", "sq", "sw", "gl", "mr", "pa", "si",
     "km", "sn", "yo", "so", "af", "oc", "ka", "be", "tg", "sd", "gu", "am", "yi", "lo", "uz", "fo",
-    "ht", "ps", "tk", "nn", "mt", "sa", "lb", "my", "bo", "tl", "mg", "as", "tt", "haw", "ln", "ha",
-    "ba", "jw", "su", "yue",
+    "ht", "ps", "tk", "nn", "mt", "sa", "lb", "my", "bo", "tl", "mg", "as", "tt", "haw", "ln",
+    "ha", "ba", "jw", "su", "yue",
 ];
 
 fn byte_to_unicode(byte: u8) -> String {
@@ -698,7 +708,9 @@ mod tests {
         let filters = mel_filters(80, NUM_BINS);
         assert_eq!(filters.len(), 80 * NUM_BINS);
         for mel_bin in 0..80 {
-            let row: f32 = filters[mel_bin * NUM_BINS..(mel_bin + 1) * NUM_BINS].iter().sum();
+            let row: f32 = filters[mel_bin * NUM_BINS..(mel_bin + 1) * NUM_BINS]
+                .iter()
+                .sum();
             assert!(row > 0.0, "mel bin {mel_bin} has no weight");
         }
         // Filters are triangular: each has interior values strictly between 0
@@ -721,7 +733,9 @@ mod tests {
     #[test]
     fn log_mel_is_channels_first_and_normalized() {
         let samples: Vec<f32> = (0..N_SAMPLES)
-            .map(|n| (2.0 * std::f32::consts::PI * 440.0 * n as f32 / SAMPLE_RATE as f32).sin() * 0.5)
+            .map(|n| {
+                (2.0 * std::f32::consts::PI * 440.0 * n as f32 / SAMPLE_RATE as f32).sin() * 0.5
+            })
             .collect();
         let features = log_mel_spectrogram(&samples, 80);
         assert_eq!(features.len(), 80 * N_FRAMES);
@@ -768,7 +782,13 @@ mod tests {
             (3, 2, &[3., 2., 1., 2., 3., 2., 1.]),
             (4, 1, &[2., 1., 2., 3., 4., 3.]),
             // A pad wider than the signal folds back over the edges repeatedly.
-            (3, 8, &[1., 2., 3., 2., 1., 2., 3., 2., 1., 2., 3., 2., 1., 2., 3., 2., 1., 2., 3.]),
+            (
+                3,
+                8,
+                &[
+                    1., 2., 3., 2., 1., 2., 3., 2., 1., 2., 3., 2., 1., 2., 3., 2., 1., 2., 3.,
+                ],
+            ),
         ];
         for (length, pad, expected) in cases {
             let samples: Vec<f32> = (1..=length).map(|value| value as f32).collect();
@@ -794,7 +814,10 @@ mod tests {
     #[test]
     fn byte_level_tokens_decode_back_to_text() {
         let tokenizer = Tokenizer::whisper_default();
-        assert_eq!(tokenizer.decode_text("The quick brown fox"), "The quick brown fox");
+        assert_eq!(
+            tokenizer.decode_text("The quick brown fox"),
+            "The quick brown fox"
+        );
         assert_eq!(tokenizer.eot, 50_256);
         assert_eq!(tokenizer.start_of_transcript, 50_257);
         assert_eq!(tokenizer.transcribe, 50_262);
@@ -810,7 +833,12 @@ mod tests {
         assert_eq!(tokenizer.language_token("en"), Some(50_265));
         // The language block starts at 50_265 in the order whisper.cpp uses.
         assert_eq!(tokenizer.language_token("de"), Some(50_267));
-        for control in ["endoftext", "notimestamps", "transcribe", "startoftranscript"] {
+        for control in [
+            "endoftext",
+            "notimestamps",
+            "transcribe",
+            "startoftranscript",
+        ] {
             assert_eq!(
                 tokenizer.language_token(control),
                 None,
@@ -847,7 +875,9 @@ mod live_tests {
             return;
         };
         let Ok(wav_path) = std::env::var("KORY_ONNX_VOICE_WAV") else {
-            eprintln!("skipped: set KORY_ONNX_VOICE_WAV to 16 kHz mono audio to run the live check");
+            eprintln!(
+                "skipped: set KORY_ONNX_VOICE_WAV to 16 kHz mono audio to run the live check"
+            );
             return;
         };
         let wav = PathBuf::from(wav_path);

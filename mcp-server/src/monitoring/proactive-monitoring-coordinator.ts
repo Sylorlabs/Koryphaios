@@ -394,7 +394,11 @@ export class ProactiveMonitoringCoordinator extends EventEmitter {
   }
 
   private expandConfigWatchPattern(pattern: string): string | string[] {
-    return pattern;
+    // A literal missing file can reach Chokidar's ready event before realpath
+    // resolution, leaving its native event filter on an unresolved alias (e.g.
+    // /var instead of /private/var). Use an exact glob so it resolves and watches
+    // the existing parent directory, without matching nested or backup manifests.
+    return pattern === 'package.json' ? '[p]ackage.json' : pattern;
   }
 
   private handleFileChange(event: WorkspaceEvent): void {

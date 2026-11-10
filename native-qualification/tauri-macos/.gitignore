@@ -1,0 +1,6 @@
+node_modules/
+vendor/
+bin/
+.build/
+fixture/src-tauri/target/
+fixture/src-tauri/gen/

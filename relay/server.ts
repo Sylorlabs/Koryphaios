@@ -7,6 +7,8 @@
  */
 
 import { randomBytes, randomInt, createHmac, timingSafeEqual } from 'crypto';
+import { deviceRelay } from './devices';
+import { MOBILE_HTML, mobileBundle } from './mobile';
 
 interface CollaborationPolicy {
   hostName?: string;
@@ -152,7 +154,8 @@ if (!HOST_SECRET || !JWT_SECRET) {
 
 interface WsData {
   sessionId: string;
-  role: 'host' | 'guest';
+  role: 'host' | 'guest' | 'device';
+  deviceId?: string;
   guestId: string;
   name: string;
   tierId: string;
@@ -175,11 +178,7 @@ const codeLookupWindows = new Map<string, { started: number; count: number }>();
 function makeJoinCode(): string {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code = '';
-  do
-    code = Array.from(
-      { length: 8 },
-      () => alphabet[randomInt(alphabet.length)],
-    ).join('');
+  do code = Array.from({ length: 8 }, () => alphabet[randomInt(alphabet.length)]).join('');
   while ([...sessions.values()].some((s) => s.joinCode === code));
   return code;
 }
@@ -200,13 +199,19 @@ function guestTier(session: Session, tierId: string) {
   const tier = tierFor(session, tierId);
   if (!tier) return null;
   const permissions = Object.fromEntries(
-    Object.keys(DEFAULT_POLICY.accessTiers.find((item) => item.id === 'models')!.permissions)
-      .map((key) => [key, Array.isArray(tier.permissions[key])
-        ? tier.permissions[key].filter((value: unknown) => typeof value === 'string')
-        : tier.permissions[key] === true]),
+    Object.keys(DEFAULT_POLICY.accessTiers.find((item) => item.id === 'models')!.permissions).map(
+      (key) => [
+        key,
+        Array.isArray(tier.permissions[key])
+          ? tier.permissions[key].filter((value: unknown) => typeof value === 'string')
+          : tier.permissions[key] === true,
+      ],
+    ),
   );
   return {
-    id: tier.id, name: tier.name, color: tier.color,
+    id: tier.id,
+    name: tier.name,
+    color: tier.color,
     allowedModels: tier.allowedModels,
     reasoningByModel: tier.reasoningByModel,
     permissions,
@@ -220,9 +225,12 @@ function guestPolicy(session: Session, tierId: string) {
   return {
     hostName: session.policy.hostName || 'Host',
     sessionName: modelsOnly ? 'Shared models' : session.policy.sessionName,
-    sharedFolders: modelsOnly ? [] : session.policy.sharedFolders ?? [],
-    modelCatalog: modelsOnly ? [] : session.policy.modelCatalog.filter((model) =>
-      tier?.allowedModels.includes('*') || tier?.allowedModels.includes(model.id)),
+    sharedFolders: modelsOnly ? [] : (session.policy.sharedFolders ?? []),
+    modelCatalog: modelsOnly
+      ? []
+      : session.policy.modelCatalog.filter(
+          (model) => tier?.allowedModels.includes('*') || tier?.allowedModels.includes(model.id),
+        ),
     joinMode: session.policy.joinMode,
     defaultTierId: tierId,
     accessTiers: tier ? [guestTier(session, tierId)] : [],
@@ -604,9 +612,14 @@ const GUEST_HTML = `<!DOCTYPE html>
 
 const server = Bun.serve<WsData>({
   port: PORT,
+  hostname: process.env.HOST || '0.0.0.0',
 
   async fetch(req, server) {
     const url = new URL(req.url);
+    if (url.pathname === '/link-device') return new Response(MOBILE_HTML, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" } });
+    if (url.pathname === '/device-client.js') return new Response(await mobileBundle(), { headers: { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store' } });
+    const deviceResponse = await deviceRelay.fetch(req, server);
+    if (deviceResponse !== null) return deviceResponse;
 
     // CORS for Koryphaios frontend
     const cors = {
@@ -624,9 +637,15 @@ const server = Bun.serve<WsData>({
 
     // Health
     if (url.pathname === '/health') {
-      return json({ ok: true, sessions: sessions.size, capabilities: {
-        sharedFolderMetadata: true, modelOnlyIsolation: true, revocableInvites: true,
-      } });
+      return json({
+        ok: true,
+        sessions: sessions.size,
+        capabilities: {
+          sharedFolderMetadata: true,
+          modelOnlyIsolation: true,
+          revocableInvites: true,
+        },
+      });
     }
 
     // Host creates / retrieves a session
@@ -683,18 +702,35 @@ const server = Bun.serve<WsData>({
         ...patch,
         requirePromptApproval: true,
       };
-      session.policy.hostName = String(session.policy.hostName || 'Host').trim().slice(0, 80);
-      session.policy.sharedFolders = (Array.isArray(patch.sharedFolders) ? patch.sharedFolders : session.policy.sharedFolders ?? [])
-        .slice(0, 24).flatMap((folder) =>
-          typeof folder?.id === 'string' && typeof folder?.name === 'string' &&
-          folder.name.trim() && !/[\\/]/.test(folder.name)
+      session.policy.hostName = String(session.policy.hostName || 'Host')
+        .trim()
+        .slice(0, 80);
+      session.policy.sharedFolders = (
+        Array.isArray(patch.sharedFolders)
+          ? patch.sharedFolders
+          : (session.policy.sharedFolders ?? [])
+      )
+        .slice(0, 24)
+        .flatMap((folder) =>
+          typeof folder?.id === 'string' &&
+          typeof folder?.name === 'string' &&
+          folder.name.trim() &&
+          !/[\\/]/.test(folder.name)
             ? [{ id: folder.id.slice(0, 64), name: folder.name.slice(0, 160) }]
-            : []);
+            : [],
+        );
       // Old clients may send workspace roots. They are never guest metadata.
       delete (session.policy as any).workspacePaths;
-      session.policy.accessTiers = session.policy.accessTiers.map((tier) => tier.id === 'models'
-        ? { ...tier, permissions: { ...DEFAULT_POLICY.accessTiers.find((t) => t.id === 'models')!.permissions } }
-        : tier);
+      session.policy.accessTiers = session.policy.accessTiers.map((tier) =>
+        tier.id === 'models'
+          ? {
+              ...tier,
+              permissions: {
+                ...DEFAULT_POLICY.accessTiers.find((t) => t.id === 'models')!.permissions,
+              },
+            }
+          : tier,
+      );
       session.guests.forEach((g) => {
         if (!session.policy.accessTiers.some((t) => t.id === g.tierId))
           g.tierId = session.policy.defaultTierId;
@@ -721,12 +757,14 @@ const server = Bun.serve<WsData>({
         if (codeLookupWindows.size >= 5000) {
           for (const [key, entry] of codeLookupWindows)
             if (now - entry.started >= 60_000) codeLookupWindows.delete(key);
-          if (codeLookupWindows.size >= 5000) return json({ ok: false, error: 'Code lookup is busy. Try again shortly.' }, 429);
+          if (codeLookupWindows.size >= 5000)
+            return json({ ok: false, error: 'Code lookup is busy. Try again shortly.' }, 429);
         }
         window = { started: now, count: 0 };
         codeLookupWindows.set(address, window);
       }
-      if (++window.count > 20) return json({ ok: false, error: 'Too many code attempts. Try again in a minute.' }, 429);
+      if (++window.count > 20)
+        return json({ ok: false, error: 'Too many code attempts. Try again in a minute.' }, 429);
       const code = decodeURIComponent(url.pathname.slice(6)).trim().toUpperCase();
       const session = [...sessions.values()].find((s) => s.joinCode === code);
       if (!session) return json({ ok: false, error: 'Invalid or inactive join code' }, 404);
@@ -743,7 +781,9 @@ const server = Bun.serve<WsData>({
         sessionName: session.policy.sessionName,
         tierId,
         hostName: session.policy.hostName || 'Host',
-        sharedFolders: isModelOnly(tierFor(session, tierId)) ? [] : session.policy.sharedFolders ?? [],
+        sharedFolders: isModelOnly(tierFor(session, tierId))
+          ? []
+          : (session.policy.sharedFolders ?? []),
         inviteUrl: `${url.protocol}//${url.host}/join?token=${encodeURIComponent(token)}`,
       });
     }
@@ -804,6 +844,7 @@ const server = Bun.serve<WsData>({
   websocket: {
     maxPayloadLength: 64 * 1024 * 1024,
     open(ws) {
+      if (ws.data.role === 'device') return deviceRelay.open(ws);
       const { sessionId, role, guestId, name, tierId } = ws.data;
       const session = sessions.get(sessionId);
       if (!session) {
@@ -847,8 +888,12 @@ const server = Bun.serve<WsData>({
             tier: guestTier(session, tierId),
             hostName: session.policy.hostName || 'Host',
             sessionName: guestPolicy(session, tierId).sessionName,
-            participants: tierFor(session, tierId)?.permissions.viewParticipants ? participantMap : {},
-            history: session.history.filter((event) => eventAllowed(event, tierFor(session, tierId))),
+            participants: tierFor(session, tierId)?.permissions.viewParticipants
+              ? participantMap
+              : {},
+            history: session.history.filter((event) =>
+              eventAllowed(event, tierFor(session, tierId)),
+            ),
             policy: guestPolicy(session, tierId),
           }),
         );
@@ -858,12 +903,18 @@ const server = Bun.serve<WsData>({
         session.hostWs?.send(joinMsg);
         if (session.policy.showParticipants)
           session.guests.forEach((g, id) => {
-            if (id !== guestId && g.admitted && tierFor(session, g.tierId)?.permissions.viewParticipants) g.ws.send(joinMsg);
+            if (
+              id !== guestId &&
+              g.admitted &&
+              tierFor(session, g.tierId)?.permissions.viewParticipants
+            )
+              g.ws.send(joinMsg);
           });
       }
     },
 
     message(ws, message) {
+      if (ws.data.role === 'device') return deviceRelay.message(ws, message);
       const { sessionId, role, guestId, name } = ws.data;
       const session = sessions.get(sessionId);
       if (!session) return;
@@ -895,7 +946,8 @@ const server = Bun.serve<WsData>({
         // The host's shared-provider catalog fans out to every admitted guest.
         if (msg.type === 'provider-catalog') {
           session.guests.forEach((g) => {
-            if (g.admitted && tierFor(session, g.tierId)?.permissions.useRemoteProviders) g.ws.send(JSON.stringify(msg));
+            if (g.admitted && tierFor(session, g.tierId)?.permissions.useRemoteProviders)
+              g.ws.send(JSON.stringify(msg));
           });
           return;
         }
@@ -1028,6 +1080,7 @@ const server = Bun.serve<WsData>({
     },
 
     close(ws) {
+      if (ws.data.role === 'device') return deviceRelay.close(ws);
       const { sessionId, role, guestId, name } = ws.data;
       const session = sessions.get(sessionId);
       if (!session) return;
@@ -1043,7 +1096,8 @@ const server = Bun.serve<WsData>({
         const msg = JSON.stringify({ type: 'guest-left', guestId, name });
         session.hostWs?.send(msg);
         session.guests.forEach((g) => {
-          if (g.admitted && tierFor(session, g.tierId)?.permissions.viewParticipants) g.ws.send(msg);
+          if (g.admitted && tierFor(session, g.tierId)?.permissions.viewParticipants)
+            g.ws.send(msg);
         });
       }
     },

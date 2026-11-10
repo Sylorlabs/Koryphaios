@@ -4,6 +4,43 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 static CONFIG: OnceLock<AppConfig> = OnceLock::new();
+static BACKEND_DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+pub(crate) fn set_backend_data_dir(path: PathBuf) {
+    let _ = BACKEND_DATA_DIR.set(path);
+}
+
+pub(crate) fn uses_background_service() -> bool {
+    BACKEND_DATA_DIR.get().is_some()
+}
+
+pub(crate) fn read_service_endpoint() -> Option<(String, u16, u32)> {
+    let path = BACKEND_DATA_DIR
+        .get()?
+        .join(".koryphaios/.active-port.json");
+    parse_service_endpoint(&fs::read_to_string(path).ok()?)
+}
+
+fn parse_service_endpoint(raw: &str) -> Option<(String, u16, u32)> {
+    let parsed: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let port = u16::try_from(parsed.get("port")?.as_u64()?)
+        .ok()
+        .filter(|port| *port > 0)?;
+    let pid = u32::try_from(parsed.get("pid")?.as_u64()?)
+        .ok()
+        .filter(|pid| *pid > 0)?;
+    let host = parsed
+        .get("host")
+        .and_then(|v| v.as_str())
+        .unwrap_or("127.0.0.1");
+    // An on-disk marker is not an arbitrary remote connection instruction.
+    let host = match host {
+        "0.0.0.0" | "127.0.0.1" | "localhost" => "127.0.0.1",
+        "::" | "[::]" | "::1" | "[::1]" => "[::1]",
+        _ => return None,
+    };
+    Some((host.to_string(), port, pid))
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -177,7 +214,21 @@ pub(crate) fn browser_host(host: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
-    use super::browser_host;
+    use super::{browser_host, parse_service_endpoint};
+
+    #[test]
+    fn service_marker_remains_valid_across_days_and_validates_pid_and_port() {
+        assert_eq!(
+            parse_service_endpoint(r#"{"host":"0.0.0.0","port":3001,"pid":123,"timestamp":1}"#),
+            Some(("127.0.0.1".into(), 3001, 123))
+        );
+        assert!(
+            parse_service_endpoint(r#"{"host":"remote.example","port":3001,"pid":123}"#).is_none()
+        );
+        assert!(parse_service_endpoint(r#"{"port":65537,"pid":123}"#).is_none());
+        assert!(parse_service_endpoint(r#"{"port":3001,"pid":0}"#).is_none());
+        assert!(parse_service_endpoint(r#"{"port":3001}"#).is_none());
+    }
 
     #[test]
     fn wildcard_bind_hosts_become_browser_safe_loopback_hosts() {
@@ -246,6 +297,11 @@ pub fn read_active_port_public() -> Option<(String, u16)> {
 /// it bound to (may differ from the config default when EADDRINUSE caused
 /// a fallback). Returns `(host, port)` if the file exists and is fresh.
 fn read_active_port() -> Option<(String, u16)> {
+    // Services can run for days without touching their startup marker. Do not
+    // apply the development marker's five-minute age limit to an OS service.
+    if BACKEND_DATA_DIR.get().is_some() {
+        return read_service_endpoint().map(|(host, port, _)| (host, port));
+    }
     use std::time::{SystemTime, UNIX_EPOCH};
 
     // Search candidate paths: project root (dev) and cwd-relative.

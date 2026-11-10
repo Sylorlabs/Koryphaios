@@ -1,0 +1,22 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Koryphaios",
+        "width": 1280,
+        "height": 1072,
+        "minWidth": 700,
+        "minHeight": 480,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": false,
+        "visible": false,
+        "focus": true,
+        "useHttpsScheme": false,
+        "skipTaskbar": false
+      }
+    ]
+  }
+}

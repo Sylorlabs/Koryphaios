@@ -2,7 +2,7 @@
  * Integration test to validate enhanced error detection capabilities
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -12,7 +12,7 @@ import { BuildToolDetector } from '@/detectors/build-tool-detector.js';
 import { ProcessMonitorDetector } from '@/detectors/process-monitor-detector.js';
 import { MultiLanguageDetector } from '@/detectors/multi-language-detector.js';
 import type { ErrorDetectionConfig } from '@/types/config.js';
-import { ErrorCategory, ErrorSeverity } from '@/types/errors.js';
+import type { DetectedError } from '@/types/errors.js';
 
 describe('Enhanced Error Detection Validation', () => {
   let tempDir: string;
@@ -112,8 +112,9 @@ describe('Enhanced Error Detection Validation', () => {
         })
       );
 
+      const errorFile = join(tempDir, 'error.ts');
       await fs.writeFile(
-        join(tempDir, 'error.ts'),
+        errorFile,
         `
         interface User {
           id: number;
@@ -133,32 +134,40 @@ describe('Enhanced Error Detection Validation', () => {
       `
       );
 
+      const expectFixtureTypeErrors = (errors: DetectedError[]) => {
+        // Sources are structured objects. Require the actual compiler diagnostics
+        // from this fixture, not generic build/optional-tool failures or categories.
+        const expectedDiagnostics = [
+          { line: 9, from: 'string', to: 'number' },
+          { line: 10, from: 'number', to: 'string' },
+          { line: 15, from: 'string', to: 'number' },
+          { line: 16, from: 'string', to: 'boolean' },
+        ];
+        expect(errors).toEqual(expect.arrayContaining(expectedDiagnostics.map(diagnostic =>
+          expect.objectContaining({
+            type: 'TypeScriptError',
+            source: expect.objectContaining({ type: 'build', tool: 'build-detector' }),
+            message: `TS2322: Type '${diagnostic.from}' is not assignable to type '${diagnostic.to}'.`,
+            stackTrace: expect.arrayContaining([
+              expect.objectContaining({
+                location: expect.objectContaining({ file: errorFile, line: diagnostic.line }),
+              }),
+            ]),
+          })
+        )));
+      };
+
       await detectorManager.start();
 
-      // Wait for detection
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Manager startup is bounded and can return before compilation completes.
+      // Wait for real findings without launching repeated compiler processes.
+      await vi.waitFor(() => expectFixtureTypeErrors(detectorManager.getAggregatedErrors()), {
+        timeout: 10000,
+        interval: 50,
+      });
 
-      const errors = await detectorManager.detectErrors();
-
-      // Should have detected some errors
-      expect(Array.isArray(errors)).toBe(true);
-
-      // Look for build-related errors
-      const buildErrors = errors.filter(
-        e =>
-          e.source === 'build-tools' ||
-          e.source === 'multi-language' ||
-          e.type.includes('Build') ||
-          e.type.includes('Compilation')
-      );
-
-      if (buildErrors.length > 0) {
-        expect(
-          buildErrors.some(
-            e => e.category === ErrorCategory.SYNTAX || e.category === ErrorCategory.LOGICAL
-          )
-        ).toBe(true);
-      }
+      const errors = await detectorManager.detectErrors({ source: 'build' });
+      expectFixtureTypeErrors(errors);
 
       await detectorManager.stop();
     });

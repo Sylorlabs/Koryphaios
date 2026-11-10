@@ -1,0 +1,13 @@
+{
+  "name": "kory-tauri-v5-native-candidate",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "package:fixture": "tauri build --debug --bundles app",
+    "smoke:packaged": "node native-smoke.mjs"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4"
+  }
+}

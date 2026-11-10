@@ -44,7 +44,6 @@ impl PythonRuntime {
         }
         None
     }
-
 }
 
 /// Whether a PyTorch model can run right now.
@@ -81,10 +80,7 @@ pub fn transcribe(
     // once used to share one script and one audio file, so whichever finished
     // first deleted the other's inputs mid-flight.
     let run = NEXT_RUN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let stem = std::env::temp_dir().join(format!(
-        "kory-voice-{}-{run}",
-        std::process::id()
-    ));
+    let stem = std::env::temp_dir().join(format!("kory-voice-{}-{run}", std::process::id()));
     let script = stem.with_extension("py");
     let audio = stem.with_extension("f32");
     let result = stem.with_extension("txt");
@@ -119,7 +115,9 @@ pub fn transcribe(
         Ok(child) => child,
         Err(error) => {
             cleanup();
-            return Err(format!("Could not start the Python transcription runtime: {error}"));
+            return Err(format!(
+                "Could not start the Python transcription runtime: {error}"
+            ));
         }
     };
     let output = match child.wait_with_output() {
@@ -138,7 +136,9 @@ pub fn transcribe(
             .find(|line| !line.trim().is_empty())
             .unwrap_or("no detail")
             .trim();
-        return Err(format!("The PyTorch voice model could not transcribe: {detail}"));
+        return Err(format!(
+            "The PyTorch voice model could not transcribe: {detail}"
+        ));
     }
     // The transcript comes from its own file, not from stdout: the pipeline
     // prints loading and device notices there, and a multi-line transcript
@@ -149,7 +149,6 @@ pub fn transcribe(
     cleanup();
     Ok(text.trim().to_string())
 }
-
 
 /// Distinguishes concurrent transcriptions in the temp directory.
 static NEXT_RUN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -243,7 +242,10 @@ mod live_tests {
         };
         // Honour the interpreter under test instead of whatever is on PATH.
         let previous = std::env::var("PATH").ok();
-        std::env::set_var("PATH", format!("{python}:{}", previous.clone().unwrap_or_default()));
+        std::env::set_var(
+            "PATH",
+            format!("{python}:{}", previous.clone().unwrap_or_default()),
+        );
         let dir = std::path::PathBuf::from(dir);
         let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
             .expect("model folder")
@@ -274,7 +276,10 @@ mod live_tests {
         assert!(!samples.is_empty(), "test audio is empty");
         let text = transcribe(&model, &samples, "en").expect("transcription failed");
         println!("pytorch transcribed: {text}");
-        assert!(text.trim().len() > 8, "the model produced no usable text: {text:?}");
+        assert!(
+            text.trim().len() > 8,
+            "the model produced no usable text: {text:?}"
+        );
         if let Some(previous) = previous {
             std::env::set_var("PATH", previous);
         }

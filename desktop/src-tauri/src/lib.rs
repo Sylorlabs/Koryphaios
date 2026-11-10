@@ -1,3 +1,12 @@
+#[cfg(target_os = "macos")]
+use objc2::rc::Retained;
+#[cfg(target_os = "macos")]
+use objc2_app_kit::{
+    NSEvent, NSScreen, NSWindow, NSWindowButton, NSWindowCollectionBehavior, NSWindowStyleMask,
+    NSWindowTitleVisibility,
+};
+#[cfg(target_os = "macos")]
+use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize};
 use std::io::Read;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -10,12 +19,6 @@ use tauri::{
     AppHandle, Emitter, Listener, Manager, WebviewWindow, WindowEvent,
 };
 use tauri_plugin_dialog::DialogExt;
-#[cfg(target_os = "macos")]
-use objc2::rc::Retained;
-#[cfg(target_os = "macos")]
-use objc2_app_kit::{NSScreen, NSWindow, NSWindowStyleMask};
-#[cfg(target_os = "macos")]
-use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize};
 
 // Cached updater so install_update doesn't re-fetch the manifest every click.
 // tauri_plugin_updater::Update is not Clone, so we hold it behind a Mutex.
@@ -25,6 +28,10 @@ static CACHED_UPDATE: Mutex<Option<tauri_plugin_updater::Update>> = Mutex::new(N
 // minutes while still preventing a stalled download from hanging forever
 // (tauri-plugin-updater hardcodes Update.timeout = None on check()).
 const UPDATE_DOWNLOAD_TIMEOUT_SECS: u64 = 30 * 60;
+// The backend writes through stdout/stderr for both normal diagnostics and
+// crash reports. Keep a broken/restarting service from growing its private log
+// files without bound and turning disk cache into another resource problem.
+const MAX_BACKEND_LOG_BYTES: u64 = 32 * 1024 * 1024;
 
 // Tauri's production WebView origin is application-owned rather than the
 // dev server's loopback HTTP origin. Different WebView implementations use
@@ -73,11 +80,39 @@ fn merge_packaged_cors_origins(existing: Option<&str>) -> Result<String, String>
 
 include!(concat!(env!("OUT_DIR"), "/embedded_backend.rs"));
 
+mod background_service;
 mod config;
+mod desktop_lifecycle;
 mod error;
 mod indexer;
+mod lifecycle_platform;
 mod local_voice;
 mod voice_python;
+
+// Parakeet TDT runs on ONNX Runtime, which is not linked on Windows (see
+// Cargo.toml). Everywhere else it is the real runtime.
+#[cfg(not(target_os = "windows"))]
+mod parakeet;
+#[cfg(target_os = "windows")]
+mod parakeet {
+    use std::path::Path;
+
+    pub fn validate(_primary: &Path) -> Result<(), String> {
+        Err("Parakeet voice models need ONNX Runtime, which is not available on this platform.".to_string())
+    }
+
+    pub fn transcribe(_primary: &Path, _samples: &[f32], _sample_rate: usize) -> Result<String, String> {
+        Err("Parakeet voice models need ONNX Runtime, which is not available on this platform.".to_string())
+    }
+
+    pub fn model_dir(primary: &Path) -> std::path::PathBuf {
+        if primary.is_dir() {
+            primary.to_path_buf()
+        } else {
+            primary.parent().map(std::path::Path::to_path_buf).unwrap_or_else(|| primary.to_path_buf())
+        }
+    }
+}
 
 // ONNX speech-to-text needs ONNX Runtime, which is not linked on Windows (see
 // Cargo.toml). Everywhere else it is the real runtime.
@@ -170,7 +205,7 @@ fn resolve_bundled_backend(
     ];
     for exact_path in exact_paths {
         if exact_path.is_file() {
-            return copy_backend_to_cache(app_handle, &exact_path);
+            return copy_backend_to_runtime(app_handle, &exact_path);
         }
     }
 
@@ -186,7 +221,7 @@ fn resolve_bundled_backend(
                 {
                     continue;
                 }
-                return copy_backend_to_cache(app_handle, &path);
+                return copy_backend_to_runtime(app_handle, &path);
             }
         }
     }
@@ -195,18 +230,18 @@ fn resolve_bundled_backend(
     Ok(None)
 }
 
-/// Copy the backend binary from the resource directory to the cache/runtime
+/// Copy the backend binary from the resource directory to the data/runtime
 /// directory with executable permissions. This avoids permission issues on
 /// macOS where the .app bundle's Resources directory may be read-only after
 /// signing, and ensures a consistent executable path across platforms.
-fn copy_backend_to_cache(
+fn copy_backend_to_runtime(
     app_handle: &tauri::AppHandle,
     source: &std::path::Path,
 ) -> Result<Option<std::path::PathBuf>, String> {
     let runtime_dir = app_handle
         .path()
-        .app_cache_dir()
-        .map_err(|e| format!("Failed to resolve app cache directory: {e}"))?
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?
         .join("runtime");
     std::fs::create_dir_all(&runtime_dir)
         .map_err(|e| format!("Failed to create backend runtime directory: {e}"))?;
@@ -217,9 +252,10 @@ fn copy_backend_to_cache(
     let source_size = source_metadata.len();
 
     let destination = runtime_dir.join(format!(
-        "koryphaios-service-{}-{}{}",
+        "koryphaios-service-{}-{}-{}{}",
         env!("CARGO_PKG_VERSION"),
         EMBEDDED_BACKEND_ID,
+        EMBEDDED_BUNDLE_HASH,
         if cfg!(target_os = "windows") {
             ".exe"
         } else {
@@ -436,6 +472,9 @@ fn open_private_backend_logs(
                 "backend log path is not a regular file",
             ));
         }
+        if file.metadata()?.len() > MAX_BACKEND_LOG_BYTES {
+            file.set_len(0)?;
+        }
         file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
         Ok(file)
     };
@@ -481,58 +520,41 @@ fn open_private_backend_logs(
                 "backend log path is not a regular file",
             ));
         }
+        if file.metadata()?.len() > MAX_BACKEND_LOG_BYTES {
+            file.set_len(0)?;
+        }
         Ok(file)
     };
 
     Ok((open_log(stdout_name)?, open_log(stderr_name)?))
 }
 
-/// Start the bundled backend service.
-fn spawn_bundled_backend(
-    app_handle: &tauri::AppHandle,
-) -> Result<Option<Arc<std::sync::Mutex<std::process::Child>>>, String> {
+/// Register and start the backend in the signed-in user's login manager.
+/// Returns false only when the development launcher owns the backend.
+fn start_bundled_backend(app_handle: &tauri::AppHandle) -> Result<bool, String> {
     let backend_path = match resolve_bundled_backend(app_handle)? {
         Some(path) => path,
         None => {
             println!("[Koryphaios] Dev mode: launcher owns the backend");
-            return Ok(None);
+            return Ok(false);
         }
     };
 
-    println!("[Koryphaios] Starting bundled backend service");
+    println!("[Koryphaios] Starting background login service");
 
     let mut cmd = std::process::Command::new(&backend_path);
-    // The backend is a console-subsystem .exe on Windows; without CREATE_NO_WINDOW
-    // a Tauri GUI app pops an (empty) console window on every spawn — and the
-    // supervisor respawns on exit, so it would flash repeatedly. stdout/stderr are
-    // already redirected to log files below, so nothing is lost by hiding it.
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
     // NEVER pipe without a reader: the backend logs heavily and a full 64KB
     // pipe buffer blocks its writes — the whole backend freezes mid-session.
     // Log to files in the data dir instead (also gives users a crash log).
-    let log_dir = app_handle
+    let data_dir = app_handle
         .path()
         .app_data_dir()
-        .map(|d| d.join("logs"))
-        .ok();
-    if let Some(dir) = &log_dir {
-        match open_private_backend_logs(dir, "backend.log", "backend.err.log") {
-            Ok((out, err)) => {
-                cmd.stdout(Stdio::from(out)).stderr(Stdio::from(err));
-            }
-            Err(error) => {
-                eprintln!("[Koryphaios] Refusing unsafe backend log path: {error}");
-                cmd.stdout(Stdio::null()).stderr(Stdio::null());
-            }
-        }
-    } else {
-        cmd.stdout(Stdio::null()).stderr(Stdio::null());
-    }
+        .map_err(|e| e.to_string())?;
+    crate::config::set_backend_data_dir(data_dir.clone());
+    let logs = data_dir.join("logs");
+    // Precreate and validate the files before the OS manager opens them.
+    let _ = open_private_backend_logs(&logs, "backend.log", "backend.err.log")
+        .map_err(|error| format!("Cannot prepare private service logs: {error}"))?;
 
     // Set environment variables for the backend
     let config = AppConfig::get();
@@ -571,33 +593,92 @@ fn spawn_bundled_backend(
 
     // Set data directory — also the service's cwd so relative paths (SQLite
     // dbs, koryphaios.json) never land in whatever dir launched the AppImage.
-    if let Ok(app_data_dir) = app_handle.path().app_data_dir() {
-        let _ = std::fs::create_dir_all(&app_data_dir);
-        cmd.env("KORYPHAIOS_DATA_DIR", &app_data_dir);
-        cmd.current_dir(&app_data_dir);
-    }
+    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+    cmd.env("KORYPHAIOS_DATA_DIR", &data_dir);
+    cmd.current_dir(&data_dir);
 
-    // One app: the backend serves the bundled frontend, the window loads it
-    // from the backend origin — frontend and backend are never separate.
+    // AppImage resource mounts disappear when the GUI exits. Materialize the
+    // frontend alongside the cached backend so the service can serve it later.
     if let Ok(frontend_dir) = app_handle
         .path()
         .resolve("frontend", tauri::path::BaseDirectory::Resource)
     {
         if frontend_dir.exists() {
-            cmd.env("KORYPHAIOS_FRONTEND_DIST", &frontend_dir);
+            let persistent_frontend = data_dir.join("runtime").join(format!(
+                "frontend-{}-{}",
+                env!("CARGO_PKG_VERSION"),
+                EMBEDDED_BUNDLE_HASH
+            ));
+            if !persistent_frontend.is_dir() {
+                let staging =
+                    persistent_frontend.with_extension(format!("{}.new", std::process::id()));
+                copy_frontend_tree(&frontend_dir, &staging)?;
+                std::fs::rename(&staging, &persistent_frontend).map_err(|e| e.to_string())?;
+            }
+            cmd.env("KORYPHAIOS_FRONTEND_DIST", &persistent_frontend);
         }
     }
 
-    let child = cmd
-        .spawn()
-        .map_err(|e| format!("Failed to spawn backend: {}", e))?;
+    let mut environment = cmd
+        .get_envs()
+        .filter_map(|(key, value)| {
+            value.map(|value| {
+                (
+                    key.to_string_lossy().into_owned(),
+                    value.to_string_lossy().into_owned(),
+                )
+            })
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    // Login managers do not inherit the GUI's environment. Retain discovery
+    // paths so already-configured native CLI providers keep resolving.
+    for key in [
+        "PATH",
+        "HOME",
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+    ] {
+        if let Ok(value) = std::env::var(key) {
+            environment.insert(key.to_string(), value);
+        }
+    }
+    background_service::ensure_running(&background_service::ServiceSpec {
+        executable: backend_path,
+        working_directory: data_dir,
+        environment,
+        stdout: logs.join("backend.log"),
+        stderr: logs.join("backend.err.log"),
+    })?;
+    Ok(true)
+}
 
-    println!(
-        "[Koryphaios] Bundled backend started with PID {}",
-        child.id()
-    );
+fn copy_frontend_tree(
+    source: &std::path::Path,
+    destination: &std::path::Path,
+) -> Result<(), String> {
+    std::fs::create_dir_all(destination).map_err(|e| e.to_string())?;
+    for entry in std::fs::read_dir(source).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let target = destination.join(entry.file_name());
+        let kind = entry.file_type().map_err(|e| e.to_string())?;
+        if kind.is_dir() {
+            copy_frontend_tree(&entry.path(), &target)?;
+        } else if kind.is_file() {
+            std::fs::copy(entry.path(), target).map_err(|e| e.to_string())?;
+        } else {
+            return Err("Bundled frontend contains a non-regular resource".into());
+        }
+    }
+    Ok(())
+}
 
-    Ok(Some(Arc::new(std::sync::Mutex::new(child))))
+/// Called before initializing the desktop UI. Windows Task Scheduler invokes
+/// this windowless supervisor after login; other OSes supervise the backend.
+pub fn run_background_service_if_requested() -> bool {
+    background_service::run_if_requested()
 }
 
 /// Wait for backend to be ready by polling health endpoint.
@@ -654,7 +735,15 @@ async fn wait_for_backend_ready(
                         .and_then(|data| data.get("pid"))
                         .and_then(|value| value.as_u64())
                         .and_then(|value| u32::try_from(value).ok());
-                    let correct_process = expected_pid.is_none() || responding_pid == expected_pid;
+                    let correct_process = if crate::config::uses_background_service() {
+                        crate::config::read_service_endpoint().is_some_and(
+                            |(_, marker_port, marker_pid)| {
+                                marker_port == current_port && responding_pid == Some(marker_pid)
+                            },
+                        )
+                    } else {
+                        expected_pid.is_none() || responding_pid == expected_pid
+                    };
                     if healthy && correct_process {
                         println!("[Koryphaios] Backend is ready on port {}!", current_port);
                         return Ok(current_port);
@@ -672,12 +761,13 @@ async fn wait_for_backend_ready(
     ))
 }
 
-/// Kill the backend process
+/// Stop only a development backend owned by this UI. Installed services are
+/// owned by the OS and never stored in BACKEND_PROCESS.
 fn kill_backend() {
     if let Ok(mut guard) = BACKEND_PROCESS.lock() {
         if let Some(process_arc) = guard.take() {
             if let Ok(mut process) = process_arc.lock() {
-                println!("[Koryphaios] Stopping bundled backend...");
+                println!("[Koryphaios] Stopping UI-owned development backend...");
                 let _ = process.kill();
             }
         }
@@ -688,8 +778,8 @@ fn kill_backend() {
 //
 // In dev mode the launcher (scripts/launch-desktop.ts) owns the backend: it
 // spawns `bun run src/server.ts` and sets KORYPHAIOS_PORT before launching
-// `tauri dev`. The Tauri app therefore skips spawn_bundled_backend (returns
-// Ok(None)) and starts no supervisor.
+// `tauri dev`. The Tauri app therefore skips installing a login service and
+// watches the launcher's backend instead.
 //
 // The problem: the Tauri app process detaches from the launcher (it reparents
 // to init/systemd when the terminal that ran `bun run dev` closes). When the
@@ -768,7 +858,7 @@ fn spawn_dev_backend(
     }
 
     // NEVER pipe without a reader: the backend logs heavily and a full 64KB
-    // pipe buffer blocks its writes (same rationale as spawn_bundled_backend).
+    // pipe buffer blocks its writes (same rationale as the installed service).
     // Log to the app data dir so a crash leaves a trail.
     if let Ok(data_dir) = app_handle.path().app_data_dir() {
         let logs = data_dir.join("logs");
@@ -999,6 +1089,14 @@ struct UpdateCheckResult {
     pub_date: Option<String>,
 }
 
+fn prepare_desktop_update() {
+    // Installation was already approved in the update dialog. In particular,
+    // Windows installers exit with code 0 rather than Tauri's restart code.
+    desktop_lifecycle::approve_exit(true);
+    kill_backend();
+    background_service::prepare_for_update();
+}
+
 #[tauri::command]
 async fn check_for_updates(app: tauri::AppHandle) -> Result<UpdateCheckResult, String> {
     if cfg!(debug_assertions) {
@@ -1007,7 +1105,7 @@ async fn check_for_updates(app: tauri::AppHandle) -> Result<UpdateCheckResult, S
     use tauri_plugin_updater::UpdaterExt;
     let updater = app
         .updater_builder()
-        .on_before_exit(kill_backend)
+        .on_before_exit(prepare_desktop_update)
         .build()
         .map_err(|e| e.to_string())?;
     let update = updater.check().await.map_err(|e| e.to_string())?;
@@ -1056,7 +1154,7 @@ async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
         None => {
             let updater = app
                 .updater_builder()
-                .on_before_exit(kill_backend)
+                .on_before_exit(prepare_desktop_update)
                 .build()
                 .map_err(|e| e.to_string())?;
             updater
@@ -1126,145 +1224,104 @@ fn get_app_version() -> String {
     AppConfig::get().app.version.clone()
 }
 
+/// Place the main window at launch on the display the cursor is on, filling
+/// that display's usable work area. Used before and after the window is shown
+/// so the first frame is already in place on any monitor layout, instead of
+/// the window opening centred on the primary display at its default size.
+///
+/// macOS uses `zoom_to_work_area` (AppKit frame); this covers the rest. Every
+/// value is physical pixels so mixed-DPI displays line up.
+#[cfg(not(target_os = "macos"))]
+fn place_on_launch_display(window: &WebviewWindow) {
+    if window.is_fullscreen().unwrap_or(false) || window.is_maximized().unwrap_or(false) {
+        return;
+    }
+    let Ok(monitors) = window.available_monitors() else {
+        return;
+    };
+    if monitors.is_empty() {
+        return;
+    }
+    let frame_of = |position: &tauri::PhysicalPosition<i32>, size: &tauri::PhysicalSize<u32>| {
+        [
+            position.x as f64,
+            position.y as f64,
+            size.width as f64,
+            size.height as f64,
+        ]
+    };
+    let frames: Vec<[f64; 4]> = monitors
+        .iter()
+        .map(|monitor| frame_of(monitor.position(), monitor.size()))
+        .collect();
+    let work_areas: Vec<[f64; 4]> = monitors
+        .iter()
+        .map(|monitor| {
+            let area = monitor.work_area();
+            frame_of(&area.position, &area.size)
+        })
+        .collect();
+    // The window is still hidden, so its own position says nothing about the
+    // display the user is on: go by the cursor, then the primary display.
+    let mouse = window
+        .cursor_position()
+        .map(|p| [p.x, p.y])
+        .unwrap_or([f64::NAN, f64::NAN]);
+    let main_frame = window
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .map(|monitor| frame_of(monitor.position(), monitor.size()));
+    let Some((_, target)) =
+        pick_launch_work_area(None, &frames, &work_areas, mouse, main_frame)
+    else {
+        return;
+    };
+    // Select the launch display, then let the window manager own maximization
+    // and taskbar/work-area changes. A manually filled frame has no native
+    // maximized state and will not grow when the work area grows.
+    let _ = window.set_position(tauri::PhysicalPosition::new(
+        target[0].round() as i32,
+        target[1].round() as i32,
+    ));
+    let _ = window.maximize();
+}
+
+/// Launch placement for the main window, applied before and after it is shown.
+fn fit_main_window_at_launch(window: &WebviewWindow) {
+    #[cfg(target_os = "macos")]
+    zoom_to_work_area(window);
+    #[cfg(not(target_os = "macos"))]
+    place_on_launch_display(window);
+}
+
 /// Best-effort zoom for the frameless main window: macOS `zoom:` (which backs
 /// `maximize()`) is a silent no-op without a native title bar, so on macOS the
 /// window frame is enforced directly with a synchronous AppKit
-/// `setFrame:display:` to the screen's `visibleFrame`. That yields the full
+/// `setFrame:display:` to the work area of the display the window belongs on
+/// (its own display, else the cursor display, else main). That yields the full
 /// work-area frame — full width and height, unmagnified, never fullscreen —
-/// below the menu bar and above the Dock, like the native green-button zoom.
+/// below the menu bar and above the Dock, like the native green-button zoom,
+/// on any resolution or display arrangement.
+#[cfg(target_os = "macos")]
 fn zoom_to_work_area(window: &WebviewWindow) {
-    if window.is_maximized().unwrap_or(false) || window.is_fullscreen().unwrap_or(false) {
-        return;
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let w = window.clone();
-        let apply = move || {
+    let w = window.clone();
+    let apply = move || {
+        if native_fullscreen_state(&w) {
+            return;
+        }
+        // Keep the original restore frame across the two launch passes even
+        // when AppKit relocates the fitted window while showing it. A manual
+        // resize releases the fitted state before the next explicit zoom.
+        if fitted_frame().is_none() {
             capture_pre_zoom_frame(&w);
-            set_visible_frame(&w);
-        };
-        if MainThreadMarker::new().is_some() {
-            apply();
-        } else {
-            let _ = window.run_on_main_thread(apply);
         }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        // `current_monitor()` can briefly return nothing right after show; the
-        // primary monitor is a good enough fallback so the zoom never silently
-        // no-ops and leaves the window at its short config size.
-        let monitor = match window
-            .current_monitor()
-            .ok()
-            .flatten()
-            .or_else(|| window.primary_monitor().ok().flatten())
-        {
-            Some(monitor) => monitor,
-            None => {
-                println!("[Koryphaios] Zoom skipped: no monitor information available");
-                return;
-            }
-        };
-        let scale = monitor.scale_factor();
-        let area = monitor.work_area();
-        let target_height = area.size.to_logical::<f64>(scale).height;
-        let before_size = window.inner_size().ok();
-        let before_pos = window.outer_position().ok();
-        println!(
-            "[Koryphaios] Zoom check (monitor={}x{}@{}, work_area={}x{}@{},{} window={:?}@{:?})",
-            monitor.size().width,
-            monitor.size().height,
-            scale,
-            area.size.width,
-            area.size.height,
-            area.position.x,
-            area.position.y,
-            before_size,
-            before_pos
-        );
-        let current_height = window
-            .inner_size()
-            .map(|size| size.to_logical::<f64>(scale).height)
-            .unwrap_or(0.0);
-        let current_y = window.outer_position().map(|pos| pos.y).unwrap_or(i32::MAX);
-        let target_y = area.position.y;
-        // Already flush with the work area (top edge and height): nothing to do.
-        // Otherwise take control and enforce the exact frame — growing or
-        // shrinking — so the window sits flush below the menu bar and above the
-        // Dock like every native zoomed Mac app.
-        if (current_height - target_height).abs() <= 1.0 && (current_y - target_y).abs() <= 2 {
-            return;
-        }
-        let width = match window.inner_size() {
-            Ok(size) => size.to_logical::<f64>(scale).width,
-            Err(_) => return,
-        };
-        if width <= 0.0 || target_height <= 0.0 {
-            return;
-        }
-        let target_x = window
-            .outer_position()
-            .map(|pos| pos.x)
-            .unwrap_or(area.position.x);
-        // AppKit applies resizes asynchronously (and the dev watcher can briefly
-        // relaunch under us), so verify on a worker thread and re-apply while
-        // the window is still short or sitting low.
-        let worker = window.clone();
-        std::thread::spawn(move || {
-            if worker.is_fullscreen().unwrap_or(false) {
-                return;
-            }
-            // Distance from the target work-area geometry, as (height_gap_px,
-            // y_gap_px, x_gap_px). Used to tell "AppKit still hasn't applied our
-            // request" (gap shrinks or stays put — keep retrying) from "someone
-            // else is dragging the window" (gap grows — stop fighting them).
-            let gap = |h: f64, x: i32, y: i32| -> (f64, u32, u32) {
-                ((target_height - h).abs(), y.abs_diff(target_y), x.abs_diff(target_x))
-            };
-            let mut prev_gap: Option<(f64, u32, u32)> = None;
-            for attempt in 0..6u32 {
-                // Re-read the width every attempt so an east/west drag by the
-                // user during the retry window is preserved instead of snapped
-                // back to the width captured before the zoom started.
-                let width = worker
-                    .inner_size()
-                    .map(|size| size.to_logical::<f64>(scale).width)
-                    .unwrap_or(width);
-                let _ = worker.set_size(tauri::LogicalSize::new(width, target_height));
-                let _ = worker.set_position(tauri::PhysicalPosition::new(target_x, target_y));
-                std::thread::sleep(std::time::Duration::from_millis(400));
-                let size = worker
-                    .inner_size()
-                    .map(|size| size.to_logical::<f64>(scale))
-                    .unwrap_or_default();
-                let pos = worker.outer_position().unwrap_or_default();
-                let height = size.height;
-                let y = pos.y;
-                if (height - target_height).abs() <= 1.0 && (y - target_y).abs() <= 2 {
-                    println!(
-                        "[Koryphaios] Work-area height settled at {}x{} y={} (attempt {})",
-                        width as u32, height as u32, y, attempt + 1
-                    );
-                    return;
-                }
-                let current_gap = gap(height, pos.x, y);
-                if let Some((prev_h, prev_y, prev_x)) = prev_gap {
-                    let drifted = current_gap.0 > prev_h + 2.0
-                        || current_gap.1 > prev_y + 2
-                        || current_gap.2 > prev_x + 2;
-                    if drifted {
-                        println!(
-                            "[Koryphaios] Work-area zoom aborted: window is being resized or moved externally ({}x{} y={})",
-                            width as u32, height as u32, y
-                        );
-                        return;
-                    }
-                }
-                prev_gap = Some(current_gap);
-            }
-            println!("[Koryphaios] Work-area height fallback did not stick; leaving window as-is");
-        });
+        set_visible_frame(&w);
+    };
+    if MainThreadMarker::new().is_some() {
+        apply();
+    } else {
+        let _ = window.run_on_main_thread(apply);
     }
 }
 
@@ -1277,6 +1334,59 @@ static PRE_ZOOM_FRAME: std::sync::Mutex<Option<(f64, f64, f64, f64)>> = std::syn
 fn retain_ns_window(window: &WebviewWindow) -> Option<Retained<NSWindow>> {
     let ptr = window.ns_window().ok()?;
     unsafe { Retained::retain(ptr as *mut NSWindow) }
+}
+
+/// Configure the actual AppKit window for fullscreen before asking AppKit to
+/// create a fullscreen Space. The webview is borderless, but AppKit can still
+/// reserve a titlebar/content-layout strip during its fullscreen transition
+/// unless the native window explicitly opts into full-size content.
+#[cfg(target_os = "macos")]
+fn prepare_native_fullscreen(window: &WebviewWindow) -> bool {
+    let Some(ns_window) = retain_ns_window(window) else {
+        return false;
+    };
+    let mut behavior = ns_window.collectionBehavior();
+    behavior.remove(NSWindowCollectionBehavior::FullScreenNone);
+    behavior.insert(NSWindowCollectionBehavior::FullScreenPrimary);
+    ns_window.setCollectionBehavior(behavior);
+
+    let mut style = ns_window.styleMask();
+    // Keep the Tauri-created window style intact except for the native titled
+    // frame. This preserves the WebView window's normal accessibility and
+    // interaction while preventing AppKit from drawing its titlebar band.
+    style.remove(NSWindowStyleMask::Titled);
+    style.insert(NSWindowStyleMask::FullSizeContentView);
+    ns_window.setStyleMask(style);
+    ns_window.setTitlebarAppearsTransparent(true);
+    ns_window.setTitleVisibility(NSWindowTitleVisibility::Hidden);
+    ns_window.setHasShadow(false);
+    for button in [
+        NSWindowButton::CloseButton,
+        NSWindowButton::MiniaturizeButton,
+        NSWindowButton::ZoomButton,
+    ] {
+        if let Some(native_button) = ns_window.standardWindowButton(button) {
+            native_button.setHidden(true);
+        }
+    }
+    (style.0 & NSWindowStyleMask::FullScreen.0) != 0
+}
+
+#[cfg(target_os = "macos")]
+fn native_fullscreen_state(window: &WebviewWindow) -> bool {
+    let Some(ns_window) = retain_ns_window(window) else {
+        return false;
+    };
+    (ns_window.styleMask().0 & NSWindowStyleMask::FullScreen.0) != 0
+}
+
+/// Whether the window still sits on the work-area frame we last applied.
+#[cfg(target_os = "macos")]
+fn already_fitted(window: &WebviewWindow) -> bool {
+    let Some(ns_window) = retain_ns_window(window) else {
+        return false;
+    };
+    fitted_frame().is_some_and(|fitted| frames_match(&fitted, &frame_values(ns_window.frame())))
 }
 
 /// Record the window's current AppKit frame so the zoom can be undone to the
@@ -1297,10 +1407,12 @@ fn capture_pre_zoom_frame(window: &WebviewWindow) {
     }
 }
 
-/// Synchronously set the window frame to the screen's `visibleFrame` — the
-/// work area between the menu bar and the Dock. `setFrame:display:` is
-/// applied immediately (no animation, no async race), and AppKit clamps it
-/// to `constrainFrameRect`, so the frame can never cover the menu bar.
+/// Synchronously set the window frame to the work area of the display it
+/// belongs on — full width and height between the menu bar and the Dock, like
+/// the native green-button zoom, on whatever resolution or arrangement that
+/// display uses. `setFrame:display:` applies immediately (no animation, no
+/// async race). The applied frame is read back and *that* is recorded, so a
+/// later display change compares against reality rather than the request.
 #[cfg(target_os = "macos")]
 fn set_visible_frame(window: &WebviewWindow) {
     let Some(mtm) = MainThreadMarker::new() else {
@@ -1309,20 +1421,65 @@ fn set_visible_frame(window: &WebviewWindow) {
     let Some(ns_window) = retain_ns_window(window) else {
         return;
     };
-    let screen = ns_window.screen().or_else(|| NSScreen::mainScreen(mtm));
-    let Some(screen) = screen else {
+    let screens = NSScreen::screens(mtm);
+    let frames: Vec<[f64; 4]> = screens
+        .iter()
+        .map(|screen| frame_values(screen.frame()))
+        .collect();
+    let work_areas: Vec<[f64; 4]> = screens
+        .iter()
+        .map(|screen| frame_values(screen.visibleFrame()))
+        .collect();
+    // Tauri has already created and centered the hidden window before setup
+    // runs. Its frame is the reliable startup display choice; using the cursor
+    // here can select a Retina screen with a negative origin, then AppKit
+    // constrains that frame onto the primary display during orderFront and
+    // leaves the app offset. After show, the second pass follows the window's
+    // actual display if the window manager moved it.
+    let placed_frame = Some(frame_values(ns_window.frame()));
+    let mouse = NSEvent::mouseLocation();
+    let main_frame = NSScreen::mainScreen(mtm).map(|screen| frame_values(screen.frame()));
+    let Some((index, target)) = pick_launch_work_area(
+        placed_frame,
+        &frames,
+        &work_areas,
+        [mouse.x, mouse.y],
+        main_frame,
+    ) else {
         println!("[Koryphaios] Work-area zoom skipped: no screen available");
         return;
     };
-    let frame = screen.visibleFrame();
     println!(
-        "[Koryphaios] Work-area zoom: setFrame origin=({},{}) size={}x{}",
-        frame.origin.x, frame.origin.y, frame.size.width, frame.size.height
+        "[Koryphaios] Work-area zoom: screen {} of {} (frame=({},{}) {}x{}, work_area=({},{}) {}x{})",
+        index,
+        frames.len(),
+        frames[index][0],
+        frames[index][1],
+        frames[index][2],
+        frames[index][3],
+        target[0],
+        target[1],
+        target[2],
+        target[3]
     );
-    ns_window.setFrame_display(frame, false);
+    ns_window.setFrame_display(
+        NSRect::new(
+            NSPoint::new(target[0], target[1]),
+            NSSize::new(target[2], target[3]),
+        ),
+        false,
+    );
+    let applied = frame_values(ns_window.frame());
+    if !frames_match(&applied, &target) {
+        println!(
+            "[Koryphaios] Work-area zoom adjusted by AppKit: requested ({},{}) {}x{}, applied ({},{}) {}x{}",
+            target[0], target[1], target[2], target[3], applied[0], applied[1], applied[2],
+            applied[3]
+        );
+    }
     // Record it so a later display change can tell a zoomed window apart from
     // one the user sized by hand and re-fill only the former.
-    record_fitted_frame(frame_values(frame));
+    record_fitted_frame(target, applied);
 }
 
 /// Undo the work-area zoom by restoring the exact pre-zoom frame.
@@ -1349,25 +1506,74 @@ fn restore_pre_zoom_frame(window: &WebviewWindow) {
     }
     // The window is no longer filled to a work area, so a display change must
     // not treat it as zoomed and snap it back out to full size.
-    if let Ok(mut slot) = FITTED_FRAME.lock() {
-        *slot = None;
+    if let Ok(mut state) = DISPLAY_FIT.lock() {
+        state.fitted = None;
     }
 }
 
-/// The work-area frame the window was last fitted to, as
-/// `(x, y, width, height)` in logical points. A display change has to tell
-/// "the user had this filled the work area" apart from "the user sized this
-/// themselves", and this is the only place the former is recorded.
-static FITTED_FRAME: Mutex<Option<[f64; 4]>> = Mutex::new(None);
-
-fn fitted_frame() -> Option<[f64; 4]> {
-    FITTED_FRAME.lock().ok().and_then(|slot| *slot)
+/// Track the OS work area separately from the applied frame. Reconcile only
+/// when the work area changes, not on every poll of a manually sized window.
+/// AppKit uses global logical points; the other platforms use physical pixels.
+#[derive(Default)]
+struct DisplayFit {
+    work: Option<[f64; 4]>,
+    fitted: Option<[f64; 4]>,
 }
 
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn record_fitted_frame(frame: [f64; 4]) {
-    if let Ok(mut slot) = FITTED_FRAME.lock() {
-        *slot = Some(frame);
+impl DisplayFit {
+    fn reconcile(
+        &mut self,
+        work: [f64; 4],
+        frame: [f64; 4],
+        live_resize: bool,
+    ) -> Option<[f64; 4]> {
+        if !valid_frame(&work) || !valid_frame(&frame) {
+            return None;
+        }
+        if live_resize {
+            self.fitted = None;
+            // Keep the previous work area so a pending display change can be
+            // handled once AppKit has finished the user's drag.
+            return None;
+        }
+        let changed = self
+            .work
+            .is_none_or(|previous| !frames_match(&previous, &work));
+        self.work = Some(work);
+        self.fitted = self.fitted.and_then(|previous| {
+            // AppKit can relocate or constrain a zoomed window before our poll
+            // after a Dock/display change. Recognize only unchanged size or the
+            // expected work-area clamp, not an arbitrary user-selected size.
+            let relocated = changed
+                && (previous[2] - frame[2]).abs() < 1.0
+                && (previous[3] - frame[3]).abs() < 1.0;
+            let constrained = changed
+                && frame_for_display_change(&work, &previous, None)
+                    .is_some_and(|clamped| frames_match(&clamped, &frame));
+            (frames_match(&previous, &frame) || relocated || constrained).then_some(frame)
+        });
+        if !changed {
+            return None;
+        }
+        frame_for_display_change(&work, &frame, self.fitted)
+    }
+}
+
+static DISPLAY_FIT: Mutex<DisplayFit> = Mutex::new(DisplayFit {
+    work: None,
+    fitted: None,
+});
+
+#[cfg(target_os = "macos")]
+fn fitted_frame() -> Option<[f64; 4]> {
+    DISPLAY_FIT.lock().ok().and_then(|state| state.fitted)
+}
+
+#[cfg(target_os = "macos")]
+fn record_fitted_frame(work: [f64; 4], frame: [f64; 4]) {
+    if let Ok(mut state) = DISPLAY_FIT.lock() {
+        state.work = Some(work);
+        state.fitted = Some(frame);
     }
 }
 
@@ -1387,6 +1593,75 @@ fn frames_match(a: &[f64; 4], b: &[f64; 4]) -> bool {
     a.iter().zip(b.iter()).all(|(l, r)| (l - r).abs() < 1.0)
 }
 
+fn valid_frame(frame: &[f64; 4]) -> bool {
+    frame.iter().all(|value| value.is_finite()) && frame[2] > 0.0 && frame[3] > 0.0
+}
+
+/// Index of the display whose frame contains `point`, in AppKit global points
+/// (bottom-left origin — negative on stacked or side-by-side arrangements).
+/// Used to open on the display the user is actually looking at instead of
+/// pinning every launch to the main display.
+fn screen_index_for_point(frames: &[[f64; 4]], point: [f64; 2]) -> Option<usize> {
+    frames.iter().position(|frame| {
+        let [x, y, width, height] = *frame;
+        point[0] >= x && point[0] < x + width && point[1] >= y && point[1] < y + height
+    })
+}
+
+/// Pick the work area a window should be zoomed to fill, as
+/// `(screen_index, work_area)`.
+///
+/// The preference order is what makes this work on every resolution and
+/// arrangement instead of only the main display:
+/// 1. the display holding the window already, by window center (a manual
+///    re-zoom must stay where the window is — a freshly created window has no
+///    display yet, so launch falls through),
+/// 2. the display holding the mouse cursor (`center` in tauri.conf.json would
+///    otherwise pin every launch to the main display even when the user is
+///    working on another one),
+/// 3. the main display,
+/// 4. the first display.
+///
+/// Every frame is `(x, y, width, height)` in logical points. A candidate is
+/// only usable when its work area has positive size, so a stale or
+/// half-measured display can never strand the window off-screen.
+fn pick_launch_work_area(
+    window_frame: Option<[f64; 4]>,
+    frames: &[[f64; 4]],
+    work_areas: &[[f64; 4]],
+    mouse: [f64; 2],
+    main_frame: Option<[f64; 4]>,
+) -> Option<(usize, [f64; 4])> {
+    if frames.len() != work_areas.len() || frames.is_empty() {
+        return None;
+    }
+    let usable = |index: usize| {
+        let area = work_areas[index];
+        (area[2] > 0.0 && area[3] > 0.0).then_some((index, area))
+    };
+    if let Some(frame) = window_frame {
+        let center = [frame[0] + frame[2] / 2.0, frame[1] + frame[3] / 2.0];
+        if let Some(index) = screen_index_for_point(frames, center) {
+            if let Some(pick) = usable(index) {
+                return Some(pick);
+            }
+        }
+    }
+    if let Some(index) = screen_index_for_point(frames, mouse) {
+        if let Some(pick) = usable(index) {
+            return Some(pick);
+        }
+    }
+    if let Some(main) = main_frame {
+        if let Some(index) = frames.iter().position(|frame| frames_match(frame, &main)) {
+            if let Some(pick) = usable(index) {
+                return Some(pick);
+            }
+        }
+    }
+    usable(0)
+}
+
 /// Pick the frame the window should take now that the display it sits on
 /// changed, or `None` when it is already correctly placed inside `work`.
 ///
@@ -1404,22 +1679,19 @@ fn frame_for_display_change(
 ) -> Option<[f64; 4]> {
     let [wx, wy, ww, wh] = *work;
     let [fx, fy, fw, fh] = *frame;
-    if ww <= 0.0 || wh <= 0.0 || fw <= 0.0 || fh <= 0.0 {
+    if !valid_frame(work) || !valid_frame(frame) {
         return None;
     }
     if fitted.is_some_and(|previous| frames_match(&previous, frame)) {
-        let target = [wx, wy, ww, wh];
+        let target = *work;
         return (!frames_match(&target, frame)).then_some(target);
     }
     let width = fw.min(ww);
     let height = fh.min(wh);
     if width == fw && height == fh {
-        // The window already fits, so its position is the user's business:
-        // dragging a window partly off-screen to see what is behind it is
-        // normal, and yanking it back would be hostile. An over-sized frame is
-        // a different matter, because AppKit never lets a user make a window
-        // larger than the display — so an over-sized one is always a leftover
-        // from a bigger display, never a deliberate choice.
+        // The window already fits, so its position is the user's business.
+        // Only repair an oversized frame after a work-area change; this helper
+        // is not a size constraint to enforce during normal manual resizing.
         return None;
     }
     let target = [
@@ -1472,14 +1744,22 @@ fn refit_window_to_display(window: &WebviewWindow) {
         if (ns_window.styleMask().0 & NSWindowStyleMask::FullScreen.0) != 0 {
             return;
         }
+        if !ns_window.isVisible() || ns_window.isMiniaturized() {
+            return;
+        }
         let Some(screen) = ns_window.screen().or_else(|| NSScreen::mainScreen(mtm)) else {
             return;
         };
         let work = frame_values(screen.visibleFrame());
         let frame = frame_values(ns_window.frame());
-        let Some(target) = frame_for_display_change(&work, &frame, fitted_frame()) else {
+        let target = DISPLAY_FIT
+            .lock()
+            .ok()
+            .and_then(|mut state| state.reconcile(work, frame, ns_window.inLiveResize()));
+        let Some(target) = target else {
             return;
         };
+        let was_fitted = fitted_frame().is_some();
         println!(
             "[Koryphaios] Display changed: refitting window to ({},{}) {}x{}",
             target[0], target[1], target[2], target[3]
@@ -1491,8 +1771,8 @@ fn refit_window_to_display(window: &WebviewWindow) {
             ),
             false,
         );
-        if frames_match(&target, &work) {
-            record_fitted_frame(target);
+        if was_fitted {
+            record_fitted_frame(work, frame_values(ns_window.frame()));
             // The captured un-zoom frame points at the display that just went
             // away, so replace it with a normal frame on the new work area.
             if let Ok(mut slot) = PRE_ZOOM_FRAME.lock() {
@@ -1515,43 +1795,50 @@ fn refit_window_to_display(window: &WebviewWindow) {
 fn refit_window_to_display(window: &WebviewWindow) {
     // A maximized window belongs to the window manager, which re-zooms it
     // itself when the display layout changes.
-    if window.is_fullscreen().unwrap_or(false) || window.is_maximized().unwrap_or(false) {
+    if window.is_fullscreen().unwrap_or(false)
+        || window.is_maximized().unwrap_or(false)
+        || window.is_minimized().unwrap_or(false)
+        || !window.is_visible().unwrap_or(false)
+    {
         return;
     }
     let Ok(Some(monitor)) = window.current_monitor() else {
         return;
     };
-    let scale = monitor.scale_factor();
-    if scale <= 0.0 {
-        return;
-    }
     let area = monitor.work_area();
     let work = [
-        area.position.x as f64 / scale,
-        area.position.y as f64 / scale,
-        area.size.width as f64 / scale,
-        area.size.height as f64 / scale,
+        area.position.x as f64,
+        area.position.y as f64,
+        area.size.width as f64,
+        area.size.height as f64,
     ];
     let (Ok(position), Ok(size)) = (window.outer_position(), window.inner_size()) else {
         return;
     };
     let frame = [
-        position.x as f64 / scale,
-        position.y as f64 / scale,
-        size.width as f64 / scale,
-        size.height as f64 / scale,
+        position.x as f64,
+        position.y as f64,
+        size.width as f64,
+        size.height as f64,
     ];
-    let Some(target) = frame_for_display_change(&work, &frame, fitted_frame()) else {
+    let target = DISPLAY_FIT
+        .lock()
+        .ok()
+        .and_then(|mut state| state.reconcile(work, frame, false));
+    let Some(target) = target else {
         return;
     };
     println!(
         "[Koryphaios] Display changed: refitting window to ({},{}) {}x{}",
         target[0], target[1], target[2], target[3]
     );
-    let _ = window.set_size(tauri::LogicalSize::new(target[2], target[3]));
+    let _ = window.set_size(tauri::PhysicalSize::new(
+        target[2].round() as u32,
+        target[3].round() as u32,
+    ));
     let _ = window.set_position(tauri::PhysicalPosition::new(
-        (target[0] * scale).round() as i32,
-        (target[1] * scale).round() as i32,
+        target[0].round() as i32,
+        target[1].round() as i32,
     ));
 }
 
@@ -1580,13 +1867,37 @@ fn show_main_window(window: WebviewWindow) {
 }
 
 #[tauri::command]
-fn toggle_fullscreen(window: WebviewWindow) -> Result<bool, String> {
-    let is_fullscreen = window.is_fullscreen().unwrap_or(false);
-    let enter_fullscreen = !is_fullscreen;
+fn is_window_expanded(window: WebviewWindow) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        return native_fullscreen_state(&window);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        window.is_maximized().unwrap_or(false)
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn toggle_native_fullscreen(window: WebviewWindow) -> Result<bool, String> {
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    let target = window.clone();
     window
-        .set_fullscreen(enter_fullscreen)
+        .run_on_main_thread(move || {
+            let result = if let Some(ns_window) = retain_ns_window(&target) {
+                let is_fullscreen = prepare_native_fullscreen(&target);
+                ns_window.toggleFullScreen(None);
+                Ok(!is_fullscreen)
+            } else {
+                Err("Unable to access the native macOS window".to_string())
+            };
+            let _ = sender.send(result);
+        })
         .map_err(|error| error.to_string())?;
-    Ok(enter_fullscreen)
+    receiver
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .map_err(|_| "Timed out waiting for AppKit fullscreen".to_string())?
 }
 
 #[tauri::command]
@@ -1604,31 +1915,44 @@ async fn minimize_window_cmd(window: WebviewWindow) {
 }
 
 #[tauri::command]
-async fn toggle_maximize(window: WebviewWindow) {
-    let is_maximized = window.is_maximized().unwrap_or(false);
-    if is_maximized {
-        #[cfg(target_os = "macos")]
+async fn toggle_maximize(window: WebviewWindow) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        // Decide and apply in the same AppKit turn. A stale saved frame is not
+        // evidence that the window is still zoomed after a manual resize, and
+        // concurrent commands must not both decide from the pre-toggle state.
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let w = window.clone();
+        if window
+            .run_on_main_thread(move || {
+                if native_fullscreen_state(&w) {
+                    let _ = sender.send(true);
+                    return;
+                }
+                refit_window_to_display(&w);
+                let is_expanded = already_fitted(&w);
+                if is_expanded {
+                    restore_pre_zoom_frame(&w);
+                } else {
+                    zoom_to_work_area(&w);
+                }
+                let _ = sender.send(already_fitted(&w));
+            })
+            .is_err()
         {
-            // tao's unmaximize falls back to a hardcoded 800x600 frame for
-            // borderless windows; restore the real pre-zoom geometry instead.
-            let w = window.clone();
-            let restore = move || restore_pre_zoom_frame(&w);
-            if MainThreadMarker::new().is_some() {
-                restore();
-            } else {
-                let _ = window.run_on_main_thread(restore);
-            }
+            return false;
         }
-        #[cfg(not(target_os = "macos"))]
-        let _ = window.unmaximize();
-    } else {
-        #[cfg(target_os = "macos")]
-        zoom_to_work_area(&window);
-        #[cfg(not(target_os = "macos"))]
-        {
+        receiver.await.unwrap_or(false)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let is_expanded = window.is_maximized().unwrap_or(false);
+        if is_expanded {
+            let _ = window.unmaximize();
+        } else {
             let _ = window.maximize();
-            zoom_to_work_area(&window);
         }
+        !is_expanded
     }
 }
 
@@ -1673,7 +1997,14 @@ async fn select_voice_model_dialog(app: tauri::AppHandle) -> Result<Option<Strin
         .add_filter(
             "Voice models",
             &[
-                "bin", "onnx", "pt", "pth", "ckpt", "safetensors", "gguf", "npz",
+                "bin",
+                "onnx",
+                "pt",
+                "pth",
+                "ckpt",
+                "safetensors",
+                "gguf",
+                "npz",
             ],
         )
         .blocking_pick_file();
@@ -1933,16 +2264,16 @@ fn create_native_menu(app: &tauri::AppHandle) -> AppResult<Menu<tauri::Wry>> {
     .map_err(|e| AppError::Menu(e.to_string()))?;
 
     // Edit menu
-    let undo = PredefinedMenuItem::undo(app, Some("Undo"))
-        .map_err(|e| AppError::Menu(e.to_string()))?;
-    let redo = PredefinedMenuItem::redo(app, Some("Redo"))
-        .map_err(|e| AppError::Menu(e.to_string()))?;
-    let cut = PredefinedMenuItem::cut(app, Some("Cut"))
-        .map_err(|e| AppError::Menu(e.to_string()))?;
-    let copy = PredefinedMenuItem::copy(app, Some("Copy"))
-        .map_err(|e| AppError::Menu(e.to_string()))?;
-    let paste = PredefinedMenuItem::paste(app, Some("Paste"))
-        .map_err(|e| AppError::Menu(e.to_string()))?;
+    let undo =
+        PredefinedMenuItem::undo(app, Some("Undo")).map_err(|e| AppError::Menu(e.to_string()))?;
+    let redo =
+        PredefinedMenuItem::redo(app, Some("Redo")).map_err(|e| AppError::Menu(e.to_string()))?;
+    let cut =
+        PredefinedMenuItem::cut(app, Some("Cut")).map_err(|e| AppError::Menu(e.to_string()))?;
+    let copy =
+        PredefinedMenuItem::copy(app, Some("Copy")).map_err(|e| AppError::Menu(e.to_string()))?;
+    let paste =
+        PredefinedMenuItem::paste(app, Some("Paste")).map_err(|e| AppError::Menu(e.to_string()))?;
     let select_all = PredefinedMenuItem::select_all(app, Some("Select All"))
         .map_err(|e| AppError::Menu(e.to_string()))?;
 
@@ -1966,14 +2297,6 @@ fn create_native_menu(app: &tauri::AppHandle) -> AppResult<Menu<tauri::Wry>> {
     // View menu
     let reload = MenuItem::with_id(app, "reload", "Reload", true, Some("CmdOrCtrl+R"))
         .map_err(|e| AppError::Menu(e.to_string()))?;
-    let toggle_fullscreen = MenuItem::with_id(
-        app,
-        "toggle_fullscreen",
-        "Toggle Fullscreen",
-        true,
-        Some("F11"),
-    )
-    .map_err(|e| AppError::Menu(e.to_string()))?;
     let toggle_devtools = MenuItem::with_id(
         app,
         "toggle_devtools",
@@ -1990,7 +2313,6 @@ fn create_native_menu(app: &tauri::AppHandle) -> AppResult<Menu<tauri::Wry>> {
         &[
             &reload,
             &PredefinedMenuItem::separator(app).map_err(|e| AppError::Menu(e.to_string()))?,
-            &toggle_fullscreen,
             &toggle_devtools,
         ],
     )
@@ -2068,7 +2390,7 @@ fn setup_system_tray(app: &tauri::AppHandle) -> AppResult<()> {
                 }
             }
             "quit" => {
-                app.exit(0);
+                desktop_lifecycle::request(app, desktop_lifecycle::Reason::Close);
             }
             _ => {}
         })
@@ -2092,9 +2414,52 @@ fn setup_system_tray(app: &tauri::AppHandle) -> AppResult<()> {
     Ok(())
 }
 
+/// macOS never delivers the fn/Globe key to a webview — the system keeps it
+/// for dictation — so a `Fn` voice binding would silently never fire. Watch
+/// `NSEvent` flags-changed events for the function modifier and relay them to
+/// the frontend, which can then treat them like the binding's key event.
+#[cfg(target_os = "macos")]
+fn install_fn_key_monitor(app: &tauri::AppHandle) {
+    use block2::RcBlock;
+    use core::ptr::NonNull;
+    use objc2_app_kit::{NSEventMask, NSEventModifierFlags};
+    let app_handle = app.clone();
+    let block = RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
+        let event_ref = unsafe { event.as_ref() };
+        // Arrow/function keys can carry the Function flag too. Only the
+        // physical Fn/Globe key (kVK_Function) may start a voice hold.
+        if event_ref.keyCode() != 63 {
+            return event.as_ptr();
+        }
+        let down = event_ref
+            .modifierFlags()
+            .contains(NSEventModifierFlags::Function);
+        // Each flagsChanged event for this physical key is an edge. Do not
+        // cache its state: a release outside the app may not reach this local
+        // monitor, and must not prevent the next focused hold from starting.
+        let name = if down {
+            "voice://fn-down"
+        } else {
+            "voice://fn-up"
+        };
+        let _ = app_handle.emit(name, ());
+        event.as_ptr() // keep the event alive for the next responder
+    });
+
+    unsafe {
+        // The frontend also offers the standard voice chord when the native
+        // monitor or the keyboard cannot expose Fn.
+        let _ = NSEvent::addLocalMonitorForEventsMatchingMask_handler(
+            NSEventMask::FlagsChanged,
+            &block,
+        );
+        // Leak the block and the monitor: they must live as long as the app.
+        std::mem::forget(block);
+    }
+}
+
 fn setup_file_drop_handler(window: &WebviewWindow) {
     let window_clone = window.clone();
-
     // Handle file drop events
     window.listen("tauri://drag-drop", move |event| {
         if let Ok(payload) = serde_json::from_str::<serde_json::Value>(event.payload()) {
@@ -2166,6 +2531,13 @@ fn register_appimage_launcher() -> Result<(), String> {
 }
 
 pub fn run() {
+    let mut context = tauri::generate_context!();
+    if desktop_lifecycle::starts_in_background() {
+        for window in &mut context.config_mut().app.windows {
+            window.visible = false;
+            window.focus = false;
+        }
+    }
     #[cfg(target_os = "linux")]
     {
         // Force X11 backend on Linux to ensure custom titlebar dragging works correctly
@@ -2179,6 +2551,15 @@ pub fn run() {
     }
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if !args.iter().any(|arg| arg == "--background") {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            }
+        }))
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
@@ -2190,26 +2571,22 @@ pub fn run() {
             let config = AppConfig::get();
             let app_handle = app.handle().clone();
 
-            match spawn_bundled_backend(&app_handle) {
-                Ok(Some(process)) => {
-                    let process_pid = process.lock().ok().map(|child| child.id());
-                    if let Ok(mut guard) = BACKEND_PROCESS.lock() {
-                        *guard = Some(process.clone());
-                    }
-
+            match start_bundled_backend(&app_handle) {
+                Ok(true) => {
+                    lifecycle_platform::enable_login_guard(&app_handle)
+                        .map_err(std::io::Error::other)?;
                     let host = browser_host(&config.server.host).to_string();
                     let port = config.server.port;
                     let nav_handle = app_handle.clone();
                     let nav_host = host.clone();
-                    let nav_process = process.clone();
                     let ready_handle = app_handle.clone();
                     tauri::async_runtime::spawn(async move {
                         let ready_result = wait_for_backend_ready(
                             &nav_host,
                             port,
                             120_000,
-                            process_pid,
-                            Some(nav_process.clone()),
+                            None,
+                            None,
                         )
                         .await;
                         match ready_result {
@@ -2223,14 +2600,8 @@ pub fn run() {
                                     &nav_handle,
                                     "initial-timeout",
                                     format!("Backend did not become ready: {e}"),
-                                    process_pid,
+                                    None,
                                 );
-                                // A live-but-unhealthy process would otherwise sit
-                                // outside the exit-only watchdog forever. Killing
-                                // it hands recovery to the normal restart loop.
-                                if let Ok(mut child) = nav_process.lock() {
-                                    let _ = child.kill();
-                                }
                             }
                             Ok(actual_port) => {
                                 // Keep the packaged UI on Tauri's local app origin.
@@ -2239,99 +2610,16 @@ pub fn run() {
                                 // can block Koryphaios rather than the app appearing
                                 // under its own name. The frontend already obtains the
                                 // local API/WS URLs through Tauri commands.
-                                emit_backend_ready(&ready_handle, process_pid, nav_host.clone(), actual_port);
+                                let pid = crate::config::read_service_endpoint().map(|(_, _, pid)| pid);
+                                emit_backend_ready(&ready_handle, pid, nav_host.clone(), actual_port);
                             }
                         }
                     });
 
-                    // Supervise: if the backend ever dies, restart it and
-                    // reload the window. The app and backend live and die
-                    // together — never a dead UI over a dead server.
-                    let watch_handle = app_handle.clone();
-                    let watch_host = host.clone();
-                    tauri::async_runtime::spawn(async move {
-                        loop {
-                            tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-                            let exited = {
-                                let guard = BACKEND_PROCESS.lock().ok();
-                                match guard.as_ref().and_then(|g| g.as_ref()) {
-                                    Some(proc_arc) => match proc_arc.lock() {
-                                        Ok(mut child) => child.try_wait().ok().flatten().is_some(),
-                                        Err(_) => false,
-                                    },
-                                    None => break, // intentionally stopped (app quit)
-                                }
-                            };
-                            if !exited {
-                                continue;
-                            }
-                            let dead_pid = BACKEND_PROCESS
-                                .lock()
-                                .ok()
-                                .and_then(|g| g.as_ref().and_then(|p| p.lock().ok().map(|c| c.id())));
-                            eprintln!("[Koryphaios] Backend died — restarting...");
-                            emit_backend_down(
-                                &watch_handle,
-                                "exited",
-                                "Backend process exited; supervisor is restarting it.".to_string(),
-                                dead_pid,
-                            );
-                            match spawn_bundled_backend(&watch_handle) {
-                                Ok(Some(new_proc)) => {
-                                    let new_pid = new_proc.lock().ok().map(|child| child.id());
-                                    if let Ok(mut guard) = BACKEND_PROCESS.lock() {
-                                        *guard = Some(new_proc.clone());
-                                    }
-                                    let ready = wait_for_backend_ready(
-                                        &watch_host,
-                                        port,
-                                        60_000,
-                                        new_pid,
-                                        Some(new_proc.clone()),
-                                    )
-                                    .await;
-                                    match ready {
-                                        Ok(actual_port) => {
-                                            // Do not navigate the packaged WebView
-                                            // to localhost on backend recovery; its
-                                            // health sentinel resumes API traffic.
-                                            emit_backend_ready(
-                                                &watch_handle,
-                                                new_pid,
-                                                watch_host.clone(),
-                                                actual_port,
-                                            );
-                                        }
-                                        Err(_) => {
-                                            emit_backend_down(
-                                                &watch_handle,
-                                                "restart-timeout",
-                                                "Restarted backend did not become ready; retrying.".to_string(),
-                                                new_pid,
-                                            );
-                                            if let Ok(mut child) = new_proc.lock() {
-                                                let _ = child.kill();
-                                            }
-                                        }
-                                    }
-                                }
-                                _ => {
-                                    eprintln!(
-                                        "[Koryphaios] Backend restart failed; retrying in 5s"
-                                    );
-                                    emit_backend_down(
-                                        &watch_handle,
-                                        "restart-failed",
-                                        "Supervisor could not spawn a new backend process; retrying.".to_string(),
-                                        None,
-                                    );
-                                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                                }
-                            }
-                        }
-                    });
+                    // The OS supervises the service even after the UI quits.
+                    // The frontend health sentinel reconnects after recovery.
                 }
-                Ok(None) => {
+                Ok(false) => {
                     // Dev mode: the launcher owns the backend. But the Tauri
                     // app can outlive the launcher — when the terminal that ran
                     // `bun run dev` closes, the launcher dies and SIGTERMs its
@@ -2402,17 +2690,11 @@ pub fn run() {
                         }
                     }
                     "quit" => {
-                        app.exit(0);
+                        desktop_lifecycle::request(app, desktop_lifecycle::Reason::Close);
                     }
                     "reload" => {
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.eval("window.location.reload()");
-                        }
-                    }
-                    "toggle_fullscreen" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let is_fullscreen = window.is_fullscreen().unwrap_or(false);
-                            let _ = window.set_fullscreen(!is_fullscreen);
                         }
                     }
                     "toggle_devtools" => {
@@ -2445,24 +2727,23 @@ pub fn run() {
 
             // Get main window and ensure visibility
             if let Some(window) = app.get_webview_window("main") {
-                // Start filling the work area while keeping normal window
-                // resizing available. Fullscreen is user-controlled. On macOS
-                // the frameless window's maximize() is unreliable and leaves
-                // tao state that fights later resizes, so zoom_to_work_area
-                // enforces the frame synchronously after show instead.
-                #[cfg(not(target_os = "macos"))]
-                let _ = window.maximize();
-
-                // CRITICAL: Always force show, focus, and unminimize to ensure window is visible on launch
-                println!("[Koryphaios] Main window initialized, forcing visibility...");
-                let _ = window.show();
-                let _ = window.set_focus();
-                let _ = window.unminimize();
-
-                // Frameless windows ignore zoom on macOS, so grow to the work
-                // area instead (after show, so AppKit constrains the final
-                // frame rather than a half-applied one).
-                zoom_to_work_area(&window);
+                // Login startup keeps the session guard/tray available without
+                // opening a window. A manual launch fills the current display's
+                // usable work area without entering macOS fullscreen mode.
+                if !desktop_lifecycle::starts_in_background() {
+                    // Position while still hidden (the window starts hidden via
+                    // `visible: false` in tauri.conf.json) so the first painted
+                    // frame is already the work-area frame: no flash of the
+                    // small centered window, and display selection cannot depend
+                    // on a half-shown window.
+                    fit_main_window_at_launch(&window);
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                    let _ = window.unminimize();
+                    // Window managers and AppKit can still move a window as it
+                    // maps, so confirm the frame now that it is on screen.
+                    fit_main_window_at_launch(&window);
+                }
 
                 // Unplugging or re-arranging a display moves the window but
                 // never resizes it, so the frame has to be repaired whenever
@@ -2471,6 +2752,11 @@ pub fn run() {
 
                 // Set up file drop handler
                 setup_file_drop_handler(&window);
+
+                // Relay fn/Globe key edges to the composer: macOS swallows
+                // them before the webview, so voice push-to-talk needs this.
+                #[cfg(target_os = "macos")]
+                install_fn_key_monitor(&app.handle());
 
                 // On Linux/WebKitGTK, getUserMedia (microphone) is denied by
                 // default unless the app handles the webview's permission-request
@@ -2528,27 +2814,34 @@ pub fn run() {
                 }
             }
 
-            // Set up exit handler to kill backend
-            let app_handle_clone = app.handle().clone();
-            app_handle_clone
-                .run_on_main_thread(|| {
-                    // Cleanup happens automatically via Drop, but we ensure it here
-                })
-                .ok();
-
+            if let Err(error) = lifecycle_platform::install(app.handle()) {
+                eprintln!("[Koryphaios] OS session confirmation is unavailable: {error}");
+            }
             Ok(())
         })
-        .on_window_event(|_app, event| {
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if !desktop_lifecycle::exit_approved() {
+                    api.prevent_close();
+                    desktop_lifecycle::request(window.app_handle(), desktop_lifecycle::Reason::Close);
+                }
+            }
             if let WindowEvent::Destroyed = event {
+                // Only development children belong to the window. The
+                // installed login service remains available after UI exit.
                 kill_backend();
             }
         })
         .invoke_handler(tauri::generate_handler![
+            desktop_lifecycle::get_desktop_exit_request,
+            desktop_lifecycle::resolve_desktop_exit,
             get_backend_url,
             get_websocket_url,
             get_app_version,
             show_main_window,
-            toggle_fullscreen,
+            is_window_expanded,
+            #[cfg(target_os = "macos")]
+            toggle_native_fullscreen,
             minimize_to_tray,
             minimize_window_cmd,
             toggle_maximize,
@@ -2558,6 +2851,7 @@ pub fn run() {
             select_voice_model_dialog,
             local_voice::local_voice_model_status,
             local_voice::download_local_voice_model,
+            local_voice::delete_local_voice_model,
             local_voice::attach_local_voice_model,
             local_voice::transcribe_local_voice,
             create_project_folder,
@@ -2567,16 +2861,27 @@ pub fn run() {
             check_for_updates,
             install_update,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Koryphaios desktop app");
+        .build(context)
+        .expect("error while building Koryphaios desktop app")
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
+                // App updates use Tauri's reserved restart code, not an OS
+                // reboot. Their already-confirmed installation must complete.
+                if code != Some(tauri::RESTART_EXIT_CODE) && !desktop_lifecycle::exit_approved() {
+                    api.prevent_exit();
+                    desktop_lifecycle::request(app, desktop_lifecycle::Reason::Close);
+                }
+            }
+        });
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         copy_backend_resource, dev_backend_binding, frame_for_display_change,
-        merge_packaged_cors_origins, open_private_backend_logs, restore_frame_for_work_area,
-        validate_log_file_name,
+        merge_packaged_cors_origins, open_private_backend_logs, pick_launch_work_area,
+        restore_frame_for_work_area, screen_index_for_point, validate_log_file_name,
+        DisplayFit, MAX_BACKEND_LOG_BYTES,
     };
     use flate2::write::GzEncoder;
     use flate2::Compression;
@@ -2598,6 +2903,145 @@ mod tests {
             Some(EXTERNAL_WORK_AREA),
         );
         assert_eq!(target, Some(BUILT_IN_WORK_AREA));
+    }
+
+    #[test]
+    fn work_area_growth_does_not_leave_a_small_bottom_gap() {
+        let old = [0.0, 28.0, 1512.0, 942.0];
+        assert_eq!(
+            frame_for_display_change(&BUILT_IN_WORK_AREA, &old, Some(old)),
+            Some(BUILT_IN_WORK_AREA)
+        );
+    }
+
+    fn fitted_to(work: [f64; 4]) -> DisplayFit {
+        DisplayFit {
+            work: Some(work),
+            fitted: Some(work),
+        }
+    }
+
+    #[test]
+    fn dock_changes_refill_both_axes_without_fixed_insets() {
+        let bottom_dock = [0.0, 80.0, 1512.0, 890.0];
+        let hidden_dock = [0.0, 0.0, 1512.0, 970.0];
+        let left_dock = [90.0, 0.0, 1422.0, 970.0];
+        let right_dock = [0.0, 0.0, 1422.0, 970.0];
+        let mut state = fitted_to(bottom_dock);
+        let mut frame = bottom_dock;
+        for work in [hidden_dock, left_dock, right_dock, bottom_dock] {
+            assert_eq!(state.reconcile(work, frame, false), Some(work));
+            // Model the synchronous AppKit read-back after applying the frame.
+            state.fitted = Some(work);
+            frame = work;
+            assert_eq!(state.reconcile(work, frame, false), None);
+        }
+    }
+
+    #[test]
+    fn os_relocation_before_the_poll_keeps_zoom_on_the_new_work_area() {
+        let mut state = fitted_to(EXTERNAL_WORK_AREA);
+        let relocated = [417.0, -1081.0, 2560.0, 1410.0];
+        assert_eq!(
+            state.reconcile(LAPTOP_WORK_AREA, relocated, false),
+            Some(LAPTOP_WORK_AREA)
+        );
+        assert!(state.fitted.is_some());
+    }
+
+    #[test]
+    fn os_clamping_before_the_poll_does_not_lose_the_next_expansion() {
+        let mut state = fitted_to(EXTERNAL_WORK_AREA);
+        assert_eq!(
+            state.reconcile(BUILT_IN_WORK_AREA, BUILT_IN_WORK_AREA, false),
+            None
+        );
+        assert_eq!(
+            state.reconcile(EXTERNAL_WORK_AREA, BUILT_IN_WORK_AREA, false),
+            Some(EXTERNAL_WORK_AREA)
+        );
+    }
+
+    #[test]
+    fn manual_resize_releases_zoom_even_before_a_work_area_change() {
+        let mut state = fitted_to(BUILT_IN_WORK_AREA);
+        // Even a small deliberate resize must not be snapped back by polling.
+        let manual = [0.0, 28.0, 1512.0, 942.0];
+        assert_eq!(state.reconcile(BUILT_IN_WORK_AREA, manual, false), None);
+        assert!(
+            state.fitted.is_none(),
+            "the next zoom must expand, not restore"
+        );
+        assert_eq!(state.reconcile(EXTERNAL_WORK_AREA, manual, false), None);
+    }
+
+    #[test]
+    fn manual_move_on_an_unchanged_display_releases_zoom() {
+        let mut state = fitted_to(BUILT_IN_WORK_AREA);
+        let moved = [200.0, 125.0, 1512.0, 945.0];
+        assert_eq!(state.reconcile(BUILT_IN_WORK_AREA, moved, false), None);
+        assert!(state.fitted.is_none());
+        assert_eq!(state.reconcile(EXTERNAL_WORK_AREA, moved, false), None);
+    }
+
+    #[test]
+    fn live_resize_defers_display_repair_and_releases_zoom() {
+        let mut state = fitted_to(EXTERNAL_WORK_AREA);
+        let manual = [200.0, 100.0, 1200.0, 800.0];
+        assert_eq!(state.reconcile(BUILT_IN_WORK_AREA, manual, true), None);
+        assert!(state.fitted.is_none());
+        assert_eq!(state.work, Some(EXTERNAL_WORK_AREA));
+        assert_eq!(state.reconcile(BUILT_IN_WORK_AREA, manual, false), None);
+        assert_eq!(state.work, Some(BUILT_IN_WORK_AREA));
+    }
+
+    #[test]
+    fn polling_does_not_enforce_a_size_limit_or_adopt_manual_windows_as_zoomed() {
+        let mut state = DisplayFit {
+            work: Some(EXTERNAL_WORK_AREA),
+            fitted: None,
+        };
+        let oversized = [0.0, 0.0, 2800.0, 1600.0];
+        assert_eq!(state.reconcile(EXTERNAL_WORK_AREA, oversized, false), None);
+        assert_eq!(
+            state.reconcile(BUILT_IN_WORK_AREA, oversized, false),
+            Some(BUILT_IN_WORK_AREA)
+        );
+        assert!(state.fitted.is_none());
+        assert_eq!(
+            state.reconcile(EXTERNAL_WORK_AREA, BUILT_IN_WORK_AREA, false),
+            None
+        );
+    }
+
+    #[test]
+    fn appkit_adjusted_readback_is_not_retried_on_every_poll() {
+        let applied = [0.0, 30.0, 1512.0, 940.0];
+        let mut state = DisplayFit {
+            work: Some(BUILT_IN_WORK_AREA),
+            fitted: Some(applied),
+        };
+        for _ in 0..3 {
+            assert_eq!(state.reconcile(BUILT_IN_WORK_AREA, applied, false), None);
+        }
+        assert_eq!(
+            state.reconcile(EXTERNAL_WORK_AREA, applied, false),
+            Some(EXTERNAL_WORK_AREA)
+        );
+    }
+
+    #[test]
+    fn invalid_work_area_does_not_poison_fit_tracking() {
+        let mut state = fitted_to(EXTERNAL_WORK_AREA);
+        for invalid in [
+            [0.0; 4],
+            [0.0, f64::NAN, 1512.0, 945.0],
+            [0.0, 0.0, f64::INFINITY, 945.0],
+        ] {
+            assert_eq!(state.reconcile(invalid, EXTERNAL_WORK_AREA, false), None);
+            assert_eq!(state.work, Some(EXTERNAL_WORK_AREA));
+            assert_eq!(state.fitted, Some(EXTERNAL_WORK_AREA));
+        }
     }
 
     #[test]
@@ -2628,7 +3072,10 @@ mod tests {
         // normal thing to do. The window fits, so only its size could ever be
         // a bug.
         let dragged = [1600.0, 400.0, 800.0, 600.0];
-        assert_eq!(frame_for_display_change(&BUILT_IN_WORK_AREA, &dragged, None), None);
+        assert_eq!(
+            frame_for_display_change(&BUILT_IN_WORK_AREA, &dragged, None),
+            None
+        );
     }
 
     #[test]
@@ -2648,7 +3095,10 @@ mod tests {
     #[test]
     fn a_window_already_inside_the_new_display_is_left_untouched() {
         let settled = [100.0, 100.0, 1200.0, 800.0];
-        assert_eq!(frame_for_display_change(&BUILT_IN_WORK_AREA, &settled, None), None);
+        assert_eq!(
+            frame_for_display_change(&BUILT_IN_WORK_AREA, &settled, None),
+            None
+        );
     }
 
     #[test]
@@ -2670,6 +3120,130 @@ mod tests {
         assert!(restore[1] >= BUILT_IN_WORK_AREA[1]);
         assert!(restore[0] + restore[2] <= BUILT_IN_WORK_AREA[0] + BUILT_IN_WORK_AREA[2] + 1.0);
         assert!(restore[1] + restore[3] <= BUILT_IN_WORK_AREA[1] + BUILT_IN_WORK_AREA[3] + 1.0);
+    }
+
+    /// A main external display with a scaled built-in panel stacked below it
+    /// (negative global origin): launches must be able to target either one.
+    const MAIN_FRAME: [f64; 4] = [0.0, 0.0, 2560.0, 1440.0];
+    const MAIN_WORK_AREA: [f64; 4] = [0.0, 0.0, 2560.0, 1410.0];
+    const LAPTOP_FRAME: [f64; 4] = [417.0, -1169.0, 1800.0, 1169.0];
+    const LAPTOP_WORK_AREA: [f64; 4] = [417.0, -1081.0, 1800.0, 1043.0];
+
+    fn two_display_layout() -> (Vec<[f64; 4]>, Vec<[f64; 4]>) {
+        (
+            vec![MAIN_FRAME, LAPTOP_FRAME],
+            vec![MAIN_WORK_AREA, LAPTOP_WORK_AREA],
+        )
+    }
+
+    #[test]
+    fn launch_stays_on_the_display_holding_the_window() {
+        let (frames, work_areas) = two_display_layout();
+        // A re-zoom of a window living on the lower panel must not teleport it
+        // to the main display, even when the cursor sits on main.
+        let window = [500.0, -900.0, 1200.0, 800.0];
+        let pick = pick_launch_work_area(
+            Some(window),
+            &frames,
+            &work_areas,
+            [1280.0, 700.0],
+            Some(MAIN_FRAME),
+        );
+        assert_eq!(pick, Some((1, LAPTOP_WORK_AREA)));
+    }
+
+    #[test]
+    fn launch_follows_the_cursor_when_the_window_has_no_display_yet() {
+        let (frames, work_areas) = two_display_layout();
+        // Every launch positions a hidden, unplaced window: the cursor display
+        // wins over `center`, which would otherwise pin it to main.
+        let pick = pick_launch_work_area(
+            None,
+            &frames,
+            &work_areas,
+            [900.0, -500.0],
+            Some(MAIN_FRAME),
+        );
+        assert_eq!(pick, Some((1, LAPTOP_WORK_AREA)));
+        let pick = pick_launch_work_area(
+            None,
+            &frames,
+            &work_areas,
+            [1280.0, 700.0],
+            Some(MAIN_FRAME),
+        );
+        assert_eq!(pick, Some((0, MAIN_WORK_AREA)));
+    }
+
+    #[test]
+    fn hidden_launch_window_stays_on_its_configured_display_not_the_cursor_display() {
+        let (frames, work_areas) = two_display_layout();
+        let centered_launch_window = [640.0, 300.0, 1280.0, 800.0];
+        let pick = pick_launch_work_area(
+            Some(centered_launch_window),
+            &frames,
+            &work_areas,
+            [900.0, -500.0],
+            Some(MAIN_FRAME),
+        );
+        assert_eq!(pick, Some((0, MAIN_WORK_AREA)));
+    }
+
+    #[test]
+    fn launch_falls_back_to_main_when_the_cursor_is_outside_every_display() {
+        let (frames, work_areas) = two_display_layout();
+        let pick = pick_launch_work_area(
+            None,
+            &frames,
+            &work_areas,
+            [99_999.0, 99_999.0],
+            Some(MAIN_FRAME),
+        );
+        assert_eq!(pick, Some((0, MAIN_WORK_AREA)));
+    }
+
+    #[test]
+    fn launch_uses_the_only_display_it_has() {
+        let pick = pick_launch_work_area(
+            None,
+            &[LAPTOP_FRAME],
+            &[LAPTOP_WORK_AREA],
+            [0.0, 2000.0],
+            None,
+        );
+        assert_eq!(pick, Some((0, LAPTOP_WORK_AREA)));
+        assert_eq!(
+            pick_launch_work_area(None, &[], &[], [0.0, 0.0], None),
+            None,
+            "no displays means no pick, never a stranded window"
+        );
+    }
+
+    #[test]
+    fn launch_skips_a_degenerate_work_area_for_the_next_candidate() {
+        let (frames, mut work_areas) = two_display_layout();
+        work_areas[1] = [417.0, -1081.0, 0.0, 0.0];
+        // Cursor and window both sit on the broken panel: main must win over a
+        // zero-size work area.
+        let pick = pick_launch_work_area(
+            Some([500.0, -900.0, 800.0, 600.0]),
+            &frames,
+            &work_areas,
+            [900.0, -500.0],
+            Some(MAIN_FRAME),
+        );
+        assert_eq!(pick, Some((0, MAIN_WORK_AREA)));
+    }
+
+    #[test]
+    fn point_lookup_handles_negative_stacked_origins() {
+        let (frames, _) = two_display_layout();
+        assert_eq!(screen_index_for_point(&frames, [100.0, 100.0]), Some(0));
+        assert_eq!(screen_index_for_point(&frames, [900.0, -500.0]), Some(1));
+        // The shared edge belongs to the upper display; the lower one is
+        // half-open there, so a straddling pick is deterministic.
+        assert_eq!(screen_index_for_point(&frames, [900.0, 0.0]), Some(0));
+        assert_eq!(screen_index_for_point(&frames, [99_999.0, 99_999.0]), None);
     }
 
     #[test]
@@ -2813,6 +3387,36 @@ mod tests {
             std::fs::read(logs.join("backend.err.log")).expect("stderr log should be readable"),
             b"existing error\nnext error\n"
         );
+    }
+
+    #[test]
+    fn private_backend_logs_bound_existing_files() {
+        let root = TestDirectory::new("bounded");
+        let logs = root.path().join("logs");
+        std::fs::create_dir(&logs).expect("logs directory should be creatable");
+        for name in ["backend.log", "backend.err.log"] {
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .open(logs.join(name))
+                .expect("log should be writable");
+            file.set_len(MAX_BACKEND_LOG_BYTES + 1)
+                .expect("log should be extendable for the test");
+        }
+
+        drop(
+            open_private_backend_logs(&logs, "backend.log", "backend.err.log")
+                .expect("private logs should open"),
+        );
+
+        for name in ["backend.log", "backend.err.log"] {
+            assert_eq!(
+                std::fs::metadata(logs.join(name))
+                    .expect("bounded log metadata should be available")
+                    .len(),
+                0
+            );
+        }
     }
 
     #[cfg(unix)]
