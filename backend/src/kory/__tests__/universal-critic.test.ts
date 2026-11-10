@@ -214,7 +214,7 @@ test('an eligible Critic review explains when no independent route can start', a
 test.each(['yolo', 'guarded', 'ask'] as const)('routes Critic action approval to the correct owner in %s', async (mode) => {
   const f = await fixture(mode);
   f.internal.waitForUserInputInternal = mock(async () => 'Allow once');
-  f.internal.managerRoutingBySession.set(f.session.id, { provider: 'openai', model: 'producer' });
+  f.internal.runtimes.get(f.session.id).managerRouting = { provider: 'openai', model: 'producer' };
   const approved = await f.internal.approveCriticAction(f.session.id, 'critic-test', 'Explain caching',
     { id: 'action', name: 'bash', input: { command: 'bun test' } }, 'Verify behavior', new AbortController().signal);
   expect(approved).toBe(true);

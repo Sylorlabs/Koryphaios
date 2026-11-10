@@ -50,6 +50,7 @@ import {
   type Provider,
 } from '../providers';
 import type { ProviderMessage } from '../providers/types';
+import { SessionRuntimeRegistry } from './services/SessionRuntime';
 import { attachmentInputBlocks, mediaInputAdmissionError } from '../providers/media-input';
 import {
   imageAttachmentAdmissionError,
@@ -554,28 +555,13 @@ interface AdmissionRecord {
 export class KoryManager implements WorkerPipelineHost {
   private memoryDir: string;
   private isProcessing = false;
-  /** Per-chat mirror of the composer's YOLO pill, keyed by session. Nothing
-   *  enforces from this map — approval comes from the durable per-chat preset
-   *  (see getIsYoloMode) — but keying it per session means one chat can no
-   *  longer publish a process-wide posture for every other chat. */
-  private yoloModeMirrorBySession = new Map<string, boolean>();
+  /** Per-session server state. Do not add a new Map<sessionId, …> to KoryManager;
+   *  add a property to SessionRuntime. See docs/architecture/transcript-integrity.md Invariant 5. */
+  private readonly runtimes = new SessionRuntimeRegistry();
+
   private snapshotManager: SnapshotManager;
   public readonly git: GitManager;
   private workspaceManager: WorkspaceManager | null = null;
-  /** AbortController for the current manager run per session (so cancelSessionWorkers can abort manager too). */
-  private managerAbortBySession = new Map<string, AbortController>();
-  /** Synchronous intent claims cover provider resolution, intent interviews,
-   * and every other pre-controller await. Time Travel uses the paired mutation
-   * barrier so a new manager turn cannot start between its busy check and the
-   * workspace transaction. */
-  private sessionRunClaims = new Set<string>();
-  /** Wall-clock install time of each run claim, used to tell a hung owner
-   *  that stopped making durable progress from a healthy long-running turn. */
-  private readonly sessionRunClaimsAt = new Map<string, number>();
-  /** Chats that already broadcast a full session.updated during this turn. */
-  private readonly sessionUpdatedDuringTurn = new Set<string>();
-  /** Repeated stop clicks must share one cancellation transaction. */
-  private sessionCancellations = new Map<string, Promise<void>>();
   /** Object-identity registry makes admission tokens single-use and unforgeable. */
   private turnAdmissions = new Map<SessionTurnAdmission, AdmissionRecord>();
   /** Async execution provenance. A callback retains the exact run generation
@@ -583,34 +569,11 @@ export class KoryManager implements WorkerPipelineHost {
   private readonly runContext = new AsyncLocalStorage<ManagerRunHandle>();
   private readonly runControllerByHandle = new WeakMap<ManagerRunHandle, AbortController>();
   private shutdownPromise: Promise<void> | null = null;
-  private sessionMutationBarriers = new Set<string>();
-  /**
-   * Workers started per session through runWorkerPipeline. CLI managers (agy,
-   * claude, codex, ...) delegate via the MCP bridge during their own turn, so the
-   * manager loop never sees those calls as completedToolCalls. Multi-Agent
-   * enforcement compares this counter against a turn-start baseline instead.
-   */
-  private sessionWorkerStartCounts = new Map<string, number>();
-  /** Worker token spend accumulated during the current manager turn, folded
-   * into the assistant message cost so chat totals include subagents. */
-  private pendingWorkerUsage = new Map<
-    string,
-    { tokensIn: number; tokensOut: number; cost: number }
-  >();
   /** Permanent process-lifetime tombstones stop stale callbacks from reviving
    * a session after its durable row and archives have been erased. */
   private erasedSessions = new Set<string>();
-  /** Heartbeat timers per session — emit agent.heartbeat every 5s while a
-   *  run is active so the client watchdog can distinguish "alive but quiet"
-   *  (long tool call) from "dead — terminal event was dropped". */
-  private heartbeatBySession = new Map<string, ReturnType<typeof setInterval>>();
-  /** Latest manager phase per session, used to populate agent.heartbeat.
-   *  Updated at every agent.status emit for kory-manager and at stream/tool
-   *  transitions. */
-  private heartbeatPhaseBySession = new Map<string, AgentStatus>();
   /** In-memory worker/critic chat threads keyed by agentId. */
   private agentThreads = new Map<string, AgentThreadState>();
-  private agentSteeringDrains = new Map<string, Promise<{ runId: string } | null>>();
   /** Services */
   private events: EventEmitterService;
   private managerRouting: ManagerRoutingService;
@@ -620,48 +583,9 @@ export class KoryManager implements WorkerPipelineHost {
   private processCompletionCoordinator: ProcessCompletionCoordinator;
   private runLifecycle: ManagerRunLifecycle;
   private unsubscribeProcessLifecycle?: () => void;
-  /** Awaitable in-flight naming operations; completed titles live in the DB. */
-  private titlePromisesBySession = new Map<string, Promise<void>>();
-  private titleGenerationBySession = new Map<string, AbortController>();
-  private usageRetryTimersBySession = new Map<string, Set<ReturnType<typeof setTimeout>>>();
-  /** Last visible prompt manifest per session; prevents repeated disclosure on tool-loop turns. */
-  private promptManifestHashBySession = new Map<string, string>();
-  /** Collision choices persist per project and are reused by task workers/critics. */
-  private skillCollisionChoicesBySession = new Map<
-    string,
-    Record<string, 'personal' | 'project'>
-  >();
-  /** User-selected manager identity, used only to enforce role independence. */
-  private managerRoutingBySession = new Map<
-    string,
-    { model: string; provider: ProviderName | undefined }
-  >();
-  /** Client-side session context budget (tokens) from the composer's
-   *  context-window picker, threaded in with each admitted turn. A valid
-   *  override is stored for the turn; a null/undefined/invalid one clears it.
-   *  Budgeting-only — never forwarded as a provider API parameter. */
-  private contextWindowOverrideBySession = new Map<string, number>();
-  /** Last shrink level that succeeded per session+provider+model. Small-route
-   *  gateways (e.g. custom conduit routes with a tiny verified window) 413 on
-   *  the full prompt even for a one-word message — the next turn starts at the
-   *  remembered level instead of failing the same way again. Cleared when the
-   *  session is cleaned up. */
-  private contextShrinkHintBySession = new Map<string, number>();
-  private cachePrewarmBySession = new Map<string, { key: string; at: number }>();
   /** Reusable model-independent downshift checkpoints. Canonical history stays
    * in the message store and is never replaced by these derived views. */
   private contextProjectionCheckpointByKey = new Map<string, CachedContextProjectionCheckpoint>();
-  private compactingSessions = new Map<string, AbortController>();
-  /** Provider preflight is shared with handleDirectly so normal turns do not
-   * resolve the same provider, CLI capability probe, or fallback twice. */
-  private providerPreflightBySession = new Map<
-    string,
-    { routing: { model: string; provider: ProviderName | undefined }; provider: Provider }
-  >();
-  /** Last automatic-compaction failure per session. While cooling down after
-   *  a failure, post-turn turns do not re-trigger (prevents a crash loop
-   *  that re-fires every turn while session_compactions stays empty). */
-  private lastAutoCompactFailureBySession = new Map<string, number>();
   private readonly restartHandoffOwner = `kory-manager-${crypto.randomUUID()}`;
   private readonly restartHandoffTasks = new Map<string, Promise<void>>();
   private readonly restartHandoffConsumers = new Map<
@@ -669,22 +593,6 @@ export class KoryManager implements WorkerPipelineHost {
     { sessionId: string; controller: AbortController }
   >();
   private readonly restartHandoffRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  /** Goal state is immutable task context, not a conversational suggestion. */
-  private goalContextBySession = new Map<
-    string,
-    NonNullable<import('./prompts').TaskContract['goalContext']>
-  >();
-  /** Guard: at most one automatic 25-turn-cap continuation per session run chain. */
-  private autoContinuationIssuedBySession = new Set<string>();
-  /** Unverified-context warnings are emitted once per session+model. Without
-   *  this, every manager/worker/critic compilePrompt re-broadcasts the same
-   *  `system.info` row each turn, spamming the feed for custom models whose
-   *  window is not (yet) verified. */
-  private warnedUnverifiedContextWindowBySession = new Map<string, Set<string>>();
-  /** All other compilation warnings (per-skill advisory notes, budget
-   *  overflow, lazy-prune notes, etc.) are emitted once per session. Without
-   *  this, every turn re-broadcasts the same advisory rows and spams the feed. */
-  private warnedCompilationMessagesBySession = new Map<string, Set<string>>();
 
   /** Emit prompt-compilation warnings, deduplicating repetitive notices per
    *  session. The "Context window unverified" notice dedupes per
@@ -700,20 +608,12 @@ export class KoryManager implements WorkerPipelineHost {
     for (const w of warnings) {
       if (typeof w === 'string' && w.startsWith('Context window unverified for')) {
         const key = `${provider}/${model ?? 'unknown model'}`;
-        let seen = this.warnedUnverifiedContextWindowBySession.get(sessionId);
-        if (!seen) {
-          seen = new Set<string>();
-          this.warnedUnverifiedContextWindowBySession.set(sessionId, seen);
-        }
+        const seen = this.runtimes.get(sessionId).warnedUnverifiedContextWindows;
         if (seen.has(key)) continue;
         seen.add(key);
       } else {
         const key = this.compilationWarningDedupeKey(w);
-        let seen = this.warnedCompilationMessagesBySession.get(sessionId);
-        if (!seen) {
-          seen = new Set<string>();
-          this.warnedCompilationMessagesBySession.set(sessionId, seen);
-        }
+        const seen = this.runtimes.get(sessionId).warnedCompilationMessages;
         if (seen.has(key)) continue;
         seen.add(key);
       }
@@ -891,12 +791,15 @@ export class KoryManager implements WorkerPipelineHost {
       throw new Error('Session became busy before its background-process completion drained');
     }
     const wakeAbort = new AbortController();
-    this.managerAbortBySession.set(sessionId, wakeAbort);
+    this.runtimes.get(sessionId).abort = wakeAbort;
     try {
       await this.wakeForProcessCompletionsWithClaim(sessionId, events);
     } finally {
-      if (this.managerAbortBySession.get(sessionId) === wakeAbort) {
-        this.managerAbortBySession.delete(sessionId);
+      if (this.runtimes.peek(sessionId)?.abort === wakeAbort) {
+        {
+          const r = this.runtimes.peek(sessionId);
+          if (r) r.abort = undefined;
+        }
       }
       this.endSessionRun(sessionId);
     }
@@ -918,7 +821,7 @@ export class KoryManager implements WorkerPipelineHost {
     if (!resumed.handle) {
       throw new Error(`Session ${sessionId} process wait resumed without an execution handle`);
     }
-    const ownerController = this.managerAbortBySession.get(sessionId);
+    const ownerController = this.runtimes.peek(sessionId)?.abort;
     if (!ownerController) {
       throw new Error(`Session ${sessionId} process wake has no cancellation owner`);
     }
@@ -1205,7 +1108,7 @@ export class KoryManager implements WorkerPipelineHost {
   }
 
   setYoloMode(enabled: boolean, sessionId?: string) {
-    if (sessionId) this.yoloModeMirrorBySession.set(sessionId, enabled);
+    if (sessionId) this.runtimes.get(sessionId).yoloModeMirror = enabled;
     koryLog.info({ enabled, sessionId }, 'YOLO mode mirror updated');
   }
 
@@ -1326,7 +1229,7 @@ export class KoryManager implements WorkerPipelineHost {
     // nothing to abort while archived-session/lifecycle/provider preflight is
     // still in progress.
     const abort = new AbortController();
-    this.compactingSessions.set(input.sessionId, abort);
+    this.runtimes.get(input.sessionId).compacting = abort;
     let handle: ManagerRunHandle | null = null;
     try {
       if (this.sessions && !(await this.getActiveSession(input.sessionId))) {
@@ -1356,8 +1259,11 @@ export class KoryManager implements WorkerPipelineHost {
       }
       throw error;
     } finally {
-      if (this.compactingSessions.get(input.sessionId) === abort) {
-        this.compactingSessions.delete(input.sessionId);
+      if (this.runtimes.peek(input.sessionId)?.compacting === abort) {
+        {
+          const r = this.runtimes.peek(input.sessionId);
+          if (r) r.compacting = undefined;
+        }
       }
       this.endSessionRun(input.sessionId);
     }
@@ -1595,7 +1501,10 @@ export class KoryManager implements WorkerPipelineHost {
       );
       // A fresh checkpoint resets the automatic-failure backoff for both
       // manual and automatic compactions.
-      this.lastAutoCompactFailureBySession.delete(input.sessionId);
+      {
+        const r = this.runtimes.peek(input.sessionId);
+        if (r) r.lastAutoCompactFailureAt = undefined;
+      }
       return { compactionId, sourceMessages: conversational.length, checkpointTokens };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1973,7 +1882,7 @@ export class KoryManager implements WorkerPipelineHost {
     reasoningLevel: string | undefined,
     deps: { sleep?: (ms: number) => Promise<void>; defer?: boolean } = {},
   ): void {
-    if (isAutoCompactCoolingDown(this.lastAutoCompactFailureBySession.get(sessionId))) {
+    if (isAutoCompactCoolingDown(this.runtimes.peek(sessionId)?.lastAutoCompactFailureAt)) {
       koryLog.debug(
         { sessionId },
         'Skipping automatic compaction while a recent failure cools down',
@@ -2012,9 +1921,12 @@ export class KoryManager implements WorkerPipelineHost {
           return;
         }
         if (outcome.ok) {
-          this.lastAutoCompactFailureBySession.delete(sessionId);
+          {
+            const r = this.runtimes.peek(sessionId);
+            if (r) r.lastAutoCompactFailureAt = undefined;
+          }
         } else {
-          this.lastAutoCompactFailureBySession.set(sessionId, Date.now());
+          this.runtimes.get(sessionId).lastAutoCompactFailureAt = Date.now();
           const msg =
             outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
           koryLog.warn(
@@ -2810,7 +2722,7 @@ export class KoryManager implements WorkerPipelineHost {
       else throw new Error(`Skill collision for ${collision.name} was not resolved.`);
       if (collisionChoices[collision.name] !== choices[collision.name]) updated = true;
     }
-    this.skillCollisionChoicesBySession.set(sessionId, choices);
+    this.runtimes.get(sessionId).skillCollisionChoices = choices;
 
     if (updated) {
       const settings = loadAgentSettings(workingDirectory);
@@ -2843,7 +2755,7 @@ export class KoryManager implements WorkerPipelineHost {
       return null;
     }
     const controller = new AbortController();
-    this.managerAbortBySession.set(sessionId, controller);
+    this.runtimes.get(sessionId).abort = controller;
     let handle: ManagerRunHandle | null = null;
     let orphanedRunDetected = false;
     try {
@@ -2875,9 +2787,9 @@ export class KoryManager implements WorkerPipelineHost {
         // is not permanently blocked by a stale "active work" conflict.
         orphanedRunDetected =
           recoverOrphanedRun &&
-          !this.sessionMutationBarriers.has(sessionId) &&
-          this.managerAbortBySession.get(sessionId) === controller &&
-          !this.compactingSessions.has(sessionId) &&
+          !(this.runtimes.peek(sessionId)?.mutationBarrier === true) &&
+          this.runtimes.peek(sessionId)?.abort === controller &&
+          !(this.runtimes.peek(sessionId)?.compacting !== undefined) &&
           !this.workers.hasSessionWorkers(sessionId) &&
           this.hasDurableSessionRun(sessionId);
         if (!orphanedRunDetected) return null;
@@ -2886,8 +2798,11 @@ export class KoryManager implements WorkerPipelineHost {
       }
     } finally {
       if (!handle || controller.signal.aborted) {
-        if (this.managerAbortBySession.get(sessionId) === controller) {
-          this.managerAbortBySession.delete(sessionId);
+        if (this.runtimes.peek(sessionId)?.abort === controller) {
+          {
+            const r = this.runtimes.peek(sessionId);
+            if (r) r.abort = undefined;
+          }
         }
         this.endSessionRun(sessionId);
       }
@@ -2943,8 +2858,11 @@ export class KoryManager implements WorkerPipelineHost {
         throw error;
       } finally {
         this.isProcessing = false;
-        if (this.managerAbortBySession.get(admission.sessionId) === controller) {
-          this.managerAbortBySession.delete(admission.sessionId);
+        if (this.runtimes.peek(admission.sessionId)?.abort === controller) {
+          {
+            const r = this.runtimes.peek(admission.sessionId);
+            if (r) r.abort = undefined;
+          }
         }
         this.endSessionRun(admission.sessionId);
         await settleTerminal();
@@ -2974,8 +2892,11 @@ export class KoryManager implements WorkerPipelineHost {
       try {
         await this.finishRunAndProject(handle, outcome, reason, workflowState);
       } finally {
-        if (this.managerAbortBySession.get(admission.sessionId) === controller) {
-          this.managerAbortBySession.delete(admission.sessionId);
+        if (this.runtimes.peek(admission.sessionId)?.abort === controller) {
+          {
+            const r = this.runtimes.peek(admission.sessionId);
+            if (r) r.abort = undefined;
+          }
         }
         this.endSessionRun(admission.sessionId);
         await settleTerminal();
@@ -2988,7 +2909,7 @@ export class KoryManager implements WorkerPipelineHost {
     if (
       !record ||
       admission.sessionId.length === 0 ||
-      this.managerAbortBySession.get(admission.sessionId) !== record.controller
+      this.runtimes.peek(admission.sessionId)?.abort !== record.controller
     ) {
       throw new Error('Session turn admission is invalid, forged, or already consumed');
     }
@@ -3259,7 +3180,7 @@ export class KoryManager implements WorkerPipelineHost {
       throw new Error('Session turn command ledger is unavailable');
     }
     const controller = new AbortController();
-    this.managerAbortBySession.set(input.sessionId, controller);
+    this.runtimes.get(input.sessionId).abort = controller;
     let handle: ManagerRunHandle | null = null;
     let admission: SessionTurnAdmission | null = null;
     let command: SessionTurnCommandRecord | null = null;
@@ -3321,8 +3242,11 @@ export class KoryManager implements WorkerPipelineHost {
       throw error;
     } finally {
       if (!admission) {
-        if (this.managerAbortBySession.get(input.sessionId) === controller) {
-          this.managerAbortBySession.delete(input.sessionId);
+        if (this.runtimes.peek(input.sessionId)?.abort === controller) {
+          {
+            const r = this.runtimes.peek(input.sessionId);
+            if (r) r.abort = undefined;
+          }
         }
         this.endSessionRun(input.sessionId);
       }
@@ -3439,8 +3363,11 @@ export class KoryManager implements WorkerPipelineHost {
       }
       if (terminalError) throw terminalError;
     } finally {
-      if (this.managerAbortBySession.get(sessionId) === intentAbort) {
-        this.managerAbortBySession.delete(sessionId);
+      if (this.runtimes.peek(sessionId)?.abort === intentAbort) {
+        {
+          const r = this.runtimes.peek(sessionId);
+          if (r) r.abort = undefined;
+        }
       }
       this.endSessionRun(sessionId);
       // Nothing owned by this turn may mutate session state after publication:
@@ -3541,9 +3468,9 @@ export class KoryManager implements WorkerPipelineHost {
       await this.sessions?.update(sessionId, { planNoteId: planNote.id });
     }
     const configuredCollisionChoices = workflowSettings.skillCollisionChoices ?? {};
-    if (goalContext) this.goalContextBySession.set(sessionId, goalContext);
+    if (goalContext) this.runtimes.get(sessionId).goalContext = goalContext;
     const initialContract = createTaskContract(userMessage, {
-      goalContext: goalContext ?? this.goalContextBySession.get(sessionId),
+      goalContext: goalContext ?? this.runtimes.peek(sessionId)?.goalContext,
     });
     const discoveryQuestions = buildIntentDiscoveryBatch(
       userMessage,
@@ -3597,8 +3524,14 @@ export class KoryManager implements WorkerPipelineHost {
     if (!provider) {
       await this.updateWorkflowState(sessionId, 'idle');
       this.emitError(sessionId, this.getModelConfigurationError(preferredModel));
-      this.skillCollisionChoicesBySession.delete(sessionId);
-      this.goalContextBySession.delete(sessionId);
+      {
+        const r = this.runtimes.peek(sessionId);
+        if (r) r.skillCollisionChoices = undefined;
+      }
+      {
+        const r = this.runtimes.peek(sessionId);
+        if (r) r.goalContext = undefined;
+      }
       this.stopHeartbeat(sessionId);
       this.isProcessing = false;
       this.processCompletionCoordinator.notifySessionIdle(sessionId);
@@ -3620,15 +3553,21 @@ export class KoryManager implements WorkerPipelineHost {
         sessionId,
         spendGate.reason ?? 'A configured spend limit blocked this request.',
       );
-      this.skillCollisionChoicesBySession.delete(sessionId);
-      this.goalContextBySession.delete(sessionId);
+      {
+        const r = this.runtimes.peek(sessionId);
+        if (r) r.skillCollisionChoices = undefined;
+      }
+      {
+        const r = this.runtimes.peek(sessionId);
+        if (r) r.goalContext = undefined;
+      }
       this.stopHeartbeat(sessionId);
       this.isProcessing = false;
       this.processCompletionCoordinator.notifySessionIdle(sessionId);
       await this.runLifecycle.finish(handle, 'fail', 'spend_policy_blocked');
       return;
     }
-    this.providerPreflightBySession.set(sessionId, { routing, provider });
+    this.runtimes.get(sessionId).providerPreflight = { routing, provider };
 
     // Broadcast the user message to relay guests
     collaborationManager.broadcastEvent({ type: 'chat', from: 'human', content: userMessage });
@@ -3682,7 +3621,7 @@ export class KoryManager implements WorkerPipelineHost {
           ? { message: err.message, name: err.name, stack: err.stack, cause: err.cause }
           : { raw: String(err), typeof: typeof err };
       const aborted =
-        (this.managerAbortBySession.get(sessionId)?.signal.aborted ?? false) ||
+        (this.runtimes.peek(sessionId)?.abort?.signal.aborted ?? false) ||
         (err instanceof DOMException && err.name === 'AbortError');
       if (aborted) {
         // A user/agent stop is not a failure. Record a cancel, not a Kory error.
@@ -3712,10 +3651,19 @@ export class KoryManager implements WorkerPipelineHost {
         }
       }
     } finally {
-      this.providerPreflightBySession.delete(sessionId);
+      {
+        const r = this.runtimes.peek(sessionId);
+        if (r) r.providerPreflight = undefined;
+      }
       if (collaborationToolPolicy) clearCollaborationToolPolicy(sessionId);
-      this.skillCollisionChoicesBySession.delete(sessionId);
-      this.goalContextBySession.delete(sessionId);
+      {
+        const r = this.runtimes.peek(sessionId);
+        if (r) r.skillCollisionChoices = undefined;
+      }
+      {
+        const r = this.runtimes.peek(sessionId);
+        if (r) r.goalContext = undefined;
+      }
       this.stopHeartbeat(sessionId);
       this.isProcessing = false;
     }
@@ -3843,12 +3791,12 @@ export class KoryManager implements WorkerPipelineHost {
       } catch {
         cost = 0;
       }
-      const prev = this.pendingWorkerUsage.get(sessionId);
-      this.pendingWorkerUsage.set(sessionId, {
+      const prev = this.runtimes.peek(sessionId)?.pendingWorkerUsage;
+      this.runtimes.get(sessionId).pendingWorkerUsage = {
         tokensIn: (prev?.tokensIn ?? 0) + tokensIn,
         tokensOut: (prev?.tokensOut ?? 0) + tokensOut,
         cost: (prev?.cost ?? 0) + cost,
-      });
+      };
     } catch {
       // Accounting must never break delegation.
     }
@@ -3872,7 +3820,7 @@ export class KoryManager implements WorkerPipelineHost {
     // Antigravity/CLI manager turn driving kory__delegate_to_worker) is already
     // excluded from concurrent mutation. Reuse that exclusion instead of trying
     // to acquire a nested barrier, which would always fail and block delegation.
-    const barrierAlreadyHeld = this.sessionMutationBarriers.has(sessionId);
+    const barrierAlreadyHeld = (this.runtimes.peek(sessionId)?.mutationBarrier === true);
     const lifecycleLease = managerOwnsLifecycle || barrierAlreadyHeld
       ? null
       : this.tryAcquireSessionMutationBarrier(sessionId);
@@ -3893,10 +3841,8 @@ export class KoryManager implements WorkerPipelineHost {
       if (before.decision === 'deny') {
         return `Delegation denied by workflow hook: ${before.reason ?? 'no reason supplied'}`;
       }
-      this.sessionWorkerStartCounts.set(
-        sessionId,
-        (this.sessionWorkerStartCounts.get(sessionId) ?? 0) + 1,
-      );
+      const workerRuntime = this.runtimes.get(sessionId);
+      workerRuntime.workerStartCount = (workerRuntime.workerStartCount ?? 0) + 1;
       const sessionRoot = await this.resolveSessionWorkingDirectory(sessionId);
       const managerRouting = this.resolveActiveRouting(
         preferredModel,
@@ -3972,7 +3918,7 @@ export class KoryManager implements WorkerPipelineHost {
     preferredModel?: string,
     signal?: AbortSignal,
   ): Promise<void> {
-    const pending = this.titlePromisesBySession.get(sessionId);
+    const pending = this.runtimes.peek(sessionId)?.titlePromise;
     if (pending) return pending;
     const work = this.generateInitialSessionTitle(
       sessionId,
@@ -3980,11 +3926,14 @@ export class KoryManager implements WorkerPipelineHost {
       preferredModel,
       signal,
     ).finally(() => {
-      if (this.titlePromisesBySession.get(sessionId) === work) {
-        this.titlePromisesBySession.delete(sessionId);
+      if (this.runtimes.peek(sessionId)?.titlePromise === work) {
+        {
+          const r = this.runtimes.peek(sessionId);
+          if (r) r.titlePromise = undefined;
+        }
       }
     });
-    this.titlePromisesBySession.set(sessionId, work);
+    this.runtimes.get(sessionId).titlePromise = work;
     return work;
   }
 
@@ -3995,12 +3944,12 @@ export class KoryManager implements WorkerPipelineHost {
     signal?: AbortSignal,
   ): Promise<void> {
     if (!this.sessions) return;
-    if (this.erasedSessions.has(sessionId) || this.sessionMutationBarriers.has(sessionId)) {
+    if (this.erasedSessions.has(sessionId) || (this.runtimes.peek(sessionId)?.mutationBarrier === true)) {
       return;
     }
     const controller = new AbortController();
     const titleSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
-    this.titleGenerationBySession.set(sessionId, controller);
+    this.runtimes.get(sessionId).titleAbort = controller;
     try {
       const session = await this.getActiveSession(sessionId);
       if (!session || titleSignal.aborted || this.erasedSessions.has(sessionId)) return;
@@ -4042,15 +3991,18 @@ export class KoryManager implements WorkerPipelineHost {
         if (!current || current.title !== SESSION.DEFAULT_TITLE || titleSignal.aborted) return;
         const updated = await this.sessions.update(sessionId, { title }, current.version);
         if (updated) {
-          this.sessionUpdatedDuringTurn.add(sessionId);
+          this.runtimes.get(sessionId).updatedDuringTurn = true;
           this.events.emit(sessionId, 'session.updated', { session: updated });
           return;
         }
       }
       throw new Error('Could not save the session title before responding. Please retry.');
     } finally {
-      if (this.titleGenerationBySession.get(sessionId) === controller) {
-        this.titleGenerationBySession.delete(sessionId);
+      if (this.runtimes.peek(sessionId)?.titleAbort === controller) {
+        {
+          const r = this.runtimes.peek(sessionId);
+          if (r) r.titleAbort = undefined;
+        }
       }
     }
   }
@@ -4149,7 +4101,7 @@ export class KoryManager implements WorkerPipelineHost {
     if (!session) throw new Error('Session is missing or archived.');
     const updated = await this.sessions.update(sessionId, { title: cleaned }, session.version);
     if (!updated) throw new Error('Session changed while renaming. Retry with the current title.');
-    this.sessionUpdatedDuringTurn.add(sessionId);
+    this.runtimes.get(sessionId).updatedDuringTurn = true;
     this.events.emit(sessionId, 'session.updated', { session: updated });
     return updated.title;
   }
@@ -4211,7 +4163,7 @@ export class KoryManager implements WorkerPipelineHost {
             content: redactSecretsInText(typeof message.content === 'string' ? message.content : JSON.stringify(message.content), 8_000),
           })),
           producer,
-          manager: this.managerRoutingBySession.get(sessionId),
+          manager: this.runtimes.peek(sessionId)?.managerRouting,
           builders: [...this.agentThreads.values()]
             .filter((thread) => thread.sessionId === sessionId && thread.toolRole === 'worker')
             .map((thread) => ({ provider: thread.providerName, model: thread.modelId })),
@@ -4219,7 +4171,7 @@ export class KoryManager implements WorkerPipelineHost {
         }) }],
         tools: [], allowedToolNames: [], maxTokens: 1024,
         workingDirectory, sessionId, signal: decisionSignal,
-        harnessRole: producer.model === this.managerRoutingBySession.get(sessionId)?.model ? 'manager' : 'worker',
+        harnessRole: producer.model === this.runtimes.peek(sessionId)?.managerRouting?.model ? 'manager' : 'worker',
         interactionMode: 'plan', forceFreshConversation: true,
         sandbox: SANDBOX_PRESETS.readonly,
       }, { signal: decisionSignal, maxRetries: 0 });
@@ -4305,7 +4257,7 @@ export class KoryManager implements WorkerPipelineHost {
       return { passed: true, skipped: true, feedback: 'Critic disabled by user.' };
     }
     if (criticMode === 'auto' && !reviewOptions?.autoDecisionMade) {
-      const producer = producerIdentity ?? this.managerRoutingBySession.get(sessionId);
+      const producer = producerIdentity ?? this.runtimes.peek(sessionId)?.managerRouting;
       // Without a producer identity or a live adapter the ask cannot happen.
       // Fall through to the routing checks instead of returning a pass: they
       // fail closed when nothing independent can review the work.
@@ -4314,7 +4266,7 @@ export class KoryManager implements WorkerPipelineHost {
           ? this.agentThreads.get(skillReviewContext.producerAgentId) : undefined;
         const decision = await this.askForCriticDecision(
           sessionId, workerMessages ?? [], task ?? 'Review completed work', reviewDirectory, { model: producer.model, provider: producer.provider },
-          producerThread?.ctx.signal ?? this.managerAbortBySession.get(sessionId)?.signal,
+          producerThread?.ctx.signal ?? this.runtimes.peek(sessionId)?.abort?.signal,
         );
         if (!decision.review) {
           if (producerThread?.ctx.deferResponse) {
@@ -4358,7 +4310,7 @@ export class KoryManager implements WorkerPipelineHost {
             reviewDirectory,
           )
         : { model: undefined, provider: undefined };
-    const managerIdentity = this.managerRoutingBySession.get(sessionId);
+    const managerIdentity = this.runtimes.peek(sessionId)?.managerRouting;
     const routing = this.resolveIndependentRouting(
       producerRouting.model,
       producerRouting.provider,
@@ -4504,7 +4456,7 @@ export class KoryManager implements WorkerPipelineHost {
       taskContract: reviewContract,
       contextPaths: this.config.contextPaths,
       skillSelection: {
-        collisionChoices: this.skillCollisionChoicesBySession.get(sessionId),
+        collisionChoices: this.runtimes.peek(sessionId)?.skillCollisionChoices,
         ...skillBudgetSelection(reviewDirectory, sessionId),
       },
     });
@@ -4571,7 +4523,7 @@ export class KoryManager implements WorkerPipelineHost {
       };
     }
     const settingsRoot = await this.resolveSessionWorkingDirectory(sessionId);
-    const ownerSignal = this.managerAbortBySession.get(sessionId)?.signal;
+    const ownerSignal = this.runtimes.peek(sessionId)?.abort?.signal;
     const reviewSignal = ownerSignal
       ? AbortSignal.any([ownerSignal, criticAbort.signal])
       : criticAbort.signal;
@@ -5052,7 +5004,7 @@ export class KoryManager implements WorkerPipelineHost {
       return answer === 'Allow once';
     }
     const routing =
-      this.managerRoutingBySession.get(sessionId) ??
+      this.runtimes.peek(sessionId)?.managerRouting ??
       this.resolveActiveRouting(undefined, 'general', true, objective, undefined, root);
     const provider = await this.providers.resolveProvider(routing.model, routing.provider);
     if (!provider) return false;
@@ -5291,17 +5243,23 @@ export class KoryManager implements WorkerPipelineHost {
       Number.isSafeInteger(contextWindow) &&
       contextWindow > 0
     ) {
-      this.contextWindowOverrideBySession.set(sessionId, contextWindow);
+      this.runtimes.get(sessionId).contextWindowOverride = contextWindow;
     } else {
-      this.contextWindowOverrideBySession.delete(sessionId);
+      {
+        const r = this.runtimes.peek(sessionId);
+        if (r) r.contextWindowOverride = undefined;
+      }
     }
     koryLog.debug(
       { sessionId, reasoningLevel, preferredModel, fastMode },
       'Entering handleDirectly',
     );
     const directWorkingDirectory = await this.resolveSessionWorkingDirectory(sessionId);
-    const preflight = this.providerPreflightBySession.get(sessionId);
-    if (preflight) this.providerPreflightBySession.delete(sessionId);
+    const preflight = this.runtimes.peek(sessionId)?.providerPreflight;
+    if (preflight) {
+      const runtime = this.runtimes.peek(sessionId);
+      if (runtime) runtime.providerPreflight = undefined;
+    }
     let routing =
       preflight?.routing ??
       this.resolveActiveRouting(
@@ -5334,7 +5292,7 @@ export class KoryManager implements WorkerPipelineHost {
     // Normal human/Goal turns preflight immediately after their authoritative
     // routing pass. Recovery wakes enter here directly, so enforce the same
     // boundary before they can start another paid provider stream.
-    if (!this.managerRoutingBySession.has(sessionId)) {
+    if (!(this.runtimes.peek(sessionId)?.managerRouting !== undefined)) {
       const spendGate = await checkAndEnforceCaps(sessionId);
       if (spendGate.reason && spendGate.canProceed) {
         this.emitWSMessage(sessionId, 'system.info', {
@@ -5351,14 +5309,14 @@ export class KoryManager implements WorkerPipelineHost {
         await this.runLifecycle.finish(handle, 'fail', 'spend_policy_blocked');
         return;
       }
-      this.managerRoutingBySession.set(sessionId, {
+      this.runtimes.get(sessionId).managerRouting = {
         model: routing.model,
         provider: providerName,
-      });
+      };
     }
 
-    const abort = this.managerAbortBySession.get(sessionId) ?? new AbortController();
-    this.managerAbortBySession.set(sessionId, abort);
+    const abort = this.runtimes.peek(sessionId)?.abort ?? new AbortController();
+    this.runtimes.get(sessionId).abort = abort;
     this.assertRunHandleActive(handle);
     // The assistant message id is the turn's identity from its first event. Every
     // manager stream event is stamped with it by the emitter (Invariant 2).
@@ -5428,7 +5386,7 @@ export class KoryManager implements WorkerPipelineHost {
         undefined,
         undefined,
         undefined,
-        this.contextWindowOverrideBySession.get(sessionId),
+        this.runtimes.peek(sessionId)?.contextWindowOverride,
       );
 
       const directGit = new GitManager(directWorkingDirectory);
@@ -5441,8 +5399,8 @@ export class KoryManager implements WorkerPipelineHost {
         activeProvider: providerName,
         activeModel: routing.model,
         reasoningLevel,
-        goalId: this.goalContextBySession.get(sessionId)?.goalId,
-        goalItemId: this.goalContextBySession.get(sessionId)?.itemId,
+        goalId: this.runtimes.peek(sessionId)?.goalContext?.goalId,
+        goalItemId: this.runtimes.peek(sessionId)?.goalContext?.itemId,
         workingDirectory: directWorkingDirectory,
         requiredWorkspaceRoot: sessionWorkspaceOwnership(directWorkingDirectory)?.checkout,
         allowedPaths: [],
@@ -5596,9 +5554,10 @@ export class KoryManager implements WorkerPipelineHost {
       // is unfinished — it must never be reported as a completion.
       let executedToolCallCount = 0;
       let delegatedWorkerCount = 0;
-      const workerStartBaseline = this.sessionWorkerStartCounts.get(sessionId) ?? 0;
+      const workerStartBaseline = this.runtimes.peek(sessionId)?.workerStartCount ?? 0;
+      // Clamped: an erasure mid-turn disposes the runtime and resets the count.
       const bridgeDelegationsThisRun = () =>
-        (this.sessionWorkerStartCounts.get(sessionId) ?? 0) - workerStartBaseline;
+        Math.max(0, (this.runtimes.peek(sessionId)?.workerStartCount ?? 0) - workerStartBaseline);
       let failedCriticEvidenceTool = false;
       let consequentialCriticTool = false;
       let multiModeRetryIssued = false;
@@ -5831,9 +5790,9 @@ export class KoryManager implements WorkerPipelineHost {
           hasOpenSessionTasks =
             (active ?? []).some(
               (t) => t.sessionId === sessionId && (t.status === 'active' || t.status === 'pending'),
-            ) || this.goalContextBySession.get(sessionId) !== undefined;
+            ) || this.runtimes.peek(sessionId)?.goalContext !== undefined;
         } catch {
-          hasOpenSessionTasks = this.goalContextBySession.get(sessionId) !== undefined;
+          hasOpenSessionTasks = this.runtimes.peek(sessionId)?.goalContext !== undefined;
         }
         if (!hasOpenSessionTasks && lastTurnToolCallCount > 0) hasOpenSessionTasks = true;
       }
@@ -6008,7 +5967,7 @@ export class KoryManager implements WorkerPipelineHost {
         consequentialToolActivity: consequentialCriticTool,
         managerRequestedReview: autoCriticDecision?.review,
         managerReviewReason: autoCriticDecision?.reason,
-        purpose: this.goalContextBySession.has(sessionId) ? 'goal' : 'response',
+        purpose: (this.runtimes.peek(sessionId)?.goalContext !== undefined) ? 'goal' : 'response',
       });
       // Critic Auto stays silent when it skips: no message when no review runs.
       // Only announce when a review is actually required and will run below.
@@ -6173,7 +6132,7 @@ export class KoryManager implements WorkerPipelineHost {
       // owns the chat. Never persist a late provider answer into it. The
       // ordinary stop path keeps the same controller in place through settle,
       // so partial answers from a normal stop still persist.
-      const stillOwner = this.managerAbortBySession.get(sessionId) === abort;
+      const stillOwner = this.runtimes.peek(sessionId)?.abort === abort;
       if (this.messages && toPersist && stillOwner) {
         finalMessageId = turnMessageId;
         // Persist the provider-reported token usage and computed cost with the
@@ -6181,8 +6140,11 @@ export class KoryManager implements WorkerPipelineHost {
         // reflect real spend — not just in the demo. Worker/subagent spend
         // accumulated via recordWorkerUsage is folded in here so the chat
         // total includes subagents.
-        const workerPending = this.pendingWorkerUsage.get(sessionId);
-        this.pendingWorkerUsage.delete(sessionId);
+        const workerPending = this.runtimes.peek(sessionId)?.pendingWorkerUsage;
+        {
+          const r = this.runtimes.peek(sessionId);
+          if (r) r.pendingWorkerUsage = undefined;
+        }
         const totalTokensIn = tokensIn + (workerPending?.tokensIn ?? 0);
         const totalTokensOut = tokensOut + (workerPending?.tokensOut ?? 0);
         const assistantCost = usageKnown
@@ -6316,8 +6278,8 @@ export class KoryManager implements WorkerPipelineHost {
       // manual "continue" — or the scheduled auto-followup — resumes with
       // context instead of a silent done.
       let needsCapContinuation = false;
-      if (capIncomplete && stillOwner && !this.autoContinuationIssuedBySession.has(sessionId)) {
-        this.autoContinuationIssuedBySession.add(sessionId);
+      if (capIncomplete && stillOwner && !(this.runtimes.peek(sessionId)?.autoContinuationIssued === true)) {
+        this.runtimes.get(sessionId).autoContinuationIssued = true;
         needsCapContinuation = true;
         try {
           if (this.messages) {
@@ -6343,7 +6305,10 @@ export class KoryManager implements WorkerPipelineHost {
       const cancelledAtCommit = observeCancellation();
       if (needsCapContinuation && cancelledAtCommit) {
         // A stop wins over auto-continuation; allow a future cap to retry.
-        this.autoContinuationIssuedBySession.delete(sessionId);
+        {
+          const r = this.runtimes.peek(sessionId);
+          if (r) r.autoContinuationIssued = false;
+        }
         needsCapContinuation = false;
       }
       const terminalStatus =
@@ -6392,7 +6357,10 @@ export class KoryManager implements WorkerPipelineHost {
             interactionMode: followupMode,
             fastMode: followupFast,
           }).catch((error) => {
-            this.autoContinuationIssuedBySession.delete(sessionId);
+            {
+              const r = this.runtimes.peek(sessionId);
+              if (r) r.autoContinuationIssued = false;
+            }
             const msg = error instanceof Error ? error.message : String(error);
             koryLog.warn({ error, sessionId }, 'Automatic turn-cap continuation failed');
             this.emitError(
@@ -6443,7 +6411,7 @@ export class KoryManager implements WorkerPipelineHost {
       if (
         !stoppedByUser &&
         autoSettings.autoCompactEnabled !== false &&
-        !isAutoCompactCoolingDown(this.lastAutoCompactFailureBySession.get(sessionId)) &&
+        !isAutoCompactCoolingDown(this.runtimes.peek(sessionId)?.lastAutoCompactFailureAt) &&
         pressure.shouldCompact
       ) {
         koryLog.debug({ sessionId, ...pressure }, 'Automatic compaction context-pressure decision');
@@ -6452,8 +6420,14 @@ export class KoryManager implements WorkerPipelineHost {
     } finally {
       // After the deferred stream.delta above, so that delta is stamped too.
       this.events.transcript.endTurn(sessionId, turnMessageId);
-      this.managerAbortBySession.delete(sessionId);
-      this.managerRoutingBySession.delete(sessionId);
+      {
+        const r = this.runtimes.peek(sessionId);
+        if (r) r.abort = undefined;
+      }
+      {
+        const r = this.runtimes.peek(sessionId);
+        if (r) r.managerRouting = undefined;
+      }
       await this.updateWorkflowState(sessionId, 'idle');
       this.processCompletionCoordinator.notifySessionIdle(sessionId);
     }
@@ -6556,12 +6530,12 @@ export class KoryManager implements WorkerPipelineHost {
     // surfacing the raw 413 dump to the user. Deferred context (skills via
     // load_skill_detail, history via fetch_context, tools via request_tools)
     // stays reachable on demand at every level.
-    const shrinkHintKey = `${sessionId} ${provider.name} ${modelId}`;
+    const shrinkHintKey = `${provider.name} ${modelId}`;
     const shrink = Math.max(
       0,
       Math.min(
         3,
-        Math.floor(shrinkLevelParam ?? this.contextShrinkHintBySession.get(shrinkHintKey) ?? 0),
+        Math.floor(shrinkLevelParam ?? this.runtimes.peek(sessionId)?.contextShrinkHints.get(shrinkHintKey) ?? 0),
       ),
     );
     const reservedOutputByShrink = [MANAGER_OUTPUT_TOKEN_LIMIT, 8192, 4096, 2048];
@@ -6632,15 +6606,15 @@ export class KoryManager implements WorkerPipelineHost {
       requireVerifiedContextWindow: true,
       // The composer's context-window budget scales skill budgeting and the
       // capacity warnings; compilePrompt clamps it against the verified window.
-      contextWindowOverride: this.contextWindowOverrideBySession.get(sessionId),
+      contextWindowOverride: this.runtimes.peek(sessionId)?.contextWindowOverride,
       workingDirectory: promptRoot,
       sessionTitle: (await this.getActiveSession(sessionId))?.title,
       taskContract: createTaskContract(taskGoal, {
-        goalContext: this.goalContextBySession.get(sessionId),
+        goalContext: this.runtimes.peek(sessionId)?.goalContext,
       }),
       contextPaths: this.config.contextPaths,
       skillSelection: {
-        collisionChoices: this.skillCollisionChoicesBySession.get(sessionId),
+        collisionChoices: this.runtimes.peek(sessionId)?.skillCollisionChoices,
         pins: [
           ...(shrink >= 3 ? [] : alwaysPinnedSkills(interactionMode)),
           ...(shrink < 3 && settings.criticGateEnabled && resolveCriticMode(settings) === 'auto'
@@ -6673,8 +6647,8 @@ export class KoryManager implements WorkerPipelineHost {
       systemPrompt +=
         '\n\n## Critic Auto selection\nYou decide whether this response merits independent Critic review. Call request_critic_review only when you can state a concrete concern that independent inspection would help resolve, such as material factual uncertainty, high-impact advice, or a claim whose correctness is not clear from the available evidence. Do NOT request review merely because the user says “test”, asks whether you are ready/working, or wants a brief acknowledgement; those are not review requests by themselves. Host-enforced reviews for changes, delegated work, failed or consequential tool activity, goal completion, and generated images still run regardless of this choice.';
     }
-    if (this.promptManifestHashBySession.get(sessionId) !== managerCompilation.manifest.hash) {
-      this.promptManifestHashBySession.set(sessionId, managerCompilation.manifest.hash);
+    if (this.runtimes.peek(sessionId)?.promptManifestHash !== managerCompilation.manifest.hash) {
+      this.runtimes.get(sessionId).promptManifestHash = managerCompilation.manifest.hash;
       const manifest = managerCompilation.manifest;
       // Manifest provenance is operational diagnostics, not conversation. Keep
       // it in structured logs; surfacing its path/hash payload in the feed made
@@ -6882,7 +6856,7 @@ export class KoryManager implements WorkerPipelineHost {
       0,
       false,
       contextBreakdown,
-      this.contextWindowOverrideBySession.get(sessionId),
+      this.runtimes.peek(sessionId)?.contextWindowOverride,
     );
 
     // Context self-awareness: tell the model what its window looks like and
@@ -6978,7 +6952,7 @@ export class KoryManager implements WorkerPipelineHost {
               },
               usage.cachedInputTokens,
               usage.estimated,
-              this.contextWindowOverrideBySession.get(sessionId),
+              this.runtimes.peek(sessionId)?.contextWindowOverride,
               usage.cacheWriteInputTokens,
             ),
           loopDetected: (detection: OutputLoopDetection) => {
@@ -7010,7 +6984,7 @@ export class KoryManager implements WorkerPipelineHost {
           },
         },
         cancel: (reason) => {
-          const controller = this.managerAbortBySession.get(sessionId);
+          const controller = this.runtimes.peek(sessionId)?.abort;
           if (controller && !controller.signal.aborted) controller.abort(reason);
         },
         request: {
@@ -7083,10 +7057,10 @@ export class KoryManager implements WorkerPipelineHost {
         shrink + 1,
         imageInputMode,
       );
-      if (retried.success) this.contextShrinkHintBySession.set(shrinkHintKey, shrink + 1);
+      if (retried.success) this.runtimes.get(sessionId).contextShrinkHints.set(shrinkHintKey, shrink + 1);
       return retried;
     }
-    if (!failure && shrink > 0) this.contextShrinkHintBySession.set(shrinkHintKey, shrink);
+    if (!failure && shrink > 0) this.runtimes.get(sessionId).contextShrinkHints.set(shrinkHintKey, shrink);
 
     const {
       content: assistantContent,
@@ -7510,7 +7484,7 @@ export class KoryManager implements WorkerPipelineHost {
       sessionId,
     );
 
-    const goalContext = this.goalContextBySession.get(sessionId) ?? taskContract?.goalContext;
+    const goalContext = this.runtimes.peek(sessionId)?.goalContext ?? taskContract?.goalContext;
     const resolvedReasoningLevel =
       reasoningLevel === 'auto' ? determineAutoReasoningLevel(userMessage) : reasoningLevel;
     const ctx: ToolContext = {
@@ -7648,7 +7622,7 @@ export class KoryManager implements WorkerPipelineHost {
       },
       contextPaths: this.config.contextPaths,
       skillSelection: {
-        collisionChoices: this.skillCollisionChoicesBySession.get(sessionId),
+        collisionChoices: this.runtimes.peek(sessionId)?.skillCollisionChoices,
         ...skillBudgetSelection(workerWorkingDirectory, sessionId),
       },
     });
@@ -7886,7 +7860,7 @@ export class KoryManager implements WorkerPipelineHost {
   ) {
     return applyContextWindowOverride(
       resolveTrustedContextWindow(modelId, providerName),
-      this.contextWindowOverrideBySession.get(sessionId),
+      this.runtimes.peek(sessionId)?.contextWindowOverride,
     );
   }
 
@@ -7933,7 +7907,7 @@ export class KoryManager implements WorkerPipelineHost {
       // denominator visibly jumped the moment a turn reported usage.
       typeof contextWindowOverride === 'number'
         ? contextWindowOverride
-        : this.contextWindowOverrideBySession.get(sessionId),
+        : this.runtimes.peek(sessionId)?.contextWindowOverride,
     );
     // Provider-reported token counts are only authoritative for the exact
     // routing identity and conversation boundary that produced them.
@@ -8007,22 +7981,28 @@ export class KoryManager implements WorkerPipelineHost {
   private tryBeginSessionRun(sessionId: string): boolean {
     if (
       this.erasedSessions.has(sessionId) ||
-      this.sessionMutationBarriers.has(sessionId) ||
-      this.sessionRunClaims.has(sessionId) ||
-      this.managerAbortBySession.has(sessionId) ||
-      this.compactingSessions.has(sessionId) ||
+      (this.runtimes.peek(sessionId)?.mutationBarrier === true) ||
+      (this.runtimes.peek(sessionId)?.runClaimed === true) ||
+      (this.runtimes.peek(sessionId)?.abort !== undefined) ||
+      (this.runtimes.peek(sessionId)?.compacting !== undefined) ||
       this.workers.hasSessionWorkers(sessionId)
     ) {
       return false;
     }
-    this.sessionRunClaims.add(sessionId);
-    this.sessionRunClaimsAt.set(sessionId, Date.now());
+    this.runtimes.get(sessionId).runClaimed = true;
+    this.runtimes.get(sessionId).runClaimedAt = Date.now();
     return true;
   }
 
   private endSessionRun(sessionId: string): void {
-    this.sessionRunClaims.delete(sessionId);
-    this.sessionRunClaimsAt.delete(sessionId);
+    {
+      const r = this.runtimes.peek(sessionId);
+      if (r) r.runClaimed = false;
+    }
+    {
+      const r = this.runtimes.peek(sessionId);
+      if (r) r.runClaimedAt = undefined;
+    }
     this.state.touchSession(sessionId);
     this.processCompletionCoordinator.notifySessionIdle(sessionId);
     // Keep the chat list ordered by most recent interaction: bump the durable
@@ -8050,7 +8030,10 @@ export class KoryManager implements WorkerPipelineHost {
     // A title publish during this turn already sent the full row, which carried
     // a newer updatedAt and re-sorted the sidebar. Sending a timestamp-only
     // copy afterwards would make one turn look like two chat updates.
-    if (this.sessionUpdatedDuringTurn.delete(sessionId)) return;
+    const turnRuntime = this.runtimes.peek(sessionId);
+    const updatedDuringTurn = turnRuntime?.updatedDuringTurn === true;
+    if (turnRuntime) turnRuntime.updatedDuringTurn = false;
+    if (updatedDuringTurn) return;
     this.events.emit(sessionId, 'session.updated', { session: updated });
   }
 
@@ -8068,7 +8051,7 @@ export class KoryManager implements WorkerPipelineHost {
       throw new DOMException('A stale session callback lost execution ownership', 'AbortError');
     }
     const controller = this.runControllerByHandle.get(handle);
-    if (!controller || this.managerAbortBySession.get(handle.sessionId) !== controller) {
+    if (!controller || this.runtimes.peek(handle.sessionId)?.abort !== controller) {
       throw new DOMException('Session execution generation is no longer current', 'AbortError');
     }
     if (controller.signal.aborted) {
@@ -8084,23 +8067,26 @@ export class KoryManager implements WorkerPipelineHost {
   tryAcquireSessionMutationBarrier(sessionId: string): { release(): void } | null {
     if (
       this.erasedSessions.has(sessionId) ||
-      this.sessionMutationBarriers.has(sessionId) ||
-      this.sessionRunClaims.has(sessionId) ||
-      this.managerAbortBySession.has(sessionId) ||
-      this.compactingSessions.has(sessionId) ||
-      this.titleGenerationBySession.has(sessionId) ||
+      (this.runtimes.peek(sessionId)?.mutationBarrier === true) ||
+      (this.runtimes.peek(sessionId)?.runClaimed === true) ||
+      (this.runtimes.peek(sessionId)?.abort !== undefined) ||
+      (this.runtimes.peek(sessionId)?.compacting !== undefined) ||
+      (this.runtimes.peek(sessionId)?.titleAbort !== undefined) ||
       this.workers.hasSessionWorkers(sessionId) ||
       this.runLifecycle.isAuthoritativelyLive(sessionId)
     ) {
       return null;
     }
-    this.sessionMutationBarriers.add(sessionId);
+    this.runtimes.get(sessionId).mutationBarrier = true;
     let held = true;
     return {
       release: () => {
         if (!held) return;
         held = false;
-        this.sessionMutationBarriers.delete(sessionId);
+        {
+          const r = this.runtimes.peek(sessionId);
+          if (r) r.mutationBarrier = false;
+        }
       },
     };
   }
@@ -8112,18 +8098,21 @@ export class KoryManager implements WorkerPipelineHost {
   tryAcquireAgentGitMutationBarrier(sessionId: string): { release(): void } | null {
     if (
       this.erasedSessions.has(sessionId) ||
-      this.sessionMutationBarriers.has(sessionId) ||
-      this.compactingSessions.has(sessionId) ||
+      (this.runtimes.peek(sessionId)?.mutationBarrier === true) ||
+      (this.runtimes.peek(sessionId)?.compacting !== undefined) ||
       this.workers.hasSessionWorkers(sessionId)
     )
       return null;
-    this.sessionMutationBarriers.add(sessionId);
+    this.runtimes.get(sessionId).mutationBarrier = true;
     let held = true;
     return {
       release: () => {
         if (!held) return;
         held = false;
-        this.sessionMutationBarriers.delete(sessionId);
+        {
+          const r = this.runtimes.peek(sessionId);
+          if (r) r.mutationBarrier = false;
+        }
       },
     };
   }
@@ -8131,20 +8120,20 @@ export class KoryManager implements WorkerPipelineHost {
   /** Install an erasure barrier before the first await, cancel existing work,
    * and wait until every in-memory producer has acknowledged cancellation. */
   tryBeginSessionErasure(sessionId: string): ManagerSessionErasureLease | null {
-    if (this.erasedSessions.has(sessionId) || this.sessionMutationBarriers.has(sessionId)) {
+    if (this.erasedSessions.has(sessionId) || (this.runtimes.peek(sessionId)?.mutationBarrier === true)) {
       return null;
     }
-    this.sessionMutationBarriers.add(sessionId);
+    this.runtimes.get(sessionId).mutationBarrier = true;
     const cancellation = this.cancelSessionWorkers(sessionId);
-    this.titleGenerationBySession
-      .get(sessionId)
-      ?.abort(new DOMException('Session is being deleted', 'AbortError'));
+    this.runtimes
+      .peek(sessionId)
+      ?.titleAbort?.abort(new DOMException('Session is being deleted', 'AbortError'));
     let settled = false;
     const hasExecution = () =>
-      this.sessionRunClaims.has(sessionId) ||
-      this.managerAbortBySession.has(sessionId) ||
-      this.compactingSessions.has(sessionId) ||
-      this.titleGenerationBySession.has(sessionId) ||
+      (this.runtimes.peek(sessionId)?.runClaimed === true) ||
+      (this.runtimes.peek(sessionId)?.abort !== undefined) ||
+      (this.runtimes.peek(sessionId)?.compacting !== undefined) ||
+      (this.runtimes.peek(sessionId)?.titleAbort !== undefined) ||
       [...this.restartHandoffConsumers.values()].some(
         (consumer) => consumer.sessionId === sessionId,
       ) ||
@@ -8166,28 +8155,40 @@ export class KoryManager implements WorkerPipelineHost {
         if (settled) return;
         settled = true;
         this.cleanupSession(sessionId);
-        this.sessionMutationBarriers.delete(sessionId);
+        {
+          const r = this.runtimes.peek(sessionId);
+          if (r) r.mutationBarrier = false;
+        }
         this.erasedSessions.add(sessionId);
       },
       rollback: () => {
         if (settled) return;
         settled = true;
-        this.sessionMutationBarriers.delete(sessionId);
-        this.titlePromisesBySession.delete(sessionId);
+        {
+          const r = this.runtimes.peek(sessionId);
+          if (r) r.mutationBarrier = false;
+        }
+        {
+          const r = this.runtimes.peek(sessionId);
+          if (r) r.titlePromise = undefined;
+        }
         this.processCompletionCoordinator.resumeSession(sessionId);
       },
     };
   }
 
   cancelSessionWorkers(sessionId: string): Promise<void> {
-    const pending = this.sessionCancellations.get(sessionId);
+    const pending = this.runtimes.peek(sessionId)?.cancellation;
     if (pending) return pending;
     const cancellation = this.performSessionCancellation(sessionId).finally(() => {
-      if (this.sessionCancellations.get(sessionId) === cancellation) {
-        this.sessionCancellations.delete(sessionId);
+      if (this.runtimes.peek(sessionId)?.cancellation === cancellation) {
+        {
+          const r = this.runtimes.peek(sessionId);
+          if (r) r.cancellation = undefined;
+        }
       }
     });
-    this.sessionCancellations.set(sessionId, cancellation);
+    this.runtimes.get(sessionId).cancellation = cancellation;
     return cancellation;
   }
 
@@ -8197,17 +8198,17 @@ export class KoryManager implements WorkerPipelineHost {
     // cancellable lookup settles, so its existing caller-owned wait remains
     // responsible for observing that transition.
     const awaitOwnerSettlement =
-      !this.compactingSessions.has(sessionId) &&
-      (this.sessionRunClaims.has(sessionId) || this.managerAbortBySession.has(sessionId));
+      !(this.runtimes.peek(sessionId)?.compacting !== undefined) &&
+      ((this.runtimes.peek(sessionId)?.runClaimed === true) || (this.runtimes.peek(sessionId)?.abort !== undefined));
     // Snapshot ownership before aborting. A process-local execution owner must
     // be the only writer that publishes its terminal transition: it may still
     // need to persist a partial assistant response and cleanup after observing
     // the AbortSignal. Durable waits have no such stack and can be terminalized
     // directly here.
     const locallyOwned =
-      this.sessionRunClaims.has(sessionId) ||
-      this.managerAbortBySession.has(sessionId) ||
-      this.compactingSessions.has(sessionId);
+      (this.runtimes.peek(sessionId)?.runClaimed === true) ||
+      (this.runtimes.peek(sessionId)?.abort !== undefined) ||
+      (this.runtimes.peek(sessionId)?.compacting !== undefined);
     for (const consumer of this.restartHandoffConsumers.values()) {
       if (consumer.sessionId === sessionId) consumer.controller.abort();
     }
@@ -8343,9 +8344,9 @@ export class KoryManager implements WorkerPipelineHost {
 
   /** True if the session has an active manager run or any worker. */
   hasActiveSessionExecution(sessionId: string): boolean {
-    if (this.sessionRunClaims.has(sessionId)) return true;
-    if (this.managerAbortBySession.has(sessionId)) return true;
-    if (this.compactingSessions.has(sessionId)) return true;
+    if ((this.runtimes.peek(sessionId)?.runClaimed === true)) return true;
+    if ((this.runtimes.peek(sessionId)?.abort !== undefined)) return true;
+    if ((this.runtimes.peek(sessionId)?.compacting !== undefined)) return true;
     return this.workers.hasSessionWorkers(sessionId);
   }
 
@@ -8357,13 +8358,13 @@ export class KoryManager implements WorkerPipelineHost {
   /** Process-wait wakeups must ignore the durable wait they are resuming, but
    * still respect every process-local owner and mutation gate. */
   isLocallyBlockedForProcessWake(sessionId: string): boolean {
-    return this.sessionMutationBarriers.has(sessionId) || this.hasActiveSessionExecution(sessionId);
+    return (this.runtimes.peek(sessionId)?.mutationBarrier === true) || this.hasActiveSessionExecution(sessionId);
   }
 
   /** Destructive/external callers need both local and durable lifecycle truth. */
   isSessionRunning(sessionId: string): boolean {
     return (
-      this.sessionMutationBarriers.has(sessionId) ||
+      (this.runtimes.peek(sessionId)?.mutationBarrier === true) ||
       this.hasActiveSessionExecution(sessionId) ||
       this.hasDurableSessionRun(sessionId)
     );
@@ -8373,14 +8374,14 @@ export class KoryManager implements WorkerPipelineHost {
    *  for the settle window is dead weight, not live work. A healthy turn that
    *  made progress moments ago is never reclaimed. */
   private staleAbortedRunClaim(sessionId: string): boolean {
-    if (!this.sessionRunClaims.has(sessionId)) return false;
-    const controller = this.managerAbortBySession.get(sessionId);
-    // Compaction-only claims live in compactingSessions, never in
-    // managerAbortBySession; their owners settle through their own path.
+    if (!(this.runtimes.peek(sessionId)?.runClaimed === true)) return false;
+    const controller = this.runtimes.peek(sessionId)?.abort;
+    // Compaction-only claims live in runtime.compacting, never in
+    // runtime.abort; their owners settle through their own path.
     if (!controller) return false;
     if (!controller.signal.aborted) return false;
     if (this.workers.hasSessionWorkers(sessionId)) return false;
-    const claimTime = this.sessionRunClaimsAt.get(sessionId);
+    const claimTime = this.runtimes.peek(sessionId)?.runClaimedAt;
     if (claimTime === undefined) return false;
     const STALE_ABORT_CLAIM_SETTLE_MS = 15_000;
     const snapshot = this.runs?.get(sessionId);
@@ -8398,11 +8399,20 @@ export class KoryManager implements WorkerPipelineHost {
    */
   private forceReleaseStaleRunClaim(sessionId: string, reason: string): boolean {
     if (!this.staleAbortedRunClaim(sessionId)) return false;
-    const controller = this.managerAbortBySession.get(sessionId);
-    this.sessionRunClaims.delete(sessionId);
-    this.sessionRunClaimsAt.delete(sessionId);
-    if (controller && this.managerAbortBySession.get(sessionId) === controller) {
-      this.managerAbortBySession.delete(sessionId);
+    const controller = this.runtimes.peek(sessionId)?.abort;
+    {
+      const r = this.runtimes.peek(sessionId);
+      if (r) r.runClaimed = false;
+    }
+    {
+      const r = this.runtimes.peek(sessionId);
+      if (r) r.runClaimedAt = undefined;
+    }
+    if (controller && this.runtimes.peek(sessionId)?.abort === controller) {
+      {
+        const r = this.runtimes.peek(sessionId);
+        if (r) r.abort = undefined;
+      }
     }
     this.runLifecycle.forget(sessionId);
     this.stopHeartbeat(sessionId);
@@ -8440,20 +8450,24 @@ export class KoryManager implements WorkerPipelineHost {
       sessionIds.add(handoff.sessionId);
     }
     const locallyOwned = new Set<string>();
-    for (const sid of this.sessionRunClaims) {
+    for (const sid of this.runtimes.sessionIds()) {
+      if (!this.runtimes.peek(sid)?.runClaimed) continue;
       sessionIds.add(sid);
       locallyOwned.add(sid);
     }
-    this.managerAbortBySession.forEach((ac, sid) => {
+    for (const sid of this.runtimes.sessionIds()) {
+      const ac = this.runtimes.peek(sid)?.abort;
+      if (!ac) continue;
       sessionIds.add(sid);
       locallyOwned.add(sid);
       ac.abort();
-    });
-    for (const sid of this.compactingSessions.keys()) {
+    }
+    for (const sid of this.runtimes.sessionIds()) {
+      if (!this.runtimes.peek(sid)?.compacting) continue;
       sessionIds.add(sid);
       locallyOwned.add(sid);
     }
-    for (const controller of this.compactingSessions.values()) controller.abort();
+    for (const sid of this.runtimes.sessionIds()) this.runtimes.peek(sid)?.compacting?.abort();
     const cancellations: Promise<void>[] = [];
     for (const sid of sessionIds) {
       for (const consumer of this.restartHandoffConsumers.values()) {
@@ -8712,8 +8726,9 @@ export class KoryManager implements WorkerPipelineHost {
     sessionId: string,
     agentId: string,
   ): Promise<{ runId: string } | null> {
-    const key = `${sessionId}:${agentId}`;
-    const existing = this.agentSteeringDrains.get(key);
+    // Steering drains are per (session, agent); the runtime owns the map.
+    const steeringDrains = this.runtimes.get(sessionId).steeringDrains;
+    const existing = steeringDrains.get(agentId);
     if (existing) return existing;
     const drain = (async () => {
       const thread = this.agentThreads.get(agentId);
@@ -8747,9 +8762,9 @@ export class KoryManager implements WorkerPipelineHost {
         throw error;
       }
     })().finally(() => {
-      if (this.agentSteeringDrains.get(key) === drain) this.agentSteeringDrains.delete(key);
+      if (steeringDrains.get(agentId) === drain) steeringDrains.delete(agentId);
     });
-    this.agentSteeringDrains.set(key, drain);
+    steeringDrains.set(agentId, drain);
     return drain;
   }
 
@@ -9374,11 +9389,11 @@ export class KoryManager implements WorkerPipelineHost {
       workingDirectory: ctx.workingDirectory,
       taskContract: createTaskContract(workerGoal, {
         scope: ctx.allowedPaths ?? [],
-        goalContext: this.goalContextBySession.get(sessionId),
+        goalContext: this.runtimes.peek(sessionId)?.goalContext,
       }),
       contextPaths: this.config.contextPaths,
       skillSelection: {
-        collisionChoices: this.skillCollisionChoicesBySession.get(sessionId),
+        collisionChoices: this.runtimes.peek(sessionId)?.skillCollisionChoices,
         ...skillBudgetSelection(ctx.workingDirectory, sessionId),
       },
     });
@@ -9432,7 +9447,7 @@ export class KoryManager implements WorkerPipelineHost {
   }
 
   abortManagerRun(sessionId: string): void {
-    const controller = this.managerAbortBySession.get(sessionId);
+    const controller = this.runtimes.peek(sessionId)?.abort;
     if (controller) {
       controller.abort();
       koryLog.info({ sessionId }, 'Manager run aborted');
@@ -9440,7 +9455,7 @@ export class KoryManager implements WorkerPipelineHost {
   }
 
   private abortCompaction(sessionId: string): void {
-    const controller = this.compactingSessions.get(sessionId);
+    const controller = this.runtimes.peek(sessionId)?.compacting;
     if (!controller) return;
     controller.abort();
     koryLog.info({ sessionId }, 'Compaction aborted');
@@ -9477,29 +9492,11 @@ export class KoryManager implements WorkerPipelineHost {
     // Clear session-specific data
     this.state.cleanupSession(sessionId);
     this.events.transcript.dispose(sessionId);
-    this.sessionRunClaims.delete(sessionId);
-    this.managerRoutingBySession.delete(sessionId);
-    this.managerAbortBySession.delete(sessionId);
-    this.compactingSessions.delete(sessionId);
     this.runLifecycle.forget(sessionId);
-    this.titlePromisesBySession.delete(sessionId);
-    this.titleGenerationBySession.get(sessionId)?.abort();
-    this.titleGenerationBySession.delete(sessionId);
-    this.promptManifestHashBySession.delete(sessionId);
-    this.skillCollisionChoicesBySession.delete(sessionId);
-    for (const key of [...this.contextShrinkHintBySession.keys()]) {
-      if (key === sessionId || key.startsWith(`${sessionId} `)) {
-        this.contextShrinkHintBySession.delete(key);
-      }
-    }
-    this.warnedUnverifiedContextWindowBySession.delete(sessionId);
-    this.warnedCompilationMessagesBySession.delete(sessionId);
-    this.goalContextBySession.delete(sessionId);
-    this.sessionWorkingDirs.delete(sessionId);
-    this.stopHeartbeat(sessionId);
-    this.heartbeatPhaseBySession.delete(sessionId);
-    for (const timer of this.usageRetryTimersBySession.get(sessionId) ?? []) clearTimeout(timer);
-    this.usageRetryTimersBySession.delete(sessionId);
+    // Title generation is the only run aborted on session delete. Everything
+    // else per-session is dropped with the runtime (timers cleared inside dispose).
+    this.runtimes.peek(sessionId)?.titleAbort?.abort();
+    this.runtimes.dispose(sessionId);
     for (const [agentId, thread] of this.agentThreads.entries()) {
       if (thread.sessionId === sessionId) this.agentThreads.delete(agentId);
     }
@@ -9530,6 +9527,18 @@ export class KoryManager implements WorkerPipelineHost {
    * Cleanup abandoned resources.
    * Call this periodically to prevent memory leaks from abandoned sessions.
    */
+  /** Coordination state installed by an operation that clears it itself (a
+   *  Time Travel or erasure barrier, a stop in progress, a workspace being
+   *  prepared). Disposing the runtime would drop it, so the idle sweep treats
+   *  these as live. */
+  private hasInFlightSessionWork(sessionId: string): boolean {
+    const runtime = this.runtimes.peek(sessionId);
+    if (!runtime) return false;
+    return (
+      runtime.mutationBarrier || runtime.cancellation !== undefined || runtime.workspacePreparation !== undefined
+    );
+  }
+
   cleanupAbandonedResources(maxSessionAgeMs = AGENT_THREAD_IDLE_TTL_MS): void {
     const now = Date.now();
     const activeSessionIds = new Set(this.workers.getActiveSessionIds());
@@ -9544,9 +9553,10 @@ export class KoryManager implements WorkerPipelineHost {
       const lastActivityAt = this.state.getLastActivityAt(sessionId);
       const isLive =
         activeSessionIds.has(sessionId) ||
-        this.sessionRunClaims.has(sessionId) ||
-        this.managerAbortBySession.has(sessionId) ||
-        this.compactingSessions.has(sessionId) ||
+        (this.runtimes.peek(sessionId)?.runClaimed === true) ||
+        (this.runtimes.peek(sessionId)?.abort !== undefined) ||
+        (this.runtimes.peek(sessionId)?.compacting !== undefined) ||
+        this.hasInFlightSessionWork(sessionId) ||
         this.state.hasPendingInput(sessionId) ||
         this.runLifecycle.isAuthoritativelyLive(sessionId);
       if (isLive || lastActivityAt === null || now - lastActivityAt < maxSessionAgeMs) continue;
@@ -9646,7 +9656,9 @@ export class KoryManager implements WorkerPipelineHost {
     this.workers.shutdown();
 
     // Abort all manager runs
-    for (const [sessionId, controller] of this.managerAbortBySession) {
+    for (const sessionId of this.runtimes.sessionIds()) {
+      const controller = this.runtimes.peek(sessionId)?.abort;
+      if (!controller) continue;
       try {
         controller.abort();
       } catch (err) {
@@ -9656,13 +9668,34 @@ export class KoryManager implements WorkerPipelineHost {
         );
       }
     }
-    this.managerAbortBySession.clear();
-    for (const controller of this.compactingSessions.values()) controller.abort();
-    this.compactingSessions.clear();
-    for (const controller of this.titleGenerationBySession.values()) controller.abort();
-    this.titleGenerationBySession.clear();
-    await Promise.allSettled([...this.titlePromisesBySession.values()]);
-    this.titlePromisesBySession.clear();
+    for (const sessionId of this.runtimes.sessionIds()) {
+      const runtime = this.runtimes.peek(sessionId);
+      if (runtime) runtime.abort = undefined;
+    }
+    for (const sessionId of this.runtimes.sessionIds()) {
+      this.runtimes.peek(sessionId)?.compacting?.abort();
+    }
+    for (const sessionId of this.runtimes.sessionIds()) {
+      const runtime = this.runtimes.peek(sessionId);
+      if (runtime) runtime.compacting = undefined;
+    }
+    for (const sessionId of this.runtimes.sessionIds()) {
+      this.runtimes.peek(sessionId)?.titleAbort?.abort();
+    }
+    for (const sessionId of this.runtimes.sessionIds()) {
+      const runtime = this.runtimes.peek(sessionId);
+      if (runtime) runtime.titleAbort = undefined;
+    }
+    await Promise.allSettled(
+      this.runtimes
+        .sessionIds()
+        .map((sessionId) => this.runtimes.peek(sessionId)?.titlePromise)
+        .filter((promise): promise is Promise<void> => promise !== undefined),
+    );
+    for (const sessionId of this.runtimes.sessionIds()) {
+      const runtime = this.runtimes.peek(sessionId);
+      if (runtime) runtime.titlePromise = undefined;
+    }
     for (const consumer of this.restartHandoffConsumers.values()) consumer.controller.abort();
     for (const timer of this.restartHandoffRetryTimers.values()) clearTimeout(timer);
     this.restartHandoffRetryTimers.clear();
@@ -9679,15 +9712,11 @@ export class KoryManager implements WorkerPipelineHost {
     // manager and touch a closing database.
     for (const timer of this.restartHandoffRetryTimers.values()) clearTimeout(timer);
     this.restartHandoffRetryTimers.clear();
-    for (const timers of this.usageRetryTimersBySession.values()) {
-      for (const timer of timers) clearTimeout(timer);
-    }
-    this.usageRetryTimersBySession.clear();
     this.turnAdmissions.clear();
-    this.sessionRunClaims.clear();
-    this.sessionMutationBarriers.clear();
     this.erasedSessions.clear();
-    this.sessionWorkingDirs.clear();
+    // Dispose every session runtime: clears usage-retry and heartbeat timers and
+    // drops run claims, working directories and every other per-session field.
+    for (const sessionId of this.runtimes.sessionIds()) this.runtimes.dispose(sessionId);
 
     // Clear all session state
     this.state.cleanupAll();
@@ -9719,10 +9748,6 @@ export class KoryManager implements WorkerPipelineHost {
   ) {
     this.events.emitNotification(sessionId, type, message);
   }
-  // Per-session project folders: a chat created with a project open runs in THAT
-  // folder (tools, providers, workers), not the backend's launch directory.
-  private sessionWorkingDirs = new Map<string, string>();
-  private sessionWorkspacePreparations = new Map<string, Promise<string>>();
 
   /** Kernel sandbox policy for agents, from `workspace.sandbox`. Governs
    *  confinement only — never whether the user is asked to approve a tool. */
@@ -9777,16 +9802,19 @@ export class KoryManager implements WorkerPipelineHost {
   }
 
   private async resolveSessionWorkingDirectory(sessionId: string): Promise<string> {
-    const pending = this.sessionWorkspacePreparations.get(sessionId);
+    const pending = this.runtimes.peek(sessionId)?.workspacePreparation;
     if (pending) return pending;
     // Keep concurrent callers coalesced, but do not negative-cache a
     // filesystem/configuration failure. A mount can come back, a checkout can
     // be restored, or the session binding can be repaired while the app is
     // open; the next Git/status request must re-read that state immediately.
     const preparation = this.prepareSessionWorkingDirectory(sessionId).finally(() => {
-      this.sessionWorkspacePreparations.delete(sessionId);
+      {
+        const r = this.runtimes.peek(sessionId);
+        if (r) r.workspacePreparation = undefined;
+      }
     });
-    this.sessionWorkspacePreparations.set(sessionId, preparation);
+    this.runtimes.get(sessionId).workspacePreparation = preparation;
     return preparation;
   }
 
@@ -9820,7 +9848,7 @@ export class KoryManager implements WorkerPipelineHost {
         } catch (cause) {
           throw new Error(`Session project folder is unavailable: ${requested}`, { cause });
         }
-        this.sessionWorkingDirs.set(sessionId, resolved);
+        this.runtimes.get(sessionId).workingDir = resolved;
         return resolved;
       }
     }
@@ -9845,7 +9873,7 @@ export class KoryManager implements WorkerPipelineHost {
         'Chat Git metadata has been redirected; refusing shared-repository execution',
       );
     }
-    this.sessionWorkingDirs.set(sessionId, resolved);
+    this.runtimes.get(sessionId).workingDir = resolved;
     return resolved;
   }
 
@@ -9862,7 +9890,7 @@ export class KoryManager implements WorkerPipelineHost {
     interactionMode: 'act' | 'plan' = 'act',
   ): Promise<{ triggered: boolean; reason?: string }> {
     const key = `${selectedModel}\0${reasoningLevel}\0${interactionMode}`;
-    const previous = this.cachePrewarmBySession.get(sessionId);
+    const previous = this.runtimes.peek(sessionId)?.cachePrewarm;
     const now = Date.now();
     if (previous?.key === key && now - previous.at < 30_000) {
       return { triggered: false, reason: 'cooldown' };
@@ -9874,7 +9902,7 @@ export class KoryManager implements WorkerPipelineHost {
       interactionMode,
     );
     if (result.triggered) {
-      this.cachePrewarmBySession.set(sessionId, { key, at: now });
+      this.runtimes.get(sessionId).cachePrewarm = { key, at: now };
       promptCacheMaintenance.recordExternalPrewarm();
     }
     return result;
@@ -9905,7 +9933,7 @@ export class KoryManager implements WorkerPipelineHost {
       occupiedContextTokenUpperBound: 0,
       reservedOutputTokens: MANAGER_OUTPUT_TOKEN_LIMIT,
       requireVerifiedContextWindow: false,
-      contextWindowOverride: this.contextWindowOverrideBySession.get(sessionId),
+      contextWindowOverride: this.runtimes.peek(sessionId)?.contextWindowOverride,
       workingDirectory: promptRoot,
       taskContract: createTaskContract('Prepare the stable provider cache prefix.'),
       contextPaths: this.config.contextPaths,
@@ -9988,7 +10016,7 @@ export class KoryManager implements WorkerPipelineHost {
   getLastManagerRouting(
     sessionId: string,
   ): { model: string; provider: ProviderName | undefined } | null {
-    return this.managerRoutingBySession.get(sessionId) ?? null;
+    return this.runtimes.peek(sessionId)?.managerRouting ?? null;
   }
 
   // ── MCP bridge + hooks bridge helpers ───────────────────────────────────
@@ -10003,7 +10031,7 @@ export class KoryManager implements WorkerPipelineHost {
       if (!session) return '';
       const parts: string[] = [];
       // Surface the goal context if set for this session.
-      const goalCtx = this.goalContextBySession.get(sessionId);
+      const goalCtx = this.runtimes.peek(sessionId)?.goalContext;
       if (goalCtx) {
         parts.push(`Active goal: ${goalCtx.objective} (item: ${goalCtx.itemTitle})`);
       }
@@ -10279,9 +10307,7 @@ export class KoryManager implements WorkerPipelineHost {
       // "unknown".
       if (!win.contextKnown) {
         const t = setTimeout(() => {
-          const timers = this.usageRetryTimersBySession.get(sessionId);
-          timers?.delete(t);
-          if (timers?.size === 0) this.usageRetryTimersBySession.delete(sessionId);
+          this.runtimes.peek(sessionId)?.usageRetryTimers.delete(t);
           if (this.erasedSessions.has(sessionId)) return;
           const retry = applyContextWindowOverride(
             resolveTrustedContextWindow(model, provider),
@@ -10305,9 +10331,7 @@ export class KoryManager implements WorkerPipelineHost {
           }
         }, 6_000);
         t.unref?.();
-        const timers = this.usageRetryTimersBySession.get(sessionId) ?? new Set();
-        timers.add(t);
-        this.usageRetryTimersBySession.set(sessionId, timers);
+        this.runtimes.get(sessionId).usageRetryTimers.add(t);
       }
     }
   }
@@ -10323,7 +10347,7 @@ export class KoryManager implements WorkerPipelineHost {
   /** Update the phase reported by the next heartbeat for this session.
    *  Called at every manager status transition. */
   private setHeartbeatPhase(sessionId: string, phase: AgentStatus): void {
-    this.heartbeatPhaseBySession.set(sessionId, phase);
+    this.runtimes.get(sessionId).heartbeatPhase = phase;
   }
 
   /** Start emitting agent.heartbeat every 5s for this session. The client
@@ -10336,7 +10360,7 @@ export class KoryManager implements WorkerPipelineHost {
     this.stopHeartbeat(sessionId);
     const interval = 5_000 + (Math.random() * 1_000 - 500);
     const timer = setInterval(() => {
-      const phase = this.heartbeatPhaseBySession.get(sessionId) ?? 'streaming';
+      const phase = this.runtimes.peek(sessionId)?.heartbeatPhase ?? 'streaming';
       this.emitWSMessage(sessionId, 'agent.heartbeat', {
         agentId: KORY_IDENTITY.id,
         sessionId,
@@ -10344,17 +10368,20 @@ export class KoryManager implements WorkerPipelineHost {
       });
     }, interval);
     timer.unref?.();
-    this.heartbeatBySession.set(sessionId, timer);
+    this.runtimes.get(sessionId).heartbeat = timer;
   }
 
   /** Stop the heartbeat for a session. Called when the run terminates. */
   private stopHeartbeat(sessionId: string): void {
-    const timer = this.heartbeatBySession.get(sessionId);
+    const timer = this.runtimes.peek(sessionId)?.heartbeat;
     if (timer) {
       clearInterval(timer);
-      this.heartbeatBySession.delete(sessionId);
     }
-    this.heartbeatPhaseBySession.delete(sessionId);
+    const runtime = this.runtimes.peek(sessionId);
+    if (runtime) {
+      runtime.heartbeat = undefined;
+      runtime.heartbeatPhase = undefined;
+    }
   }
 }
 

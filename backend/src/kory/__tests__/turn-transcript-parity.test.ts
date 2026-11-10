@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeAll, describe, expect, mock, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,12 +10,17 @@ import {
   type KoryphaiosConfig,
 } from '@koryphaios/shared';
 import { wsBroker } from '../../pubsub';
+import { initDb } from '../../db';
 import type { ProviderRegistry } from '../../providers';
 import type { Provider, ProviderEvent, StreamRequest } from '../../providers/types';
 import { MessageStore } from '../../stores/message-store';
 import { SessionStore } from '../../stores/session-store';
 import { ToolRegistry } from '../../tools';
 import { KoryManager } from '../manager';
+
+beforeAll(async () => {
+  await initDb();
+});
 
 const MANAGER_AGENT = 'kory-manager';
 const fixtures: Array<{ manager: KoryManager; root: string }> = [];

@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { KoryManager } from '../manager';
+import { SessionRuntimeRegistry } from '../services/SessionRuntime';
 import { createSessionWorkspace } from '../session-workspace';
 
 const roots: string[] = [];
@@ -21,9 +22,7 @@ function manager(rows: Map<string, any>, fallback: string) {
   const instance = Object.create(KoryManager.prototype);
   Object.assign(instance, {
     workingDirectory: fallback,
-    sessionWorkingDirs: new Map(),
-    sessionWorkspacePreparations: new Map(),
-    sessionWorkspacePrepareFailures: new Map(),
+    runtimes: new SessionRuntimeRegistry(),
     sessions: {
       get: async (id: string) => rows.get(id),
       update: async (id: string, updates: object, version: number) => {

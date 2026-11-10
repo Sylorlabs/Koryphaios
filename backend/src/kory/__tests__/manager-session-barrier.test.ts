@@ -69,12 +69,12 @@ describe('KoryManager session mutation barrier', () => {
   test('agent Git switching permits its owning manager run but excludes workers and other mutations', () => {
     const { manager } = createManager();
     const internal = manager as unknown as {
-      managerAbortBySession: Map<string, AbortController>;
+      runtimes: { get(id: string): Record<string, unknown> };
       workers: { hasSessionWorkers(id: string): boolean };
     };
     const previous = internal.workers.hasSessionWorkers;
     try {
-      internal.managerAbortBySession.set('git-agent', new AbortController());
+      internal.runtimes.get('git-agent').abort = new AbortController();
       expect(manager.tryAcquireSessionMutationBarrier('git-agent')).toBeNull();
       internal.workers.hasSessionWorkers = () => true;
       expect(manager.tryAcquireAgentGitMutationBarrier('git-agent')).toBeNull();
@@ -89,7 +89,7 @@ describe('KoryManager session mutation barrier', () => {
       next!.release();
     } finally {
       internal.workers.hasSessionWorkers = previous;
-      internal.managerAbortBySession.delete('git-agent');
+      internal.runtimes.get('git-agent').abort = undefined;
       manager.shutdown();
     }
   });
@@ -115,13 +115,13 @@ describe('KoryManager session mutation barrier', () => {
     const { manager } = createManager();
     try {
       const internal = manager as unknown as {
-        titleGenerationBySession: Map<string, AbortController>;
+        runtimes: { get(id: string): Record<string, unknown> };
       };
-      internal.titleGenerationBySession.set('session-title', new AbortController());
+      internal.runtimes.get('session-title').titleAbort = new AbortController();
 
       expect(manager.tryAcquireSessionMutationBarrier('session-title')).toBeNull();
 
-      internal.titleGenerationBySession.delete('session-title');
+      internal.runtimes.get('session-title').titleAbort = undefined;
       const lease = manager.tryAcquireSessionMutationBarrier('session-title');
       expect(lease).not.toBeNull();
       lease?.release();
@@ -159,12 +159,11 @@ describe('KoryManager session mutation barrier', () => {
       const controller = new AbortController();
       controller.signal.addEventListener('abort', () => timeline.push('abort-requested'));
       const internal = manager as unknown as {
-        sessionRunClaims: Set<string>;
-        managerAbortBySession: Map<string, AbortController>;
+        runtimes: { get(id: string): Record<string, unknown> };
         runLifecycle: { cancelCurrent: typeof cancelCurrent; finish: typeof finish };
       };
-      internal.sessionRunClaims.add('session-owned');
-      internal.managerAbortBySession.set('session-owned', controller);
+      internal.runtimes.get('session-owned').runClaimed = true;
+      internal.runtimes.get('session-owned').abort = controller;
       internal.runLifecycle.cancelCurrent = cancelCurrent;
       internal.runLifecycle.finish = finish;
 
@@ -172,8 +171,8 @@ describe('KoryManager session mutation barrier', () => {
       await Promise.resolve();
       timeline.push('partial-response-persisted');
       await internal.runLifecycle.finish({}, 'cancel', 'cancelled');
-      internal.managerAbortBySession.delete('session-owned');
-      internal.sessionRunClaims.delete('session-owned');
+      internal.runtimes.get('session-owned').abort = undefined;
+      internal.runtimes.get('session-owned').runClaimed = false;
       await cancellation;
 
       expect(controller.signal.aborted).toBe(true);
@@ -246,7 +245,7 @@ describe('KoryManager session mutation barrier', () => {
       controller.abort(new DOMException('Stopped by user', 'AbortError'));
       const finish = mock(async (..._args: unknown[]) => {});
       const internal = manager as unknown as {
-        managerAbortBySession: Map<string, AbortController>;
+        runtimes: { get(id: string): Record<string, unknown> };
         runLifecycle: {
           resumeProcessWait: ReturnType<typeof mock>;
           finish: typeof finish;
@@ -254,7 +253,7 @@ describe('KoryManager session mutation barrier', () => {
         continueProcessWake: ReturnType<typeof mock>;
         wakeForProcessCompletionsWithClaim(sessionId: string, events: unknown[]): Promise<void>;
       };
-      internal.managerAbortBySession.set(sessionId, controller);
+      internal.runtimes.get(sessionId).abort = controller;
       internal.runLifecycle.resumeProcessWait = mock(async () => ({
         handle,
         processIds: ['process-id'],
@@ -309,9 +308,9 @@ describe('KoryManager session mutation barrier', () => {
       state.ensureSession('live-manager');
       state.touchSession('live-manager', 1);
       const internal = manager as unknown as {
-        sessionRunClaims: Set<string>;
+        runtimes: { get(id: string): Record<string, unknown> };
       };
-      internal.sessionRunClaims.add('live-manager');
+      internal.runtimes.get('live-manager').runClaimed = true;
 
       const pending = state.requestUserInput('waiting-user', 0);
       state.touchSession('waiting-user', 1);

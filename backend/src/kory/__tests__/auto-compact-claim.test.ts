@@ -72,8 +72,8 @@ function schedule(
 
 function failureCooldown(manager: KoryManager, sessionId: string): number | undefined {
   return (
-    manager as unknown as { lastAutoCompactFailureBySession: Map<string, number> }
-  ).lastAutoCompactFailureBySession.get(sessionId);
+    manager as unknown as { runtimes: { peek(id: string): { lastAutoCompactFailureAt?: number } | undefined } }
+  ).runtimes.peek(sessionId)?.lastAutoCompactFailureAt;
 }
 
 async function tick(times = 6): Promise<void> {
@@ -125,11 +125,12 @@ describe('automatic compaction run-claim handoff', () => {
       ).compactSession.bind(manager);
       // Observe the claim WITHOUT mutating it, so the real attempt sees the
       // same state the probe saw.
-      const claims = (manager as unknown as { sessionRunClaims: Set<string> }).sessionRunClaims;
+      const claimHeld = () =>
+        (manager as unknown as { runtimes: { peek(id: string): { runClaimed?: boolean } | undefined } }).runtimes.peek(sessionId)?.runClaimed === true;
       const seenClaimHeld: boolean[] = [];
       (manager as unknown as { compactSession: (input: unknown) => Promise<unknown> }).compactSession =
         async (input: unknown) => {
-          seenClaimHeld.push(claims.has(sessionId));
+          seenClaimHeld.push(claimHeld());
           return compactSession(input);
         };
 

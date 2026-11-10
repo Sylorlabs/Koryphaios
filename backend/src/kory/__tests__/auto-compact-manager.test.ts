@@ -165,9 +165,9 @@ describe('automatic compaction retry and cooldown', () => {
       await waitFor(() =>
         (
           harness.manager as unknown as {
-            lastAutoCompactFailureBySession: Map<string, number>;
+            runtimes: { peek(id: string): { lastAutoCompactFailureAt?: number } | undefined };
           }
-        ).lastAutoCompactFailureBySession.has(harness.sessionId),
+        ).runtimes.peek(harness.sessionId)?.lastAutoCompactFailureAt !== undefined,
       );
       expect(harness.providerCalls()).toBe(3);
       expect(harness.committed()).toBeUndefined();

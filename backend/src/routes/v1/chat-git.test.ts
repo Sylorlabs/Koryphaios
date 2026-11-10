@@ -16,6 +16,7 @@ const { setContext, getContext } = await import('../../context');
 const { SessionStore } = await import('../../stores/session-store');
 const { createSessionWorkspace } = await import('../../kory/session-workspace');
 const { KoryManager } = await import('../../kory/manager');
+const { SessionRuntimeRegistry } = await import('../../kory/services/SessionRuntime');
 const { ensurePendingSessionReview } = await import('../../stores/session-review-store');
 const { processSupervisor } = await import('../../process-supervisor/supervisor');
 const { gitRoutes } = await import('./git');
@@ -74,9 +75,7 @@ beforeAll(async () => {
   const workspaceManager = Object.assign(Object.create(KoryManager.prototype), {
     sessions,
     workingDirectory: source,
-    sessionWorkingDirs: new Map(),
-    sessionWorkspacePreparations: new Map(),
-    sessionWorkspacePrepareFailures: new Map(),
+    runtimes: new SessionRuntimeRegistry(),
     emitWSMessage: mock(() => {}),
   }) as InstanceType<typeof KoryManager>;
   setContext({
