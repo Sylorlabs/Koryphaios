@@ -398,6 +398,18 @@ function orderedEventMetadata(msg: WSMessage): Record<string, unknown> {
   };
 }
 
+/** A manager stream event that belongs to a turn (Invariant 2). Such events are
+ *  folded into the turn's parts (feedStore.applyManagerTurnEvent) rather than
+ *  written as independent rows. */
+function isManagerTurnEvent(msg: WSMessage): boolean {
+  const payload = msg.payload as { agentId?: unknown; messageId?: unknown } | null;
+  return (
+    payload?.agentId === 'kory-manager' &&
+    typeof payload.messageId === 'string' &&
+    payload.messageId.length > 0
+  );
+}
+
 function addBackendErrorToSessionFeed(
   msg: WSMessage,
   errorText: string,
@@ -758,6 +770,9 @@ function handleMessage(msg: WSMessage) {
       const p = msg.payload as { agentId: string };
       finalizeSessionThinking(sm.sessionId, p.agentId, msg.timestamp, true);
       if (isForActiveSession) feedStore.finalizeThinking(sm.sessionId, p.agentId, msg.timestamp);
+      if (msg.type === 'stream.complete' && isManagerTurnEvent(msg)) {
+        feedStore.applyManagerTurnEvent(sm.sessionId, msg);
+      }
       agentStore.completeAgent(sm.sessionId, p.agentId);
       if (isForActiveSession) feedStore.removeAnalyzingThoughtEntries(sm.sessionId);
       // Run-phase clearing is handled by applyEvent above.
@@ -798,11 +813,10 @@ function handleMessage(msg: WSMessage) {
       finalizeSessionThinking(sm.sessionId, p.agentId, msg.timestamp);
       if (isForActiveSession) feedStore.finalizeThinking(sm.sessionId, p.agentId, msg.timestamp);
       agentStore.appendAgentContent(sm.sessionId, p.agentId, p.content);
-      const alreadyPersisted =
-        msg.replayed &&
-        p.agentId === 'kory-manager' &&
-        feedStore.hasPersistedAssistantContaining(sm.sessionId, p.content, msg.timestamp);
-      if (isForActiveSession && !alreadyPersisted) {
+      if (isManagerTurnEvent(msg)) {
+        if (isForActiveSession) feedStore.removeAnalyzingThoughtEntries(sm.sessionId);
+        feedStore.applyManagerTurnEvent(sm.sessionId, msg);
+      } else if (isForActiveSession) {
         feedStore.removeAnalyzingThoughtEntries(sm.sessionId);
         feedStore.accumulateFeedEntry(sm.sessionId, {
           timestamp: msg.timestamp,
@@ -832,7 +846,9 @@ function handleMessage(msg: WSMessage) {
       const sm = msg as SessionWSMessage;
       const p = msg.payload as { agentId: string };
       agentStore.clearAgentStreamingState(sm.sessionId, p.agentId);
-      if (isForActiveSession) {
+      if (isManagerTurnEvent(msg)) {
+        feedStore.applyManagerTurnEvent(sm.sessionId, msg);
+      } else if (isForActiveSession) {
         feedStore.removeContentEntriesForAgent(sm.sessionId, p.agentId);
       }
       break;
@@ -843,7 +859,10 @@ function handleMessage(msg: WSMessage) {
       const p = msg.payload as StreamThinkingPayload;
       const isSubAgent = isSpawnedSubAgent(sm.sessionId, p.agentId);
       agentStore.appendAgentThinking(sm.sessionId, p.agentId, p.thinking);
-      if (isForActiveSession) {
+      if (isManagerTurnEvent(msg)) {
+        if (isForActiveSession) feedStore.removeAnalyzingThoughtEntries(sm.sessionId);
+        feedStore.applyManagerTurnEvent(sm.sessionId, msg);
+      } else if (isForActiveSession) {
         // The ephemeral "Analyzing…" row must clear as soon as real
         // thinking starts streaming, same as it does for content deltas.
         feedStore.removeAnalyzingThoughtEntries(sm.sessionId);
@@ -889,12 +908,15 @@ function handleMessage(msg: WSMessage) {
         feedStore.removeAnalyzingThoughtEntries(sm.sessionId);
       }
       feedStore.removeAnalyzingThoughtEntries(sm.sessionId);
-      const existingToolCall =
-        !!sm.sessionId &&
-        feedStore.updateToolCall(sm.sessionId, p.toolCall, msg.timestamp, p.agentId);
+      const turnEvent = isManagerTurnEvent(msg);
+      // A turn folds its tool call by call id, so "new" is the turn's answer.
+      const existingToolCall = turnEvent
+        ? !feedStore.applyManagerTurnEvent(sm.sessionId, msg)
+        : !!sm.sessionId &&
+          feedStore.updateToolCall(sm.sessionId, p.toolCall, msg.timestamp, p.agentId);
       if (!existingToolCall)
         agentStore.addToolCall(sm.sessionId, p.agentId, p.toolCall.name);
-      {
+      if (!turnEvent) {
         if (!existingToolCall)
           feedStore.addFeedEntryForSession(sm.sessionId, {
             timestamp: msg.timestamp,
@@ -994,7 +1016,9 @@ function handleMessage(msg: WSMessage) {
         : p.toolResult.durationMs > 0
           ? `Tool result (${p.toolResult.durationMs.toFixed(0)}ms): ${p.toolResult.output}`
           : `Tool result (time not reported by provider): ${p.toolResult.output}`;
-      {
+      if (isManagerTurnEvent(msg)) {
+        feedStore.applyManagerTurnEvent(sm.sessionId, msg);
+      } else {
         const completed = feedStore.completeToolCall(
           sm.sessionId,
           p.toolResult.callId,

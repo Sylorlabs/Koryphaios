@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { waitFor } from '@testing-library/svelte';
 import type { WSMessage } from '@koryphaios/shared';
-import type { MessageDisplayBoundary } from '$lib/utils/message-variants';
+import type { DisplayMessage, MessageDisplayBoundary } from '$lib/utils/message-variants';
 
 const state = vi.hoisted(() => ({
   activeSessionId: '',
@@ -96,11 +96,17 @@ class TestWebSocket {
   }
 }
 
+// The backend stamps every manager stream event with the id its turn persists under.
+const TURN_MESSAGE_ID = 'answer-1';
+
 function appendEvent(type: WSMessage['type'], payload: unknown) {
   const sequence = savedEvents.length + 1;
   savedEvents.push({
     type,
-    payload,
+    payload: {
+      ...(payload as object),
+      messageId: (payload as { messageId?: string }).messageId ?? TURN_MESSAGE_ID,
+    },
     sessionId: state.activeSessionId,
     epoch: 1,
     sequence,
@@ -108,10 +114,31 @@ function appendEvent(type: WSMessage['type'], payload: unknown) {
   });
 }
 
-function history() {
+// The persisted turn is the fold of the same four events (timestamps 100..400).
+function history(): DisplayMessage[] {
   return [
     { id: 'user-1', role: 'user', content: 'Check the project', createdAt: 50 },
-    { id: 'answer-1', role: 'assistant', content: 'The checks passed.', createdAt: 500 },
+    {
+      id: TURN_MESSAGE_ID,
+      role: 'assistant',
+      content: 'The checks passed.',
+      createdAt: 500,
+      parts: [
+        { kind: 'reasoning', text: 'Inspect the project first.', startedAt: 100, endedAt: 200 },
+        {
+          kind: 'tool',
+          callId: toolCall.id,
+          name: toolCall.name,
+          input: toolCall.input,
+          startedAt: 200,
+          output: toolResult.output,
+          isError: false,
+          durationMs: toolResult.durationMs,
+          endedAt: 300,
+        },
+        { kind: 'text', text: 'The checks passed.', startedAt: 400 },
+      ],
+    },
   ];
 }
 
@@ -215,7 +242,8 @@ describe('transcript recovery after reload and reconnect', () => {
     first.onclose?.({ code: 1006, reason: 'connection lost' });
 
     const pendingCall = { id: 'call-2', name: 'read_file', input: { path: 'src/app.ts' } };
-    appendEvent('stream.tool_call', { agentId: 'kory-manager', toolCall: pendingCall });
+    // A new turn: the persisted answer above is settled and cannot take events.
+    appendEvent('stream.tool_call', { agentId: 'kory-manager', messageId: 'answer-2', toolCall: pendingCall });
     appendEvent('system.error', { error: 'Provider connection interrupted.' });
     const second = await connectSocket();
     second.open();
@@ -258,7 +286,12 @@ describe('transcript recovery after reload and reconnect', () => {
       mcpServers: [{ name: 'Research_team', tools: ['lookup_topic'] }],
       data: [{ id: 'registry-tool', ts: 300, label: 'mcp_Research_team_lookup_topic', content: 'found' }],
     });
-    await wsStore.loadSessionMessages(state.activeSessionId, history());
+    // A legacy answer without persisted parts has no tool rows of its own, so
+    // its archived tool activity is still the only evidence and must render.
+    await wsStore.loadSessionMessages(
+      state.activeSessionId,
+      history().map((message) => ({ ...message, parts: undefined })),
+    );
     const archived = feedStore.feed.find((entry) => entry.id === 'arch-registry-tool');
     expect(archived).toBeDefined();
     expect(toolPresentation(archived!)).toMatchObject({ mcpIdentity: 'Research_team MCP · lookup_topic' });
@@ -334,8 +367,9 @@ describe('transcript recovery after reload and reconnect', () => {
       resolveContext = resolve;
     });
     const loading = wsStore.loadSessionMessages(state.activeSessionId, history());
+    // The persisted answer's text part is the row with the answer's identity.
     await waitFor(() =>
-      expect(feedStore.feed.some((entry) => entry.id === 'hist-answer-1')).toBe(true),
+      expect(feedStore.feed.some((entry) => entry.id === 'turn-answer-1-2')).toBe(true),
     );
     agentStore.updateUsage(
       state.activeSessionId,

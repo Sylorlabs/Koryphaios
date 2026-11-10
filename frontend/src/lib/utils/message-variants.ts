@@ -1,3 +1,5 @@
+import type { TranscriptPart } from '@koryphaios/shared';
+
 export interface DisplayMessageAttachment {
   type: 'image' | 'file';
   data: string;
@@ -20,6 +22,9 @@ export interface DisplayMessage {
   variantIndex?: number;
   attachments?: DisplayMessageAttachment[];
   isActive?: boolean;
+  /** Ordered transcript parts of an assistant turn (Invariant 1). Absent on
+   *  user rows and on responses that predate persisted parts. */
+  parts?: TranscriptPart[];
 }
 
 export interface MessageDisplayBoundary {
@@ -102,7 +107,17 @@ function parseMessage(value: unknown, activeLineageIds: ReadonlySet<string>): Di
     attachments: attachments && attachments.length > 0 ? attachments : undefined,
     isActive:
       value.isActive === true || value.isActiveBranch === true || activeLineageIds.has(value.id),
+    parts: Array.isArray(value.parts) ? parseTranscriptParts(value.parts) : undefined,
   };
+}
+
+function parseTranscriptParts(value: readonly unknown[]): TranscriptPart[] {
+  return value.filter(
+    (part): part is TranscriptPart =>
+      isRecord(part) &&
+      (part.kind === 'reasoning' || part.kind === 'text' || part.kind === 'tool') &&
+      typeof part.startedAt === 'number',
+  );
 }
 
 /** Accept both the authoritative structured response and the old message

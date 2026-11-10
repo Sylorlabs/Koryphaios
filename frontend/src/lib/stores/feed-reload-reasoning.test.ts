@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { WSMessage } from '@koryphaios/shared';
 
 // Reproduction harness for reasoning-trace loss across app relaunch/reload.
 // The app relaunch path is: WS connect -> subscribe_session -> server replays
@@ -56,44 +57,35 @@ describe('reasoning traces survive relaunch/reload', () => {
 
     // The ordered event log says reasoning happened before the answer, but a
     // terminal history write can round the assistant timestamp earlier than
-    // the replayed event timestamps. The live answer is deduplicated during
-    // reload, so it must first transfer its canonical anchor to history.
-    feedStore.accumulateFeedEntry(feedStore.sessionId, {
-      timestamp: 5_000,
-      type: 'thinking',
-      agentId: 'kory-manager',
-      agentName: 'Kory',
-      glowClass: 'glow-kory',
-      text: 'Reasoning summary from the replay.',
-      metadata: {
+    // the replayed event timestamps. Placement is decided by the turn's message
+    // id and its parts, never by the assistant timestamp or by matching text.
+    const turnEvent = (type: string, payload: Record<string, unknown>, timestamp: number, sequence: number) =>
+      ({
+        type,
+        payload: { agentId: 'kory-manager', messageId: 'm2', ...payload },
         sessionId,
-        eventEpoch: 7,
-        sequenceStart: 29,
-        sequenceEnd: 37,
+        timestamp,
+        epoch: 7,
+        sequence,
         replayed: true,
-      },
-    });
-    feedStore.accumulateFeedEntry(feedStore.sessionId, {
-      timestamp: 5_100,
-      type: 'content',
-      agentId: 'kory-manager',
-      agentName: 'Kory',
-      glowClass: 'glow-kory',
-      text: 'Final answer text.',
-      metadata: {
-        sessionId,
-        eventEpoch: 7,
-        sequenceStart: 38,
-        sequenceEnd: 56,
-        replayed: true,
-      },
-    });
+      }) as unknown as WSMessage;
+    feedStore.applyManagerTurnEvent(sessionId, turnEvent('stream.thinking', { thinking: 'Reasoning summary from the replay.' }, 5000, 29));
+    feedStore.applyManagerTurnEvent(sessionId, turnEvent('stream.delta', { content: 'Final answer text.' }, 5100, 38));
 
     const ok = await feedStore.loadSessionMessages(sessionId, [
       { id: 'm1', role: 'user', content: 'hello', createdAt: 100 },
       // Deliberately earlier than replayed reasoning: this is the production
       // timestamp precision mismatch that previously inverted the turn.
-      { id: 'm2', role: 'assistant', content: 'Final answer text.', createdAt: 200 },
+      {
+        id: 'm2',
+        role: 'assistant',
+        content: 'Final answer text.',
+        createdAt: 200,
+        parts: [
+          { kind: 'reasoning', text: 'Reasoning summary from the replay.', startedAt: 5000, endedAt: 5100 },
+          { kind: 'text', text: 'Final answer text.', startedAt: 5100 },
+        ],
+      },
     ]);
 
     expect(ok).toBe(true);
@@ -102,9 +94,13 @@ describe('reasoning traces survive relaunch/reload', () => {
       'thinking',
       'content',
     ]);
-    const persistedAnswer = feedStore.feed.find((entry) => entry.id === 'hist-m2');
-    expect(persistedAnswer?.metadata?.eventEpoch).toBe(7);
-    expect(persistedAnswer?.metadata?.sequenceStart).toBe(38);
+    // The live turn and the persisted turn are the same rows: one per part.
+    expect(feedStore.feed.map((entry) => entry.id)).toEqual([
+      'hist-m1',
+      'turn-m2-0',
+      'turn-m2-1',
+    ]);
+    expect(feedStore.feed[2]?.metadata?.turnMessageId).toBe('m2');
   });
 
   it('keeps replayed thinking entries when the history refresh lands after the replay burst', async () => {

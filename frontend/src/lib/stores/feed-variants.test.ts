@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { WSMessage } from '@koryphaios/shared';
 import type { DisplayMessage, MessageDisplayBoundary } from '$lib/utils/message-variants';
 
 const state = vi.hoisted(() => ({
@@ -149,14 +150,16 @@ describe('feed response variant truth', () => {
     // regeneration replaced it as the active branch. Only one variant may be
     // rendered, so this row must be absorbed by the history refresh instead of
     // reappearing as a second Kory answer.
-    feedStore.addFeedEntryForSession(feedStore.sessionId, {
+    // The superseded answer is turn v0. Identity, not its text, lets the
+    // history refresh absorb it.
+    feedStore.applyManagerTurnEvent(sessionId, {
+      type: 'stream.delta',
+      payload: { agentId: 'kory-manager', messageId: 'v0', content: 'first answer' },
+      sessionId,
       timestamp: 120,
-      type: 'content',
-      agentId: 'kory-manager',
-      agentName: 'Kory',
-      glowClass: 'glow-kory',
-      text: 'first answer',
-    });
+      epoch: 1,
+      sequence: 1,
+    } as unknown as WSMessage);
 
     await feedStore.loadSessionMessages(sessionId, [
       message('prompt', 'user', 'question'),

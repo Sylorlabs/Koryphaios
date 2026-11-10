@@ -1,7 +1,9 @@
 // Feed Store — handles feed entries and message display
 // Split from the monolithic websocket.svelte.ts for better separation of concerns
 
-import type { AgentIdentity, RunRevisionRef } from '@koryphaios/shared';
+import type { AgentIdentity, RunRevisionRef, TranscriptPart, WSMessage } from '@koryphaios/shared';
+import { reduceTurnParts, turnEventFromWSMessage } from '@koryphaios/shared';
+import { MANAGER_TURN_IDENTITY, partsToFeedEntries } from './transcript-turns';
 import type { CompactionProgressPayload, ContextBreakdown } from '@koryphaios/shared';
 import type { FeedEntry, FeedEntryType } from '$lib/types';
 import { sessionStore } from './sessions.svelte';
@@ -101,6 +103,34 @@ const feedStreamTargets = new Map<
  *  a finished answer. Keyed by turn (session + agent). */
 const closedFeedTurns = new Set<string>();
 
+// ── Live manager turns (Invariants 1 and 2) ────────────────────────────────
+// A manager turn is keyed by the message id it is persisted under. Its rows are
+// the expansion of its folded parts (partsToFeedEntries), the same expansion a
+// reload uses, so the streamed transcript and the reloaded one are one thing.
+type LiveTurn = {
+  sessionId: string;
+  messageId: string;
+  parts: TranscriptPart[];
+  lastEpoch?: number;
+  lastSequence?: number;
+  lastTimestamp: number;
+};
+const liveTurns = new Map<string, LiveTurn>();
+/** Turns whose persisted message has been loaded. Their events are no longer
+ *  folded: a reconnect replay that starts mid-turn would otherwise rebuild a
+ *  partial turn over the persisted rows. */
+const settledTurns = new Set<string>();
+
+function liveTurnKey(sessionId: string, messageId: string): string {
+  return `${sessionId}::${messageId}`;
+}
+
+function forgetLiveTurnsForSession(sessionId: string): void {
+  const prefix = `${sessionId}::`;
+  for (const key of [...liveTurns.keys()]) if (key.startsWith(prefix)) liveTurns.delete(key);
+  for (const key of [...settledTurns]) if (key.startsWith(prefix)) settledTurns.delete(key);
+}
+
 function feedTurnKey(sessionId: string, agentId: string): string {
   return `${sessionId}::${agentId}`;
 }
@@ -199,13 +229,6 @@ function clearThinkingClocksForSession(sessionId: string): void {
 
 function rebuildGroupedFeedCache(): void {
   lastGroupedFeed = getGroupedEntries(feed);
-}
-
-/** Normalize message text for dedup comparisons. Collapses whitespace so a
- *  streamed turn and its persisted counterpart match even when the provider
- *  emits deltas with slightly different spacing. */
-function normalizeFeedText(text: string): string {
-  return (text ?? '').trim().replace(/\s+/g, ' ');
 }
 
 function cloneEntries(entries: FeedEntry[]): FeedEntry[] {
@@ -854,20 +877,142 @@ function upsertCompaction(
   else appendCachedEntry(sessionId, visible);
 }
 
-function hasPersistedAssistantContaining(
-  sessionId: string,
-  text: string,
-  eventTimestamp: number,
-): boolean {
-  const needle = normalizeFeedText(text);
-  if (!needle) return false;
-  return (laneEntries(sessionId) ?? []).some(
-    (entry) =>
-      entry.type === 'content' &&
-      entry.agentId === 'kory-manager' &&
-      typeof entry.metadata?.messageId === 'string' &&
-      entry.timestamp >= eventTimestamp &&
-      normalizeFeedText(entry.text).includes(needle),
+/** Splice a turn's expansion into a lane in place of the rows it already has.
+ *  The first replaced row's position is kept, so a turn that grows never moves
+ *  above rows that came before it. */
+function spliceTurnRows(lane: FeedEntry[], messageId: string, rows: FeedEntry[]): FeedEntry[] {
+  const isTurnRow = (row: FeedEntry) => row.metadata?.turnMessageId === messageId;
+  const first = lane.findIndex(isTurnRow);
+  if (first < 0) return rows.length > 0 ? [...lane, ...rows] : lane;
+  // Rows before `first` are not this turn's, so their index is unchanged once the
+  // turn's rows are removed.
+  const kept = lane.filter((row) => !isTurnRow(row));
+  return [...kept.slice(0, first), ...rows, ...kept.slice(first)];
+}
+
+function rowFingerprint(row: FeedEntry): string {
+  return JSON.stringify([row.type, row.text, row.timestamp, row.metadata, row.isCollapsed]);
+}
+
+/** Token-streaming fast path. When the turn's rows keep the same ids and kinds
+ *  and only the LAST row changed (text grew, token estimate moved), update that
+ *  row in place instead of regrouping the whole feed — O(turn) per delta rather
+ *  than O(feed). Any structural change (new part, tool result inside a group,
+ *  reasoning sealed on an earlier row) returns false and takes the full path. */
+function patchLastTurnRowInPlace(lane: FeedEntry[], rows: FeedEntry[]): boolean {
+  if (rows.length === 0) return false;
+  const start = lane.findIndex((row) => row.id === rows[0].id);
+  if (start < 0) return false;
+  const end = start + rows.length;
+  if (end > lane.length) return false;
+  const next = lane[end];
+  if (next && next.metadata?.turnMessageId === rows[0].metadata?.turnMessageId) return false;
+  for (let i = 0; i < rows.length; i++) {
+    const current = lane[start + i];
+    if (current.id !== rows[i].id || current.type !== rows[i].type) return false;
+    if (i < rows.length - 1 && rowFingerprint(current) !== rowFingerprint(rows[i])) return false;
+  }
+  const last = rows[rows.length - 1];
+  const target = lane[end - 1];
+  Object.assign(target, last);
+  patchGroupedFeedEntry(target.id, target.text, target.timestamp, last);
+  return true;
+}
+
+function publishLiveTurn(turn: LiveTurn): void {
+  const rows = partsToFeedEntries({
+    sessionId: turn.sessionId,
+    messageId: turn.messageId,
+    parts: turn.parts,
+    ...MANAGER_TURN_IDENTITY,
+  });
+  if (isDisplayedLane(turn.sessionId)) {
+    if (patchLastTurnRowInPlace(feed, rows)) {
+      streamingRevision++;
+      return;
+    }
+    feed = spliceTurnRows(feed, turn.messageId, rows);
+    streamingRevision++;
+    feedVersion++;
+    rebuildGroupedFeedCache();
+    return;
+  }
+  // Background chats get the same rows, written to their cached lane.
+  sessionFeedCache.set(
+    turn.sessionId,
+    spliceTurnRows(sessionFeedCache.get(turn.sessionId) ?? [], turn.messageId, rows),
+  );
+}
+
+/** Fold one realtime manager event into its turn and re-expand that turn's rows.
+ *  Applies to the displayed chat and to background chats alike. Events already
+ *  folded (replays, reconnects) and turns already persisted are ignored. */
+export function applyManagerTurnEvent(sessionId: string, msg: WSMessage): boolean {
+  if (!sessionId) return false;
+  const messageId = (msg.payload as { messageId?: unknown } | null)?.messageId;
+  if (typeof messageId !== 'string' || !messageId) return false;
+  const key = liveTurnKey(sessionId, messageId);
+  if (settledTurns.has(key)) return false;
+  const event = turnEventFromWSMessage(msg);
+  if (!event) return false;
+  const epoch = Number.isSafeInteger(msg.epoch) ? Number(msg.epoch) : undefined;
+  const sequence = Number.isSafeInteger(msg.sequence) ? Number(msg.sequence) : undefined;
+
+  let turn = liveTurns.get(key);
+  if (turn && epoch !== undefined && sequence !== undefined && turn.lastEpoch !== undefined && turn.lastSequence !== undefined) {
+    const folded =
+      epoch < turn.lastEpoch || (epoch === turn.lastEpoch && sequence <= turn.lastSequence);
+    if (folded) return false;
+  }
+  if (!turn) {
+    turn = { sessionId, messageId, parts: [], lastTimestamp: msg.timestamp };
+    liveTurns.set(key, turn);
+  }
+  const isNewToolCall =
+    event.type === 'tool_call' &&
+    !turn.parts.some((part) => part.kind === 'tool' && part.callId === event.callId);
+  turn.parts = reduceTurnParts(turn.parts, event);
+  turn.lastTimestamp = msg.timestamp;
+  if (epoch !== undefined && sequence !== undefined) {
+    turn.lastEpoch = epoch;
+    turn.lastSequence = sequence;
+  }
+  publishLiveTurn(turn);
+  return isNewToolCall;
+}
+
+/** A reasoning block of a live manager turn ends when the turn's reasoning is
+ *  sealed by the reader's stop, a terminal state or the next action. The turn
+ *  is closed with the same timestamp, so the rows and the parts agree. A null
+ *  end (local stop) freezes at the last observed server timestamp. */
+function sealLiveTurnReasoning(sessionId: string, agentId: string | undefined, endedAt: number | null): void {
+  if (agentId && agentId !== 'kory-manager') return;
+  const prefix = `${sessionId}::`;
+  for (const [key, turn] of liveTurns) {
+    if (!key.startsWith(prefix)) continue;
+    if (!turn.parts.some((part) => part.kind === 'reasoning' && part.endedAt === undefined)) continue;
+    turn.parts = reduceTurnParts(turn.parts, { type: 'complete', timestamp: endedAt ?? turn.lastTimestamp });
+    publishLiveTurn(turn);
+  }
+}
+
+/** Persisted messages supersede their live turns: the live state is dropped and
+ *  the turn is marked settled so late events cannot rebuild it. */
+function settleLoadedTurns(sessionId: string, messageIds: Iterable<string>): void {
+  for (const messageId of messageIds) {
+    const key = liveTurnKey(sessionId, messageId);
+    liveTurns.delete(key);
+    settledTurns.add(key);
+  }
+}
+
+/** A live row that the persisted history now represents. Matched by identity only. */
+function isRowPersistedIn(entry: FeedEntry, loadedMessageIds: ReadonlySet<string>): boolean {
+  const turnMessageId = entry.metadata?.turnMessageId;
+  if (typeof turnMessageId === 'string' && loadedMessageIds.has(turnMessageId)) return true;
+  const messageId = entry.metadata?.messageId;
+  return (
+    entry.type === 'user_message' && typeof messageId === 'string' && loadedMessageIds.has(messageId)
   );
 }
 
@@ -898,6 +1043,11 @@ function sealThinkingInLane(
   let changed = false;
   for (const e of entries) {
     if (e.type !== 'thinking' || e.thinkingFinalized) continue;
+    // A measured seal of a live manager turn goes through its parts
+    // (sealLiveTurnReasoning), so the rows cannot disagree with them. An
+    // unmeasured freeze (leaving the chat) is display-only and re-expands from
+    // the parts when the turn next emits.
+    if (measured && typeof e.metadata?.turnMessageId === 'string') continue;
     if (agentId && e.agentId !== agentId) continue;
     if (measured) {
       const startedAt =
@@ -930,6 +1080,7 @@ function finalizeThinking(
   endedAt: number | null = Date.now(),
 ) {
   if (!sessionId) return;
+  sealLiveTurnReasoning(sessionId, agentId, endedAt);
   const entries = laneEntries(sessionId);
   if (!entries) return;
   // `endedAt` is always a provider timestamp here, so a background lane still
@@ -1351,6 +1502,7 @@ function clearFeed(sessionId: string) {
  * tool rows from the discarded branch. */
 function resetSessionFeed(sessionId: string): number {
   sessionFeedCache.delete(sessionId);
+  forgetLiveTurnsForSession(sessionId);
   if (feedSessionId !== sessionId) return feedTransitionGeneration;
   // Invalidate any history request that began on the discarded branch. The
   // rewrite handler starts a fresh generation after this reset.
@@ -1382,6 +1534,7 @@ function clearSessionFeedState(sessionId: string): void {
   if (cached) rememberEntryAgents(cached);
   if (feedSessionId === sessionId) rememberEntryAgents(feed);
   sessionFeedCache.delete(sessionId);
+  forgetLiveTurnsForSession(sessionId);
   sessionMessageHistory.delete(sessionId);
   olderMessagesBySession.delete(sessionId);
   oldestMessageCursorBySession.delete(sessionId);
@@ -1439,75 +1592,6 @@ function isDuplicateError(sessionId: string, text: string, timestamp: number): b
   const last = lane.length > 0 ? lane[lane.length - 1] : null;
   const delta = last ? timestamp - last.timestamp : -1;
   return !!(last?.type === 'error' && last.text === text && delta >= 0 && delta < 3_000);
-}
-
-/**
- * A history response only carries a wall-clock creation timestamp. When it
- * replaces a streamed manager reply, retain the reply's durable event-log
- * position so timeline reconciliation does not put that persisted reply ahead
- * of replayed reasoning merely because the database timestamp is coarse.
- *
- * Work backwards so repeated assistant text belongs to the most recent
- * persisted reply. A coalesced live content row already carries the first and
- * final sequence of its delta range, which is exactly the canonical anchor we
- * need to preserve.
- */
-function anchorPersistedRepliesToLiveContent(
-  history: FeedEntry[],
-  liveEntries: ReadonlyArray<FeedEntry>,
-): FeedEntry[] {
-  const liveContent = liveEntries
-    .map((entry, index) => ({ entry, index }))
-    .filter(({ entry }) => {
-      const epoch = entry.metadata?.eventEpoch;
-      const sequence = entry.metadata?.sequenceStart;
-      return (
-        entry.type === 'content' &&
-        entry.agentId === 'kory-manager' &&
-        Number.isSafeInteger(epoch) &&
-        Number.isSafeInteger(sequence) &&
-        !!normalizeFeedText(entry.text)
-      );
-    });
-  if (liveContent.length === 0) return history;
-
-  const claimedLiveEntries = new Set<number>();
-  const anchored = [...history];
-  for (let historyIndex = anchored.length - 1; historyIndex >= 0; historyIndex--) {
-    const persisted = anchored[historyIndex];
-    if (
-      persisted.type !== 'content' ||
-      persisted.agentId !== 'kory-manager' ||
-      typeof persisted.metadata?.messageId !== 'string'
-    ) {
-      continue;
-    }
-
-    const persistedText = normalizeFeedText(persisted.text);
-    if (!persistedText) continue;
-    const match = [...liveContent]
-      .reverse()
-      .find(
-        ({ entry, index }) =>
-          !claimedLiveEntries.has(index) && persistedText.includes(normalizeFeedText(entry.text)),
-      );
-    if (!match) continue;
-
-    claimedLiveEntries.add(match.index);
-    const eventEpoch = Number(match.entry.metadata?.eventEpoch);
-    const sequenceStart = Number(match.entry.metadata?.sequenceStart);
-    const sequenceEnd = Number(match.entry.metadata?.sequenceEnd ?? sequenceStart);
-    anchored[historyIndex] = {
-      ...persisted,
-      metadata: {
-        ...persisted.metadata,
-        eventEpoch,
-        sequenceStart,
-        ...(Number.isSafeInteger(sequenceEnd) ? { sequenceEnd } : {}),
-      },
-    };
-  }
-  return anchored;
 }
 
 // ─── Grouped Feed (for virtual list) ─────────────────────────────────────────
@@ -1620,6 +1704,33 @@ export function getGroupedEntries(entries: FeedEntry[]): FeedEntry[] {
 }
 
 // ─── Session Loading ─────────────────────────────────────────────────────────
+
+/** Persisted parts of an assistant message, or null when the row is rendered
+ *  as a plain message. A persisted turn is over, so an open reasoning part is
+ *  closed at the message time rather than left to run. */
+function persistedTurnParts(message: DisplayMessage): TranscriptPart[] | null {
+  if (message.role !== 'assistant' || !message.parts || message.parts.length === 0) return null;
+  return message.parts.map((part) =>
+    part.kind === 'reasoning' && part.endedAt === undefined
+      ? { ...part, endedAt: Math.max(part.startedAt, message.createdAt) }
+      : part,
+  );
+}
+
+/** Time windows (previous message, assistant message] of assistant turns that
+ *  have persisted tool parts. Archived tool rows inside a window duplicate parts. */
+function turnPartsWindows(messages: readonly DisplayMessage[]): Array<{ from: number; to: number }> {
+  const sorted = [...messages].sort((a, b) => a.createdAt - b.createdAt);
+  const windows: Array<{ from: number; to: number }> = [];
+  sorted.forEach((message, index) => {
+    if (message.role !== 'assistant' || !message.parts?.some((part) => part.kind === 'tool')) return;
+    const previous = sorted[index - 1];
+    // Without a loaded predecessor the turn's start is unknown; keep its archive rows.
+    if (!previous) return;
+    windows.push({ from: previous.createdAt, to: message.createdAt });
+  });
+  return windows;
+}
 
 type SessionLoadOptions = {
   generation?: number;
@@ -1840,10 +1951,10 @@ async function loadSessionMessagesImpl(
       variantChoices.get(message.variantGroupId)?.representative.id === message.id,
   );
 
-  const history = displayMessages.map((m) => {
+  const history: FeedEntry[] = displayMessages.flatMap((m): FeedEntry[] => {
     const isCompaction = m.role === 'system' && m.content.startsWith('[KORY_COMPACTION]');
     const variantChoice = m.variantGroupId ? variantChoices.get(m.variantGroupId) : undefined;
-    return {
+    const legacyRow: FeedEntry = {
       id: `hist-${m.id}`,
       timestamp: m.createdAt,
       // System rows are plain markers ("Stopped by user.") — not Kory speech.
@@ -1921,30 +2032,34 @@ async function loadSessionMessagesImpl(
       },
       ghostHash: undefined,
     };
+    const parts = persistedTurnParts(m);
+    if (!parts) return [legacyRow];
+    return partsToFeedEntries({
+      sessionId,
+      messageId: m.id,
+      parts,
+      ...MANAGER_TURN_IDENTITY,
+      messageMetadata: legacyRow.metadata,
+    });
   });
-  const historyWithLiveAnchors = anchorPersistedRepliesToLiveContent(history, liveTailAtLoad);
 
-  // The live tail holds the turn we just watched stream in (the user's
-  // message via addUserMessage + Kory's reply via accumulateFeedEntry). By
-  // the time we reload, that turn is persisted and present in `history`
-  // above — keeping both would render the user's text and Kory's reply
-  // twice. Drop the now-persisted text rows from the live tail, but keep
-  // ephemeral rows (thinking, tool calls, tool results, system markers)
-  // that aren't part of message history. Worker content is also kept:
-  // only the manager's turns are persisted as session messages.
-  const persistedTextKeys = new Set<string>();
-  const persistedAssistantTexts: string[] = [];
-  // Dedup against every retained row, not just the displayed representatives.
-  // A regenerated response keeps the superseded answer as a retained sibling
-  // variant: it is deliberately excluded from `displayMessages` (one variant is
-  // shown at a time) but it is still persisted. Comparing the live tail only
-  // against the representatives left the live-streamed copy of a superseded
-  // variant unmatched, so it survived the reload and rendered as a second,
-  // duplicate Kory answer next to the one that replaced it.
-  for (const m of messages) {
-    persistedTextKeys.add(`${m.role}\u0000${normalizeFeedText(m.content)}`);
-    if (m.role === 'assistant') persistedAssistantTexts.push(normalizeFeedText(m.content));
-  }
+  // Every loaded message is persisted now: its live turn (if any) is superseded
+  // and identity, not text, decides which live rows the history replaces.
+  const loadedMessageIds = new Set(messages.map((message) => message.id));
+  settleLoadedTurns(
+    sessionId,
+    messages.filter((message) => message.role === 'assistant').map((message) => message.id),
+  );
+  // Archived tool rows for a turn that has persisted parts are already in the
+  // turn's rows. Archive ids are not provider call ids, so the match is by time:
+  // a row inside (previous message, assistant] belongs to that assistant turn.
+  const coveredByParts = turnPartsWindows(messages);
+
+  // The live tail holds the turn we just watched stream in. By the time we
+  // reload, that turn is persisted and present in `history`, so its rows are
+  // dropped by identity: a live manager row by its turn message id, a live user
+  // row by the persisted id bound at send time. Rows of turns that are not yet
+  // persisted, ephemeral rows and worker rows are kept.
   const dedupedLiveTail = withoutAnalyzingThoughts(
     liveTailAtLoad.filter((entry) => {
       const clientEntryId = entry.metadata?.clientEntryId;
@@ -1954,19 +2069,7 @@ async function loadSessionMessagesImpl(
       ) {
         return false;
       }
-      if (entry.type === 'user_message') {
-        return !persistedTextKeys.has(`user\u0000${normalizeFeedText(entry.text)}`);
-      }
-      if (entry.type === 'content' && entry.agentId === 'kory-manager') {
-        // A streamed reply may be split across several content entries when
-        // tool calls interleave. Each segment is contained within the
-        // persisted assistant message, so match by containment rather than
-        // exact equality. Empty fragments never count as a match.
-        const text = normalizeFeedText(entry.text);
-        if (!text) return true;
-        return !persistedAssistantTexts.some((p) => p.includes(text));
-      }
-      return true;
+      return !isRowPersistedIn(entry, loadedMessageIds);
     }),
     analyzingThoughtId,
   );
@@ -1979,11 +2082,7 @@ async function loadSessionMessagesImpl(
   feed = visibleEntriesForSession(
     sessionId,
     withoutAnalyzingThoughts(
-      mergeFeedTimeline(
-        historyWithLiveAnchors,
-        persistedClientErrorEntries(sessionId),
-        dedupedLiveTail,
-      ),
+      mergeFeedTimeline(history, persistedClientErrorEntries(sessionId), dedupedLiveTail),
       analyzingThoughtId,
     ),
   );
@@ -2037,7 +2136,7 @@ async function loadSessionMessagesImpl(
       options.onUsage?.(contextData.lastUsage ?? null);
     }
     if (Array.isArray(contextData.data)) {
-      toolHistory = contextData.data.map((e) => {
+      toolHistory = contextData.data.filter((e) => !coveredByParts.some((window) => e.ts > window.from && e.ts <= window.to)).map((e) => {
         const name = e.label.split(' ')[0] || 'tool';
         const input = parseArchivedToolInput(e.toolInput ?? e.label.slice(name.length + 1));
         return {
@@ -2078,16 +2177,25 @@ async function loadSessionMessagesImpl(
     !ownsFeed(sessionId, options.generation)
   ) return false;
 
-  const enrichedHistory = historyWithLiveAnchors.map((entry) => ({
+  const enrichedHistory = history.map((entry) => ({
     ...entry,
-    ghostHash: timeline.find((item) => item.messageId === entry.metadata?.messageId)?.hash,
+    ghostHash:
+      typeof entry.metadata?.messageId === 'string'
+        ? timeline.find((item) => item.messageId === entry.metadata?.messageId)?.hash
+        : undefined,
   }));
   // Preserve both the retained live rows committed with text history and any
   // rows that arrived while ancillary history was loading. The snapshot is
   // identified by feed IDs, not its old array position, because canonical
   // ordering may interleave those lanes.
+  // Rows of the committed tail may have been re-expanded in place since the
+  // text commit (a turn grows under the same ids), so take the current version.
+  const currentById = new Map(feed.map((entry) => [entry.id, entry]));
   const liveSinceTextCommit = feed.filter((entry) => !committedIds.has(entry.id));
-  const liveAcrossReload = mergeFeedTimeline(dedupedLiveTail, liveSinceTextCommit);
+  const liveAcrossReload = mergeFeedTimeline(
+    dedupedLiveTail.map((entry) => currentById.get(entry.id) ?? entry),
+    liveSinceTextCommit,
+  ).filter((entry) => !isRowPersistedIn(entry, loadedMessageIds));
   const liveOperational = operationalEntriesForReload(liveAcrossReload);
   const archivedWithoutLiveDuplicates = omitArchivedToolDuplicates(toolHistory, liveOperational);
   const merged = mergeFeedTimeline(
@@ -2214,7 +2322,7 @@ export const feedStore = {
   removeAnalyzingThoughtEntries,
   addClientError,
   upsertCompaction,
-  hasPersistedAssistantContaining,
+  applyManagerTurnEvent,
   removeEntries,
   deleteEntry,
   setEntryVisibility,
