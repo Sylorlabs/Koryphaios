@@ -65,6 +65,41 @@ which OS the server is on. It exposes `hostOS()`, `isMac()` / `isLinux()` /
 
 `AGENTS.md` records the reasoning; the modules are the contract.
 
+## Transcript integrity and chat isolation
+
+Two bug classes kept coming back — reasoning reordered or lost after reload, and
+one chat's rows appearing in another — because the live view and the reload view
+were built by different code, and session identity was optional. The full
+contract is `docs/architecture/transcript-integrity.md`; these rules are the
+part every change must respect.
+
+- **One reducer orders a turn.** `reduceTurnParts()` in `shared/src/transcript/`
+  is the only code that decides how reasoning, text and tool activity are ordered
+  inside an assistant turn. The backend folds emitted events through it and
+  persists the result as `StoredMessage.parts`; the frontend folds the same live
+  events through it and renders persisted parts with the same expansion. Never
+  add ordering logic to `feed.svelte.ts`, the history loader or
+  `message-store.ts`; change the reducer and its tests.
+- **A turn has one identity from its first event.** The assistant message id is
+  allocated when the manager turn starts (`TurnTranscriptRecorder.beginTurn`) and
+  `EventEmitterService.emit()` stamps it on every manager `stream.*` event as
+  `payload.messageId`. Live rows are replaced by persisted rows **by id**.
+  Matching live and persisted rows by text is forbidden — if two rows cannot be
+  matched by id, they are different rows.
+- **`reasoningContent` is provider input, `parts` is display.** Do not change what
+  is replayed to a provider when touching display, and vice versa.
+- **Session identity is required.** `SESSION_SCOPED_EVENT_TYPES` lists every event
+  that touches a chat; the WS manager and the frontend both drop one that has no
+  `sessionId`. Store mutations take `sessionId` as a required first argument and
+  never default to the open chat; per-agent client state is keyed by
+  `(sessionId, agentId)`. A new session-bound event type must be added to the set.
+- **Per-session server state lives in `SessionRuntime`.** Do not add a
+  `Map<sessionId, …>` field to `KoryManager`; add a property to `SessionRuntime`,
+  which session deletion disposes in one call.
+- The guards are tests: `turn-transcript-parity.test.ts` (backend),
+  `transcript-reload-parity.test.ts` and `session-isolation.test.ts` (frontend).
+  A change that needs one of them weakened is the bug.
+
 ## UI controls
 
 - Never introduce native HTML `<select>` controls in Koryphaios product UI.

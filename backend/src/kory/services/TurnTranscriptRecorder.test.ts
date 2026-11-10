@@ -139,6 +139,15 @@ describe('finalizeParts', () => {
     expect(finalizeParts(parts, 'Hello', 99)).toEqual(parts);
   });
 
+  test('closes reasoning a cancelled turn left open at persistence time', () => {
+    const open: TranscriptPart = { kind: 'reasoning', text: 'thinking', startedAt: 1 };
+    expect(finalizeParts([open], '', 50)).toEqual([{ ...open, endedAt: 50 }]);
+    expect(finalizeParts([open, { kind: 'text', text: 'Hi', startedAt: 5 }], 'Hi', 50)).toEqual([
+      { ...open, endedAt: 50 },
+      { kind: 'text', text: 'Hi', startedAt: 5 },
+    ]);
+  });
+
   test('replaces mismatched text with one text part and keeps non-text order', () => {
     const parts: TranscriptPart[] = [reasoning, { kind: 'text', text: 'draft', startedAt: 3 }, tool];
     expect(finalizeParts(parts, 'withheld notice', 99)).toEqual([

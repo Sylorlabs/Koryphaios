@@ -94,9 +94,14 @@ export function finalizeParts(
   toPersist: string,
   createdAt: number,
 ): TranscriptPart[] {
-  const nonText = parts.filter((part) => part.kind !== 'text');
+  // A persisted turn is over: reasoning a cancelled or failed turn left open
+  // (no complete event) ends at persistence time, never renders as live.
+  const closed = parts.map((part) =>
+    part.kind === 'reasoning' && part.endedAt === undefined ? { ...part, endedAt: createdAt } : part,
+  );
+  const nonText = closed.filter((part) => part.kind !== 'text');
   if (toPersist === '') return nonText;
-  const textOf = parts.map((part) => (part.kind === 'text' ? part.text : '')).join('');
-  if (textOf === toPersist) return parts.slice();
+  const textOf = closed.map((part) => (part.kind === 'text' ? part.text : '')).join('');
+  if (textOf === toPersist) return closed;
   return [...nonText, { kind: 'text', text: toPersist, startedAt: createdAt }];
 }
