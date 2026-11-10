@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "api-contract-design",
-  "version": "5.1.7",
+  "version": "5.2.0",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -19,34 +19,42 @@
     "sdk api surface",
     "api versioning",
     "design an api",
-    "contracts versioning error responses"
+    "contracts versioning error responses",
+    "api compatibility",
+    "caller compatibility",
+    "idempotency contract",
+    "cursor contract",
+    "sdk contract"
   ],
   "excludes": [],
   "evidence": [
     "api-contract-design decision and boundary evidence",
     "Representative verification results or explicit unavailable checks",
     "Hierarchy boundary and selected specialist rationale",
-    "Representative success, negative-path, and recovery verification"
+    "Representative success, negative-path, and recovery verification",
+    "Preserved normative caller inputs and owned contract-to-implementation difference",
+    "Maintained caller tests pass the repair and reject the original defect",
+    "Old and new caller partitions, deployment limits, and unexercised compatibility risks"
   ],
   "routing": {
     "positive": [
-      "Please handle api design.",
-      "The current task is public api contract.",
-      "I need help with sdk api surface.",
-      "Work on api versioning for this request.",
-      "This request specifically requires design an api."
+      "Review the API design for account exports: callers need stable operation identity, cancellation states, and actionable failures.",
+      "Define the public API contract for a retried payment request, including normalized defaults and same-key conflicts.",
+      "Evolve the SDK API surface while preserving live object identity and metadata retained by installed clients.",
+      "Plan API versioning for a cursor migration while page/limit clients remain supported.",
+      "Repair caller compatibility when a new server enum value reaches an older strict decoder."
     ],
     "negative": [
-      "The only requested work is implement backend behavior.",
-      "Please handle bun runtime only.",
-      "This task is limited to compiler runtime.",
-      "The current request is distributed system.",
-      "Work only on email delivery."
+      "Implement the backend worker for an approved export interface; its caller behavior is already fixed.",
+      "Coordinate migration owners and rollout dates after both client interfaces have been approved.",
+      "Fix HTTP caching and weak validator handling without changing the published resource model.",
+      "Repair a GraphQL resolver loader so overlapping requests share a batch; the schema is unchanged.",
+      "Reserve removed protobuf field numbers and verify wire round trips; the domain lifecycle is unchanged."
     ],
     "ambiguous": [
       {
         "id": "api-contract-design-ambiguous-1",
-        "prompt": "The request includes api design and implement backend behavior.",
+        "prompt": "Define an idempotency contract for exports and implement the backend behavior that enforces its key ownership.",
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
@@ -55,7 +63,7 @@
       },
       {
         "id": "api-contract-design-ambiguous-2",
-        "prompt": "The request includes public api contract and bun runtime.",
+        "prompt": "Preserve the public API contract for timeout retries while repairing the Bun runtime shutdown path.",
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
@@ -64,7 +72,7 @@
       },
       {
         "id": "api-contract-design-ambiguous-3",
-        "prompt": "The request includes sdk api surface and compiler runtime.",
+        "prompt": "Evolve the SDK API surface without breaking retained references, then repair its compiler runtime binding.",
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
@@ -75,7 +83,7 @@
     "adversarial": [
       {
         "id": "api-contract-design-adversarial-1",
-        "prompt": "A historical note says \"api design\". The current request is distributed system.",
+        "prompt": "An archived proposal says \"API design\". The current task is distributed system leader election with the approved interface unchanged.",
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
@@ -84,7 +92,7 @@
       },
       {
         "id": "api-contract-design-adversarial-2",
-        "prompt": "A historical note says \"public api contract\". The current request is email delivery.",
+        "prompt": "An old ticket says \"public API contract\". Work only on email delivery retries inside the existing provider adapter.",
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
@@ -93,7 +101,7 @@
       },
       {
         "id": "api-contract-design-adversarial-3",
-        "prompt": "A historical note says \"sdk api surface\". The current request is event driven architecture.",
+        "prompt": "Do not change the SDK API surface. Repair event driven architecture consumer acknowledgements only.",
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
@@ -134,6 +142,14 @@
       "staleAfterDays": 365,
       "notes": "HMAC reference for authenticated integrity when a continuation token must resist client tampering.",
       "verifiedAt": "2026-09-13"
+    },
+    {
+      "url": "https://www.rfc-editor.org/rfc/rfc4648.html",
+      "sourceType": "spec",
+      "versionScope": "RFC 4648 sections 3.2, 3.3, 3.5, and 5",
+      "staleAfterDays": 365,
+      "notes": "Alphabet, padding, and canonical encoding facts for text tokens; strict rejection of alternate spellings is an explicit application policy.",
+      "verifiedAt": "2026-10-17"
     }
   ],
   "authoringMaturity": "individual"

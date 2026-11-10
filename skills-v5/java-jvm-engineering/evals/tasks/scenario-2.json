@@ -1,15 +1,15 @@
 {
   "id": "java-jvm-engineering-full-task-2-individual",
   "maturity": "individual",
-  "prompt": "Evolve a JVM message DTO used in JSON and a persisted queue by making `region` optional and adding an enum `priority`. Old producers omit both fields and one consumer is still on the previous version. Define defaults/unknown-enum behavior at serialization boundaries, preserve binary/source compatibility expectations where relevant, and test old/new producer-consumer combinations plus malformed persisted messages and restart recovery.",
+  "prompt": "Evolve a JVM message DTO used in JSON and a persisted queue by making `region` optional and adding an enum `priority`. Old producers omit both fields and one consumer is still on the previous version. Define defaults/unknown-enum behavior at serialization boundaries, preserve binary/source compatibility expectations where relevant, and test old/new producer-consumer combinations plus malformed persisted messages and restart recovery across supported JDK/build targets.",
   "environment": {
     "kind": "repository",
     "startingState": "fixture://java-jvm-engineering/record-serialization-compat",
     "requirements": [
-      "old and new JVM DTO versions plus golden JSON/persisted queue records",
-      "rolling-deployment matrix with old producer/new consumer and new producer/old consumer",
-      "unknown priority enum and missing/explicit-null region samples",
-      "restart fixture loading mixed-version persisted records",
+      "old and new JVM DTO versions, prior source/binary consumers, and golden JSON/persisted queue records",
+      "rolling-deployment matrix with old producer/new consumer and new producer/old consumer, separated from source and binary compatibility checks",
+      "unknown priority enum, missing/explicit-null region, malformed-record, and unknown-field samples",
+      "restart fixture loading mixed-version persisted records while retaining later valid entries",
       "paired same-model skill/no-skill execution from the identical starting snapshot"
     ]
   },
@@ -60,15 +60,18 @@
     },
     {
       "id": "operating-contract",
-      "assertion": "Confirm language and JVM targets, build tool, dependency graph, nullability conventions, framework lifecycle, and concurrency model."
+      "assertion": "Confirm language and JVM targets, build tool, dependency graph, nullability conventions, framework lifecycle, and concurrency model.",
+      "source": "https://docs.oracle.com/en/java/javase/"
     },
     {
       "id": "execution-invariant",
-      "assertion": "Versioned serialization semantics are explicit at boundaries; supported mixed-version traffic cannot fail because a new field/enum was assumed universally present."
+      "assertion": "Versioned serialization semantics are explicit at boundaries; source, binary, and wire compatibility are tested separately, and supported mixed-version traffic cannot fail because a new field/enum was assumed universally present.",
+      "source": "https://docs.oracle.com/en/java/javase/25/docs/specs/serialization/version.html"
     },
     {
       "id": "verification-discipline",
-      "assertion": "Run the authoritative Gradle or Maven checks plus focused tests across supported runtime targets."
+      "assertion": "Run the authoritative Gradle or Maven checks plus focused tests across supported runtime targets, including a prior consumer and restart recovery rather than only a new-version round trip.",
+      "source": "https://docs.oracle.com/en/java/javase/25/docs/specs/serialization/version.html"
     },
     {
       "id": "anti-pattern-resistance",
@@ -76,7 +79,8 @@
     },
     {
       "id": "evidence-and-uncertainty",
-      "assertion": "Every material completion claim must map to observable evidence (java-jvm-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+      "assertion": "Every material completion claim must map to observable evidence (java-jvm-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty.",
+      "source": "https://docs.oracle.com/en/java/javase/25/docs/specs/serialization/version.html"
     }
   ]
 }

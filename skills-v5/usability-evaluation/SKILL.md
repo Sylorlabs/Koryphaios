@@ -13,6 +13,8 @@ Scope every claim to the actual people, tasks, product state, environment, and m
 
 Prioritize findings by consequence to the task: harm, irreversibility, task criticality, frequency within the observed evidence, assistance/workaround, and confidence. Tie each recommendation to the observed breakdown it is intended to address. Retest consequential changes under comparable tasks and conditions; a changed interface is not proof that the original usability problem is solved.
 
+For bounded evaluation exercises that ask for a pure function or structured result, implement the stated observable contract exactly before adding richer study detail. Preserve required task names and ordering, participant slices, severity labels, input field meanings, and decision rules as written; return the requested fields without extra wrappers that change the result shape. Derive output fields from the input field named by the contract rather than guessing the input key from the output name: when `participantSlices` is defined from input `profiles`, read `profiles`. Likewise, when the input supplies task coverage under `scenarios`, use `scenarios` as the stated coverage source even when the output calls the canonical list `requiredTasks`. Keep synthetic plan logic separate from observed findings, and never convert missing participant evidence into findings.
+
 Use `user-research` for broader unmet-needs/context questions and quantitative/statistical practice when the claim requires prevalence or causal inference.
 
 [Sources](references/sources.md).

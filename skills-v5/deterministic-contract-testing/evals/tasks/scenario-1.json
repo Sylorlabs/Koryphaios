@@ -10,7 +10,8 @@
       "the harness supplies an injectable fixed clock and a nonce source whose fresh-fixture byte sequence is documented",
       "the fixture can apply and restore the single comparison mutation `>=` to `>` without other code changes",
       "nonce consumption can be observed independently from the returned lease",
-      "paired same-model skill/no-skill execution"
+      "the fixture is synthetic and local; its results must not be reported as real dependency or production qualification",
+      "paired same-model skill/no-skill execution remains a separate official evaluation requirement"
     ]
   },
   "falsifiableChecks": [
@@ -61,8 +62,9 @@
     "before/equal/after observable results",
     "controlled mutation failing result and restored passing result",
     "two fresh-fixture focused test runs",
-    "paired skill/no-skill run artifacts",
-    "explicit unavailable or simulated evidence labels"
+    "exact command, runtime identity, and observed or unexecuted status for each focused run",
+    "synthetic/local fixture boundary with real dependency and production qualification explicitly unavailable",
+    "paired skill/no-skill and independent blind-review status explicitly labeled unavailable unless separately executed"
   ],
   "requiredArtifacts": [
     "deterministic-contract-testing-scenario-1-case-matrix",

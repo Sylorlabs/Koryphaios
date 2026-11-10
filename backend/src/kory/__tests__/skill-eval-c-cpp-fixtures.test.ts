@@ -10,8 +10,10 @@ import {
   nativeFixturePreflight,
   scoreNativeFixture,
   type NativeFixture,
+  type NativeRun,
 } from '../skill-eval-native-runner';
 import { writeFixtureFile } from '../skill-eval-fixture-helpers';
+import { canonicalizePath, isMac } from '../../runtime/platform';
 
 // These solutions calibrate the evaluator only. They must not be copied into
 // a live-model subject's fixture or counted as skill/no-skill observations.
@@ -78,6 +80,9 @@ describe('actual native C and C++ evaluators', () => {
     const preflight = nativeFixturePreflight(fixture);
     const runtimeTest = test.skipIf(preflight.reasons.length > 0);
     test(`${fixture.language}: preflight records actual compiler and each configured mode`, () => {
+      // An explicitly scoped Xcode run must fail visibly rather than skip all native controls.
+      if (isMac() && (process.env.DEVELOPER_DIR || process.env.SDKROOT))
+        expect(preflight.reasons, preflight.reasons.join('\n')).toEqual([]);
       expect(preflight.version).toMatch(/clang|unavailable|ENOENT/iu);
       if (!preflight.reasons.length) {
         expect(preflight.runs.filter((run) => run.phase.startsWith('preflight-run-'))).toHaveLength(
@@ -96,23 +101,20 @@ describe('actual native C and C++ evaluators', () => {
       },
       60_000,
     );
-    runtimeTest(
-      `${fixture.language}: missing candidate regression is a task failure, not tampering`,
-      async () => {
-        const root = await fixtureRoot(fixture);
-        const regression = `tests/regression.${fixture.language === 'c' ? 'c' : 'cpp'}`;
-        rmSync(join(root, regression));
-        const result = scoreNativeFixture(root, fixture);
-        expect(result.passed).toBe(false);
-        expect(result.integrityFailure).toBe(false);
-        expect(result.evidence).toContain(`Missing candidate regression coverage: ${regression}`);
-        const outside = join(root, 'outside-regression.txt');
-        writeFileSync(outside, 'int main(void) { return 0; }');
-        symlinkSync(outside, join(root, regression));
-        expect(scoreNativeFixture(root, fixture).integrityFailure).toBe(true);
-        expect(readFileSync(outside, 'utf8')).toBe('int main(void) { return 0; }');
-      },
-    );
+    test(`${fixture.language}: missing candidate regression is a task failure, not tampering`, async () => {
+      const root = await fixtureRoot(fixture);
+      const regression = `tests/regression.${fixture.language === 'c' ? 'c' : 'cpp'}`;
+      rmSync(join(root, regression));
+      const result = scoreNativeFixture(root, fixture);
+      expect(result.passed).toBe(false);
+      expect(result.integrityFailure).toBe(false);
+      expect(result.evidence).toContain(`Missing candidate regression coverage: ${regression}`);
+      const outside = join(root, 'outside-regression.txt');
+      writeFileSync(outside, 'int main(void) { return 0; }');
+      symlinkSync(outside, join(root, regression));
+      expect(scoreNativeFixture(root, fixture).integrityFailure).toBe(true);
+      expect(readFileSync(outside, 'utf8')).toBe('int main(void) { return 0; }');
+    });
     runtimeTest(
       `${fixture.language}: valid control passes compiled clients and a real failing regression baseline`,
       async () => {
@@ -122,9 +124,20 @@ describe('actual native C and C++ evaluators', () => {
         expect(result.integrityFailure).toBe(false);
         const report = JSON.parse(readFileSync(join(root, fixture.reportPath), 'utf8'));
         expect(report.evidenceKind).toBe('actual-local-native-runtime');
+        if (process.env.DEVELOPER_DIR)
+          expect(report.toolchain.developerDir).toBe(canonicalizePath(process.env.DEVELOPER_DIR));
+        if (process.env.SDKROOT)
+          expect(report.toolchain.sdkRoot).toBe(canonicalizePath(process.env.SDKROOT));
         expect(report.sourceFingerprint).toHaveLength(64);
         expect(report.checks).toHaveLength(fixture.modes.length + 2);
         expect(report.checks.every((check: { passed: boolean }) => check.passed)).toBe(true);
+        // Preflight, hidden clients and both public regression variants use the same selector.
+        const command = preflight.runs[0]!.command.slice(0, -1);
+        const buildRuns = (report.runs as NativeRun[]).filter(
+          (run) => run.phase.includes('-compile-') || run.phase.endsWith('-link'),
+        );
+        expect(buildRuns).toHaveLength((fixture.modes.length + 2) * 3);
+        for (const run of buildRuns) expect(run.command.slice(0, command.length)).toEqual(command);
       },
       60_000,
     );

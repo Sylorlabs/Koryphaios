@@ -1,7 +1,7 @@
 {
   "id": "postgres-engineering-full-task-2-individual",
   "maturity": "individual",
-  "prompt": "Add a foreign-key-like integrity constraint to a large PostgreSQL table that currently contains a small number of orphan rows and cannot tolerate a long blocking validation scan. Design a PostgreSQL-version-correct cleanup and NOT VALID/validation sequence where applicable, bound locks, handle concurrent writes, and prove rollback/retry plus final integrity. Measure plans/locks rather than assuming syntax is nonblocking.",
+  "prompt": "Add a foreign-key-like integrity constraint to a large PostgreSQL table that currently contains a small number of orphan rows and cannot tolerate a long blocking validation scan. Design a PostgreSQL-version-correct cleanup and NOT VALID/validation sequence where applicable, bound locks, handle concurrent writes, and prove rollback/retry plus final integrity. In machine-readable evidence, preserve the literal evidence categories constraint and concurrent. Candidate-shell inability to invoke PostgreSQL or Docker must not be inferred as evaluator-runtime absence; mark the runtime unavailable only when the runtime command being reported actually fails. Measure plans/locks rather than assuming syntax is nonblocking.",
   "environment": {
     "kind": "synthetic",
     "startingState": "fixture://postgres-engineering/not-valid-constraint-migration",

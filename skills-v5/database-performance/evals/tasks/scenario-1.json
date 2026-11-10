@@ -1,7 +1,7 @@
 {
   "id": "database-performance-full-task-1-individual",
   "maturity": "individual",
-  "prompt": "Diagnose a PostgreSQL-compatible orders query whose median latency is acceptable but p99 jumps from 80 ms to 4 s for one enterprise tenant. The table is highly tenant-skewed, a proposed index duplicates an existing prefix, and concurrent writes make lock impact relevant. Capture representative parameters/statistics, compare actual plans for small and large tenants, choose the narrowest tuning change, and verify latency distribution plus write/storage effects. Do not offload the query to GPU compute.",
+  "prompt": "Diagnose a PostgreSQL-compatible orders query whose median latency is acceptable but p99 jumps from 80 ms to 4 s for one enterprise tenant. The table is highly tenant-skewed, a proposed index duplicates an existing prefix, and concurrent writes make lock impact relevant. Establish the actual engine/version and whether each result is synthetic or from an authorized target. Capture representative parameters/statistics, distinguish generic from custom prepared plans, compare actual plans for small and large tenants, choose the narrowest tuning change, and verify latency distribution plus write/storage effects. Do not offload the query to GPU compute.",
   "environment": {
     "kind": "synthetic",
     "startingState": "fixture://database-performance/skewed-orders-plan-regression",
@@ -10,6 +10,7 @@
       "parameterized query plus actual plans for small and enterprise tenants",
       "existing index set including one tempting redundant-prefix candidate",
       "concurrent write workload and before/after latency distribution",
+      "evidence record that labels fixture outputs synthetic and any unavailable target checks",
       "paired same-model skill/no-skill execution from the identical starting snapshot"
     ]
   },
@@ -46,7 +47,7 @@
     "Hierarchy boundary and selected specialist rationale",
     "hierarchy boundary and selected specialist rationale",
     "paired skill/no-skill run artifacts",
-    "explicit unavailable, simulated, inferred, or stale evidence labels"
+    "explicit synthetic, unavailable, simulated, inferred, or stale evidence labels"
   ],
   "requiredArtifacts": [
     "database-performance-individual-scenario-1-result",
@@ -60,7 +61,13 @@
     },
     {
       "id": "operating-contract",
-      "assertion": "Capture the exact query, parameters, schema, statistics, data distribution, concurrency, and latency/resource symptom before tuning."
+      "assertion": "Capture the actual engine/version, exact query, representative bind classes, schema and indexes, statistics, data distribution, concurrency, measurement boundary, and latency/resource symptom before tuning.",
+      "source": "https://www.postgresql.org/docs/17/sql-prepare.html"
+    },
+    {
+      "id": "plan-cache-discrimination",
+      "assertion": "Distinguish a generic prepared plan from a custom plan for small and enterprise tenants before attributing the tail to statistics or an index; report planning overhead when testing scoped custom planning.",
+      "source": "https://www.postgresql.org/docs/17/sql-prepare.html"
     },
     {
       "id": "execution-invariant",
@@ -68,7 +75,7 @@
     },
     {
       "id": "verification-discipline",
-      "assertion": "Compare before/after plans and latency distributions under representative data and concurrency, confirm write/storage side effects of indexes or materialization, and monitor regressions on neighboring queries."
+      "assertion": "Compare before/after plans and latency distributions under representative data and concurrency, confirm write/storage side effects of indexes or materialization, and monitor regressions on neighboring queries; a synthetic fixture result cannot be reported as a production p99 improvement."
     },
     {
       "id": "anti-pattern-resistance",
@@ -76,7 +83,7 @@
     },
     {
       "id": "evidence-and-uncertainty",
-      "assertion": "Every material completion claim must map to observable evidence (database-performance decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+      "assertion": "Every material completion claim must map to observable evidence (database-performance decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with synthetic, simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
     }
   ]
 }

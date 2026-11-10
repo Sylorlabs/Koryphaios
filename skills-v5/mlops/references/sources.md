@@ -6,28 +6,28 @@
 
 - Package authorship is independent from empirical qualification; the audit/evaluation ledger is authoritative for qualification status.
 - Hierarchy: broader release-planning.
-- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held-out cases through the real resolver.
-- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no-skill pairing, regression retention, and blind semantic judging.
+- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held out cases through the real resolver.
+- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no skill pairing, regression retention, and blind semantic judging.
 - Source discipline: authoritative/spec/reference sources outrank community patterns when they conflict; runtime evidence outranks examples for behavioral claims.
 
 ## Maintained sources
 
 - **Google Cloud: MLOps continuous delivery and automation pipelines**: https://cloud.google.com/architecture/mlops-continuous-delivery-and-automation-pipelines-in-machine-learning
-  - Scope: Google Cloud MLOps architecture guidance as available 2026-09-05.
+  - Scope: Google Cloud MLOps architecture guidance as available 2026-10-04.
   - Use: separation of ML experimentation/CI/CD/continuous training, automated validation, serving and production monitoring across the ML lifecycle.
-  - Verified: 2026-09-05; refresh after 30 days.
+  - Verified: 2026-11-03; refresh after 30 days.
 - **MLflow Model Registry**: https://mlflow.org/docs/latest/ml/model-registry
-  - Scope: MLflow 3.15.2 latest documentation as available 2026-09-19.
+  - Scope: MLflow latest documentation as available 2026-10-16.
   - Use: registered models, versions, lineage, model signatures, aliases/tags and controlled lifecycle workflows. A registry alias is a mutable reference and should identify, not replace, immutable qualification evidence.
-  - Verified: 2026-09-19; refresh after 14 days.
+  - Verified: 2026-10-16; refresh after 14 days.
 - **Google Cloud Feature Store online serving types**: https://docs.cloud.google.com/gemini-enterprise-agent-platform/machine-learning/featurestore/latest/online-serving-types
-  - Scope: online-serving documentation updated 2026-09-01.
+  - Scope: online-serving documentation as available 2026-10-16.
   - Use: current online store modes, sync behavior and deprecation-sensitive serving choices. Current documentation marks Optimized online serving deprecated and should be refreshed before implementation.
-  - Verified: 2026-09-19; refresh after 14 days.
+  - Verified: 2026-10-16; refresh after 14 days.
 - **Google Cloud Feature Store: serve feature values**: https://docs.cloud.google.com/gemini-enterprise-agent-platform/machine-learning/featurestore/latest/serve-feature-values
-  - Scope: feature-value serving documentation updated 2026-09-02.
+  - Scope: feature-value serving documentation as available 2026-10-16.
   - Use: current entity-ID, feature timestamp, latest-value and sync requirements; verify exact null/latest semantics for the selected configuration.
-  - Verified: 2026-09-19; refresh after 14 days.
+  - Verified: 2026-10-16; refresh after 14 days.
 - **NIST AI Risk Management Framework**: https://www.nist.gov/itl/ai-risk-management-framework
   - Scope: NIST AI RMF materials as available 2026-09-05.
   - Use: lifecycle governance, measurement, monitoring, traceability and risk response for production ML systems.

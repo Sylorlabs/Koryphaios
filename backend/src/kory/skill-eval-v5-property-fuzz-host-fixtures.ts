@@ -79,13 +79,13 @@ export function propertyFuzzHostReadiness(): string[] {
     PYTHON,
     ['-c', 'import hypothesis,pytest; print(hypothesis.__version__ + "|" + pytest.__version__)'],
     process.cwd(),
-    3_000,
+    10_000,
   );
   if (python.code !== 0 || python.stdout.trim() !== `${HYPOTHESIS_VERSION}|${PYTEST_VERSION}`)
     reasons.push(
       `Hypothesis fixture requires hypothesis ${HYPOTHESIS_VERSION} and pytest ${PYTEST_VERSION}; observed ${python.stdout.trim() || python.stderr.trim() || 'unavailable'}.`,
     );
-  const maven = run(MAVEN, ['-v'], process.cwd(), 3_000);
+  const maven = run(MAVEN, ['-v'], process.cwd(), 10_000);
   if (maven.code !== 0 || !maven.stdout.includes('Apache Maven 3.9.16'))
     reasons.push(
       `jqwik fixture requires Maven 3.9.16; observed ${maven.stdout.split('\n')[0] || 'unavailable'}.`,

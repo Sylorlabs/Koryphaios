@@ -1,6 +1,12 @@
 # Source map
 
-`deterministic-contract-testing` is individually authored. Qualification still depends on clean routing plus paired same-model skill/no-skill full-task runs and independent blind evaluation; source quality alone is not a promotion result.
+`deterministic-contract-testing` is individually authored. Qualification still depends on clean routing plus paired same-model skill/no skill full task runs and independent blind evaluation; source quality alone is not a promotion result.
+
+## Evidence and qualification boundary
+
+- The package-local check at [`../evals/README.md`](../evals/README.md) validates authored package structure, routing decisions, registered synthetic fixtures, and scorer negative controls. It does not invoke a model, run paired skill/no skill tasks, conduct a blind review, or write qualification evidence.
+- A `fixture://` starting state is deterministic test material. It can establish a local oracle, mutation response, and repeatability only for the materialized code and declared seams. It cannot establish behavior of a real broker, database, network, filesystem, process, provider, deployed service, or production runtime unless that boundary is actually exercised.
+- The task records must retain explicit `synthetic/local`, `observed`, `unavailable`, and `unexecuted` labels. Paired full-task execution and independent blind evaluation remain separate qualification artifacts; authored cases and local scorer checks are readiness evidence, not promotion results.
 
 ## Authoritative and first-party sources
 
@@ -95,3 +101,6 @@
 - A fixed seed is useful only with a reproducibility contract for the chosen generator/runtime. Preserve the minimized generated counterexample as a fixed regression when exact future seed replay is not guaranteed.
 - Prefer behavioral outputs and state to collaborator call order unless the interaction itself is the contract.
 - Mutation evidence is strongest when the mutation models the actual or plausible defect the regression claims to prevent. Do not chase a mutation percentage detached from product risk.
+- When a source describes a platform mechanism or a testing pattern, apply only the supported runtime and contract in the target repository. A controlled fake or in-process fixture may make a claim repeatable, but it does not upgrade the claim to real-boundary qualification.
+
+See the package-local [evaluation boundary and checks](../evals/README.md) for the exact offline command and the evidence that remains unavailable until a separate qualification run.

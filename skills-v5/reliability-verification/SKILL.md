@@ -17,6 +17,8 @@ Reliability evidence starts from an explicit contract: what must remain availabl
 6. **Add sustained evidence when the claim requires it.** Soak long enough to expose resource retention, queue growth, lease/token expiry, periodic jobs, or cumulative drift, with stable workload and periodic invariant checks. Do not extrapolate a short smoke run into a long-duration claim.
 7. **Report a bounded verdict.** Attach the disturbance matrix, timeline, recovery metrics, state-integrity checks, and untested failure domains. Distinguish infrastructure/test-harness failure from product failure.
 
+When a fixture or simulator supplies modeled recovery seconds, health flags, or soak samples, label those results as synthetic/model evidence. They can verify the modeled transitions and invariants, but they do not establish wall clock RTO, real resource behavior, or production-duration stability unless the actual process, dependency, and resource boundary was exercised.
+
 `integration-fault-testing` can design reusable lower-level failure fixtures; `performance-verification` owns quantitative capacity/latency budgets; `incident-response` owns live incident handling. Reliability verification integrates the evidence needed to decide whether the declared resilience/recovery contract holds.
 
 Use [the maintained source map](references/sources.md) for current reliability-testing and recovery guidance.

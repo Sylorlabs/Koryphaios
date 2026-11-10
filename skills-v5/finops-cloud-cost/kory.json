@@ -139,26 +139,26 @@
     {
       "url": "https://www.finops.org/framework/",
       "sourceType": "official-docs",
-      "versionScope": "FinOps Framework as available 2026-09-05, including 2026 framework updates",
+      "versionScope": "FinOps Framework as available 2026-10-04, including 2026 framework updates",
       "staleAfterDays": 30,
       "notes": "Current operating model, scopes, principles and capability structure; FinOps now spans technology value beyond only public-cloud bill reduction.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://www.finops.org/framework/capabilities/allocation/",
       "sourceType": "official-docs",
-      "versionScope": "FinOps Allocation capability as available 2026-09-05",
+      "versionScope": "FinOps Allocation capability as available 2026-10-04",
       "staleAfterDays": 30,
       "notes": "Direct/shared allocation, metadata taxonomy, shared-cost apportionment and allocation-compliance expectations.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://www.finops.org/framework/capabilities/unit-economics/",
       "sourceType": "official-docs",
-      "versionScope": "FinOps Unit Economics capability as available 2026-09-05",
+      "versionScope": "FinOps Unit Economics capability as available 2026-10-04",
       "staleAfterDays": 30,
       "notes": "Resource/business unit metrics, business-value linkage, data-source and calculation governance.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://focus.finops.org/docs/specification/v1-4/",
@@ -166,31 +166,31 @@
       "versionScope": "FOCUS Specification 1.4 published 2026",
       "staleAfterDays": 60,
       "notes": "Current open billing-data specification and common schema/terminology for billed, effective, list, contracted cost, allocation and commitment concepts.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://docs.aws.amazon.com/cost-management/latest/userguide/cost-optimization-hub.html",
       "sourceType": "official-docs",
-      "versionScope": "AWS Cost Optimization Hub documentation as available 2026-10-02",
+      "versionScope": "AWS Cost Optimization Hub documentation as available 2026-11-01",
       "staleAfterDays": 14,
       "notes": "Current consolidated rightsizing/idle/commitment recommendations, deduplication and pricing-discount-aware savings estimates.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-01"
     },
     {
       "url": "https://docs.aws.amazon.com/cost-management/latest/userguide/coh-estimated-monthly-savings.html",
       "sourceType": "official-docs",
-      "versionScope": "AWS Cost Optimization Hub savings estimation as available 2026-10-02",
+      "versionScope": "AWS Cost Optimization Hub savings estimation as available 2026-11-01",
       "staleAfterDays": 14,
       "notes": "Estimated monthly savings are normalized approximations and actual savings depend on future usage; aggregation uses amortized cost and recommendation interactions.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-01"
     },
     {
       "url": "https://docs.aws.amazon.com/savingsplans/latest/userguide/sp-recommendations.html",
       "sourceType": "official-docs",
-      "versionScope": "AWS Savings Plans recommendations as available 2026-10-02",
+      "versionScope": "AWS Savings Plans recommendations as available 2026-11-01",
       "staleAfterDays": 14,
       "notes": "Current recommendation inputs and projected coverage/utilization; recommendations depend on historical usage/current inventory and are not a forecast of future demand.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-01"
     }
   ],
   "authoringMaturity": "individual"

@@ -19,6 +19,7 @@ Turn a behavioral claim or failure risk into durable executable evidence. Start 
 
 - Prefer behavioral assertions to private implementation details; make relevant state/version/time/order/identity explicit in fixtures.
 - Treat flakes as defects or unmodeled behavior, never as permission to retry until green.
+- Treat fixture-model evidence as bounded: a fake clock, simulated process, or in-memory substitute proves only the modeled contract unless it exercises the claimed production boundary.
 - Preserve reproducible commands, meaningful failures, and skipped/unavailable coverage.
 - A passing test proves only the exercised behavior and boundary. `verification` owns the final completion claim.
 

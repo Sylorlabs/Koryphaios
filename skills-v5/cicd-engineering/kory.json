@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "cicd-engineering",
-  "version": "5.0.1",
+  "version": "5.0.2",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -16,6 +16,8 @@
   "activation": [
     "ci/cd",
     "continuous integration",
+    "ci approvals",
+    "deployment serialization",
     "github actions workflow",
     "github actions deployment",
     "gitlab ci",
@@ -122,26 +124,26 @@
     {
       "url": "https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments",
       "sourceType": "official-docs",
-      "versionScope": "Rolling GitHub Actions deployment/environment documentation as available 2026-09-05",
+      "versionScope": "Rolling GitHub Actions deployment/environment documentation rechecked 2026-10-23",
       "staleAfterDays": 21,
-      "notes": "Environment protection rules, reviewers, deployment branches/tags, secrets and deployment gating behavior.",
-      "verifiedAt": "2026-09-26"
+      "notes": "Environment protection rules, reviewers, deployment branches/tags, secrets and deployment gating behavior. On Free/Pro/Team, required reviewers, wait timers and custom protection rules are public-repository-only; custom rules remain public preview. Environment secrets have separate plan/visibility availability. Resolve actual feature entitlement before relying on a gate.",
+      "verifiedAt": "2026-10-23"
     },
     {
-      "url": "https://docs.github.com/en/actions/security-for-github-actions/security-hardening-your-deployments/configuring-openid-connect-in-cloud-providers",
+      "url": "https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-cloud-providers",
       "sourceType": "official-docs",
-      "versionScope": "Rolling GitHub Actions OIDC guidance as available 2026-09-05",
+      "versionScope": "Rolling GitHub Actions OIDC guidance rechecked 2026-11-07",
       "staleAfterDays": 21,
       "notes": "Short-lived federated cloud credentials and identity-claim scoping for deployment workflows.",
-      "verifiedAt": "2026-09-26"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://docs.gitlab.com/ci/environments/protected_environments/",
       "sourceType": "official-docs",
-      "versionScope": "Rolling GitLab protected-environment documentation as available 2026-09-05",
+      "versionScope": "Rolling GitLab protected-environment documentation rechecked 2026-10-23",
       "staleAfterDays": 21,
-      "notes": "Protected environments and Allowed to deploy permission boundary for deployment jobs.",
-      "verifiedAt": "2026-09-26"
+      "notes": "Protected environments and Allowed to deploy permission boundary for deployment jobs on Premium/Ultimate. Protection gates deployment jobs, not creation of all pipelines; administrators retain deployment access. When group and project protection both apply, both must authorize deployment.",
+      "verifiedAt": "2026-10-23"
     },
     {
       "url": "https://sre.google/sre-book/release-engineering/",

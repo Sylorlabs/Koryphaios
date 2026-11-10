@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "accessibility-practice",
-  "version": "5.0.0",
+  "version": "5.0.2",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "domains": ["accessibility", "human-factors"],
@@ -26,12 +26,13 @@
   "excludes": [],
   "evidence": [
     "Scope and standard",
-    "Equivalent access paths",
-    "AT/input plan",
+    "Critical tasks, failure states, barriers, and equivalent access paths",
+    "Platform-specific semantics, focus/selection, announcements, and AT/input plan",
     "Environmental, cognitive, sensory, and motor constraints",
-    "Verification matrix and explicitly untested combinations",
+    "Verification matrix with input, version, expected and observed result, status, and provenance",
     "Hierarchy boundary and selected specialist rationale",
-    "Representative success, negative-path, and recovery verification"
+    "Representative success, negative-path, and recovery acceptance checks; explicitly untested combinations",
+    "Live browser/device evidence boundary and handoff to accessibility-verification"
   ],
   "routing": {
     "positive": [
@@ -39,14 +40,16 @@
       "Design screen-reader support for this document workflow, including meaningful names, relationships, state changes, reading order, and equivalent access to all primary actions.",
       "Improve keyboard access for this complex interface so every critical task has a non-pointer path, focus or selection remains understandable, and custom interactions preserve platform conventions.",
       "Add reduced motion behavior to this experience without removing necessary feedback or orientation; identify which motion is decorative, user-triggered, or essential to understanding state.",
-      "Use inclusive design to make this safety-critical status experience perceivable through redundant channels instead of relying on color, sound, or touch alone."
+      "Use inclusive design to make this safety-critical status experience perceivable through redundant channels instead of relying on color, sound, or touch alone.",
+      "Write accessible interaction requirements for a virtualized diagnostic list that loses its selected row during filtering, including alternate input and focus recovery."
     ],
     "negative": [
       "Benchmark the allocator under representative concurrency and memory pressure; there is no user-facing accessibility surface in scope.",
       "Normalize the database schema and improve query indexes without changing any product interface or documentation.",
       "Run a general usability study to learn whether new customers understand onboarding; disability access is not the study question.",
       "Edit this investor memo for argument structure, source quality, and executive clarity.",
-      "Implement cryptographic key rotation and secret storage for the backend service; no human interaction surface changes."
+      "Implement cryptographic key rotation and secret storage for the backend service; no human interaction surface changes.",
+      "Run the approved keyboard and screen-reader acceptance tests on an implemented dialog and capture observed announcements and failures; requirements are already signed off."
     ],
     "ambiguous": [
       {
@@ -75,6 +78,16 @@
         "forbiddenSkills": [],
         "adjacentSkills": ["embedded-interface", "hardware-safety-verification"],
         "tags": ["embedded", "environment", "safety"]
+      },
+      {
+        "id": "accessibility-practice-ambiguous-overlap",
+        "prompt": "The settings screen needs new non-pointer access requirements and then a real VoiceOver run to validate the implemented flow. Define the design contract and hand the actual AT verdict to the verification specialist.",
+        "expectedSelection": true,
+        "selectionScope": "direct",
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["accessibility-verification", "interaction-design"],
+        "tags": ["design-and-verification", "ownership"]
       }
     ],
     "adversarial": [
@@ -104,6 +117,16 @@
         "forbiddenSkills": [],
         "adjacentSkills": ["technical-communication"],
         "tags": ["pasted-decoy"]
+      },
+      {
+        "id": "accessibility-practice-adversarial-verdict",
+        "prompt": "The accessible interaction design has already been approved. Execute the installed screen reader and switch-input tests on the shipped control; document the actual failed steps without changing the design.",
+        "expectedSelection": false,
+        "selectionScope": "direct",
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["accessibility-verification"],
+        "tags": ["verification-only", "ownership"]
       }
     ]
   },
@@ -128,7 +151,7 @@
       "url": "https://developer.android.com/guide/topics/ui/accessibility/principles",
       "sourceType": "official-docs",
       "versionScope": "Android accessibility principles available 2026-09-04",
-      "verifiedAt": "2026-09-04",
+      "verifiedAt": "2026-11-03",
       "staleAfterDays": 60,
       "notes": "Android-platform evidence for meaningful labels, accessibility actions, built-in platform behavior, non-color cues, accessible media, TalkBack, and switch access."
     },
@@ -136,7 +159,7 @@
       "url": "https://learn.microsoft.com/en-us/xbox/accessibility/guidelines",
       "sourceType": "official-docs",
       "versionScope": "Xbox Accessibility Guidelines and current linked guidance available 2026-09-04",
-      "verifiedAt": "2026-09-04",
+      "verifiedAt": "2026-11-03",
       "staleAfterDays": 60,
       "notes": "Game-specific evidence for alternative input, narration, subtitles/captions, redundant sensory cues, UI navigation, error prevention, and motion settings. XAGs are best-practice guidance, not a compliance claim."
     },
@@ -144,7 +167,7 @@
       "url": "https://github.com/rampstackco/claude-skills/blob/main/skills/accessibility-audit/SKILL.md",
       "sourceType": "community-pattern",
       "versionScope": "rampstackco/claude-skills main accessibility-audit skill at e5bc67519991 as inspected 2026-10-03",
-      "verifiedAt": "2026-10-03",
+      "verifiedAt": "2026-11-03",
       "staleAfterDays": 30,
       "license": "MIT",
       "notes": "Community workflow evidence for combining automation, keyboard/alternative-input checks, assistive technology, visual checks, cognitive checks, explicit gaps, and remediation. Its WCAG 2.1/web-specific assumptions are not copied as the current or universal standard."

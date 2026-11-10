@@ -9,7 +9,7 @@ Apply the requested house style to authored prose. This is a style preference, n
 
 ## Rewrite the sentence, not the character
 
-Replace an aside with parentheses or a separate sentence. Use a colon for an explanation and a conjunction when it expresses the relationship more clearly. Express a range with “to” or “through”. Rephrase a compound as an ordinary phrase instead of deleting the joining mark and leaving ambiguous words. Preserve negation, uncertainty, conditions, attribution, numbers, units, and scope.
+Replace an aside with parentheses or a separate sentence. Use a colon for an explanation and a conjunction when it expresses the relationship more clearly. Express a range with “to” or “through”. When removing a dash from a range, keep the endpoint tokens and their representation unchanged, including leading zeros, clock notation, units, and timezone labels. “With words” means use a word separator such as “to” or “through”; it does not mean spell out numeric endpoints unless the user separately asks to restyle them. Rephrase a compound as an ordinary phrase instead of deleting the joining mark and leaving ambiguous words. Preserve negation, uncertainty, conditions, attribution, numbers, units, and scope.
 
 Cover em, en, figure, horizontal, fullwidth, nonbreaking, and ordinary hyphen forms when they function as prose punctuation. Do not replace them with double hyphens, another Unicode dash, or a visually similar minus sign. Choose natural wording rather than a mechanical punctuation substitution.
 

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "postgres-engineering",
-  "version": "5.1.1",
+  "version": "5.1.2",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -99,58 +99,58 @@
     {
       "url": "https://www.postgresql.org/docs/current/sql-explain.html",
       "sourceType": "official-docs",
-      "versionScope": "PostgreSQL current EXPLAIN documentation inspected 2026-09-06",
+      "versionScope": "PostgreSQL current EXPLAIN documentation inspected 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Estimated versus executed plans and buffers; ANALYZE requires a safe execution boundary.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://www.postgresql.org/docs/current/planner-stats.html",
       "sourceType": "official-docs",
-      "versionScope": "PostgreSQL current planner-statistics guidance inspected 2026-09-06",
+      "versionScope": "PostgreSQL current planner-statistics guidance inspected 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Cardinality estimation and statistics; adapt checks to actual distributions and parameter values.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://www.postgresql.org/docs/current/indexes.html",
       "sourceType": "official-docs",
-      "versionScope": "PostgreSQL current Indexes chapter introduction inspected 2026-09-06",
+      "versionScope": "PostgreSQL current Indexes chapter introduction inspected 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Index read benefits and overhead; deeper index-specific behavior requires its linked section and target version.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://www.postgresql.org/docs/current/mvcc.html",
       "sourceType": "official-docs",
-      "versionScope": "PostgreSQL current Concurrency Control chapter introduction inspected 2026-09-06",
+      "versionScope": "PostgreSQL current Concurrency Control chapter introduction inspected 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Concurrency-control topic discovery; transaction-isolation details come from the separately inspected isolation section.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://www.postgresql.org/docs/current/transaction-iso.html",
       "sourceType": "official-docs",
-      "versionScope": "PostgreSQL current Transaction Isolation documentation inspected 2026-09-06",
+      "versionScope": "PostgreSQL current Transaction Isolation documentation inspected 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Visibility and isolation behavior including serialization failures; preserve a retry contract rather than mandating serializable isolation.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://www.postgresql.org/docs/current/ddl-constraints.html",
       "sourceType": "official-docs",
-      "versionScope": "PostgreSQL current Constraints documentation inspected 2026-09-06",
+      "versionScope": "PostgreSQL current Constraints documentation inspected 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Database-enforced invariants and constraint semantics; runtime violations still need direct tests.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://www.postgresql.org/docs/current/",
       "sourceType": "official-docs",
-      "versionScope": "Current PostgreSQL documentation as available 2026-09-04",
+      "versionScope": "Current PostgreSQL documentation as available 2026-10-19",
       "staleAfterDays": 45,
       "notes": "SQL, transactions, locking, indexes, planning, replication, and operations reference.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-10-19"
     }
   ],
   "authoringMaturity": "individual"

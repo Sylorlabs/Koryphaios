@@ -1,7 +1,7 @@
 {
   "id": "agentic-systems-full-task-2-individual",
   "maturity": "individual",
-  "prompt": "The evaluation repository asks the agent to \"Apply ai agent expertise to this task\". The fixture contains version/runtime ambiguity, a tempting shortcut, a compatibility edge case, and a failure path that distinguishes real expertise from generic completion. The acceptance boundary is agentic-systems: Separate goal interpretation, planning, tool discovery, authorization, execution, observation, memory, delegation, and completion judgment. The adjacent rag-retrieval-systems discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "prompt": "Repair a regression-investigation manager that delegates dependency analysis and test-evidence analysis under distinct read-only scopes, finite shared budgets and a manager-owned completion contract. Preserve valid completed work on resume, reject scope expansion and incomplete or stale artifacts, and adjudicate contradictory conclusions using current primary evidence rather than advisory incident memory. First read the executable environment's actual contract: the registered individual exercise currently provides a pure solve(input) manager/specialist evidence evaluator, not a running specialist dispatcher or durable resume harness. Implement that supplied evaluator exactly, including field paths, rejection precedence, ordering and terminal results, and label live authority, recovery, tool integration, and external completion-oracle obligations not exercised by it as unverified. Retain a detailed trace row for every required negative or recovery scenario without claiming an unexecuted receipt. Agentic-systems owns delegation and evidence adjudication; llm-application-engineering owns bounded model/tool integration, while rag-retrieval-systems owns retrieval design only when separately requested.",
   "environment": {
     "kind": "repository",
     "startingState": "fixture://agentic-systems/scenario-2",
@@ -11,9 +11,11 @@
       "partial timeout, contradictory conclusions, unauthorized scope-expansion and stale-memory conflict fixtures",
       "durable manager/specialist run state with resume harness and explicit final evidence contract",
       "paired same-model skill/no-skill execution",
-      "agentic-systems parent/child/neighbor hierarchy boundary fixture",
-      "domain-specific tempting anti-pattern or shortcut",
-      "representative negative, interruption, compatibility, or recovery path"
+      "broader llm-application-engineering and adjacent rag-retrieval-systems responsibility boundaries",
+      "scope expansion, majority-vote adjudication and stale-memory authority as explicit negative controls",
+      "completed-child resume, partial timeout and conflicting current evidence with inspectable acceptance decisions",
+      "the registered individual materializer supplies a synthetic specialist-evidence evaluator only; actual child dispatch, aggregate budget enforcement, durable resume and independent source readback remain separate requirements",
+      "the package-local trace-evidence fixture requires explicit unverified labels and detailed traces without fabricated execution"
     ]
   },
   "falsifiableChecks": [
@@ -23,19 +25,19 @@
     },
     {
       "id": "operating-contract",
-      "assertion": "Separate goal interpretation, planning, tool discovery, authorization, execution, observation, memory, delegation, and completion judgment."
+      "assertion": "Read the supplied specialist fields and acceptance contract exactly, including declaredScope versus requestedScope, status, revision and artifact type. Preserve input ordering, rejection reasons and terminal-state precedence in the pure evaluator. A runtime manager must additionally issue explicit objectives, tool/path grants, budgets, delegation depth and required-artifact contracts before dispatch."
     },
     {
       "id": "execution-invariant",
-      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+      "assertion": "Judge each specialist independently and exclude rejected evidence from the verdict. Stale memory cannot override accepted current evidence. For runtime orchestration, child grants must stay within parent authority and remaining shared budget; completed current artifacts survive resume, and only eligible partial work is dispatched again. Distinguish these runtime controls from supplied evidence scored by the pure evaluator."
     },
     {
       "id": "verification-discipline",
-      "assertion": "Use scenario suites covering tool success/failure, stale observations, partial side effects, denied permissions, duplicate retries, delegation errors, long-horizon drift, and independent verification of final state."
+      "assertion": "Exercise current agreeing specialists, contradictory current conclusions, attempted scope expansion, timeout, stale revision or memory, and missing artifacts under the supplied contract. For runtime coverage, retain detailed dispatch and checkpoint traces proving bounded grants, aggregate spend, completed-child reuse on resume and primary-source conflict resolution, including event order, revision, authority/scope decision, artifact status, budget charge, acceptance, terminal decision, observedResult and missingEvidence. Mark live authority, recovery, tool integration and external completion-oracle cases not executed as unverified; do not fabricate receipts. Service mutations and restart retries belong to scenario 1."
     },
     {
       "id": "anti-pattern-resistance",
-      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not let prompts grant authority, let agents self-certify irreversible work, retry non-idempotent actions blindly, or add subagents when decomposition does not improve evidence or throughput."
+      "assertion": "Do not accept a specialist's claimed completion without its required artifact, silently widen a child grant, resolve contradictions by majority vote, or let stale memory veto otherwise valid current evidence. Preserve the pure evaluator's specified completion result without claiming that real specialists ran or independent source verification occurred."
     },
     {
       "id": "evidence-and-uncertainty",
@@ -81,7 +83,8 @@
     "hierarchy boundary and selected specialist rationale",
     "representative success plus negative/recovery evidence",
     "paired skill/no-skill run artifacts",
-    "explicit unavailable, simulated, inferred, or stale evidence labels"
+    "explicit unavailable, simulated, inferred, stale, unresolved, and unverified evidence labels",
+    "detailed per-scenario negative/recovery traces with event order, budget use, acceptance decisions, terminal decisions, observedResult and missing proof"
   ],
   "requiredArtifacts": [
     "agentic-systems-individual-scenario-2-result",

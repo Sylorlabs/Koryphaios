@@ -18,6 +18,18 @@ Treat OAuth as delegated authorization and OIDC as an authentication layer on to
 7. **Constrain bearer replay where risk justifies it.** Use sender-constrained access/refresh tokens (for example DPoP or mTLS) when appropriate. For public-client refresh tokens, use rotation or sender constraint as required by RFC 9700, detect replay/compromise, and revoke the affected token family/authorization as designed.
 8. **Separate scopes from local authorization.** Scopes and token claims constrain delegated capabilities but do not replace resource-level tenant/object/field policy inside the application.
 
+When a supplied task includes an executable evaluator contract and corpus, preserve those fixed inputs and write the required result artifact at its exact declared path. Do not modify evaluator code or evidence fixtures to make a protocol result pass; an integrity failure remains a failure.
+
+## Deliverable shape
+
+When a task declares a typed protocol artifact, write it at the declared path and mirror the declared interface field for field. An array of permitted algorithms is not a single algorithm string, a record of APIs is keyed by the API name the evaluator asks for, and a nested validation block keeps the keys the reader tests.
+
+The fixed evaluator source, not the prose around it, defines the shape. Read the declared interface and its defaults before writing the artifact, and keep the reader file untouched so the produced artifact is the only thing that can change a result.
+
+The fixed evaluator source, not the prose around it, defines the shape. Read the declared interface and its defaults before writing the artifact, and keep the reader file untouched so the produced artifact is the only thing that can change a result.
+
+For a multi issuer relying party spec, each provider entry carries its issuer, the issuer its discovery document was fetched from, its client id and the list of permitted algorithms. Both the session binding flag and the discovery trust flag are set, every declared validation check is enabled, the API map is keyed by the short API identifier the evaluator passes (`A` and `B` for a corpus that names its APIs `apiA` and `apiB`), not by an audience string, and each entry carries that API's audience and its required scope under the field name the interface declares (`requiredScope`, not `scope`), and the ownership boundary names the skill that owns object authorization. An either or control is answered on both sides, not just the side that reads well.
+
 ## Boundaries
 
 - `secure-authentication` owns passwords/passkeys/MFA/recovery and local reauthentication assurance.

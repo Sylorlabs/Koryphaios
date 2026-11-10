@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "in-process-backend",
-  "version": "5.1.1",
+  "version": "5.1.3",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -20,12 +20,26 @@
     "library backend",
     "embedded job scheduler",
     "host process backend",
-    "no daemon backend"
+    "no daemon backend",
+    "same-process state",
+    "local durable state",
+    "in-process cache refresh"
   ],
-  "excludes": [],
+  "excludes": [
+    "local service only",
+    "network service only",
+    "distributed system only",
+    "compiler runtime only",
+    "Bun runtime only",
+    "Node.js runtime only"
+  ],
   "evidence": [
+    "Boundary and selected-specialist rationale",
     "Ownership and state-transition model",
-    "Host-runtime tests",
+    "Host-runtime lifecycle and concurrency tests",
+    "Failure and recovery verification",
+    "Source provenance and freshness",
+    "Explicit simulation versus runtime evidence labels",
     "Hierarchy boundary and selected specialist rationale",
     "Representative success, negative-path, and recovery verification"
   ],
@@ -119,6 +133,22 @@
       "staleAfterDays": 180,
       "notes": "Lifecycle background and reference discovery only; not evidence for host-specific disposal or concurrency behavior.",
       "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://sqlite.org/lang_transaction.html",
+      "sourceType": "official-docs",
+      "versionScope": "SQLite transaction and locking guidance as available 2026-10-17",
+      "staleAfterDays": 180,
+      "notes": "Use for transaction and locking terminology only. It does not prove this package's application-level effect idempotency, worker scheduling, or restart recovery.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal",
+      "sourceType": "official-docs",
+      "versionScope": "AbortSignal notification semantics as available 2026-10-17",
+      "staleAfterDays": 90,
+      "notes": "The signal notifies consumers of cancellation. It does not by itself settle an arbitrary promise or define ownership of shared work.",
+      "verifiedAt": "2026-10-17"
     }
   ],
   "authoringMaturity": "individual"

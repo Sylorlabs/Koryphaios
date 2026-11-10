@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "container-engineering",
-  "version": "5.1.1",
+  "version": "5.1.5",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -30,7 +30,13 @@
     "container runtime user",
     "image contract",
     "container image",
-    "docker container"
+    "docker container",
+    "container shutdown",
+    "container sigterm",
+    "container writable paths",
+    "container portability",
+    "multi platform image",
+    "container build context"
   ],
   "excludes": [
     "Kubernetes controller or cluster behavior as the primary task",
@@ -38,16 +44,18 @@
     "host or runtime-daemon hardening without an image/runtime contract change",
     "CI pipeline implementation with the container definition already fixed",
     "documentation-only mention of a Dockerfile or container image",
-    "treat the oci image",
-    "already approved container image",
-    "already qualified image",
-    "current task is only to correct",
-    "rename a documentation heading only"
+    "treat the oci image as fixed",
+    "already approved container image without changing its contents",
+    "already qualified image without changing its runtime contract",
+    "current task is only to correct the issue's markdown formatting",
+    "rename a documentation heading only",
+    "summarize the timestamps only"
   ],
   "evidence": [
     "Resolved base image/digest, build inputs, target platforms, and OCI metadata",
     "Final-image layer/config/user/entrypoint inspection",
     "Runtime filesystem, privilege, process, and signal evidence",
+    "Health-contract and vulnerability/license-gate disposition",
     "Clean-build/start portability results or explicit unavailable runtime checks",
     "Hierarchy boundary and selected specialist rationale",
     "Representative success, negative-path, and recovery verification"
@@ -65,7 +73,8 @@
       "Verify cosign signatures, SLSA provenance, SBOM policy and build identity for a container artifact whose contents and runtime behavior are already approved.",
       "Harden containerd/runc host configuration, Linux namespaces, seccomp defaults, kernel settings and node firewall policy; treat the OCI image as fixed.",
       "Implement a CI workflow that builds and pushes an existing Dockerfile with approvals, caching and registry credentials; do not alter image/runtime semantics.",
-      "Configure an AWS ECS service, ALB, task autoscaling and IAM roles around an already-qualified image without changing its OCI image/config contract."
+      "Configure an AWS ECS service, ALB, task autoscaling and IAM roles around an already-qualified image without changing its OCI image/config contract.",
+      "Implement CI approvals, immutable promotion, job permissions, artifact handoff, and deployment serialization around the existing Dockerfile. Keep its image definition unchanged."
     ],
     "ambiguous": [
       {
@@ -148,10 +157,34 @@
     {
       "url": "https://docs.docker.com/build/building/best-practices/",
       "sourceType": "official-docs",
-      "versionScope": "Docker Build best-practice documentation as available 2026-09-05",
+      "versionScope": "Docker Build best-practice documentation as available 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Practitioner guidance for build context, multi-stage builds, base images, caching, package installation and reproducible Dockerfile structure.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
+    },
+    {
+      "url": "https://docs.docker.com/build/building/secrets/",
+      "sourceType": "official-docs",
+      "versionScope": "Docker Build secret and SSH mount documentation retrieved 2026-10-17",
+      "staleAfterDays": 60,
+      "notes": "Temporary secret delivery to build steps; ARG/ENV are unsuitable for credentials. Delivery does not prevent the consumer from copying or logging the secret.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://docs.docker.com/build/building/multi-platform/",
+      "sourceType": "official-docs",
+      "versionScope": "Docker multi-platform build documentation retrieved 2026-10-17",
+      "staleAfterDays": 60,
+      "notes": "Index and child manifest structure, builder image-store/export constraints, emulation, native nodes, and BUILDPLATFORM/TARGETPLATFORM cross compilation.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://docs.docker.com/reference/dockerfile/",
+      "sourceType": "official-docs",
+      "versionScope": "Dockerfile reference retrieved 2026-10-17; feature support depends on frontend, builder, engine, and target OS",
+      "staleAfterDays": 60,
+      "notes": "ENTRYPOINT/CMD argument and signal semantics, USER, STOPSIGNAL, HEALTHCHECK, EXPOSE, and build mounts. Configuration intent still requires artifact/runtime verification.",
+      "verifiedAt": "2026-10-17"
     }
   ],
   "authoringMaturity": "individual"

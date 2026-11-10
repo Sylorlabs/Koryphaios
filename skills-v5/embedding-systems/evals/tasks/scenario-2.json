@@ -10,6 +10,8 @@
       "labeled text-text and text-image pairs plus modality preprocessing manifests",
       "candidate dimensions, task-instruction variants, vector norms and semantic-match thresholds",
       "old/new cache/store schemas, coexistence traces, latency/cost and rollback fixtures",
+      "representation manifests and embedding/index seam fixtures covering modality, identity, dimension, normalization, metric and namespace mismatches",
+      "separate provider fact, observed response receipt, empirical result and unavailable-evidence labels",
       "paired same-model skill/no-skill execution",
       "embedding-systems parent/child/neighbor hierarchy boundary fixture",
       "domain-specific tempting anti-pattern or shortcut",
@@ -19,7 +21,7 @@
   "falsifiableChecks": [
     {
       "id": "scope-and-hierarchy",
-      "assertion": "The result must establish the actual embedding-systems boundary and relevant environment before acting, preserve the hierarchy relationship (broader=implementation; near-neighbor=fine-tuning-training), and not absorb the near-neighbor responsibility merely because it is adjacent."
+      "assertion": "The result must establish the actual embedding-systems boundary and relevant environment before acting, preserve the hierarchy relationship (broader=implementation; near-neighbor=fine-tuning-training), keep vector-search-systems responsible for ANN/index mechanics, and not absorb either neighboring responsibility merely because it is adjacent."
     },
     {
       "id": "operating-contract",
@@ -27,11 +29,11 @@
     },
     {
       "id": "execution-invariant",
-      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+      "assertion": "The result must make its consequential assumptions, multimodal representation manifest, embedding/index seam ownership, and decision sequence explicit and reproducible."
     },
     {
       "id": "verification-discipline",
-      "assertion": "Evaluate downstream retrieval/classification/clustering behavior on labeled cases, compare model revisions, test long/short/multilingual inputs and zero/degenerate vectors, and measure latency/storage cost."
+      "assertion": "Evaluate downstream retrieval/classification/clustering behavior on labeled cases, compare model revisions, test long/short/multilingual inputs and zero/degenerate vectors, verify only judged modality pairs, assert index representation compatibility, and measure latency/storage/cost with provider or index identity recorded."
     },
     {
       "id": "anti-pattern-resistance",
@@ -39,7 +41,7 @@
     },
     {
       "id": "evidence-and-uncertainty",
-      "assertion": "Every material completion claim must map to observable evidence (Provider/model/version/task/preprocessing/dimension/normalization representation identity; Input limit, truncation, batching/cache and degenerate-vector behavior; Labeled downstream similarity/retrieval/classification/clustering quality plus latency/cost evidence; Versioned migration/backfill/coverage/cutover/rollback and drift-canary evidence), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+      "assertion": "Every material completion claim must map to observable evidence (documented provider/model/version/task facts separated from observed response behavior; preprocessing/dimension/normalization and modality representation identity; input limit, truncation, batching/cache and degenerate-vector behavior; labeled downstream quality plus latency/cost evidence; versioned migration/backfill/coverage/cutover/rollback and drift-canary evidence), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
     }
   ],
   "scorers": [
@@ -76,6 +78,8 @@
     "Input limit, truncation, batching/cache and degenerate-vector behavior",
     "Labeled downstream similarity/retrieval/classification/clustering quality plus latency/cost evidence",
     "Versioned migration/backfill/coverage/cutover/rollback and drift-canary evidence",
+    "Documented provider/model facts separated from observed behavior, empirical results and unavailable evidence",
+    "Representation manifest and explicit embedding/index compatibility checks",
     "Hierarchy boundary and selected specialist rationale",
     "Representative success, negative-path, and recovery verification",
     "hierarchy boundary and selected specialist rationale",

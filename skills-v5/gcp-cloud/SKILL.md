@@ -21,7 +21,7 @@ Treat Google Cloud as a hierarchy of authority, billing, network, location, and 
 
 ## Evidence
 
-Record organization/folder/project identity, acting principal/service account, effective IAM role/binding and impersonation evidence, network/key paths, service topology and quota state, observed or explicitly unverified scaling behavior, material cost-driver evidence, audit/log-routing configuration, restore/failover evidence, and the reviewed change/rollback artifact. Re-fetch rolling Google Cloud documentation whenever the task depends on current defaults, product availability, quotas, pricing, or newly introduced behavior.
+Record organization/folder/project identity, acting principal/service account, effective IAM role/binding and impersonation evidence, representative allowed and denied permission results, network/key paths, service topology and quota state, observed or explicitly unverified scaling behavior, material cost-driver evidence tied to current pricing/billing inputs, audit/log-routing configuration, restore/failover evidence, and the reviewed change/rollback artifact. Re-fetch rolling Google Cloud documentation whenever the task depends on current defaults, product availability, quotas, pricing, or newly introduced behavior.
 
 ## Boundaries
 

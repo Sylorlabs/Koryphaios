@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "go-engineering",
-  "version": "5.1.2",
+  "version": "5.2.0",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -20,14 +20,25 @@
     "go service",
     "goroutine",
     "go test",
+    "go vet",
+    "gofmt",
     "go.mod",
+    "go.sum",
+    "go.work",
     "context.Context",
+    "context cancellation",
+    "errors.Is",
+    "errors.As",
+    "typed nil error",
+    "data race",
+    "race detector",
+    "fuzz test",
     "Go channel",
     "go grpc",
     "go code",
     "written in go"
   ],
-  "excludes": [],
+  "excludes": ["go/no-go", "go-to-market", "documentation-only", "test log", "test log only"],
   "evidence": [
     "go-engineering decision and boundary evidence",
     "Representative verification results or explicit unavailable checks",
@@ -40,14 +51,21 @@
       "A Go package wraps an error and callers can no longer detect the sentinel with errors.Is. Preserve its semantic identity and add a real consumer regression.",
       "Our go module uses a replacement directive that hides an incompatible dependency API. Make the published module resolve and build correctly outside this checkout.",
       "Investigate a golang map race under concurrent cache refresh. Preserve reads during refresh and verify the owning synchronization contract under the race detector.",
-      "A Go channel is closed by two consumers during shutdown. Establish which component owns closure and test cancellation before and after the last producer exits."
+      "A Go channel is closed by two consumers during shutdown. Establish which component owns closure and test cancellation before and after the last producer exits.",
+      "A Go package returns a typed nil error. Repair the owning boundary and preserve errors.Is/errors.As behavior for callers.",
+      "A Go module passes only in the local workspace. Verify a standalone consumer against its declared toolchain and module requirements.",
+      "A Go worker pool has bounded admission but an uncooperative dependency blocks forever. Prove the context cancellation and isolation boundary before claiming no leak.",
+      "Add Go package tests for cancellation during delivery, errors.Is and errors.As wrapping, and repeated shutdown without relying on sleeps."
     ],
     "negative": [
       "Choose a go-to-market segment and launch message using the supplied customer interviews. No programming or service implementation is requested.",
       "Repair Java executor shutdown and interruption handling in an existing JVM service.",
       "Review protobuf compatibility for a renamed field. The generated clients and their language-specific behavior must stay untouched.",
       "Diagnose a Kubernetes pod eviction using cluster events and resource requests. The application's code and goroutine behavior are not part of the investigation.",
-      "Rewrite a README paragraph that contains the literal go.mod filename. Only wording and formatting should change."
+      "Rewrite a README paragraph that contains the literal go.mod filename. Only wording and formatting should change.",
+      "Prepare a go/no-go launch brief from the supplied Go test report; do not edit or test the Go package.",
+      "The current work is go-to-market positioning for a Go product, not implementation or package verification.",
+      "Reformat a pasted Go test log into a status update; do not inspect or change the package."
     ],
     "ambiguous": [
       {
@@ -132,6 +150,62 @@
       "staleAfterDays": 90,
       "notes": "Adopted for conditional race-enabled testing; only executed paths are observed.",
       "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://go.dev/doc/effective_go",
+      "sourceType": "official-docs",
+      "versionScope": "Effective Go guidance rechecked 2026-10-17; page notes its older coverage limits",
+      "staleAfterDays": 90,
+      "notes": "Naming, formatting, interfaces, zero values, errors, and Go-native package idioms; newer modules and libraries require current sources.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://pkg.go.dev/context",
+      "sourceType": "official-docs",
+      "versionScope": "Go standard library context documentation as verified 2026-10-17",
+      "staleAfterDays": 30,
+      "notes": "Explicit context parameters, cancellation ownership, cancel cleanup, and the distinction between signaling and waiting.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://go.dev/doc/database/cancel-operations",
+      "sourceType": "official-docs",
+      "versionScope": "Go cancellation guidance for database and request operations as verified 2026-10-17",
+      "staleAfterDays": 90,
+      "notes": "Pass deadline-bearing contexts into APIs that support cancellation and defer cancel functions; dependency cooperation remains a boundary.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://pkg.go.dev/errors",
+      "sourceType": "official-docs",
+      "versionScope": "Go standard library errors documentation as verified 2026-10-17",
+      "staleAfterDays": 30,
+      "notes": "Use errors.Is and errors.As to inspect semantic identity through wrapping and joined errors.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://go.dev/blog/go1.13-errors",
+      "sourceType": "official-docs",
+      "versionScope": "Go error-wrapping API guidance rechecked 2026-10-17",
+      "staleAfterDays": 180,
+      "notes": "Wrap only conditions a package is willing to expose as part of its caller contract; use %w for that identity.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://go.dev/doc/modules/managing-dependencies",
+      "sourceType": "official-docs",
+      "versionScope": "Go modules dependency-management guidance as verified 2026-10-17",
+      "staleAfterDays": 30,
+      "notes": "Keep go.mod and go.sum authoritative, understand replace and workspace boundaries, and verify standalone consumers.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://go.dev/doc/tutorial/fuzz",
+      "sourceType": "official-docs",
+      "versionScope": "Go fuzzing tutorial and test workflow as verified 2026-10-17",
+      "staleAfterDays": 90,
+      "notes": "Use seed corpora and fuzz tests for input invariants after deterministic package regressions; retain minimized failures.",
+      "verifiedAt": "2026-10-17"
     }
   ],
   "authoringMaturity": "individual"

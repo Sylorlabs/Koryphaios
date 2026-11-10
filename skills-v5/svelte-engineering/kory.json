@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "svelte-engineering",
-  "version": "5.1.1",
+  "version": "5.1.2",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -99,50 +99,50 @@
     {
       "url": "https://svelte.dev/docs/svelte/overview",
       "sourceType": "official-docs",
-      "versionScope": "Svelte documentation as fetched 2026-09-06",
+      "versionScope": "Svelte documentation as fetched 2026-10-20",
       "staleAfterDays": 45,
       "notes": "Svelte reactivity, components, runes, lifecycle, and rendering guidance.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-10-20"
     },
     {
       "url": "https://svelte.dev/docs/svelte/$state",
       "sourceType": "official-docs",
-      "versionScope": "Current rune reference as fetched 2026-09-06",
+      "versionScope": "Current rune reference as fetched 2026-10-20",
       "staleAfterDays": 45,
       "notes": "Reactive state, deep proxies, snapshots, and destructuring behavior.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-10-20"
     },
     {
       "url": "https://svelte.dev/docs/svelte/$derived",
       "sourceType": "official-docs",
-      "versionScope": "Current rune reference as fetched 2026-09-06",
+      "versionScope": "Current rune reference as fetched 2026-10-20",
       "staleAfterDays": 45,
       "notes": "Derived reactive state and dependency propagation.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-10-20"
     },
     {
       "url": "https://svelte.dev/docs/svelte/$effect",
       "sourceType": "official-docs",
-      "versionScope": "Current rune reference as fetched 2026-09-06",
+      "versionScope": "Current rune reference as fetched 2026-10-20",
       "staleAfterDays": 45,
       "notes": "Browser-only effects, dependency tracking, teardown, and effect escape-hatch guidance.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-10-20"
     },
     {
       "url": "https://svelte.dev/docs/svelte/legacy-reactive-assignments",
       "sourceType": "official-docs",
-      "versionScope": "Current legacy API reference as fetched 2026-09-06",
+      "versionScope": "Current legacy API reference as fetched 2026-10-20",
       "staleAfterDays": 45,
       "notes": "Legacy reactive statement dependency and ordering behavior.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-10-20"
     },
     {
       "url": "https://github.com/mattpocock/skills",
       "sourceType": "community-pattern",
-      "versionScope": "main commit 3cca18b368ae95cdbdebbff572ccafa662551015 authored 2026-09-04T08:43:27Z; package 1.2.3",
+      "versionScope": "main commit 4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d fetched 2026-10-05",
       "staleAfterDays": 30,
       "notes": "Community packaging reference for focused composable skill responsibilities and separate routing; never Svelte authority.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-03"
     }
   ],
   "authoringMaturity": "individual"

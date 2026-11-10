@@ -1,30 +1,31 @@
 {
   "id": "concurrency-debugging-full-task-2",
   "maturity": "individual",
-  "prompt": "The supplied worker pool deadlocks during shutdown only when a session flush starts at the same time. The fixture can pause after shutdown acquires `sessionLock` and after flush acquires `queueLock`. Reproduce the deadlock with those barriers, construct the wait-for graph and lock-order sequence, identify the inconsistent ordering, correct the ownership/order without dropping pending flushes, and add a deterministic regression for the conflicting schedule plus a control showing normal shutdown still drains work. Do not replace the locks with polling or timeouts.",
+  "prompt": "The supplied worker-pool lock-order model represents a shutdown/flush deadlock. `simulateConflictingSchedule()` models shutdown holding `sessionLock` and flush holding `queueLock` before each requests the other's lock; `simulateNormalShutdown()` is the working drain control. Execute both on the starting source before editing and retain their actual modeled outcomes and provenance. Construct the waiter/resource/holder cycle and each actor's acquisition sequence, identify the inconsistent ordering, and correct the shared order without dropping pending flushes. Add an authored regression that rejects the original defect and passes the repair, plus a normal-shutdown control with positive pending work. Repeat the modeled conflicting and control schedules in a named bounded loop with assertions for no cycle, unchanged pending-work count, and drain result on every iteration. Record a `repeatabilityRegression` or `stressRegression` object in `.kory-eval/concurrency-deadlock.json` with numeric completed `iterations`, schedule IDs/counts, per-iteration outcomes or a linked receipt, command/exit status, and failures. Label the wait graph and drain result as simulated: this fixture has no real lock wait, completion acknowledgments, watchdog cleanup, alternate runtime ordering, or injected worker-failure seam. State those verification limits rather than claiming live progress/cleanup/recovery or varied scheduling stress. Do not replace synchronization with polling or timeouts.",
   "environment": {
     "kind": "synthetic",
     "startingState": "fixture://concurrency-debugging/shutdown-flush-deadlock",
     "requirements": [
-      "barriers deterministically establish the conflicting lock-acquisition schedule",
-      "normal shutdown without simultaneous flush currently drains correctly",
+      "simulateConflictingSchedule represents opposing first lock acquisitions and the resulting wait-for edges; no real workers or async barriers are supplied",
+      "simulateNormalShutdown is a modeled working drain control, not evidence of actual worker completion",
       "pending flushes must not be discarded",
       "timeouts/polling are prohibited as the correctness fix",
+      "modeled pending-work count and drain outcome are preserved in a bounded repeated assertion; real cleanup/recovery requires a runtime fixture",
       "paired same-model skill/no-skill execution"
     ]
   },
   "falsifiableChecks": [
     {
       "id": "concurrency-deadlock-cycle",
-      "assertion": "The starting revision produces a concrete wait-for cycle under the supplied barriers."
+      "assertion": "The starting source is executed for the modeled conflicting schedule and normal control; retain both outcomes, source/command provenance, and a simulated label. The graph names shutdown → queueLock → flush → sessionLock → shutdown and the corresponding ownership/wait edges; a timeout or log timestamp alone is not cycle evidence."
     },
     {
       "id": "concurrency-deadlock-order",
-      "assertion": "The root cause identifies the inconsistent lock/resource ordering or ownership that creates the cycle."
+      "assertion": "The diagnosis identifies the inconsistent acquisition order and the actual correction establishes one coherent order or removes a dependency edge while preserving accepted-work semantics. It does not force an impossible pair of first acquisitions after a lock-order repair or treat a modeled drain flag as real completion acknowledgment."
     },
     {
       "id": "concurrency-deadlock-regression",
-      "assertion": "The controlled conflicting schedule completes after the fix, pending flushes are preserved, and the normal drain control remains green."
+      "assertion": "Authored regressions reject the original deadlock model and pass the repair: no modeled cycle, unchanged positive pending-flush count, and drained result for conflicting and normal controls. A bounded repeatability loop asserts these each iteration and records numeric completed iterations, schedule IDs/counts, outcomes, failures and command/exit status. Real worker completion, alternate runtime schedules, failure/cleanup/recovery and varied stress remain explicitly unverified when the model cannot express them."
     }
   ],
   "scorers": [
@@ -37,7 +38,9 @@
         "Violated invariant",
         "Stress regression",
         "wait-for graph and lock ordering",
-        "deterministic conflicting-schedule regression"
+        "deterministic conflicting-schedule regression",
+        "executed repeatabilityRegression or stressRegression record with per-schedule assertions",
+        "modeled pending-work preservation and explicit runtime cleanup/recovery limits"
       ]
     },
     {
@@ -47,7 +50,8 @@
       "evidence": [
         "the diagnosis names the resource cycle rather than generic timing",
         "the correction establishes a coherent ownership/order rule",
-        "the fix preserves required flush semantics"
+        "the fix preserves required flush semantics",
+        "simulation, real blocked waits, and accepted-unit completion evidence are distinguished"
       ],
       "blindTo": ["skill-variant", "expected-outcome"]
     }
@@ -58,6 +62,8 @@
     "Stress regression",
     "pre-fix wait-for evidence",
     "actual diff and passing controlled schedule",
+    "executed bounded repeatability record with command/exit status and per-iteration outcomes",
+    "modeled drain control and explicit unavailable real-schedule, cleanup, failure, and recovery checks",
     "paired skill/no-skill run artifacts"
   ],
   "requiredArtifacts": [

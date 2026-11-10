@@ -1,0 +1,31 @@
+# Local evaluation contract
+
+Run from the repository root with the repository's installed Bun and dependencies:
+
+```sh
+bun test skills-v5/infrastructure-security/evals/local-checks.test.ts
+bun test backend/src/kory/__tests__/skill-eval-security-review-runtime-fixtures.test.ts
+```
+
+These are package validation, local resolver, contract, and registered negative-control checks. They run offline, use temporary directories, do not seed global skills, and do not record evaluation campaigns. They do not create same-model pairs, independent blind judgments, deployment receipts, or qualification evidence.
+
+Evidence status is part of the contract. Use `observed` only for a named live provider/runtime result with raw output; use `synthetic` for the supplied corpus or local deterministic scorer; use `design` for intended configuration; and use `unavailable`/`unverified` when a live receipt was not supplied. Never turn a synthetic matrix, policy compilation, self-reported flag, planned probe, or rollback procedure into a live admission, enforcement, reachability, side-effect, audit, or recovery claim.
+
+## Scenario contracts
+
+| Scenario | Supplied local surface | Local assertions | Runtime evidence still required |
+| --- | --- | --- | --- |
+| `infrastructure-security-full-task-1` | Synthetic Kubernetes 1.37 version, insecure workload description, limited reachability matrix, and registered runtime-hardening fixture | Explicit versioned/enforced Pod Security intent; complete security-context and token controls; purpose-specific identities and least-privilege binding design; explicit default-deny ingress/egress and one canonical port map; named admin/control-plane and dependency paths; allowed/denied probe and rollback contract with status labels | Actual admission/enforcement decision, CNI/provider behavior, pod UID/GID/capabilities/profiles/mounts/devices/resources/tokens, listeners, dependency/DNS probes, dual-stack/proxy/mesh paths, audit receipt, side-effect result, and a real rollout rollback/recovery |
+| `infrastructure-security-full-task-2` | Synthetic Linux inventory, service/admin identity fixture, topology, patch lifecycle, and registered host-baseline fixture | Reduced installed/listening/device/socket surface; separated non-root service/admin identities; explicit firewall/service-manager and dependency-egress intent; consistent service/SSH/admin/control-plane port map; permitted/denied management paths; desired-versus-running evidence; rollback and emergency convergence contract with status labels | Actual kernel/runtime/systemd state, firewall verdicts on each interface/address family, SSH/admin audit records, package/image and dependency-egress state, resource/profile evidence, side-effect result, and a real failed rollout plus recovery |
+
+The scenarios require an evidence tuple for every important control: desired value/version, enforcing provider and decision, observed running value, an allowed control, a denied control, recovery/rollback result, and an explicit unavailable boundary. A manifest, unit file, policy compilation result, synthetic reachability row, or self-reported boolean is not a deployment receipt.
+
+## Current registered-fixture boundary
+
+The registered materializers and deterministic scorers live in `backend/src/kory/skill-eval-security-review-runtime-fixtures.ts`. They preserve fixed synthetic corpora and reject vulnerable starters. The Kubernetes fixture checks Kubernetes 1.37, basic workload identity/privilege intent, public-to-admin denial, and supplied synthetic runtime rows; the host fixture checks the supplied inventory, identity, patch lifecycle, permissions, and declared effective-state categories. Neither fixture runs a Kubernetes cluster, CNI, container runtime, Linux host, kernel, firewall, systemd unit, admission controller, audit backend, dependency probe, side-effect check, or patch rollback. Their passing artifact is a fixture/scorer result, not evidence that a production control is enforced.
+
+The current registered host and Kubernetes fixtures also do not independently validate every newly declared axis: Role/RoleBinding least privilege, service-account token behavior, default-deny provider enforcement, exact dependency/control-plane ports, seccomp/MAC/device/resource observations, alternate address-family or proxy/mesh bypasses, denied side effects, audit receipts, and rollback/recovery remain unavailable unless a candidate artifact supplies them and a future scorer enforces them. Do not satisfy these gaps with invented `true` fields or qualitative claims. Preserve `unverified`/`unavailable` status and route executed final proof to `security-verification`.
+
+## Routing boundary
+
+`routing.jsonl` contains distinct held-out prompts: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial cases. Resolver checks prove selection behavior and hierarchy closure only. They do not prove hardening quality, effective policy, runtime enforcement, recovery, or promotion readiness. Keep cloud account/project/org IAM, provider security groups/resource policy, managed-service exposure, and provider workload identity in `cloud-security`; keep dependency/build/provenance/signing in `supply-chain-security`; keep application parser/session/file/process behavior in `application-security`; keep user/resource/tenant authorization in `authorization-security`; and use `security-verification` for independent executed allow/deny and recovery verdicts.

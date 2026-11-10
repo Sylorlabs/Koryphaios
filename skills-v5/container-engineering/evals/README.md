@@ -1,0 +1,31 @@
+# Evaluation boundary
+
+The two task JSON files describe acceptance contracts. They do not contain built images, a container engine, or runtime receipts. Both current fixture implementations are synthetic. Keep their scenario IDs and `fixture://` addresses stable so registrations remain traceable. No qualification status follows from package validation or fixture registration.
+
+## Scenario contracts
+
+| Scenario                                       | Supplied surface                                                                      | Falsifiable local controls                                                                                                                                                  | Additional proof needed for real runtime claims                                                                                                                                                                  |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `container-engineering-full-task-1-individual` | Unsafe Dockerfile, fixed source inspector, artificial base digest, synthetic lockfile | Original unsafe input fails relevant assertions; repaired build shape, user, command, and credential handling pass structural checks; inspector and evidence stay unchanged | Pullable bases, enforced real lock, runnable app, clean build, exported layer/config inspection, effective identity/mounts, missing mount failure and recovery, SIGTERM timing, orphan handling, bounded cleanup |
+| `container-engineering-full-task-2-individual` | Fixed `OciIndex` model and an incomplete amd64 starting record                        | Missing arm64 and wrong native dependency fail assertions; repaired model contains both targets with equivalent runtime contracts and correct dependency/libc choices       | Actual exported index and child manifests/configs, per-target builds and executable smoke tests, runtime identity/mount/shutdown observations                                                                    |
+
+Each task retains six checks: scope, operating contract, reproducible execution, verification, shortcut resistance, and evidence boundaries. Their assertions name observable discriminators. Each required runtime axis needs its own disposition; a synthetic positive control does not satisfy an unavailable real check. Health and vulnerability/license gates absent from the fixture are `not-configured`; a required build or target execution that cannot run is `unavailable`.
+
+The runtime report is `.kory-eval/container-runtime.json`. The platform model and its separate evidence are `.kory-eval/oci-index.json` and `.kory-eval/multiarch-evidence.json`. Preserve desired settings separately from observed facts. In the platform model, `smoke` and `execution` are fields in a supplied synthetic schema, not executable observations. Label them accordingly in the evidence artifact and record actual execution independently. An artificial digest identifies model data, not an image that was built or pulled.
+
+## Current scorer blockers
+
+Inspection of the registered implementations on 2026-10-17 found these limitations:
+
+- `container-engineering/production-image-runtime@3` supplies no service source, build script, runnable dependency lock, real base artifact, or runtime harness. Its README nonetheless requires top level runtime booleans and timing in the report.
+- `container-engineering/production-image-runtime-scorer@1` checks source shape and self reported booleans such as `sigtermReachedApp: true`, `readOnlyRoot: true`, and `orphanChild: false`. It does not observe a container, check the exact supplied base digest, inspect layers, or validate the asserted elapsed time against real execution. A truthful null/unavailable report can fail this scorer. Keep the truth boundary even when it does.
+- `container-engineering/multiarch-oci-index@1` supplies descriptive platform records without built artifacts or executable smoke tests. `container-engineering/multiarch-oci-index-scorer@2` accepts reported smoke/execution fields and a `sha256:` prefix. It does not prove immutable digest validity, architecture compatibility, real config equivalence, execution without root, or native/emulated runtime behavior.
+- Registration readiness only proves that a materializer and scorer can be found. It does not establish that either scorer enforces all six task assertions, validates recovery, or detects fabricated observations.
+
+The missing runtime instrumentation and scorer calibration are external blockers to empirical runtime qualification. They cannot be repaired by changing this package's prose or by filling expected fields with invented observations. Required future calibration includes a genuinely observed positive, unsafe and wrong-platform negatives, forged reports, unavailable runtimes, and alternative valid implementations. Preserve these distinctions in any future paired results and independent review.
+
+## Routing contract
+
+Public examples live in `kory.json`; `routing.jsonl` contains distinct prompts. The suite covers five concrete image/runtime requests, five close ownership negatives, three compound requests, and three quoted or scope restricted decoys. Adjacent skill identifiers name actual ownership boundaries, including `c-cpp-systems-engineering` and `csharp-dotnet-engineering` when application changes are also requested. They are not arbitrary unrelated languages used to make routing look difficult.
+
+Run only the requested local resolver checks when validating an edit. Resolver results are routing evidence, not task improvement, real container verification, or promotion evidence. Preserve prior regression IDs and never copy public prompts into the held out suite.

@@ -56,27 +56,33 @@
   "falsifiableChecks": [
     {
       "id": "scope-and-hierarchy",
-      "assertion": "The result must establish the actual graphql-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=api-contract-design; near-neighbor=http-rest-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+      "assertion": "The result must establish the actual graphql-engineering boundary, loader implementation, and GraphQL request context before acting, preserve the hierarchy relationship (broader=api-contract-design; near-neighbor=http-rest-engineering), and keep HTTP transport mechanics outside the loader repair.",
+      "source": "https://github.com/graphql/dataloader"
     },
     {
       "id": "operating-contract",
-      "assertion": "Design schema types from durable domain semantics and client composition needs."
+      "assertion": "Keep viewer specific authorization and cache state inside the request context, with a fresh loader for each request and subscription event.",
+      "source": "https://github.com/graphql/dataloader"
     },
     {
       "id": "execution-invariant",
-      "assertion": "Batch/cache state is request-scoped and authorization-aware; optimization can reduce duplicate loads without allowing data or errors to cross caller boundaries."
+      "assertion": "Batch and cache state is request scoped and authorization aware. Duplicate keys and overlapping in flight loads share one ordered batch within a request without allowing data, permissions, or errors to cross caller boundaries.",
+      "source": "https://github.com/graphql/dataloader"
     },
     {
       "id": "verification-discipline",
-      "assertion": "Test representative queries/mutations, N+1/batching, partial errors, null propagation, pagination, authorization bypass attempts, schema compatibility, and query-cost controls."
+      "assertion": "Instrument the real resolver boundary and verify backend call count, distinct ordered keys, duplicate and in flight races, per key partial errors, simultaneous viewers, fresh subscription events, and measured fan out limits.",
+      "source": "https://cheatsheetseries.owasp.org/cheatsheets/GraphQL_Cheat_Sheet.html"
     },
     {
       "id": "anti-pattern-resistance",
-      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not expose arbitrary database graphs, make every field nullable to avoid schema decisions, put authorization only in top-level resolvers, or break clients by changing nullability/enums casually."
+      "assertion": "The result must not use a process global cache, disable batching to hide an isolation defect, trust a client supplied viewer argument, or rely on a root permission check for nested data.",
+      "source": "https://cheatsheetseries.owasp.org/cheatsheets/GraphQL_Cheat_Sheet.html"
     },
     {
       "id": "evidence-and-uncertainty",
-      "assertion": "Every material completion claim must map to observable evidence (graphql-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+      "assertion": "Every material completion claim must map to observable evidence, with synthetic, simulated, unavailable, inferred, stale, or unresolved evidence labeled. Production latency, remote subgraph behavior, and deployed rate limits remain unavailable unless exercised.",
+      "source": "https://graphql.github.io/graphql-over-http/draft/"
     }
   ]
 }

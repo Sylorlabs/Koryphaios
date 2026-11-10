@@ -1,0 +1,7 @@
+query LegacyUser($id: ID!) {
+  user(id: $id) {
+    id
+    displayName
+    avatarUrl
+  }
+}

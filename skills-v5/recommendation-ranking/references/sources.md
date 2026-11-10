@@ -6,32 +6,32 @@
 
 - Package authorship is independent from empirical qualification; the audit/evaluation ledger is authoritative for qualification status.
 - Hierarchy: broader implementation.
-- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held-out cases through the real resolver.
-- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no-skill pairing, regression retention, and blind semantic judging.
+- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held out cases through the real resolver.
+- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no skill pairing, regression retention, and blind semantic judging.
 - Source discipline: authoritative/spec/reference sources outrank community patterns when they conflict; runtime evidence outranks examples for behavioral claims.
 
 ## Maintained sources
 
 - **TensorFlow Recommenders overview**: https://www.tensorflow.org/recommenders
-  - Scope: TensorFlow Recommenders documentation as available 2026-09-05.
+  - Scope: TensorFlow Recommenders documentation as available 2026-11-07.
   - Use: current retrieval/ranking modeling library and production-oriented recommender patterns.
-  - Verified: 2026-09-05; refresh after 30 days.
+  - Verified: 2026-11-07; refresh after 30 days.
 - **TensorFlow Recommenders basic retrieval**: https://www.tensorflow.org/recommenders/examples/basic_retrieval
-  - Scope: current TFRS retrieval tutorial as available 2026-09-05.
+  - Scope: current TFRS retrieval tutorial as available 2026-11-07.
   - Use: two-stage recommender decomposition, query/candidate retrieval models, candidate evaluation and the explicit production guidance that temporal splits are generally preferable to the tutorial's simple random demonstration split.
-  - Verified: 2026-09-05; refresh after 30 days.
+  - Verified: 2026-11-07; refresh after 30 days.
 - **TensorFlow Recommenders basic ranking**: https://www.tensorflow.org/recommenders/examples/basic_ranking
-  - Scope: current TFRS ranking tutorial as available 2026-09-05.
+  - Scope: current TFRS ranking tutorial as available 2026-11-07.
   - Use: ranking-stage supervised scoring patterns and separation from retrieval. Treat tutorial labels as examples, not evidence that production exposure data is unbiased.
-  - Verified: 2026-09-05; refresh after 30 days.
+  - Verified: 2026-11-07; refresh after 30 days.
 - **TensorFlow Recommenders multitask recommenders**: https://www.tensorflow.org/recommenders/examples/multitask
-  - Scope: current TFRS multitask tutorial as available 2026-09-05.
+  - Scope: current TFRS multitask tutorial as available 2026-11-07.
   - Use: multi-objective recommender modeling and explicit tradeoffs between related objectives.
-  - Verified: 2026-09-05; refresh after 30 days.
+  - Verified: 2026-11-07; refresh after 30 days.
 - **NIST AI Risk Management Framework**: https://www.nist.gov/itl/ai-risk-management-framework
-  - Scope: NIST AI RMF materials as available 2026-09-05.
+  - Scope: NIST AI RMF materials as available 2026-11-07.
   - Use: lifecycle measurement, representative evaluation, transparency and governance when recommendation effects are consequential.
-  - Verified: 2026-09-05; refresh after 180 days.
+  - Verified: 2026-11-07; refresh after 180 days.
 
 ## Interpretation rules
 

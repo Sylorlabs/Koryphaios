@@ -23,6 +23,6 @@ Severity follows the demonstrated path: attacker position/privilege, complexity/
 
 ## Specialty boundaries
 
-- `application-security`: application hardening/design. `authorization-security`: subject-resource-action/tenant/delegation/revocation policy. `security-verification`: executed proof. `threat-modeling-practice`: threat-model creation/refresh. `infrastructure-security`/`cloud-security`: host, network, IAM, deployment, and control-plane assessment. Compose when needed but keep evidence and ownership separate.
+- `application-security`: application hardening/design. `authorization-security`: subject-resource-action/tenant/delegation/revocation policy. `security-verification`: executed proof. `threat-modeling-practice`: threat model creation/refresh. `infrastructure-security`/`cloud-security`: host, network, IAM, deployment, and control-plane assessment. Compose when needed but keep evidence and ownership separate.
 
 Use [the maintained source map](references/sources.md) for version-sensitive guidance. Explicitly say when evidence is insufficient for a vulnerability claim.

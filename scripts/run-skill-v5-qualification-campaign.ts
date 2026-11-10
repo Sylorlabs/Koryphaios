@@ -1,9 +1,15 @@
-import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import {
-  createIsolatedCodexSkillEvalExecutor,
-  createTextOnlyPatchSkillEvalExecutor,
-} from '../backend/src/kory/skill-eval-codex';
+  QualificationDispatch,
+  qualificationInfrastructureStatus,
+} from './skill-v5-qualification-dispatch';
+import {
+  applySkillEvalExecutorReadiness,
+  resolveSkillEvalExecutor,
+  parseSkillEvalExecutorMode,
+  skillEvalCampaignHarnessVersion,
+  type SkillEvalExecutorDescriptor,
+} from './skill-v5-qualification-executor';
 import {
   auditSkillEvalExecutionReadiness,
   runPairedSkillEvaluationV3,
@@ -16,14 +22,16 @@ import {
   CURRENT_SKILL_EVAL_CONTRACT_VERSION,
   listOpenSkillRegressionSources,
   listSkillEvaluationRuns,
-  type SkillEvaluationRun,
 } from '../backend/src/kory/skill-evaluations';
+import { hasCompleteCurrentSkillPair } from '../backend/src/kory/skill-eval-campaign-resume';
+import { skillEvaluationV5ContractHash } from '../backend/src/kory/skill-eval-contract-hash';
 import {
   loadV5SkillPackages,
   type V5CompiledSkillPackage,
   type V5FullTaskFixture,
 } from '../backend/src/kory/skill-packages';
 import { listSkills, type SkillRevision } from '../backend/src/kory/skills';
+import type { SkillEvalScenarioV3 } from '../backend/src/kory/skill-eval-harness';
 
 const projectRoot = resolve(import.meta.dir, '..');
 const evaluationContractVersion = CURRENT_SKILL_EVAL_CONTRACT_VERSION;
@@ -49,15 +57,7 @@ const requestedScenarios = new Set(
 const force = process.argv.includes('--force');
 const openRegressionsOnly = process.argv.includes('--open-regressions');
 const dryRun = process.argv.includes('--dry-run');
-const textPatchMode =
-  process.argv.includes('--text-patch') || process.env.KORY_SKILL_EVAL_TEXT_PATCH === '1';
-const configuredConcurrency = Number(
-  process.argv
-    .find((argument) => argument.startsWith('--concurrency='))
-    ?.slice('--concurrency='.length) ||
-    process.env.KORY_SKILL_EVAL_CONCURRENCY?.trim() ||
-    (textPatchMode ? '1' : '4'),
-);
+const requestedExecutorMode = parseSkillEvalExecutorMode(process.argv);
 const wallClockMs = Number(
   process.argv
     .find((argument) => argument.startsWith('--wall-clock-ms='))
@@ -72,18 +72,33 @@ const reasoningEffort =
     .trim() ||
   process.env.KORY_SKILL_EVAL_REASONING_EFFORT?.trim() ||
   'none';
-const model =
+const requestedModel =
   process.argv
     .find((argument) => argument.startsWith('--model='))
     ?.slice('--model='.length)
-    .trim() ||
-  process.env.KORY_SKILL_EVAL_MODEL?.trim() ||
-  'gpt-5.6-sol';
-const executionMode = textPatchMode
-  ? 'text-only-patch'
-  : process.env.KORY_SKILL_EVAL_SINGLE_NATIVE_CALL === '1'
-    ? 'single-native-call'
-    : 'multi-turn';
+    .trim() || undefined;
+const executorSelection = resolveSkillEvalExecutor({
+  mode: requestedExecutorMode,
+  model: requestedModel,
+  reasoningEffort,
+  wallClockMs,
+  dryRun,
+});
+const executorDescriptor = executorSelection.descriptor;
+const executionMode = !executorDescriptor
+  ? 'unverified'
+  : executorDescriptor.mode.endsWith('text-patch')
+    ? 'text-only-patch'
+    : process.env.KORY_SKILL_EVAL_SINGLE_NATIVE_CALL === '1'
+      ? 'single-native-call'
+      : 'multi-turn';
+const configuredConcurrency = Number(
+  process.argv
+    .find((argument) => argument.startsWith('--concurrency='))
+    ?.slice('--concurrency='.length) ||
+    process.env.KORY_SKILL_EVAL_CONCURRENCY?.trim() ||
+    (executorDescriptor?.mode.endsWith('text-patch') ? '1' : '4'),
+);
 if (
   !Number.isInteger(configuredConcurrency) ||
   configuredConcurrency < 1 ||
@@ -105,68 +120,68 @@ const selectedPackages = requestedSkills.size
     })
   : packages;
 
-const readiness = auditSkillEvalExecutionReadiness(
+const fixtureReadiness = auditSkillEvalExecutionReadiness(
   selectedPackages,
   BUILTIN_SKILL_EVAL_MATERIALIZERS,
   BUILTIN_SKILL_EVAL_SCORERS,
 );
+const readiness = applySkillEvalExecutorReadiness(
+  fixtureReadiness,
+  selectedPackages.flatMap((skillPackage) =>
+    skillPackage.evaluation.tasks.map((task) => ({
+      skill: skillPackage.sidecar.name,
+      id: task.id,
+      environmentKind: task.environment.kind,
+    })),
+  ),
+  executorSelection,
+);
 const readinessByScenario = new Map(readiness.map((row) => [row.scenarioId, row]));
-const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
-
 function contractHash(skillPackage: V5CompiledSkillPackage, task: V5FullTaskFixture): string {
-  const materializerIds = BUILTIN_SKILL_EVAL_MATERIALIZERS.filter((item) => item.matches(task))
+  const scenario: SkillEvalScenarioV3 = {
+    id: task.id,
+    skill: skillPackage.sidecar.name,
+    category: 'full-task',
+    prompt: task.prompt,
+    expectedSelection: true,
+    expectedSkills: [],
+    forbiddenSkills: [],
+    heldOut: true,
+    adjacentSkills: [],
+    tags: ['held-out', 'full-task'],
+    environment: task.environment,
+    falsifiableChecks: task.falsifiableChecks,
+    scorers: task.scorers,
+    requiredEvidence: task.requiredEvidence,
+    requiredArtifacts: task.requiredArtifacts,
+  };
+  const materializerIds = BUILTIN_SKILL_EVAL_MATERIALIZERS.filter((item) => item.matches(scenario))
     .map((item) => item.id)
     .sort();
   const scorerIds = BUILTIN_SKILL_EVAL_SCORERS.filter((item) => item.scenarioIds.includes(task.id))
     .map((item) => item.id)
     .sort();
-  return sha256(
-    JSON.stringify({
-      contractVersion: evaluationContractVersion,
-      skill: skillPackage.sidecar.name,
-      packageVersion: skillPackage.sidecar.version,
-      scenario: task,
-      materializerIds,
-      scorerIds,
-    }),
-  ).slice(0, 16);
+  return skillEvaluationV5ContractHash({
+    contractVersion: evaluationContractVersion,
+    skill: skillPackage.sidecar.name,
+    packageVersion: skillPackage.sidecar.version,
+    scenario: task,
+    materializerIds,
+    scorerIds,
+  });
 }
 
-function campaignHarnessVersion(evaluationContractHash: string): string {
-  return `v5-campaign-2026-09-08:${executionMode}:${reasoningEffort}:${wallClockMs}ms:${evaluationContractHash}`;
-}
-
-function hasCompletePair(
-  runs: readonly SkillEvaluationRun[],
-  revisionHash: string,
-  scenarioId: string,
+function campaignHarnessVersion(
   evaluationContractHash: string,
-  harnessVersion: string,
-): boolean {
-  const byPair = new Map<string, Set<string>>();
-  for (const run of runs) {
-    if (
-      run.revisionHash !== revisionHash ||
-      run.protocolVersion !== 3 ||
-      run.evaluator !== 'deterministic' ||
-      run.caseCategory !== 'full-task' ||
-      run.scenarioId !== scenarioId ||
-      run.evaluationContractHash !== evaluationContractHash ||
-      run.harnessVersion !== harnessVersion ||
-      run.infrastructureFailure ||
-      !run.comparisonId ||
-      !run.variant
-    ) {
-      continue;
-    }
-    const pairKey = `${run.comparisonId}\u0000${run.provider}\u0000${run.model}`;
-    const variants = byPair.get(pairKey) ?? new Set<string>();
-    variants.add(run.variant);
-    byPair.set(pairKey, variants);
-  }
-  return [...byPair.values()].some(
-    (variants) => variants.has('with-skill') && variants.has('without-skill'),
-  );
+  descriptor: SkillEvalExecutorDescriptor,
+): string {
+  return skillEvalCampaignHarnessVersion({
+    descriptor,
+    executionMode,
+    reasoningEffort,
+    wallClockMs,
+    evaluationContractHash,
+  });
 }
 
 interface CampaignItem {
@@ -174,6 +189,7 @@ interface CampaignItem {
   revision: SkillRevision;
   task: V5FullTaskFixture;
   evaluationContractHash: string;
+  regressionId?: string;
 }
 
 const queued: CampaignItem[] = [];
@@ -192,33 +208,36 @@ for (const skillPackage of selectedPackages) {
     );
   }
   const runs = listSkillEvaluationRuns(projectRoot, skillPackage.sidecar.name);
-  const openRegressionScenarioIds = openRegressionsOnly
-    ? new Set(
-        listOpenSkillRegressionSources(projectRoot, skillPackage.sidecar.name, revision.hash).map(
-          (run) => run.scenarioId ?? run.caseId,
-        ),
-      )
+  const openRegressionSources = openRegressionsOnly
+    ? listOpenSkillRegressionSources(projectRoot, skillPackage.sidecar.name, revision.hash)
     : null;
   for (const task of skillPackage.evaluation.tasks) {
     if (requestedScenarios.size && !requestedScenarios.has(task.id)) continue;
-    if (openRegressionScenarioIds && !openRegressionScenarioIds.has(task.id)) continue;
+    const sources = openRegressionSources?.filter((run) => (run.scenarioId ?? run.caseId) === task.id);
+    if (sources && !sources.length) continue;
     if (!readinessByScenario.get(task.id)?.ready) continue;
     const evaluationContractHash = contractHash(skillPackage, task);
     if (
       !force &&
       !openRegressionsOnly &&
-      hasCompletePair(
-        runs,
-        revision.hash,
-        task.id,
+      executorDescriptor &&
+      hasCompleteCurrentSkillPair(runs, {
+        skill: skillPackage.sidecar.name,
+        revisionHash: revision.hash,
+        scenarioId: task.id,
         evaluationContractHash,
-        campaignHarnessVersion(evaluationContractHash),
-      )
+        evaluationContractVersion,
+        harnessVersion: campaignHarnessVersion(evaluationContractHash, executorDescriptor),
+        provider: executorDescriptor.provider,
+        model: executorDescriptor.model,
+      })
     ) {
       skippedComplete.push({ skill: skillPackage.sidecar.name, scenarioId: task.id });
       continue;
     }
-    queued.push({ skillPackage, revision, task, evaluationContractHash });
+    for (const source of sources ?? [undefined]) {
+      queued.push({ skillPackage, revision, task, evaluationContractHash, regressionId: source?.id });
+    }
   }
 }
 
@@ -228,10 +247,26 @@ if (dryRun) {
       {
         schemaVersion: 1,
         dryRun: true,
+        executor: executorDescriptor
+          ? {
+              status: 'available',
+              requestedMode: requestedExecutorMode,
+              ...executorDescriptor,
+              executionMode,
+            }
+          : {
+              status: 'unavailable',
+              verification: 'unverified',
+              requestedMode: requestedExecutorMode,
+              descriptor: null,
+              reason:
+                executorSelection.status === 'unavailable' ? executorSelection.reason : undefined,
+            },
         mode: openRegressionsOnly ? 'open-regressions' : 'qualification',
         selectedSkills: selectedPackages.length,
         readyScenarios: readiness.filter((row) => row.ready).length,
         environmentBlockedScenarios: blocked.length,
+        blockedScenarios: blocked,
         skippedComplete: skippedComplete.length,
         queued: queued.length,
         queuedBySkill: Object.fromEntries(
@@ -252,17 +287,11 @@ if (dryRun) {
   process.exit(0);
 }
 
-const executor = textPatchMode
-  ? createTextOnlyPatchSkillEvalExecutor({
-      model,
-      reasoningEffort,
-      wallClockMs,
-    })
-  : createIsolatedCodexSkillEvalExecutor({
-      model,
-      reasoningEffort,
-      wallClockMs,
-    });
+if (executorSelection.status !== 'available' || !executorDescriptor) {
+  throw new Error('Cannot dispatch qualification with an unavailable/unverified executor.');
+}
+const executor = executorSelection.executor;
+const dispatchExecutorDescriptor = executorSelection.descriptor;
 const completed: Array<{
   skill: string;
   scenarioId: string;
@@ -271,15 +300,15 @@ const completed: Array<{
   withoutSkillPassed: boolean | null;
 }> = [];
 const failed: Array<{ skill: string; scenarioId: string; detail: string }> = [];
-let cursor = 0;
+const dispatch = new QualificationDispatch(queued.length);
 
 async function runWorker(): Promise<void> {
   while (true) {
-    const index = cursor;
-    cursor += 1;
+    const index = dispatch.take();
+    if (index === undefined) return;
     const item = queued[index];
     if (!item) return;
-    const { skillPackage, revision, task, evaluationContractHash } = item;
+    const { skillPackage, revision, task, evaluationContractHash, regressionId } = item;
     const existingRuns = listSkillEvaluationRuns(projectRoot, skillPackage.sidecar.name);
     const priorPairCount = existingRuns.filter(
       (run) =>
@@ -295,9 +324,13 @@ async function runWorker(): Promise<void> {
         skillPackage,
         scenarioId: task.id,
         skillRevisionHash: revision.hash,
-        harnessVersion: campaignHarnessVersion(evaluationContractHash),
+        harnessVersion: campaignHarnessVersion(
+          evaluationContractHash,
+          dispatchExecutorDescriptor,
+        ),
         evaluationContractHash,
         evaluationContractVersion,
+        regressionId,
         executor,
         materializers: BUILTIN_SKILL_EVAL_MATERIALIZERS,
         scorers: BUILTIN_SKILL_EVAL_SCORERS,
@@ -305,19 +338,41 @@ async function runWorker(): Promise<void> {
         executionOrder: priorPairCount % 2 === 0 ? 'without-skill-first' : 'with-skill-first',
       });
       try {
-        const withInfrastructureFailure = Boolean(
+        dispatch.observe([
           result.withSkill.observation.infrastructureFailure,
-        );
-        const withoutInfrastructureFailure = Boolean(
+          result.withoutSkill.observation.infrastructureFailure,
+        ]);
+        const infrastructure = qualificationInfrastructureStatus(
+          result.withSkill.observation.infrastructureFailure,
           result.withoutSkill.observation.infrastructureFailure,
         );
-        if (withInfrastructureFailure || withoutInfrastructureFailure) {
+        const withIntegrityFailure = Boolean(result.withSkill.score?.integrityFailure);
+        const withoutIntegrityFailure = Boolean(result.withoutSkill.score?.integrityFailure);
+        const integrityEvidence = (evidence: readonly string[] | undefined): string =>
+          (evidence ?? [])
+            .filter((entry) =>
+              /integrity|protected|modified|mutation|unexpected|scope/iu.test(entry),
+            )
+            .slice(0, 3)
+            .join(' | ')
+            .slice(0, 700) || 'scorer reported an integrity failure';
+        if (
+          infrastructure.infrastructureFailure ||
+          withIntegrityFailure ||
+          withoutIntegrityFailure
+        ) {
           failed.push({
             skill: skillPackage.sidecar.name,
             scenarioId: task.id,
+            ...(regressionId ? { regressionId } : {}),
             detail: [
-              result.withSkill.observation.infrastructureFailure?.detail,
-              result.withoutSkill.observation.infrastructureFailure?.detail,
+              infrastructure.detail,
+              withIntegrityFailure
+                ? `with-skill evaluator integrity failure: ${integrityEvidence(result.withSkill.score?.evidence)}`
+                : null,
+              withoutIntegrityFailure
+                ? `without-skill evaluator integrity failure: ${integrityEvidence(result.withoutSkill.score?.evidence)}`
+                : null,
             ]
               .filter(Boolean)
               .join(' | '),
@@ -342,7 +397,20 @@ async function runWorker(): Promise<void> {
             pairId: result.pairId,
             withSkill: result.withSkill.score?.passed ?? null,
             withoutSkill: result.withoutSkill.score?.passed ?? null,
-            infrastructureFailure: withInfrastructureFailure || withoutInfrastructureFailure,
+            withSkillInfrastructureFailure: infrastructure.withSkillInfrastructureFailure,
+            withoutSkillInfrastructureFailure: infrastructure.withoutSkillInfrastructureFailure,
+            infrastructureFailure: infrastructure.infrastructureFailure,
+            integrityFailure: withIntegrityFailure || withoutIntegrityFailure,
+            ...(withIntegrityFailure
+              ? { withSkillIntegrityEvidence: integrityEvidence(result.withSkill.score?.evidence) }
+              : {}),
+            ...(withoutIntegrityFailure
+              ? {
+                  withoutSkillIntegrityEvidence: integrityEvidence(
+                    result.withoutSkill.score?.evidence,
+                  ),
+                }
+              : {}),
           }),
         );
       } finally {
@@ -377,6 +445,9 @@ console.log(
     {
       schemaVersion: 1,
       executor: {
+        mode: executorDescriptor.mode,
+        id: executor.id,
+        subject: executor.subject,
         provider: executor.provider,
         model: executor.model,
         runtimeIdentity: executor.runtimeIdentity,
@@ -393,10 +464,15 @@ console.log(
       completed: completed.length,
       failed: failed.length,
       failedScenarios: failed,
+      stoppedReason: dispatch.stopReason,
+      notStarted: dispatch.notStarted,
     },
     null,
     2,
   ),
 );
 
-if (failed.length) process.exitCode = 1;
+// The summary must be flushed before the one-shot process exits. Provider
+// adapters are responsible for closing their own resources; forcing exit here
+// can truncate piped JSON and hide the final campaign state.
+process.exitCode = failed.length ? 1 : 0;

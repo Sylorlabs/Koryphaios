@@ -1,15 +1,15 @@
 {
   "id": "data-pipeline-engineering-full-task-2-individual",
   "maturity": "individual",
-  "prompt": "A nightly partner feed adds an unexpected nested field and changes one timestamp from ISO-8601 to epoch milliseconds for 3% of rows. The current pipeline coerces both silently, producing null event times downstream. Add bounded schema evolution and quarantine behavior: preserve valid rows, isolate malformed/incompatible rows with reason codes, keep raw provenance, make reruns idempotent, and verify recovery after a parser update. Do not define business metrics.",
+  "prompt": "A nightly partner feed adds an additive nested metadata field and one supplied row changes its timestamp from ISO-8601 to epoch milliseconds. The current pipeline coerces the incompatible timestamp silently, producing an empty event time downstream. Add bounded schema evolution and quarantine behavior: preserve valid rows, accept the additive field without widening the normalized contract, isolate incompatible rows with reason codes, keep raw provenance, make duplicate file delivery idempotent, and verify recovery after a parser update. Do not define business metrics or claim process-durable restart evidence from this in-memory fixture.",
   "environment": {
     "kind": "synthetic",
     "startingState": "fixture://data-pipeline-engineering/schema-drift-quarantine",
     "requirements": [
       "versioned feed samples with known valid, new-compatible, and incompatible timestamp rows",
-      "raw landing area plus normalized sink and quarantine/dead-letter destination",
+      "in-memory raw landing representation plus normalized sink and quarantine destination",
       "rerun fixture demonstrating duplicate file delivery",
-      "reprocessing path that moves corrected quarantined rows exactly once",
+      "reprocessing path that moves corrected quarantined rows exactly once and removes the resolved quarantine record",
       "paired same-model skill/no-skill execution from the identical starting snapshot"
     ]
   },
@@ -60,7 +60,8 @@
     },
     {
       "id": "operating-contract",
-      "assertion": "Define source authority, event/record identity, watermark, partition, schema, transformation lineage, retry semantics, and destination guarantees."
+      "assertion": "Define source authority, file and row identity, watermark or batch boundary, schema versions, transformation lineage, retry semantics, and normalized, raw, and quarantine destination guarantees.",
+      "source": "https://airflow.apache.org/docs/apache-airflow/stable/best-practices.html"
     },
     {
       "id": "execution-invariant",
@@ -68,11 +69,11 @@
     },
     {
       "id": "verification-discipline",
-      "assertion": "Test reruns, partial batches, late/out-of-order data, schema additions/removals, malformed records, backfills, reconciliation totals, and lineage from output rows to source inputs."
+      "assertion": "Test duplicate file reruns, partial delivery, additive schema fields, incompatible timestamp values, malformed records, reason-coded quarantine, parser-update recovery, reconciliation counts, and lineage from normalized or quarantined rows to raw source inputs. State that process-durable restart, live backfill concurrency, and business metric validation are unavailable or out of scope for this fixture."
     },
     {
       "id": "anti-pattern-resistance",
-      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not use processing time when event time matters, assume exactly-once from retries alone, discard bad rows without accounting, or let a backfill bypass normal quality gates."
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not use processing time when event time matters, assume exactly once from retries alone, discard bad rows without accounting, or let a backfill bypass normal quality gates."
     },
     {
       "id": "evidence-and-uncertainty",

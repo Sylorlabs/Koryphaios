@@ -352,8 +352,21 @@ Add a regression proving the supplied semantic manifest produces the same canoni
   },
 };
 
+function claimsLiveReleaseVerification(text: string): boolean {
+  return text.split(/[\n,;}]+/u).some((clause) => {
+    const mentionsLiveVerification =
+      /(?:live|production).{0,100}(?:verif(?:ied|ication)|prov(?:ed|en))|(?:verif(?:ied|ication)|prov(?:ed|en)).{0,100}(?:live|production)/iu.test(
+        clause,
+      );
+    if (!mentionsLiveVerification) return false;
+    return !/(?:\bno\b|\bnot\b|\bnever\b|\bwithout\b|\bunverified\b|\bfalse\b|not.?performed|not.?executed|not.?run)/iu.test(
+      clause,
+    );
+  });
+}
+
 const releaseSignatureScorer: SkillEvalDeterministicScorer = {
-  id: 'applied-cryptography/offline-release-signature-scorer@4',
+  id: 'applied-cryptography/offline-release-signature-scorer@5',
   scenarioIds: [RELEASE_SIGNATURE],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
@@ -391,7 +404,7 @@ test('hidden: canonical signed bytes are insertion-order independent and domain 
       /unknown.*algorithm|algorithm.*unknown/u.test(report.text) &&
       /secrets[-_ ]?key[-_ ]?management/iu.test(report.text) &&
       /synthetic|local/u.test(report.text) &&
-      !/live.*(?:verified|proved)/u.test(report.text);
+      !claimsLiveReleaseVerification(report.text);
     const passed = hidden.passed && regression && vectorsPreserved && bounded;
     return {
       passed,

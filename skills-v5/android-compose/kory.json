@@ -105,34 +105,34 @@
     {
       "url": "https://developer.android.com/develop/ui/compose/state-saving",
       "sourceType": "official-docs",
-      "versionScope": "Android Compose state-saving guidance opened 2026-09-06",
-      "verifiedAt": "2026-09-06",
+      "versionScope": "Android Compose state-saving guidance opened 2026-10-20",
+      "verifiedAt": "2026-10-20",
       "staleAfterDays": 45,
       "notes": "State-owner and recreation boundaries; small saved UI state is not durable business-data persistence."
     },
     {
       "url": "https://developer.android.com/develop/ui/compose/side-effects",
       "sourceType": "official-docs",
-      "versionScope": "Android Compose effect guidance opened 2026-09-06",
-      "verifiedAt": "2026-09-06",
+      "versionScope": "Android Compose effect guidance opened 2026-10-20",
+      "verifiedAt": "2026-10-20",
       "staleAfterDays": 45,
       "notes": "Lifecycle-owned effects, restart keys, cancellation and cleanup."
     },
     {
       "url": "https://developer.android.com/develop/ui/compose/lists",
       "sourceType": "official-docs",
-      "versionScope": "Android Compose lazy-list guidance opened 2026-09-06",
-      "verifiedAt": "2026-09-06",
+      "versionScope": "Android Compose lazy-list guidance opened 2026-10-20",
+      "verifiedAt": "2026-10-20",
       "staleAfterDays": 45,
       "notes": "Stable item identity and restorable key types; not device-verification evidence."
     },
     {
       "url": "https://developer.android.com/compose",
       "sourceType": "official-docs",
-      "versionScope": "Android Jetpack Compose documentation as available 2026-09-04",
+      "versionScope": "Android Jetpack Compose documentation as available 2026-10-19",
       "staleAfterDays": 45,
       "notes": "Compose state, layout, navigation, adaptive UI, lifecycle, and accessibility guidance.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-10-19"
     }
   ],
   "authoringMaturity": "individual"

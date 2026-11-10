@@ -31,6 +31,13 @@ function readFile(root: string, name: string) {
   }
 }
 
+function hasAffirmativeCertainty(text: string): boolean {
+  return (
+    /\b(?:launch(?:\s+date)?|release)\s+is\s+(?:approved|guaranteed)\b/iu.test(text) ||
+    /\bdefinitely\s+(?:launch|release|ship|shipping)\b/iu.test(text)
+  );
+}
+
 export function communicationPacket(id: string) {
   if (!COMMUNICATION_SCENARIOS.includes(id as never)) throw new Error(`Unknown scenario ${id}`);
   return { id, source: sources[id as keyof typeof sources] };
@@ -64,7 +71,7 @@ export function scoreCommunication(root: string, id: string): SkillEvalDetermini
             revised,
           ),
           'security risk preserved': /security review|security/i.test(revised),
-          'no invented certainty': !/approved|guaranteed|definitely launch/i.test(revised),
+          'no invented certainty': !hasAffirmativeCertainty(revised),
         };
   const passed = Object.values(checks).every(Boolean);
   writeFixtureFile(

@@ -1,7 +1,7 @@
 {
   "id": "data-visualization-full-task-2-individual",
   "maturity": "individual",
-  "prompt": "The evaluation repository asks the agent to \"choose a chart for these results\". The evidence packet contains a surprising subgroup result, a stale or weak source field, and uncertainty that must not be converted into unsupported precision. The acceptance boundary is data-visualization: Identify the comparison, distribution, relationship, composition, geography, flow, or uncertainty before choosing an encoding. The adjacent data-pipeline-engineering discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "prompt": "The evaluation repository asks the agent to \"choose a chart for these results\". The supplied regional conversion data has extreme denominator imbalance, two low-sample regions, one unresolved region label, and binomial uncertainty that must not be converted into unsupported precision. No reader persona or downstream product decision is supplied, so keep those unspecified instead of inventing product strategy. The acceptance boundary is data-visualization: identify the rate-comparison/uncertainty task before choosing an encoding. The adjacent data-pipeline-engineering discipline is a routing decoy unless its separate responsibility is actually requested. Resolve only environment facts actually supplied by the fixture, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. Any claim that a success, negative-path, or recovery check ran must have persisted artifact-bound evidence; otherwise label it unobserved or unavailable. A happy path alone is insufficient.",
   "environment": {
     "kind": "synthetic",
     "startingState": "fixture://data-visualization/regional-conversion-denominator",
@@ -27,6 +27,7 @@
         "Reader task verification",
         "Hierarchy boundary and selected specialist rationale",
         "Representative success, negative-path, and recovery verification",
+        "Artifact-bound persisted verification provenance for claimed executed checks",
         "hierarchy boundary and specialist selection rationale",
         "representative negative/recovery verification",
         "source/version boundary when facts can drift"
@@ -52,6 +53,7 @@
     "Representative success, negative-path, and recovery verification",
     "hierarchy boundary and selected specialist rationale",
     "representative success plus negative/recovery evidence",
+    "artifact-bound persisted verification provenance for claimed executed checks",
     "paired skill/no-skill run artifacts",
     "explicit unavailable, simulated, inferred, or stale evidence labels"
   ],
@@ -75,7 +77,7 @@
     },
     {
       "id": "verification-discipline",
-      "assertion": "Encoding rationale; Scale and access review; Reader task verification"
+      "assertion": "Encoding rationale; Scale and access review; Reader task verification; any claimed executed success/negative/recovery check must be persisted and bound to the exact artifact/source, otherwise it must be labeled unobserved or unavailable."
     },
     {
       "id": "anti-pattern-resistance",
@@ -83,7 +85,7 @@
     },
     {
       "id": "evidence-and-uncertainty",
-      "assertion": "Every material completion claim must map to observable evidence (Encoding rationale; Scale and access review; Reader task verification; Hierarchy boundary and selected specialist rationale), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+      "assertion": "Every material completion claim must map to observable evidence (Encoding rationale; Scale and access review; Reader task verification; Hierarchy boundary and selected specialist rationale), with simulated, unavailable, inferred, stale, unobserved, or unresolved evidence labeled rather than converted into certainty. Claims that a negative-path or recovery check executed require artifact-bound persisted evidence rather than prose alone."
     }
   ]
 }

@@ -1,13 +1,13 @@
 # Source map
 
-`hardware-runtime-debugging` localizes failures across application/firmware, runtime/API, driver, transport/platform, and physical-device layers. Simulator or debugger evidence must be labelled by the layer it actually observes. V5 promotion still requires paired same-model skill/no-skill evidence and independent blind evaluation.
+`hardware-runtime-debugging` localizes failures across application/firmware, runtime/API, driver, transport/platform, and physical-device layers. Simulator or debugger evidence must be labelled by the layer it actually observes. V5 promotion still requires paired same-model skill/no skill evidence and independent blind evaluation.
 
 ## Qualification basis
 
 - Package authorship is independent from empirical qualification; the audit/evaluation ledger is authoritative for qualification status.
 - Hierarchy: broader debugging, simulation-device-testing.
-- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held-out cases through the real resolver.
-- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no-skill pairing, regression retention, and blind semantic judging.
+- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held out cases through the real resolver.
+- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no skill pairing, regression retention, and blind semantic judging.
 - Source discipline: authoritative/spec/reference sources outrank community patterns when they conflict; runtime evidence outranks examples for behavioral claims.
 
 ## Maintained sources

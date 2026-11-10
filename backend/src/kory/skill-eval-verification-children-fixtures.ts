@@ -16,6 +16,28 @@ function normalized(value: unknown): string {
   return JSON.stringify(value ?? '').toLowerCase();
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function containsDiagnosisClaim(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some((item) => containsDiagnosisClaim(item));
+  const record = asRecord(value);
+  if (!record) return false;
+  return Object.entries(record).some(([key, nested]) => {
+    const normalizedKey = key.toLowerCase().replace(/[^a-z]/gu, '');
+    if (normalizedKey === 'diagnosisattempted') return nested === true;
+    if (
+      ['diagnosis', 'rootcause', 'fix', 'proposedfix', 'remediation'].includes(normalizedKey)
+    ) {
+      return nested !== null && nested !== false && nested !== '';
+    }
+    return containsDiagnosisClaim(nested);
+  });
+}
+
 function run(
   root: string,
   args: string[],
@@ -552,11 +574,13 @@ Write \`.kory-eval/performance-api.json\` with environment/workload identity, wa
 };
 
 const performanceApiScorer: SkillEvalDeterministicScorer = {
-  id: 'performance-verification/api-release-gate-scorer@1',
+  id: 'performance-verification/api-release-gate-scorer@4',
   scenarioIds: [PERFORMANCE_API],
   score: ({ workingDirectory }) => {
     const artifact = readJsonArtifact<unknown>(workingDirectory, '.kory-eval/performance-api.json');
     const body = normalized(artifact);
+    const artifactRecord = asRecord(artifact);
+    const releaseVerdict = asRecord(artifactRecord?.releaseVerdict ?? artifactRecord?.verdict);
     const identity =
       /candidate-91f/u.test(body) &&
       /v4\.7\.2/u.test(body) &&
@@ -579,12 +603,12 @@ const performanceApiScorer: SkillEvalDeterministicScorer = {
       /generator/u.test(body) &&
       /correct/u.test(body);
     const verdict =
-      /fail/u.test(body) &&
+      String(releaseVerdict?.result ?? releaseVerdict?.status ?? '').toLowerCase() === 'fail' &&
       /p99/u.test(body) &&
       /350/u.test(body) &&
       /p95/u.test(body) &&
       /variance|range|repeat/u.test(body) &&
-      !/diagnos|root cause|fix the/u.test(body);
+      !containsDiagnosisClaim(artifact);
     const passed = Boolean(artifact) && identity && warmup && runs && independent && verdict;
     return {
       passed,

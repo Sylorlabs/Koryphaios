@@ -128,7 +128,7 @@ const TEST_SCAN_IGNORED_DIRS = new Set([
   'coverage',
 ]);
 
-function testFiles(root: string): string[] {
+function scanTestFiles(root: string, matches: (name: string) => boolean): string[] {
   try {
     const files: string[] = [];
     const walk = (relativeDirectory: string, depth: number): void => {
@@ -147,7 +147,7 @@ function testFiles(root: string): string[] {
           if (!TEST_SCAN_IGNORED_DIRS.has(name)) walk(relativePath, depth + 1);
           continue;
         }
-        if (stat.isFile() && /\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(name)) {
+        if (stat.isFile() && matches(name)) {
           files.push(relativePath);
           if (files.length > TEST_SCAN_MAX_FILES) {
             throw new Error('Candidate test-file budget exceeded');
@@ -162,9 +162,33 @@ function testFiles(root: string): string[] {
   }
 }
 
+function testFiles(root: string): string[] {
+  return scanTestFiles(root, (name) => /\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(name));
+}
+
+/** Bounded, non-symlink test paths for isolated debugging regression replay. */
+export function candidateBunTestFiles(root: string): string[] {
+  return testFiles(root);
+}
+
+// The sealed fixtures are not all JavaScript. `sqlite-engineering` ships a Python
+// fixture, and its candidates write `tests/test_migration.py`. A scan that only
+// recognises `*.test.*` and `*.spec.*` reports "missing" for regression evidence the
+// candidate actually wrote, so accept the Python test naming conventions as well.
+// A regression file is recognized by the naming convention of the language the fixture is
+// written in. Java and Ruby fixtures both ask the candidate for regressions and then read them
+// back through this matcher, so `TenantSchedulersTest.java` and `foo_spec.rb` have to count;
+// otherwise a candidate that follows the instruction exactly is scored as having written none.
+const REGRESSION_TEST_FILE_NAME =
+  /(?:\.(?:test|spec)\.(?:[cm]?[jt]sx?|py|sh|bash)$)|(?:^test_.+\.py$)|(?:.+_test\.py$)|(?:(?:^|\/)(?:Test|Tests|IT|Spec)\.(?:java|kt|kts)$)|(?:.+?(?:Test|Tests|IT|Spec)\.(?:java|kt|kts)$)|(?:.+_(?:spec|test)\.rb$)/u;
+
+function regressionFiles(root: string): string[] {
+  return scanTestFiles(root, (name) => REGRESSION_TEST_FILE_NAME.test(name));
+}
+
 export function hasRegressionText(root: string, required: RegExp[]): boolean {
   try {
-    const files = testFiles(root);
+    const files = regressionFiles(root);
     if (!files.length) return false;
     const text = files.map((path) => readFixtureText(root, path)).join('\n');
     return required.every((pattern) => {
@@ -176,16 +200,25 @@ export function hasRegressionText(root: string, required: RegExp[]): boolean {
   }
 }
 
-export function runCandidateBunTests(root: string): {
+export function runCandidateBunTests(root: string, selectedTests?: readonly string[]): {
   completed: boolean;
   passed: boolean;
+  exitStatus: number | null;
+  /** Full output is bounded by the subprocess buffer; excerpts are for display, not scoring. */
+  output: string;
   evidence: string;
 } {
   let privateHome: string | undefined;
   try {
-    const publicTests = testFiles(root);
+    const discovered = testFiles(root);
+    const publicTests = selectedTests ? [...selectedTests] : discovered;
+    if (publicTests.length > TEST_SCAN_MAX_FILES || new Set(publicTests).size !== publicTests.length ||
+        publicTests.some((path) => !discovered.includes(path))) {
+      throw new Error('Selected tests must be distinct, bounded discovered Bun test files');
+    }
+    for (const path of publicTests) readFixtureText(root, path);
     if (!publicTests.length) {
-      return { completed: false, passed: false, evidence: 'Candidate tests are missing.' };
+      return { completed: false, passed: false, exitStatus: null, output: '', evidence: 'Candidate tests are missing.' };
     }
     privateHome = mkdtempSync(join(tmpdir(), 'kory-eval-public-test-home-'));
     const runnerConfig = '[test]\npreload = ["./setup.ts"]\n';
@@ -207,6 +240,8 @@ export function runCandidateBunTests(root: string): {
       },
       encoding: 'utf8' as const,
       timeout: 15_000,
+      // Candidate code can handle SIGTERM; a deadline must still terminate the process.
+      killSignal: 'SIGKILL' as const,
       maxBuffer: 1_000_000,
     };
     const runnerArgs = [
@@ -226,12 +261,16 @@ export function runCandidateBunTests(root: string): {
     return {
       completed,
       passed,
+      exitStatus: result.status,
+      output,
       evidence: `Candidate tests: ${completed ? (passed ? 'passed' : 'failed') : 'did not complete'}.\n${output.slice(-2_000) || `bun test exited ${String(result.status)}`}`,
     };
   } catch (error) {
     return {
       completed: false,
       passed: false,
+      exitStatus: null,
+      output: '',
       evidence: `Candidate test execution failure: ${error instanceof Error ? error.message : String(error)}`,
     };
   } finally {
@@ -278,6 +317,8 @@ export function runHiddenBunTest(
       },
       encoding: 'utf8' as const,
       timeout: 15_000,
+      // Candidate code can handle SIGTERM; a deadline must still terminate the process.
+      killSignal: 'SIGKILL' as const,
       maxBuffer: 1_000_000,
     };
     // Bun 1.3.14 accepts --config before the subcommand but then exits without

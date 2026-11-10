@@ -1,19 +1,27 @@
 {
   "schemaVersion": 1,
   "name": "concurrency-debugging",
-  "version": "5.0.1",
+  "version": "5.0.2",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
   "domains": ["debugging", "concurrency"],
   "targetMedia": ["any"],
   "pathScopes": [],
-  "contextBudget": 3900,
+  "contextBudget": 8000,
   "broader": ["debugging"],
   "facets": [],
   "requires": [],
   "conflicts": [],
-  "activation": ["race condition", "deadlock", "threading bug", "async ordering"],
+  "activation": [
+    "race condition",
+    "deadlock",
+    "threading bug",
+    "async ordering",
+    "lost update",
+    "callback after disposal",
+    "cancellation race"
+  ],
   "excludes": [
     "fully deterministic single-path logic defect",
     "cross-service distributed causality without shared-process scheduling",
@@ -24,8 +32,11 @@
     "Concurrency timeline",
     "Violated invariant",
     "Stress regression",
+    "Executed pre-fix schedules, source/runtime identity, and observed versus simulated evidence",
+    "Bounded repeatability record tied to per-iteration schedule assertions and outcomes",
     "Hierarchy boundary and selected specialist rationale",
-    "Representative success, negative-path, and recovery verification"
+    "Representative success, negative-path, and recovery verification",
+    "Accepted-work completion, cleanup, and fresh work after conflict/failure, or explicit model limits"
   ],
   "routing": {
     "positive": [
@@ -54,7 +65,7 @@
       },
       {
         "id": "concurrency-debugging-ambiguous-2",
-        "prompt": "The deadlock has a reproducible two-barrier schedule. Use deterministic-debugging for that fixed reproducer while concurrency-debugging owns the wait-for graph and synchronization invariant.",
+        "prompt": "The deadlock now has a reproducible two-checkpoint schedule. Keep concurrency-debugging responsible for the controlled schedule, wait-for graph, and synchronization invariant: making the interleaving repeatable does not turn it into a single-path deterministic-debugging defect.",
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
@@ -117,6 +128,15 @@
       "staleAfterDays": 180,
       "notes": "Instrumented data-race detection and its platform/runtime limits; not general deadlock detection or proof of race absence.",
       "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://go.dev/ref/mem",
+      "sourceType": "spec",
+      "versionScope": "Go memory model, June 6, 2022 revision inspected 2026-10-17",
+      "revision": "2022-06-06",
+      "staleAfterDays": 180,
+      "notes": "Sequenced-before and synchronized-before relations, mutex/channel handoffs, and atomic visibility in Go. Consult the target runtime's own guarantees; do not generalize Go's atomics to every language.",
+      "verifiedAt": "2026-10-17"
     }
   ],
   "authoringMaturity": "individual"

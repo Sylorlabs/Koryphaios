@@ -110,15 +110,15 @@
       "versionScope": "FreeRTOS documentation as available 2026-09-04",
       "staleAfterDays": 60,
       "notes": "Embedded task, scheduling, synchronization, timing, memory, and platform behavior.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-11-03"
     },
     {
-      "url": "https://freertos.org/RTOS_Task_Notification_As_Event_Group.html",
+      "url": "https://freertos.org/Documentation/02-Kernel/02-Kernel-features/03-Direct-to-task-notifications/04-As-event-group",
       "sourceType": "official-docs",
-      "versionScope": "FreeRTOS task notification guidance as verified 2026-09-06",
+      "versionScope": "FreeRTOS task notification guidance as verified 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Adopted only for FreeRTOS ISR-safe notification handoff; MCU timing, DMA, and electrical behavior remain vendor-specific.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     }
   ],
   "authoringMaturity": "individual"

@@ -1,15 +1,17 @@
 {
   "id": "instructional-communication-full-task-2-individual",
   "maturity": "individual",
-  "prompt": "The evaluation repository asks the agent to \"write a setup guide\". The fixture contains version/runtime ambiguity, a tempting shortcut, a compatibility edge case, and a failure path that distinguishes real expertise from generic completion. The acceptance boundary is instructional-communication: Define prerequisites, starting state, goal, actions, decisions, expected feedback, failure recovery, warnings, and completion checks. The adjacent executive-communication discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "prompt": "The evaluation repository asks the agent to \"write a credential-rotation runbook\" for an on-call operator with the stated permissions. The fixture contains version/runtime ambiguity, a tempting immediate-replacement shortcut, a compatibility edge case, and a failure path that distinguishes real expertise from generic completion. The acceptance boundary is instructional-communication: Define audience, medium, permissions, prerequisites, observable starting state, goal, ordered actions, stage feedback, decision conditions, accessible equivalent status or action paths, failure recovery, rollback, warnings, escalation, and completion checks. The adjacent executive-communication discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
   "environment": {
     "kind": "synthetic",
     "startingState": "fixture://instructional-communication/credential-rotation-runbook",
     "requirements": [
       "closed production-like evidence packet with supported credential lifecycle and service topology",
-      "permission and secret-store command evidence",
+      "permission and secret-store command evidence with a read-only preflight",
       "safer overlap procedure plus obsolete immediate-replacement command",
+      "stage feedback for propagation and service liveness",
       "propagation failure, verification failure, rollback, and escalation evidence",
+      "operator audience, target medium, authority boundary, and accessible status language",
       "paired same-model skill/no-skill execution",
       "instructional-communication parent/child/neighbor hierarchy boundary fixture",
       "domain-specific tempting anti-pattern or shortcut",
@@ -19,27 +21,27 @@
   "falsifiableChecks": [
     {
       "id": "scope-and-hierarchy",
-      "assertion": "The result must establish the actual instructional-communication boundary and relevant environment before acting, preserve the hierarchy relationship (broader=documents-communication; near-neighbor=executive-communication), and not absorb the near-neighbor responsibility merely because it is adjacent."
+      "assertion": "The result must establish the on-call operator audience, target medium, permissions, relevant environment, and actual instructional-communication boundary before acting; preserve the hierarchy relationship (broader=documents-communication; near-neighbor=executive-communication); and not absorb the near-neighbor responsibility merely because it is adjacent."
     },
     {
       "id": "operating-contract",
-      "assertion": "Define prerequisites, starting state, goal, actions, decisions, expected feedback, failure recovery, warnings, and completion checks."
+      "assertion": "Define audience, medium, permissions, prerequisites, observable starting state, goal, ordered actions, stage feedback, decision conditions, warnings, rollback, failure recovery, escalation, accessible equivalent status paths, and completion checks."
     },
     {
       "id": "execution-invariant",
-      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+      "assertion": "The result must make its source/version boundary, authorization, secret ownership, overlap invariant, consequential assumptions, decision sequence, and rollback authority explicit and reproducible."
     },
     {
       "id": "verification-discipline",
-      "assertion": "Walkthrough result; Recovery and completion checks"
+      "assertion": "Walkthrough result; propagation/liveness feedback; rollback and completion checks"
     },
     {
       "id": "anti-pattern-resistance",
-      "assertion": "The result must not treat a happy path, generated artifact, compilation, or unsupported assumption as sufficient proof of instructional-communication correctness."
+      "assertion": "The result must not treat a happy path, generated artifact, command exit code, or unsupported assumption as sufficient proof of instructional-communication correctness; it must distinguish overlap, propagation failure, rollback, escalation, and final service proof."
     },
     {
       "id": "evidence-and-uncertainty",
-      "assertion": "Every material completion claim must map to observable evidence (Prerequisites and observable starting state; Ordered actions with expected feedback; Decision branches, warnings, and recovery; Objective completion checks and walkthrough evidence), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+      "assertion": "Every material completion claim must map to observable evidence (audience and start state; ordered actions with stage feedback and decisions; warnings, authorization, rollback, and recovery; accessible equivalent status path; objective completion checks and walkthrough evidence), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
     }
   ],
   "scorers": [
@@ -48,15 +50,17 @@
       "kind": "deterministic",
       "weight": 0.75,
       "evidence": [
-        "Prerequisites and observable starting state",
-        "Ordered actions with expected feedback",
-        "Decision branches, warnings, and recovery",
+        "Audience, medium, permissions, prerequisites, and observable starting state",
+        "Ordered actions with stage feedback, liveness, and decision conditions",
+        "Decision branches, warnings, authorization, rollback, and recovery",
+        "Accessible equivalent action or status path",
         "Objective completion checks and walkthrough evidence",
         "Hierarchy boundary and selected specialist rationale",
         "Representative success, negative-path, and recovery verification",
         "hierarchy boundary and specialist selection rationale",
         "representative negative/recovery verification",
-        "source/version boundary when facts can drift"
+        "source/version boundary when facts can drift",
+        "walkthrough limitation and evidence state"
       ]
     },
     {
@@ -72,14 +76,16 @@
     }
   ],
   "requiredEvidence": [
-    "Prerequisites and observable starting state",
-    "Ordered actions with expected feedback",
-    "Decision branches, warnings, and recovery",
+    "Audience, medium, permissions, prerequisites, and observable starting state",
+    "Ordered actions with stage feedback, liveness, and decision conditions",
+    "Decision branches, warnings, authorization, rollback, and recovery",
+    "Accessible equivalent action or status path",
     "Objective completion checks and walkthrough evidence",
     "Hierarchy boundary and selected specialist rationale",
     "Representative success, negative-path, and recovery verification",
     "hierarchy boundary and selected specialist rationale",
     "representative success plus negative/recovery evidence",
+    "walkthrough limitation and evidence state",
     "paired skill/no-skill run artifacts",
     "explicit unavailable, simulated, inferred, or stale evidence labels"
   ],

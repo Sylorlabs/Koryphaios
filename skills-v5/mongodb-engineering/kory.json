@@ -99,42 +99,42 @@
     {
       "url": "https://www.mongodb.com/docs/manual/data-modeling/best-practices/",
       "sourceType": "official-docs",
-      "versionScope": "MongoDB data-modeling best practices inspected 2026-09-06",
+      "versionScope": "MongoDB data-modeling best practices inspected 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Adopt access-pattern and atomicity reasoning; preserve both embedding and referencing as conditional architectures.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://www.mongodb.com/docs/manual/data-modeling/embedding/",
       "sourceType": "official-docs",
-      "versionScope": "MongoDB embedding guidance inspected 2026-09-06",
+      "versionScope": "MongoDB embedding guidance inspected 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Embedding locality and atomic update benefits depend on bounded document growth and relationship shape.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://www.mongodb.com/docs/manual/data-modeling/referencing/",
       "sourceType": "official-docs",
-      "versionScope": "MongoDB referencing guidance inspected 2026-09-06",
+      "versionScope": "MongoDB referencing guidance inspected 2026-11-07",
       "staleAfterDays": 60,
       "notes": "References remain valid for independent lifecycles, complex relationships, and costly duplication; reject universal embedding.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://www.mongodb.com/docs/manual/reference/explain-results/",
       "sourceType": "official-docs",
-      "versionScope": "MongoDB explain results inspected 2026-09-06",
+      "versionScope": "MongoDB explain results inspected 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Query-plan and execution statistics; adapt evidence to representative data without treating a plan as production-latency proof.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://www.mongodb.com/docs/manual/",
       "sourceType": "official-docs",
-      "versionScope": "MongoDB manual as available 2026-09-04",
+      "versionScope": "MongoDB manual as available 2026-10-19",
       "staleAfterDays": 45,
       "notes": "MongoDB schema, consistency, indexing, transactions, sharding, and operations reference.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-10-19"
     }
   ],
   "authoringMaturity": "individual"

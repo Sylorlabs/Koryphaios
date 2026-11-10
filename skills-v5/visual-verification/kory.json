@@ -117,34 +117,34 @@
     {
       "url": "https://developer.apple.com/design/human-interface-guidelines/layout",
       "sourceType": "official-docs",
-      "versionScope": "Apple HIG layout guidance available 2026-09-05",
+      "versionScope": "Apple HIG layout guidance available 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Visual hierarchy, alignment, adaptability, safe areas, window/device changes, larger text, and locale direction for Apple targets.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://developer.apple.com/design/human-interface-guidelines/design-principles",
       "sourceType": "official-docs",
-      "versionScope": "Apple HIG design principles available 2026-09-05",
+      "versionScope": "Apple HIG design principles available 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Hierarchy, flexibility, consistency, platform intentionality, and visual craft for Apple targets.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://learn.microsoft.com/en-us/windows/apps/design/guidelines-overview",
       "sourceType": "official-docs",
-      "versionScope": "Windows app design guidance updated 2026-07-01 and available 2026-09-05",
+      "versionScope": "Windows app design guidance updated 2026-07-01 and available 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Current Windows hierarchy, color, elevation, geometry, layout, typography, and motion guidance.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://learn.microsoft.com/en-us/windows/apps/develop/ui/layouts-with-xaml",
       "sourceType": "official-docs",
-      "versionScope": "Windows responsive layout guidance available 2026-09-05",
+      "versionScope": "Windows responsive layout guidance available 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Resizable-window visual states, adaptive triggers, and responsive reflow for Windows targets.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://www.w3.org/TR/WCAG22/",

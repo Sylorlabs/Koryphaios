@@ -30,4 +30,6 @@ Recommend a coherent set of choices and exclusions, with a bounded next test and
 
 Reconcile the final recommendation and verification summary against the evidence artifacts that actually exist. Claim a check, evidence map, or validation step as completed only when its recorded result is available; if an artifact was not produced, a check did not finish, or the supporting evidence is missing, label that item unavailable or unverified instead of describing it as completed.
 
+When the task requires multiple output artifacts, create the smallest decision and verification set before expanding optional research or prose. Write each output path once per edit operation; if a multi-file patch is rejected, switch to separate writes rather than retrying it. A stated local validation command is not observed evidence unless the command result and the validated artifact are captured. Do not claim that an evidence map, checker, market test, customer purchase, or regulatory review exists when the workspace does not contain the corresponding output or execution record.
+
 Use [the maintained source map](references/sources.md) for version-sensitive facts and source conflicts.

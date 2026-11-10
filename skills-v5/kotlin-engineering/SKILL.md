@@ -36,6 +36,7 @@ Use this skill when Kotlin language semantics, coroutines, Flow, Java interop, o
 
 - Run the configured checks for every affected target, not only Kotlin/JVM when the project is multiplatform.
 - Test coroutine success, parent cancellation, child failure, and cleanup for changed structured-concurrency boundaries.
+- When supervision is part of a durable-work contract, make a durable child itself fail and prove the supervisor owner can still run a later durable child. A request-child failure does not verify `SupervisorJob` isolation.
 - Verify Flow collection stops at the intended owner lifecycle and does not duplicate work unexpectedly after restart.
 - Compile or test representative Java callers when a public JVM API changes.
 - Record any target-specific behavior instead of presenting one target's result as universal Kotlin behavior.

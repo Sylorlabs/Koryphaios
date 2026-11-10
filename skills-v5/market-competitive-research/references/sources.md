@@ -6,8 +6,8 @@
 
 - Package authorship is independent from empirical qualification; the audit/evaluation ledger is authoritative for qualification status.
 - Hierarchy: broader research; narrower children market-strategy, marketing-strategy, pricing-monetization, procurement-vendor-evaluation.
-- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held-out cases through the real resolver.
-- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no-skill pairing, regression retention, and blind semantic judging.
+- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held out cases through the real resolver.
+- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no skill pairing, regression retention, and blind semantic judging.
 - Source discipline: authoritative/spec/reference sources outrank community patterns when they conflict; runtime evidence outranks examples for behavioral claims.
 
 ## Maintained sources
@@ -34,13 +34,13 @@
   - Type: `spec`
   - Scope: portable Agent Skills format as available 2026-09-05.
   - Use: discriminating discovery metadata and progressive disclosure.
-  - Verified: 2026-09-05; refresh after 90 days.
+  - Verified: 2026-11-03; refresh after 90 days.
 
 - **OpenAI skill creator reference**: https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md
   - Type: `reference-implementation`
-  - Scope: OpenAI public skill-authoring guidance on `main` as inspected 2026-09-05.
+  - Scope: OpenAI public skill-authoring guidance on `main` as inspected 2026-11-03.
   - Use: narrow triggers, scoped references, and behavioral validation.
-  - Verified: 2026-09-05; refresh after 60 days.
+  - Verified: 2026-11-03; refresh after 60 days.
 
 ## Interpretation rules
 

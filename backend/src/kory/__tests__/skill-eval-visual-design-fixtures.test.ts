@@ -1,237 +1,181 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
-import { writeFixtureFile } from '../skill-eval-fixture-helpers';
+import { auditSkillEvalExecutionReadiness } from '../skill-eval-execution';
 import { loadV5SkillPackages } from '../skill-packages';
 import {
   VISUAL_DESIGN_SKILL_EVAL_MATERIALIZERS,
   VISUAL_DESIGN_SKILL_EVAL_SCORERS,
 } from '../skill-eval-visual-design-fixtures';
+import {
+  DIRECTION_CONTEXTS,
+  EDITOR_DIRECTION_SCENARIO,
+  OPS_DIRECTION_SCENARIO,
+} from '../skill-eval-visual-direction-fixtures';
 
 const roots: string[] = [];
+const skill = () =>
+  loadV5SkillPackages().packages.find((item) => item.sidecar.name === 'visual-interface-design')!;
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-function greenArtifacts(scenarioId: string): { system: unknown; verification: string } {
-  if (scenarioId === 'visual-interface-design-full-task-cross-platform-editor') {
-    return {
-      system: {
-        tokens: { accent: '#5B63FF', radius: 6, spacing: [4, 8, 12, 16, 24] },
-        themes: ['light', 'dark'],
-        platformAdaptations: {
-          macOS: ['native titlebar spacing'],
-          Windows: ['window controls spacing'],
-        },
-        states: ['loading', 'empty', 'normal', 'dense', 'error', 'selected', 'disabled'],
-        density: { compactRow: 28, comfortableRow: 36 },
-        accessibility: {
-          minTextScale: 1.25,
-          longLabelStrategy: 'wrap labels before truncating supporting copy',
-          focusVisible: true,
-          colorNotSoleSignal: true,
-        },
-        hierarchy: { primaryAction: 'save', secondaryTreatment: 'quiet controls' },
-      },
-      verification:
-        '# Verification matrix\n\nVerify 640 minimum width in light and dark themes, long label handling, loading and empty states, and dense editor surfaces.\n',
-    };
-  }
+async function materialized(scenarioId: string) {
+  const suite = buildSkillEvalSuiteV3(skill());
+  const scenario = suite.scenarios.find((item) => item.id === scenarioId)!;
+  const root = mkdtempSync(join(tmpdir(), 'kory-visual-direction-'));
+  roots.push(root);
+  const materializer = VISUAL_DESIGN_SKILL_EVAL_MATERIALIZERS.find((item) => item.matches(scenario))!;
+  const scorer = VISUAL_DESIGN_SKILL_EVAL_SCORERS.find((item) => item.scenarioIds.includes(scenario.id))!;
+  await materializer.materialize(root, scenario);
+  const score = (workingDirectory = root) =>
+    scorer.score({
+      scenario,
+      experiment: {} as never,
+      workingDirectory,
+      observation: { output: '', evidence: [], artifacts: [], durationMs: 0 },
+    });
+  return { root, scenario, scorer, score };
+}
+
+function truncatedIds(root: string, context: string): string[] {
+  const geometry = JSON.parse(readFileSync(join(root, 'geometry', `${context}.json`), 'utf8')) as {
+    elements?: Array<{ id?: string; truncated?: boolean }>;
+  };
+  return (geometry.elements ?? [])
+    .filter((element) => element.truncated === true && typeof element.id === 'string')
+    .map((element) => element.id as string)
+    .sort();
+}
+
+function completeDirection(root: string) {
+  const tokens = JSON.parse(readFileSync(join(root, 'tokens.json'), 'utf8')) as {
+    type: Record<string, unknown>;
+    metrics: Record<string, unknown>;
+    semanticColorRoles: string[];
+  };
+  const role = 'A reused role with enough text to satisfy the documented floor.';
   return {
-    system: {
-      tokens: { accent: '#1457D9', radius: 4, spacing: [4, 8, 12, 16] },
-      themes: ['light', 'dark'],
-      platformAdaptations: {},
-      states: ['loading', 'empty', 'normal', 'dense', 'error', 'selected', 'disabled'],
-      density: { compactRow: 28, comfortableRow: 36 },
-      accessibility: { focusVisible: true, colorNotSoleSignal: true },
-      hierarchy: {
-        primaryAction: 'resolve-case',
-        secondaryTreatment: 'lower-contrast secondary controls',
-      },
-      severityEncoding: {
-        critical: 'icon + critical label',
-        high: 'icon + high label',
-        medium: 'medium label',
-        low: 'low label',
-        informational: 'informational label',
-      },
-      shadowLevels: 2,
-      cardNesting: 1,
+    status: 'proposed',
+    surface: 'macos-appkit-record-inspector',
+    identity: {
+      shared: ['title treatment', 'sidebar geometry', 'label and value rhythm'],
+      adapted: [
+        { platform: 'macos', decision: 'Keep the native bezel and metric spacing.', rationale: 'Platform control metrics already carry familiarity here.' },
+        { platform: 'windows', decision: 'Adopt the platform dialog chrome and padding.', rationale: 'Windows users read its modal metrics as the expected affordance.' },
+      ],
     },
-    verification:
-      '# Representative-state verification\n\nVerify case table and case detail in dense and sparse or empty states, critical severity, and primary action hierarchy.\n',
+    system: {
+      typeSteps: Object.keys(tokens.type).map((token) => ({ token, role })),
+      spacingSteps: Object.keys(tokens.metrics).map((token) => ({ token, role })),
+      colorRoles: tokens.semanticColorRoles.map((token) => ({ token, role })),
+      iconography: 'No icons are introduced; the supplied surface uses text labels only.',
+      density: 'Row height and insets come from the measured token table, never from a guess.',
+    },
+    hierarchy: {
+      primaryAction: 'Apply is the single primary action at the trailing edge.',
+      secondaryControls: 'Cancel stays visually quieter than Apply.',
+      contentHierarchy: 'Field labels stay secondary to their values.',
+      statusSignals: 'Status text carries meaning without color alone.',
+    },
+    stateReviews: DIRECTION_CONTEXTS.map((context) => ({
+      context: context.id,
+      verdict: 'Reviewed the supplied capture and its measured geometry.',
+      truncated: truncatedIds(root, context.id),
+    })),
+    motion: {
+      introduced: false,
+      rationale: 'The supplied surface introduces no motion, so none is proposed here.',
+      reducedMotion: 'Any later motion must present an equivalent static state first.',
+    },
+    boundary: {
+      visualOnly: true,
+      preserved: ['window geometry', 'control order', 'field labels'],
+      tradeoffs: ['Dense rows trade breathing room for scan density at the minimum width.'],
+    },
   };
 }
 
-describe('visual design closed-packet fixtures', () => {
-  test('both design-system tasks start red and pass with complete closed-packet artifacts', async () => {
-    const skill = loadV5SkillPackages().packages.find(
-      (item) => item.sidecar.name === 'visual-interface-design',
-    )!;
-    for (const scenario of buildSkillEvalSuiteV3(skill).scenarios.filter(
-      (item) => item.category === 'full-task',
-    )) {
-      const root = mkdtempSync(join(tmpdir(), 'kory-visual-design-test-'));
-      roots.push(root);
-      const materializer = VISUAL_DESIGN_SKILL_EVAL_MATERIALIZERS.find((item) =>
-        item.matches(scenario),
-      )!;
-      const scorer = VISUAL_DESIGN_SKILL_EVAL_SCORERS.find((item) =>
-        item.scenarioIds.includes(scenario.id),
-      )!;
-      await materializer.materialize(root, scenario);
-      const input = {
-        scenario,
-        experiment: {} as never,
-        workingDirectory: root,
-        observation: { output: '', evidence: [], artifacts: [], durationMs: 0 },
-      };
-      const red = await scorer.score(input);
-      expect(red.passed, scenario.id).toBe(false);
-      expect(red.integrityFailure, scenario.id).toBe(false);
-
-      const artifacts = greenArtifacts(scenario.id);
-      writeFixtureFile(
-        root,
-        'visual-system.json',
-        `${JSON.stringify(artifacts.system, null, 2)}\n`,
-      );
-      writeFixtureFile(root, 'verification.md', artifacts.verification);
-      const green = await scorer.score(input);
-      expect(green.passed, scenario.id).toBe(true);
-      expect(green.integrityFailure, scenario.id).toBe(false);
-      expect(green.quality, scenario.id).toBe(1);
+describe('visual direction real-source fixtures', () => {
+  test('both design tasks are executable now that source, tokens and captures are supplied', () => {
+    const readiness = auditSkillEvalExecutionReadiness(
+      [skill()],
+      VISUAL_DESIGN_SKILL_EVAL_MATERIALIZERS,
+      VISUAL_DESIGN_SKILL_EVAL_SCORERS,
+    );
+    expect(readiness).toHaveLength(2);
+    for (const scenario of readiness) {
+      expect(scenario.ready, scenario.scenarioId).toBe(true);
+      expect(scenario.reasons.join(' ')).not.toMatch(/synthetic requirements only/iu);
     }
   });
 
-  test('tampering with the sealed packet fails integrity', async () => {
-    const skill = loadV5SkillPackages().packages.find(
-      (item) => item.sidecar.name === 'visual-interface-design',
-    )!;
-    const scenario = buildSkillEvalSuiteV3(skill).scenarios.find(
-      (item) => item.id === 'visual-interface-design-full-task-cross-platform-editor',
-    )!;
-    const root = mkdtempSync(join(tmpdir(), 'kory-visual-design-tamper-'));
-    roots.push(root);
-    const materializer = VISUAL_DESIGN_SKILL_EVAL_MATERIALIZERS.find((item) =>
-      item.matches(scenario),
-    )!;
-    const scorer = VISUAL_DESIGN_SKILL_EVAL_SCORERS.find((item) =>
-      item.scenarioIds.includes(scenario.id),
-    )!;
-    await materializer.materialize(root, scenario);
-    writeFixtureFile(root, 'evidence/editor.json', '{}\n');
-    const score = await scorer.score({
-      scenario,
-      experiment: {} as never,
-      workingDirectory: root,
-      observation: { output: '', evidence: [], artifacts: [], durationMs: 0 },
-    });
-    expect(score.passed).toBe(false);
-    expect(score.integrityFailure).toBe(true);
-  });
-
-  test('cross-platform scorer accepts equivalent structured visual-system shapes', async () => {
-    const skill = loadV5SkillPackages().packages.find(
-      (item) => item.sidecar.name === 'visual-interface-design',
-    )!;
-    const scenario = buildSkillEvalSuiteV3(skill).scenarios.find(
-      (item) => item.id === 'visual-interface-design-full-task-cross-platform-editor',
-    )!;
-    const root = mkdtempSync(join(tmpdir(), 'kory-visual-design-structured-'));
-    roots.push(root);
-    const materializer = VISUAL_DESIGN_SKILL_EVAL_MATERIALIZERS.find((item) =>
-      item.matches(scenario),
-    )!;
-    const scorer = VISUAL_DESIGN_SKILL_EVAL_SCORERS.find((item) =>
-      item.scenarioIds.includes(scenario.id),
-    )!;
-    await materializer.materialize(root, scenario);
-    writeFixtureFile(
-      root,
-      'visual-system.json',
-      `${JSON.stringify(
-        {
-          tokens: {
-            brandAccent: '#5B63FF',
-            radius: { control: 6, panel: 8 },
-            spacing: [4, 8, 12, 16, 24],
-          },
-          themes: { light: { surface: '#fff' }, dark: { surface: '#111' } },
-          platformAdaptations: {
-            macOS: { chrome: 'native titlebar spacing', controls: 'platform controls' },
-            Windows: { chrome: 'caption button spacing', controls: 'platform controls' },
-          },
-          states: {
-            loading: 'stable geometry',
-            empty: 'explain recovery',
-            normal: 'default',
-            dense: 'reduced rows',
-            error: 'icon and text',
-            selected: 'fill and border',
-            disabled: 'readable label',
-          },
-          density: { dense: { rowHeight: 28 }, comfortable: { rowHeight: 36 } },
-          accessibility: {
-            focus: '2px ring remains visible on every keyboard focus target',
-            colorIndependence: 'status uses icon, text, and border in addition to color',
-            textScale: '1.25x without clipping',
-            localization: 'long labels wrap or expand instead of clipping',
-          },
-        },
-        null,
-        2,
-      )}\n`,
-    );
-    writeFixtureFile(
-      root,
-      'verification.md',
-      '# Verification matrix\n\nVerify 640 minimum width in light and dark themes, long label handling, loading and empty states, and dense editor surfaces.\n',
-    );
-    const score = await scorer.score({
-      scenario,
-      experiment: {} as never,
-      workingDirectory: root,
-      observation: { output: '', evidence: [], artifacts: [], durationMs: 0 },
-    });
-    expect(scorer.id).toEndWith('@3');
-    expect(score.passed).toBe(true);
-    expect(score.quality).toBe(1);
-  });
-
-  test('malformed collection shapes score red instead of crashing', async () => {
-    const skill = loadV5SkillPackages().packages.find(
-      (item) => item.sidecar.name === 'visual-interface-design',
-    )!;
-    for (const scenario of buildSkillEvalSuiteV3(skill).scenarios.filter(
-      (item) => item.category === 'full-task',
-    )) {
-      const root = mkdtempSync(join(tmpdir(), 'kory-visual-design-malformed-'));
-      roots.push(root);
-      const materializer = VISUAL_DESIGN_SKILL_EVAL_MATERIALIZERS.find((item) =>
-        item.matches(scenario),
-      )!;
-      const scorer = VISUAL_DESIGN_SKILL_EVAL_SCORERS.find((item) =>
-        item.scenarioIds.includes(scenario.id),
-      )!;
-      await materializer.materialize(root, scenario);
-      writeFixtureFile(
-        root,
-        'visual-system.json',
-        `${JSON.stringify({ themes: { light: true }, states: { normal: true } }, null, 2)}\n`,
-      );
-      const score = await scorer.score({
-        scenario,
-        experiment: {} as never,
-        workingDirectory: root,
-        observation: { output: '', evidence: [], artifacts: [], durationMs: 0 },
-      });
-      expect(score.passed, scenario.id).toBe(false);
-      expect(score.integrityFailure, scenario.id).toBe(false);
+  test('materialization supplies real source, tokens and seven measured captures', async () => {
+    const { root } = await materialized(EDITOR_DIRECTION_SCENARIO);
+    expect(existsSync(join(root, 'Surface.swift'))).toBe(true);
+    expect(existsSync(join(root, 'tokens.json'))).toBe(true);
+    const captures = readdirSync(join(root, 'captures')).filter((name) => name.endsWith('.png'));
+    expect(captures).toHaveLength(DIRECTION_CONTEXTS.length);
+    for (const context of DIRECTION_CONTEXTS) {
+      expect(existsSync(join(root, 'geometry', `${context.id}.json`))).toBe(true);
     }
+    // The large-text German minimum width is the condition the fixture exists to expose.
+    expect(truncatedIds(root, 'min-dark-de-large').length).toBeGreaterThan(0);
+  });
+
+  test('the untouched placeholder fails closed and scores no verification', async () => {
+    const { score } = await materialized(EDITOR_DIRECTION_SCENARIO);
+    const red = await score();
+    expect(red.passed).toBe(false);
+    expect(red.integrityFailure).toBe(false);
+    // Supplied-evidence integrity and the toolchain build still verify, so the score is
+    // small but not zero; every authored requirement must still fail.
+    expect(red.verification).toBeLessThan(0.5);
+    expect(red.quality).toBeLessThan(0.3);
+    expect(red.evidence).toContain('evaluator supplied source, tokens and captures: pass — all seven captures and the source are present');
+    expect(red.evidence.some((line) => line.startsWith('surface identity recorded honestly: fail'))).toBe(true);
+  });
+
+  test('a complete artifact passes only when every truncation claim matches the render', async () => {
+    const { root, score } = await materialized(EDITOR_DIRECTION_SCENARIO);
+    const artifact = completeDirection(root);
+    writeFileSync(join(root, 'direction.json'), JSON.stringify(artifact, null, 2));
+    const green = await score();
+    expect(green.passed).toBe(true);
+    expect(green.quality).toBe(1);
+    expect(green.verification).toBe(1);
+
+    // Claiming fewer clipped elements than were measured must fail, not silently pass.
+    const understated = {
+      ...artifact,
+      stateReviews: artifact.stateReviews.map((review) =>
+        review.context === 'min-dark-de-large' ? { ...review, truncated: [] } : review,
+      ),
+    };
+    writeFileSync(join(root, 'direction.json'), JSON.stringify(understated, null, 2));
+    const overstated = await score();
+    expect(overstated.passed).toBe(false);
+    expect(
+      overstated.evidence.some((line) =>
+        line.startsWith('per context truncation claims match a fresh render: fail'),
+      ),
+    ).toBe(true);
+  });
+
+  test('a missing supplied capture is reported instead of credited', async () => {
+    const { root, score } = await materialized(OPS_DIRECTION_SCENARIO);
+    writeFileSync(join(root, 'direction.json'), JSON.stringify(completeDirection(root), null, 2));
+    rmSync(join(root, 'captures', 'empty-selection.png'));
+    const scored = await score();
+    expect(scored.passed).toBe(false);
+    expect(
+      scored.evidence.some((line) =>
+        line.startsWith('evaluator supplied source, tokens and captures: fail'),
+      ),
+    ).toBe(true);
   });
 });

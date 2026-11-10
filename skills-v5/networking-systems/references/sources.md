@@ -1,13 +1,13 @@
 # Source map
 
-`networking-systems` is individually authored for V5; empirical qualification is tracked separately in the audit/evaluation ledger. Network diagnosis must follow the actual source, address family and protocol path. Standards define wire semantics, but resolver, firewall, VPN, load-balancer and operating-system implementations still need environment-specific verification.
+`networking-systems` is individually authored for V5; empirical qualification is tracked separately in the audit/evaluation ledger. Network diagnosis must follow the actual source, address family and protocol path. Standards define wire semantics, but resolver, firewall, VPN, load-balancer and operating system implementations still need environment-specific verification.
 
 ## Qualification basis
 
 - Package authorship is independent from empirical qualification; the audit/evaluation ledger is authoritative for qualification status.
 - Hierarchy: broader network-service-backend.
-- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held-out cases through the real resolver.
-- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no-skill pairing, regression retention, and blind semantic judging.
+- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held out cases through the real resolver.
+- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no skill pairing, regression retention, and blind semantic judging.
 - Source discipline: authoritative/spec/reference sources outrank community patterns when they conflict; runtime evidence outranks examples for behavioral claims.
 
 ## Maintained sources
@@ -45,9 +45,9 @@
 
 - **RFC 9001: Using TLS to Secure QUIC**: https://www.rfc-editor.org/rfc/rfc9001.html. Sections 3 and 4 opened 2026-09-06; refresh within 365 days. Adopt the cooperative TLS/QUIC handshake model and adapt path diagnosis to UDP and QUIC CRYPTO frames. Reject TCP establishment as a prerequisite for all TLS traffic. This does not mandate QUIC or change inherited RFC verification dates.
 
-- Every network claim is vantage-specific. Record source environment, destination, address family, port, transport, time and expected path before comparing evidence.
+- Every network claim is specific to its vantage. Record source environment, destination, address family, port, transport, time and expected path before comparing evidence.
 - Preserve bad DNS/cache state before flushing anything. Compare resolver path, answers and TTLs from failing and working sources.
-- A route is directional; verify source-address selection and return path. Stateful and stateless filters/NAT can make asymmetry decisive.
+- A route is directional; verify source address selection and the return path. Stateful and stateless filters/NAT can make asymmetry decisive.
 - Ping is not a service probe. Test the actual TCP/UDP port/protocol and distinguish timeout, reset, handshake success and established-but-stalled data transfer.
 - Small transfers succeeding does not rule out a network fault. PMTUD/MTU black holes can allow TCP/TLS handshakes and then stall larger payloads.
 - Treat firewall/NAT/LB/proxy as explicit hops with actual tuples, state, listeners/backends and timeout ownership. Do not broaden access or retries before localizing the boundary.

@@ -6,20 +6,20 @@
 
 - Package authorship is independent from empirical qualification; the audit/evaluation ledger is authoritative for qualification status.
 - Hierarchy: broader implementation.
-- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held-out cases through the real resolver.
-- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no-skill pairing, regression retention, and blind semantic judging.
+- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held out cases through the real resolver.
+- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no skill pairing, regression retention, and blind semantic judging.
 - Source discipline: authoritative/spec/reference sources outrank community patterns when they conflict; runtime evidence outranks examples for behavioral claims.
 
 ## Maintained sources
 
 - **TorchVision object detection finetuning tutorial**: https://docs.pytorch.org/tutorials/intermediate/torchvision_tutorial.html
-  - Scope: current PyTorch/TorchVision object-detection and instance-segmentation tutorial as available 2026-09-05.
+  - Scope: current PyTorch/TorchVision object-detection and instance-segmentation tutorial as available 2026-10-04.
   - Use: custom dataset target structure, boxes/masks, transfer-learning workflow and detection evaluation integration.
-  - Verified: 2026-09-05; refresh after 30 days.
+  - Verified: 2026-11-03; refresh after 30 days.
 - **TorchVision transforms v2 end-to-end detection/segmentation example**: https://docs.pytorch.org/vision/stable/auto_examples/transforms/plot_transforms_e2e.html
-  - Scope: TorchVision 0.28 stable documentation as available 2026-09-05.
+  - Scope: TorchVision stable transforms-v2 documentation as available 2026-10-04.
   - Use: joint spatial transformations of images, bounding boxes and masks; prevents image-only augmentation that leaves targets geometrically invalid.
-  - Verified: 2026-09-05; refresh after 30 days.
+  - Verified: 2026-11-03; refresh after 30 days.
 - **OpenCV 4.13 geometric image transformations**: https://docs.opencv.org/4.13.0/da/d54/group__imgproc__transform.html
   - Scope: OpenCV 4.13 image-processing transform reference.
   - Use: resize, affine/perspective mapping, interpolation and pixel-coordinate transformation behavior.

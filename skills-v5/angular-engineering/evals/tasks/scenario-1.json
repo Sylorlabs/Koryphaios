@@ -10,6 +10,8 @@
       "two customer ids with delayed save responses that can complete out of order",
       "existing validation and unsaved-change behavior that must remain compatible",
       "component/router tests for id change, cancellation, error focus, and teardown",
+      "A-to-B-to-A navigation and multiple saves for the same customer with obsolete success, error, and finalization callbacks",
+      "whitespace-only required name plus another invalid control, with keyboard and pointer submission through the rendered form",
       "paired same-model skill/no-skill execution from the identical starting snapshot"
     ]
   },
@@ -64,11 +66,12 @@
     },
     {
       "id": "execution-invariant",
-      "assertion": "Form and async state are scoped to the active route entity; a response started for one customer can never mutate the UI state for another customer."
+      "assertion": "Form and async state belong to the active route entity and operation generation. Obsolete success, error, and finalization callbacks cannot mutate a later operation, including A-to-B-to-A reuse and repeated saves for the same id. Committed id changes initialize the correct form; same-id updates and declined navigation preserve dirty input and unsaved-change behavior.",
+      "source": "https://angular.dev/guide/routing/read-route-state"
     },
     {
       "id": "verification-discipline",
-      "assertion": "Run Angular build/tests and exercise routing, form validation, subscription cleanup, async error states, keyboard behavior, and change-detection-sensitive interactions."
+      "assertion": "Run the Angular build and component/router tests. In the rendered form, keyboard and pointer submissions reject whitespace-only required text without increasing the save request count, expose validation feedback, and focus the first invalid control in DOM order, including when it is not the name field. Prove out-of-order response isolation, recovery after a failed request, same-id dirty-state preservation, declined navigation, and teardown; retain the configured change detection mode."
     },
     {
       "id": "anti-pattern-resistance",

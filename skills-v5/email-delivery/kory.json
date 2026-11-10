@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "email-delivery",
-  "version": "5.1.1",
+  "version": "5.1.6",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -19,7 +19,11 @@
     "sendgrid email",
     "ses email",
     "gmail delivery",
-    "bounces suppressions",
+    "email provider",
+    "email retries",
+    "email idempotency",
+    "provider failover",
+    "bounce suppression",
     "password reset mail"
   ],
   "excludes": [],
@@ -42,7 +46,8 @@
       "Please handle webhook only.",
       "This task is limited to api design.",
       "The current request is implement backend behavior.",
-      "Work only on bun runtime."
+      "Work only on bun runtime.",
+      "An archived incident mentions bounce suppression; the current task is generic queue retry infrastructure with no mail behavior change."
     ],
     "ambiguous": [
       {

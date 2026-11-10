@@ -107,8 +107,8 @@
     {
       "url": "https://developers.openai.com/api/docs/guides/image-generation",
       "sourceType": "official-docs",
-      "versionScope": "Image output options and text/consistency/composition limitations inspected 2026-09-06",
-      "verifiedAt": "2026-09-06",
+      "versionScope": "OpenAI image generation guide as inspected 2026-11-07",
+      "verifiedAt": "2026-11-07",
       "staleAfterDays": 30,
       "notes": "Adopt actual-output review and distinction between a supported control and guaranteed fidelity. Do not hardcode a provider model or resolution into reusable guidance."
     },
@@ -118,7 +118,7 @@
       "versionScope": "Legacy platform URL redirected to the canonical OpenAI image generation guide and was inspected 2026-10-03",
       "staleAfterDays": 30,
       "notes": "Canonical guide covers generation and editing through the Image API and Responses API plus output controls. Current model IDs are volatile and are not pinned by the reusable skill.",
-      "verifiedAt": "2026-10-03"
+      "verifiedAt": "2026-11-03"
     }
   ],
   "authoringMaturity": "individual"

@@ -11,7 +11,7 @@ Use this branch when the task creates the interface substrate itself. Establish 
 
 Separate the ergonomic surface used by application authors from backend adapters and platform integration. Design primitives that compose without forcing one product aesthetic. Make state ownership, identity, lifecycle, measurement, layout, rendering, and event propagation explicit. Provide escape hatches without making unsafe or platform-specific behavior the default. Research mature native, game, embedded, and declarative toolkits for tradeoffs, but do not clone DOM/CSS or a fashionable framework unless its model fits the language and runtime.
 
-Build a vertical reference slice that proves layout, text, input, focus, theming, accessibility semantics, error reporting, and rendering in the real target. Test invariants, golden rendering where stable, event/focus traversal, resize/scaling, resource cleanup, performance, and at least one realistic application flow.
+Coalesce continuous input into one paint per frame: a burst of scroll, wheel, or drag events must set the pending value and schedule a single frame, not paint once per event, and a virtualized window must be recomputed from the coalesced offset rather than from each event. Build a vertical reference slice that proves layout, text, input, focus, theming, accessibility semantics, error reporting, and rendering in the real target. Test invariants, golden rendering where stable, event/focus traversal, resize/scaling, resource cleanup, performance, and at least one realistic application flow.
 
 ## Hierarchy and routing
 
@@ -38,6 +38,7 @@ Design a reusable rendering or widget substrate without cloning browser architec
 - Retained, immediate, or hybrid ownership model.
 - Measurement/layout and invalidation contracts.
 - Event propagation, capture, focus, and accessibility bridge.
+- Focus ownership across transient loading, error, and recovery controls. When a recovery action succeeds, leave keyboard focus on a durable control that continues the user's task instead of letting focus fall away with a removed retry surface.
 - Where safe escape hatches end and platform-specific adapters begin.
 
 ### Failure and recovery discipline
@@ -46,6 +47,7 @@ Design a reusable rendering or widget substrate without cloning browser architec
 - A toy demo avoids lifecycle or accessibility.
 - Public APIs leak backend details.
 - Identity or resource ownership becomes implicit and untestable.
+- Async failure UI exposes a retry path but drops keyboard focus when that temporary recovery control disappears. Make error state perceivable through the target platform's semantic status/alert mechanism and verify the post-recovery focus target.
 
 ### Evidence required before completion
 

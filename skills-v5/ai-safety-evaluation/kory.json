@@ -127,7 +127,7 @@
       "url": "https://openai.com/index/trustworthy-third-party-evaluations-foundations/",
       "sourceType": "official-docs",
       "versionScope": "OpenAI third-party evaluation playbook published 2026-05-29",
-      "verifiedAt": "2026-09-05",
+      "verifiedAt": "2026-11-07",
       "staleAfterDays": 60,
       "notes": "Claim-first evaluation design, harness and budget disclosure, strong elicitation for safeguard claims, and validity checks for contamination, broken tasks, refusals, reward hacking, and evaluation awareness."
     },
@@ -144,7 +144,7 @@
       "url": "https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/",
       "sourceType": "official-docs",
       "versionScope": "OWASP GenAI LLM Top 10 2026, released 2026-08-03",
-      "verifiedAt": "2026-09-05",
+      "verifiedAt": "2026-11-07",
       "staleAfterDays": 90,
       "license": "See OWASP project licensing and attribution terms",
       "notes": "Current application-level GenAI risk taxonomy for choosing relevant security/safety slices; use as scenario input, not as a complete evaluation protocol."
@@ -152,16 +152,16 @@
     {
       "url": "https://atlas.mitre.org/",
       "sourceType": "official-docs",
-      "versionScope": "MITRE ATLAS living knowledge base as available 2026-09-04",
-      "verifiedAt": "2026-09-05",
+      "versionScope": "MITRE ATLAS living knowledge base as available 2026-11-07",
+      "verifiedAt": "2026-11-07",
       "staleAfterDays": 60,
       "notes": "Empirical adversary tactics, techniques, mitigations, and case studies across predictive, generative, and agentic AI; useful for threat-model and scenario coverage."
     },
     {
       "url": "https://github.com/UKGovernmentBEIS/inspect_ai",
       "sourceType": "reference-implementation",
-      "versionScope": "UK AI Security Institute Inspect AI main as available 2026-09-04",
-      "verifiedAt": "2026-09-05",
+      "versionScope": "UK AI Security Institute Inspect AI main as available 2026-10-04",
+      "verifiedAt": "2026-11-03",
       "staleAfterDays": 30,
       "license": "MIT",
       "notes": "Evaluation harness pattern for composable datasets, agents/tools, multi-turn trajectories, sandboxed execution, and deterministic or model-graded scorers."

@@ -119,31 +119,31 @@
       "versionScope": "Current Rust book as available 2026-09-04",
       "staleAfterDays": 60,
       "notes": "Ownership, lifetimes, traits, concurrency, and language guidance.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://doc.rust-lang.org/nomicon/send-and-sync.html",
       "sourceType": "official-docs",
-      "versionScope": "Rustonomicon Send and Sync guidance as verified 2026-09-06",
+      "versionScope": "Rustonomicon Send and Sync guidance as verified 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Adopted for unsafe Send and Sync correctness promises and reachable-state invariants; not proof of soundness.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://doc.rust-lang.org/stable/nomicon/safe-unsafe-meaning.html",
       "sourceType": "official-docs",
-      "versionScope": "Rustonomicon safe and unsafe boundary guidance as verified 2026-09-06",
+      "versionScope": "Rustonomicon safe and unsafe boundary guidance as verified 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Adopted for explicit invariants around unsafe code and FFI operations Rust cannot check.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://doc.rust-lang.org/cargo/reference/features.html",
       "sourceType": "official-docs",
-      "versionScope": "Cargo features reference as verified 2026-09-06",
+      "versionScope": "Cargo features reference as verified 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Adopted for treating supported feature combinations as part of the crate build surface without implying powerset testing.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     }
   ],
   "authoringMaturity": "individual"

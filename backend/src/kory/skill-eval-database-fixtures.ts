@@ -12,6 +12,21 @@ import {
   runHiddenBunTest,
   writeFixtureFile,
 } from './skill-eval-fixture-helpers';
+import {
+  postgresRuntimeReadiness,
+  runPostgresConstraintRuntime,
+  runPostgresQueueRuntime,
+} from './skill-eval-postgres-runtime';
+import {
+  mysqlRuntimeReadiness,
+  runMySqlDeadlockRuntime,
+  runMySqlOnlineIndexRuntime,
+} from './skill-eval-mysql-runtime';
+import {
+  mongodbRuntimeReadiness,
+  runMongoAtomicUpdateRuntime,
+  runMongoIndexRuntime,
+} from './skill-eval-mongodb-runtime';
 
 const REL_MEMBERSHIP = 'relational-data-modeling-full-task-1-individual';
 const REL_ORDERS = 'relational-data-modeling-full-task-2-individual';
@@ -26,16 +41,19 @@ const MONGO_INDEX = 'mongodb-engineering-full-task-2-individual';
 const REDIS_LOCK = 'redis-engineering-full-task-1-individual';
 const REDIS_STREAM = 'redis-engineering-full-task-2-individual';
 
-const POSTGRES_RUNTIME_BLOCKER =
-  'Full-task qualification requires PostgreSQL 17.5-backed lock, concurrency, constraint, and plan execution; this fixture currently checks SQL/report structure only.';
-const MYSQL_RUNTIME_BLOCKER =
-  'Full-task qualification requires MySQL 8/InnoDB-backed DDL, metadata-lock, replication, and deadlock execution; this fixture currently checks SQL/report structure or an in-memory transfer model only.';
-const MONGODB_RUNTIME_BLOCKER =
-  'Full-task qualification requires MongoDB-backed atomic-update and explain/index execution; this fixture currently uses an in-memory document/index model only.';
-
 function artifactText(root: string, path: string): { artifact: unknown | null; text: string } {
   const artifact = readJsonArtifact<unknown>(root, path);
   return { artifact, text: JSON.stringify(artifact ?? '').toLowerCase() };
+}
+
+function artifactHasEvidence(
+  report: { artifact: unknown | null; text: string },
+  patterns: readonly RegExp[],
+): boolean {
+  return Boolean(report.artifact) && patterns.every((pattern) => {
+    pattern.lastIndex = 0;
+    return pattern.test(report.text);
+  });
 }
 
 function runPython(root: string, source: string): { passed: boolean; evidence: string } {
@@ -223,8 +241,11 @@ SELECT id FROM jobs WHERE status = 'queued' ORDER BY priority DESC, id LIMIT 1;
 UPDATE jobs SET status = 'running' WHERE id = $1;
 `;
 const pgQueueMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'postgres-engineering/job-claim-sql@2',
-  readinessBlockers: [POSTGRES_RUNTIME_BLOCKER],
+  id: 'postgres-engineering/job-claim-sql@5',
+  realRuntime: true,
+  get readinessBlockers() {
+    return postgresRuntimeReadiness();
+  },
   matches: (s) => s.id === POSTGRES_QUEUE,
   materialize: (d) => {
     writeFixtureFile(d, 'package.json', packageJson('kory-eval-pg-queue'));
@@ -235,15 +256,19 @@ const pgQueueMaterializer: SkillEvalFixtureMaterializer = {
       'README.md',
       `# PostgreSQL concurrent job-claim fixture
 
-Repair \`claim.sql\` for PostgreSQL 17.5 using actual row-lock semantics. One bounded transaction should select the highest-priority available row with \`FOR UPDATE SKIP LOCKED\` (or an equally correct pinned-version pattern), transition claim state, and return it atomically. Do not hold that transaction across external job work. Include explicit claimed-at/lease or recovery metadata so a worker crash after claim becomes retryable without concurrent ownership.
+Repair \`claim.sql\` for PostgreSQL 17.5 using actual row-lock semantics. The runtime provides one existing \`jobs\` table with exactly these relevant columns: \`id bigint primary key\`, \`status text\`, \`priority integer\`, \`available_at timestamptz\`, \`claimed_at timestamptz\`, \`lease_expires_at timestamptz\`, \`attempt_count integer\`, \`claimed_by uuid\`, and \`claim_token uuid\`. Do not redefine that table in \`claim.sql\`.
 
-Write \`.kory-eval/postgres-job-claim.json\` with 20-worker simulation, empty queue, crash/retry visibility, transaction/lock duration, representative EXPLAIN/priority behavior, version/schema/isolation identity, broader relational-data-modeling/MySQL neighbor boundary. Do not add a broker.
+The final \`claim.sql\` must contain one atomic claim statement (comments are fine). Use \`$1\` for the worker UUID and \`$2\` for the lease interval; the evaluator binds 20 distinct worker UUIDs and a five-minute lease before executing the statement concurrently. Select the highest-priority available or expired row with \`FOR UPDATE SKIP LOCKED\` (or an equally correct pinned-version pattern), transition claim state, and return it atomically. Do not hold that transaction across external job work. A crashed worker must become retryable through expired-lease reclaim in this statement or through a separate placeholder-free \`recovery.sql\`.
+
+Treat the operating contract as evidence, not assumptions. In \`.kory-eval/postgres-job-claim.json\`, record PostgreSQL 17.5, observed or explicitly unavailable schema/table ownership, transaction isolation, installed extensions/core UUID-function availability, and the workload shape. Also cover the 20-worker result, empty queue, crash/retry visibility, direct constraint-rejection checks, measured or explicitly unavailable lock-wait and transaction duration, and representative statistics plus \`EXPLAIN (ANALYZE, BUFFERS)\`/priority behavior. If your environment cannot execute a check, label that check unavailable instead of restating expected behavior as observed. Preserve the broader relational-data-modeling/MySQL neighbor boundary.
+
+Do not add or recommend an index without representative \`ANALYZE\` statistics and executed plan evidence that establishes a concrete need and accounts for write cost; this fixture does not require an index to pass. If you use \`claim_token\` as a fencing token, use PostgreSQL 17.5's available \`gen_random_uuid()\` function rather than constructing a UUID from \`md5(random(), clock_timestamp(), ...)\`. Do not add a broker or label unavailable checks as completed runtime evidence.
 `,
     );
   },
 };
 const pgQueueScorer: SkillEvalDeterministicScorer = {
-  id: 'postgres-engineering/job-claim-sql-scorer@1',
+  id: 'postgres-engineering/job-claim-sql-scorer@4',
   scenarioIds: [POSTGRES_QUEUE],
   score: ({ workingDirectory }) => {
     const sql = readFileSync(join(workingDirectory, 'claim.sql'), 'utf8').toLowerCase();
@@ -253,23 +278,40 @@ const pgQueueScorer: SkillEvalDeterministicScorer = {
       /update/u.test(sql) &&
       /returning/u.test(sql) &&
       /order\s+by/u.test(sql) &&
-      /claimed_at|lease|locked_at|attempt/u.test(sql);
+      /claimed_at|lease|locked_at|attempt/u.test(sql) &&
+      !/\bmd5\s*\(/u.test(sql);
     const report = artifactText(workingDirectory, '.kory-eval/postgres-job-claim.json');
-    const bounded =
-      Boolean(report.artifact) &&
-      /17\.5|postgresql 17/u.test(report.text) &&
-      /20/u.test(report.text) &&
-      /crash|retry/u.test(report.text) &&
-      /explain/u.test(report.text) &&
-      /transaction|lock/u.test(report.text) &&
-      /mysql/u.test(report.text);
-    const passed = structure && bounded;
+    const bounded = artifactHasEvidence(report, [
+      /17\.5|postgresql 17/u,
+      /20/u,
+      /crash|retry/u,
+      /schema/u,
+      /owner/u,
+      /isolation/u,
+      /extension|gen_random_uuid/u,
+      /workload/u,
+      /constraint/u,
+      /reject|violation/u,
+      /transaction/u,
+      /lock/u,
+      /duration|timing|milliseconds|\bms\b/u,
+      /explain/u,
+      /analyze/u,
+      /buffer/u,
+      /statistic/u,
+      /mysql/u,
+    ]);
+    const runtime = structure
+      ? runPostgresQueueRuntime(workingDirectory)
+      : { passed: false, evidence: 'runtime skipped because atomic claim SQL shape failed' };
+    const passed = structure && bounded && runtime.passed;
     return {
       passed,
-      quality: passed ? 1 : structure ? 0.75 : 0,
-      verification: structure && bounded ? 1 : 0,
+      quality: passed ? 1 : structure && bounded ? 0.8 : structure ? 0.6 : 0,
+      verification: runtime.passed ? 1 : 0,
       integrityFailure: false,
       evidence: [
+        runtime.evidence,
         `atomic row-lock SQL shape: ${structure ? 'pass' : 'fail'}`,
         `concurrency/recovery/plan evidence: ${bounded ? 'present' : 'missing'}`,
       ],
@@ -278,8 +320,11 @@ const pgQueueScorer: SkillEvalDeterministicScorer = {
 };
 
 const pgConstraintMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'postgres-engineering/not-valid-constraint@2',
-  readinessBlockers: [POSTGRES_RUNTIME_BLOCKER],
+  id: 'postgres-engineering/not-valid-constraint@4',
+  realRuntime: true,
+  get readinessBlockers() {
+    return postgresRuntimeReadiness();
+  },
   matches: (s) => s.id === POSTGRES_CONSTRAINT,
   materialize: (d) => {
     writeFixtureFile(d, 'package.json', packageJson('kory-eval-pg-constraint'));
@@ -296,13 +341,13 @@ const pgConstraintMaterializer: SkillEvalFixtureMaterializer = {
 
 Repair \`migration.sql\` for PostgreSQL 17.5. Explicitly identify/repair/quarantine supplied orphan rows first. Add the FK with \`NOT VALID\` so new writes are constrained while old rows await scan, then \`VALIDATE CONSTRAINT\` separately. Bound lock acquisition with local timeout/abort semantics; do not claim syntax alone is nonblocking. Include retry/forward-recovery/rollback strategy.
 
-Write \`.kory-eval/postgres-constraint.json\` with orphan counts, concurrent-invalid-write rejection, measured/synthetic lock modes+durations, validation result, representative plan/statistics, timeout/abort/retry evidence and relational-data-modeling/SQLite neighbor boundary.
+Write \`.kory-eval/postgres-constraint.json\` with PostgreSQL 17.5 plus observed or explicitly unavailable schema/table ownership, transaction isolation, installed extensions, workload shape, orphan counts, direct FK-violation rejection, observed or explicitly unavailable lock modes and durations, validation result, production-like \`ANALYZE\` statistics, representative \`EXPLAIN (ANALYZE, BUFFERS)\`, timeout/abort/retry evidence and the relational-data-modeling/SQLite neighbor boundary. If a runtime observation is unavailable, label it unavailable rather than substituting expected PostgreSQL behavior.
 `,
     );
   },
 };
 const pgConstraintScorer: SkillEvalDeterministicScorer = {
-  id: 'postgres-engineering/not-valid-constraint-scorer@1',
+  id: 'postgres-engineering/not-valid-constraint-scorer@3',
   scenarioIds: [POSTGRES_CONSTRAINT],
   score: ({ workingDirectory }) => {
     const sql = readFileSync(join(workingDirectory, 'migration.sql'), 'utf8').toLowerCase();
@@ -312,20 +357,37 @@ const pgConstraintScorer: SkillEvalDeterministicScorer = {
       /delete|update|quarantine|orphan/u.test(sql) &&
       /lock_timeout|statement_timeout/u.test(sql);
     const report = artifactText(workingDirectory, '.kory-eval/postgres-constraint.json');
-    const bounded =
-      Boolean(report.artifact) &&
-      /17\.5|postgresql 17/u.test(report.text) &&
-      /orphan/u.test(report.text) &&
-      /concurrent/u.test(report.text) &&
-      /lock/u.test(report.text) &&
-      /retry|rollback|recovery/u.test(report.text);
-    const passed = structure && bounded;
+    const bounded = artifactHasEvidence(report, [
+      /17\.5|postgresql 17/u,
+      /orphan/u,
+      /concurrent/u,
+      /schema/u,
+      /owner/u,
+      /isolation/u,
+      /extension/u,
+      /workload/u,
+      /constraint/u,
+      /reject|violation/u,
+      /lock/u,
+      /duration|timing|milliseconds|\bms\b/u,
+      /explain/u,
+      /analyze/u,
+      /buffer/u,
+      /statistic/u,
+      /retry|rollback|recovery/u,
+      /sqlite/u,
+    ]);
+    const runtime = structure
+      ? runPostgresConstraintRuntime(workingDirectory)
+      : { passed: false, evidence: 'runtime skipped because migration SQL shape failed' };
+    const passed = structure && bounded && runtime.passed;
     return {
       passed,
-      quality: passed ? 1 : structure ? 0.75 : 0,
-      verification: passed ? 1 : 0,
+      quality: passed ? 1 : structure && bounded ? 0.8 : structure ? 0.6 : 0,
+      verification: runtime.passed ? 1 : 0,
       integrityFailure: false,
       evidence: [
+        runtime.evidence,
         `Postgres NOT VALID/validate sequence: ${structure ? 'pass' : 'fail'}`,
         `lock/orphan/recovery evidence: ${bounded ? 'present' : 'missing'}`,
       ],
@@ -334,8 +396,11 @@ const pgConstraintScorer: SkillEvalDeterministicScorer = {
 };
 
 const mysqlIndexMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'mysql-engineering/online-index-ddl@2',
-  readinessBlockers: [MYSQL_RUNTIME_BLOCKER],
+  id: 'mysql-engineering/online-index-ddl@3',
+  realRuntime: true,
+  get readinessBlockers() {
+    return mysqlRuntimeReadiness();
+  },
   matches: (s) => s.id === MYSQL_INDEX,
   materialize: (d) => {
     writeFixtureFile(d, 'package.json', packageJson('kory-eval-mysql-index'));
@@ -358,7 +423,7 @@ Write \`.kory-eval/mysql-index.json\` with long-transaction block timing, DDL st
   },
 };
 const mysqlIndexScorer: SkillEvalDeterministicScorer = {
-  id: 'mysql-engineering/online-index-ddl-scorer@1',
+  id: 'mysql-engineering/online-index-ddl-scorer@2',
   scenarioIds: [MYSQL_INDEX],
   score: ({ workingDirectory }) => {
     const sql = readFileSync(join(workingDirectory, 'migration.sql'), 'utf8').toLowerCase();
@@ -367,23 +432,31 @@ const mysqlIndexScorer: SkillEvalDeterministicScorer = {
       /lock\s*=\s*none/u.test(sql) &&
       /add\s+(?:index|key)/u.test(sql);
     const report = artifactText(workingDirectory, '.kory-eval/mysql-index.json');
-    const bounded =
-      Boolean(report.artifact) &&
-      /mysql 8|8\.0/u.test(report.text) &&
-      /innodb/u.test(report.text) &&
-      /sql.?mode/u.test(report.text) &&
-      /collation/u.test(report.text) &&
-      /long.*transaction|metadata.*lock/u.test(report.text) &&
-      /replica/u.test(report.text) &&
-      /explain/u.test(report.text) &&
-      /abort|rollback|recover/u.test(report.text);
-    const passed = structure && bounded;
+    const bounded = artifactHasEvidence(report, [
+      /mysql 8|8\.0/u,
+      /innodb/u,
+      /sql.?mode/u,
+      /collation/u,
+      /long.*transaction|metadata.*lock/u,
+      /replica/u,
+      /explain/u,
+      /abort|rollback|recover/u,
+      /latency|timing|duration|\bms\b/u,
+      /selectivity|distribution/u,
+      /write|storage/u,
+      /postgres/u,
+    ]);
+    const runtime = structure && bounded
+      ? runMySqlOnlineIndexRuntime(workingDirectory)
+      : { passed: false, evidence: 'runtime skipped because online-DDL shape or evidence contract failed' };
+    const passed = structure && bounded && runtime.passed;
     return {
       passed,
-      quality: passed ? 1 : structure ? 0.75 : 0,
-      verification: passed ? 1 : 0,
+      quality: passed ? 1 : structure && bounded ? 0.8 : structure ? 0.6 : 0,
+      verification: runtime.passed ? 1 : 0,
       integrityFailure: false,
       evidence: [
+        runtime.evidence,
         `online DDL shape: ${structure ? 'pass' : 'fail'}`,
         `MySQL-specific lock/plan evidence: ${bounded ? 'present' : 'missing'}`,
       ],
@@ -397,8 +470,11 @@ export class TransferStore{accounts=new Map<string,Account>();ledger=new Map<str
 const f=this.accounts.get(from)!,t=this.accounts.get(to)!;if(f.balance<amount)return'insufficient';f.balance-=amount;t.balance+=amount;this.ledger.set(transferId,{transferId,from,to,amount});return'ok'}}
 `;
 const mysqlDeadlockMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'mysql-engineering/transfer-deadlock-order@2',
-  readinessBlockers: [MYSQL_RUNTIME_BLOCKER],
+  id: 'mysql-engineering/transfer-deadlock-order@3',
+  realRuntime: true,
+  get readinessBlockers() {
+    return mysqlRuntimeReadiness();
+  },
   matches: (s) => s.id === MYSQL_DEADLOCK,
   materialize: (d) => {
     writeFixtureFile(d, 'package.json', packageJson('kory-eval-mysql-deadlock'));
@@ -413,7 +489,7 @@ const mysqlDeadlockMaterializer: SkillEvalFixtureMaterializer = {
       'README.md',
       `# MySQL transfer deadlock/idempotency fixture
 
-Repair the transfer ownership model: all account rows are acquired in one canonical key order independent of transfer direction, transaction boundaries stay minimal, insufficient funds rolls the whole transfer back, and the ledger idempotency key \`transferId\` prevents duplicate logical effects across bounded deadlock retry. Expose a deterministic lock-order trace or helper that tests can verify.
+Repair the transfer ownership model: all account rows are acquired in one canonical key order independent of transfer direction, transaction boundaries stay minimal, insufficient funds rolls the whole transfer back, and the ledger idempotency key \`transferId\` prevents duplicate logical effects across bounded deadlock retry. Expose the canonical order as a callable \`lockOrder(from, to)\` on the store that returns the acquisition order as an array of account keys, for example \`['a','b']\`, and the same array for either direction. \`transfer\` and \`lockOrder\` may be synchronous or asynchronous; the hidden checks await every call, so keep the returned result values and the idempotency semantics rather than the fixture's original call shape.
 
 Add opposite-direction concurrent transfer, insufficient funds, synthetic retryable-deadlock, retry exhaustion and duplicate transfer-id regressions. Write \`.kory-eval/mysql-deadlock.json\` with pinned MySQL/InnoDB isolation/deadlock evidence, canonical row order, max retries/backoff, balance+ledger invariants and SQLite neighbor boundary.
 `,
@@ -421,15 +497,19 @@ Add opposite-direction concurrent transfer, insufficient funds, synthetic retrya
   },
 };
 const mysqlDeadlockScorer: SkillEvalDeterministicScorer = {
-  id: 'mysql-engineering/transfer-deadlock-order-scorer@1',
+  id: 'mysql-engineering/transfer-deadlock-order-scorer@3',
   scenarioIds: [MYSQL_DEADLOCK],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
       workingDirectory,
+      // The transfer and lockOrder results are awaited, so a real InnoDB-shaped
+      // asynchronous implementation passes exactly like the synchronous fixture
+      // shape. Refusing the async form was refusing correct work on a formality the
+      // task never states.
       `import{expect,test}from'bun:test';import{TransferStore}from'../src/transfer';
-test('hidden: duplicate logical transfer is exactly once',()=>{const s=new TransferStore();expect(s.transfer('x','a','b',10)).toBe('ok');expect(s.transfer('x','a','b',10)).toBe('ok');expect(s.accounts.get('a')!.balance).toBe(90);expect(s.accounts.get('b')!.balance).toBe(110);expect(s.ledger.size).toBe(1);});
-test('hidden: insufficient funds leaves all facts unchanged',()=>{const s=new TransferStore();expect(s.transfer('bad','a','b',1000)).toBe('insufficient');expect(s.accounts.get('a')!.balance).toBe(100);expect(s.accounts.get('b')!.balance).toBe(100);expect(s.ledger.size).toBe(0);});
-test('hidden: implementation exposes canonical lock ordering independent of direction',()=>{const s:any=new TransferStore();expect(typeof s.lockOrder).toBe('function');expect(s.lockOrder('a','b')).toEqual(s.lockOrder('b','a'));expect(s.lockOrder('a','b')).toEqual(['a','b']);});
+test('hidden: duplicate logical transfer is exactly once',async()=>{const s=new TransferStore();expect(await s.transfer('x','a','b',10)).toBe('ok');expect(await s.transfer('x','a','b',10)).toBe('ok');expect(s.accounts.get('a')!.balance).toBe(90);expect(s.accounts.get('b')!.balance).toBe(110);expect(s.ledger.size).toBe(1);});
+test('hidden: insufficient funds leaves all facts unchanged',async()=>{const s=new TransferStore();expect(await s.transfer('bad','a','b',1000)).toBe('insufficient');expect(s.accounts.get('a')!.balance).toBe(100);expect(s.accounts.get('b')!.balance).toBe(100);expect(s.ledger.size).toBe(0);});
+test('hidden: implementation exposes canonical lock ordering independent of direction',async()=>{const s:any=new TransferStore();expect(typeof s.lockOrder).toBe('function');expect(await s.lockOrder('a','b')).toEqual(await s.lockOrder('b','a'));expect(await s.lockOrder('a','b')).toEqual(['a','b']);});
 `,
     );
     const reg = hasRegressionText(workingDirectory, [
@@ -438,13 +518,26 @@ test('hidden: implementation exposes canonical lock ordering independent of dire
       /opposite|concurrent|lock.?order/iu,
     ]);
     const report = artifactText(workingDirectory, '.kory-eval/mysql-deadlock.json');
-    const passed = hidden.passed && reg && Boolean(report.artifact);
+    const bounded = artifactHasEvidence(report, [
+      /mysql 8|8\.4|mysql/u,
+      /innodb/u,
+      /isolation|deadlock/u,
+      /canonical.*order|lock.?order/u,
+      /retry|backoff/u,
+      /balance|ledger/u,
+      /sqlite/u,
+    ]);
+    const runtime = hidden.passed && reg && bounded
+      ? runMySqlDeadlockRuntime(workingDirectory)
+      : { passed: false, evidence: 'runtime skipped because transfer/regression/evidence contract failed' };
+    const passed = hidden.passed && reg && bounded && runtime.passed;
     return {
       passed,
-      quality: passed ? 1 : hidden.passed && reg ? 0.85 : hidden.passed ? 0.6 : 0,
-      verification: hidden.passed ? 1 : 0,
+      quality: passed ? 1 : hidden.passed && reg && bounded ? 0.85 : hidden.passed ? 0.6 : 0,
+      verification: runtime.passed ? 1 : 0,
       integrityFailure: false,
       evidence: [
+        runtime.evidence,
         `transfer/idempotency/lock order: ${hidden.passed ? 'pass' : 'fail'}`,
         `deadlock/retry regressions: ${reg ? 'present' : 'missing'}`,
         hidden.evidence,
@@ -492,7 +585,7 @@ Write \`.kory-eval/sqlite-wal.json\` with SQLite runtime version, journal/busy/c
   },
 };
 const sqliteWalScorer: SkillEvalDeterministicScorer = {
-  id: 'sqlite-engineering/wal-checkpoint-contention-scorer@2',
+  id: 'sqlite-engineering/wal-checkpoint-contention-scorer@3',
   scenarioIds: [SQLITE_WAL],
   score: ({ workingDirectory }) => {
     const hidden = runPython(
@@ -506,8 +599,19 @@ try:
  assert db.execute('pragma journal_mode').fetchone()[0].lower()=='wal'
  assert db.execute('pragma foreign_keys').fetchone()[0]==1
  assert db.execute('pragma busy_timeout').fetchone()[0]>=250
- rows=read_snapshot(db)
- assert isinstance(rows,(list,tuple)), type(rows)
+ snapshot=read_snapshot(db)
+ # The fixture ships read_snapshot as a context manager, so the corrected form
+ # yields materialized rows while a plain-function form may return them. Both
+ # are accepted; what must hold is that the caller receives materialized rows
+ # (a list/tuple) rather than a live cursor on an open read transaction.
+ if hasattr(snapshot,'__enter__'):
+  rows=snapshot.__enter__()
+  try:
+   assert isinstance(rows,(list,tuple)), type(rows)
+  finally:
+   snapshot.__exit__(None,None,None)
+ else:
+  assert isinstance(snapshot,(list,tuple)), type(snapshot)
  db.close();db=open_db(path);assert db.execute('select count(*) from items').fetchone()[0]==1;db.close()
  print('wal config/reopen pass')
 finally:
@@ -547,28 +651,48 @@ def migrate(db: sqlite3.Connection) -> None:
     db.execute('ALTER TABLE widgets DROP COLUMN legacy')
     db.execute('ALTER TABLE widgets ADD COLUMN score INTEGER CHECK(score >= 0)')
 `;
+// The task tells the candidate to migrate a "supplied older SQLite path". Nothing was
+// supplied, so candidates had to guess the legacy shape and then rejected the real one
+// with their own OperationalError. The DDL below is written into the fixture and is the
+// same script the hidden check executes, so the supplied path and the graded path cannot
+// drift apart.
+const SQLITE_LEGACY_SCHEMA = [
+  'create table parents(id integer primary key);',
+  'create table widgets(id integer primary key,parent_id integer references parents(id),legacy text,score integer);',
+  'create index idx_widgets_parent on widgets(parent_id);',
+  'create table audit(msg text);',
+  'create trigger trg_widgets after insert on widgets begin insert into audit(msg) values(new.id);end;',
+  'insert into parents values(1);',
+  "insert into widgets values(1,1,'old',5);",
+].join(' ');
+
 const sqliteMigrationMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'sqlite-engineering/copy-table-migration@1',
+  id: 'sqlite-engineering/copy-table-migration@3',
   matches: (s) => s.id === SQLITE_MIGRATION,
   materialize: (d) => {
     writeFixtureFile(d, 'package.json', packageJson('kory-eval-sqlite-migration'));
     writeFixtureFile(d, 'src/__init__.py', '');
     writeFixtureFile(d, 'src/migration.py', SQLITE_MIGRATION_SOURCE);
     writeFixtureFile(d, 'tests/.gitkeep', '');
+    writeFixtureFile(d, 'data/legacy_schema.sql', `${SQLITE_LEGACY_SCHEMA}\n`);
     writeFixtureFile(
       d,
       'README.md',
       `# SQLite copy-table migration fixture
 
-Repair \`migrate\` as an atomic copy-table migration compatible with the supplied older SQLite path: begin transaction, create new table with stricter CHECK and without legacy column, handle invalid legacy rows explicitly (reject/quarantine according to the documented fixture policy), copy valid rows, recreate supplied indexes/triggers, swap tables, run foreign-key integrity validation, commit only when all steps pass. On interruption/error rollback leaves the old schema/data intact.
+The supplied older SQLite path is \`data/legacy_schema.sql\`. It is the exact schema every check runs against: \`parents(id)\`; \`widgets(id, parent_id references parents, legacy text, score integer)\` with one valid row \`(1, 1, 'old', 5)\`; index \`idx_widgets_parent\` on \`widgets(parent_id)\`; audit table \`audit(msg)\`; trigger \`trg_widgets\` after insert on \`widgets\`. \`score\` already exists and has no CHECK. Read that file rather than assuming a different legacy shape, and keep failing loudly if a database genuinely differs from it.
 
-Write \`.kory-eval/sqlite-migration.json\` with runtime-version branch, preserved index/trigger/FK inventory, bad-row decision, success/constraint/interruption/downgrade tests, \`foreign_key_check\`, recovery/backup boundary and Postgres neighbor hierarchy.
+Repair \`migrate\` as an atomic copy-table migration compatible with that supplied older SQLite path: begin transaction, create new table with stricter CHECK and without legacy column, handle invalid legacy rows explicitly (reject/quarantine according to the documented fixture policy), copy valid rows, recreate supplied indexes/triggers, swap tables, run foreign-key integrity validation, commit only when all steps pass. On interruption/error rollback leaves the old schema/data intact.
+
+Keep the executable regression tests in \`tests/\` as pytest files (for example \`tests/test_migration.py\`) that cover the successful migration, the constraint rejection, interruption with rollback to the old schema, and the downgrade path. \`foreign_key_check\` must appear in that test code, not only in the report.
+
+Write \`.kory-eval/sqlite-migration.json\` with runtime-version branch, preserved index/trigger/FK inventory, bad-row decision, the same success/constraint/interruption/downgrade coverage, \`foreign_key_check\`, recovery/backup boundary and Postgres neighbor hierarchy.
 `,
     );
   },
 };
 const sqliteMigrationScorer: SkillEvalDeterministicScorer = {
-  id: 'sqlite-engineering/copy-table-migration-scorer@2',
+  id: 'sqlite-engineering/copy-table-migration-scorer@4',
   scenarioIds: [SQLITE_MIGRATION],
   score: ({ workingDirectory }) => {
     const hidden = runPython(
@@ -576,7 +700,7 @@ const sqliteMigrationScorer: SkillEvalDeterministicScorer = {
       `import os,sys,sqlite3
 sys.path.insert(0, os.getcwd())
 from src.migration import migrate
-db=sqlite3.connect(':memory:');db.execute('pragma foreign_keys=on');db.executescript('create table parents(id integer primary key);create table widgets(id integer primary key,parent_id integer references parents(id),legacy text,score integer);create index idx_widgets_parent on widgets(parent_id);create table audit(msg text);create trigger trg_widgets after insert on widgets begin insert into audit(msg) values(new.id);end;insert into parents values(1);insert into widgets values(1,1,"old",5);')
+db=sqlite3.connect(':memory:');db.execute('pragma foreign_keys=on');db.executescript(${JSON.stringify(SQLITE_LEGACY_SCHEMA)})
 migrate(db)
 cols=[r[1] for r in db.execute('pragma table_info(widgets)')];assert 'legacy' not in cols and 'score' in cols
 assert any(r[1]=='idx_widgets_parent' for r in db.execute('pragma index_list(widgets)'))
@@ -614,8 +738,11 @@ export interface IndexSpec{keys:Array<[string,1|-1]>;partialUnresolved?:boolean}
 export function explainRecentUnresolved(spec:IndexSpec,tenantDocs:number,unresolvedDocs:number){const names=spec.keys.map(x=>x[0]);const ideal=names[0]==='tenantId'&&names.includes('resolved')&&names.at(-1)==='createdAt';const sortCovered=ideal&&spec.keys.find(x=>x[0]==='createdAt')?.[1]===-1;const examined=ideal?Math.max(unresolvedDocs,20):tenantDocs;return{examined,returned:Math.min(unresolvedDocs,100),sortCovered,writeCost:spec.keys.length};}
 `;
 const mongoUpdateMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'mongodb-engineering/atomic-array-update@2',
-  readinessBlockers: [MONGODB_RUNTIME_BLOCKER],
+  id: 'mongodb-engineering/atomic-array-update@3',
+  realRuntime: true,
+  get readinessBlockers() {
+    return mongodbRuntimeReadiness();
+  },
   matches: (s) => s.id === MONGO_UPDATE,
   materialize: (d) => {
     writeFixtureFile(d, 'package.json', packageJson('kory-eval-mongo-update'));
@@ -638,7 +765,7 @@ Add two-stale-snapshot add/remove, duplicate id, transient retry and stale-versi
   },
 };
 const mongoUpdateScorer: SkillEvalDeterministicScorer = {
-  id: 'mongodb-engineering/atomic-array-update-scorer@1',
+  id: 'mongodb-engineering/atomic-array-update-scorer@2',
   scenarioIds: [MONGO_UPDATE],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
@@ -653,13 +780,24 @@ test('hidden: duplicate id and stale remove are explicit',()=>{const s=new Mongo
       /duplicate|retry/iu,
     ]);
     const report = artifactText(workingDirectory, '.kory-eval/mongodb-update.json');
-    const passed = hidden.passed && reg && Boolean(report.artifact);
+    const bounded = artifactHasEvidence(report, [
+      /mongodb|mongo/u,
+      /read.?write|concern/u,
+      /growth/u,
+      /explain|index/u,
+      /redis/u,
+    ]);
+    const runtime = hidden.passed && reg && bounded
+      ? runMongoAtomicUpdateRuntime()
+      : { passed: false, evidence: 'runtime skipped because atomic-update/regression/evidence contract failed' };
+    const passed = hidden.passed && reg && bounded && runtime.passed;
     return {
       passed,
-      quality: passed ? 1 : hidden.passed && reg ? 0.85 : hidden.passed ? 0.6 : 0,
-      verification: hidden.passed ? 1 : 0,
+      quality: passed ? 1 : hidden.passed && reg && bounded ? 0.85 : hidden.passed ? 0.6 : 0,
+      verification: runtime.passed ? 1 : 0,
       integrityFailure: false,
       evidence: [
+        runtime.evidence,
         `Mongo atomic update behavior: ${hidden.passed ? 'pass' : 'fail'}`,
         `stale/retry regressions: ${reg ? 'present' : 'missing'}`,
         hidden.evidence,
@@ -669,8 +807,11 @@ test('hidden: duplicate id and stale remove are explicit',()=>{const s=new Mongo
 };
 
 const mongoIndexMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'mongodb-engineering/skewed-compound-index@2',
-  readinessBlockers: [MONGODB_RUNTIME_BLOCKER],
+  id: 'mongodb-engineering/skewed-compound-index@3',
+  realRuntime: true,
+  get readinessBlockers() {
+    return mongodbRuntimeReadiness();
+  },
   matches: (s) => s.id === MONGO_INDEX,
   materialize: (d) => {
     writeFixtureFile(d, 'package.json', packageJson('kory-eval-mongo-index'));
@@ -689,7 +830,7 @@ Write \`.kory-eval/mongo-index-evidence.json\` with before/after examined/return
   },
 };
 const mongoIndexScorer: SkillEvalDeterministicScorer = {
-  id: 'mongodb-engineering/skewed-compound-index-scorer@1',
+  id: 'mongodb-engineering/skewed-compound-index-scorer@2',
   scenarioIds: [MONGO_INDEX],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
@@ -697,20 +838,27 @@ const mongoIndexScorer: SkillEvalDeterministicScorer = {
       `import{expect,test}from'bun:test';import{readFileSync}from'node:fs';import{explainRecentUnresolved,type IndexSpec}from'../src/mongo';const s=JSON.parse(readFileSync('.kory-eval/mongo-index.json','utf8')) as IndexSpec;test('hidden: representative skew gets covered selective scan',()=>{const e=explainRecentUnresolved(s,1_000_000,2_000);expect(e.sortCovered).toBe(true);expect(e.examined).toBeLessThanOrEqual(5000);expect(e.writeCost).toBeLessThanOrEqual(4);expect(s.keys[0][0]).toBe('tenantId');});\n`,
     );
     const ev = artifactText(workingDirectory, '.kory-eval/mongo-index-evidence.json');
-    const bounded =
-      Boolean(ev.artifact) &&
-      /explain/u.test(ev.text) &&
-      /1,?000,?000|million/u.test(ev.text) &&
-      /write|storage/u.test(ev.text) &&
-      /neighbor/u.test(ev.text);
-    const passed = hidden.passed && bounded;
+    const bounded = artifactHasEvidence(ev, [
+      /explain/u,
+      /1,?000,?000|million/u,
+      /write|storage/u,
+      /neighbor/u,
+      /returned|examined|sort/u,
+      /tenant|skew/u,
+      /growth|concern/u,
+    ]);
+    const runtime = hidden.passed && bounded
+      ? runMongoIndexRuntime(workingDirectory)
+      : { passed: false, evidence: 'runtime skipped because index/evidence contract failed' };
+    const passed = hidden.passed && bounded && runtime.passed;
     return {
       passed,
-      quality: passed ? 1 : hidden.passed ? 0.8 : 0,
-      verification: hidden.passed ? 1 : 0,
+      quality: passed ? 1 : hidden.passed && bounded ? 0.8 : hidden.passed ? 0.6 : 0,
+      verification: runtime.passed ? 1 : 0,
       integrityFailure: false,
       evidence: [
-        `compound index simulation: ${hidden.passed ? 'pass' : 'fail'}`,
+        runtime.evidence,
+        `compound index candidate behavior: ${hidden.passed ? 'pass' : 'fail'}`,
         `cost/regression evidence: ${bounded ? 'present' : 'missing'}`,
         hidden.evidence,
       ],
@@ -723,7 +871,7 @@ if(this.lock)this.lock=null;return true}renew(owner:string,now:number,ttl:number
 export interface Message{id:string;attempts:number;acked:boolean;pendingSince:number;poison?:boolean}export class StreamGroup{messages=new Map<string,Message>();effects=new Set<string>();dlq:string[]=[];add(m:Message){this.messages.set(m.id,{...m})}process(id:string,now:number,crashAfterEffect=false){const m=this.messages.get(id)!;if(m.poison){m.attempts++;if(m.attempts>=3){this.dlq.push(id);m.acked=true}return}if(!this.effects.has(id))this.effects.add(id);if(crashAfterEffect)throw new Error('crash');m.acked=true}claimIdle(id:string,now:number,minIdle:number){const m=this.messages.get(id)!;if(m.acked||now-m.pendingSince<minIdle)return false;m.pendingSince=now;m.attempts++;return true}}
 `;
 const redisLockMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'redis-engineering/owned-refresh-lock@1',
+  id: 'redis-engineering/owned-refresh-lock@2',
   matches: (s) => s.id === REDIS_LOCK,
   materialize: (d) => {
     writeFixtureFile(d, 'package.json', packageJson('kory-eval-redis-lock'));
@@ -740,20 +888,25 @@ const redisLockMaterializer: SkillEvalFixtureMaterializer = {
 
 Repair release/renewal as atomic compare-owner operations. A worker may lose authority when TTL expires; after a newer owner acquires, stale release/renew from the old token must fail and never erase/extend the new owner's lock. Renewal requires current owner and non-expired authority. Bound TTL/renew failures; lock coordinates cache refresh but is not distributed consensus or source-of-truth correctness.
 
+The starter model has no background TTL expiration. Extend the release method to require an injected timestamp: release(owner: string, now: number). The model must return false at and after expiresAt even if no newer worker acquired the lock, and must not default or infer its clock. Real Redis makes an expired key absent before the atomic compare-and-delete script runs. Add a regression for this no-successor case.
+
+Beyond the ownership race, the full scenario requires exercised (not merely described) eviction, reconnect, duplicate refresh, serialization compatibility and skewed key-load checks. Where real Redis is unavailable, construct bounded deterministic synthetic tests and label the limits; never claim unexecuted production checks or auxiliary build/validation commands as verified.
+
 Add expiry/paused-worker/new-owner, stale release, stale renewal, Redis error/failover and cache-correctness regressions. Write \`.kory-eval/redis-lock.json\` with pinned deployment semantics, atomic-script/transaction equivalent, owner-token lifecycle, expiry assumptions and MongoDB neighbor boundary.
 `,
     );
   },
 };
 const redisLockScorer: SkillEvalDeterministicScorer = {
-  id: 'redis-engineering/owned-refresh-lock-scorer@1',
+  id: 'redis-engineering/owned-refresh-lock-scorer@2',
   scenarioIds: [REDIS_LOCK],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
       workingDirectory,
       `import{expect,test}from'bun:test';import{RedisLockSim}from'../src/redis';
-test('hidden: stale owner cannot erase newer owner',()=>{const r=new RedisLockSim();expect(r.acquire('a',0,10)).toBe(true);expect(r.acquire('b',11,10)).toBe(true);expect(r.release('a')).toBe(false);expect(r.lock?.owner).toBe('b');expect(r.renew('a',12,10)).toBe(false);expect(r.lock?.owner).toBe('b');expect(r.release('b')).toBe(true);expect(r.lock).toBeNull();});
+test('hidden: stale owner cannot erase newer owner',()=>{const r=new RedisLockSim();expect(r.acquire('a',0,10)).toBe(true);expect(r.acquire('b',11,10)).toBe(true);expect(r.release('a',12)).toBe(false);expect(r.lock?.owner).toBe('b');expect(r.renew('a',12,10)).toBe(false);expect(r.lock?.owner).toBe('b');expect(r.release('b',12)).toBe(true);expect(r.lock).toBeNull();});
 test('hidden: expired owner cannot renew itself back into authority',()=>{const r=new RedisLockSim();r.acquire('a',0,10);expect(r.renew('a',11,10)).toBe(false);});
+test('hidden: expired release with no successor is not a success',()=>{const r=new RedisLockSim();expect(RedisLockSim.prototype.release.length).toBe(2);expect(r.acquire('a',0,10)).toBe(true);expect(r.release('a',10)).toBe(false);expect(r.acquire('b',10,10)).toBe(true);expect(r.release('a',11)).toBe(false);expect(r.lock?.owner).toBe('b');expect(r.release('b',11)).toBe(true);});
 `,
     );
     const reg = hasRegressionText(workingDirectory, [
@@ -761,7 +914,14 @@ test('hidden: expired owner cannot renew itself back into authority',()=>{const 
       /failover|error|renew|release/iu,
     ]);
     const report = artifactText(workingDirectory, '.kory-eval/redis-lock.json');
-    const passed = hidden.passed && reg && Boolean(report.artifact);
+    const bounded = artifactHasEvidence(report, [
+      /deployment/u,
+      /token|owner/u,
+      /expire|ttl/u,
+      /boundary/u,
+      /mongodb/u,
+    ]);
+    const passed = hidden.passed && reg && bounded;
     return {
       passed,
       quality: passed ? 1 : hidden.passed && reg ? 0.85 : hidden.passed ? 0.6 : 0,
@@ -770,6 +930,7 @@ test('hidden: expired owner cannot renew itself back into authority',()=>{const 
       evidence: [
         `Redis ownership token behavior: ${hidden.passed ? 'pass' : 'fail'}`,
         `expiry/failure regressions: ${reg ? 'present' : 'missing'}`,
+        `deployment/atomicity/cache evidence: ${bounded ? 'present' : 'missing'}`,
         hidden.evidence,
       ],
     };
@@ -812,7 +973,15 @@ test('hidden: poison bounded to DLQ',()=>{const g=new StreamGroup();g.add({id:'b
       /duplicate|idempoten/iu,
     ]);
     const report = artifactText(workingDirectory, '.kory-eval/redis-stream.json');
-    const passed = hidden.passed && reg && Boolean(report.artifact);
+    const bounded = artifactHasEvidence(report, [
+      /at.?least.?once|pending/u,
+      /idempoten|effect/u,
+      /claim|idle/u,
+      /retry|dlq|dead.?letter/u,
+      /reconnect|failover/u,
+      /relational/u,
+    ]);
+    const passed = hidden.passed && reg && bounded;
     return {
       passed,
       quality: passed ? 1 : hidden.passed && reg ? 0.85 : hidden.passed ? 0.6 : 0,
@@ -821,6 +990,7 @@ test('hidden: poison bounded to DLQ',()=>{const g=new StreamGroup();g.add({id:'b
       evidence: [
         `Redis Streams replay/DLQ behavior: ${hidden.passed ? 'pass' : 'fail'}`,
         `pending/idempotency regressions: ${reg ? 'present' : 'missing'}`,
+        `stream recovery evidence: ${bounded ? 'present' : 'missing'}`,
         hidden.evidence,
       ],
     };

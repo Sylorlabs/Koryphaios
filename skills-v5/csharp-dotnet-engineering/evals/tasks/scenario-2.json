@@ -1,14 +1,14 @@
 {
   "id": "csharp-dotnet-engineering-full-task-2-individual",
   "maturity": "individual",
-  "prompt": "Evolve a C# record used in a persisted JSON job queue by adding a new optional retry policy while old serialized jobs and old workers remain in circulation during a rolling deployment. Preserve source/binary behavior where required, define serializer defaults, reject malformed retry data safely, and test old->new/new->old compatibility plus restart recovery. Do not solve by deleting the queue.",
+  "prompt": "Evolve a public C# positional record used in a persisted JSON job queue by adding a new optional retry policy while old serialized jobs and old workers remain in circulation during a rolling deployment. First inspect the target framework, nullable settings, record constructors, serializer options or generated context, and queue recovery contract. Preserve source, binary, and wire behavior where each is actually promised, define defaults for omitted retry data, reject malformed retry data safely, and test old->new/new->old compatibility plus restart recovery. Do not solve by deleting the queue or silently dropping malformed entries.",
   "environment": {
     "kind": "repository",
     "startingState": "fixture://csharp-dotnet-engineering/record-json-compatibility",
     "requirements": [
       "persisted JSON corpus from the previous record shape plus a rolling-deployment compatibility window",
       "new optional retry policy with bounded attempts/backoff values",
-      "old-worker reader behavior and new-worker reader/writer tests",
+      "old-worker reader behavior, a consumer for existing public constructors/deconstruction, and new-worker reader/writer tests",
       "malformed and unknown-field queue entries plus restart fixture",
       "paired same-model skill/no-skill execution from the identical starting snapshot"
     ]
@@ -44,7 +44,9 @@
     "record-json-compatibility scenario evidence",
     "csharp-dotnet-engineering decision and boundary evidence",
     "Hierarchy boundary and selected specialist rationale",
-    "hierarchy boundary and selected specialist rationale",
+    "Target framework, record API, serializer, and rolling-deployment contract evidence",
+    "Old/new reader and writer compatibility evidence",
+    "Malformed-entry retention, later-valid-entry progress, and repeated restart-recovery evidence",
     "paired skill/no-skill run artifacts",
     "explicit unavailable, simulated, inferred, or stale evidence labels"
   ],
@@ -56,23 +58,23 @@
   "falsifiableChecks": [
     {
       "id": "scope-and-hierarchy",
-      "assertion": "The result must establish the actual csharp-dotnet-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=implementation; near-neighbor=feature-implementation), and not absorb the near-neighbor responsibility merely because it is adjacent."
+      "assertion": "The result must establish the supplied .NET project, public record and queue boundary, serializer/host environment, and rolling-deployment window before acting. Preserve the hierarchy relationship (broader=implementation; feature work remains a separate near-neighbor) without turning compatibility repair into an unrelated feature redesign."
     },
     {
       "id": "operating-contract",
-      "assertion": "Confirm target frameworks, nullable context, hosting model, dependency lifetimes, async flow, and serializer configuration."
+      "assertion": "Record target frameworks, C# and nullable settings, public positional constructor and deconstruction shape, serializer options or generated context, naming/null/unknown-field rules, and old/new worker roles."
     },
     {
       "id": "execution-invariant",
-      "assertion": "Schema evolution has an explicit compatibility envelope; persisted jobs deserialize deterministically and invalid new state fails closed without corrupting the queue."
+      "assertion": "Schema evolution has an explicit compatibility envelope: omitted retry policy receives the documented old-record default, supplied retry values are range-validated, unknown additive fields follow the documented serializer policy, malformed entries fail closed while retaining their raw contents and queue position, later valid entries still load, and repeated restart recovery is deterministic."
     },
     {
       "id": "verification-discipline",
-      "assertion": "Run dotnet build/test for supported target frameworks, exercise cancellation and disposal, and validate serialization, trimming, or AOT paths when affected."
+      "assertion": "Run the actual queue regression program or test project, not only dotnet build. Exercise old->new and new->old payloads, omitted fields, invalid bounds and types, unknown additive fields, malformed-entry retention, progress to later valid entries, and restart twice from the same persisted corpus. Compile a consumer using every preexisting public constructor, property, and deconstruction contract; execute trimmed or AOT artifacts only when the queue is published that way, and label unavailable checks."
     },
     {
       "id": "anti-pattern-resistance",
-      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not block async tasks with .Result or .Wait in request paths, capture scoped services in singletons, suppress nullable warnings without proof, or depend on reflection that deployment modes remove."
+      "assertion": "The result must not replace the queue with deletion, silently discard malformed entries, reinterpret omitted retry data as an invalid zero-value, remove existing positional constructors or deconstruction shape, or claim reflection-based serialization works in trimmed/AOT deployment without metadata and executed-artifact evidence."
     },
     {
       "id": "evidence-and-uncertainty",

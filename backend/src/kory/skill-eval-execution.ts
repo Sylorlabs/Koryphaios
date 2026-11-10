@@ -1,18 +1,24 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
+  closeSync,
+  constants,
   cpSync,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   readdirSync,
   readlinkSync,
+  readSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { join, relative } from 'node:path';
+import { basename, dirname, join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
+import { canonicalizePath, isContainedBy } from '../runtime/platform';
 import {
   createPairedSkillExperimentsV3,
   validatePairedSkillExperimentsV3,
@@ -22,11 +28,13 @@ import {
   type SkillEvalSubject,
 } from './skill-eval-harness';
 import {
+  listOpenSkillRegressionSources,
   recordSkillEvaluationRun,
   type SkillInfrastructureFailure,
   type SkillRuntimeArtifact,
 } from './skill-evaluations';
 import type { V5CompiledSkillPackage } from './skill-packages';
+import type { ProviderConfig } from '@koryphaios/shared';
 
 export interface SkillEvalFixtureMaterializer {
   id: string;
@@ -41,6 +49,16 @@ export interface SkillEvalFixtureMaterializer {
   realRuntime?: boolean;
   matches: (scenario: SkillEvalScenarioV3) => boolean;
   materialize: (destination: string, scenario: SkillEvalScenarioV3) => void | Promise<void>;
+  /** Trusted fixture-owned execution on the original source, before either arm is cloned/dispatched. */
+  captureBeforeCandidateDispatch?: (destination: string, scenario: SkillEvalScenarioV3) =>
+    { relativePath: string; text: string } | Promise<{ relativePath: string; text: string }>;
+}
+
+/** Sealed separately from the editable candidate-visible receipt. */
+export interface SkillEvalPreDispatchCapture {
+  readonly relativePath: string;
+  readonly sha256: string;
+  readonly text: string;
 }
 
 export interface SkillEvalExecutionObservation {
@@ -51,15 +69,130 @@ export interface SkillEvalExecutionObservation {
   infrastructureFailure?: SkillInfrastructureFailure;
   /** The model failed its execution contract, without a proven host failure. */
   taskFailure?: string;
+  /** Validated raw transport bytes, non-enumerable to keep opaque data out of logs. */
+  nativeTextEventStream?: Buffer;
+}
+
+export const SKILL_EVAL_PUBLIC_FIXTURE_PATHS = ['README.md', 'contract.json'] as const;
+export type SkillEvalPublicFixturePath = (typeof SKILL_EVAL_PUBLIC_FIXTURE_PATHS)[number];
+
+export interface SkillEvalPublicContractFileSnapshot {
+  available: boolean;
+  sha256: string | null;
+  byteLength: number;
+  text: string | null;
+  reason?: string;
+}
+
+export type SkillEvalPublicContractTextSnapshot = SkillEvalPublicContractFileSnapshot;
+
+/** Candidate-visible input captured from the materialized workspace before either arm runs. */
+export interface SkillEvalPublicContractSnapshot {
+  schemaVersion: 1;
+  capturedBeforeExecution: true;
+  taskPrompt: SkillEvalPublicContractTextSnapshot;
+  fixtureFiles: Record<SkillEvalPublicFixturePath, SkillEvalPublicContractFileSnapshot>;
+}
+
+function freezePublicContractSnapshot(
+  snapshot: SkillEvalPublicContractSnapshot,
+): SkillEvalPublicContractSnapshot {
+  for (const file of Object.values(snapshot.fixtureFiles)) Object.freeze(file);
+  Object.freeze(snapshot.taskPrompt);
+  Object.freeze(snapshot.fixtureFiles);
+  return Object.freeze(snapshot);
+}
+
+// Use the changed-workspace snapshot ceiling of 64 MiB for capture. Blind
+// import's public-contract/request/envelope gates remain narrower: availability
+// is not import eligibility. Oversized or unstable input is unavailable, never truncated.
+const MAX_PUBLIC_CONTRACT_FILE_BYTES = 67_108_864;
+
+function snapshotTextFile(path: string): SkillEvalPublicContractFileSnapshot {
+  const unavailable: SkillEvalPublicContractFileSnapshot = {
+    available: false, sha256: null, byteLength: 0, text: null, reason: 'not-present',
+  };
+  try {
+    const stat = lstatSync(path);
+    if (!stat.isFile() || !Number.isSafeInteger(stat.size) || stat.size < 0 ||
+      stat.size > MAX_PUBLIC_CONTRACT_FILE_BYTES) return unavailable;
+    const parentPath = dirname(path);
+    const parent = lstatSync(parentPath);
+    if (!parent.isDirectory() || parent.isSymbolicLink()) return unavailable;
+    // Preserve legitimate platform aliases such as macOS /var via the one
+    // canonicalisation helper, while pinning the actual materialized parent.
+    const canonicalParent = canonicalizePath(parentPath);
+    const fd = openSync(join(canonicalParent, basename(path)),
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+      const before = fstatSync(fd);
+      if (!before.isFile() || before.dev !== stat.dev || before.ino !== stat.ino ||
+        before.size !== stat.size || before.mtimeMs !== stat.mtimeMs || before.ctimeMs !== stat.ctimeMs) return unavailable;
+      // Never pathname-read or consume to EOF without a fixed bound: the file
+      // can grow after fstat. The extra byte detects growth without admitting it.
+      const buffer = Buffer.alloc(before.size + 1);
+      let offset = 0;
+      while (offset < buffer.length) {
+        const count = readSync(fd, buffer, offset, buffer.length - offset, offset);
+        if (!count) break;
+        offset += count;
+      }
+      const after = fstatSync(fd);
+      const current = lstatSync(path);
+      const parentAfter = lstatSync(parentPath);
+      if (offset !== before.size || after.size !== before.size ||
+        after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs ||
+        !current.isFile() || current.isSymbolicLink() || current.dev !== before.dev || current.ino !== before.ino ||
+        current.size !== before.size || current.mtimeMs !== before.mtimeMs || current.ctimeMs !== before.ctimeMs ||
+        !parentAfter.isDirectory() || parentAfter.isSymbolicLink() || parentAfter.dev !== parent.dev || parentAfter.ino !== parent.ino ||
+        canonicalizePath(parentPath) !== canonicalParent) return unavailable;
+      const bytes = buffer.subarray(0, offset);
+      const text = bytes.toString('utf8');
+      if (!Buffer.from(text, 'utf8').equals(bytes)) return unavailable;
+      return {
+        available: true,
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+        byteLength: bytes.byteLength,
+        text,
+      };
+    } finally { closeSync(fd); }
+  } catch {
+    return unavailable;
+  }
+}
+
+/** Capture only candidate-visible public input before either paired arm executes. */
+export function captureSkillEvalPublicContractSnapshot(
+  root: string,
+  taskPrompt: string,
+): SkillEvalPublicContractSnapshot {
+  const promptBytes = Buffer.from(taskPrompt, 'utf8');
+  return freezePublicContractSnapshot({
+    schemaVersion: 1,
+    capturedBeforeExecution: true,
+    taskPrompt: {
+      available: true,
+      sha256: createHash('sha256').update(promptBytes).digest('hex'),
+      byteLength: promptBytes.byteLength,
+      text: taskPrompt,
+    },
+    fixtureFiles: {
+      'README.md': snapshotTextFile(join(root, 'README.md')),
+      'contract.json': snapshotTextFile(join(root, 'contract.json')),
+    },
+  });
 }
 
 export interface SkillEvalExecutor {
   id: string;
   subject: SkillEvalSubject;
   provider: string;
+  providerConfig?: ProviderConfig;
   model: string;
   runtimeIdentity: string;
   tools: string[];
+  /** A scenario may grant a narrower or broader tool surface to both arms. */
+  toolsForScenario?: (scenario: SkillEvalScenarioV3) => string[];
   budget: SkillEvalBudget;
   execute: (input: {
     experiment: SkillEvalExperimentV3;
@@ -87,6 +220,8 @@ export interface SkillEvalDeterministicScorer {
     experiment: SkillEvalExperimentV3;
     workingDirectory: string;
     observation: SkillEvalExecutionObservation;
+    /** Exists only when the evaluator really captured it before candidate dispatch. */
+    preDispatchCapture?: SkillEvalPreDispatchCapture;
   }) => SkillEvalDeterministicScore | Promise<SkillEvalDeterministicScore>;
 }
 
@@ -104,6 +239,8 @@ export interface SkillEvalPairRunResult {
   pairId: string;
   scenarioId: string;
   initialFingerprint: string;
+  publicContractSnapshot: SkillEvalPublicContractSnapshot;
+  preDispatchCapture?: SkillEvalPreDispatchCapture;
   executionOrder: Array<'with-skill' | 'without-skill'>;
   withSkill: {
     experiment: SkillEvalExperimentV3;
@@ -217,23 +354,15 @@ function workspaceHashes(root: string): Map<string, string> {
   return hashes;
 }
 
+export const SKILL_EVAL_WORKSPACE_FINGERPRINT_FORMAT = 'path-entry-sha256-json-v1';
+
 export function fingerprintSkillEvalWorkspace(root: string): string {
-  const hash = createHash('sha256');
-  for (const path of workspaceEntries(root)) {
-    const relativePath = relative(root, path).replaceAll('\\', '/');
-    const stat = lstatSync(path);
-    hash.update(relativePath);
-    hash.update('\0');
-    if (stat.isSymbolicLink()) {
-      hash.update('symlink\0');
-      hash.update(readlinkSync(path));
-    } else if (stat.isFile()) {
-      hash.update('file\0');
-      hash.update(readFileSync(path));
-    }
-    hash.update('\0');
-  }
-  return hash.digest('hex');
+  // Hash each entry before framing the tree: binary content can contain separators.
+  return createHash('sha256')
+    .update(SKILL_EVAL_WORKSPACE_FINGERPRINT_FORMAT)
+    .update('\0')
+    .update(JSON.stringify([...workspaceHashes(root)]))
+    .digest('hex');
 }
 
 function safeArtifactSegment(value: string): string {
@@ -251,7 +380,11 @@ function persistArmEvidence(input: {
   evaluationContractHash?: string;
   evaluationContractVersion?: number;
   baseRoot: string;
+  initialFingerprint: string;
+  assertBaseUnchanged: () => void;
   workingDirectory: string;
+  publicContractSnapshot: SkillEvalPublicContractSnapshot;
+  preDispatchCapture?: SkillEvalPreDispatchCapture;
   observation: SkillEvalExecutionObservation;
   score: SkillEvalDeterministicScore | null;
 }): SkillRuntimeArtifact[] {
@@ -264,6 +397,16 @@ function persistArmEvidence(input: {
     input.variant,
   );
   mkdirSync(artifactRoot, { recursive: true });
+  const nativeStream = input.observation.nativeTextEventStream;
+  const nativeWorkspaceRoot = nativeStream === undefined
+    ? undefined
+    : canonicalizePath(dirname(input.baseRoot));
+  if (nativeWorkspaceRoot !== undefined) {
+    if (!Buffer.isBuffer(nativeStream)) throw new Error('Native text event stream must be raw bytes');
+    if (isContainedBy(nativeWorkspaceRoot, canonicalizePath(artifactRoot))) {
+      throw new Error('Native text event archive must be outside the evaluation workspace');
+    }
+  }
   const before = workspaceHashes(input.baseRoot);
   const after = workspaceHashes(input.workingDirectory);
   const paths = [...new Set([...before.keys(), ...after.keys()])].sort();
@@ -299,11 +442,78 @@ function persistArmEvidence(input: {
   const outputPath = join(artifactRoot, 'final-output.txt');
   writeFileSync(outputPath, input.observation.output);
   const manifestPath = join(artifactRoot, 'run-manifest.json');
+  const nativeTextArtifacts: SkillRuntimeArtifact[] = [];
+  let nativeTextEventArchive: {
+    location: string; sha256: string; bytes: number; workspaceRoot: string;
+  } | undefined;
+  if (nativeStream !== undefined) {
+    const location = join(artifactRoot, 'native-text-events.jsonl');
+    writeFileSync(location, nativeStream, { mode: 0o600, flag: 'wx' });
+    const archived = readFileSync(location);
+    if (!archived.equals(nativeStream)) throw new Error('Native text event archive changed during persistence');
+    const sha256 = createHash('sha256').update(archived).digest('hex');
+    nativeTextEventArchive = {
+      location: canonicalizePath(location), sha256, bytes: archived.byteLength,
+      workspaceRoot: nativeWorkspaceRoot!,
+    };
+    nativeTextArtifacts.push({ kind: 'report', location, sha256 });
+  }
+  const publicContractRoot = join(artifactRoot, 'public-contract');
+  mkdirSync(publicContractRoot, { recursive: true });
+  const publicContractFiles: Array<
+    [keyof SkillEvalPublicContractSnapshot['fixtureFiles'], string]
+  > = [
+    ['README.md', join(publicContractRoot, 'README.md')],
+    ['contract.json', join(publicContractRoot, 'contract.json')],
+  ];
+  for (const [name, destination] of publicContractFiles) {
+    const snapshot = input.publicContractSnapshot.fixtureFiles[name];
+    if (!snapshot.available) continue;
+    writeFileSync(destination, snapshot.text!);
+    const archived = readFileSync(destination);
+    if (
+      createHash('sha256').update(archived).digest('hex') !== snapshot.sha256 ||
+      archived.byteLength !== snapshot.byteLength ||
+      archived.toString('utf8') !== snapshot.text
+    ) {
+      throw new Error(`Public fixture snapshot could not be archived for ${name}`);
+    }
+  }
+  const taskPromptSnapshot = input.publicContractSnapshot.taskPrompt;
+  if (
+    !taskPromptSnapshot.available ||
+    typeof taskPromptSnapshot.sha256 !== 'string' ||
+    typeof taskPromptSnapshot.text !== 'string'
+  ) {
+    throw new Error('Public task-prompt snapshot is unavailable');
+  }
+  const promptPath = join(publicContractRoot, 'task-prompt.txt');
+  writeFileSync(promptPath, taskPromptSnapshot.text);
+  const archivedPrompt = readFileSync(promptPath);
+  if (
+    createHash('sha256').update(archivedPrompt).digest('hex') !== taskPromptSnapshot.sha256 ||
+    archivedPrompt.byteLength !== taskPromptSnapshot.byteLength ||
+    archivedPrompt.toString('utf8') !== taskPromptSnapshot.text
+  ) {
+    throw new Error('Public task-prompt snapshot could not be archived');
+  }
+  let archivedPreDispatch: { location: string; sha256: string; relativePath: string } | undefined;
+  if (input.preDispatchCapture) {
+    const sealed = input.preDispatchCapture;
+    const location = join(artifactRoot, 'pre-dispatch-original.json');
+    writeFileSync(location, sealed.text, { flag: 'wx' });
+    if (createHash('sha256').update(readFileSync(location)).digest('hex') !== sealed.sha256) {
+      throw new Error('Sealed pre-dispatch original-source observation could not be archived');
+    }
+    archivedPreDispatch = { location, sha256: sealed.sha256, relativePath: sealed.relativePath };
+  }
+  const finalFingerprint = fingerprintSkillEvalWorkspace(input.workingDirectory);
+  input.assertBaseUnchanged();
   writeFileSync(
     manifestPath,
     `${JSON.stringify(
       {
-        artifactSchemaVersion: 2,
+        artifactSchemaVersion: 3,
         pairId: input.pairId,
         variant: input.variant,
         scenario: input.scenario,
@@ -312,8 +522,12 @@ function persistArmEvidence(input: {
         harnessVersion: input.harnessVersion,
         evaluationContractHash: input.evaluationContractHash ?? null,
         evaluationContractVersion: input.evaluationContractVersion ?? null,
-        initialFingerprint: fingerprintSkillEvalWorkspace(input.baseRoot),
-        finalFingerprint: fingerprintSkillEvalWorkspace(input.workingDirectory),
+        workspaceFingerprintFormat: SKILL_EVAL_WORKSPACE_FINGERPRINT_FORMAT,
+        initialFingerprint: input.initialFingerprint,
+        finalFingerprint,
+        publicContractSnapshot: input.publicContractSnapshot,
+        preDispatchCaptureArchive: archivedPreDispatch ?? null,
+        ...(nativeTextEventArchive ? { nativeTextEventArchive } : {}),
         durationMs: input.observation.durationMs,
         changes,
         score: input.score,
@@ -325,6 +539,11 @@ function persistArmEvidence(input: {
     )}\n`,
   );
   return [
+    ...nativeTextArtifacts,
+    ...(archivedPreDispatch ? [{
+      kind: 'report' as const, location: archivedPreDispatch.location,
+      sha256: archivedPreDispatch.sha256,
+    }] : []),
     {
       kind: 'report',
       location: manifestPath,
@@ -390,6 +609,8 @@ export async function runPairedSkillEvaluationV3(input: {
   materializers: readonly SkillEvalFixtureMaterializer[];
   scorers: readonly SkillEvalDeterministicScorer[];
   pairId?: string;
+  /** Immutable failure to retest under the exact current task and scorer. */
+  regressionId?: string;
   persist?: boolean;
   executionOrder?: 'with-skill-first' | 'without-skill-first';
 }): Promise<SkillEvalPairRunResult> {
@@ -405,6 +626,14 @@ export async function runPairedSkillEvaluationV3(input: {
   if (materializer.readinessBlockers?.length) {
     throw new Error(`Cannot execute ${scenario.id}: ${materializer.readinessBlockers.join('; ')}`);
   }
+  if (input.regressionId) {
+    const source = listOpenSkillRegressionSources(
+      input.projectRoot, input.skillPackage.sidecar.name, input.skillRevisionHash,
+    ).find((run) => run.id === input.regressionId);
+    if (!source || (source.scenarioId ?? source.caseId) !== scenario.id) {
+      throw new Error(`Cannot retest ${scenario.id}: regression source is not open for this task`);
+    }
+  }
 
   const pairId = input.pairId ?? `${scenario.id}:${randomUUID()}`;
   const suiteId = `${input.skillPackage.sidecar.name}:v${input.skillPackage.sidecar.version}:held-out`;
@@ -419,7 +648,7 @@ export async function runPairedSkillEvaluationV3(input: {
     harnessVersion: input.harnessVersion,
     role: 'worker',
     runtimeIdentity: input.executor.runtimeIdentity,
-    tools: input.executor.tools,
+    tools: input.executor.toolsForScenario?.(scenario) ?? input.executor.tools,
     budget: input.executor.budget,
   });
   const pairValidation = validatePairedSkillExperimentsV3(
@@ -444,7 +673,46 @@ export async function runPairedSkillEvaluationV3(input: {
 
   try {
     await materializer.materialize(baseRoot, scenario);
+    let preDispatchCapture: SkillEvalPreDispatchCapture | undefined;
+    if (materializer.captureBeforeCandidateDispatch) {
+      const capture = await materializer.captureBeforeCandidateDispatch(baseRoot, scenario);
+      if (!/^[a-zA-Z0-9_.-]+(?:\/[a-zA-Z0-9_.-]+)*$/u.test(capture.relativePath) ||
+        capture.relativePath.split('/').includes('..')) {
+        throw new Error('Unsafe pre-dispatch observation path');
+      }
+      const snapshot = snapshotTextFile(join(baseRoot, capture.relativePath));
+      if (!snapshot.available || snapshot.text !== capture.text || !snapshot.sha256) {
+        throw new Error('Original-source observation was not captured intact before dispatch');
+      }
+      preDispatchCapture = Object.freeze({
+        relativePath: capture.relativePath,
+        sha256: snapshot.sha256,
+        text: snapshot.text,
+      });
+    }
+    const baseIdentity = lstatSync(baseRoot);
+    if (!baseIdentity.isDirectory() || baseIdentity.isSymbolicLink()) {
+      throw new Error('Evaluation base workspace must be a real directory');
+    }
+    const canonicalBaseRoot = canonicalizePath(baseRoot);
     const initialFingerprint = fingerprintSkillEvalWorkspace(baseRoot);
+    const assertBaseUnchanged = () => {
+      try {
+        const current = lstatSync(baseRoot);
+        if (current.isDirectory() && !current.isSymbolicLink() &&
+          current.dev === baseIdentity.dev && current.ino === baseIdentity.ino &&
+          canonicalizePath(baseRoot) === canonicalBaseRoot &&
+          fingerprintSkillEvalWorkspace(baseRoot) === initialFingerprint) return;
+      } catch {
+        // A missing or substituted baseline cannot become starting-state evidence.
+      }
+      throw new Error('Evaluation base workspace changed after materialization');
+    };
+    const publicContractSnapshot = captureSkillEvalPublicContractSnapshot(
+      baseRoot,
+      scenario.prompt,
+    );
+    assertBaseUnchanged();
     cpSync(baseRoot, withSkillRoot, { recursive: true });
     cpSync(baseRoot, withoutSkillRoot, { recursive: true });
     if (
@@ -459,6 +727,7 @@ export async function runPairedSkillEvaluationV3(input: {
       workingDirectory: string,
       skillContext: string | null,
     ) => {
+      assertBaseUnchanged();
       let observation: SkillEvalExecutionObservation;
       try {
         observation = await input.executor.execute({
@@ -475,6 +744,7 @@ export async function runPairedSkillEvaluationV3(input: {
           ['executor threw before producing a complete observation'],
         );
       }
+      assertBaseUnchanged();
       const score: SkillEvalDeterministicScore | null = observation.infrastructureFailure
         ? null
         : observation.taskFailure
@@ -485,11 +755,12 @@ export async function runPairedSkillEvaluationV3(input: {
               integrityFailure: false,
               evidence: [observation.taskFailure],
             }
-          : await scorer.score({ scenario, experiment, workingDirectory, observation });
+          : await scorer.score({ scenario, experiment, workingDirectory, observation, preDispatchCapture });
       if (score) {
         boundedUnit(score.quality);
         boundedUnit(score.verification);
       }
+      assertBaseUnchanged();
       if (input.persist) {
         const durableArtifacts = persistArmEvidence({
           projectRoot: input.projectRoot,
@@ -502,7 +773,11 @@ export async function runPairedSkillEvaluationV3(input: {
           evaluationContractHash: input.evaluationContractHash,
           evaluationContractVersion: input.evaluationContractVersion,
           baseRoot,
+          initialFingerprint,
+          assertBaseUnchanged,
           workingDirectory,
+          publicContractSnapshot,
+          preDispatchCapture,
           observation,
           score,
         });
@@ -525,6 +800,9 @@ export async function runPairedSkillEvaluationV3(input: {
           protocolVersion: 3,
           variant: experiment.variant,
           caseCategory: 'full-task',
+          ...(experiment.variant === 'with-skill' && input.regressionId
+            ? { regressionId: input.regressionId }
+            : {}),
           comparisonId: pairId,
           routing: {
             expectedSelection: true,
@@ -568,6 +846,8 @@ export async function runPairedSkillEvaluationV3(input: {
       pairId,
       scenarioId: scenario.id,
       initialFingerprint,
+      publicContractSnapshot,
+      preDispatchCapture,
       executionOrder,
       withSkill,
       withoutSkill,

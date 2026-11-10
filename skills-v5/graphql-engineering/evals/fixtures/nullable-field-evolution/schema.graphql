@@ -1,0 +1,16 @@
+type Query {
+  user(id: ID!): User
+}
+
+type User {
+  id: ID!
+  displayName: String!
+  avatarUrl: String @deprecated(reason: "Use avatar.url; null when no avatar is set.")
+  avatar: Avatar
+}
+
+type Avatar {
+  url: String!
+  width: Int!
+  height: Int!
+}

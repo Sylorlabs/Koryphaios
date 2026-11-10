@@ -1,6 +1,6 @@
 # Verification source map
 
-`verification` is an individually researched V5 candidate. The sources below bound its evidence discipline; they do not by themselves qualify the skill. Promotion still requires paired same-model skill/no-skill outcomes and independent blind evaluation.
+`verification` is an individually researched V5 candidate. The sources below bound its evidence discipline; they do not by themselves qualify the skill. Promotion still requires paired same-model skill/no skill outcomes and independent blind evaluation.
 
 ## Authoritative and first-party sources
 

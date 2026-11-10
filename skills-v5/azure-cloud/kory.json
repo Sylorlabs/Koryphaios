@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "azure-cloud",
-  "version": "5.1.1",
+  "version": "5.1.2",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -124,10 +124,10 @@
     {
       "url": "https://learn.microsoft.com/en-us/azure/well-architected/whats-new",
       "sourceType": "official-docs",
-      "versionScope": "Azure Well-Architected Framework rolling change log through June 2026 as available 2026-09-05",
+      "versionScope": "Azure Well-Architected Framework rolling change log through August 2026 as available 2026-10-04",
       "staleAfterDays": 30,
       "notes": "Current Azure Well-Architected guidance and recent reliability/operations design updates.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://learn.microsoft.com/en-us/azure/governance/management-groups/overview",
@@ -148,18 +148,18 @@
     {
       "url": "https://learn.microsoft.com/en-us/azure/reliability/availability-zones-overview",
       "sourceType": "official-docs",
-      "versionScope": "Azure availability-zone guidance current as available 2026-09-05",
+      "versionScope": "Azure availability-zone guidance current as available 2026-10-20",
       "staleAfterDays": 45,
       "notes": "Zonal versus zone-redundant resilience and requirement to verify exact service/SKU zone support.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-10-20"
     },
     {
       "url": "https://learn.microsoft.com/en-us/azure/azure-monitor/platform/diagnostic-settings",
       "sourceType": "official-docs",
-      "versionScope": "Azure Monitor diagnostic-settings guidance current as available 2026-09-05",
+      "versionScope": "Azure Monitor diagnostic-settings guidance current as available 2026-10-04",
       "staleAfterDays": 30,
       "notes": "Resource logs require diagnostic settings for collection/routing; Activity Log and metrics can be exported to deliberate destinations.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     }
   ],
   "authoringMaturity": "individual"

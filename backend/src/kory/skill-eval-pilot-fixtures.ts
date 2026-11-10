@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto';
+import { rmSync } from 'node:fs';
+import { join } from 'node:path';
 import type {
   SkillEvalDeterministicScore,
   SkillEvalDeterministicScorer,
@@ -51,7 +54,7 @@ function hiddenScore(input: {
 }
 
 const backendJobMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'backend-engineering/idempotent-job-state-machine@1',
+  id: 'backend-engineering/idempotent-job-state-machine@2',
   matches: (scenario) => scenario.id === BACKEND_JOB,
   materialize: (destination) => {
     writeFixtureFile(destination, 'package.json', packageJson('kory-eval-backend-job'));
@@ -155,6 +158,46 @@ test('normal request creates and commits one job', () => {
   expect(system.getJob(created.jobId)?.state).toBe('committed');
 });
 
+test('repeated cancellation keeps the job cancelled and drains its queued delivery once', () => {
+  const system = new InvoiceJobSystem();
+  const created = system.createInvoiceJob('cancel-repeat', 'inv-1');
+
+  expect(system.requestCancel(created.jobId)).toBe(true);
+  expect(system.requestCancel(created.jobId)).toBe(false);
+  expect(system.runWorkerOnce('worker-a')).toEqual({
+    jobId: created.jobId,
+    crashed: false,
+  });
+  expect(system.runWorkerOnce('worker-b')).toEqual({
+    jobId: null,
+    crashed: false,
+  });
+  expect(system.getJob(created.jobId)).toMatchObject({
+    state: 'cancelled',
+    invoiceId: 'inv-1',
+  });
+  expect(system.objectKeys()).toEqual([]);
+});
+
+test('duplicate submission preserves the first payload and does not enqueue a second delivery', () => {
+  const system = new InvoiceJobSystem();
+  const first = system.createInvoiceJob('duplicate-submit', 'inv-first');
+  const duplicate = system.createInvoiceJob('duplicate-submit', 'inv-second');
+
+  expect(duplicate).toEqual(first);
+  expect(system.jobCount()).toBe(1);
+  expect(system.getJob(first.jobId)?.invoiceId).toBe('inv-first');
+  expect(system.runWorkerOnce('worker-a')).toEqual({
+    jobId: first.jobId,
+    crashed: false,
+  });
+  expect(system.runWorkerOnce('worker-b')).toEqual({
+    jobId: null,
+    crashed: false,
+  });
+   expect(system.objectKeys()).toEqual([\`invoices/\${first.jobId}.pdf\`]);
+});
+
 test('pending jobs can be cancelled', () => {
   const system = new InvoiceJobSystem();
   const created = system.createInvoiceJob('idem-1', 'inv-1');
@@ -178,7 +221,7 @@ Repair the implementation and add regression tests. A correct design gives one s
 };
 
 const backendJobScorer: SkillEvalDeterministicScorer = {
-  id: 'backend-engineering/idempotent-job-state-machine-scorer@2',
+  id: 'backend-engineering/idempotent-job-state-machine-scorer@3',
   scenarioIds: [BACKEND_JOB],
   score: ({ workingDirectory }) =>
     hiddenScore({
@@ -197,6 +240,18 @@ test('hidden: duplicate HTTP retries reuse the logical job identity', () => {
   const second = system.createInvoiceJob('same-key', 'inv-1');
   expect(second).toEqual(first);
   expect(system.jobCount()).toBe(1);
+});
+
+test('hidden: a duplicate payload cannot replace the first job or add a second delivery', () => {
+  const system = new InvoiceJobSystem();
+  const first = system.createInvoiceJob('same-key-different-payload', 'inv-first');
+  const second = system.createInvoiceJob('same-key-different-payload', 'inv-second');
+  expect(second).toEqual(first);
+  expect(system.jobCount()).toBe(1);
+  expect(system.getJob(first.jobId)?.invoiceId).toBe('inv-first');
+  expect(system.runWorkerOnce('worker-a').jobId).toBe(first.jobId);
+  expect(system.runWorkerOnce('worker-b')).toEqual({ jobId: null, crashed: false });
+   expect(system.objectKeys()).toEqual([\`invoices/\${first.jobId}.pdf\`]);
 });
 
 test('hidden: crash after upload reconciles to one stable output', () => {
@@ -226,6 +281,17 @@ test('hidden: cancellation before commit never creates output', () => {
   expect(system.requestCancel(created.jobId)).toBe(true);
   system.runWorkerOnce('worker-a');
   expect(system.objectKeys()).toHaveLength(0);
+});
+
+test('hidden: repeated cancellation is terminal and does not revive queued work', () => {
+  const system = new InvoiceJobSystem();
+  const created = system.createInvoiceJob('cancel-repeat-key', 'inv-5');
+  expect(system.requestCancel(created.jobId)).toBe(true);
+  expect(system.requestCancel(created.jobId)).toBe(false);
+  expect(system.runWorkerOnce('worker-a').jobId).toBe(created.jobId);
+  expect(system.runWorkerOnce('worker-b')).toEqual({ jobId: null, crashed: false });
+  expect(system.getJob(created.jobId)?.state).toBe('cancelled');
+  expect(system.objectKeys()).toEqual([]);
 });
 `,
     }),
@@ -380,7 +446,7 @@ test('hidden: cancellation leaves cursor replayable without double effects', () 
 };
 
 const dataAovMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'data-analysis/unit-grain-revenue-reconciliation@1',
+  id: 'data-analysis/unit-grain-revenue-reconciliation@2',
   matches: (scenario) => scenario.id === DATA_AOV,
   materialize: (destination) => {
     writeFixtureFile(
@@ -452,7 +518,7 @@ test('fixture documents the pricing boundary', () => {
 
 Pricing changed at 2026-07-01. The export is line-item grain and repeats the order total on each line. \`row_id\` identifies ingestion rows; exact duplicate row ids are duplicate ingestion records. Source version \`v1\` stores \`legacy_total\` in cents and \`v2\` stores it in dollars. Refunded orders remain in gross reconciliation but are excluded from the paid-order AOV comparison.
 
-Make \`bun run analyze\` write \`analysis.json\` with these fields: \`grain\`, \`duplicateRowsRemoved\`, \`refundedOrdersExcludedFromAov\`, \`reconciliation.pre/post.{orders,grossRevenue,netRevenue}\`, \`aov.{pre,post,difference,percentChange}\`, \`naiveRowAverage.{pre,post}\`, \`uncertainty.{method,sampleSizePre,sampleSizePost}\`, and \`conclusion.{direction,causal}\`. Calculations must be reproducible from the CSV; do not hard-code the expected totals.
+Make \`bun run analyze\` write \`analysis.json\` with these fields: \`grain\`, \`duplicateRowsRemoved\`, \`refundedOrdersExcludedFromAov\`, \`reconciliation.pre/post.{orders,grossRevenue,netRevenue}\`, \`aov.{pre,post,difference,percentChange}\`, \`naiveRowAverage.{pre,post}\`, \`uncertainty.{method,sampleSizePre,sampleSizePost}\`, and \`conclusion.{direction,causal}\`. Define \`naiveRowAverage\` as the average normalized \`legacy_total\` across paid source line rows before ingestion-row deduplication or order-grain collapse: convert v1 cents to dollars, keep v2 dollars as-is, retain duplicate ingestion rows, and exclude refunded rows. Calculations must be reproducible from the CSV; do not hard-code the expected totals.
 `,
     );
   },
@@ -477,21 +543,29 @@ function close(actual: number | undefined, expected: number, tolerance = 1e-6): 
 }
 
 const dataAovScorer: SkillEvalDeterministicScorer = {
-  id: 'data-analysis/unit-grain-revenue-reconciliation-scorer@2',
+  id: 'data-analysis/unit-grain-revenue-reconciliation-scorer@4',
   scenarioIds: [DATA_AOV],
   score: ({ workingDirectory }) => {
+    const observedArtifact = `.kory-eval/__kory_data_aov_${randomUUID().replaceAll('-', '')}.json`;
     const hidden = runHiddenBunTest(
       workingDirectory,
       `import { expect, test } from 'bun:test';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 
 test('hidden: analysis command completes', () => {
   const result = spawnSync('bun', ['run', 'analyze'], { cwd: process.cwd(), encoding: 'utf8' });
   expect(result.status).toBe(0);
+  mkdirSync('.kory-eval', { recursive: true });
+  writeFileSync(${JSON.stringify(observedArtifact)}, readFileSync('analysis.json'));
 });
 `,
     );
-    const artifact = readJsonArtifact<AovArtifact>(workingDirectory, 'analysis.json');
+    // Candidate public tests run after the hidden test and may legitimately
+    // clean generated outputs. Score the evaluator-owned snapshot captured
+    // immediately after the requested analysis command completed.
+    const artifact = readJsonArtifact<AovArtifact>(workingDirectory, observedArtifact);
+    rmSync(join(workingDirectory, observedArtifact), { force: true });
     const grain = artifact?.grain?.trim().toLowerCase() ?? '';
     const direction = artifact?.conclusion?.direction?.trim().toLowerCase() ?? '';
     const checks =
@@ -509,8 +583,8 @@ test('hidden: analysis command completes', () => {
       close(artifact.aov?.post, 80) &&
       close(artifact.aov?.difference, -10) &&
       close(artifact.aov?.percentChange, -11.11111111111111, 0.02) &&
-      close(artifact.naiveRowAverage?.pre, 9013.333333333334, 0.02) &&
-      close(artifact.naiveRowAverage?.post, 1231.6666666666667, 0.02) &&
+      close(artifact.naiveRowAverage?.pre, 95, 0.02) &&
+      close(artifact.naiveRowAverage?.post, 85, 0.02) &&
       artifact.uncertainty?.sampleSizePre === 2 &&
       artifact.uncertainty?.sampleSizePost === 2 &&
       Boolean(artifact.uncertainty?.method && artifact.uncertainty.method !== 'none') &&
@@ -657,7 +731,7 @@ test('hidden: analysis command completes', () => {
 };
 
 const appsecImportMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'application-security/media-import-boundaries@3',
+  id: 'application-security/media-import-boundaries@4',
   matches: (scenario) => scenario.id === APPSEC_IMPORT,
   materialize: (destination) => {
     writeFixtureFile(destination, 'package.json', packageJson('kory-eval-appsec-import'));
@@ -730,7 +804,7 @@ export function sanitizeDiagnostic(message: string): string {
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { archiveDestination, converterInvocation, validateArchive, validateFetchChain } from '../src/importer';
+import { archiveDestination, converterInvocation, sanitizeDiagnostic, validateArchive, validateFetchChain } from '../src/importer';
 
 test('happy-path public input remains accepted', () => {
   const root = mkdtempSync(join(tmpdir(), 'kory-appsec-import-'));
@@ -739,6 +813,9 @@ test('happy-path public input remains accepted', () => {
     expect(archiveDestination(root, 'a.wav')).toBe(join(realpathSync(root), 'a.wav'));
     expect(validateArchive({ entries: 3, totalUncompressedBytes: 1000, maxEntryBytes: 800, maxDepth: 2 })).toBe(true);
     expect(converterInvocation('a.wav', 'a.mp3', ['--quality', 'high']).args.length).toBeGreaterThan(0);
+    const diagnostic = sanitizeDiagnostic('Authorization: Bearer public-test-secret\\nname=bad\\u001b[31m');
+    expect(diagnostic).not.toContain('public-test-secret');
+    expect(diagnostic).not.toContain('\\u001b');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -752,16 +829,16 @@ test('happy-path public input remains accepted', () => {
 
 The caller is already authorized; do not redesign authorization. The service may fetch only HTTPS public-network sources. Every redirect target and resolved address must satisfy the same destination policy. Archive and output paths must remain inside the job root after normalization/canonicalization. The converter executable is fixed and must receive attacker-controlled values as structured argv entries, never shell syntax.
 
-The supplied happy-path job root exists before path confinement is evaluated. Resolve that real root (and existing ancestors for new targets) rather than assuming an invented absolute path exists. The fixture requires the existing \`--quality low|medium|high\` option contract; implementations may reject unsupported converter flags. Safe argument separation is proved with supported options plus attacker-controlled file/operand values, not by requiring arbitrary flags to be accepted.
+The supplied happy-path job root exists before path confinement is evaluated. Resolve that real root (and existing ancestors for new targets) rather than assuming an invented absolute path exists. The fixture requires the existing --quality low|medium|high option contract; implementations may reject unsupported converter flags. Safe argument separation is proved with supported options plus attacker-controlled file/operand values, not by requiring arbitrary flags to be accepted.
 
-Resource limits must cover redirect count, archive entry count, total expanded bytes, per-entry bytes, and nesting depth. Failures are fail-closed and user-visible diagnostics must not leak credentials or terminal/control sequences. Add reproducible negative tests for the privileged sinks you harden.
+Resource limits must cover redirect count, archive entry count, total expanded bytes, per-entry bytes, nesting depth, remote body bytes, generated output bytes, processing duration, converter memory/process use, and diagnostic/log bytes. The starter constants define the existing redirect/archive ceilings. For the other limits, choose explicit conservative provisional numeric ceilings and identify them as proposed deployment defaults rather than observed product policy; qualitative “finite” or “bounded” language alone is insufficient. Failures are fail-closed and user-visible diagnostics must not leak credentials or terminal/control sequences. In particular, a full Authorization: Bearer <credential> diagnostic must remove the credential value even when broader field-name redaction also runs. Add reproducible negative tests for the privileged sinks you harden.
 `,
     );
   },
 };
 
 const appsecImportScorer: SkillEvalDeterministicScorer = {
-  id: 'application-security/media-import-boundaries-scorer@3',
+  id: 'application-security/media-import-boundaries-scorer@4',
   scenarioIds: [APPSEC_IMPORT],
   score: ({ workingDirectory }) =>
     hiddenScore({
@@ -777,6 +854,10 @@ import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { archiveDestination, converterInvocation, sanitizeDiagnostic, validateArchive, validateFetchChain } from '../src/importer';
+
+function directoryLinkType(): 'junction' | 'dir' {
+  return process.platform === 'win32' ? 'junction' : 'dir';
+}
 
 test('hidden: every redirect and resolved address is revalidated', () => {
   expect(validateFetchChain([
@@ -795,7 +876,7 @@ test('hidden: archive paths cannot escape the job root', () => {
   const outside = mkdtempSync(join(tmpdir(), 'kory-appsec-outside-'));
   try {
     mkdirSync(join(root, 'nested'));
-    symlinkSync(outside, join(root, 'escape-link'), process.platform === 'win32' ? 'junction' : 'dir');
+    symlinkSync(outside, join(root, 'escape-link'), directoryLinkType());
     expect(() => archiveDestination(root, '../escape.txt')).toThrow();
     expect(() => archiveDestination(root, '/etc/passwd')).toThrow();
     expect(() => archiveDestination(root, 'escape-link/file.wav')).toThrow();
@@ -927,13 +1008,16 @@ Persisted queue entries are revalidated on load. Ordinary serialized session sta
 };
 
 const appsecDesktopScorer: SkillEvalDeterministicScorer = {
-  id: 'application-security/desktop-sync-client-boundaries-scorer@2',
+  id: 'application-security/desktop-sync-client-boundaries-scorer@3',
   scenarioIds: [APPSEC_DESKTOP],
   score: ({ workingDirectory }) =>
     hiddenScore({
       root: workingDirectory,
       coverage: [
-        /malformed|unknown|payload|schema/i,
+        // Recorded 5.1.6 tests reject invalid commands with this assertion but
+        // use none of the original labels. Recognize the rejection assertion,
+        // not a bare "invalid" mention; all runtime and coverage gates still apply.
+        /malformed|unknown|payload|schema|\.toThrow(?:Error)?\(\s*['"`]invalid command['"`]\s*\)/i,
         /revok|expir|reauth/i,
         /travers|authorized.*root|canonical/i,
       ],
@@ -1412,6 +1496,30 @@ function transitionEdge(
   );
 }
 
+function transitionEdgeOrGuardedDynamicDestination(
+  artifact: InteractionContractArtifact,
+  from: string,
+  to: string,
+): boolean {
+  if (transitionEdge(artifact, from, to)) return true;
+  return Boolean(
+    artifact.transitions?.some((transition) => {
+      if (transition.from !== from || !/^\$[A-Za-z][A-Za-z0-9_-]*$/u.test(transition.to ?? '')) {
+        return false;
+      }
+      const text = [transition.event, transition.action, transition.guard, transition.effect]
+        .filter(Boolean)
+        .join(' ');
+      return (
+        new RegExp(
+          `(?:^|[^A-Za-z0-9-])${to.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[^A-Za-z0-9-])`,
+          'iu',
+        ).test(text) && /reconcil|reattach|restore|authoritative|remote.?state/iu.test(text)
+      );
+    }),
+  );
+}
+
 function interactionArtifactScore(input: {
   root: string;
   validate: (artifact: InteractionContractArtifact) => boolean;
@@ -1598,7 +1706,7 @@ The contract must distinguish mixed validation, processing before commit, commit
 };
 
 const ixImportScorer: SkillEvalDeterministicScorer = {
-  id: 'interaction-design/resumable-import-scorer@3',
+  id: 'interaction-design/resumable-import-scorer@4',
   scenarioIds: [IX_IMPORT],
   score: ({ workingDirectory }) =>
     interactionArtifactScore({
@@ -1661,7 +1769,11 @@ const ixImportScorer: SkillEvalDeterministicScorer = {
           transitionEdge(artifact, 'reviewing-partial', 'processing-precommit') &&
           transitionEdge(artifact, 'processing-precommit', 'committing') &&
           transitionEdge(artifact, 'processing-precommit', 'disconnected') &&
-          transitionEdge(artifact, 'disconnected', 'processing-precommit') &&
+          transitionEdgeOrGuardedDynamicDestination(
+            artifact,
+            'disconnected',
+            'processing-precommit',
+          ) &&
           transitionEdge(artifact, 'disconnected', 'completed') &&
           transitionEdge(artifact, 'committing', 'partial-result') &&
           transitionEdge(artifact, 'completed', 'reopened') &&

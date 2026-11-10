@@ -1,13 +1,13 @@
 # Source map
 
-`threat-modeling-practice` is individually authored for V5; empirical qualification is tracked separately in the audit/evaluation ledger. These sources support a methodology-neutral, decision-oriented threat-model workflow; the actual architecture, identity model, data/control flows, and supplied operational evidence determine the concrete model.
+`threat-modeling-practice` is individually authored for V5; empirical qualification is tracked separately in the audit/evaluation ledger. These sources support a methodology-neutral, decision oriented threat model workflow; the actual architecture, identity model, data/control flows, and supplied operational evidence determine the concrete model.
 
 ## Qualification basis
 
 - Package authorship is independent from empirical qualification; the audit/evaluation ledger is authoritative for qualification status.
 - Hierarchy: root responsibility.
-- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held-out cases through the real resolver.
-- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no-skill pairing, regression retention, and blind semantic judging.
+- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held out cases through the real resolver.
+- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no skill pairing, regression retention, and blind semantic judging.
 - Source discipline: authoritative/spec/reference sources outrank community patterns when they conflict; runtime evidence outranks examples for behavioral claims.
 
 ## Maintained sources
@@ -23,7 +23,7 @@
 - **NIST SP 800-218: SSDF Version 1.1**: https://csrc.nist.gov/pubs/sp/800/218/final
   - Scope: Version 1.1 final from February 2022. NIST lists SP 800-218 Rev. 1 / SSDF Version 1.2 as draft, not final, as verified 2026-09-05.
   - Use: secure-development lifecycle context and risk-based software security practices. It does not replace system-specific threat modeling or dictate one modeling method.
-  - Verified: 2026-09-05; refresh after 365 days.
+  - Verified: 2026-11-07; refresh after 365 days.
 
 ## Interpretation rules
 

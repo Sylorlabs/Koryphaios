@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "event-driven-architecture",
-  "version": "5.1.1",
+  "version": "5.1.3",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -19,14 +19,21 @@
     "message broker architecture",
     "event bus",
     "event contracts",
+    "event delivery semantics",
+    "event ordering",
     "event idempotency",
-    "replay semantics"
+    "schema evolution",
+    "dead letter",
+    "dead-letter",
+    "replay recovery",
+    "replay semantics",
+    "outbox"
   ],
   "excludes": [],
   "evidence": [
     "event-driven-architecture decision and boundary evidence",
     "Representative verification results or explicit unavailable checks",
-    "Hierarchy boundary and selected specialist rationale",
+    "Concrete scope boundary and neighboring responsibility behavior",
     "Representative success, negative-path, and recovery verification"
   ],
   "routing": {
@@ -35,7 +42,10 @@
       "The current task is domain event.",
       "I need help with message broker architecture.",
       "Work on event bus for this request.",
-      "This request specifically requires event contracts."
+      "This request specifically requires event contracts.",
+      "Define event delivery semantics across the producer, broker, and consumer.",
+      "Repair event ordering and idempotency for a keyed business workflow.",
+      "Plan schema evolution and dead-letter recovery for independently deployed consumers."
     ],
     "negative": [
       "The only requested work is stream processing.",
@@ -118,7 +128,7 @@
       "versionScope": "Apache Kafka documentation as available 2026-09-04",
       "staleAfterDays": 60,
       "notes": "Streams, partitions, delivery, ordering, replication, and operational behavior.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://www.asyncapi.com/docs/reference/specification/v3.1.0",
@@ -129,12 +139,20 @@
       "verifiedAt": "2026-09-06"
     },
     {
+      "url": "https://github.com/cloudevents/spec/blob/v1.0.2/cloudevents/spec.md",
+      "sourceType": "spec",
+      "versionScope": "CloudEvents Specification 1.0.2",
+      "staleAfterDays": 180,
+      "notes": "Conditional event-envelope identity, source, type, subject, time, and correlation attributes.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
       "url": "https://kafka.apache.org/40/design/design/",
       "sourceType": "official-docs",
       "versionScope": "Apache Kafka 4.0 design documentation",
       "staleAfterDays": 60,
       "notes": "Conditional offset, redelivery, transaction, and delivery-semantics reference.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     }
   ],
   "authoringMaturity": "individual"

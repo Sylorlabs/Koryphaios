@@ -1,16 +1,20 @@
 {
   "id": "event-driven-architecture-full-task-2-individual",
   "maturity": "individual",
-  "prompt": "Evolve a CustomerUpdated event to support multiple contact methods while three consumers deploy independently. One old consumer treats an unknown enum as fatal and another assumes email is always present. Design a staged schema/versioning rollout, compatibility tests, replay behavior, and dead-letter recovery so producers and consumers can coexist during migration. Do not couple deployment order through an undocumented flag.",
+  "prompt": "Evolve a CustomerUpdated integration event from a single email field to multiple contact methods while three consumers deploy independently. One old consumer treats an unknown enum as fatal and another assumes email is always present. Design an expand/compatibility/contract rollout without an undocumented deployment flag: preserve the existing event identity and supported representation during coexistence, introduce an additive representation and explicit version policy, migrate consumers in a safe order, define when a representation may be retired, and state how unknown fields and values are handled. Define routing, ordering, delivery, idempotency, bounded replay, retry, dead-letter, and operator re-drive behavior. Verify old/new consumer compatibility, duplicate/delayed/reordered/missing events, historical replay through each supported consumer version, poison-event recovery, and cleanup of the compatibility path.",
   "environment": {
     "kind": "repository",
     "startingState": "fixture://event-driven-architecture/event-schema-consumer-evolution",
     "requirements": [
-      "producer plus three consumer fixtures with documented current decoding assumptions",
-      "historical event log to replay through old and new consumers",
-      "new contact-method representation and unknown-enum test vector",
-      "dead-letter/retry fixture proving incompatible events are recoverable and observable",
-      "paired same-model skill/no-skill execution from the identical starting snapshot"
+      "producer plus three independently deployable consumer fixtures with documented current decoding, enum, required-field, authorization, and side-effect assumptions",
+      "historical event log with stable logical event identities, old schema records, additive-field records, and an unknown-enum test vector",
+      "broker fixture with injectable duplicate, delay, reorder, missing-delivery, publish-failure, acknowledgement, and consumer-restart faults",
+      "durable consumer idempotency/effect fixture shared across process recreation and schema representations",
+      "compatibility harness that exercises old consumer against old/additive payloads and new consumers against both supported representations",
+      "dead-letter/retry fixture proving bounded attempts, preserved original envelope and failure context, operator visibility, corrected re-drive, and retention cleanup",
+      "deployment-order fixture that can demonstrate coexistence without a hidden producer or consumer flag",
+      "independent contract/authorization inspection path for replay and re-drive",
+      "paired same-model skill/no-skill execution from the identical starting snapshot is evaluator-owned evidence"
     ]
   },
   "scorers": [
@@ -19,13 +23,10 @@
       "kind": "deterministic",
       "weight": 0.75,
       "evidence": [
-        "event-driven-architecture decision and boundary evidence",
-        "Representative verification results or explicit unavailable checks",
-        "Hierarchy boundary and selected specialist rationale",
-        "Representative success, negative-path, and recovery verification",
-        "hierarchy boundary and specialist selection rationale",
-        "representative negative/recovery verification",
-        "source/version boundary when facts can drift"
+        "version and compatibility matrix across producer and three consumers",
+        "stable identity, delivery, ordering, and replay results",
+        "dead-letter re-drive and compatibility cleanup results",
+        "explicit status for unavailable checks"
       ]
     },
     {
@@ -41,12 +42,14 @@
     }
   ],
   "requiredEvidence": [
-    "event-schema-consumer-evolution scenario evidence",
-    "event-driven-architecture decision and boundary evidence",
-    "Hierarchy boundary and selected specialist rationale",
-    "hierarchy boundary and selected specialist rationale",
-    "paired skill/no-skill run artifacts",
-    "explicit unavailable, simulated, inferred, or stale evidence labels"
+    "event-driven-architecture operating contract with message role, authoritative source, stable identity, routing, ordering, delivery, retention, replay, and side-effect boundaries",
+    "producer/consumer compatibility matrix covering old, additive, and retired representations plus unknown fields and enum values",
+    "deployment sequence and gate evidence showing coexistence without an undocumented flag or unsafe deployment-order dependency",
+    "duplicate, delayed, reordered, missing, and restart/replay results with durable idempotency and authorization controls",
+    "poison retry, dead-letter quarantine, operator visibility, corrected re-drive, and retention cleanup result",
+    "historical replay result through every supported consumer version with logical identity preserved",
+    "explicit unavailable, simulated, inferred, stale, unresolved, or not-applicable labels for every unexercised check",
+    "evaluator-owned paired skill/no-skill run artifacts"
   ],
   "requiredArtifacts": [
     "event-driven-architecture-individual-scenario-2-result",
@@ -55,28 +58,36 @@
   ],
   "falsifiableChecks": [
     {
-      "id": "scope-and-hierarchy",
-      "assertion": "The result must establish the actual event-driven-architecture boundary and relevant environment before acting, preserve the hierarchy relationship (broader=distributed-backend; near-neighbor=realtime-systems), and not absorb the near-neighbor responsibility merely because it is adjacent."
+      "id": "scope-and-ownership",
+      "assertion": "The result identifies the integration-event boundary and producer/consumer owners, keeps the event contract separate from stream-processing window/state mechanics, realtime connection delivery, and request/response API design, and names the authoritative customer source of truth."
     },
     {
-      "id": "operating-contract",
-      "assertion": "Distinguish commands, domain events, integration events, notifications, and change-data streams."
+      "id": "compatibility-envelope",
+      "assertion": "The rollout states old and new supported representations, required/optional/nullability and unknown-field behavior, strict-enum handling, coexistence gates, telemetry or evidence for retirement, and a safe removal condition; a version label alone is not treated as compatibility."
     },
     {
-      "id": "execution-invariant",
-      "assertion": "Event evolution has an explicit compatibility envelope across independently deployed consumers, and replay of historical/new events remains deterministic and observable."
+      "id": "stable-identity-and-schema",
+      "assertion": "The same logical CustomerUpdated occurrence retains its event identity, correlation/causation context, subject, and ordering scope across representations and historical replay; schema version changes decoding rules without creating a second business update."
     },
     {
-      "id": "verification-discipline",
-      "assertion": "Exercise duplicate, delayed, reordered, missing, poison, schema-evolved, and replayed events; verify producer transaction boundaries and consumer idempotency/reconciliation."
+      "id": "delivery-ordering-and-recovery",
+      "assertion": "At-least-once or another explicitly bounded delivery contract is stated per hop, with retry ownership, acknowledgement timing, timeout ambiguity, per-customer ordering/gap behavior, and producer publication recovery; broker acceptance is not presented as exactly-once business delivery."
     },
     {
-      "id": "anti-pattern-resistance",
-      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not use events to hide synchronous dependencies, publish before authoritative state commits without a recovery model, or let consumers depend on undocumented producer database fields."
+      "id": "consumer-idempotency-and-replay",
+      "assertion": "Duplicate, delayed, reordered, missing, and replayed records produce the declared convergent result across process restart, and each externally visible consumer effect is protected by durable identity or authoritative reconciliation rather than an in-memory deduplication set."
+    },
+    {
+      "id": "dead-letter-recovery",
+      "assertion": "An incompatible or poison record follows bounded retry, quarantine, operator visibility, and corrected re-drive behavior; the dead-letter record preserves original identity, payload/reference, failure context, attempts, and authorization, and re-drive does not duplicate an already applied effect."
+    },
+    {
+      "id": "cleanup-and-retention",
+      "assertion": "Historical replay and compatibility retention are bounded by an explicit horizon, and cleanup occurs only after consumer support and reconciliation evidence satisfy the declared removal gate; expired records are not silently treated as successfully processed."
     },
     {
       "id": "evidence-and-uncertainty",
-      "assertion": "Every material completion claim must map to observable evidence (event-driven-architecture decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+      "assertion": "Every material completion claim maps to an executed compatibility, delivery, negative-path, recovery, or cleanup assertion; unavailable, simulated, inferred, stale, unresolved, and evaluator-owned paired evidence are labeled accurately."
     }
   ]
 }

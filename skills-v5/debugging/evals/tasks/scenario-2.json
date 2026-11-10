@@ -1,7 +1,7 @@
 {
   "id": "debugging-full-task-2",
   "maturity": "individual",
-  "prompt": "The supplied async job runner intermittently records a completed job as `cancelled` when cancellation is requested at nearly the same time as the provider resolves. Debug the failure rather than applying a timing delay. Use the deterministic scheduling hooks in the fixture to reproduce both event orders, trace the state transition that commits the terminal status, test competing ordering/lifecycle hypotheses, implement the narrow correction that preserves exactly one valid terminal transition, and add a regression covering both schedules. Keep cancellation semantics for genuinely in-flight jobs unchanged. Return the reproductions, causal evidence, diff, and regression output.",
+  "prompt": "The supplied async job runner intermittently records a completed job as `cancelled` when cancellation is requested at nearly the same time as the provider resolves. Debug the failure rather than applying a timing delay. Use the deterministic scheduling hooks and exact reproduction command from the fixture to reproduce both event orders, retain the cancellation-before-completion control, trace the state transition that commits the terminal status, test competing ordering/lifecycle hypotheses, implement the narrow correction that preserves exactly one valid terminal transition, and add a regression covering both schedules plus the terminal-state recovery/idempotence boundary. Keep cancellation semantics for genuinely in-flight jobs unchanged. Return the reproductions, causal evidence, diff, control, recovery result, and regression output.",
   "environment": {
     "kind": "repository",
     "startingState": "fixture://debugging/cancel-complete-race",
@@ -10,21 +10,22 @@
       "one schedule reproduces an incorrect cancelled terminal state after provider completion",
       "normal cancellation-before-completion behavior is currently valid and must remain valid",
       "state machine exposes a single terminal-state persistence boundary",
+      "a later opposing event cannot overwrite an already-owned terminal result",
       "arbitrary sleeps are prohibited as a fix"
     ]
   },
   "falsifiableChecks": [
     {
       "id": "debugging-race-two-orders",
-      "assertion": "The evaluation exercises completion-before-cancellation and cancellation-before-completion under deterministic scheduling."
+      "assertion": "The evaluation exercises completion-before-cancellation and cancellation-before-completion under deterministic scheduling, retaining the observed outcome and command for each order."
     },
     {
       "id": "debugging-race-cause",
-      "assertion": "The causal evidence identifies the invalid terminal-state transition or ownership condition rather than attributing the bug generically to timing."
+      "assertion": "The causal evidence identifies the first invalid terminal-state transition or ownership condition, tests at least one competing lifecycle hypothesis, and does not attribute the bug generically to timing."
     },
     {
       "id": "debugging-race-regression",
-      "assertion": "The fix preserves completed when completion wins, preserves cancelled when cancellation legitimately wins, and does not use timing sleeps as correctness logic."
+      "assertion": "The fix preserves completed when completion wins, preserves cancelled when cancellation legitimately wins, leaves an already-owned terminal result unchanged when the opposing event arrives later, and does not use timing sleeps as correctness logic."
     }
   ],
   "scorers": [
@@ -55,11 +56,13 @@
     "both deterministic starting-revision schedules",
     "root-cause hypothesis evidence",
     "actual diff",
+    "cancellation control and terminal-state recovery/idempotence result with commands and observed statuses",
     "both post-fix schedule regressions"
   ],
   "requiredArtifacts": [
     "debugging-scenario-2-reproduction",
     "debugging-scenario-2-root-cause",
+    "debugging-scenario-2-control-recovery",
     "debugging-scenario-2-diff",
     "debugging-scenario-2-regression",
     "debugging-scenario-2-paired-evaluation"

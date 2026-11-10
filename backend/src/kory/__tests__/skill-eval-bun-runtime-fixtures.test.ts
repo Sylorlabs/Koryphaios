@@ -22,9 +22,10 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 const prerequisites = bunMigrationReadiness();
-const task = loadV5SkillPackages()
-  .packages.find((p) => p.sidecar.name === 'bun-deno-runtime')!
-  .evaluation.tasks.find((t) => t.id === BUN_MIGRATION_SCENARIO)!;
+const skillPackage = loadV5SkillPackages().packages.find(
+  (p) => p.sidecar.name === 'bun-deno-runtime',
+)!;
+const task = skillPackage.evaluation.tasks.find((t) => t.id === BUN_MIGRATION_SCENARIO)!;
 const scenario: SkillEvalScenarioV3 = {
   ...task,
   skill: 'bun-deno-runtime',
@@ -57,11 +58,11 @@ describe('real Node-to-Bun migration evaluator', () => {
       BUILTIN_SKILL_EVAL_SCORERS.filter((s) => s.scenarioIds.includes(scenario.id)),
     ).toHaveLength(1);
     const row = auditSkillEvalExecutionReadiness(
-      loadV5SkillPackages().packages,
+      [skillPackage],
       BUILTIN_SKILL_EVAL_MATERIALIZERS,
       BUILTIN_SKILL_EVAL_SCORERS,
     ).find((r) => r.scenarioId === scenario.id)!;
-    expect(row.materializerId).toBe('bun-deno-runtime/actual-bun-migration@1');
+    expect(row.materializerId).toBe('bun-deno-runtime/actual-bun-migration@3');
     expect(row.ready).toBe(prerequisites.length === 0);
     expect(row.reasons).toEqual(prerequisites);
   });

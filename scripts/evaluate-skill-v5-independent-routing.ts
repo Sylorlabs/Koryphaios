@@ -78,6 +78,11 @@ function loadCorpus(): IndependentRoutingCase[] {
 
 const cases = loadCorpus();
 const knownSkills = new Set(BUNDLED_SKILL_DEFINITIONS.map((definition) => definition.name));
+// This corpus qualifies V5 packages. Runtime-only host guidance (for example
+// Critic role pins) is known to the resolver but has no V5 package to qualify.
+const packageSkills = new Set(
+  V5_SKILL_PACKAGE_CATALOG.packages.map((skillPackage) => skillPackage.sidecar.name),
+);
 const ids = new Set<string>();
 const coveredSkills = new Set<string>();
 const validationErrors: string[] = [];
@@ -101,7 +106,7 @@ for (const testCase of cases) {
       validationErrors.push(`${testCase.id} references unknown ${related}`);
   }
 }
-const missingCoverage = [...knownSkills].filter((skill) => !coveredSkills.has(skill)).sort();
+const missingCoverage = [...packageSkills].filter((skill) => !coveredSkills.has(skill)).sort();
 if (missingCoverage.length) {
   validationErrors.push(`missing independent cases for: ${missingCoverage.join(', ')}`);
 }

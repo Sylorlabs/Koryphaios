@@ -39,6 +39,26 @@ CUDA-specific memory and execution guidance applies only to CUDA targets. For Me
 - Validate performance claims on representative hardware. Emulation, compilation, or a different GPU generation does not establish target performance.
 - Keep performance and correctness claims separate when only one has been measured.
 
+### Runtime readiness and evidence contract
+
+Before running a check that depends on the device, emit a small readiness record with the
+target GPU and revision, API/runtime and driver versions, toolkit/compiler,
+profiler and memory/race checker availability, and the exact workload or kernel
+entry point. Each item is `available`, `unavailable`, or `unknown`, with the
+observed command output or artifact path. A source inspection, successful
+compilation, CPU reference, mock device, or host timing is not an available GPU
+runtime check.
+
+If the target device or the required execution/profiling tool is unavailable,
+stop the device claim as **blocked** and preserve the readiness record. It is
+valid to report host/reference checks separately, but label them
+`host-only`/`simulated` and do not use them to certify kernel correctness,
+device synchronization, memory behavior, occupancy, or target performance.
+Completion evidence must identify the exact device run, reference/oracle,
+negative or boundary cases, profiler/checker artifacts, and any properties that
+remain unverified. Never replace a blocked GPU run with CPU execution merely to
+obtain a passing result.
+
 ## Completion evidence
 
 - Numerical accuracy contract and reference-result evidence

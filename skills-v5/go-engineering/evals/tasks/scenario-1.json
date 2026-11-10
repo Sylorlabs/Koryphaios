@@ -1,7 +1,7 @@
 {
   "id": "go-engineering-full-task-1-individual",
   "maturity": "individual",
-  "prompt": "Fix a Go HTTP batch endpoint that launches one goroutine per downstream request but leaks goroutines when the client cancels and one downstream call never returns. Preserve bounded concurrency and partial-result semantics, propagate context cancellation, close channels exactly once, and verify cancellation, timeout, one slow dependency, all-success, and race-detector/goroutine-count stability.",
+  "prompt": "Fix a Go HTTP batch endpoint that launches one goroutine per downstream request and leaks goroutines when the client cancels while a downstream call blocks until its context is canceled. Keep the consumer-owned downstream interface small; do not add an interface solely for mocking. Edit batch/batch.go and add or update Go regression tests; README.md, go.mod, and .kory-runtime/go and .kory-runtime/runtime.json are evaluator-owned immutable inputs and must remain byte-for-byte unchanged. Preserve bounded admission, partial-result semantics, request context propagation, single channel ownership, and explicit worker joins. Verify cancellation while work is blocked and while results are being delivered, deadline timeout, one slow dependency, all-success, repeated cancellation, and race-detector/goroutine-count stability without using sleeps as synchronization. If a downstream implementation ignores context indefinitely, explain the dependency or isolation boundary needed for guaranteed cleanup in your final response or a new notes file; do not rewrite the immutable README.md or claim Go can forcibly stop that call.",
   "environment": {
     "kind": "repository",
     "startingState": "fixture://go-engineering/context-goroutine-leak",
@@ -10,6 +10,9 @@
       "bounded concurrency requirement and partial-result response contract",
       "race detector plus goroutine-count/leak test across repeated cancelled requests",
       "existing public response fields and timeout behavior that must remain compatible",
+      "consumer-owned downstream interface and explicit worker/channel ownership",
+      "context-aware dependency plus a separately labeled non-cooperative dependency boundary",
+      "synchronization-based tests for blocked work, result delivery, repeated cancellation, and teardown",
       "paired same-model skill/no-skill execution from the identical starting snapshot"
     ]
   },
@@ -23,6 +26,8 @@
         "Representative verification results or explicit unavailable checks",
         "Hierarchy boundary and selected specialist rationale",
         "Representative success, negative-path, and recovery verification",
+        "Interface, context, channel, worker-join, and dependency-boundary evidence",
+        "go vet, focused go test, and go test -race results when available",
         "hierarchy boundary and specialist selection rationale",
         "representative negative/recovery verification",
         "source/version boundary when facts can drift"
@@ -64,7 +69,7 @@
     },
     {
       "id": "execution-invariant",
-      "assertion": "Every goroutine has a bounded owner and cancellation path; request completion/cancellation cannot leave blocked workers or double-close shared coordination channels."
+      "assertion": "Every goroutine has a bounded owner, cancellation path, and terminal join; request completion/cancellation cannot leave context-aware workers blocked or double-close shared coordination channels."
     },
     {
       "id": "verification-discipline",
@@ -76,7 +81,28 @@
     },
     {
       "id": "evidence-and-uncertainty",
-      "assertion": "Every material completion claim must map to observable evidence (go-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+      "assertion": "Every material completion claim must map to observable evidence (go-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty.",
+      "source": "https://pkg.go.dev/context"
+    },
+    {
+      "id": "downstream-cancellation-contract",
+      "assertion": "The regression dependency blocks until the supplied context is canceled and then returns; if an additional dependency ignores context, the result separates prompt caller return from unproven blocked-call cleanup and names the required deadline or killable process boundary.",
+      "source": "https://go.dev/doc/database/cancel-operations"
+    },
+    {
+      "id": "shutdown-observation",
+      "assertion": "The owner observes worker completion through an explicit join or equivalent terminal signal after cancellation. A response returning, a bounded worker count, or process exit alone is not accepted as proof that background work terminated.",
+      "source": "https://go.dev/ref/spec"
+    },
+    {
+      "id": "package-test-boundary",
+      "assertion": "Tests arrange blocked work and result delivery with channels or other synchronization, use timeouts only as guards, and keep race/goroutine-count evidence tied to repeated exercised requests rather than claiming all possible schedules are covered.",
+      "source": "https://go.dev/doc/articles/race_detector"
+    },
+    {
+      "id": "test-tool-boundary",
+      "assertion": "The final report identifies the exact focused go test, go vet, and go test -race commands that ran, and labels unavailable tools or unsupported non-cooperative dependency cleanup instead of inferring them from a passing unit test.",
+      "source": "https://go.dev/doc/effective_go"
     }
   ]
 }

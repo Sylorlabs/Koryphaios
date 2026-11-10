@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "database-performance",
-  "version": "5.1.1",
+  "version": "5.2.1",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -21,14 +21,30 @@
     "query plan indexes",
     "plan indexes statistics locks",
     "index statistics tuning",
-    "database lock contention"
+    "database lock contention",
+    "database p99 regression",
+    "tenant skew query performance",
+    "database migration blocking writes",
+    "low lock database migration",
+    "tail latency database",
+    "prepared plan",
+    "lock acquisition delay",
+    "resumable backfill",
+    "enterprise cohort",
+    "four-second tail",
+    "checkpointed backfill",
+    "production table"
   ],
   "excludes": [],
   "evidence": [
     "database-performance decision and boundary evidence",
     "Representative verification results or explicit unavailable checks",
     "Hierarchy boundary and selected specialist rationale",
-    "Representative success, negative-path, and recovery verification"
+    "Representative success, negative-path, and recovery verification",
+    "Per-parameter actual versus estimated plans, or clearly unavailable plan evidence",
+    "Before/after tail-latency and neighboring-query/write/lock impacts",
+    "For migrations, bounded-phase, constraint-validation, abort and resume evidence",
+    "Evidence class for each material observation, with synthetic and unavailable limits stated"
   ],
   "routing": {
     "positive": [
@@ -36,7 +52,11 @@
       "The current task is database performance.",
       "I need help with query plan.",
       "Work on database contention for this request.",
-      "This request specifically requires query plan indexes."
+      "This request specifically requires query plan indexes.",
+      "Our database p99 regressed for the largest tenants; inspect the parameterized query plans and write overhead.",
+      "A production database migration waits for table locks and blocks writers; design a resumable low-lock backfill.",
+      "Compare the p95 and p99 of a tenant-skewed query before adding an index, including prepared-plan behavior and competing writes.",
+      "A staging migration is fast but the production table is much larger; diagnose lock acquisition delay and design bounded backfill and recovery checks."
     ],
     "negative": [
       "The only requested work is gpu compute.",
@@ -101,6 +121,15 @@
         "forbiddenSkills": [],
         "adjacentSkills": ["relational-data-modeling"],
         "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "database-performance-adversarial-4",
+        "prompt": "Run the approved migration verification matrix and report observed lock waits; schema design and performance changes are out of scope.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["verification"],
+        "tags": ["adversarial", "verification-only", "scope-boundary"]
       }
     ]
   },
@@ -108,34 +137,74 @@
     {
       "url": "https://www.postgresql.org/docs/current/",
       "sourceType": "official-docs",
-      "versionScope": "Current PostgreSQL documentation as available 2026-09-04",
+      "versionScope": "Current PostgreSQL documentation as available 2026-10-19",
       "staleAfterDays": 45,
       "notes": "SQL, transactions, locking, indexes, planning, replication, and operations reference.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-10-19"
     },
     {
       "url": "https://www.postgresql.org/docs/current/using-explain.html",
       "sourceType": "official-docs",
-      "versionScope": "PostgreSQL 18 current documentation as available 2026-09-06",
+      "versionScope": "PostgreSQL 18 current documentation as available 2026-10-20",
       "staleAfterDays": 45,
       "notes": "Estimated versus actual row evidence; EXPLAIN ANALYZE executes the query and its side effects, so profiling requires an authorized safe target.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-10-20"
     },
     {
       "url": "https://www.postgresql.org/docs/current/planner-stats.html",
       "sourceType": "official-docs",
-      "versionScope": "PostgreSQL 18 current documentation as available 2026-09-06",
+      "versionScope": "PostgreSQL 18 current documentation as available 2026-10-20",
       "staleAfterDays": 45,
       "notes": "Planner statistics, selectivity, and correlated-column statistics.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-10-20"
     },
     {
       "url": "https://www.postgresql.org/docs/current/indexes.html",
       "sourceType": "official-docs",
-      "versionScope": "PostgreSQL 18 current documentation as available 2026-09-06",
+      "versionScope": "PostgreSQL 18 current documentation as available 2026-10-20",
       "staleAfterDays": 45,
       "notes": "Index access paths and index overhead tradeoffs.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-10-20"
+    },
+    {
+      "url": "https://www.postgresql.org/docs/17/sql-prepare.html",
+      "sourceType": "official-docs",
+      "versionScope": "PostgreSQL 17 prepared-statement plan selection",
+      "staleAfterDays": 45,
+      "notes": "Generic versus custom plan choice depends on parameters; EXPLAIN EXECUTE reveals plan mode.",
+      "verifiedAt": "2026-10-10"
+    },
+    {
+      "url": "https://www.postgresql.org/docs/17/planner-stats.html",
+      "sourceType": "official-docs",
+      "versionScope": "PostgreSQL 17 planner statistics",
+      "staleAfterDays": 45,
+      "notes": "Extended statistics are collected during ANALYZE, with predicate limitations.",
+      "verifiedAt": "2026-10-10"
+    },
+    {
+      "url": "https://www.postgresql.org/docs/17/sql-altertable.html",
+      "sourceType": "official-docs",
+      "versionScope": "PostgreSQL 17 DDL locks and constraints",
+      "staleAfterDays": 45,
+      "notes": "ADD and SET NOT NULL, NOT VALID then VALIDATE, and scan-skipping with a valid CHECK.",
+      "verifiedAt": "2026-10-10"
+    },
+    {
+      "url": "https://www.postgresql.org/docs/17/sql-createindex.html",
+      "sourceType": "official-docs",
+      "versionScope": "PostgreSQL 17 concurrent index builds",
+      "staleAfterDays": 45,
+      "notes": "Concurrent build transaction restriction, writer impact, and invalid index recovery.",
+      "verifiedAt": "2026-10-10"
+    },
+    {
+      "url": "https://www.postgresql.org/docs/17/sql-createtable.html",
+      "sourceType": "official-docs",
+      "versionScope": "PostgreSQL 17 default expressions",
+      "staleAfterDays": 45,
+      "notes": "Column DEFAULT cannot reference another current-row column; generated columns differ.",
+      "verifiedAt": "2026-10-10"
     }
   ],
   "authoringMaturity": "individual"

@@ -232,6 +232,88 @@ app.innerHTML = \`<div class="page"><div class="hero"><img src="/assets/logo.svg
 `;
 
 const DASHBOARD_FONT_NAME = 'KoryEvalInter';
+// Agents must be given the complete machine-readable artifact contract before the
+// independent scorer can fairly evaluate their own rendered captures. The matrix is
+// keyed by a capture id the evaluator also computes, so an undocumented id format
+// makes the check unpassable rather than demanding.
+const VISUAL_DASHBOARD_README = `# Responsive dashboard visual-verification fixture
+
+Do not modify the dashboard, fixed reference, or bundled font. Verify the real rendered application
+at 1440x900, 900x900, and 390x844 in light and dark themes across loading, empty, normal, and dense
+states. Record the 24-cell matrix, every measurable failed claim, the stabilized environment, and a
+grounded verdict under \`verification/\`. The dense state deliberately exercises the narrow support
+boundary, so do not assume a happy path.
+
+## Artifact contract (exact field names)
+
+Capture id format: \`<width>x<height>-<theme>-<state>\`, for example \`390x844-dark-dense\`. The matrix
+has 3 viewports x 2 themes x 4 states = 24 entries, one per capture id.
+
+\`verification/visual-verification-scenario-1-capture-matrix.json\`
+
+\`\`\`json
+{
+  "environment": {
+    "dpr": 1,
+    "font": "Inter",
+    "animations": "disabled",
+    "dataset": "fixture-v1",
+    "browserVersion": "<the version string you observed>"
+  },
+  "entries": [
+    {
+      "captureId": "1440x900-light-normal",
+      "width": 1440,
+      "height": 900,
+      "theme": "light",
+      "state": "normal",
+      "horizontalOverflow": false,
+      "chartClipped": false,
+      "legendClipped": false,
+      "stickyOverlap": false,
+      "primaryActionDistinct": true
+    }
+  ]
+}
+\`\`\`
+
+Each boolean is your own measurement of that render. \`primaryActionDistinct\` is \`true\` when the
+primary action is visually distinct from secondary controls.
+
+\`verification/visual-verification-scenario-1-claim-audit.json\`
+
+\`\`\`json
+{
+  "renderingNoisePolicy": "<how you neutralized rendering noise: font, dpr, animation, runtime>",
+  "failures": ["390x844-dark-dense:horizontal-overflow"]
+}
+\`\`\`
+
+A failure claim is \`<captureId>:<slug>\` using exactly one of \`horizontal-overflow\`,
+\`chart-clipping\`, \`legend-clipping\`, \`sticky-header-overlap\`, \`primary-action-not-distinct\`.
+Record a claim only for a defect you actually measured, and record every one you measured.
+
+\`verification/visual-verification-scenario-1-verdict.md\` states the scope and must name the 390px
+width, both themes, the dense state, the overflow observation, and your rendering-noise policy.
+
+## How each boolean is measured
+
+Render each cell at \`?theme=<light|dark>&state=<loading|empty|normal|dense>\` with a device scale
+factor of 1 and \`prefers-reduced-motion: reduce\`, then measure these exact expressions. The
+independent scorer evaluates the same expressions, so a different heuristic will disagree with it.
+
+| Field | Measured as |
+| --- | --- |
+| \`horizontalOverflow\` | \`document.documentElement.scrollWidth > window.innerWidth + 1\` |
+| \`chartClipped\` | \`.chart\` scrollWidth exceeds \`.chart-panel\` clientWidth by more than 1 |
+| \`legendClipped\` | \`.legend\` scrollWidth exceeds its own clientWidth by more than 1 |
+| \`stickyOverlap\` | \`.content\` top is above \`.topbar\` bottom minus 1 |
+| \`primaryActionDistinct\` | the \`background-color|color|border-color\` triple of \`.primary-action\` differs from \`.secondary-action\` |
+
+\`environment\` must record the scale factor (1), the font family actually applied, that animations
+were disabled, the fixture dataset marker, and the browser version string you observed.
+`;
+
 const DASHBOARD_VIEWPORTS = [
   { width: 1440, height: 900 },
   { width: 900, height: 900 },
@@ -1411,11 +1493,14 @@ async function scoreVisualDashboard(root: string): Promise<SkillEvalDeterministi
 const browserUnavailable = existsSync(BRAVE_PATH)
   ? undefined
   : [`Requires system Brave at ${BRAVE_PATH} for real-browser evidence.`];
+export function dashboardAssetBlockers(): string[] {
+  return existsSync(INTER_FONT_SOURCE)
+    ? []
+    : [`Requires the bundled Inter evaluation font at ${INTER_FONT_SOURCE}.`];
+}
 const visualUnavailable = [
   ...(browserUnavailable ?? []),
-  ...(existsSync(INTER_FONT_SOURCE)
-    ? []
-    : [`Requires the bundled Inter evaluation font at ${INTER_FONT_SOURCE}.`]),
+  ...dashboardAssetBlockers(),
 ];
 
 export const BROWSER_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMaterializer[] = [
@@ -1506,7 +1591,7 @@ export const BROWSER_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMaterial
       writeFixtureFile(
         root,
         'README.md',
-        '# Responsive dashboard visual-verification fixture\n\nDo not modify the dashboard, fixed reference, or bundled font. Verify the real rendered application at 1440x900, 900x900, and 390x844 in light/dark themes across loading, empty, normal, and dense states. Record the 24-cell matrix, every measurable failed claim, the stabilized environment, and a grounded verdict in `verification/`. The dense state deliberately exercises the narrow support boundary, so do not assume a happy path.\n',
+        VISUAL_DASHBOARD_README,
       );
     },
   },

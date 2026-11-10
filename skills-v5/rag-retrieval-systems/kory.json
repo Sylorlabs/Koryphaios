@@ -1,17 +1,28 @@
 {
   "schemaVersion": 1,
   "name": "rag-retrieval-systems",
-  "version": "5.1.1",
+  "version": "5.1.4",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
-  "domains": ["ai", "retrieval", "search"],
-  "targetMedia": ["any"],
+  "domains": [
+    "ai",
+    "retrieval",
+    "search"
+  ],
+  "targetMedia": [
+    "any"
+  ],
   "pathScopes": [],
   "contextBudget": 6000,
-  "broader": ["llm-application-engineering"],
+  "broader": [
+    "llm-application-engineering"
+  ],
   "facets": [],
-  "requires": ["verification", "llm-evaluation"],
+  "requires": [
+    "verification",
+    "llm-evaluation"
+  ],
   "conflicts": [],
   "activation": [
     "retrieval augmented generation",
@@ -79,8 +90,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["prompt-context-engineering"],
-        "tags": ["ambiguous", "neighbor-boundary"]
+        "adjacentSkills": [
+          "prompt-context-engineering"
+        ],
+        "tags": [
+          "ambiguous",
+          "neighbor-boundary"
+        ]
       },
       {
         "id": "rag-retrieval-systems-ambiguous-2",
@@ -88,8 +104,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["vector-search-systems"],
-        "tags": ["ambiguous", "scope-control"]
+        "adjacentSkills": [
+          "vector-search-systems"
+        ],
+        "tags": [
+          "ambiguous",
+          "scope-control"
+        ]
       },
       {
         "id": "rag-retrieval-systems-ambiguous-3",
@@ -97,8 +118,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["llm-evaluation"],
-        "tags": ["ambiguous", "scope-control"]
+        "adjacentSkills": [
+          "llm-evaluation"
+        ],
+        "tags": [
+          "ambiguous",
+          "scope-control"
+        ]
       }
     ],
     "adversarial": [
@@ -108,8 +134,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["testing-engineering"],
-        "tags": ["adversarial", "quoted-decoy"]
+        "adjacentSkills": [
+          "testing-engineering"
+        ],
+        "tags": [
+          "adversarial",
+          "quoted-decoy"
+        ]
       },
       {
         "id": "rag-retrieval-systems-adversarial-2",
@@ -117,8 +148,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["incident-response"],
-        "tags": ["adversarial", "scope-control"]
+        "adjacentSkills": [
+          "incident-response"
+        ],
+        "tags": [
+          "adversarial",
+          "scope-control"
+        ]
       },
       {
         "id": "rag-retrieval-systems-adversarial-3",
@@ -126,8 +162,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["documentation"],
-        "tags": ["adversarial", "scope-control"]
+        "adjacentSkills": [
+          "documentation"
+        ],
+        "tags": [
+          "adversarial",
+          "scope-control"
+        ]
       }
     ]
   },
@@ -135,50 +176,50 @@
     {
       "url": "https://developers.openai.com/api/docs/guides/retrieval",
       "sourceType": "official-docs",
-      "versionScope": "Rolling OpenAI Retrieval API documentation as available 2026-10-02",
+      "versionScope": "Rolling OpenAI Retrieval API documentation inspected 2026-11-08",
       "staleAfterDays": 14,
       "notes": "Current vector-store ingestion, chunking, attribute filtering, ranking options, hybrid weights and deletion consistency behavior.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-08"
     },
     {
       "url": "https://developers.openai.com/api/docs/guides/tools-file-search",
       "sourceType": "official-docs",
-      "versionScope": "Rolling OpenAI file-search documentation as available 2026-10-02",
+      "versionScope": "Rolling OpenAI file-search documentation inspected 2026-11-08",
       "staleAfterDays": 14,
       "notes": "Hosted retrieval integration, result inclusion, metadata filtering and max-result quality/latency tradeoffs.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-08"
     },
     {
       "url": "https://www.elastic.co/docs/solutions/search/hybrid-search",
       "sourceType": "official-docs",
-      "versionScope": "Rolling Elastic hybrid-search documentation as available 2026-09-05",
+      "versionScope": "Rolling Elastic hybrid-search documentation as available 2026-10-04",
       "staleAfterDays": 30,
       "notes": "Current lexical-plus-vector hybrid retrieval and reciprocal-rank-fusion guidance.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://www.elastic.co/docs/reference/elasticsearch/rest-apis/search-rank-eval",
       "sourceType": "official-docs",
-      "versionScope": "Rolling Elasticsearch ranking-evaluation documentation as available 2026-09-05",
+      "versionScope": "Rolling Elasticsearch ranking-evaluation documentation as available 2026-10-04",
       "staleAfterDays": 30,
       "notes": "Query/judgment-based ranking evaluation with Precision@k, Recall@k, MRR, DCG/NDCG and other IR metrics.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://www.elastic.co/docs/reference/search-connectors/es-dls-overview",
       "sourceType": "official-docs",
-      "versionScope": "Rolling Elastic connector document-level security documentation as available 2026-09-05",
+      "versionScope": "Rolling Elastic connector document-level security documentation as available 2026-10-04",
       "staleAfterDays": 30,
       "notes": "Concrete document-level access-control synchronization and search-time filtering model for private corpora.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://docs.cloud.google.com/gemini/enterprise/docs/evaluate-search-quality",
       "sourceType": "official-docs",
-      "versionScope": "Google Cloud search-quality evaluation documentation as available 2026-09-05",
+      "versionScope": "Google Cloud search-quality evaluation documentation as available 2026-10-04",
       "staleAfterDays": 30,
       "notes": "Sample-query target sets and document/page Recall, Precision and NDCG metrics for comparing retrieval configurations.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     }
   ],
   "authoringMaturity": "individual"

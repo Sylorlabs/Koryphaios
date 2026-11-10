@@ -166,6 +166,8 @@ test('canonical insertion order preserves the release domain', () => {
       secretsKeyManagement: 'HSM custody and rotation own private-key lifecycle',
       evidence: 'synthetic local evidence',
       liveSigningKeyVerification: false,
+      verificationBoundary:
+        'No live signing-key verification was performed or proved by this synthetic evidence.',
     }),
   );
   const score = await scorer.score({
@@ -174,8 +176,29 @@ test('canonical insertion order preserves the release domain', () => {
     workingDirectory: root,
     observation: { output: '', evidence: [], artifacts: [], durationMs: 0 },
   });
-  expect(scorer.id).toEndWith('@4');
+  expect(scorer.id).toEndWith('@5');
   expect(score.passed).toBe(true);
+
+  writeFileSync(
+    join(root, '.kory-eval/release-signature.json'),
+    JSON.stringify({
+      algorithm: 'Ed25519',
+      domain: 'fixed release-manifest domain',
+      rollback: 'reject',
+      expiration: 'reject expired releases',
+      downgrade: 'reject algorithm downgrade',
+      unknownAlgorithm: 'unknown algorithm values fail closed',
+      secretsKeyManagement: 'HSM custody and rotation own private-key lifecycle',
+      evidence: 'synthetic local evidence; live signing-key verification completed successfully',
+    }),
+  );
+  const affirmativeClaim = await scorer.score({
+    scenario: item,
+    experiment: {} as never,
+    workingDirectory: root,
+    observation: { output: '', evidence: [], artifacts: [], durationMs: 0 },
+  });
+  expect(affirmativeClaim.passed).toBe(false);
 });
 
 test('cloud-security materializers declare the JSON shape their scorers require', async () => {

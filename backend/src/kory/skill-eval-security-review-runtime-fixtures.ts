@@ -5,6 +5,7 @@ import type {
   SkillEvalFixtureMaterializer,
 } from './skill-eval-execution';
 import {
+  fixtureTextEquals,
   hasRegressionText,
   packageJson,
   readJsonArtifact,
@@ -181,8 +182,7 @@ const hostScorer: SkillEvalDeterministicScorer = {
       `import{expect,test}from'bun:test';import{readFileSync}from'node:fs';import{hostHardened,type HostHardeningSpec}from'../src/infra-sim';const s=JSON.parse(readFileSync('.kory-eval/host-hardening.json','utf8')) as HostHardeningSpec;test('hidden: desired host baseline also proves effective running state',()=>{expect(hostHardened(s)).toBe(true);expect(s.cloudIamOwnedBy).toBe('cloud-security');});\n`,
     );
     const fixed = readFileSync(join(workingDirectory, 'src/infra-sim.ts'), 'utf8') === INFRA_SIM;
-    const corpus =
-      readFileSync(join(workingDirectory, 'evidence/host.json'), 'utf8') === HOST_CORPUS;
+    const corpus = fixtureTextEquals(workingDirectory, 'evidence/host.json', HOST_CORPUS);
     const passed = hidden.passed && fixed && corpus;
     return {
       passed,
@@ -483,8 +483,19 @@ const importReviewScorer: SkillEvalDeterministicScorer = {
     const corpus =
       readFileSync(join(workingDirectory, 'evidence/review-corpus.json'), 'utf8') === REVIEW_CORPUS;
     const r = artifactText(workingDirectory, '.kory-eval/security-review-import.json');
+    // This is a static, review-only assignment. An affirmative execution result
+    // contradicts the evidence, even if other fields say "static review".
+    const execution =
+      r.artifact && typeof r.artifact === 'object' && !Array.isArray(r.artifact)
+        ? (r.artifact as Record<string, unknown>).execution
+        : undefined;
+    const unprovenExecution =
+      (execution !== null && typeof execution === 'object' &&
+        /\b(executed|succeeded|passed|confirmed|verified)\b/u.test(JSON.stringify(execution).toLowerCase())) ||
+      /\b(?:exploit|traversal)\s+(?:was\s+)?(?:executed|succeeded|confirmed|verified)\b/u.test(r.text);
     const good =
       Boolean(r.artifact) &&
+      !unprovenExecution &&
       /archive|entry/u.test(r.text) &&
       /queue/u.test(r.text) &&
       /filesystem|extract/u.test(r.text) &&

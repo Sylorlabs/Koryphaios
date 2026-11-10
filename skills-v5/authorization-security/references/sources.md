@@ -1,13 +1,13 @@
 # Source map
 
-`authorization-security` owns entitlement design and trusted enforcement placement. It is not a substitute for authentication, OAuth/OIDC protocol design, or independent verification of the finished control. Formal V5 promotion still requires paired same-model skill/no-skill results and blind evaluation.
+`authorization-security` owns entitlement design and trusted enforcement placement. It is not a substitute for authentication, OAuth/OIDC protocol design, or independent verification of the finished control. Formal V5 promotion still requires paired same-model skill/no skill results and blind evaluation.
 
 ## Qualification basis
 
 - Package authorship is independent from empirical qualification; the audit/evaluation ledger is authoritative for qualification status.
 - Hierarchy: broader application-security; narrower children oauth-oidc.
-- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held-out cases through the real resolver.
-- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no-skill pairing, regression retention, and blind semantic judging.
+- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held out cases through the real resolver.
+- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no skill pairing, regression retention, and blind semantic judging.
 - Source discipline: authoritative/spec/reference sources outrank community patterns when they conflict; runtime evidence outranks examples for behavioral claims.
 
 ## Maintained sources
@@ -19,11 +19,11 @@
 - **OWASP Authorization Cheat Sheet**: https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html
   - Scope: current OWASP guidance available 2026-09-05.
   - Use: least privilege, deny by default, validation on every request, right enforcement location, ID tampering resistance, logging, and authorization tests.
-  - Verified: 2026-09-05; refresh after 120 days.
+  - Verified: 2026-11-07; refresh after 120 days.
 - **OWASP Web Security Testing Guide: stable Authorization Testing**: https://owasp.org/www-project-web-security-testing-guide/stable/4-Web_Application_Security_Testing/05-Authorization_Testing/
   - Scope: WSTG current stable site available 2026-09-05.
   - Use: horizontal/vertical authorization bypass, object-reference, directory traversal/file include, and privilege-escalation test patterns where applicable.
-  - Verified: 2026-09-05; refresh after 120 days.
+  - Verified: 2026-11-07; refresh after 120 days.
 - **NIST SP 800-207: Zero Trust Architecture**: https://csrc.nist.gov/pubs/sp/800/207/final
   - Scope: NIST SP 800-207.
   - Use: resource-centric decisions and the principle that network location is not an implicit authorization grant.

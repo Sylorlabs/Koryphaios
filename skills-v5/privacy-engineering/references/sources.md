@@ -6,20 +6,20 @@
 
 - Package authorship is independent from empirical qualification; the audit/evaluation ledger is authoritative for qualification status.
 - Hierarchy: broader security-review.
-- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held-out cases through the real resolver.
-- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no-skill pairing, regression retention, and blind semantic judging.
+- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held out cases through the real resolver.
+- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no skill pairing, regression retention, and blind semantic judging.
 - Source discipline: authoritative/spec/reference sources outrank community patterns when they conflict; runtime evidence outranks examples for behavioral claims.
 
 ## Maintained sources
 
 - **NIST Privacy Framework**: https://www.nist.gov/privacy-framework
-  - Scope: Privacy Framework 1.0 is the current final framework. Privacy Framework 1.1 remains an Initial Public Draft as verified 2026-09-05; do not present 1.1 as final.
+  - Scope: Privacy Framework 1.0 is the current final framework. Privacy Framework 1.1 remains an Initial Public Draft as verified 2026-11-07; do not present 1.1 as final.
   - Use: organizational privacy-risk outcomes and vocabulary for identifying, governing, controlling, communicating, and protecting data processing.
-  - Verified: 2026-09-05; refresh after 90 days.
+  - Verified: 2026-11-07; refresh after 90 days.
 - **NISTIR 8062: An Introduction to Privacy Engineering and Risk Management in Federal Systems**: https://csrc.nist.gov/pubs/ir/8062/final
   - Scope: final January 2017 publication; NIST publication record updated May 2026.
   - Use: privacy engineering objectives of predictability, manageability, and disassociability, plus the privacy-risk model that separates privacy problems from security failures.
-  - Verified: 2026-09-05; refresh after 365 days.
+  - Verified: 2026-11-07; refresh after 365 days.
 
 ## Interpretation rules
 

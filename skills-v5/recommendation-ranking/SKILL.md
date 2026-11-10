@@ -7,6 +7,8 @@ description: Engineer recommenders with explicit objectives, feedback bias, cand
 
 A recommender learns from what the previous policy exposed, not from an unbiased sample of user preference. Treat candidate eligibility, exposure, feedback semantics, ranking objective, exploration, serving state and evaluation as one contract.
 
+An event validator or inverse-propensity aggregate is only one input to that contract. Before accepting a recommendation change, record the product utility and guardrails, candidate eligibility and retrieval coverage, ranking/slate construction, exposure and label semantics, temporal feature boundary, offline retrieval/ranking/slice evidence, and serving/launch/rollback state. If those stages are absent, report a partial data-quality or evaluation result rather than calling it a recommender implementation or launch decision.
+
 ## Workflow
 
 1. **Define the product decision and utility.** State what is being ranked, for whom, at what moment, and which user/product outcome matters. Separate immediate engagement from long-term value, satisfaction, retention, revenue, safety, marketplace health or other guardrails. Do not optimize click-through simply because it is easy to log.
@@ -15,7 +17,7 @@ A recommender learns from what the previous policy exposed, not from an unbiased
 4. **Use point-in-time-correct features.** Build examples from feature values available at the ranking decision time. Prevent future catalog state, post-impression aggregates, label-derived statistics or delayed outcomes from leaking backward. Version feature definitions and joins.
 5. **Split on deployment time and dependency.** Prefer temporal/backtest splits when the production task predicts future behavior. Keep repeated sessions, near-duplicate events and derived labels from contaminating validation/final sets. Include seasonality or catalog-change windows when material.
 6. **Evaluate candidate generation separately.** Measure whether relevant/eligible items enter the candidate set with Recall@K, hit rate, coverage or task-appropriate retrieval metrics. Slice by new users/items, long tail, locale/market and sparse-history cases. Keep ANN implementation details in `vector-search-systems` when the representation is fixed.
-7. **Evaluate ordering at the decision depth.** Use NDCG, MRR, MAP, precision/recall or other ranking metrics whose gain/position semantics match the product. Report metrics at the actual slate depth and important segments. Do not claim online impact from a small offline rank-metric delta alone.
+7. **Evaluate ordering at the decision depth.** Use NDCG, MRR, MAP, precision/recall or other ranking metrics whose gain/position semantics match the product. Report metrics at the actual slate depth and important segments. Do not claim online impact from a small offline delta in ranking metrics alone.
 8. **Track slate and ecosystem quality.** Measure diversity, novelty, catalog/provider coverage, duplication, freshness and constraint satisfaction when relevant. Popularity-biased accuracy can improve while cold-start users, long-tail items or marketplace suppliers become worse off.
 9. **Treat logged-policy data as biased.** Position, selection and exposure bias make observational comparisons non-causal. If propensities are reliably logged and the estimator assumptions hold, use appropriate counterfactual estimators with diagnostics; otherwise describe the result as offline/observational and require a controlled online experiment for causal launch claims.
 10. **Make exploration explicit.** Define exploration eligibility, risk budget, probability/propensity logging, exclusions and user/product guardrails. Never mix exploratory traffic into training or evaluation without preserving the action probability and policy version needed to interpret it.
@@ -23,6 +25,8 @@ A recommender learns from what the previous policy exposed, not from an unbiased
 12. **Preserve train-serving parity.** Verify online candidate filters, feature freshness/defaults, entity IDs, normalization and model/reranker versions against offline construction. Test cold-start and missing-feature fallbacks, inventory/eligibility changes and stale-cache behavior.
 13. **Audit feedback loops and abuse.** Check whether ranking amplifies popularity, spam, strategic supplier behavior, bots, clickbait or position artifacts. Prefer debiased or exploration-informed evidence over recursively treating prior exposure as ground truth preference.
 14. **Promote with reversible evidence.** Persist dataset/log windows, policy/model/features, candidate-set definitions, offline metrics, online assignment/analysis and serving traces. Keep failed slices and experiment regressions, and preserve a fast fallback or prior policy for rollback.
+
+Reject incomplete policy records explicitly: an omitted exposure cutoff, missing action propensity for exploration traffic, malformed event object, or missing candidate-policy version must be a negative path or an identified limitation, not an accepted ordinary negative or positive label. Exercise recovery by rerunning the same temporal/policy window after the defect is corrected and record the changed evidence.
 
 ## Boundaries
 

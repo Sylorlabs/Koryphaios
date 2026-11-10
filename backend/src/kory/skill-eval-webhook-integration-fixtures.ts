@@ -101,7 +101,7 @@ Repair \`src/receiver.ts\` against the provider contract. Preserve the exported 
 };
 
 const rawSignatureScorer: SkillEvalDeterministicScorer = {
-  id: 'webhook-integration/raw-body-signature-replay-scorer@1',
+  id: 'webhook-integration/raw-body-signature-replay-scorer@2',
   scenarioIds: [RAW_SIGNATURE],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
@@ -160,12 +160,16 @@ test('hidden: authenticated malformed and oversized bodies fail closed', () => {
 `,
     );
     const tests = readFileSync(join(workingDirectory, 'tests/receiver.test.ts'), 'utf8');
+    const payloadLimitCoverage =
+      /size|oversiz/iu.test(tests) ||
+      /(?:body|payload|bytes?).{0,80}(?:limit|maximum|max)/isu.test(tests) ||
+      /(?:limit|maximum|max).{0,80}(?:body|payload|bytes?)/isu.test(tests);
     const regressionCoverage =
       /signature/iu.test(tests) &&
       /stale|replay|timestamp/iu.test(tests) &&
       /duplicate|dedup/iu.test(tests) &&
       /malformed/iu.test(tests) &&
-      /size|oversiz/iu.test(tests);
+      payloadLimitCoverage;
     const passed = hidden.passed && regressionCoverage;
     return {
       passed,

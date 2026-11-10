@@ -16,6 +16,18 @@ Establish whether an interface supports a realistic user task, not merely whethe
 5. **Keep evidence attributable.** Distinguish product defects from facilitator intervention, test-data problems, prototype limitations, unavailable backend behavior, and participant-specific setup. For repeated rounds, keep task wording and success criteria stable enough to compare results.
 6. **Retest the corrected task.** A design change closes a usability finding only when the affected task/state has fresh evidence. Preserve representative failures as regression scenarios when they can recur mechanically.
 
+## When the evidence packet excludes the runtime
+
+Some evaluations hand over a closed packet of authored records instead of a running product. Treat the packet as the whole evidence base. Do not browse, do not invent measurements, and never describe an interaction you did not drive.
+
+Deliver the work anyway, in three files:
+
+1. `result.md` states the task analysis, the test or design decision it supports, and the recovery design the records justify.
+2. `verification.md` walks every falsifiable check and labels it `passed`, `failed`, `unavailable`, or `not-applicable`, citing the record that supports the label.
+3. `evidence-map.json` carries `claims[]` with evidence ids and a confidence of `observed`, `inferred`, `assumption`, or `unresolved`; `verification[]` rows with a check id and status; `artifacts[]` rows naming each required artifact as `produced`, `external-evaluator`, or `unavailable` with a note; and `limitations[]`.
+
+Trace every supplied record from at least one claim and give every check a verification row. A check that needs a runtime, participant, or device the packet does not contain stays `unavailable` with the reason recorded. Records the harness marks as evaluator metadata are not product evidence and do not become claims. Honest unavailability completes the answer only when the packet really excludes the surface; a fabricated observation never does.
+
 ## Specialist boundaries
 
 - `usability-evaluation` owns broader study design, synthesis, research conclusions, and prioritization across evidence. This skill owns executing and evidencing concrete interface tasks.

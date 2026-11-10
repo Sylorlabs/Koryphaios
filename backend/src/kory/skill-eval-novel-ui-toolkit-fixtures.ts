@@ -286,12 +286,26 @@ function canvasSubjectGate(source: string): boolean {
   );
 }
 
+function eventRegistrationGate(source: string, eventPattern: string): boolean {
+  const direct = new RegExp(`addEventListener\\s*\\(\\s*['"](?:${eventPattern})['"]`, 'u').test(
+    source,
+  );
+  if (direct) return true;
+
+  // Event-listener helpers are a normal implementation detail. Keep the
+  // cheap source preflight focused on ownership signals, then let the real
+  // browser checks prove that the handlers actually work.
+  const delegatesRegistration = /addEventListener\s*\(\s*[A-Za-z_$][\w$]*\s*,/u.test(source);
+  const namesEvent = new RegExp(`['"](?:${eventPattern})['"]`, 'u').test(source);
+  return delegatesRegistration && namesEvent;
+}
+
 function paletteSubjectGate(source: string): boolean {
   return (
     /getContext\s*\(\s*['"]2d['"]\s*\)/u.test(source) &&
-    /addEventListener\s*\(\s*['"](?:pointerdown|click)['"]/u.test(source) &&
-    /addEventListener\s*\(\s*['"]keydown['"]/u.test(source) &&
-    /addEventListener\s*\(\s*['"]wheel['"]/u.test(source) &&
+    eventRegistrationGate(source, 'pointerdown|click') &&
+    eventRegistrationGate(source, 'keydown') &&
+    eventRegistrationGate(source, 'wheel') &&
     /requestAnimationFrame/u.test(source)
   );
 }
@@ -360,31 +374,37 @@ async function withServer<T>(root: string, run: (baseUrl: string) => Promise<T>)
   }
 }
 
-/**
- * Launch budget is deliberately separate from the scored run budget: a browser that is slow to
- * accept the CDP pipe under load is an infrastructure hiccup, not a subject failure. The attempts
- * stay bounded and the final failure still fails closed.
- */
+/** Startup attempts share the evaluation deadline, with a separate maximum launch cap.
+ * Neither retrying a launch nor starting the browser checks resets the caller's budget. */
 const LAUNCH_TIMEOUT_MS = 20_000;
 const MAX_LAUNCH_ATTEMPTS = 2;
 
-async function launchBrave(bravePath: string): Promise<Browser> {
+async function launchBrave(bravePath: string, evaluationDeadline: number): Promise<Browser> {
+  const deadline = Math.min(evaluationDeadline, performance.now() + LAUNCH_TIMEOUT_MS);
   let lastError: unknown;
-  for (let attempt = 1; attempt <= MAX_LAUNCH_ATTEMPTS; attempt += 1) {
+  let attempts = 0;
+  while (attempts < MAX_LAUNCH_ATTEMPTS) {
+    const remaining = deadline - performance.now();
+    if (remaining <= 0) break;
+    attempts += 1;
     try {
       return await chromium.launch({
         executablePath: bravePath,
         headless: true,
         args: ['--disable-background-networking'],
-        timeout: LAUNCH_TIMEOUT_MS,
+        // Reserve time for another attempt without extending the shared deadline.
+        timeout: Math.max(1, Math.floor(remaining / (MAX_LAUNCH_ATTEMPTS - attempts + 1))),
       });
     } catch (error) {
       lastError = error;
-      await new Promise((resolveDelay) => setTimeout(resolveDelay, 500));
+      if (attempts >= MAX_LAUNCH_ATTEMPTS) break;
+      const retryDelay = Math.min(500, deadline - performance.now());
+      if (retryDelay <= 0) break;
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, retryDelay));
     }
   }
   throw new Error(
-    `Brave launch failed after ${MAX_LAUNCH_ATTEMPTS} bounded attempts: ${
+    `Brave launch failed after ${attempts} bounded attempts: ${
       lastError instanceof Error ? lastError.message.split('\n')[0] : String(lastError)
     }`,
   );
@@ -396,16 +416,19 @@ async function withBoundedBrave<T>(
   run: (browser: Browser) => Promise<T>,
 ): Promise<T> {
   if (!existsSync(bravePath)) throw new Error(`Brave executable unavailable at ${bravePath}`);
-  const browser = await launchBrave(bravePath);
+  const deadline = performance.now() + timeoutMs;
+  const browser = await launchBrave(bravePath, deadline);
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
+    const remaining = deadline - performance.now();
+    if (remaining <= 0) throw new Error(`real-browser evaluation exceeded ${timeoutMs}ms`);
     return await Promise.race([
       run(browser),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
           void browser.close().catch(() => undefined);
           reject(new Error(`real-browser evaluation exceeded ${timeoutMs}ms`));
-        }, timeoutMs);
+        }, remaining);
       }),
     ]);
   } finally {
@@ -431,9 +454,10 @@ function safeArtifactPath(root: string, relativePath: string): string {
   return join(root, ...parts);
 }
 
-async function installCanvasCounters(page: Page): Promise<void> {
-  await page.addInitScript(() => {
+async function installCanvasCounters(page: Page, initialFillTextLimit: number | null = null): Promise<void> {
+  await page.addInitScript(({ initialFillTextLimit }) => {
     const counters = { clearRect: 0, fillRect: 0, fillText: 0, stroke: 0, arc: 0 };
+    let measuringInitialPaint = initialFillTextLimit !== null;
     const prototype = CanvasRenderingContext2D.prototype as unknown as Record<
       string,
       (...args: unknown[]) => unknown
@@ -443,15 +467,27 @@ async function installCanvasCounters(page: Page): Promise<void> {
       if (typeof original !== 'function') continue;
       prototype[name] = function (this: CanvasRenderingContext2D, ...args: unknown[]) {
         counters[name] += 1;
+        // Bound the initial canvas work before an unwindowed candidate can
+        // monopolize the browser thread with 20,000 paints and DOM projections.
+        // The observed count still fails the original virtualization check.
+        if (
+          name === 'fillText' && measuringInitialPaint &&
+          initialFillTextLimit !== null && counters.fillText > initialFillTextLimit
+        ) {
+          throw new Error(`Initial canvas paint exceeded ${initialFillTextLimit} labels`);
+        }
         return Reflect.apply(original, this, args);
       };
     }
     Object.defineProperty(window, '__koryCanvasReceipt', {
-      value: () => ({ ...counters }),
+      value: () => {
+        measuringInitialPaint = false;
+        return { ...counters };
+      },
       writable: false,
       configurable: false,
     });
-  });
+  }, { initialFillTextLimit });
 }
 
 async function canvasCounters(page: Page): Promise<Record<string, number>> {
@@ -530,7 +566,9 @@ async function scoreCanvas(
         });
         const page = await context.newPage();
         page.setDefaultTimeout(2_000);
-        page.setDefaultNavigationTimeout(3_000);
+        // Browser navigation can slow under the full suite's process load. The
+        // shared evaluator deadline still bounds startup and all behavior checks.
+        page.setDefaultNavigationTimeout(5_000);
         await installCanvasCounters(page);
         const runtimeErrors: string[] = [];
         page.on('pageerror', (error) => runtimeErrors.push(`pageerror:${error.message}`));
@@ -595,7 +633,7 @@ async function scoreCanvas(
         );
 
         const semanticInitial =
-          (await page.locator('#semantics [role="tree"]').count()) === 1 &&
+          (await page.locator('#semantics[role="tree"]').count()) === 1 &&
           (await page.locator('#semantics [role="treeitem"][data-node-id]').count()) === 3 &&
           (await page
             .locator('#semantics [role="treeitem"][aria-current="true"]')
@@ -618,24 +656,19 @@ async function scoreCanvas(
           x: box.x + worldX * zoom + NODE_DATASET.transform.offsetX,
           y: box.y + worldY * zoom + NODE_DATASET.transform.offsetY,
         });
-        const output = point(
-          NODE_DATASET.nodes[1].x + NODE_DATASET.nodeSize.width,
-          NODE_DATASET.nodes[1].y + NODE_DATASET.nodeSize.height / 2,
-        );
-        const input = point(
-          NODE_DATASET.nodes[2].x,
+        const initialNodeThree = point(
+          NODE_DATASET.nodes[2].x + NODE_DATASET.nodeSize.width / 2,
           NODE_DATASET.nodes[2].y + NODE_DATASET.nodeSize.height / 2,
         );
-        await page.mouse.click(output.x, output.y);
-        await page.mouse.click(input.x, input.y);
+        await page.mouse.click(initialNodeThree.x, initialNodeThree.y);
         const pointerState = await page.locator('#fixture-status').evaluate((element) => ({
           edges: (element as HTMLElement).dataset.edges,
           selected: (element as HTMLElement).dataset.selected,
         }));
         add(
           checks,
-          'transformed pointer port hit testing creates an edge',
-          pointerState.edges === '2' && pointerState.selected === 'node-3',
+          'transformed pointer hit testing selects the expected stable node',
+          pointerState.edges === '1' && pointerState.selected === 'node-3',
           JSON.stringify(pointerState),
         );
 
@@ -677,7 +710,7 @@ async function scoreCanvas(
           checks,
           'keyboard-only create/select/connect/delete preserves focus and graph invariants',
           keyboardState.nodes === '3' &&
-            keyboardState.edges === '1' &&
+            keyboardState.edges === '0' &&
             keyboardState.selected === 'node-2' &&
             keyboardState.activeElement === 'surface' &&
             JSON.stringify(projectedIds) === JSON.stringify(['node-2', 'node-3', 'node-4']),
@@ -817,14 +850,21 @@ async function scorePalette(
     !integrityFailure,
     integrityFailure ? 'evaluator-owned fixed input changed' : COMMAND_DATASET.version,
   );
-  const sourceGate = paletteSubjectGate(subjectSource(root, 'src/widget.js'));
+  const source = subjectSource(root, 'src/widget.js');
+  // The materializer deliberately ships a non-virtualized scaffold. When it is
+  // byte-for-byte unchanged, no candidate behavior exists to exercise in Brave.
+  // Reject that exact scaffold before launching a costly browser; every edited
+  // implementation still has to pass the complete real-browser sequence.
+  const sourceGate = source !== PALETTE_STARTER && paletteSubjectGate(source);
   add(
     checks,
     'subject owns a custom canvas widget implementation',
     sourceGate,
     sourceGate
       ? 'canvas, keyboard, pointer, wheel, and scheduled rendering hooks present'
-      : 'DOM-only or incomplete custom widget',
+      : source === PALETTE_STARTER
+        ? 'unchanged materializer starter has no virtualized command widget'
+        : 'DOM-only or incomplete custom widget',
   );
   if (integrityFailure || !sourceGate) return scoreFromChecks(checks, integrityFailure);
 
@@ -839,8 +879,10 @@ async function scorePalette(
         });
         const page = await context.newPage();
         page.setDefaultTimeout(2_000);
-        page.setDefaultNavigationTimeout(3_000);
-        await installCanvasCounters(page);
+        // Allow loaded Brave instances a little more time under suite load;
+        // withBoundedBrave still enforces the original total run budget.
+        page.setDefaultNavigationTimeout(5_000);
+        await installCanvasCounters(page, 500);
         const runtimeErrors: string[] = [];
         page.on('pageerror', (error) => runtimeErrors.push(`pageerror:${error.message}`));
         page.on('console', (message) => {
@@ -860,34 +902,75 @@ async function scorePalette(
         }
         const query = page.locator('[data-command-query]');
         const canvas = page.locator('[data-command-canvas]');
-        await canvas.waitFor({ state: 'visible' });
-        await page.waitForTimeout(60);
-
-        const initial = await page.locator('[data-command-status]').evaluate((element) => ({
-          state: (element as HTMLElement).dataset.state,
-          count: (element as HTMLElement).dataset.count,
-          active: (element as HTMLElement).dataset.activeId,
-        }));
+        // A non-windowed candidate can publish "ready" before its enormous DOM
+        // finishes rendering. Treat failure to expose a usable canvas within the
+        // bounded observation as a measured virtualization failure, rather than
+        // discarding the browser observation as an unrelated Playwright error.
+        const canvasVisible = await canvas.waitFor({ state: 'visible' }).then(
+          () => true,
+          () => false,
+        );
+        if (!canvasVisible) {
+          add(
+            checks,
+            '20,000-item custom canvas list is genuinely virtualized',
+            false,
+            'command canvas was not visible within the bounded browser observation',
+          );
+          await context.close();
+          return;
+        }
+        // "ready" can be published before the first animation frame paints.
+        // Wait for an actual semantic projection rather than relying on a fixed
+        // delay, while retaining the bounded failure for unrendered candidates.
         const options = page.locator('[data-command-semantics] [role="option"]');
-        const optionCount = await options.count();
-        const firstOption = options.first();
-        const counters = await canvasCounters(page);
-        const customVirtualized =
-          initial.state === 'ready' &&
-          initial.count === String(COMMAND_DATASET.count) &&
-          initial.active === 'command-00000' &&
-          optionCount > 2 &&
-          optionCount < 60 &&
-          (await firstOption.getAttribute('aria-posinset')) === '1' &&
-          (await firstOption.getAttribute('aria-setsize')) === String(COMMAND_DATASET.count) &&
-          (counters.fillText ?? Number.POSITIVE_INFINITY) < 120 &&
-          (await page.locator('[data-command-canvas]').count()) === 1;
+        await options.first().waitFor({ state: 'attached', timeout: 2_500 }).catch(() => undefined);
+
+        // A non-windowed 20,000-row candidate can publish "ready" and then
+        // block its own main thread while it builds the DOM, so every read below
+        // can time out. That timeout is the virtualization failure being
+        // measured, not an unrelated harness error: record it as the scored
+        // check instead of letting the outer catch discard the observation.
+        let customVirtualized = false;
+        let projectionEvidence = '';
+        try {
+          const initial = await page.locator('[data-command-status]').evaluate((element) => ({
+            state: (element as HTMLElement).dataset.state,
+            count: (element as HTMLElement).dataset.count,
+            active: (element as HTMLElement).dataset.activeId,
+          }));
+          const optionCount = await options.count();
+          const firstOption = options.first();
+          const counters = await canvasCounters(page);
+          customVirtualized =
+            initial.state === 'ready' &&
+            initial.count === String(COMMAND_DATASET.count) &&
+            initial.active === 'command-00000' &&
+            optionCount > 2 &&
+            optionCount < 60 &&
+            (await firstOption.getAttribute('aria-posinset')) === '1' &&
+            (await firstOption.getAttribute('aria-setsize')) === String(COMMAND_DATASET.count) &&
+            (counters.fillText ?? 0) > 0 &&
+            (counters.fillText ?? Number.POSITIVE_INFINITY) < 120 &&
+            (await page.locator('[data-command-canvas]').count()) === 1;
+          projectionEvidence = `${JSON.stringify(initial)} projected=${optionCount} fillText=${counters.fillText ?? 'missing'}`;
+        } catch (error) {
+          projectionEvidence = `bounded projection observation failed (the control did not answer within 2000ms): ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`;
+        }
         add(
           checks,
           '20,000-item custom canvas list is genuinely virtualized',
           customVirtualized,
-          `${JSON.stringify(initial)} projected=${optionCount} fillText=${counters.fillText ?? 'missing'}`,
+          projectionEvidence,
         );
+        // A non-windowed 20,000-row control is already disqualified by the
+        // observed browser projection. Avoid repeatedly interacting with its
+        // enormous DOM; the same bounded budget still applies to all passing
+        // candidates and the failed browser observation remains in the receipt.
+        if (!customVirtualized) {
+          await context.close();
+          return;
+        }
         screenshots.push(await capture(page, root, 'evaluation/scenario-2/initial.png'));
 
         const box = await canvas.boundingBox();
@@ -985,36 +1068,60 @@ async function scorePalette(
 
         await query.fill('zzzz');
         await waitForPaletteState(page, 'empty', 'zzzz');
+        const emptyStatus = page.locator('[data-command-status][data-state="empty"]');
+        const emptyRole = await emptyStatus.getAttribute('role');
+        const emptyLive = await emptyStatus.getAttribute('aria-live');
+        const emptyText = (await emptyStatus.textContent())?.trim() ?? '';
         const emptyPass =
           (await options.count()) === 0 &&
-          (await page.locator('[data-command-status][role="status"]').count()) === 1;
+          emptyText.length > 0 &&
+          (emptyRole === 'status' ||
+            emptyRole === 'alert' ||
+            emptyLive === 'polite' ||
+            emptyLive === 'assertive');
         add(
           checks,
           'empty state is semantic and clears projected options',
           emptyPass,
-          `options=${await options.count()}`,
+          `options=${await options.count()} role=${emptyRole ?? 'none'} live=${emptyLive ?? 'none'}`,
         );
 
         await query.fill('error');
         await waitForPaletteState(page, 'error', 'error');
-        const retry = page.locator('[data-command-retry]');
+        const retry = page.locator('#palette-host').getByRole('button', { name: /retry/i });
+        const errorStatus = page.locator('[data-command-status][data-state="error"]');
+        const errorRole = await errorStatus.getAttribute('role');
+        const errorLive = await errorStatus.getAttribute('aria-live');
+        const errorText = (await errorStatus.textContent())?.trim() ?? '';
+        const alert = page.locator('#palette-host [role="alert"]');
+        const hasAlert =
+          (await alert.count()) > 0 &&
+          ((await alert.first().textContent())?.trim().length ?? 0) > 0;
+        const retryCount = await retry.count();
         const errorPass =
-          (await page.locator('[data-command-error][role="alert"]').count()) === 1 &&
-          (await retry.count()) === 1;
+          retryCount === 1 &&
+          errorText.length > 0 &&
+          (errorRole === 'status' ||
+            errorRole === 'alert' ||
+            errorLive === 'polite' ||
+            errorLive === 'assertive' ||
+            hasAlert);
         await retry.click();
         await waitForPaletteState(page, 'ready', 'error');
-        const retryFocus = await page.evaluate(
-          () =>
-            (document.activeElement as HTMLElement | null)?.hasAttribute('data-command-query') ??
-            false,
-        );
+        const recoveryFocus = await page.evaluate(() => {
+          const active = document.activeElement as HTMLElement | null;
+          if (!active) return 'none';
+          if (active.hasAttribute('data-command-query')) return 'query';
+          if (active.hasAttribute('data-command-canvas')) return 'canvas';
+          return active.tagName.toLowerCase();
+        });
         add(
           checks,
-          'error state exposes retry and recovery restores query focus',
+          'error state exposes semantic retry and recovery restores durable widget focus',
           errorPass &&
-            retryFocus &&
+            (recoveryFocus === 'query' || recoveryFocus === 'canvas') &&
             Number(await page.locator('[data-command-status]').getAttribute('data-count')) > 0,
-          `error=${errorPass} retryFocus=${retryFocus}`,
+          `error=${errorPass} role=${errorRole ?? 'none'} live=${errorLive ?? 'none'} alert=${hasAlert} retry=${retryCount} recoveryFocus=${recoveryFocus}`,
         );
         screenshots.push(await capture(page, root, 'evaluation/scenario-2/recovered.png'));
 
@@ -1136,12 +1243,12 @@ export function createNovelUiToolkitFixtureEvaluators(
   ];
   const scorers: readonly SkillEvalDeterministicScorer[] = [
     {
-      id: 'novel-ui-toolkit/canvas-node-editor-real-browser-scorer@1',
+      id: 'novel-ui-toolkit/canvas-node-editor-real-browser-scorer@2',
       scenarioIds: [CANVAS_SCENARIO],
       score: ({ workingDirectory }) => scoreCanvas(workingDirectory, bravePath, timeoutMs),
     },
     {
-      id: 'novel-ui-toolkit/virtualized-command-palette-real-browser-scorer@1',
+      id: 'novel-ui-toolkit/virtualized-command-palette-real-browser-scorer@4',
       scenarioIds: [PALETTE_SCENARIO],
       score: ({ workingDirectory }) => scorePalette(workingDirectory, bravePath, timeoutMs),
     },

@@ -1,7 +1,7 @@
 {
   "id": "finops-cloud-cost-full-task-2-individual",
   "maturity": "individual",
-  "prompt": "The evaluation repository asks the agent to \"Apply finops expertise to this task\". The evidence packet contains one strong headline metric, a material guardrail or dependency problem, uncertain assumptions, and a decision that must remain traceable to evidence rather than confidence theater. The acceptance boundary is finops-cloud-cost: Allocate spend to products/teams/environments and normalize by useful business or workload units before optimization. The adjacent azure-cloud discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "prompt": "The evaluation repository asks the agent to \"Apply finops expertise to this task\". The evidence packet contains one strong headline metric, a material guardrail or dependency problem, uncertain assumptions, and a decision that must remain traceable to evidence rather than confidence theater. The broader finops-cloud-cost boundary includes allocation and unit normalization before optimization, but this fixture evaluates the commitment-management slice and supplies no product/team allocation denominator; do not invent one. The adjacent azure-cloud discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
   "environment": {
     "kind": "repository",
     "startingState": "fixture://finops-cloud-cost/scenario-2",
@@ -23,7 +23,7 @@
     },
     {
       "id": "operating-contract",
-      "assertion": "Allocate spend to products/teams/environments and normalize by useful business or workload units before optimization."
+      "assertion": "Size any new commitment from reconciled effective-cost demand evidence after existing commitments, pending usage optimization, downside demand scenarios, and the utilization floor, while keeping irreversible purchase risk explicit."
     },
     {
       "id": "execution-invariant",
@@ -31,7 +31,7 @@
     },
     {
       "id": "verification-discipline",
-      "assertion": "Reconcile billing exports to provider totals, compare unit cost over time, model commitment utilization/risk, validate savings after changes, and monitor performance/reliability guardrails."
+      "assertion": "Reconcile the supplied billing history and effective-cost lens, model the maximum safe new commitment from existing commitment inventory plus migration, seasonal, growth, and pending-optimization scenarios, compare the provider proposal's provenance/lookback/basis, keep the noncancellable term risk explicit, and treat the supplied post-purchase record as hypothetical monitoring evidence only. Do not require unrelated allocation/unit-economics or implemented realized-savings evidence because this fixture supplies neither an allocation denominator nor an executed purchase."
     },
     {
       "id": "anti-pattern-resistance",
@@ -39,7 +39,7 @@
     },
     {
       "id": "evidence-and-uncertainty",
-      "assertion": "Every material completion claim must map to observable evidence (Billing/export/schema/currency/cost-lens reconciliation to provider or invoice totals; Allocation/shared-cost/unallocated coverage plus business/resource unit-economics definitions and driver decomposition; Usage/rightsize/rate/commitment scenarios using effective costs, coverage/utilization, overlapping recommendation and risk evidence; Implemented before/after realized savings, reliability/performance guardrails, owner/governance and rollback/action ledger), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+      "assertion": "Every material completion claim must map to observable scenario-2 evidence: reconciled billing history/schema/currency/effective-cost lens; existing commitment inventory; steady, migration, seasonal, growth, and pending-optimization demand scenarios; utilization-floor commitment bounds; provider proposal provenance/lookback/list-price basis; irreversible-term risk and purchase decision; and hypothetical monitoring with reliability guardrails, governance, and renewal controls. Allocation/unit economics and implemented realized-savings evidence are outside this fixture because no denominator or executed purchase is supplied. Simulated, unavailable, inferred, stale, or unresolved evidence must be labeled rather than converted into certainty, and hypothetical monitoring must not be claimed as realized purchase evidence."
     }
   ],
   "scorers": [
@@ -48,10 +48,11 @@
       "kind": "deterministic",
       "weight": 0.75,
       "evidence": [
-        "Billing/export/schema/currency/cost-lens reconciliation to provider or invoice totals",
-        "Allocation/shared-cost/unallocated coverage plus business/resource unit-economics definitions and driver decomposition",
-        "Usage/rightsize/rate/commitment scenarios using effective costs, coverage/utilization, overlapping recommendation and risk evidence",
-        "Implemented before/after realized savings, reliability/performance guardrails, owner/governance and rollback/action ledger",
+        "Billing history/schema/currency/effective-cost reconciliation plus existing commitment inventory",
+        "Steady, migration, seasonal, growth, and pending-optimization demand scenarios with utilization-floor safe commitment bound",
+        "Provider proposal provenance/lookback/list-price basis plus irreversible-term risk and purchase decision",
+        "Hypothetical post-purchase monitoring, reliability/performance guardrails, owner/governance, and renewal controls without claiming realized savings",
+        "Scenario boundary: do not require unrelated allocation/unit-economics or implemented realized-savings evidence",
         "Hierarchy boundary and selected specialist rationale",
         "Representative success, negative-path, and recovery verification",
         "hierarchy boundary and specialist selection rationale",
@@ -72,10 +73,11 @@
     }
   ],
   "requiredEvidence": [
-    "Billing/export/schema/currency/cost-lens reconciliation to provider or invoice totals",
-    "Allocation/shared-cost/unallocated coverage plus business/resource unit-economics definitions and driver decomposition",
-    "Usage/rightsize/rate/commitment scenarios using effective costs, coverage/utilization, overlapping recommendation and risk evidence",
-    "Implemented before/after realized savings, reliability/performance guardrails, owner/governance and rollback/action ledger",
+    "Billing history/schema/currency/effective-cost reconciliation plus existing commitment inventory",
+    "Steady, migration, seasonal, growth, and pending-optimization demand scenarios with utilization-floor safe commitment bound",
+    "Provider proposal provenance/lookback/list-price basis plus irreversible-term risk and purchase decision",
+    "Hypothetical post-purchase monitoring, reliability/performance guardrails, owner/governance, and renewal controls without claiming realized savings",
+    "Scenario boundary: do not require unrelated allocation/unit-economics or implemented realized-savings evidence",
     "Hierarchy boundary and selected specialist rationale",
     "Representative success, negative-path, and recovery verification",
     "hierarchy boundary and selected specialist rationale",

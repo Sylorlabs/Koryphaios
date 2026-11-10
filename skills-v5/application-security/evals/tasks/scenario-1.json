@@ -1,15 +1,16 @@
 {
   "id": "application-security-full-task-1",
   "maturity": "individual",
-  "prompt": "Review and harden a media-import service. A user can upload a ZIP archive or provide an HTTPS source URL, choose an output name, and supply converter options. The service fetches remote input, extracts the archive, writes files into a job directory, invokes a native converter, and stores generated output plus logs. Build a source-to-sink map and concrete application-security requirements for URL fetching, redirect/resolution behavior, archive paths and resource limits, output-path canonicalization, subprocess argument handling, parser limits, partial output cleanup, and safe errors/logging. Preserve authorization as a separate concern: assume the caller is already entitled to create the job. Define reproducible negative cases and fail-closed behavior, but leave final black-box proof of the finished implementation to security-verification.",
+  "prompt": "Review and harden a media-import service. A user can upload a ZIP archive or provide an HTTPS source URL, choose an output name, and supply converter options. The service fetches remote input, extracts the archive, writes files into a job directory, invokes a native converter, and stores generated output plus logs. Build a source-to-sink map and concrete application-security requirements for URL fetching, redirect/resolution behavior, archive paths and resource limits, output-path canonicalization, subprocess argument handling, parser limits, partial output cleanup, and safe errors/logging. Preserve authorization as a separate concern: assume the caller is already entitled to create the job. Resource ceilings must be explicit: when the existing product does not provide a numeric policy, choose and label conservative provisional limits instead of leaving body/output/time/memory/process/log bounds qualitative. Define reproducible negative cases, including a full bearer Authorization header and terminal controls in diagnostic text, and fail-closed behavior, but leave final black-box proof of the finished implementation to security-verification.",
   "environment": {
     "kind": "synthetic",
     "startingState": "fixture://application-security/scenario-1",
     "requirements": [
       "media-import service with remote URL, archive, output-name, and converter-option inputs",
-      "synthetic HTTP source supporting redirects and multiple address classes",
-      "archive corpus containing traversal, nested, oversized, malformed, and valid entries",
-      "native converter invoked through a process API plus inspectable job/output directories",
+      "FetchHop array modeling URL/resolved-IP pairs; no HTTP transport or connected-peer observation is supplied",
+      "archive metadata validator and path helper with real temporary roots; no ZIP parser/extractor is supplied",
+      "converter invocation descriptor with fixed executable and --quality low|medium|high contract; no converter process or durable job pipeline is supplied",
+      "implement and test supplied helpers; record absent transport/parser/process/persistence boundaries as integration blockers rather than claiming runtime proof",
       "paired same-model skill/no-skill execution"
     ]
   },
@@ -20,23 +21,26 @@
     },
     {
       "id": "application-security-path-1",
-      "assertion": "Archive entry and output paths are normalized/canonicalized at the relevant filesystem boundary and must remain within the job root; absolute, parent-traversal, symlink/reparse, or post-normalization escape cases are explicitly handled."
+      "assertion": "Tests use existing temporary roots: permit a nested relative target and reject absolute, parent-traversal, normalized escape, and escaping symlink/reparse targets. Apply containment to both archive and output paths, including existing leaf links and new-target ancestors. Specify race-safe creation and no outside-root writes; identify any missing write/extract integration as unverified."
     },
     {
       "id": "application-security-resource-1",
-      "assertion": "Archive/file/body/redirect/output size, entry count, nesting/decompression, processing time, and converter resource limits are explicit, with rejection and cleanup semantics that prevent partial privileged output from being treated as success."
+      "assertion": "Declare numeric ceilings with units and enforcement points for redirects, archive entries/expanded bytes/per-entry bytes/depth, body/output bytes, processing time, converter memory/process count, and diagnostic bytes. Preserve supplied ceilings; label missing-policy defaults as provisional. Exercise permitted values, exact boundaries, overflow, and invalid/non-finite metadata. Mark absent parser/process limit enforcement as unverified rather than treating constants or prose as proof."
     },
     {
       "id": "application-security-process-1",
-      "assertion": "Converter options and file names are passed through structured process arguments or an equivalent non-shell API with a fixed executable; attacker-controlled values are not interpolated into a shell command."
+      "assertion": "Use a fixed executable and shell-free structured argv, preserve supported --quality low|medium|high options and valid punctuation, and test rejected unsupported options plus leading-option operands. Explain option/operand separation using the converter's documented parser; -- is useful only where supported. A descriptor containing safe-looking strings is not proof of the converter's actual effects; record missing executable/parser evidence as a blocker.",
+      "source": "https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html"
     },
     {
       "id": "application-security-fetch-1",
-      "assertion": "The outbound-fetch design constrains accepted URL schemes and the permitted destination policy across redirects/resolution, and does not rely on string-prefix host checks that can change meaning after parsing or DNS resolution."
+      "assertion": "Permit a valid public HTTPS control; reject malformed/non-HTTPS/userinfo URLs, private/loopback/link-local and non-public destinations, redirect-to-private targets, and excessive hops under the fixture's public-network policy. Test IPv4/IPv6 and mapped forms. Require the actual connection, retries, and redirects to use vetted destinations with TLS hostname checks and safe cross-origin header handling. A resolvedIp field alone does not prove connected-peer/DNS-rebinding enforcement; record absent transport evidence as a blocker.",
+      "source": "https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html"
     },
     {
       "id": "application-security-error-1",
-      "assertion": "Failure paths return bounded user-safe errors, preserve operator diagnostics without credentials/sensitive content or unsafe attacker-controlled terminal/log data, and remove or quarantine partial outputs deterministically."
+      "assertion": "Retain useful non-sensitive diagnostic context while removing a full Authorization: Bearer credential, access/refresh credentials and bare aliases across newlines/delimiters, and terminal controls; test long messages against the declared byte cap. Specify and, where implemented, exercise failure after partial staging, no outside-root or committed partial output, deterministic cleanup/quarantine, and a later valid retry. Record missing persistence/cleanup execution as unverified.",
+      "source": "https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html"
     }
   ],
   "scorers": [
@@ -47,7 +51,8 @@
       "evidence": [
         "source-to-sink trust map",
         "path/network/process/resource invariants",
-        "negative-case matrix",
+        "executable helper regressions with permitted controls and rejected inputs",
+        "negative-case matrix separating observed results from integration blockers",
         "fail-closed cleanup/error contract"
       ]
     },
@@ -67,7 +72,8 @@
     "entry-point and sensitive-sink inventory",
     "source-to-sink security invariants",
     "archive/path/network/process resource limits",
-    "negative and cleanup/failure cases",
+    "executable helper regressions and commands/results",
+    "negative and cleanup/failure cases with unverified integration boundaries labeled",
     "paired skill/no-skill run artifacts"
   ],
   "requiredArtifacts": [

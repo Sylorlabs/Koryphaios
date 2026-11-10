@@ -21,6 +21,18 @@ Treat privacy as a system property, not a notice-writing exercise. Trace how inf
 
 Produce a field-level lifecycle map, purpose/necessity rationale, retention/deletion matrix, preference/control contract, and observable verification results. Mark systems that are unavailable, simulated, or governed by external processors. Do not claim that deleting source records removes information from model weights, immutable audit artifacts, third-party systems, or backups unless the actual mechanism and evidence support that claim.
 
+## Deliverable fidelity
+
+The supplied evaluator and evidence corpus are read only inputs. Editing either one, or writing output into its path, is recorded as an integrity failure, and no other result offsets it.
+
+Implement the control the task asks for in the artifact it names, at the path and in the shape its reader expects. A typed spec is mirrored field for field with every boolean answered, and an opt out or minimization rule belongs in executable behaviour rather than in accompanying prose.
+
+When a task supplies synthetic identities or a queue and restore path, exercise them through the code path production uses. A described control is not a verified one.
+
+When a task supplies synthetic identities or a queue and restore path, exercise them through the code path production uses. A described control is not a verified one.
+
+An aggregate event identity has to be pseudonymous and unique per event: derive it from the subject with a per event nonce so two identical calls produce different values, and never emit the account id, the email address or a stable device identifier into emitted events. Opting out deletes the derived profile and tombstones queued events so a later queue drain cannot rehydrate one, and a restore reapplies that suppression before serving.
+
 ## Boundaries
 
 - `authorization-security` owns who may access or mutate a resource; privacy-engineering owns whether the data should exist, how much should be processed, and how its lifecycle is governed.

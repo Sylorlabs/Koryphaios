@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "literature-research",
-  "version": "5.1.1",
+  "version": "5.3.0",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -174,7 +174,7 @@
       "versionScope": "Agent Skills specification as available 2026-09-05",
       "staleAfterDays": 90,
       "notes": "Portable discovery metadata and progressive disclosure.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md",
@@ -182,7 +182,7 @@
       "versionScope": "OpenAI public skill-creator guidance on main as inspected 2026-09-05",
       "staleAfterDays": 60,
       "notes": "Focused triggers, progressive disclosure, and behavioral validation guidance.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills",

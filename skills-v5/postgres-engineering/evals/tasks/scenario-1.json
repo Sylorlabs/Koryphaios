@@ -1,7 +1,7 @@
 {
   "id": "postgres-engineering-full-task-1-individual",
   "maturity": "individual",
-  "prompt": "Fix a PostgreSQL job queue where multiple workers use `SELECT ... LIMIT 1` then update, causing duplicate claims and lock waits. On the pinned PostgreSQL version, implement an atomic/transactionally correct claim pattern using row locking semantics, preserve priority ordering as far as concurrency permits, and verify 20 concurrent workers, empty queue, worker crash after claim, retry visibility, and lock/transaction duration. Do not add a separate broker.",
+  "prompt": "Fix a PostgreSQL job queue where multiple workers use `SELECT ... LIMIT 1` then update, causing duplicate claims and lock waits. On the pinned PostgreSQL version, implement an atomic/transactionally correct claim pattern using row locking semantics, preserve priority ordering as far as concurrency permits, and verify 20 concurrent workers, empty queue, worker crash after claim, retry visibility, and lock/transaction duration. In machine-readable evidence, preserve the numeric quantity 20 and the literal evidence category constraint when constraint verification is reported. Candidate-shell inability to invoke PostgreSQL or Docker must not be inferred as evaluator-runtime absence; mark the runtime unavailable only when the runtime command being reported actually fails. Do not add a separate broker.",
   "environment": {
     "kind": "synthetic",
     "startingState": "fixture://postgres-engineering/skip-locked-job-claim",

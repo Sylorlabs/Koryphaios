@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "oauth-oidc",
-  "version": "5.1.1",
+  "version": "5.1.5",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -108,7 +108,7 @@
       "versionScope": "RFC 7662 OAuth 2.0 Token Introspection, October 2015",
       "staleAfterDays": 365,
       "notes": "Active-state and authorization metadata independent of token format; preserve opaque-token validation rather than imposing JWT-only access tokens.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://www.rfc-editor.org/rfc/rfc9700.html",
@@ -116,7 +116,7 @@
       "versionScope": "RFC 9700 / BCP 240, January 2025",
       "staleAfterDays": 365,
       "notes": "Current OAuth 2.0 Security Best Current Practice: exact redirects, PKCE, CSRF/mix-up defenses, implicit-grant guidance, sender-constrained tokens, refresh rotation, audience restriction, and token protection.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://openid.net/specs/openid-connect-core-1_0-errata2.html",

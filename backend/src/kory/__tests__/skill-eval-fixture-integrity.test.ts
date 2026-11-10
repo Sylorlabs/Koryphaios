@@ -130,6 +130,17 @@ describe('shared evaluation fixture integrity', () => {
     ).toBe(false);
   });
 
+  test('discovers shell regression tests without treating them as Bun tests', () => {
+    const root = workspace();
+    writeFixtureFile(
+      root,
+      'tests/rename.test.sh',
+      '#!/bin/bash\n# collision cycle rollback dry-run path with spaces\n',
+    );
+    expect(hasRegressionText(root, [/collision|cycle|rollback/iu, /space|path/iu])).toBe(true);
+    expect(runCandidateBunTests(root)).toMatchObject({ completed: false, passed: false });
+  });
+
   test('rejects an edited evaluator test and reports the evidence boundary', () => {
     const root = workspace();
     const result = runHiddenBunTest(

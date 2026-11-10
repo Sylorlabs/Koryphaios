@@ -1,17 +1,27 @@
 {
   "schemaVersion": 1,
   "name": "embedding-systems",
-  "version": "5.1.1",
+  "version": "5.1.3",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
-  "domains": ["ai", "ml", "embeddings"],
-  "targetMedia": ["any"],
+  "domains": [
+    "ai",
+    "ml",
+    "embeddings"
+  ],
+  "targetMedia": [
+    "any"
+  ],
   "pathScopes": [],
   "contextBudget": 7000,
-  "broader": ["implementation"],
+  "broader": [
+    "implementation"
+  ],
   "facets": [],
-  "requires": ["ml-evaluation"],
+  "requires": [
+    "ml-evaluation"
+  ],
   "conflicts": [],
   "activation": [
     "embedding model",
@@ -58,6 +68,8 @@
     "Input limit, truncation, batching/cache and degenerate-vector behavior",
     "Labeled downstream similarity/retrieval/classification/clustering quality plus latency/cost evidence",
     "Versioned migration/backfill/coverage/cutover/rollback and drift-canary evidence",
+    "Documented provider facts separated from observed behavior, empirical results and unavailable evidence",
+    "Representation manifest and explicit embedding/index compatibility checks",
     "Hierarchy boundary and selected specialist rationale",
     "Representative success, negative-path, and recovery verification"
   ],
@@ -67,14 +79,16 @@
       "Choose between 768- and 3072-dimensional embeddings for multilingual retrieval using the same labeled queries, provider-correct query/document task modes, explicit normalization and measured quality/storage/latency tradeoffs.",
       "Fix an embedding pipeline whose provider auto-truncates long inputs and occasionally returns missing vectors; make token/truncation behavior observable, preserve batch ordering, bound retries and test long, empty and multilingual fixtures.",
       "Calibrate an embedding-similarity threshold for duplicate detection from labeled positive/negative pairs, pin model/dimension/normalization, select the threshold on development data and verify drift when the provider model changes.",
-      "Build a multimodal embedding representation layer for text and image assets, recording exact model/modality preprocessing and shared-space contract, then verify cross-modal retrieval quality rather than assuming comparable vectors from the API response shape."
+      "Build a multimodal embedding representation layer for text and image assets, recording exact model/modality preprocessing and shared-space contract, then verify cross-modal retrieval quality rather than assuming comparable vectors from the API response shape.",
+      "Integrate an embedding writer with an ANN index by emitting a representation manifest and rejecting model, task, dimension, normalization or metric mismatches while keeping index algorithm tuning with vector-search-systems."
     ],
     "negative": [
       "Tune HNSW graph parameters, quantization and shard sizing for an existing fixed vector representation; embedding model, dimensions and preprocessing are unchanged.",
       "Improve end-to-end RAG ACL filtering, hybrid candidate fusion, reranking and citation grounding while the embedding representation is frozen.",
       "Train a LoRA adapter on a model using a governed dataset and checkpoint workflow; the downstream embedding pipeline is not changing.",
       "Optimize recommendation candidate generation and ranking loss from click feedback while existing item/user embeddings are treated as fixed features.",
-      "Evaluate a tabular classifier's ROC/PR/calibration metrics; no vector representation or embedding model is involved."
+      "Evaluate a tabular classifier's ROC/PR/calibration metrics; no vector representation or embedding model is involved.",
+      "Tune HNSW efSearch and shard capacity for a fixed representation; no embedding identity, preprocessing, vector compatibility or re-embedding behavior changes."
     ],
     "ambiguous": [
       {
@@ -83,8 +97,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["vector-search-systems"],
-        "tags": ["ambiguous", "neighbor-boundary"]
+        "adjacentSkills": [
+          "vector-search-systems"
+        ],
+        "tags": [
+          "ambiguous",
+          "neighbor-boundary"
+        ]
       },
       {
         "id": "embedding-systems-ambiguous-2",
@@ -92,8 +111,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["rag-retrieval-systems"],
-        "tags": ["ambiguous", "scope-control"]
+        "adjacentSkills": [
+          "rag-retrieval-systems"
+        ],
+        "tags": [
+          "ambiguous",
+          "scope-control"
+        ]
       },
       {
         "id": "embedding-systems-ambiguous-3",
@@ -101,8 +125,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["computer-vision"],
-        "tags": ["ambiguous", "scope-control"]
+        "adjacentSkills": [
+          "computer-vision"
+        ],
+        "tags": [
+          "ambiguous",
+          "scope-control"
+        ]
       }
     ],
     "adversarial": [
@@ -112,8 +141,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["implementation"],
-        "tags": ["adversarial", "quoted-decoy"]
+        "adjacentSkills": [
+          "implementation"
+        ],
+        "tags": [
+          "adversarial",
+          "quoted-decoy"
+        ]
       },
       {
         "id": "embedding-systems-adversarial-2",
@@ -121,8 +155,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["incident-response"],
-        "tags": ["adversarial", "scope-control"]
+        "adjacentSkills": [
+          "incident-response"
+        ],
+        "tags": [
+          "adversarial",
+          "scope-control"
+        ]
       },
       {
         "id": "embedding-systems-adversarial-3",
@@ -130,8 +169,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["documentation"],
-        "tags": ["adversarial", "scope-control"]
+        "adjacentSkills": [
+          "documentation"
+        ],
+        "tags": [
+          "adversarial",
+          "scope-control"
+        ]
       }
     ]
   },
@@ -139,42 +183,50 @@
     {
       "url": "https://developers.openai.com/api/docs/guides/embeddings",
       "sourceType": "official-docs",
-      "versionScope": "Rolling OpenAI embeddings documentation as available 2026-10-02",
+      "versionScope": "Rolling OpenAI embeddings documentation inspected 2026-11-08",
       "staleAfterDays": 14,
-      "notes": "Current embedding models, dimensions and supported shortening behavior.",
-      "verifiedAt": "2026-10-02"
+      "notes": "Documented provider/model facts only: current embedding models, dimensions and supported shortening behavior; empirical quality and latency require run receipts.",
+      "verifiedAt": "2026-11-08"
     },
     {
       "url": "https://developers.openai.com/api/reference/resources/embeddings/methods/create",
       "sourceType": "official-docs",
-      "versionScope": "Rolling OpenAI embeddings API reference as available 2026-10-02",
+      "versionScope": "Rolling OpenAI embeddings API reference inspected 2026-11-08",
       "staleAfterDays": 14,
-      "notes": "Current per-input/batch token limits, dimensions parameter, batching and response identity.",
-      "verifiedAt": "2026-10-02"
+      "notes": "Documented provider/model facts only: accepted input forms, current per-input/batch token limits, dimensions parameter, batching and response identity.",
+      "verifiedAt": "2026-11-08"
+    },
+    {
+      "url": "https://help.openai.com/en/articles/6824809-embeddings-frequently-asked-questions",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling OpenAI embeddings FAQ inspected 2026-10-12",
+      "staleAfterDays": 30,
+      "notes": "Documented provider/model fact: L2 normalization of OpenAI API embedding outputs including dimensions-parameter shortening; do not generalize to other providers or manual slicing.",
+      "verifiedAt": "2026-10-12"
     },
     {
       "url": "https://ai.google.dev/gemini-api/docs/embeddings",
       "sourceType": "official-docs",
-      "versionScope": "Rolling Gemini API embeddings documentation as available 2026-10-02",
+      "versionScope": "Gemini API embeddings documentation last updated 2026-10-09, rechecked 2026-11-01",
       "staleAfterDays": 14,
-      "notes": "Current Gemini embedding-2 multimodal behavior, output dimensions, normalization and task-instruction differences versus embedding-001.",
-      "verifiedAt": "2026-10-02"
+      "notes": "Documented provider/model facts: current Gemini Embedding 2 multimodal shared-space behavior, 3072 default dimensions with 768/1536 truncation, normalization for non-default dimensions, and taskType differences versus embedding-001.",
+      "verifiedAt": "2026-11-01"
     },
     {
       "url": "https://docs.cloud.google.com/vertex-ai/generative-ai/docs/embeddings/task-types",
       "sourceType": "official-docs",
-      "versionScope": "Rolling Vertex AI embedding task-type documentation as available 2026-09-05",
+      "versionScope": "Rolling Vertex AI embedding task-type documentation as available 2026-10-04",
       "staleAfterDays": 30,
-      "notes": "Asymmetric retrieval query/document roles and task-specific embedding modes for supported Vertex models.",
-      "verifiedAt": "2026-09-05"
+      "notes": "Documented provider/model task facts: asymmetric retrieval query/document roles and task-specific embedding modes for supported Vertex models.",
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/text-embeddings-api",
       "sourceType": "official-docs",
-      "versionScope": "Rolling Vertex AI text-embeddings API documentation as available 2026-09-05",
+      "versionScope": "Rolling Vertex AI text-embeddings API documentation as available 2026-10-04",
       "staleAfterDays": 30,
-      "notes": "Model/version, dimensionality, sequence limits, task type and auto-truncation semantics.",
-      "verifiedAt": "2026-09-05"
+      "notes": "Documented provider/model facts: model/version, dimensionality, sequence limits, task type and auto-truncation semantics.",
+      "verifiedAt": "2026-11-03"
     }
   ],
   "authoringMaturity": "individual"

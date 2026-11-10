@@ -10,7 +10,8 @@
       "the decoder exposes stable application error categories separately from validator implementation text",
       "the reducer exposes next state and emitted local effects for each transition without a broker or database",
       "the fixture can apply and restore a controlled mutation removing the extra-property restriction",
-      "paired same-model skill/no-skill execution"
+      "the fixture is synthetic and local; its results must not be reported as broker, database, or production qualification",
+      "paired same-model skill/no-skill execution remains a separate official evaluation requirement"
     ]
   },
   "falsifiableChecks": [
@@ -61,8 +62,9 @@
     "legacy/current acceptance and malformed rejection results",
     "state-transition table results",
     "controlled schema mutation failing result and restored passing result",
-    "paired skill/no-skill run artifacts",
-    "explicit unavailable or simulated evidence labels"
+    "exact command, runtime identity, and observed or unexecuted status for each focused run",
+    "synthetic/local fixture boundary with broker, database, and production qualification explicitly unavailable",
+    "paired skill/no-skill and independent blind-review status explicitly labeled unavailable unless separately executed"
   ],
   "requiredArtifacts": [
     "deterministic-contract-testing-scenario-2-case-matrix",

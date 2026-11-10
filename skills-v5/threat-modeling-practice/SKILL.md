@@ -29,4 +29,4 @@ Produce a system/trust-boundary representation, assumptions and attacker-capabil
 - `application-security`, `authorization-security`, `secure-authentication`, `cloud-security`, `embedded-device-security`, and other specialist skills own detailed control design inside their domains. Threat modeling owns cross-system attack paths, assumptions, priorities, and handoffs.
 - Avoid diagram-only output, generic STRIDE lists detached from the system, exhaustive theoretical threat catalogs without prioritization, and mitigation claims with no enforcing component.
 
-Use [the maintained source map](references/sources.md) for OWASP's maintained methodology-neutral threat-model guidance and current NIST SSDF status.
+Use [the maintained source map](references/sources.md) for OWASP's maintained methodology-neutral threat model guidance and current NIST SSDF status.

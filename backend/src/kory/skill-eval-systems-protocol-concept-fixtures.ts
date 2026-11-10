@@ -155,6 +155,8 @@ function mlBinaryVectors(): ConceptVector[] {
         reviewCapacity: 2,
         train: [{ id: 't1', account: 'a', fingerprint: 'x' }],
         rows: [
+          { id: 'r0', account: 'b', fingerprint: 'q', time: 100, label: 1, probability: 1 },
+          { id: 'before', account: 'e', fingerprint: 'v', time: 99, label: 1, probability: 0.99 },
           { id: 'r1', account: 'b', fingerprint: 'y', time: 110, label: 1, probability: 0.9 },
           { id: 'r2', account: 'a', fingerprint: 'z', time: 120, label: 0, probability: 0.8 },
           { id: 'r3', account: 'c', fingerprint: 'x', time: 130, label: 1, probability: 0.7 },
@@ -163,7 +165,7 @@ function mlBinaryVectors(): ConceptVector[] {
       },
       expected: {
         eligibleIds: ['r1', 'r4'],
-        leakageIds: ['r2', 'r3'],
+        leakageIds: ['r0', 'before', 'r2', 'r3'],
         reviewedIds: ['r1', 'r4'],
         precision: 0.5,
         recall: 1,
@@ -181,6 +183,61 @@ function mlBinaryVectors(): ConceptVector[] {
         ],
       },
       expected: { eligibleIds: ['b'], leakageIds: [], reviewedIds: ['b'], precision: 1, recall: 1 },
+    },
+    {
+      name: 'invalid labels are excluded before leakage classification and ranking',
+      input: {
+        cutoff: 20,
+        reviewCapacity: 3,
+        train: [{ id: 'train', account: 'seen', fingerprint: 'seen' }],
+        rows: [
+          { id: 'missing', account: 'seen', fingerprint: 'seen', time: 19, probability: 1 },
+          { id: 'string', account: 's', fingerprint: 's', time: 21, label: '1', probability: 0.99 },
+          {
+            id: 'boolean',
+            account: 'b',
+            fingerprint: 'b',
+            time: 21,
+            label: true,
+            probability: 0.98,
+          },
+          { id: 'invalid', account: 'i', fingerprint: 'i', time: 21, label: 2, probability: 0.97 },
+          { id: 'valid', account: 'v', fingerprint: 'v', time: 21, label: 0, probability: 0.8 },
+        ],
+      },
+      expected: {
+        eligibleIds: ['valid'],
+        leakageIds: [],
+        reviewedIds: ['valid'],
+        precision: 0,
+        recall: 0,
+      },
+    },
+    {
+      name: 'capacity and ties preserve ordering and eligible-positive recall denominator',
+      input: {
+        cutoff: 200,
+        reviewCapacity: 2,
+        train: [],
+        rows: [
+          { id: 'z', account: 'z', fingerprint: 'z', time: 201, label: 1, probability: 0.8 },
+          { id: 'a', account: 'a', fingerprint: 'a', time: 202, label: 0, probability: 0.8 },
+          { id: 'c', account: 'c', fingerprint: 'c', time: 203, label: 1, probability: 0.7 },
+          { id: 'd', account: 'd', fingerprint: 'd', time: 204, label: 1, probability: 0.6 },
+        ],
+      },
+      expected: {
+        eligibleIds: ['z', 'a', 'c', 'd'],
+        leakageIds: [],
+        reviewedIds: ['a', 'z'],
+        precision: 0.5,
+        recall: 0.333,
+      },
+    },
+    {
+      name: 'empty eligible population has zero precision and recall',
+      input: { cutoff: 0, reviewCapacity: 2, train: [], rows: [] },
+      expected: { eligibleIds: [], leakageIds: [], reviewedIds: [], precision: 0, recall: 0 },
     },
   ];
 }
@@ -443,41 +500,587 @@ function finopsCommitmentVectors(): ConceptVector[] {
 }
 
 function emailAlignmentVectors(): ConceptVector[] {
+  const safeControls = {
+    stream: 'transactional-isolated',
+    suppressionBeforeProvider: true,
+    unsubscribe: 'not-applicable',
+    templateRender: 'observed',
+    providerEvents: 'observed',
+    rateLimit: 'bounded-deferral',
+    retry: 'transient-only',
+    failover: 'state-preserving',
+  };
+  const alignedAuthentication = {
+    dnsRecords: {
+      spf: 'v=spf1 include:_spf.vendor.test -all',
+      dkim: 'v=DKIM1; k=rsa; p=fixture-public-key',
+      dmarc: 'v=DMARC1; p=none',
+    },
+    received: {
+      spf: { result: 'pass', aligned: true, domain: 'bounce.reset.example.com' },
+      dkim: { result: 'pass', aligned: true, domain: 'reset.example.com', selector: 's1' },
+      dmarc: { result: 'pass' },
+    },
+    faultSurface: 'none',
+  };
   return [
     {
-      name: 'aligned auth with provider-specific junking points to reputation experiment before DNS mutation',
+      name: 'malformed authentication records remain unresolved even when all fields are nonempty',
       input: {
-        spfAligned: true,
-        dkimAligned: true,
-        dmarcPass: true,
-        gmailPlacement: 'inbox',
-        microsoftPlacement: 'junk',
-        complaintRate: 0.001,
-        hardBounceRate: 0.002,
-        volumeJump: 8,
+        authentication: {
+          dnsRecords: {
+            spf: 'v=spf1 include:_spf.vendor.test -all',
+            dkim: 'not-a-dkim-record',
+            dmarc: 'v=DMARC1; p=none',
+          },
+          received: alignedAuthentication.received,
+          faultSurface: 'unknown',
+        },
+        identity: {
+          fromDomain: 'reset.example.com',
+          returnPathDomain: 'bounce.reset.example.com',
+          dkimDomain: 'reset.example.com',
+        },
+        placement: { gmail: 'inbox', microsoft: 'junk' },
+        complaints: 'normal',
+        bounces: 'normal',
+        volumeJump: 1,
+        contentRisk: false,
+        controls: safeControls,
       },
       expected: {
-        authProblem: false,
-        likelyFocus: ['provider-reputation', 'warm-up'],
-        experiment: 'controlled-seed-and-volume-ramp',
+        authentication: 'unresolved',
+        identity: {
+          fromDomain: 'reset.example.com',
+          returnPathDomain: 'bounce.reset.example.com',
+          dkimDomain: 'reset.example.com',
+        },
+        evidencePriority: [
+          'received-headers',
+          'dns-and-provider-config',
+          'provider-events',
+          'seed-placement',
+        ],
+        evidenceStatus: {
+          authentication: 'unresolved',
+          reputation: 'unresolved',
+          placement: 'observed',
+          providerEvents: 'observed',
+          rendering: 'observed',
+          unsubscribe: 'not-applicable',
+          retry: 'observed',
+          failover: 'observed',
+        },
+        signals: {
+          reputation: 'unresolved-until-auth-evidence',
+          complaints: 'normal',
+          bounces: 'normal',
+          content: 'no-observed-risk',
+        },
+        operatingGaps: [],
+        hypotheses: ['authentication-evidence-invalid'],
+        experiments: [
+          {
+            id: 'authentication-evidence-validation',
+            change: 'validate-dns-record-shape-and-received-auth-fields',
+            bound: 'one-sending-subdomain',
+          },
+        ],
+        successMetrics: ['dmarc-pass-rate', 'microsoft-inbox-rate', 'gmail-inbox-rate'],
+        recovery: [
+          'do-not-change-dns-without-validating-record-evidence',
+          'recheck-placement-after-auth-evidence',
+        ],
+        dnsChangeRecommended: false,
       },
     },
     {
-      name: 'DMARC alignment failure is authentication evidence not a reputation guess',
+      name: 'aligned auth with provider-specific junking produces a bounded reputation and warm-up investigation',
       input: {
-        spfAligned: false,
-        dkimAligned: false,
-        dmarcPass: false,
-        gmailPlacement: 'spam',
-        microsoftPlacement: 'junk',
-        complaintRate: 0,
-        hardBounceRate: 0,
-        volumeJump: 1,
+        authentication: alignedAuthentication,
+        identity: {
+          fromDomain: 'reset.example.com',
+          returnPathDomain: 'bounce.reset.example.com',
+          dkimDomain: 'reset.example.com',
+        },
+        placement: { gmail: 'inbox', microsoft: 'junk' },
+        complaints: 'normal',
+        bounces: 'normal',
+        volumeJump: 8,
+        contentRisk: false,
+        controls: safeControls,
       },
       expected: {
-        authProblem: true,
-        likelyFocus: ['alignment'],
-        experiment: 'header-alignment-control',
+        authentication: 'aligned',
+        identity: {
+          fromDomain: 'reset.example.com',
+          returnPathDomain: 'bounce.reset.example.com',
+          dkimDomain: 'reset.example.com',
+        },
+        evidencePriority: [
+          'received-headers',
+          'dns-and-provider-config',
+          'provider-events',
+          'seed-placement',
+        ],
+        evidenceStatus: {
+          authentication: 'observed',
+          reputation: 'inferred',
+          placement: 'observed',
+          providerEvents: 'observed',
+          rendering: 'observed',
+          unsubscribe: 'not-applicable',
+          retry: 'observed',
+          failover: 'observed',
+        },
+        signals: {
+          reputation: 'provider-specific-hypothesis',
+          complaints: 'normal',
+          bounces: 'normal',
+          content: 'no-observed-risk',
+        },
+        operatingGaps: [],
+        hypotheses: ['provider-reputation', 'warm-up'],
+        experiments: [
+          {
+            id: 'microsoft-seed-control',
+            change: 'hold-content-and-auth-constant',
+            bound: 'microsoft-seed-cohort',
+          },
+          { id: 'volume-ramp', change: 'step-volume-only', bound: 'new-sending-subdomain' },
+        ],
+        successMetrics: [
+          'microsoft-inbox-rate',
+          'complaint-rate',
+          'hard-bounce-rate',
+          'provider-acceptance-rate',
+        ],
+        recovery: [
+          'stop-ramp-on-complaint-or-bounce-regression',
+          'recheck-placement-before-expanding',
+        ],
+        dnsChangeRecommended: false,
+      },
+    },
+    {
+      name: 'provider configuration misalignment does not imply a DNS edit',
+      input: {
+        authentication: {
+          dnsRecords: alignedAuthentication.dnsRecords,
+          received: {
+            spf: { result: 'pass', aligned: false, domain: 'mail.vendor.test' },
+            dkim: { result: 'pass', aligned: false, domain: 'vendor.test', selector: 's1' },
+            dmarc: { result: 'fail' },
+          },
+          faultSurface: 'provider-config',
+        },
+        identity: {
+          fromDomain: 'reset.example.com',
+          returnPathDomain: 'mail.vendor.test',
+          dkimDomain: 'vendor.test',
+        },
+        placement: { gmail: 'spam', microsoft: 'junk' },
+        complaints: 'normal',
+        bounces: 'normal',
+        volumeJump: 1,
+        contentRisk: false,
+        controls: safeControls,
+      },
+      expected: {
+        authentication: 'misaligned',
+        identity: {
+          fromDomain: 'reset.example.com',
+          returnPathDomain: 'mail.vendor.test',
+          dkimDomain: 'vendor.test',
+        },
+        evidencePriority: [
+          'received-headers',
+          'dns-and-provider-config',
+          'provider-events',
+          'seed-placement',
+        ],
+        evidenceStatus: {
+          authentication: 'observed',
+          reputation: 'unresolved',
+          placement: 'observed',
+          providerEvents: 'observed',
+          rendering: 'observed',
+          unsubscribe: 'not-applicable',
+          retry: 'observed',
+          failover: 'observed',
+        },
+        signals: {
+          reputation: 'unresolved-until-auth-control',
+          complaints: 'normal',
+          bounces: 'normal',
+          content: 'no-observed-risk',
+        },
+        operatingGaps: [],
+        hypotheses: ['alignment'],
+        experiments: [
+          {
+            id: 'header-alignment-control',
+            change: 'align-authenticated-identities',
+            bound: 'one-sending-subdomain',
+          },
+        ],
+        successMetrics: ['dmarc-pass-rate', 'microsoft-inbox-rate', 'gmail-inbox-rate'],
+        recovery: [
+          'revert-identity-change-if-auth-regresses',
+          'recheck-placement-after-auth-control',
+        ],
+        dnsChangeRecommended: false,
+      },
+    },
+    {
+      name: 'localized DNS record defect permits a bounded DNS correction',
+      input: {
+        authentication: {
+          dnsRecords: alignedAuthentication.dnsRecords,
+          received: {
+            spf: { result: 'fail', aligned: false, domain: 'bounce.reset.example.com' },
+            dkim: { result: 'fail', aligned: false, domain: 'reset.example.com', selector: 's1' },
+            dmarc: { result: 'fail' },
+          },
+          faultSurface: 'dns-record',
+        },
+        identity: {
+          fromDomain: 'reset.example.com',
+          returnPathDomain: 'bounce.reset.example.com',
+          dkimDomain: 'reset.example.com',
+        },
+        placement: { gmail: 'inbox', microsoft: 'junk' },
+        complaints: 'normal',
+        bounces: 'normal',
+        volumeJump: 1,
+        contentRisk: false,
+        controls: safeControls,
+      },
+      expected: {
+        authentication: 'misaligned',
+        identity: {
+          fromDomain: 'reset.example.com',
+          returnPathDomain: 'bounce.reset.example.com',
+          dkimDomain: 'reset.example.com',
+        },
+        evidencePriority: [
+          'received-headers',
+          'dns-and-provider-config',
+          'provider-events',
+          'seed-placement',
+        ],
+        evidenceStatus: {
+          authentication: 'observed',
+          reputation: 'unresolved',
+          placement: 'observed',
+          providerEvents: 'observed',
+          rendering: 'observed',
+          unsubscribe: 'not-applicable',
+          retry: 'observed',
+          failover: 'observed',
+        },
+        signals: {
+          reputation: 'unresolved-until-auth-control',
+          complaints: 'normal',
+          bounces: 'normal',
+          content: 'no-observed-risk',
+        },
+        operatingGaps: [],
+        hypotheses: ['alignment'],
+        experiments: [
+          {
+            id: 'header-alignment-control',
+            change: 'align-authenticated-identities',
+            bound: 'one-sending-subdomain',
+          },
+        ],
+        successMetrics: ['dmarc-pass-rate', 'microsoft-inbox-rate', 'gmail-inbox-rate'],
+        recovery: [
+          'revert-identity-change-if-auth-regresses',
+          'recheck-placement-after-auth-control',
+        ],
+        dnsChangeRecommended: true,
+      },
+    },
+    {
+      name: 'non-differential placement leaves reputation unresolved',
+      input: {
+        authentication: alignedAuthentication,
+        identity: {
+          fromDomain: 'reset.example.com',
+          returnPathDomain: 'bounce.reset.example.com',
+          dkimDomain: 'reset.example.com',
+        },
+        placement: { gmail: 'inbox', microsoft: 'inbox' },
+        complaints: 'normal',
+        bounces: 'normal',
+        volumeJump: 1,
+        contentRisk: false,
+        controls: safeControls,
+      },
+      expected: {
+        authentication: 'aligned',
+        identity: {
+          fromDomain: 'reset.example.com',
+          returnPathDomain: 'bounce.reset.example.com',
+          dkimDomain: 'reset.example.com',
+        },
+        evidencePriority: [
+          'received-headers',
+          'dns-and-provider-config',
+          'provider-events',
+          'seed-placement',
+        ],
+        evidenceStatus: {
+          authentication: 'observed',
+          reputation: 'unresolved',
+          placement: 'observed',
+          providerEvents: 'observed',
+          rendering: 'observed',
+          unsubscribe: 'not-applicable',
+          retry: 'observed',
+          failover: 'observed',
+        },
+        signals: {
+          reputation: 'unresolved',
+          complaints: 'normal',
+          bounces: 'normal',
+          content: 'no-observed-risk',
+        },
+        operatingGaps: [],
+        hypotheses: [],
+        experiments: [],
+        successMetrics: [
+          'microsoft-inbox-rate',
+          'complaint-rate',
+          'hard-bounce-rate',
+          'provider-acceptance-rate',
+        ],
+        recovery: ['recheck-placement-before-expanding'],
+        dnsChangeRecommended: false,
+      },
+    },
+    {
+      name: 'aligned placement investigation keeps complaint content and unsafe delivery controls visible',
+      input: {
+        authentication: alignedAuthentication,
+        identity: {
+          fromDomain: 'reset.example.com',
+          returnPathDomain: 'bounce.reset.example.com',
+          dkimDomain: 'reset.example.com',
+        },
+        placement: { gmail: 'inbox', microsoft: 'junk' },
+        complaints: 'elevated',
+        bounces: 'elevated',
+        volumeJump: 1,
+        contentRisk: true,
+        controls: {
+          ...safeControls,
+          rateLimit: 'unknown',
+          retry: 'retries-permanent',
+          failover: 'bypasses-suppression',
+        },
+      },
+      expected: {
+        authentication: 'aligned',
+        identity: {
+          fromDomain: 'reset.example.com',
+          returnPathDomain: 'bounce.reset.example.com',
+          dkimDomain: 'reset.example.com',
+        },
+        evidencePriority: [
+          'received-headers',
+          'dns-and-provider-config',
+          'provider-events',
+          'seed-placement',
+        ],
+        evidenceStatus: {
+          authentication: 'observed',
+          reputation: 'inferred',
+          placement: 'observed',
+          providerEvents: 'observed',
+          rendering: 'observed',
+          unsubscribe: 'not-applicable',
+          retry: 'gap',
+          failover: 'gap',
+        },
+        signals: {
+          reputation: 'provider-specific-hypothesis',
+          complaints: 'elevated',
+          bounces: 'elevated',
+          content: 'observed-risk',
+        },
+        operatingGaps: ['rate-limit-policy', 'retry-policy', 'failover-state'],
+        hypotheses: ['provider-reputation', 'complaints', 'bounces', 'message-construction'],
+        experiments: [
+          {
+            id: 'microsoft-seed-control',
+            change: 'hold-content-and-auth-constant',
+            bound: 'microsoft-seed-cohort',
+          },
+          {
+            id: 'message-construction-control',
+            change: 'remove-one-content-risk',
+            bound: 'seed-cohort-only',
+          },
+        ],
+        successMetrics: [
+          'microsoft-inbox-rate',
+          'complaint-rate',
+          'hard-bounce-rate',
+          'provider-acceptance-rate',
+        ],
+        recovery: [
+          'restore-original-message-if-placement-worsens',
+          'keep-elevated-complaint-or-bounce-signal-open',
+          'recheck-placement-before-expanding',
+          'block-expansion-until-operating-gaps-close',
+        ],
+        dnsChangeRecommended: false,
+      },
+    },
+    {
+      name: 'missing authentication evidence and unsafe controls stay explicit',
+      input: {
+        authentication: {
+          dnsRecords: {
+            spf: 'v=spf1 include:_spf.vendor.test -all',
+            dkim: '',
+            dmarc: 'v=DMARC1; p=none',
+          },
+          received: alignedAuthentication.received,
+          faultSurface: 'unknown',
+        },
+        identity: {
+          fromDomain: 'reset.example.com',
+          returnPathDomain: 'bounce.reset.example.com',
+          dkimDomain: 'reset.example.com',
+        },
+        placement: { gmail: 'inbox', microsoft: 'junk' },
+        complaints: 'elevated',
+        bounces: 'elevated',
+        volumeJump: 4,
+        contentRisk: true,
+        controls: {
+          stream: 'shared-unknown',
+          suppressionBeforeProvider: false,
+          unsubscribe: 'not-applicable',
+          templateRender: 'unavailable',
+          providerEvents: 'unavailable',
+          rateLimit: 'unknown',
+          retry: 'retries-permanent',
+          failover: 'bypasses-suppression',
+        },
+      },
+      expected: {
+        authentication: 'unresolved',
+        identity: {
+          fromDomain: 'reset.example.com',
+          returnPathDomain: 'bounce.reset.example.com',
+          dkimDomain: 'reset.example.com',
+        },
+        evidencePriority: [
+          'received-headers',
+          'dns-and-provider-config',
+          'provider-events',
+          'seed-placement',
+        ],
+        evidenceStatus: {
+          authentication: 'unavailable',
+          reputation: 'unresolved',
+          placement: 'observed',
+          providerEvents: 'unavailable',
+          rendering: 'unavailable',
+          unsubscribe: 'not-applicable',
+          retry: 'gap',
+          failover: 'gap',
+        },
+        signals: {
+          reputation: 'unresolved-until-auth-evidence',
+          complaints: 'elevated',
+          bounces: 'elevated',
+          content: 'observed-risk',
+        },
+        operatingGaps: [
+          'stream-boundary',
+          'suppression-before-provider',
+          'rate-limit-policy',
+          'retry-policy',
+          'failover-state',
+        ],
+        hypotheses: ['authentication-evidence-gap'],
+        experiments: [
+          {
+            id: 'authentication-evidence-control',
+            change: 'collect-dns-and-received-auth-evidence',
+            bound: 'one-sending-subdomain',
+          },
+        ],
+        successMetrics: ['dmarc-pass-rate', 'microsoft-inbox-rate', 'gmail-inbox-rate'],
+        recovery: [
+          'do-not-change-dns-without-fault-localization',
+          'recheck-placement-after-auth-evidence',
+          'block-expansion-until-operating-gaps-close',
+        ],
+        dnsChangeRecommended: false,
+      },
+    },
+    {
+      name: 'unavailable placement does not become observed mailbox evidence',
+      input: {
+        authentication: alignedAuthentication,
+        identity: {
+          fromDomain: 'reset.example.com',
+          returnPathDomain: 'bounce.reset.example.com',
+          dkimDomain: 'reset.example.com',
+        },
+        placement: { gmail: 'unavailable', microsoft: 'unavailable' },
+        complaints: 'normal',
+        bounces: 'normal',
+        volumeJump: 1,
+        contentRisk: false,
+        controls: safeControls,
+      },
+      expected: {
+        authentication: 'aligned',
+        identity: {
+          fromDomain: 'reset.example.com',
+          returnPathDomain: 'bounce.reset.example.com',
+          dkimDomain: 'reset.example.com',
+        },
+        evidencePriority: [
+          'received-headers',
+          'dns-and-provider-config',
+          'provider-events',
+          'seed-placement',
+        ],
+        evidenceStatus: {
+          authentication: 'observed',
+          reputation: 'unresolved',
+          placement: 'unavailable',
+          providerEvents: 'observed',
+          rendering: 'observed',
+          unsubscribe: 'not-applicable',
+          retry: 'observed',
+          failover: 'observed',
+        },
+        signals: {
+          reputation: 'unresolved',
+          complaints: 'normal',
+          bounces: 'normal',
+          content: 'no-observed-risk',
+        },
+        operatingGaps: [],
+        hypotheses: [],
+        experiments: [],
+        successMetrics: [
+          'microsoft-inbox-rate',
+          'complaint-rate',
+          'hard-bounce-rate',
+          'provider-acceptance-rate',
+        ],
+        recovery: ['recheck-placement-before-expanding'],
+        dnsChangeRecommended: false,
       },
     },
   ];
@@ -616,6 +1219,26 @@ function paymentEventVectors(): ConceptVector[] {
         state: { charged: 50, refunded: 0, disputed: 0 },
         auditIds: ['c'],
         rejectedIds: ['bad'],
+      },
+    },
+    {
+      name: 'unverified truthy or missing signatures fail closed without blocking verified replay',
+      input: {
+        canonical: { charged: 120, refunded: 30, disputed: 0 },
+        events: [
+          { id: 'replayed', kind: 'refund', validSignature: 'true' },
+          { id: 'missing', kind: 'charge' },
+          { id: 'verified', kind: 'charge', validSignature: true },
+          { id: 'replayed', kind: 'refund', validSignature: true },
+          { id: 'numeric', kind: 'dispute', validSignature: 1 },
+          { id: 'null', kind: 'dispute', validSignature: null },
+          { id: 'verified', kind: 'charge', validSignature: true },
+        ],
+      },
+      expected: {
+        state: { charged: 120, refunded: 30, disputed: 0 },
+        auditIds: ['verified', 'replayed'],
+        rejectedIds: ['replayed', 'missing', 'numeric', 'null'],
       },
     },
   ];
@@ -1100,18 +1723,29 @@ export const SYSTEMS_PROTOCOL_CONCEPTS: readonly ConceptFixture[] = [
   {
     id: 'llm-application-engineering-full-task-2-individual',
     skill: 'llm-application-engineering',
-    contract: `Authorize a refund proposal deterministically before any tool execution. Cross-account identity rejects unauthorized. Compute key refund:<orderId>:<expectedVersion>:<amount>. If a prior receipt contains the key, return already-complete and audit authorized,receipt-found without another call. Otherwise require refundable and not already refunded, explicit confirmation, and exact order version. Audit successful gates in order authorized,eligible,confirmed,fresh. Return execute only after all gates. Stale state rejects with stale-state.`,
+    generation: 2,
+    contract: `Authorize a refund proposal deterministically before any tool execution.
+Input is exactly {sessionUser,accountUser,confirmed,order,proposal,priorReceipts}. sessionUser and accountUser are user ID strings; confirmed is a boolean; order is {id,version,refundable,refunded}; proposal is {orderId,expectedVersion,amount}; priorReceipts is an array of idempotency-key strings. These are top-level fields, not nested subject/request/account objects.
+Return exactly {decision,idempotencyKey,audit,reason}, with no extra fields. decision is 'execute', 'already-complete', or 'reject'; idempotencyKey is a string for execute/already-complete and null for reject; reason is null for execute/already-complete and a string for reject; audit is an ordered string array.
+Check sessionUser === accountUser before receipt lookup or eligibility. Cross-account identity returns {decision:'reject',idempotencyKey:null,audit:[],reason:'unauthorized'}. For authorized proposals, compute key refund:<proposal.orderId>:<proposal.expectedVersion>:<proposal.amount>. If priorReceipts contains the key, return {decision:'already-complete',idempotencyKey:key,audit:['authorized','receipt-found'],reason:null} without another execution, even if order.refunded is true.
+Otherwise require order.refundable === true and order.refunded === false, explicit confirmed === true, and exact proposal.expectedVersion === order.version, in that order. Audit successful gates as authorized,eligible,confirmed,fresh. A stale version returns {decision:'reject',idempotencyKey:null,audit:['authorized','eligible','confirmed'],reason:'stale-state'}. Only after all gates succeed return {decision:'execute',idempotencyKey:key,audit:['authorized','eligible','confirmed','fresh'],reason:null}. Reject invalid or unconfirmed actions without executing a tool.`,
     vectors: llmAppToolVectors,
   },
   {
     id: 'ml-evaluation-full-task-1-individual',
     skill: 'ml-evaluation',
-    contract: `Evaluate final-period binary examples only after leakage filtering. Exclude invalid/missing labels. A row leaks when its account or fingerprint appears in train. Remaining rows are eligible. Review the highest probability rows up to reviewCapacity, ties by id. precision is positives among reviewed / reviewed; recall is positives among reviewed / positives among all eligible, with 0 for empty denominators. Round to three decimals. Return eligibleIds and leakageIds in input order, reviewedIds in score order.`,
+    // 4: the concept harness no longer labels an unwritten candidate module as an evaluator
+    // integrity failure, so this skill's recorded integrity block must be re-derived.
+    generation: 4,
+    contract: `Input is exactly {cutoff,reviewCapacity,train,rows}. cutoff is a finite numeric timestamp; reviewCapacity is a nonnegative integer. train is an array of {id,account,fingerprint}; rows is an array of {id,account,fingerprint,time,label,probability}, with string identifiers, finite numeric time in the same units as cutoff, and finite probability in [0,1]. rows are not prefiltered to the final period.
+First exclude invalid/missing labels from eligibility, leakageIds, ranking and every metric denominator: only numeric label === 0 or label === 1 is valid (null, omitted, strings, booleans and other numbers are invalid). For labeled rows, the final period requires row.time > cutoff; rows at or before cutoff are temporal leakage. A row also leaks when its account or fingerprint appears in train. Report each leaking row once in leakageIds even if multiple leakage conditions apply; remaining labeled final-period rows are eligible.
+Review the highest probability eligible rows up to reviewCapacity, ties by id ascending. precision is positives among reviewed / reviewed; recall is positives among reviewed / positives among all eligible, with 0 for empty denominators. Round to three decimals. Return exactly {eligibleIds,leakageIds,reviewedIds,precision,recall}, with no extra fields. eligibleIds and leakageIds are string arrays in input order; reviewedIds is a string array in score order; precision and recall are numbers.`,
     vectors: mlBinaryVectors,
   },
   {
     id: 'ml-evaluation-full-task-2-individual',
     skill: 'ml-evaluation',
+    generation: 4,
     contract: `Exclude invalid rows and any row whose thread appears in trainThreads. Return eligibleIds and leakageIds in input order. accuracy is exact predicted/truth matches over eligible. criticalRecall is correctly predicted critical / eligible truth=critical, or 0 when no critical cases. Round to three decimals. Never hide the rare critical slice inside aggregate accuracy.`,
     vectors: mlMulticlassVectors,
   },
@@ -1150,7 +1784,13 @@ export const SYSTEMS_PROTOCOL_CONCEPTS: readonly ConceptFixture[] = [
   {
     id: 'email-delivery-full-task-1-individual',
     skill: 'email-delivery',
-    contract: `If DMARC fails or neither SPF nor DKIM aligns, authProblem=true, likelyFocus=['alignment'], experiment='header-alignment-control'. Otherwise authProblem=false. When Microsoft placement is junk while Gmail is inbox, focus provider-reputation; add warm-up when volumeJump>=3. Return likelyFocus sorted in provider-reputation,warm-up order and experiment controlled-seed-and-volume-ramp for that provider-specific case. Do not prescribe DNS mutation when authentication already aligns.`,
+    generation: 6,
+    contract: `Produce a structured deliverability investigation record from evidence, not a classifier or completion claim. Input is {authentication:{dnsRecords:{spf,dkim,dmarc},received:{spf:{result,aligned,domain},dkim:{result,aligned,domain,selector},dmarc:{result}},faultSurface},identity:{fromDomain,returnPathDomain,dkimDomain},placement:{gmail,microsoft},complaints,bounces,volumeJump,contentRisk,controls:{stream,suppressionBeforeProvider,unsubscribe,templateRender,providerEvents,rateLimit,retry,failover}}. Return exactly {authentication,identity,evidencePriority,evidenceStatus,signals,operatingGaps,hypotheses,experiments,successMetrics,recovery,dnsChangeRecommended}. Preserve identity, complaints, and bounces unchanged. evidencePriority is exactly ['received-headers','dns-and-provider-config','provider-events','seed-placement']. Authentication evidence is present only when all three dnsRecords strings and the received SPF result/domain, DKIM result/domain/selector, and DMARC result are nonempty. Missing evidence => authentication=unresolved, reputation=unresolved-until-auth-evidence, evidenceStatus.authentication=unavailable, hypotheses=['authentication-evidence-gap'], one authentication-evidence-control experiment, DNS change false, and recovery begins ['do-not-change-dns-without-fault-localization','recheck-placement-after-auth-evidence']. Present DNS evidence is structurally valid only when the trimmed SPF record starts with 'v=spf1', the trimmed DKIM record starts with 'v=DKIM1;', and the trimmed DMARC record starts with 'v=DMARC1;'. Present but structurally invalid DNS evidence => authentication=unresolved, reputation=unresolved-until-auth-evidence, evidenceStatus.authentication=unresolved, hypotheses=['authentication-evidence-invalid'], one authentication-evidence-validation experiment, DNS change false, and recovery begins ['do-not-change-dns-without-validating-record-evidence','recheck-placement-after-auth-evidence']. With present structurally valid evidence, authentication=misaligned when DMARC result is not pass or neither SPF nor DKIM is aligned; otherwise aligned. Misaligned => reputation=unresolved-until-auth-control, reputation status unresolved, hypotheses=['alignment'], header-alignment-control, auth success metrics, and dnsChangeRecommended=true only when faultSurface='dns-record'. Aligned Gmail=inbox plus Microsoft=junk => reputation=provider-specific-hypothesis with evidenceStatus.reputation=inferred and hypotheses start ['provider-reputation']; any other placement leaves reputation and its status unresolved. Append warm-up when volumeJump>=3, complaints when complaints=elevated, bounces when bounces=elevated, and message-construction when contentRisk=true, in that order. Add microsoft-seed-control only for the differential Gmail/Microsoft placement, volume-ramp only when volumeJump>=3, and message-construction-control only when contentRisk=true. Aligned successMetrics are ['microsoft-inbox-rate','complaint-rate','hard-bounce-rate','provider-acceptance-rate']. evidenceStatus records placement as observed only when both mailbox results are inbox, spam, or junk; otherwise unavailable; providerEvents/rendering from controls observed or unavailable; unsubscribe as not-applicable/observed/gap; retry and failover as observed/gap. operatingGaps are ordered among stream-boundary, suppression-before-provider, unsubscribe-policy, rate-limit-policy, retry-policy, failover-state from the supplied controls. If operatingGaps is nonempty append block-expansion-until-operating-gaps-close to recovery. dnsChangeRecommended=false for aligned or unresolved authentication and for misalignment localized to provider-config or unknown.
+\nExact synthetic JSON semantics: the scorer compares complete JSON values, including nested field names, array order, and string tokens. Do not invent extra properties or use alternative labels. Control values describe policies and are strings where indicated; never treat them as booleans. Safe controls are stream='transactional-isolated', suppressionBeforeProvider===true, unsubscribe='not-applicable' or 'required-configured', templateRender='observed', providerEvents='observed', rateLimit='bounded-deferral', retry='transient-only', failover='state-preserving'. Any other control value is the corresponding operating gap, except unavailable rendering/provider events, which are evidence states. Missing fields are unavailable rather than verified.
+signals is exactly {reputation,complaints,bounces,content}; content is 'observed-risk' when contentRisk===true, else 'no-observed-risk'. Do not echo volumeJump or contentRisk in signals. evidenceStatus is exactly {authentication,reputation,placement,providerEvents,rendering,unsubscribe,retry,failover}: authentication is observed for present structurally valid evidence, unavailable for a missing required field, and unresolved for a present malformed DNS record. placement is observed only when both gmail and microsoft placements are one of inbox, spam, junk; otherwise unavailable. providerEvents/rendering are observed only for control value 'observed', else unavailable. unsubscribe is not-applicable when specified, observed for required-configured, else gap. retry/failover are observed only for transient-only/state-preserving respectively, else gap.
+Each experiments entry is exactly {id,change,bound}. Use these triples, in the conditional order given above: authentication-evidence-control/collect-dns-and-received-auth-evidence/one-sending-subdomain (missing evidence); authentication-evidence-validation/validate-dns-record-shape-and-received-auth-fields/one-sending-subdomain (invalid DNS shape); header-alignment-control/align-authenticated-identities/one-sending-subdomain (misaligned); microsoft-seed-control/hold-content-and-auth-constant/microsoft-seed-cohort (differential placement); volume-ramp/step-volume-only/new-sending-subdomain (volumeJump>=3 with present valid authentication evidence); message-construction-control/remove-one-content-risk/seed-cohort-only (contentRisk===true with present valid authentication evidence). Empty experiments is [].
+For unresolved or misaligned authentication, successMetrics is exactly ['dmarc-pass-rate','microsoft-inbox-rate','gmail-inbox-rate']; for aligned authentication, use the four aligned metrics defined above. recovery for misalignment is ['revert-identity-change-if-auth-regresses','recheck-placement-after-auth-control']. For aligned authentication, recovery is ['restore-original-message-if-placement-worsens','keep-elevated-complaint-or-bounce-signal-open','recheck-placement-before-expanding'] if contentRisk===true; otherwise ['stop-ramp-on-complaint-or-bounce-regression','recheck-placement-before-expanding'] if volumeJump>=3; otherwise ['recheck-placement-before-expanding']. Missing/invalid evidence recoveries are defined above. Append 'block-expansion-until-operating-gaps-close' exactly once at the end of recovery if any operating gap exists. Never infer that a synthetic trace verifies live sending, mailbox delivery, or inbox placement.
+`,
     vectors: emailAlignmentVectors,
   },
   {
@@ -1163,13 +1803,15 @@ export const SYSTEMS_PROTOCOL_CONCEPTS: readonly ConceptFixture[] = [
   {
     id: 'payment-integration-full-task-1-individual',
     skill: 'payment-integration',
-    contract: `One logical order uses idempotencyKey payment:<orderId>. If prior payment exists, make zero provider calls and preserve its providerId/state; captured means one captured charge. With no prior, one attempt creates at most one provider call. accepted-response-lost stores providerId and state reconcile but capturedCharges=1 because provider accepted. accepted=>captured, declined=>declined. A matching authoritative webhook may move reconcile to captured. Restart never creates a second provider identity.`,
+    generation: 2,
+    contract: `Input is exactly {orderId,prior,attempt,webhook,restart}. prior is null or {providerId,state}. attempt is null or {providerOutcome,providerId}, where providerOutcome can be accepted-response-lost, accepted, or declined. webhook is null or {providerId,state}. Return exactly {idempotencyKey,providerCalls,state,capturedCharges,providerId}. One logical order uses idempotencyKey payment:<orderId>. If prior payment exists, make zero provider calls, preserve its providerId, and begin from its state; a matching authoritative webhook may move reconcile to captured. With no prior, one non-null attempt creates exactly one provider call. accepted-response-lost preserves the attempt providerId, returns state reconcile, and capturedCharges=1 because the provider accepted even though the response was lost. accepted returns captured with capturedCharges=1; declined returns declined with capturedCharges=0. Restart never creates a second provider identity or provider call.`,
     vectors: paymentAttemptVectors,
   },
   {
     id: 'payment-integration-full-task-2-individual',
     skill: 'payment-integration',
-    contract: `Reject invalid-signature events before audit/state changes. Deduplicate valid event ids in delivery order into auditIds. Because delivery is unordered, final materialized payment state equals the supplied canonical provider lookup, not replay order. rejectedIds lists invalid signatures in input order.`,
+    generation: 3,
+    contract: `Input is exactly {canonical,events}. canonical is the authoritative provider lookup object. Each event is {id,kind,validSignature}, where validSignature is the independently verified signature result and may be missing or malformed. Return exactly {state,auditIds,rejectedIds}. Only events with validSignature === true are authenticated; reject false, missing, null, and truthy non-boolean results before audit/state changes and append their ids to rejectedIds in input order. For verified events, append each stable id at most once to auditIds in first-delivery order. A rejected delivery must not reserve its id: later verified delivery of the same id enters the audit once. Event kind and delivery order do not derive the payment totals: final state equals canonical exactly so shuffled, duplicate, delayed, and replayed deliveries converge to the authoritative provider lookup.`,
     vectors: paymentEventVectors,
   },
   {
@@ -1193,13 +1835,15 @@ export const SYSTEMS_PROTOCOL_CONCEPTS: readonly ConceptFixture[] = [
   {
     id: 'compiler-runtime-backend-full-task-2-individual',
     skill: 'compiler-runtime-backend',
-    contract: `At a safepoint, roots are exactly locations of live entries whose kind is ref. Ignore int and ref-dead. At non-safepoints return no roots. Preserve input order of live roots. Return {roots}.`,
+    generation: 2,
+    contract: `Compute the GC root map of a paused JIT frame. solve(input) receives \`{ live: Array<{ vreg: string; kind: 'ref' | 'ref-dead' | 'int'; location: string }>, safepoint: boolean }\`. When \`safepoint\` is true, roots are exactly the \`location\` values of entries whose \`kind\` is 'ref', in the order the live entries appear. Ignore 'int' entries entirely and ignore 'ref-dead' entries: a dead reference contributes no root and its register or spill slot must not be reported. When \`safepoint\` is false the frame is not being collected, so return no roots. Always return \`{ roots: string[] }\`, including the empty array. Example: live [{vreg:'r1',kind:'ref',location:'stack:24'},{vreg:'i1',kind:'int',location:'reg:x0'}] at a safepoint yields { roots: ['stack:24'] }.`,
     vectors: gcRootVectors,
   },
   {
     id: 'refactor-implementation-full-task-1-individual',
     skill: 'refactor-implementation',
-    contract: `Implement the public parser behavior independent of internal tokenizer/syntax/semantic structure. Each nonempty line must be key=value. Missing '=' yields one expected-equals diagnostic with 1-based line and no value. Unknown keys yield unknown-key diagnostics. If any diagnostic exists return {ok:false,value:null,diagnostics}; otherwise return parsed string values. Preserve diagnostic messages exactly as specified in vectors.`,
+    generation: 2,
+    contract: `Implement the public parser behavior independent of internal tokenizer/syntax/semantic structure. Each nonempty line must be key=value. Missing '=' yields one expected-equals diagnostic with 1-based line and no value. Unknown keys yield unknown-key diagnostics. If any diagnostic exists return {ok:false,value:null,diagnostics}; otherwise return parsed string values. Preserve diagnostic messages exactly as specified in vectors. Implement in candidate.ts, with optional candidate.test.ts tests. README.md, contract.json, and package.json are evaluator-owned fixed inputs; do not edit or replace them, including for documentation.`,
     vectors: parserRefactorVectors,
   },
   {
@@ -1224,7 +1868,8 @@ export const SYSTEMS_PROTOCOL_CONCEPTS: readonly ConceptFixture[] = [
   {
     id: 'networking-systems-full-task-1-individual',
     skill: 'networking-systems',
-    contract: `Localize the first failed layer from evidence, without assuming topology. If DNS resolves but an address-family route is false, return route-<family>, nextProbe compare-<family>-route-source, and safeControl prefer the other family temporarily when it works. If route/TCP succeed but TLS fails for certificate-name, return tls-sni-certificate, probe verify-sni-and-certificate-chain, control rollback-lb-tls-config.`,
+    generation: 2,
+    contract: `Implement the pure solve(input) export in candidate.ts. Input is a synthetic trace with: dns { a:boolean, aaaa:boolean } (record presence by address family), routes { ipv4:boolean|null, ipv6:boolean|null }, tcp { ipv4:boolean|null, ipv6:boolean|null }, tls { ipv4:boolean|null, ipv6:boolean|null, reason?:string }, http { ipv4:boolean|null, ipv6:boolean|null }. Localize the first failed layer from evidence, without assuming topology. If DNS resolves but an address-family route is false, return {failingLayer:'route-<family>', nextProbe:'compare-<family>-route-source', safeControl:'prefer-<other>-temporarily'} when the other family works, otherwise a safe preserve control. If route/TCP succeed but TLS fails with reason 'certificate-name', return {failingLayer:'tls-sni-certificate', nextProbe:'verify-sni-and-certificate-chain', safeControl:'rollback-lb-tls-config'}. Inputs vary identifiers, values, ordering, and failure paths.`,
     vectors: networkPathVectors,
   },
   {
@@ -1236,7 +1881,8 @@ export const SYSTEMS_PROTOCOL_CONCEPTS: readonly ConceptFixture[] = [
   {
     id: 'linux-systems-full-task-1-individual',
     skill: 'linux-systems',
-    contract: `Compute effective systemd-like config by starting with unit then applying dropins in order. Merge env by key with later override. after is stable unique concatenation. Safe requires nonempty non-root-like service user, serviceUserCanWriteConfig=false and journal.cleanStart=true. Return {effective:{user,after,env},safe}.`,
+    generation: 2,
+    contract: `Implement the pure solve(input) export in candidate.ts. Input has unit {user?:string, after?:string[], env?:Record<string,string>}, dropins: Array<{user?:string, after?:string[], env?:Record<string,string>}> applied in order, permissions { serviceUserCanWriteConfig:boolean }, and journal { cleanStart:boolean }. Compute effective systemd-like config by starting with unit then applying dropins in order (later layer overrides user when present; merge env by key with later override; after is stable unique concatenation preserving first-seen order). safe is true only when effective user is nonempty and not root-like (root or 0), permissions.serviceUserCanWriteConfig is false, and journal.cleanStart is true. Return {effective:{user,after,env},safe}.`,
     vectors: systemdVectors,
   },
   {
@@ -1248,13 +1894,15 @@ export const SYSTEMS_PROTOCOL_CONCEPTS: readonly ConceptFixture[] = [
   {
     id: 'reference-communication-full-task-1-individual',
     skill: 'reference-communication',
-    contract: `Build reference facts from active contract/runtime sources. fields are OpenAPI field keys in declaration order; ignore stale prose-only fields. errors are unique OpenAPI then handler errors. defaults and nullAllowed come from runtime validator. deprecated are fields marked deprecated in OpenAPI. Return ignoredStaleFields unchanged. Do not invent behavior absent from active sources.`,
+    generation: 2,
+    contract: `Build reference facts from active contract/runtime sources. Input is {openapi:{fields,errors},validator:{omittedDefaults,nullAllowed},handlerErrors,staleProseFields}. Return exactly {fields,errors,defaults,nullAllowed,deprecated,ignoredStaleFields}. fields are Object.keys(openapi.fields) in declaration order. errors are stable-unique openapi.errors followed by handlerErrors. defaults is validator.omittedDefaults and nullAllowed is validator.nullAllowed, preserving their supplied shapes. deprecated contains the field names whose openapi.fields entry has deprecated=true. ignoredStaleFields is staleProseFields unchanged. Do not invent behavior absent from active sources.`,
     vectors: apiReferenceVectors,
   },
   {
     id: 'reference-communication-full-task-2-individual',
     skill: 'reference-communication',
-    contract: `Runtime behavior is authoritative when schema conflicts. acceptedValues are runtime.enum. default is runtime.computedDefault. Add conflict schema-runtime-enum when sorted enum sets differ. Return env name, canonical cli flag, deprecatedAliases.`,
+    generation: 2,
+    contract: `Runtime behavior is authoritative when schema conflicts. Input is {schema:{enum,default},runtime:{enum,computedDefault},env:{name,omissionSensitive},cli:{flag,aliases}}. Return exactly {acceptedValues,default,conflicts,env,cli,deprecatedAliases}. acceptedValues is runtime.enum in runtime order. default is runtime.computedDefault. Add conflict schema-runtime-enum when the sorted schema.enum and runtime.enum sets differ; otherwise conflicts is empty. env is env.name, cli is cli.flag, and deprecatedAliases is cli.aliases unchanged.`,
     vectors: settingsReferenceVectors,
   },
 ];

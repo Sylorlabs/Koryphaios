@@ -97,28 +97,28 @@
   },
   "sources": [
     {
-      "url": "https://docs.nvidia.com/cuda/cuda-c-programming-guide/",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/",
       "sourceType": "official-docs",
-      "versionScope": "NVIDIA CUDA C++ Programming Guide as available 2026-09-04",
+      "versionScope": "NVIDIA CUDA Programming Guide as available 2026-10-19",
       "staleAfterDays": 45,
       "notes": "GPU execution, memory, synchronization, precision, occupancy, and performance reference.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-10-19"
     },
     {
       "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/writing-cuda-kernels.html",
       "sourceType": "official-docs",
-      "versionScope": "CUDA kernel programming guidance as verified 2026-09-06",
+      "versionScope": "CUDA kernel programming guidance as verified 2026-10-20",
       "staleAfterDays": 45,
       "notes": "Adopted for CUDA memory-access and coalescing decisions; performance still requires profiler evidence.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-10-20"
     },
     {
       "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/understanding-memory.html",
       "sourceType": "official-docs",
-      "versionScope": "CUDA memory guidance as verified 2026-09-06",
+      "versionScope": "CUDA memory guidance as verified 2026-10-20",
       "staleAfterDays": 45,
       "notes": "Adopted for host-device and memory-hierarchy reasoning on CUDA targets only.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-10-20"
     }
   ],
   "authoringMaturity": "individual"

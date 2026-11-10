@@ -67,7 +67,7 @@
     },
     {
       "id": "verification-discipline",
-      "assertion": "Acceptance criteria"
+      "assertion": "The plan must give each phase a checkable gate with an observed result before advancing: outbox capture parity against the monolith send path, shadow-mode reconciliation counts with an explicit mismatch tolerance, idempotent replay of a notification already delivered by either owner, and rollback proven after partial cutover while dual-write is still active. Listing acceptance criteria or promising future reconciliation is not verification."
     },
     {
       "id": "anti-pattern-resistance",

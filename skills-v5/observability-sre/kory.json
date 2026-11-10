@@ -132,7 +132,7 @@
       "versionScope": "OpenTelemetry Semantic Conventions 1.44.0",
       "staleAfterDays": 60,
       "notes": "Current common semantics for resource, span, metric, log, event, and profile attributes and naming.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://opentelemetry.io/docs/concepts/sampling/",

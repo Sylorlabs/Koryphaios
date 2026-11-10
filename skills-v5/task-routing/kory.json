@@ -107,24 +107,24 @@
     {
       "url": "https://agentskills.io/specification",
       "sourceType": "spec",
-      "versionScope": "Agent Skills specification as published and verified on 2026-09-01",
-      "verifiedAt": "2026-09-01",
+      "versionScope": "Agent Skills specification as published and verified on 2026-11-01",
+      "verifiedAt": "2026-11-03",
       "staleAfterDays": 60,
       "notes": "Portable metadata, progressive disclosure, and package structure."
     },
     {
       "url": "https://agentskills.io/skill-creation/optimizing-descriptions",
       "sourceType": "official-docs",
-      "versionScope": "Agent Skills description-optimization guidance available on 2026-09-01",
-      "verifiedAt": "2026-09-01",
+      "versionScope": "Agent Skills description-optimization guidance available on 2026-11-01",
+      "verifiedAt": "2026-11-01",
       "staleAfterDays": 60,
       "notes": "Trigger precision and the cost of under- and over-activation."
     },
     {
       "url": "https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md",
       "sourceType": "reference-implementation",
-      "versionScope": "openai/skills main SKILL.md content retrieved on 2026-10-02; current commit identity not verified",
-      "verifiedAt": "2026-10-02",
+      "versionScope": "openai/skills main SKILL.md content retrieved on 2026-11-01; current commit identity not verified",
+      "verifiedAt": "2026-11-03",
       "staleAfterDays": 30,
       "license": "See upstream repository license",
       "notes": "Concise discovery metadata, progressive disclosure, and task-specific skill boundaries."
@@ -132,8 +132,8 @@
     {
       "url": "https://github.com/openai/plugins/blob/main/plugins/life-science-research/skills/research-router-skill/SKILL.md",
       "sourceType": "reference-implementation",
-      "versionScope": "openai/plugins main research-router SKILL.md content retrieved on 2026-10-02; current commit identity not verified",
-      "verifiedAt": "2026-10-02",
+      "versionScope": "openai/plugins main research-router SKILL.md content retrieved on 2026-11-01; current commit identity not verified",
+      "verifiedAt": "2026-11-01",
       "staleAfterDays": 30,
       "license": "See upstream repository license",
       "notes": "Concrete router pattern: normalize the request, select the minimum useful downstream capabilities, and keep narrow requests out of broad routing."

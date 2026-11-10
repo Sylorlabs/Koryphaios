@@ -6,15 +6,15 @@
 
 - Package authorship is independent from empirical qualification; the audit/evaluation ledger is authoritative for qualification status.
 - Hierarchy: broader data-analysis, testing-engineering; narrower children computer-vision, embedding-systems, fine-tuning-training, llm-evaluation, recommendation-ranking, speech-audio-ai.
-- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held-out cases through the real resolver.
-- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no-skill pairing, regression retention, and blind semantic judging.
+- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held out cases through the real resolver.
+- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no skill pairing, regression retention, and blind semantic judging.
 - Source discipline: authoritative/spec/reference sources outrank community patterns when they conflict; runtime evidence outranks examples for behavioral claims.
 
 ## Maintained sources
 
 - **scikit-learn cross-validation**: https://scikit-learn.org/stable/modules/cross_validation.html
   - Scope: scikit-learn 1.9.0 stable documentation as available 2026-09-05.
-  - Use: held-out final testing, cross-validation, stratified/group/time-aware splitting concerns, retained split indices and caveats around time ordering and generalization estimates.
+  - Use: held out final testing, cross-validation, stratified/group/time-aware splitting concerns, retained split indices and caveats around time ordering and generalization estimates.
   - Verified: 2026-09-05; refresh after 90 days.
 - **scikit-learn common pitfalls**: https://scikit-learn.org/stable/common_pitfalls.html
   - Scope: scikit-learn 1.9.0 stable documentation as available 2026-09-05.

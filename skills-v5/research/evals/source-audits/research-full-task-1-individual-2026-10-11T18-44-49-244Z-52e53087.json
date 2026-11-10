@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "kind": "nonqualifying-source-audit",
+  "scenarioId": "research-full-task-1-individual",
+  "observedAt": "2026-10-11T18:44:49.244Z",
+  "historicalCutoff": "2026-09-04T23:59:59Z",
+  "sourcePlanSha256": "b4a34650f24ae498f62b3807abf14c51397a50d1846c4e3319f61dff1a23d74c",
+  "candidateProbe": {
+    "scenarioId": "research-full-task-1-individual",
+    "observedAt": "2026-10-11T18:44:49.244Z",
+    "complete": false,
+    "snapshotWritten": false,
+    "observations": [
+      {
+        "id": "agent-skills-spec",
+        "status": "unresolved",
+        "detail": "An independent Internet Archive CDX lookup for the required https://agentskills.io/specification URL on 2026-09-04 returned no 200 capture on 2026-10-10. A Git commit or later website is not an equivalent retrieval."
+      },
+      {
+        "id": "cursor-skills-docs",
+        "status": "unresolved",
+        "detail": "An independent Internet Archive CDX lookup for the required https://cursor.com/docs/skills URL on 2026-09-04 returned no 200 capture on 2026-10-10. Client docs from a different date cannot satisfy the exact-day fixture."
+      },
+      {
+        "id": "community-client-extension",
+        "status": "unresolved",
+        "detail": "No dated original, independently verifiable community statement that incorrectly universalizes a Cursor-only Agent Skills extension has been established."
+      },
+      {
+        "id": "pre-support-internal-note",
+        "status": "unresolved",
+        "detail": "No authentic, versioned pre-Cursor-support internal note with a verifiable historical Git revision has been supplied or identified. Public documentation cannot be relabeled internal evidence."
+      }
+    ]
+  },
+  "exactDayArchiveIndices": [
+    {
+      "roleId": "agent-skills-spec",
+      "sourceUrl": "https://agentskills.io/specification",
+      "indexUrl": "https://web.archive.org/cdx/search/cdx?url=https%3A%2F%2Fagentskills.io%2Fspecification&output=json&fl=timestamp%2Coriginal%2Cstatuscode%2Cdigest&filter=statuscode%3A200&from=20260904&to=20260904",
+      "checkedAt": "2026-10-11T18:44:49.245Z",
+      "outcome": "request-failed",
+      "detail": "The operation timed out."
+    },
+    {
+      "roleId": "cursor-skills-docs",
+      "sourceUrl": "https://cursor.com/docs/skills",
+      "indexUrl": "https://web.archive.org/cdx/search/cdx?url=https%3A%2F%2Fcursor.com%2Fdocs%2Fskills&output=json&fl=timestamp%2Coriginal%2Cstatuscode%2Cdigest&filter=statuscode%3A200&from=20260904&to=20260904",
+      "checkedAt": "2026-10-11T18:45:04.247Z",
+      "outcome": "request-failed",
+      "detail": "The operation timed out."
+    }
+  ]
+}

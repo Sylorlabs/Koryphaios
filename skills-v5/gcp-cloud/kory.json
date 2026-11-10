@@ -121,10 +121,10 @@
     {
       "url": "https://docs.cloud.google.com/docs/get-started/well-architected-framework",
       "sourceType": "official-docs",
-      "versionScope": "Google Cloud Well-Architected Framework, continuously updated; page last updated 2026-08-26",
+      "versionScope": "Google Cloud Well-Architected Framework, continuously updated; page last updated 2026-09-30",
       "staleAfterDays": 30,
       "notes": "Current operational excellence, security, reliability, cost, performance and sustainability architecture baseline.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://docs.cloud.google.com/resource-manager/docs",
@@ -132,23 +132,23 @@
       "versionScope": "Resource Manager documentation, page last updated 2026-08-26",
       "staleAfterDays": 45,
       "notes": "Organization/folder/project hierarchy and resource-management ownership baseline.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-10-20"
     },
     {
       "url": "https://docs.cloud.google.com/iam/docs/best-practices-service-accounts",
       "sourceType": "official-docs",
-      "versionScope": "Rolling Google Cloud service-account security guidance as available 2026-09-05",
+      "versionScope": "Rolling Google Cloud service-account security guidance rechecked 2026-11-07",
       "staleAfterDays": 21,
       "notes": "Avoid service-account keys where possible; scope impersonation/attachment and workload identities deliberately.",
-      "verifiedAt": "2026-09-26"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://docs.cloud.google.com/logging/docs/central-log-storage",
       "sourceType": "official-docs",
-      "versionScope": "Rolling Cloud Logging organization aggregation guidance as available 2026-09-05",
+      "versionScope": "Rolling Cloud Logging organization aggregation guidance as available 2026-10-04",
       "staleAfterDays": 30,
       "notes": "Organization-level aggregated sinks and protected central log-storage patterns.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     }
   ],
   "authoringMaturity": "individual"

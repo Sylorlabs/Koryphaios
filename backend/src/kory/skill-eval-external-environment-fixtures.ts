@@ -3,6 +3,20 @@ import type {
   SkillEvalFixtureMaterializer,
 } from './skill-eval-execution';
 import { writeFixtureFile } from './skill-eval-fixture-helpers';
+import {
+  VUE_BROWSER_SKILL_EVAL_MATERIALIZERS,
+  VUE_BROWSER_SKILL_EVAL_SCORERS,
+} from './skill-eval-vue-browser-fixtures';
+import {
+  NATIVE_OPERATIONS_SKILL_EVAL_MATERIALIZERS,
+  NATIVE_OPERATIONS_SKILL_EVAL_SCORERS,
+  VISUAL_NATIVE_SKILL_EVAL_MATERIALIZERS,
+  VISUAL_NATIVE_SKILL_EVAL_SCORERS,
+} from './skill-eval-visual-native-fixtures';
+import {
+  NEXTJS_RUNTIME_SKILL_EVAL_MATERIALIZERS,
+  NEXTJS_RUNTIME_SKILL_EVAL_SCORERS,
+} from './skill-eval-nextjs-runtime-fixtures';
 
 /**
  * Full-task scenarios whose acceptance contract depends on an environment that
@@ -293,8 +307,33 @@ const definitions = EXTERNAL_ENVIRONMENT_GATES.flatMap((gate) =>
   gate.scenarioIds.map((scenarioId) => ({ ...gate, scenarioId })),
 );
 
+// Literature research is materialized by the live public-research runtime above
+// the fallback lane. Keep the gate definition as historical inventory, but do
+// not register a second matcher that would make contract identity ambiguous.
+const fallbackDefinitions = definitions.filter(
+  (definition) => definition.skill !== 'literature-research',
+);
+
+// Retain the historical inventory while promoting only genuinely executable,
+// independently scored fixture pairs. Each replacement itself declares any
+// missing pinned runtime or browser prerequisites as fail-closed blockers.
+const executableMaterializers = [
+  ...VUE_BROWSER_SKILL_EVAL_MATERIALIZERS,
+  ...NEXTJS_RUNTIME_SKILL_EVAL_MATERIALIZERS,
+  ...VISUAL_NATIVE_SKILL_EVAL_MATERIALIZERS,
+  ...NATIVE_OPERATIONS_SKILL_EVAL_MATERIALIZERS,
+];
+const executableScorers = [
+  ...VUE_BROWSER_SKILL_EVAL_SCORERS,
+  ...NEXTJS_RUNTIME_SKILL_EVAL_SCORERS,
+  ...VISUAL_NATIVE_SKILL_EVAL_SCORERS,
+  ...NATIVE_OPERATIONS_SKILL_EVAL_SCORERS,
+];
+
 export const EXTERNAL_ENVIRONMENT_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMaterializer[] =
-  definitions.map((definition) => ({
+  fallbackDefinitions.map((definition) => executableMaterializers.find((candidate) =>
+    candidate.matches({ id: definition.scenarioId } as Parameters<typeof candidate.matches>[0]),
+  ) ?? ({
     id: `${definition.skill}/external-environment-gate/${definition.scenarioId}@1`,
     readinessBlockers: [definition.blocker],
     matches: (scenario) => scenario.id === definition.scenarioId,
@@ -308,7 +347,9 @@ export const EXTERNAL_ENVIRONMENT_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFi
   }));
 
 export const EXTERNAL_ENVIRONMENT_SKILL_EVAL_SCORERS: readonly SkillEvalDeterministicScorer[] =
-  definitions.map((definition) => ({
+  fallbackDefinitions.map((definition) => executableScorers.find((candidate) =>
+    candidate.scenarioIds.includes(definition.scenarioId),
+  ) ?? ({
     id: `${definition.skill}/external-environment-gate-scorer/${definition.scenarioId}@1`,
     scenarioIds: [definition.scenarioId],
     score: () => ({

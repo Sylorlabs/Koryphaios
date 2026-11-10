@@ -23,6 +23,48 @@ function artifactText(root: string, path: string): { artifact: unknown | null; t
   return { artifact, text: JSON.stringify(artifact ?? '').toLowerCase() };
 }
 
+export function hasCookieMutationInventory(inventory: unknown): boolean {
+  if (!Array.isArray(inventory)) return false;
+  return inventory.some((row: unknown) => {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) return false;
+    const entry = row as Record<string, unknown>;
+    const fields = (['source', 'transform', 'sink', 'control'] as const).map((key) =>
+      typeof entry[key] === 'string' ? (entry[key] as string).toLowerCase() : '',
+    );
+    const [source, transform, sink, control] = fields;
+    const enforcement = `${transform} ${control}`;
+    const disabled =
+      /\b(?:no|without|disabled|skip(?:ped)?)\s+(?:(?:server|csrf|token)\s+){0,2}(?:verification|validation|checks?|csrf)\b/u.test(
+        enforcement,
+      ) ||
+      /\b(?:verification|validation|checks?)\s+(?:(?:is|are|were)\s+)?(?:disabled|skipped|bypassed)\b/u.test(
+        enforcement,
+      );
+    return (
+      /\bcookie[- ](?:authenticated|backed|based)\b|\b(?:session|authentication)\s+cookie\b|\bhttponly\b.{0,40}\bcookie\b/u.test(
+        source,
+      ) &&
+      /\bmutations?\b|\bstate[- ]chang(?:e|ing)\b|\bchanges?\s+(?:dashboard|server|application)\s+state\b|\b(?:post|put|patch|delete)\b/u.test(
+        sink,
+      ) &&
+      /\bcsrf\b|\bx-csrf-token\b|\bsynchroni[sz]er\s+token\b/u.test(enforcement) &&
+      /\bsession[- ]bound\b|\bagainst\s+(?:the\s+)?(?:authenticated\s+)?session\b/u.test(
+        enforcement,
+      ) &&
+      /\bserver[- ]validat|\bserver[- ]verif|\bserver\s+checks?\b|\bchecked?\s+against\s+(?:the\s+)?(?:authenticated\s+)?session\b|\bon\s+(?:the\s+)?server\b|\bvalidat(?:e|es|ed|ion)\b.{0,60}\bserver[- ]side\b/u.test(
+        enforcement,
+      ) &&
+      /\b(?:validat(?:e|es|ed|ion)|verif(?:y|ies|ied|ication)|checks?|checked|reject(?:s|ed)?)\b/u.test(
+        enforcement,
+      ) &&
+      /\breject(?:s|ed)?\b.{0,100}\b(?:missing|invalid|malformed|expired|mismatched|token|csrf)\b/u.test(
+        control,
+      ) &&
+      !disabled
+    );
+  });
+}
+
 const PRIVACY_SOURCE = `export interface NearbyPolicy {
   adoptionFields:string[];
   nearbyFields:string[];
@@ -55,7 +97,7 @@ export class DeletionSystem {
 `;
 
 const nearbyMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'privacy-engineering/nearby-data-minimization@1',
+  id: 'privacy-engineering/nearby-data-minimization@2',
   matches: (s) => s.id === NEARBY_PRIVACY,
   materialize: (d) => {
     writeFixtureFile(d, 'package.json', packageJson('kory-eval-nearby-privacy'));
@@ -75,13 +117,15 @@ Repair \`NearbySystem\` only where code behavior is needed and write \`.kory-eva
 
 Opt-out must stop future use, remove the prior recommendation/profile state promised by policy, and neutralize the supplied stale queued event so it cannot repopulate the profile. Backups are immutable in this fixture; report that limitation and reapply suppression/tombstones on restore rather than claiming selective immediate backup deletion.
 
+Keep the executable regressions in \`tests/\` as test files that name the stale queued event or opt-out path and the backup restore path; the host reads that test text, so a row in the evidence artifact is not enough.
+
 Write \`.kory-eval/nearby-privacy-evidence.json\` mapping every supplied raw/derived field to source/purpose/store/recipient/retention/deletion, before/after emitted events and durable state, stale-queue replay, backup restore behavior, residual pseudonymous linkage, and \`jurisdictionSpecificLegalClaim:false\`.
 `,
     );
   },
 };
 const nearbyScorer: SkillEvalDeterministicScorer = {
-  id: 'privacy-engineering/nearby-data-minimization-scorer@2',
+  id: 'privacy-engineering/nearby-data-minimization-scorer@3',
   scenarioIds: [NEARBY_PRIVACY],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
@@ -245,7 +289,7 @@ const WEB_CORPUS = `${JSON.stringify(
   2,
 )}\n`;
 const dashboardMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'web-security/dashboard-browser-boundaries@2',
+  id: 'web-security/dashboard-browser-boundaries@4',
   matches: (s) => s.id === DASHBOARD_WEB,
   materialize: (d) => {
     writeFixtureFile(d, 'package.json', packageJson('kory-eval-dashboard-web-security'));
@@ -257,28 +301,47 @@ const dashboardMaterializer: SkillEvalFixtureMaterializer = {
       'README.md',
       `# Browser dashboard security fixture
 
+\`src/web-policy.ts\` and \`evidence/web-corpus.json\` are immutable evaluator-provided contract and test inputs. Do not edit them to implement the proposed fixes; express your complete reviewed policy in the JSON artifact and add tests under \`tests/\` if useful.
+
 Write \`.kory-eval/dashboard-web.json\` as \`DashboardWebSpec\`. Inventory the supplied rich-text, return-navigation, cookie-authenticated mutation, iframe, and postMessage sources through their transforms to concrete sinks/controls. The legacy HTML execution sink is removed or passes through a context-appropriate sanitizer; record the sanitizer policy, allowed URL schemes, and event-handler-attribute behavior. Ordinary text is escaped and navigation URLs are validated rather than generically filtered. CSP is strict nonce-based defense in depth with explicit default/script/style/object/base/framing directives, nonce propagation, reporting endpoint, Report-Only→enforcement checks, no broad unsafe-inline/eval, and is explicitly not the primary XSS fix.
 
-Every cookie-authenticated mutation has a server-validated, session-bound CSRF token with explicit transport and reject behavior; SameSite, Origin and Fetch Metadata are complementary signals. Payment postMessage accepts only the exact supplied origin, expected source/context, correlated transaction context, and explicit schema; outgoing target origin is exact, never \`*\`. Return navigation is relative/same-origin unless explicitly allowlisted. Session cookie is Secure/HttpOnly, appropriately SameSite, host-only unless a domain is strictly required, and narrow Path. Tenant authorization stays \`authorization-security\`.
+Every cookie-authenticated mutation has a server-validated, session-bound CSRF token with explicit transport and reject behavior; SameSite, Origin and Fetch Metadata are complementary signals. Include at least one structured \`sourceSinkInventory\` row tracing the cookie-authenticated form/script source through the request and automatically attached session cookie to the state-changing POST/PUT/PATCH/DELETE handler. Name the server-side CSRF validation against the session and rejection of missing/invalid tokens in that same row; a separate \`csrf\` object does not replace this source-to-sink trace. For \`postMessage.expectedOrigin\` and \`postMessage.outgoingTargetOrigin\`, copy the literal \`dashboard.paymentOrigin\` string from \`evidence/web-corpus.json\` into JSON without changing any character. Example: \`"https://payments.example.test"\`. Do not emit Markdown links such as \`"[https://payments.example.test](https://payments.example.test)"\`, code fences, a trailing slash, or a path: they are different strings and fail exact origin matching. Payment postMessage accepts only the exact supplied origin, expected source/context, correlated transaction context, and explicit schema; outgoing target origin is exact, never \`*\`. Return navigation is relative/same-origin unless explicitly allowlisted. Session cookie is Secure/HttpOnly, appropriately SameSite, host-only unless a domain is strictly required, and narrow Path. Tenant authorization stays \`authorization-security\`.
 `,
     );
   },
 };
 const dashboardScorer: SkillEvalDeterministicScorer = {
-  id: 'web-security/dashboard-browser-boundaries-scorer@3',
+  id: 'web-security/dashboard-browser-boundaries-scorer@8',
   scenarioIds: [DASHBOARD_WEB],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
       workingDirectory,
       `import{expect,test}from'bun:test';import{readFileSync}from'node:fs';import{acceptPaymentMessage,returnUrlAllowed,type DashboardWebSpec}from'../src/web-policy';const s=JSON.parse(readFileSync('.kory-eval/dashboard-web.json','utf8')) as DashboardWebSpec;const c=JSON.parse(readFileSync('evidence/web-corpus.json','utf8')) as any;
-test('hidden: source/sink and sink-specific rendering policy are concrete',()=>{const inventory=JSON.stringify(s.sourceSinkInventory).toLowerCase();for(const term of ['rich','return','mutation','iframe','postmessage'])expect(inventory).toContain(term);expect(s.sourceSinkInventory.length).toBeGreaterThanOrEqual(5);expect(s.richText.legacyDangerousSinkRemovedOrSanitized).toBe(true);expect(s.richText.ordinaryTextEscaped).toBe(true);expect(s.richText.htmlSanitizer).toBe(true);expect(s.richText.attributeContextSafe).toBe(true);expect(s.richText.navigationUrlValidated).toBe(true);expect(s.richText.sanitizerPolicy.length).toBeGreaterThan(8);expect(s.richText.allowedUrlSchemes).toContain('https');expect(s.richText.allowedUrlSchemes).not.toContain('javascript');expect(s.richText.eventHandlerAttributesAllowed).toBe(false);});
+test('hidden: source/sink and sink-specific rendering policy are concrete',()=>{const inventory=JSON.stringify(s.sourceSinkInventory).toLowerCase();for(const term of ['rich','return','iframe','postmessage'])expect(inventory).toContain(term);expect(s.sourceSinkInventory.length).toBeGreaterThanOrEqual(5);expect(s.richText.legacyDangerousSinkRemovedOrSanitized).toBe(true);expect(s.richText.ordinaryTextEscaped).toBe(true);expect(s.richText.htmlSanitizer).toBe(true);expect(s.richText.attributeContextSafe).toBe(true);expect(s.richText.navigationUrlValidated).toBe(true);expect(s.richText.sanitizerPolicy.length).toBeGreaterThan(8);expect(s.richText.allowedUrlSchemes).toContain('https');expect(s.richText.allowedUrlSchemes).not.toContain('javascript');expect(s.richText.eventHandlerAttributesAllowed).toBe(false);});
 test('hidden: CSP and CSRF protocols are explicit and fail closed',()=>{expect(s.csp.nonceBased).toBe(true);expect(s.csp.unsafeInline).toBe(false);expect(s.csp.unsafeEval).toBe(false);expect(s.csp.reportOnlyRollout).toBe(true);expect(s.csp.primaryXssFix).toBe(false);const directives=s.csp.directives.join(' ').toLowerCase();for(const d of ['default-src','script-src','object-src','base-uri','frame-ancestors'])expect(directives).toContain(d);expect(s.csp.noncePropagation.length).toBeGreaterThan(8);expect(s.csp.reportEndpoint.length).toBeGreaterThan(0);expect(s.csp.enforcementVerification.length).toBeGreaterThanOrEqual(2);expect(s.csrf.serverValidatedToken).toBe(true);expect(s.csrf.sessionBound).toBe(true);expect(s.csrf.allCookieMutationsCovered).toBe(true);expect(s.csrf.rejectMissingOrInvalid).toBe(true);expect(['header','form-field']).toContain(s.csrf.tokenTransport);});
-test('hidden: postMessage/return/cookie boundaries fail closed',()=>{for(const m of c.dashboard.messages)expect(acceptPaymentMessage(s,m),m.origin).toBe(m.expected);expect(s.postMessage.expectedOrigin).toBe(c.dashboard.paymentOrigin);expect(s.postMessage.outgoingTargetOrigin).toBe(c.dashboard.paymentOrigin);expect(s.postMessage.expectedSourceContext.length).toBeGreaterThan(0);expect(s.postMessage.schemaFields.length).toBeGreaterThan(0);expect(s.postMessage.contextCorrelation).toBe(true);expect(returnUrlAllowed(s,'/tickets/7')).toBe(true);expect(returnUrlAllowed(s,'https://evil.example/phish')).toBe(false);expect(returnUrlAllowed(s,'//evil.example/x')).toBe(false);expect(s.cookie.secure).toBe(true);expect(s.cookie.httpOnly).toBe(true);expect(s.cookie.domain).toBeNull();expect(s.cookie.path.startsWith('/')).toBe(true);expect(s.tenantAuthorizationOwnedBy).toBe('authorization-security');});
+test('hidden: postMessage/return/cookie boundaries fail closed',()=>{for(const m of c.dashboard.messages)expect(acceptPaymentMessage(s,m),m.origin).toBe(m.expected);expect(s.postMessage.expectedOrigin).toBe(c.dashboard.paymentOrigin);expect(s.postMessage.outgoingTargetOrigin).toBe(c.dashboard.paymentOrigin);expect(s.postMessage.expectedSourceContext.length).toBeGreaterThan(0);expect(s.postMessage.schemaFields.length).toBeGreaterThan(0);expect(s.postMessage.contextCorrelation).toBe(true);expect(returnUrlAllowed(s,'/tickets/7')).toBe(true);expect(returnUrlAllowed(s,'https://evil.example/phish')).toBe(false);expect(returnUrlAllowed(s,'//evil.example/x')).toBe(false);expect(s.cookie.secure).toBe(true);expect(s.cookie.httpOnly).toBe(true);expect(s.cookie.domain).toBeNull();expect(s.cookie.path.startsWith('/')).toBe(true);const owner=s.tenantAuthorizationOwnedBy.trim();expect(owner==='authorization-security'||owner.startsWith('authorization-security: ')).toBe(true);});
 `,
     );
     const fixed = fixtureTextEquals(workingDirectory, 'src/web-policy.ts', WEB_POLICY);
     const corpus = fixtureTextEquals(workingDirectory, 'evidence/web-corpus.json', WEB_CORPUS);
-    const passed = hidden.passed && fixed && corpus;
+    const spec = readJsonArtifact<{
+      sourceSinkInventory?: unknown;
+      postMessage?: { expectedOrigin?: unknown; outgoingTargetOrigin?: unknown };
+    }>(
+      workingDirectory,
+      '.kory-eval/dashboard-web.json',
+    );
+    const mutationInventory = hasCookieMutationInventory(spec?.sourceSinkInventory);
+    const expectedPaymentOrigin = (
+      JSON.parse(WEB_CORPUS) as { dashboard: { paymentOrigin: string } }
+    ).dashboard.paymentOrigin;
+    const paymentOriginStatus = (origin: unknown): string => {
+      if (origin === expectedPaymentOrigin) return 'exact';
+      if (typeof origin === 'string' && /^\[[^\]]+\]\(https?:\/\/[^)]+\)$/u.test(origin))
+        return 'Markdown-wrapped origin (invalid)';
+      return 'mismatch or missing';
+    };
+    const passed = hidden.passed && mutationInventory && fixed && corpus;
     return {
       passed,
       quality: passed ? 1 : hidden.passed ? 0.85 : 0,
@@ -286,6 +349,9 @@ test('hidden: postMessage/return/cookie boundaries fail closed',()=>{for(const m
       integrityFailure: !fixed || !corpus,
       evidence: [
         `browser source/sink/postMessage vectors: ${hidden.passed ? 'pass' : 'fail'}`,
+        `cookie-authenticated mutation source/sink: ${mutationInventory ? 'present' : 'missing'}`,
+        `postMessage.expectedOrigin: ${paymentOriginStatus(spec?.postMessage?.expectedOrigin)}`,
+        `postMessage.outgoingTargetOrigin: ${paymentOriginStatus(spec?.postMessage?.outgoingTargetOrigin)}`,
         `fixed evaluator/corpus preserved: ${fixed && corpus ? 'yes' : 'no'}`,
         hidden.evidence,
       ],
@@ -433,8 +499,76 @@ The board-observed current image boots; unsigned, corrupt and wrong-product fixt
     );
   },
 };
+
+function hasUnsupportedBootHardwareClaim(artifact: unknown): boolean {
+  const words = (text: string): string =>
+    text
+      .replace(/([a-z])([A-Z])/gu, '$1 $2')
+      .replace(/[-_]/gu, ' ')
+      .toLowerCase();
+  const hardware =
+    /\b(?:debug|physical|invasive|(?:extraction|tamper)\s+resistance|fuse\s+enforcement)\b/u;
+  const affirmative = (text: string): boolean => {
+    // Negation belongs to its own assertion, not every claim in the report.
+    const positive = text.replace(
+      /\b(?:not|never|cannot|can't|couldn't|isn't|aren't|wasn't|weren't|hasn't|haven't)\s+(?:(?:yet|been|be|currently|independently|directly|fully|actually|physically)\s+){0,5}(?:proved|proven|verified)\b/gu,
+      '',
+    );
+    return /\b(?:proved|proven|verified)\b/u.test(positive);
+  };
+  // Each claim stays within a scalar and a clause. In particular, a debug
+  // disclaimer cannot acquire "verified" from another field or boot result.
+  const clauses = (text: string): string[] =>
+    text.split(/[.!?;,\n]|\b(?:and|but|however|whereas|while|which)\b/u);
+  const status =
+    /^(?:(?:is|was|has|been|independently|fully|physically)\s+)*(?:proved|proven|verified)\b/u;
+  const subjectFields = new Set(['subject', 'property', 'claim', 'target', 'capability']);
+  const statusFields = new Set([
+    'status',
+    'result',
+    'verification',
+    'verified',
+    'proved',
+    'proven',
+    'proof',
+  ]);
+
+  const visit = (value: unknown, subject = '', field = ''): boolean => {
+    if (typeof value === 'string') {
+      const text = words(value);
+      return clauses(text).some(
+        (clause) =>
+          (hardware.test(clause) && affirmative(clause)) ||
+          (hardware.test(subject) && status.test(clause.trim())),
+      );
+    }
+    if (typeof value === 'boolean') {
+      // A false proof flag is a boundary, not an affirmative hardware claim.
+      return value && hardware.test(subject) && (affirmative(field) || /\bproof\b/u.test(field));
+    }
+    if (Array.isArray(value)) return value.some((entry) => visit(entry, subject));
+    if (!value || typeof value !== 'object') return false;
+    const entries = Object.entries(value);
+    // Support a structured { subject: 'debug lock', status: 'verified' } row,
+    // without borrowing a subject/status from a sibling object or array row.
+    const rowSubject = entries.find(
+      ([key, entry]) =>
+        subjectFields.has(key) && typeof entry === 'string' && hardware.test(words(entry)),
+    );
+    const context = rowSubject ? words(rowSubject[1] as string) : subject;
+    return entries.some(([key, entry]) => {
+      const field = words(key);
+      // Only a property's own status can inherit its subject. A separate
+      // simulator result nested under debugStatus is still a separate claim.
+      const childSubject = hardware.test(field) ? field : statusFields.has(field) ? context : '';
+      return visit(entry, childSubject, field);
+    });
+  };
+  return visit(artifact);
+}
+
 const secureBootScorer: SkillEvalDeterministicScorer = {
-  id: 'embedded-device-security/secure-boot-ota-scorer@3',
+  id: 'embedded-device-security/secure-boot-ota-scorer@4',
   scenarioIds: [SECURE_BOOT],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
@@ -459,7 +593,7 @@ test('hidden: every power-cut state recovers to authenticated candidate/current'
       /unsigned/u.test(ev.text) &&
       /wrong-product|wrong product/u.test(ev.text) &&
       /power|cut/u.test(ev.text) &&
-      !/physical.*(?:proved|verified)|debug.*(?:proved|verified)/u.test(ev.text);
+      !hasUnsupportedBootHardwareClaim(ev.artifact);
     const passed = hidden.passed && fixed && corpus && bounded;
     return {
       passed,

@@ -1,6 +1,6 @@
 # Repository discovery sources
 
-Read this file when changing repository-identification, worktree-preservation, or instruction-discovery behavior. These references describe evidence semantics; they do not authorize commands or mutations.
+Read this file when changing repository-identification, worktree-preservation, or instruction discovery behavior. These references describe evidence semantics; they do not authorize commands or mutations.
 
 ## Git working-tree status
 

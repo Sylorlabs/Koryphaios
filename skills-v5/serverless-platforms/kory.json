@@ -1,17 +1,28 @@
 {
   "schemaVersion": 1,
   "name": "serverless-platforms",
-  "version": "5.1.1",
+  "version": "5.1.2",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
-  "domains": ["cloud", "serverless", "functions"],
-  "targetMedia": ["any"],
+  "domains": [
+    "cloud",
+    "serverless",
+    "functions"
+  ],
+  "targetMedia": [
+    "any"
+  ],
   "pathScopes": [],
   "contextBudget": 9000,
-  "broader": ["network-service-backend"],
+  "broader": [
+    "network-service-backend"
+  ],
   "facets": [],
-  "requires": ["verification", "reliability-verification"],
+  "requires": [
+    "verification",
+    "reliability-verification"
+  ],
   "conflicts": [],
   "activation": [
     "serverless function",
@@ -65,6 +76,7 @@
   "evidence": [
     "Exact provider/product/runtime/compute-mode/version plus invocation-source and delivery/retry contract",
     "Cold/warm lifecycle, concurrency/backpressure, timeout/background-work and durable-state evidence",
+    "Durable atomic idempotency boundary and independent-context concurrency evidence",
     "Batch/partial-failure/idempotency/dead-letter or retry evidence with downstream side-effect correctness",
     "Immutable artifact/version/revision, runtime limits, observability, staged traffic and rollback evidence",
     "Hierarchy boundary and selected specialist rationale",
@@ -92,8 +104,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["event-driven-architecture"],
-        "tags": ["ambiguous", "neighbor-boundary"]
+        "adjacentSkills": [
+          "event-driven-architecture"
+        ],
+        "tags": [
+          "ambiguous",
+          "neighbor-boundary"
+        ]
       },
       {
         "id": "serverless-platforms-ambiguous-2",
@@ -101,8 +118,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["network-service-backend"],
-        "tags": ["ambiguous", "scope-control"]
+        "adjacentSkills": [
+          "network-service-backend"
+        ],
+        "tags": [
+          "ambiguous",
+          "scope-control"
+        ]
       },
       {
         "id": "serverless-platforms-ambiguous-3",
@@ -110,8 +132,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["edge-cdn"],
-        "tags": ["ambiguous", "scope-control"]
+        "adjacentSkills": [
+          "edge-cdn"
+        ],
+        "tags": [
+          "ambiguous",
+          "scope-control"
+        ]
       }
     ],
     "adversarial": [
@@ -121,8 +148,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["technical-communication"],
-        "tags": ["adversarial", "quoted-decoy"]
+        "adjacentSkills": [
+          "technical-communication"
+        ],
+        "tags": [
+          "adversarial",
+          "quoted-decoy"
+        ]
       },
       {
         "id": "serverless-platforms-adversarial-2",
@@ -130,8 +162,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["documents-communication"],
-        "tags": ["adversarial", "inert-evidence"]
+        "adjacentSkills": [
+          "documents-communication"
+        ],
+        "tags": [
+          "adversarial",
+          "inert-evidence"
+        ]
       },
       {
         "id": "serverless-platforms-adversarial-3",
@@ -139,8 +176,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["documents-communication"],
-        "tags": ["adversarial", "filename-decoy"]
+        "adjacentSkills": [
+          "documents-communication"
+        ],
+        "tags": [
+          "adversarial",
+          "filename-decoy"
+        ]
       }
     ]
   },
@@ -148,66 +190,66 @@
     {
       "url": "https://docs.aws.amazon.com/lambda/latest/dg/welcome.html",
       "sourceType": "official-docs",
-      "versionScope": "AWS Lambda developer guide as available 2026-10-02",
+      "versionScope": "AWS Lambda developer guide as available 2026-11-01",
       "staleAfterDays": 14,
       "notes": "Current Lambda compute/runtime families, duration/concurrency/environment-state distinctions and managed-function behavior; do not assume standard Lambda limits apply to Durable Functions or Managed Instances.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-01"
     },
     {
       "url": "https://docs.aws.amazon.com/lambda/latest/dg/invocation-retries.html",
       "sourceType": "official-docs",
-      "versionScope": "AWS Lambda retry documentation as available 2026-10-02",
+      "versionScope": "AWS Lambda retry documentation as available 2026-11-01",
       "staleAfterDays": 14,
       "notes": "Current direct, asynchronous and indirect invocation retry ownership; duplicate-safe side effects are required because retries can follow partial execution.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-01"
     },
     {
       "url": "https://docs.aws.amazon.com/lambda/latest/dg/lambda-runtime-environment.html",
       "sourceType": "official-docs",
-      "versionScope": "AWS Lambda execution-environment lifecycle as available 2026-10-02",
+      "versionScope": "AWS Lambda execution-environment lifecycle as available 2026-11-01",
       "staleAfterDays": 14,
       "notes": "Init/invoke/freeze/reuse, cold starts, transient /tmp and background-callback reuse implications for standard and durable functions.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-01"
     },
     {
       "url": "https://docs.aws.amazon.com/lambda/latest/dg/lambda-concurrency.html",
       "sourceType": "official-docs",
-      "versionScope": "AWS Lambda concurrency documentation as available 2026-10-02",
+      "versionScope": "AWS Lambda concurrency documentation as available 2026-11-01",
       "staleAfterDays": 14,
       "notes": "Current standard Lambda concurrency/scaling controls; verify compute type because Managed Instances use a different multi-concurrency model.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-01"
     },
     {
       "url": "https://docs.aws.amazon.com/lambda/latest/dg/with-sqs.html",
       "sourceType": "official-docs",
-      "versionScope": "AWS Lambda SQS event-source documentation as available 2026-10-02",
+      "versionScope": "AWS Lambda SQS event-source documentation as available 2026-11-01",
       "staleAfterDays": 14,
       "notes": "Current polling, batching, duplicate-delivery, visibility timeout, scaling and partial-batch implications for SQS-triggered functions.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-01"
     },
     {
       "url": "https://docs.cloud.google.com/run/docs/tips/function-retries",
       "sourceType": "official-docs",
-      "versionScope": "Google Cloud Run event-driven function retry documentation as available 2026-10-02",
+      "versionScope": "Google Cloud Run event-driven function retry documentation as available 2026-11-01",
       "staleAfterDays": 14,
       "notes": "Retry policy belongs to Eventarc/Pub/Sub trigger path and event-driven functions must be designed for redelivery/idempotency.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-01"
     },
     {
       "url": "https://developers.cloudflare.com/workers/platform/limits/",
       "sourceType": "official-docs",
-      "versionScope": "Cloudflare Workers limits as available 2026-10-02",
+      "versionScope": "Cloudflare Workers limits page updated 2026-10-12; plan- and invocation-specific limits reviewed 2026-11-08",
       "staleAfterDays": 7,
-      "notes": "Current Workers CPU/memory/subrequest/connection/duration and post-response limits; an isolate may handle many concurrent requests, unlike standard Lambda's one-invocation-per-environment model.",
-      "verifiedAt": "2026-10-02"
+      "notes": "Free 10 ms vs paid 5 min max HTTP CPU (30 s paid default), 128 MB per isolate, plan-specific subrequests and trigger-specific wall time. Each invocation may have 6 simultaneous connections waiting for response headers; body streaming after headers no longer counts toward that quota. An isolate may serve concurrent requests. HTTP waitUntil extends up to 30 s after response/disconnect.",
+      "verifiedAt": "2026-11-08"
     },
     {
       "url": "https://developers.cloudflare.com/workers/runtime-apis/context/",
       "sourceType": "official-docs",
-      "versionScope": "Cloudflare Workers Context documentation as available 2026-10-02",
+      "versionScope": "Cloudflare Workers Context documentation updated 2026-10-12",
       "staleAfterDays": 14,
       "notes": "Current waitUntil lifecycle; floating asynchronous work can be canceled and waitUntil is bounded after the response/disconnect.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-01"
     }
   ],
   "authoringMaturity": "individual"

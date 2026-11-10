@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "linux-systems",
-  "version": "5.1.1",
+  "version": "5.1.2",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -137,42 +137,42 @@
     {
       "url": "https://docs.kernel.org/",
       "sourceType": "official-docs",
-      "versionScope": "Linux kernel documentation as available 2026-09-05",
+      "versionScope": "Linux kernel documentation as available 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Authoritative kernel subsystem, process, filesystems, resource and kernel-interface documentation.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://docs.kernel.org/admin-guide/cgroup-v2.html",
       "sourceType": "official-docs",
-      "versionScope": "Current Linux cgroup v2 admin guide as available 2026-09-05",
+      "versionScope": "Current Linux cgroup v2 admin guide as available 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Authoritative cgroup v2 hierarchy, controllers, delegation, resource and event semantics.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://docs.kernel.org/filesystems/proc.html",
       "sourceType": "official-docs",
-      "versionScope": "Current Linux /proc filesystem documentation as available 2026-09-05",
+      "versionScope": "Current Linux /proc filesystem documentation as available 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Kernel-visible process and system information exposed through /proc.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html",
       "sourceType": "official-docs",
-      "versionScope": "Current systemd.service manual as available 2026-09-05",
+      "versionScope": "Current systemd 259.1 systemd.service manual as available 2026-10-04",
       "staleAfterDays": 30,
       "notes": "Unit service types, execution lifecycle, restart and supervision semantics; resolve installed systemd version before applying current-only directives.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html",
       "sourceType": "official-docs",
-      "versionScope": "Current systemd.exec manual as available 2026-09-05",
+      "versionScope": "Current systemd 259.1 systemd.exec manual as available 2026-10-04",
       "staleAfterDays": 30,
       "notes": "Execution identity, environment, filesystem sandboxing, credentials, resource and security directives.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://man7.org/linux/man-pages/man7/namespaces.7.html",

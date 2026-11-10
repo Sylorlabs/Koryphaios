@@ -20,6 +20,7 @@ import type {
   SkillEvalFixtureMaterializer,
 } from './skill-eval-execution';
 import { writeFixtureFile } from './skill-eval-fixture-helpers';
+import { hostOS, openssl3ExecutableCandidates } from '../runtime/platform';
 
 export const DENO_PERMISSION_SCENARIO = 'bun-deno-runtime-full-task-2-individual';
 export const DENO_PERMISSION_VERSION = '2.9.6';
@@ -31,6 +32,34 @@ const localBinary = resolve(
 );
 export function denoEvalBinary(): string {
   return process.env.KORY_EVAL_DENO ?? (existsSync(localBinary) ? localBinary : 'deno');
+}
+/** Select only an observed OpenSSL 3 executable; no version-label substitution. */
+function denoOpenSSL3(): string {
+  for (const binary of openssl3ExecutableCandidates()) {
+    const observed = spawnSync(binary, ['version'], {
+      encoding: 'utf8', timeout: 2_000, env: environment(),
+    });
+    if (observed.status === 0 && observed.stdout.startsWith('OpenSSL 3.')) return binary;
+  }
+  return 'openssl'; // Readiness will reject a missing or incompatible executable.
+}
+let loopbackProbe: { key: string; at: number; error: string | null } | null = null;
+
+/** Actual HTTPS controls need a bindable loopback socket, not only binaries. */
+function loopbackAvailability(): string | null {
+  const key = JSON.stringify([process.execPath, process.env.PATH]);
+  if (loopbackProbe?.key === key && Date.now() - loopbackProbe.at < 60_000)
+    return loopbackProbe.error;
+  const probe = spawnSync(process.execPath, ['-e', `
+    const net = require('node:net');
+    const server = net.createServer();
+    server.once('error', (error) => { console.error(error.code || error.message); process.exit(2); });
+    server.listen(0, '127.0.0.1', () => server.close(() => process.exit(0)));
+  `], { encoding: 'utf8', timeout: 2_000, env: environment() });
+  const error = probe.status === 0 ? null
+    : `Deno permission fixture requires bindable local loopback HTTPS: ${(probe.error?.message ?? probe.stderr ?? probe.signal ?? `exit ${probe.status}`).trim().slice(0, 160)}`;
+  loopbackProbe = { key, at: Date.now(), error };
+  return error;
 }
 const environment = () => ({
   PATH: process.env.PATH ?? '',
@@ -52,30 +81,36 @@ const failure = (evidence: string[], integrityFailure = false): SkillEvalDetermi
 
 /** Runtime pins are experiment inputs, not a recommendation for every project. */
 export function denoPermissionReadiness(
-  probe = (tool: string) => {
+  probe?: (tool: string) => string,
+  platform: string = hostOS(),
+): string[] {
+  const live = !probe;
+  const observed = probe ?? ((tool: string) => {
     const result = spawnSync(
-      tool === 'deno' ? denoEvalBinary() : tool,
+      tool === 'deno' ? denoEvalBinary() : tool === 'openssl' ? denoOpenSSL3() : tool,
       tool === 'openssl' ? ['version'] : ['--version'],
       { encoding: 'utf8', timeout: 2_000, env: environment() },
     );
     return result.status === 0 ? result.stdout.trim().split('\n')[0]! : 'unavailable';
-  },
-  platform: string = process.platform,
-): string[] {
+  });
   const reasons: string[] = [];
   if (!['darwin', 'linux'].includes(platform))
     reasons.push('Deno permission fixture currently requires POSIX paths and local Git.');
-  const version = probe('deno');
+  const version = observed('deno');
   if (!version.startsWith(`deno ${DENO_PERMISSION_VERSION} `))
     reasons.push(
       `Deno permission fixture requires Deno ${DENO_PERMISSION_VERSION}; observed ${version}.`,
     );
-  if (!probe('git').startsWith('git version '))
+  if (!observed('git').startsWith('git version '))
     reasons.push('Deno permission fixture requires Git for actual read-only subprocess checks.');
-  if (!probe('openssl').startsWith('OpenSSL 3.'))
+  if (!observed('openssl').startsWith('OpenSSL 3.'))
     reasons.push(
       'Deno permission fixture requires OpenSSL 3 for an ephemeral loopback TLS certificate.',
     );
+  if (live && reasons.length === 0) {
+    const loopbackError = loopbackAvailability();
+    if (loopbackError) reasons.push(loopbackError);
+  }
   return reasons;
 }
 
@@ -100,7 +135,7 @@ const fixedFiles: Record<string, string> = {
   'reference/node-maintenance.mjs': nodeOrigin,
   '.deno-version': `${DENO_PERMISSION_VERSION}\n`,
   'deno.json': json({ compilerOptions: { strict: true }, imports: {} }),
-  'README.md': `# Deno maintenance-script permission boundary\n\nImplement permissions(context) and async execute(request, context) in candidate.mjs. Both exports are real executable code. context supplies canonical configRoot, outputRoot, repoRoot, apiOrigin and the exact Git executable. No dependency installation is needed.\n\npermissions returns --no-prompt and narrowly scoped --allow-read=configRoot, --allow-write=outputRoot, --allow-net=the API host:port, and --allow-run=the Git executable. Order is irrelevant; blanket, extra and missing grants fail. The evaluator supplies --cert for its private loopback HTTPS CA; never disable TLS verification.\n\nRequests are {kind:read,path}, {kind:write,path,text}, {kind:fetch,url}, or {kind:git,args}. Return {ok:true,value} on success, or {ok:false,error} with a useful nonempty error. read returns file text. write creates the requested output file and returns null. fetch returns response text, accepts only the declared HTTPS origin, follows same-origin redirects within a finite bound, and rejects other origins and credentials. git accepts only [status,--porcelain] and [rev-parse,HEAD], runs in repoRoot with a clean environment, and returns stdout. All other requests are denied.\n\nFor this fixture outputRoot is evaluator-created and contains no pre-existing symlinks; its parent is not writable by the script. Config includes a symlink escaping its root: scoped Deno reads alone do not enforce the intended canonical-root policy. Reject that path before reading its target. Path-prefix lookalikes and parent traversal are not children. Handle denied access explicitly without widening permissions. Internal implementation is unrestricted within this interface.\n\nVerification uses actual Deno, temporary files, a disposable Git repository, ephemeral HTTPS servers, a runtime-denial probe independent of candidate code, and evaluator-owned side-effect checks. Source/config pins and this contract are fixed. Keep subprocess confinement separate: --allow-run limits executables, not Git arguments or child OS authority. This evaluates an audited maintenance script; it is NOT a hostile-code OS sandbox or a proof against concurrent filesystem replacement. Do not claim model uplift from evaluator self-tests.\n`,
+  'README.md': `# Deno maintenance-script permission boundary\n\nImplement permissions(context) and async execute(request, context) in candidate.mjs. Both exports are real executable code. context supplies canonical configRoot, outputRoot, repoRoot, apiOrigin and the exact Git executable. No dependency installation is needed.\n\npermissions is evaluated before any permission exists, in a process that grants no filesystem or network access, so it must build its answer purely from the supplied context strings; calling a filesystem API such as Deno.realPathSync inside it throws and fails the policy check. permissions returns --no-prompt and narrowly scoped --allow-read=configRoot and outputRoot, --allow-write=outputRoot, --allow-net=the API host:port, and --allow-run=the Git executable. Deno resolves a write target through its parent directory, so the output root must also be readable; a set without it cannot create the file. Order and spelling of equivalent grants are irrelevant: one --allow-read=configRoot,outputRoot and one flag per path grant the same access, and the evaluator compares the granted path sets. Blanket, extra and missing grants fail. The evaluator supplies --cert for its private loopback HTTPS CA; never disable TLS verification.\n\nRequests are {kind:read,path}, {kind:write,path,text}, {kind:fetch,url}, or {kind:git,args}. Return {ok:true,value} on success, or {ok:false,error} with a useful nonempty error. read returns file text. write creates the requested output file and returns null. fetch returns response text, accepts only the declared HTTPS origin, follows same-origin redirects within a finite bound, and rejects other origins and credentials. git accepts only [status,--porcelain] and [rev-parse,HEAD], runs in repoRoot with a clean environment, and returns stdout. All other requests are denied.\n\nFor this fixture outputRoot is evaluator-created and contains no pre-existing symlinks; its parent is not writable by the script. Config includes a symlink escaping its root: scoped Deno reads alone do not enforce the intended canonical-root policy. Reject that path before reading its target. Path-prefix lookalikes and parent traversal are not children. Handle denied access explicitly without widening permissions. Internal implementation is unrestricted within this interface.\n\nVerification uses actual Deno, temporary files, a disposable Git repository, ephemeral HTTPS servers, a runtime-denial probe independent of candidate code, and evaluator-owned side-effect checks. Source/config pins and this contract are fixed. Keep subprocess confinement separate: --allow-run limits executables, not Git arguments or child OS authority. This evaluates an audited maintenance script; it is NOT a hostile-code OS sandbox or a proof against concurrent filesystem replacement. Do not claim model uplift from evaluator self-tests.\n`,
 };
 const starter = nodeOrigin;
 
@@ -304,8 +339,9 @@ export async function scoreDenoPermissions(root: string): Promise<SkillEvalDeter
     const git = Bun.which('git');
     if (!git) throw new Error('Git disappeared after readiness check');
     versions.git = (await command(work, git, ['--version'])).stdout.trim();
-    versions.openssl = (await command(work, 'openssl', ['version'])).stdout.trim();
-    const cert = await command(work, 'openssl', [
+    const openssl = denoOpenSSL3();
+    versions.openssl = (await command(work, openssl, ['version'])).stdout.trim();
+    const cert = await command(work, openssl, [
       'req',
       '-x509',
       '-newkey',
@@ -419,20 +455,50 @@ export async function scoreDenoPermissions(root: string): Promise<SkillEvalDeter
       json(context),
     );
     const proposed = parsed(policyResult);
-    const required = [
-      '--no-prompt',
-      `--allow-read=${context.configRoot}`,
-      `--allow-write=${context.outputRoot}`,
-      `--allow-net=${new URL(apiOrigin).host}`,
-      `--allow-run=${git}`,
-    ].sort();
+    // Deno resolves a write target through its parent directory, so creating a file also
+    // needs read access to that directory. The contract states this, and the comparison
+    // below is on the granted path sets, not on flag spelling, because
+    // `--allow-read=a,b` and one flag per path are equivalent grants.
+    const requiredGrants = {
+      read: [context.configRoot, context.outputRoot].sort(),
+      write: [context.outputRoot],
+      net: [new URL(apiOrigin).host],
+      run: [git],
+    };
+    const parseGrants = (flags: readonly unknown[]) => {
+      const grants: Record<string, string[]> = { read: [], write: [], net: [], run: [] };
+      let sawNoPrompt = false;
+      for (const flag of flags) {
+        if (typeof flag !== 'string') return null;
+        if (flag === '--no-prompt') {
+          sawNoPrompt = true;
+          continue;
+        }
+        const granted = /^--allow-(read|write|net|run)=(\S.*)$/u.exec(flag);
+        if (!granted) return null;
+        const [, kind, value] = granted as unknown as [string, string, string];
+        for (const entry of value.split(','))
+          if (entry.trim()) grants[kind] = [...(grants[kind] ?? []), entry.trim()];
+      }
+      if (!sawNoPrompt) return null;
+      return {
+        read: [...(grants.read ?? [])].sort(),
+        write: [...(grants.write ?? [])].sort(),
+        net: [...(grants.net ?? [])].sort(),
+        run: [...(grants.run ?? [])].sort(),
+      };
+    };
+    const proposedGrants = Array.isArray(proposed) ? parseGrants(proposed) : null;
     if (
       !check(
         'least-privilege invocation',
-        Array.isArray(proposed) &&
-          proposed.every((value) => typeof value === 'string') &&
-          isDeepStrictEqual([...proposed].sort(), required),
-        policyResult.timedOut ? 'bounded policy timeout' : undefined,
+        !!proposedGrants &&
+          Object.entries(requiredGrants).every(([kind, paths]) =>
+            isDeepStrictEqual(proposedGrants[kind as keyof typeof requiredGrants], paths),
+          ),
+        policyResult.timedOut
+          ? 'bounded policy timeout'
+          : `proposed grants: ${JSON.stringify(proposed)?.slice(0, 400)}`,
       )
     )
       return persist();
@@ -614,7 +680,7 @@ export async function scoreDenoPermissions(root: string): Promise<SkillEvalDeter
 
 export const DENO_RUNTIME_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMaterializer[] = [
   {
-    id: 'bun-deno-runtime/actual-deno-permissions@1',
+    id: 'bun-deno-runtime/actual-deno-permissions@3',
     get readinessBlockers() {
       return denoPermissionReadiness();
     },
@@ -627,7 +693,7 @@ export const DENO_RUNTIME_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMat
 ];
 export const DENO_RUNTIME_SKILL_EVAL_SCORERS: readonly SkillEvalDeterministicScorer[] = [
   {
-    id: 'bun-deno-runtime/actual-deno-permissions-scorer@1',
+    id: 'bun-deno-runtime/actual-deno-permissions-scorer@3',
     scenarioIds: [DENO_PERMISSION_SCENARIO],
     score: ({ workingDirectory }) => scoreDenoPermissions(workingDirectory),
   },

@@ -30,3 +30,10 @@
 - A correlation or symptom disappearing after a broad rewrite is not sufficient root cause evidence.
 - Mitigation and permanent correction are distinct outcomes; label them accordingly.
 - The regression check should protect the demonstrated contract at the closest useful observable boundary, not implementation trivia.
+
+## Local readiness boundary
+
+- Run `bun test skills-v5/debugging/evals/package-contract.test.ts` from the repository root for the local package check. It validates the current package metadata and source map, routes the public and held out corpus through the real resolver using injected package revisions, confirms both declared tasks have registered materializers and deterministic scorers, and exercises each registered scorer against its unchanged starter and a corrected synthetic candidate.
+- The checks that require starters to fail and corrected candidates to pass are controls for evaluator integrity. They establish that the current fixture/scorer pair can distinguish the demonstrated defect from a focused correction; they are not model output, paired qualification, or evidence from blind review.
+- The registered debugging scorers provide hidden behavioral checks and checks for evidence patterns. Their pass does not independently prove every prose requirement in a task contract, so the local test also checks that task contracts explicitly name the command/environment, working control, negative path, recovery boundary, and causal evidence.
+- Routing and fixture checks within the package do not create qualification records, launch campaigns, or establish promotion. Paired runs using the same model, independent blind judgment, comparison against a clean revision, and the repository promotion ledger remain external requirements.

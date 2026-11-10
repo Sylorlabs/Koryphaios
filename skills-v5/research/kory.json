@@ -140,7 +140,7 @@
       "versionScope": "Open Agent Skills specification as verified 2026-09-05",
       "staleAfterDays": 90,
       "notes": "Portable SKILL.md core, description-based discovery, referenced resources, and progressive disclosure.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://agentskills.io/skill-creation/evaluating-skills",
@@ -172,7 +172,7 @@
       "versionScope": "Cursor Agent Skills behavior as verified 2026-09-05",
       "staleAfterDays": 90,
       "notes": "Client-specific skill fields and loading behavior; use to test cross-client scope without projecting Cursor extensions onto the portable standard.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     }
   ],
   "authoringMaturity": "individual"

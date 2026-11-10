@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "kubernetes-operations",
-  "version": "5.1.1",
+  "version": "5.1.3",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -125,35 +125,35 @@
     {
       "url": "https://kubernetes.io/releases/",
       "sourceType": "official-docs",
-      "versionScope": "Kubernetes release status as of 2026-09-05: 1.37, 1.36, and 1.35 are supported; 1.37.0 released 2026-08-26",
-      "revision": "1.37.0 current latest minor release",
+      "versionScope": "Kubernetes release status as of 2026-10-04: maintained branches are 1.37, 1.36, and 1.35; latest patches are 1.37.1, 1.36.5, and 1.35.9, released 2026-09-15",
+      "revision": "1.37.1 current patch release on the latest maintained minor branch",
       "staleAfterDays": 30,
       "notes": "Use to resolve supported branches and current patch status before applying version-sensitive operational guidance.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://kubernetes.io/releases/version-skew-policy/",
       "sourceType": "official-docs",
-      "versionScope": "Kubernetes version-skew policy for supported releases as available 2026-09-05",
+      "versionScope": "Kubernetes version-skew policy for supported releases as available 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Authoritative control-plane, kubelet, kube-proxy, and kubectl skew constraints for upgrade planning.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://kubernetes.io/docs/concepts/workloads/controllers/deployment/",
       "sourceType": "official-docs",
-      "versionScope": "Kubernetes 1.37 documentation as available 2026-09-05",
+      "versionScope": "Kubernetes 1.37 documentation as available 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Deployment rollout, availability, revision, progress, and rollback semantics.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://kubernetes.io/docs/concepts/workloads/pods/disruptions/",
       "sourceType": "official-docs",
-      "versionScope": "Kubernetes 1.37 disruption/PDB documentation as available 2026-09-05",
+      "versionScope": "Kubernetes 1.37 disruption/PDB documentation as available 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Voluntary/involuntary disruptions, PodDisruptionBudget semantics, and application disruption considerations.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     }
   ],
   "authoringMaturity": "individual"

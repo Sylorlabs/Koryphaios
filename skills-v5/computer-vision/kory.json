@@ -134,18 +134,18 @@
     {
       "url": "https://docs.pytorch.org/tutorials/intermediate/torchvision_tutorial.html",
       "sourceType": "official-docs",
-      "versionScope": "PyTorch/Torchvision object-detection tutorial as available 2026-09-05",
+      "versionScope": "PyTorch/Torchvision object-detection tutorial as available 2026-10-04",
       "staleAfterDays": 30,
       "notes": "Current object-detection/instance-segmentation dataset contracts, transforms and model workflow.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://docs.pytorch.org/vision/stable/auto_examples/transforms/plot_transforms_e2e.html",
       "sourceType": "official-docs",
-      "versionScope": "Torchvision 0.28 stable transforms-v2 example as available 2026-09-05",
+      "versionScope": "Torchvision stable transforms-v2 example as available 2026-10-04",
       "staleAfterDays": 30,
       "notes": "Joint transforms for images, bounding boxes and masks; version-sensitive spatial target handling.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://docs.opencv.org/4.13.0/da/d54/group__imgproc__transform.html",

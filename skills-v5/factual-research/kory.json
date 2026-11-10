@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "factual-research",
-  "version": "5.1.1",
+  "version": "5.3.0",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -125,7 +125,7 @@
       "versionScope": "OpenAI web search documentation inspected 2026-10-03",
       "staleAfterDays": 30,
       "notes": "Up-to-date web retrieval and sourced citation behavior. Specific model IDs and API migration details are volatile and are not reusable research methodology.",
-      "verifiedAt": "2026-10-03"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://guides.loc.gov/student-resources/search-strategies",
@@ -149,7 +149,7 @@
       "versionScope": "Agent Skills specification as available 2026-09-04",
       "staleAfterDays": 90,
       "notes": "Portable SKILL.md format and progressive disclosure.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md",
@@ -157,7 +157,7 @@
       "versionScope": "OpenAI skill-creator guidance on main as inspected 2026-09-04",
       "staleAfterDays": 60,
       "notes": "Trigger information in description, focused execution body, and validation workflow.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills",
@@ -182,7 +182,7 @@
       "staleAfterDays": 30,
       "license": "MIT",
       "notes": "Community comparison for primary-source preference, claim-level citation, and explicit fallback evidence. Its background-agent and file-output prescriptions are not treated as universal authority.",
-      "verifiedAt": "2026-10-03"
+      "verifiedAt": "2026-11-03"
     }
   ],
   "authoringMaturity": "individual"

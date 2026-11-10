@@ -133,34 +133,34 @@
     {
       "url": "https://www.tensorflow.org/recommenders",
       "sourceType": "reference-implementation",
-      "versionScope": "TensorFlow Recommenders documentation as available 2026-09-05",
+      "versionScope": "TensorFlow Recommenders documentation as available 2026-10-04",
       "staleAfterDays": 30,
       "notes": "Current recommendation retrieval/ranking library overview and production-oriented modeling patterns.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://www.tensorflow.org/recommenders/examples/basic_retrieval",
       "sourceType": "reference-implementation",
-      "versionScope": "TensorFlow Recommenders basic retrieval tutorial as available 2026-09-05",
+      "versionScope": "TensorFlow Recommenders basic retrieval tutorial as available 2026-10-04",
       "staleAfterDays": 30,
       "notes": "Two-stage recommender structure, retrieval candidate generation, temporal production split guidance and FactorizedTopK-style retrieval evaluation.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://www.tensorflow.org/recommenders/examples/basic_ranking",
       "sourceType": "reference-implementation",
-      "versionScope": "TensorFlow Recommenders basic ranking tutorial as available 2026-09-05",
+      "versionScope": "TensorFlow Recommenders basic ranking tutorial as available 2026-10-04",
       "staleAfterDays": 30,
       "notes": "Ranking-stage supervised objectives and candidate scoring patterns; examples are not proof that a production feedback policy is unbiased.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://www.tensorflow.org/recommenders/examples/multitask",
       "sourceType": "reference-implementation",
-      "versionScope": "TensorFlow Recommenders multitask tutorial as available 2026-09-05",
+      "versionScope": "TensorFlow Recommenders multitask tutorial as available 2026-10-04",
       "staleAfterDays": 30,
       "notes": "Multi-objective recommender modeling and tradeoffs between related tasks.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://www.nist.gov/itl/ai-risk-management-framework",

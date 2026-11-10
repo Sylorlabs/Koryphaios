@@ -85,6 +85,30 @@ Every material claim should name its evidence class: `simulated`, `emulated`, `d
 
 Do not claim certification, environmental qualification, electrical compliance, real-world safety, or physical robustness from a bounded simulator/HIL test unless the governing procedure actually establishes it.
 
+## 8. Runtime readiness and evidence contract
+
+Before execution, write a preflight record that fails closed for every declared
+boundary: firmware/image hash, target board/device identity, simulator or
+emulator and model/version, host/toolchain/runtime, transport and fixture
+interlocks, proof of reset to a known state, and the required trace/oracle outputs.
+Use `available`, `unavailable`, or `unknown` for each item and retain the
+observed output or artifact path. A host model, synthetic trace, build, or
+configuration review cannot satisfy a physical, HIL, or target driver
+prerequisite.
+
+If a required simulator, target, transport, interlock, or artifact channel is
+missing, the affected evidence level is **blocked**. Continue only with
+explicitly bounded checks at other levels when useful, labelled by evidence class;
+never promote them to device proof. In particular, CPU/host execution cannot
+stand in for GPU/device execution, and an emulator pass cannot stand in for
+analog, power, thermal, RF, mechanical, or other unmodeled physical behavior.
+
+The completion record must link the preflight, stimulus and oracle, clean
+baseline, injected fault, safe state and recovery traces, comparison across levels,
+and every unresolved divergence. A blocked or unresolved result is
+the correct result when the declared claim cannot be falsified at the required
+boundary.
+
 ## Routing boundary
 
 Use this skill for test design/execution where the simulation-to-device evidence boundary is material. Compose with `embedded-firmware`, `robotics-control`, `gpu-compute`, or `hardware-runtime-debugging` when those skills own implementation or diagnosis. Use `integration-fault-testing` when the main concern is software/service integration faults with no simulated or physical device boundary, and `performance-testing` when the main claim is a controlled performance budget rather than device fidelity.

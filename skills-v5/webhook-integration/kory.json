@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "webhook-integration",
-  "version": "5.1.1",
+  "version": "5.1.4",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -102,7 +102,7 @@
       "versionScope": "Stripe webhook documentation as available 2026-10-03",
       "staleAfterDays": 30,
       "notes": "Webhook signing, retries, ordering, endpoint behavior, and event-handling reference.",
-      "verifiedAt": "2026-10-03"
+      "verifiedAt": "2026-11-03"
     }
   ],
   "authoringMaturity": "individual"

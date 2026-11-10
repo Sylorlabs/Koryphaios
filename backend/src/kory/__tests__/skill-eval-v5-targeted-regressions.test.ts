@@ -118,7 +118,49 @@ describe('targeted V5 evaluator regressions', () => {
     expect(score.passed).toBe(true);
   });
 
-  test('release scorer accepts a bounded not-been-measured statement without requiring the prior tag in customer prose', async () => {
+  test('release scorer accepts a bounded not-been-measured statement in an editorial hold without requiring the prior tag in customer prose', async () => {
+    const task = scenario(
+      'documents-communication',
+      'documents-communication-full-task-1-individual',
+    );
+    const workingDirectory = root();
+    const materializer = REPOSITORY_COMMUNICATION_SKILL_EVAL_MATERIALIZERS.find((item) =>
+      item.matches(task),
+    )!;
+    const scorer = REPOSITORY_COMMUNICATION_SKILL_EVAL_SCORERS.find((item) =>
+      item.scenarioIds.includes(task.id),
+    )!;
+    await materializer.materialize(workingDirectory, task);
+    writeFileSync(
+      join(workingDirectory, 'release-notes.md'),
+      `# v5.3.0 release notes
+## Highlights
+- Resumable uploads recover after interruption. (PR-101)
+## Fixes
+- Filter selection is preserved. (PR-102)
+## Editorial hold (draft only, not for publication)
+- PR-104 user impact has not been measured, so it remains uncertain.
+`,
+    );
+    writeFileSync(
+      join(workingDirectory, 'evidence-map.json'),
+      JSON.stringify({
+        included: ['PR-101', 'PR-102'],
+        excluded: ['PR-103'],
+        uncertain: ['PR-104'],
+      }),
+    );
+    const score = await scorer.score({
+      scenario: task,
+      experiment: {} as never,
+      workingDirectory,
+      observation,
+    });
+    expect(scorer.id).toEndWith('@2');
+    expect(score.passed).toBe(true);
+  });
+
+  test('release scorer rejects uncertain impact under publishable known limitations', async () => {
     const task = scenario(
       'documents-communication',
       'documents-communication-full-task-1-individual',
@@ -156,8 +198,8 @@ describe('targeted V5 evaluator regressions', () => {
       workingDirectory,
       observation,
     });
-    expect(scorer.id).toEndWith('@2');
-    expect(score.passed).toBe(true);
+    expect(score.passed).toBe(false);
+    expect(score.evidence).toContain('ambiguous impact bounded: fail');
   });
 
   test('lease scorer accepts a colocated focused test file', async () => {
@@ -246,8 +288,75 @@ test('Queued Running and Cancelled Cancelled transitions',()=>{ expect(reduceJob
       workingDirectory,
       observation,
     });
-    expect(scorer.id).toEndWith('@2');
+    expect(scorer.id).toEndWith('@3');
     expect(score.passed).toBe(true);
+  });
+
+  test('job scorer discovers a candidate test file outside the tests directory', async () => {
+    const task = scenario(
+      'deterministic-contract-testing',
+      'deterministic-contract-testing-full-task-2',
+    );
+    const workingDirectory = root();
+    const materializer = CONTRACT_CONCURRENCY_SKILL_EVAL_MATERIALIZERS.find((item) =>
+      item.matches(task),
+    )!;
+    const scorer = CONTRACT_CONCURRENCY_SKILL_EVAL_SCORERS.find((item) =>
+      item.scenarioIds.includes(task.id),
+    )!;
+    await materializer.materialize(workingDirectory, task);
+    mkdirSync(join(workingDirectory, 'test'), { recursive: true });
+    writeFileSync(
+      join(workingDirectory, 'test/job-contract.test.ts'),
+      `import { expect,test } from 'bun:test'; import { readFileSync } from 'node:fs'; import { decodeEnvelope,reduceJob } from '../src/job-contract';
+test('legacy v1 schema and EXTRA_PROPERTY',()=>{ const schema=JSON.parse(readFileSync('schema/job-command.schema.json','utf8')); expect(schema.$schema).toContain('2020-12'); expect(schema.additionalProperties).toBe(false); expect(decodeEnvelope({version:1,jobId:'legacy',command:'cancel'}).ok).toBe(true); expect(decodeEnvelope({version:2,jobId:'x',command:'start',extra:true})).toEqual({ok:false,error:'EXTRA_PROPERTY'}); });
+test('Queued Running Cancelled idempotent',()=>{ expect(reduceJob('Queued','start')).toMatchObject({ok:true,state:'Running'}); expect(reduceJob('Running','cancel')).toMatchObject({ok:true,state:'Cancelled'}); expect(reduceJob('Cancelled','cancel')).toEqual({ok:true,state:'Cancelled',effects:[]}); });
+`,
+    );
+    mkdirSync(join(workingDirectory, '.kory-eval'), { recursive: true });
+    writeFileSync(
+      join(workingDirectory, '.kory-eval/deterministic-job.json'),
+      JSON.stringify({
+        dialect: '2020-12',
+        errors: ['INVALID_JOB_ID', 'UNKNOWN_COMMAND', 'EXTRA_PROPERTY'],
+        states: ['Queued', 'Running', 'Succeeded', 'Cancelled'],
+        stateTable: { legal: [['Cancelled', 'cancel', 'Cancelled', []]] },
+        mutation: 'additionalProperties mutation red/fail',
+        restored: 'green/pass',
+        boundary: 'local synthetic',
+      }),
+    );
+    const score = await scorer.score({
+      scenario: task,
+      experiment: {} as never,
+      workingDirectory,
+      observation,
+    });
+    expect(score.passed).toBe(true);
+    expect(score.evidence).toContain('discovered candidate test files: 1');
+  });
+
+  test('job scorer rejects a candidate that supplies no tests', async () => {
+    const task = scenario(
+      'deterministic-contract-testing',
+      'deterministic-contract-testing-full-task-2',
+    );
+    const workingDirectory = root();
+    const materializer = CONTRACT_CONCURRENCY_SKILL_EVAL_MATERIALIZERS.find((item) =>
+      item.matches(task),
+    )!;
+    const scorer = CONTRACT_CONCURRENCY_SKILL_EVAL_SCORERS.find((item) =>
+      item.scenarioIds.includes(task.id),
+    )!;
+    await materializer.materialize(workingDirectory, task);
+    const score = await scorer.score({
+      scenario: task,
+      experiment: {} as never,
+      workingDirectory,
+      observation,
+    });
+    expect(score.passed).toBe(false);
+    expect(score.evidence).toContain('discovered candidate test files: 0');
   });
 
   test('corrected concept contracts expose the same input/output shape as their vectors', () => {

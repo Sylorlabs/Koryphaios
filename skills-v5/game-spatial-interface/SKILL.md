@@ -61,6 +61,27 @@ Design situated game, simulation, immersive, or spatial interaction under attent
 - Do not spend frame budget on ornamental motion.
 - Do not claim device comfort without representative testing.
 
+### Runtime readiness and evidence contract
+
+Before claiming runtime verification, record the actual engine/runtime and
+version, target device and revision, connected input capabilities,
+display/frame rate target, applicable tracking/occlusion or anchor capabilities, and the
+capture/trace locations. Mark each prerequisite `available`, `unavailable`, or
+`unknown` from observed runtime output; a design description, build, screenshot
+mock, or source inspection is not a device prerequisite check.
+
+For a VR/AR task, if no supported runtime and representative device session is
+available, the device result is **blocked**. A simulator or model may provide
+separately labelled evidence for the behavior it actually represents, such as
+state transitions or input routing, but it cannot prove headset comfort,
+tracking, occlusion, relocalization, rendered legibility, or frame time claims
+that it does not exercise. Preserve the blocked checks and their reasons rather
+than substituting a flat screen or host simulation and reporting success.
+
+Completion evidence must tie each claim to a runtime capture or trace, the
+tested control/camera/state path, the negative or recovery path, and the
+unverified device properties that remain.
+
 ## Completion evidence
 
 - Situated interaction contract

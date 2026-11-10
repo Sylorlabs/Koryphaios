@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "kind": "nonqualifying-source-audit",
+  "scenarioId": "research-full-task-2-individual",
+  "observedAt": "2026-10-11T18:45:22.033Z",
+  "historicalCutoff": "2026-09-04T23:59:59Z",
+  "sourcePlanSha256": "b4a34650f24ae498f62b3807abf14c51397a50d1846c4e3319f61dff1a23d74c",
+  "candidateProbe": {
+    "scenarioId": "research-full-task-2-individual",
+    "observedAt": "2026-10-11T18:45:22.033Z",
+    "complete": false,
+    "snapshotWritten": false,
+    "observations": [
+      {
+        "id": "protocol-spec",
+        "status": "verified-original-bytes",
+        "detail": "Response verified against the archive index or immutable Git object",
+        "retrievedAt": "2026-10-11T18:45:21.397Z",
+        "sourceUrl": "https://github.com/modelcontextprotocol/modelcontextprotocol/blob/71f7c162e42ea1cd6ca88d83c70d89324fb6b0da/docs/specification/2026-07-28/index.mdx",
+        "sha256": "c8151ab8d7f26ab46785fd34b23f7197db1a98ca8318967faa01e401909667b5",
+        "bytes": 5694,
+        "provenance": {
+          "kind": "github-commit",
+          "repository": "modelcontextprotocol/modelcontextprotocol",
+          "revision": "71f7c162e42ea1cd6ca88d83c70d89324fb6b0da",
+          "path": "docs/specification/2026-07-28/index.mdx",
+          "blobSha": "452d78601b135b95bbe45287e756c0579534096b"
+        }
+      },
+      {
+        "id": "official-migration",
+        "status": "verified-original-bytes",
+        "detail": "Response verified against the archive index or immutable Git object",
+        "retrievedAt": "2026-10-11T18:45:21.742Z",
+        "sourceUrl": "https://github.com/modelcontextprotocol/typescript-sdk/blob/70de0c8b569b0d664a56b90be2f141d1d1645880/docs/migration/support-2026-07-28.md",
+        "sha256": "8269eb627990eee0f0d001801b54bb88076f59a013015bb29714d3b5d7967164",
+        "bytes": 45919,
+        "provenance": {
+          "kind": "github-commit",
+          "repository": "modelcontextprotocol/typescript-sdk",
+          "revision": "70de0c8b569b0d664a56b90be2f141d1d1645880",
+          "path": "docs/migration/support-2026-07-28.md",
+          "blobSha": "01ae6f05422985e9e29be42a30cc29a1aff5c2f7"
+        }
+      },
+      {
+        "id": "legacy-vendor-tutorial",
+        "status": "verified-original-bytes",
+        "detail": "Response verified against the archive index or immutable Git object",
+        "retrievedAt": "2026-10-11T18:45:22.033Z",
+        "sourceUrl": "https://github.com/microsoft/mcp-for-beginners/blob/f84b977a63631defa0ae765ca5418df025280998/03-GettingStarted/01-first-server/README.md",
+        "sha256": "1b6405d7d19476d19a06e4772b96febc79f3b5a8f9edb8e5fa176182175dfa0d",
+        "bytes": 39426,
+        "provenance": {
+          "kind": "github-commit",
+          "repository": "microsoft/mcp-for-beginners",
+          "revision": "f84b977a63631defa0ae765ca5418df025280998",
+          "path": "03-GettingStarted/01-first-server/README.md",
+          "blobSha": "5da31248d971d084b3ed58ea9ff1ba46d14b2172"
+        }
+      },
+      {
+        "id": "current-vendor-compatibility",
+        "status": "unresolved",
+        "detail": "Need a historical, finalized 2026-07-28 runtime compatibility document from the same Microsoft vendor. Its 2026-07-29 release-candidate article still explicitly calls the revision not final, so it cannot establish final runtime support."
+      },
+      {
+        "id": "contradictory-forum-answer",
+        "status": "unresolved",
+        "detail": "No pre-cutoff original forum answer that materially contradicts the official migration guidance has an independently indexed archive digest and replayed bytes."
+      }
+    ]
+  },
+  "exactDayArchiveIndices": []
+}

@@ -10,6 +10,8 @@
       "polling service exposing observable notification counts and teardown hooks",
       "navigation sequence that currently leaves duplicate active pollers",
       "tests that distinguish feature lifetime from application lifetime",
+      "two simultaneously mounted feature owners, each with its own provider and independently opened overlay",
+      "observable service identity, active poller count, notification count, host-view cleanup, and repeated-close behavior",
       "paired same-model skill/no-skill execution from the identical starting snapshot"
     ]
   },
@@ -64,11 +66,12 @@
     },
     {
       "id": "execution-invariant",
-      "assertion": "The service has one explicit injector/lifecycle owner, and all resources started within that lifetime are torn down exactly once when the owner ends."
+      "assertion": "Each feature component owns exactly one service instance and active poller. Its overlay resolves that identical instance without re-providing the service; opening, closing, or reopening the overlay does not restart or stop the feature poller. Concurrent feature owners have distinct service instances. Destroying one owner tears down only its poller and surviving overlay exactly once without manually invoking the service destructor.",
+      "source": "https://angular.dev/api/core/createComponent"
     },
     {
       "id": "verification-discipline",
-      "assertion": "Run Angular build/tests and exercise routing, form validation, subscription cleanup, async error states, keyboard behavior, and change-detection-sensitive interactions."
+      "assertion": "Run the Angular build and component/router tests. Assert service identity, start/stop counts, and one notification per poll across overlay close/reopen, repeated close, feature A-to-B navigation, concurrent feature instances, final navigation away, and reentry. Assert detached/destroyed overlay views and removed owned hosts after close or owner destruction, no notifications after teardown, zero pollers after final exit, and a fresh single poller on reentry. Verify actual overlay rendering and keyboard close/focus restoration when supported by its public UI."
     },
     {
       "id": "anti-pattern-resistance",

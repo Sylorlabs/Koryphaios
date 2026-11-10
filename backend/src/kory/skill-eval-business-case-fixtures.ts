@@ -461,13 +461,13 @@ rows contains every option/case combination exactly once, identified by optionId
 
 Reconciliation conventions (specific to this experiment, not mandatory business-case methodology): upfront components are paid at upfrontYear and multiplied by the case implementationMultiplier. Legacy annual cost equals baselineAnnualCost*demand[year-1]. Before startYear, an option retains that entire cost and produces no benefits. From startYear it pays retainedLegacyFraction*legacyCost plus license*(1+escalation)^(year-startYear), support and monitoring. Scope exposure = coverage*adoption[year-1]*demand[year-1]. Cash benefits are finance-authorized contractor avoidance*exposure. Incremental exception cash costs = annualTasks*exposure*incrementalExceptionRate*exceptionUnitCashCost (negative means avoided cash cost). Capacity hours = annualHandlingHours*exposure*handlingReduction. Cash flows are incremental to status quo: legacy cost less option annual cost plus cash benefits less exception costs, upfront payment and terminal exitCost. Terminal exit cost is paid at horizon; no residual value is evidenced. Annual amounts occur at year-end. Discount at the supplied experiment rate, which is not a recommended hurdle rate. Engineering months*shadow price plus foregoneCapitalValue is a separate opportunity cost discounted at upfrontYear; resourceAdjustedNPV subtracts it once from cashNPV, not from cash flows.
 
-breakEvenAdoption has {optionId,rate} for each option: use base-case assumptions but replace every annual adoption with the same rate, solve cashNPV=0 on [0,1]. Return null when there is no unique root in that interval. A mathematical break-even does not establish desirability or approval.
+breakEvenAdoption has {optionId,rate} for each option: rate is a JSON number or null. Use base-case assumptions but replace every annual adoption with the same rate and solve cashNPV=0 on [0,1]. Preserve enough machine precision for the appendix to reconcile to the supplied model; presentation prose may round separately. Return null when there is no unique root in that interval, including a flat zero-difference comparator with no unique crossing. A mathematical break-even does not establish desirability or approval.
 
-constraints has {optionId,blockedBy,lockInSourceId,lockIn} for every option. blockedBy uses security for pending review, strategy for a fit gap, engineering-capacity for months beyond availability; status quo is the comparison baseline with no new-funding blockers. Cite the option sourceId in lockInSourceId; explain lock-in in your own words. expansionGates preserves every packet gate field and adds status:"met"|"not-met"|"unknown" computed from observed versus threshold; missing evidence cannot pass.
+constraints has {optionId,blockedBy,lockInSourceId,lockIn} for every option. blockedBy is always a JSON string array, including [] when there are no blockers. It uses security for pending review, strategy for a fit gap, engineering-capacity for months beyond availability; status quo is the comparison baseline with no new-funding blockers. Cite the option sourceId in lockInSourceId; explain lock-in in your own words. expansionGates preserves every packet gate field and adds status:"met"|"not-met"|"unknown" computed from observed versus threshold; missing evidence cannot pass.
 
 decision has optionId, action:"approve"|"conditional"|"stage"|"defer"|"reject", confidence:"low"|"medium"|"high", fundingNow (upfront authorization only), conditions (dependency/gate IDs), rationale (your reasoning) and alternatives:[{optionId,reason}] for every other option. Multiple defensible recommendations are allowed; maximizing NPV is not mandatory. Approve cannot bypass unresolved option dependencies or expansion gates. Conditional/defer/reject releases no funding now; conditional lists all unresolved dependencies/gates. Stage applies only to the reversible stage option, with its upfront cap and no rollout authorization. Assumed future clearance is not present-day evidence.
 
-review contains ownerRole, monthsAfterDecision (one or more within 12 months), metrics covering adoption, realized-cash, released-hours, cost, exceptions, and optionValueCash:null (information value is unpriced, not zero or invented). Explain strategic fit, opportunity cost, lock-in, sensitivity, uncertainty, stop/expand evidence and reconsideration in the memo. Include any alternative methodology separately without replacing the reconciled appendix.
+review contains ownerRole; monthsAfterDecision as a JSON number array with one or more entries, each within 12 months; metrics as the JSON string array ["adoption","realized-cash","released-hours","cost","exceptions"]; and optionValueCash:null (information value is unpriced, not zero or invented). Explain strategic fit, opportunity cost, lock-in, sensitivity, uncertainty, stop/expand evidence and reconsideration in the memo. Include any alternative methodology separately without replacing the reconciled appendix.
 
 The deterministic scorer independently recomputes amounts, checks traceability and decision constraints, and rejects forged success or modified evidence. It does not grade prose by keyword matching. The memo's reasoning, forecast adequacy, defensibility of a recommendation, and comparative quality still require the scenario's independent blind-semantic judge. Self-tests are not model runs or skill qualification.
 `;
@@ -747,7 +747,7 @@ export function scoreBusinessCase(root: string, scenarioId: string): SkillEvalDe
 
 export const BUSINESS_CASE_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMaterializer[] =
   BUSINESS_CASE_SCENARIOS.map((scenarioId) => ({
-    id: `${scenarioId}/evidence-packet@1`,
+    id: `${scenarioId}/evidence-packet@2`,
     matches: (scenario) => scenario.id === scenarioId,
     materialize: (root) => {
       for (const [path, contents] of Object.entries(fixedFiles(businessCasePacket(scenarioId))))
@@ -756,7 +756,7 @@ export const BUSINESS_CASE_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMa
   }));
 export const BUSINESS_CASE_SKILL_EVAL_SCORERS: readonly SkillEvalDeterministicScorer[] =
   BUSINESS_CASE_SCENARIOS.map((scenarioId) => ({
-    id: `${scenarioId}/reconciliation-scorer@1`,
+    id: `${scenarioId}/reconciliation-scorer@2`,
     scenarioIds: [scenarioId],
     score: ({ workingDirectory }) => scoreBusinessCase(workingDirectory, scenarioId),
   }));

@@ -108,34 +108,34 @@
     {
       "url": "https://docs.getdbt.com/docs/introduction",
       "sourceType": "official-docs",
-      "versionScope": "dbt documentation as available 2026-09-04",
+      "versionScope": "dbt documentation as available 2026-10-19",
       "staleAfterDays": 45,
       "notes": "Analytics transformation, lineage, testing, modeling, and deployment reference.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-10-19"
     },
     {
       "url": "https://docs.getdbt.com/docs/build/incremental-models",
       "sourceType": "official-docs",
-      "versionScope": "dbt documentation as available 2026-09-06",
+      "versionScope": "dbt incremental-model documentation as inspected 2026-11-07",
       "staleAfterDays": 30,
       "notes": "Incremental filters, unique keys, schema-change behavior, and full-refresh semantics.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://docs.getdbt.com/docs/build/data-tests",
       "sourceType": "official-docs",
-      "versionScope": "dbt documentation as available 2026-09-06",
+      "versionScope": "dbt data-test documentation as inspected 2026-11-07",
       "staleAfterDays": 30,
       "notes": "Data-test assertions and failing-record semantics.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://docs.getdbt.com/docs/build/snapshots",
       "sourceType": "official-docs",
-      "versionScope": "dbt documentation as available 2026-09-06",
+      "versionScope": "dbt snapshot documentation as inspected 2026-11-07",
       "staleAfterDays": 30,
       "notes": "Snapshot behavior for change history and point-in-time state.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     }
   ],
   "authoringMaturity": "individual"

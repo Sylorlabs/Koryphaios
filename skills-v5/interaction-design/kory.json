@@ -133,7 +133,7 @@
       "url": "https://github.com/magnus919/agent-skills/blob/main/product-design-and-ux/SKILL.md",
       "sourceType": "community-pattern",
       "versionScope": "magnus919/agent-skills main product-design-and-ux skill at aebc684075f5 as inspected 2026-10-03",
-      "verifiedAt": "2026-10-03",
+      "verifiedAt": "2026-11-03",
       "staleAfterDays": 30,
       "license": "MIT",
       "notes": "Pattern source for observable interaction behavior, explicit state/recovery contracts, multi-role handoffs through the intended human outcome, and AI interaction uncertainty/human control. Upstream specialist routing remains community-specific."

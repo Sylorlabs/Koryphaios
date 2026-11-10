@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "product-analytics",
-  "version": "5.1.0",
+  "version": "5.1.1",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -107,18 +107,18 @@
     {
       "url": "https://posthog.com/docs/product-analytics/funnels",
       "sourceType": "official-docs",
-      "versionScope": "Funnel ordering, first occurrence, breakdown and incomplete-period semantics inspected 2026-09-06",
-      "verifiedAt": "2026-09-06",
+      "versionScope": "Funnel ordering, first occurrence, breakdown and incomplete-period semantics inspected 2026-11-07",
+      "verifiedAt": "2026-11-07",
       "staleAfterDays": 60,
       "notes": "Adopt explicit count/window/identity definitions and mature cohort comparisons. Do not impose PostHog or its defaults on another product."
     },
     {
       "url": "https://developers.google.com/analytics",
       "sourceType": "official-docs",
-      "versionScope": "Google Analytics developer documentation as available 2026-09-04",
+      "versionScope": "Google Analytics developer documentation as available 2026-10-19",
       "staleAfterDays": 45,
       "notes": "Event, measurement, reporting, and analytics implementation reference.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-10-19"
     },
     {
       "url": "https://www.itl.nist.gov/div898/handbook/",

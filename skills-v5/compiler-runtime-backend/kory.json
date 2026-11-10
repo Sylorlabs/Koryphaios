@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "compiler-runtime-backend",
-  "version": "5.1.1",
+  "version": "5.1.2",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -25,10 +25,10 @@
   ],
   "excludes": [],
   "evidence": [
-    "Semantic and phase contract",
-    "Differential and end-to-end language tests",
+    "Semantic and affected representation/phase contract",
+    "Scope-matched executed regression plus legitimate differential/oracle/end-to-end verification",
     "Hierarchy boundary and selected specialist rationale",
-    "Representative success, negative-path, and recovery verification"
+    "Representative negative/malformed and recovery/cleanup evidence when the behavior exposes it"
   ],
   "routing": {
     "positive": [

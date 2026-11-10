@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "data-pipeline-engineering",
-  "version": "5.1.1",
+  "version": "5.1.3",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -19,7 +19,11 @@
     "incremental load",
     "data backfill",
     "etl flow",
-    "schema drift retries",
+    "schema drift",
+    "cdc replay",
+    "partition checkpoint",
+    "quarantine reprocessing",
+    "pipeline reconciliation",
     "nightly ingest"
   ],
   "excludes": [],
@@ -107,26 +111,34 @@
     {
       "url": "https://airflow.apache.org/docs/",
       "sourceType": "official-docs",
-      "versionScope": "Apache Airflow documentation as available 2026-09-04",
+      "versionScope": "Apache Airflow documentation as available 2026-10-17",
       "staleAfterDays": 60,
-      "notes": "DAG orchestration, retries, scheduling, state, and operational behavior.",
-      "verifiedAt": "2026-09-04"
+      "notes": "Version and concept navigation only; detailed retry, state, and backfill claims use the maintained pages below.",
+      "verifiedAt": "2026-10-17"
     },
     {
       "url": "https://airflow.apache.org/docs/apache-airflow/stable/best-practices.html",
       "sourceType": "official-docs",
-      "versionScope": "Apache Airflow 3.3.1 documentation as available 2026-09-06",
+      "versionScope": "Apache Airflow 3.3.2 documentation as available 2026-10-17",
       "staleAfterDays": 60,
       "notes": "Repeatable task outcomes, stable partitions, distributed-worker boundaries, and DAG verification.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-10-17"
     },
     {
       "url": "https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/task-and-asset-state-store.html",
       "sourceType": "official-docs",
-      "versionScope": "Apache Airflow 3.3 documentation as available 2026-09-06",
+      "versionScope": "Apache Airflow 3.3.2 documentation as available 2026-10-17",
       "staleAfterDays": 60,
       "notes": "Conditional persisted state for retries, checkpoints, and watermarks.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/backfill.html",
+      "sourceType": "official-docs",
+      "versionScope": "Apache Airflow 3.3.2 backfill documentation as available 2026-10-17",
+      "staleAfterDays": 60,
+      "notes": "Bounded historical reprocessing, reprocess behavior, concurrency, run ordering, and dry-run controls.",
+      "verifiedAt": "2026-10-17"
     }
   ],
   "authoringMaturity": "individual"

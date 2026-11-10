@@ -1,7 +1,7 @@
 {
   "id": "search-indexing-full-task-1-individual",
   "maturity": "individual",
-  "prompt": "Change a product-search analyzer so hyphenated SKU-like tokens and accented terms match correctly without corrupting the live index. Define a versioned index/mapping, reindex strategy, dual-read/alias cutover, relevance regression corpus, rollback, and handling for writes during reindex. Verify exact SKU queries, natural-language queries, accent normalization, no-result controls, and document-count parity.",
+  "prompt": "Change a product-search analyzer so hyphenated SKU-like tokens and accented terms match correctly without corrupting the live index. The bounded fixture fields are exactly oldVersion, targetVersion, initial, writesDuringReindex, queries entries shaped {q, expected}, and optional forceBrokenHyphenHandling. Apply writesDuringReindex before verification while preserving document order. Return exactly {targetVersion, documentCount, queryResults, cutover, rollbackIndex}; queryResults is an object keyed by each literal q with ordered id arrays. forceBrokenHyphenHandling removes the exact hyphen token only from candidate/index analysis, not from query analysis, so relevance parity can fail and block cutover. Define a versioned index/mapping, reindex strategy, dual-read/alias cutover, relevance regression corpus, rollback, and handling for writes during reindex. Verify exact SKU queries, natural-language queries, accent normalization, no-result controls, and document-count parity.",
   "environment": {
     "kind": "synthetic",
     "startingState": "fixture://search-indexing/zero-downtime-analyzer-change",

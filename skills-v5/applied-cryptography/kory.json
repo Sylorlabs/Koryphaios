@@ -116,7 +116,7 @@
       "versionScope": "FIPS 197-upd1, May 2023",
       "staleAfterDays": 365,
       "notes": "Current AES standard editorial update; algorithm requirements unchanged.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://csrc.nist.gov/pubs/sp/800/38/d/final",
@@ -132,7 +132,7 @@
       "versionScope": "FIPS 186-5 Digital Signature Standard, February 2023",
       "staleAfterDays": 365,
       "notes": "Current NIST digital-signature standard and approved signature algorithm framework.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://csrc.nist.gov/pubs/sp/800/56/c/r2/final",

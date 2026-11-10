@@ -5,7 +5,7 @@ description: Operate Kubernetes workloads and clusters with explicit controller,
 
 # Kubernetes Operations
 
-Kubernetes is a reconciliation system. Work from the desired-state owner, exact cluster/API version, active controllers, and observed object state; do not reason from YAML alone when admission, defaulting, mutation, scheduling, or controllers can change the effective configuration.
+Kubernetes is a reconciliation system. Identify who owns the desired state, exact cluster/API version, active controllers, and observed object state; do not reason from YAML alone when admission, defaulting, mutation, scheduling, or controllers can change the effective configuration.
 
 ## Operational workflow
 
@@ -19,9 +19,13 @@ Kubernetes is a reconciliation system. Work from the desired-state owner, exact 
 8. **Use admission and policy deliberately.** Identify Pod Security Admission, validating/mutating admission, policy engines, RBAC/service accounts, image policy, secret/config injection, and namespace boundaries. Keep infrastructure-security responsible for broader hardening and threat posture while this skill verifies the Kubernetes mechanism actually in use.
 9. **Upgrade by supported skew and API compatibility.** Inventory removed/deprecated APIs, admission/webhook compatibility, CRD/controller support, kubelet/control-plane skew, and add-on compatibility before changing versions. Exercise a representative canary/rollback or non-production upgrade path and preserve `kubectl`, events, rollout, and controller evidence.
 
+When an upgrade fixture or repository contract asks for a structured inventory, preserve its canonical category identifiers as standalone values instead of replacing them with descriptive prose. For the standard Kubernetes upgrade categories, use `deprecated-api`, `operator`, `webhook`, `cni`, `csi`, `control-plane`, and `nodes` when those categories are supplied; put versions, compatibility ranges, and failure details in their dedicated fields or companion evidence.
+
+When a repository or evaluation harness explicitly marks a supplied simulator, source file, or evidence fixture as fixed or preserved, treat that input as read-only. Produce the requested plan, artifact, or verification around the supplied fixture; do not rewrite the fixture itself to make the checks pass.
+
 ## Evidence
 
-Prefer server-side rendered/effective objects, `kubectl get/describe/events`, rollout history/status, scheduler and controller conditions, EndpointSlices, policy connection probes, storage attachment/state, metrics used by autoscaling, and recovery results. Record when evidence is from a local renderer or simulator instead of a representative cluster.
+Prefer server-side rendered/effective objects, `kubectl get/describe/events`, rollout history/status, scheduler and controller conditions, EndpointSlices, policy connection probes, storage attachment/state, metrics used by autoscaling, and recovery results. For every requested operating axis, record observed pass/fail, unavailable with a reason, or not configured; do not let a simulator or manifest establish an unobserved cluster property. Record when evidence is from a local renderer or simulator instead of a representative cluster.
 
 ## Boundaries
 

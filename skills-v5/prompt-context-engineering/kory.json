@@ -1,20 +1,31 @@
 {
   "schemaVersion": 1,
   "name": "prompt-context-engineering",
-  "version": "5.1.1",
+  "version": "5.1.2",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
-  "domains": ["ai", "prompting", "context"],
-  "targetMedia": ["any"],
+  "domains": [
+    "ai",
+    "prompting",
+    "context"
+  ],
+  "targetMedia": [
+    "any"
+  ],
   "pathScopes": [],
   "contextBudget": 6500,
-  "broader": ["llm-application-engineering"],
+  "broader": [
+    "llm-application-engineering"
+  ],
   "facets": [],
-  "requires": ["llm-evaluation"],
+  "requires": [
+    "llm-evaluation"
+  ],
   "conflicts": [],
   "activation": [
     "prompt engineering",
+    "prompt optimization",
     "system prompt",
     "developer prompt",
     "prompt template",
@@ -82,8 +93,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["rag-retrieval-systems"],
-        "tags": ["ambiguous", "neighbor-boundary"]
+        "adjacentSkills": [
+          "rag-retrieval-systems"
+        ],
+        "tags": [
+          "ambiguous",
+          "neighbor-boundary"
+        ]
       },
       {
         "id": "prompt-context-engineering-ambiguous-2",
@@ -91,8 +107,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["llm-application-engineering"],
-        "tags": ["ambiguous", "scope-control"]
+        "adjacentSkills": [
+          "llm-application-engineering"
+        ],
+        "tags": [
+          "ambiguous",
+          "scope-control"
+        ]
       },
       {
         "id": "prompt-context-engineering-ambiguous-3",
@@ -100,8 +121,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["llm-evaluation"],
-        "tags": ["ambiguous", "scope-control"]
+        "adjacentSkills": [
+          "llm-evaluation"
+        ],
+        "tags": [
+          "ambiguous",
+          "scope-control"
+        ]
       }
     ],
     "adversarial": [
@@ -111,8 +137,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["implementation"],
-        "tags": ["adversarial", "quoted-decoy"]
+        "adjacentSkills": [
+          "implementation"
+        ],
+        "tags": [
+          "adversarial",
+          "quoted-decoy"
+        ]
       },
       {
         "id": "prompt-context-engineering-adversarial-2",
@@ -120,8 +151,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["incident-response"],
-        "tags": ["adversarial", "scope-control"]
+        "adjacentSkills": [
+          "incident-response"
+        ],
+        "tags": [
+          "adversarial",
+          "scope-control"
+        ]
       },
       {
         "id": "prompt-context-engineering-adversarial-3",
@@ -129,8 +165,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["documentation"],
-        "tags": ["adversarial", "scope-control"]
+        "adjacentSkills": [
+          "documentation"
+        ],
+        "tags": [
+          "adversarial",
+          "scope-control"
+        ]
       }
     ]
   },
@@ -138,18 +179,18 @@
     {
       "url": "https://developers.openai.com/api/docs/guides/prompt-engineering",
       "sourceType": "official-docs",
-      "versionScope": "Rolling OpenAI prompt-engineering documentation as available 2026-10-02",
+      "versionScope": "Rolling OpenAI prompt-engineering documentation inspected 2026-11-08",
       "staleAfterDays": 14,
       "notes": "Message roles and instruction priority, prompt structure, context-window planning, examples and code-managed prompt versioning.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-08"
     },
     {
       "url": "https://developers.openai.com/api/docs/guides/prompting",
       "sourceType": "official-docs",
-      "versionScope": "Rolling OpenAI prompting documentation as available 2026-10-02",
+      "versionScope": "Rolling OpenAI prompting documentation inspected 2026-11-08",
       "staleAfterDays": 14,
       "notes": "Current prompt-as-code guidance, typed dynamic inputs, testing and release discipline for production prompts.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-08"
     },
     {
       "url": "https://model-spec.openai.com/2026-08-18.html",
@@ -162,26 +203,26 @@
     {
       "url": "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices",
       "sourceType": "official-docs",
-      "versionScope": "Rolling Claude Platform prompting best practices as available 2026-10-02",
+      "versionScope": "Rolling Claude Platform prompting best practices inspected 2026-11-08",
       "staleAfterDays": 14,
       "notes": "Current Claude-specific clarity, examples, structural tags, long-context placement and model-generation migration guidance.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-08"
     },
     {
       "url": "https://platform.claude.com/docs/en/build-with-claude/context-windows",
       "sourceType": "official-docs",
-      "versionScope": "Rolling Claude Platform context-window documentation as available 2026-10-02",
+      "versionScope": "Rolling Claude Platform context-window documentation inspected 2026-11-08",
       "staleAfterDays": 14,
       "notes": "What consumes context, token accounting, context-limit behavior and current compaction/context-awareness mechanics.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-08"
     },
     {
       "url": "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-tools",
       "sourceType": "official-docs",
-      "versionScope": "Rolling Claude Platform prompt template/variable tooling documentation as available 2026-09-05",
+      "versionScope": "Rolling Claude Platform prompt template/variable tooling documentation as available 2026-10-04",
       "staleAfterDays": 30,
       "notes": "Fixed versus variable prompt content, template-variable separation, testability and prompt-versioning guidance.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     }
   ],
   "authoringMaturity": "individual"

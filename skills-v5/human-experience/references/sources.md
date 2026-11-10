@@ -2,7 +2,7 @@
 
 Use sources in this order when guidance conflicts:
 
-1. ISO 9241-210:2019 for the durable human-centred design lifecycle and interactive-system scope.
+1. ISO 9241-210:2019 for the durable human-centred design lifecycle and interactive system scope.
 2. Current GOV.UK Service Manual guidance for problem-first discovery, user evidence, whole journeys, and cross-channel seams.
 3. Community design skills only for demonstrated workflow patterns; they do not define Kory routing, permissions, or universal aesthetics.
 

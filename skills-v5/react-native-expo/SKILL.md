@@ -34,16 +34,23 @@ Use this skill for React Native and Expo application behavior. Compose platform-
 
 ## Verification at the React Native boundary
 
-- Use a development or production-like build whenever the changed path depends on native libraries or configuration.
+- Use a development build, or a build that resembles production, whenever the changed path depends on native libraries or configuration.
 - Exercise cold start, background and foreground, deep link, offline state, and permission denial when relevant to the feature.
-- Verify both iOS and Android when the shared code path claims cross-platform behavior.
+- Verify both iOS and Android when the shared code path claims cross platform behavior.
 - For OTA changes, verify the intended update is accepted by compatible runtimes and excluded from incompatible native builds.
-- Distinguish Expo Go, development-build, simulator or emulator, and physical-device evidence in the result.
+- Distinguish evidence from Expo Go, a development build, a simulator or emulator, and a physical device in the result.
+
+## Runtime readiness and evidence discipline
+
+- Before a native verification claim, record the Expo SDK, build type, platform, exact simulator/emulator or device identity, and the observed readiness result. A tool probe only establishes tool/device availability; it does not establish AppState, safe-area, keyboard, lifecycle, permission, or rendered interaction behavior.
+- If the required simulator, emulator, device, native build, or development client is unavailable, report that check as unavailable and keep source-level, static, or simulated observations separate. Do not convert a successful JavaScript test, package install, or host-tool version probe into native-runtime evidence.
+- Treat iOS and Android readiness independently. A missing `simctl`/booted iOS simulator does not explain Android behavior, and a missing `adb`/connected Android target does not explain iOS behavior.
+- For lifecycle, safe-area, keyboard, permission, and rendered-layout claims, retain the runtime receipt or test output that observed the behavior, including the target identity and build lineage. Without that receipt, describe the behavior as unverified.
 
 ## Completion evidence
 
 - Expo SDK, native-runtime, and platform assumptions affected
 - Development or production-build evidence for native-dependent paths
-- OTA runtime-compatibility and cross-platform evidence when those contracts changed
+- OTA runtime-compatibility and cross platform evidence when those contracts changed
 
-Use [the maintained source map](references/sources.md) for version-sensitive facts and source conflicts.
+Use [the maintained source map](references/sources.md) for facts that are sensitive to the version in use and source conflicts.

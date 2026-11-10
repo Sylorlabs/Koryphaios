@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "debugging",
-  "version": "5.0.0",
+  "version": "5.0.1",
   "skillKind": "orchestrator",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -33,11 +33,12 @@
   ],
   "evidence": [
     "Failure reproduction or direct failure evidence",
+    "Exact command, environment, and source/runtime identity",
     "Root-cause hypothesis test",
     "Regression check",
     "Corrected behavior verification",
     "Hierarchy boundary and selected specialist rationale",
-    "Representative success, negative-path, and recovery verification"
+    "Working control, negative-path, and recovery verification"
   ],
   "routing": {
     "positive": [

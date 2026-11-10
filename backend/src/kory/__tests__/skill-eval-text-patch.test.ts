@@ -97,6 +97,35 @@ describe('text-only skill evaluation patch adapter', () => {
     ).toThrow('repeats the path');
   });
 
+  test('skips an invalid placeholder block when exactly one later strict block is valid', () => {
+    const parsed = parseSkillEvalTextPatch(
+      '<kory-eval-patch>...</kory-eval-patch>\n' +
+        '<kory-eval-patch>[{"operation":"write","path":"result.txt","content":"ok"}]</kory-eval-patch>',
+    );
+    expect(parsed.operations).toEqual([{ operation: 'write', path: 'result.txt', content: 'ok' }]);
+  });
+
+  test('rejects multiple valid patch blocks as ambiguous', () => {
+    expect(() =>
+      parseSkillEvalTextPatch(
+        '<kory-eval-patch>[]</kory-eval-patch>\n' + '<kory-eval-patch>[]</kory-eval-patch>',
+      ),
+    ).toThrow('multiple valid patch blocks');
+  });
+
+  test('allows contained directory names ending in dots without treating them as traversal', () => {
+    const root = mkdtempSync(join(tmpdir(), 'kory-text-patch-'));
+    roots.push(root);
+    const path = 'release../summary.txt';
+
+    expect(applySkillEvalTextPatch(root, [
+      { operation: 'write', path, content: 'contained\n' },
+    ])).toEqual([path]);
+    expect(readFileSync(join(root, path), 'utf8')).toBe('contained\n');
+    expect(applySkillEvalTextPatch(root, [{ operation: 'delete', path }])).toEqual([path]);
+    expect(existsSync(join(root, path))).toBe(false);
+  });
+
   test('applies writes and deletions inside the fixture root and refuses symlink traversal', () => {
     const root = mkdtempSync(join(tmpdir(), 'kory-text-patch-'));
     const outside = mkdtempSync(join(tmpdir(), 'kory-text-patch-outside-'));

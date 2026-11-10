@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "language-runtime-security",
-  "version": "5.1.2",
+  "version": "5.1.5",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -16,6 +16,10 @@
   "activation": [
     "runtime security",
     "compiler security",
+    "custom compiler",
+    "bounds check",
+    "lowering",
+    "optimization",
     "runtime sandbox",
     "custom language runtime",
     "sandbox escape",
@@ -26,6 +30,14 @@
     "bytecode verifier",
     "memory safe language runtime",
     "denial of service confinement",
+    "runtime resource limits",
+    "resource limits",
+    "untrusted scripts",
+    "host call",
+    "fuel limit",
+    "capability boundary",
+    "sandbox recovery",
+    "runtime escape audit",
     "memory safety"
   ],
   "excludes": [
@@ -40,18 +52,20 @@
   "evidence": [
     "Explicit runtime guarantee and trust model",
     "Cross-layer semantic and representation trace",
+    "Isolation and escape-boundary map",
     "Host capability and resource-bound contract",
+    "Observable limit, effect, and recovery record",
     "Adversarial reproducer or minimized verification corpus",
     "Hierarchy boundary and selected specialist rationale",
     "Representative success, negative-path, and recovery verification"
   ],
   "routing": {
     "positive": [
-      "Review a WebAssembly plugin runtime that executes untrusted customer modules. Prove memory/type validation, deny ambient filesystem/network/process authority, constrain host imports, bound fuel/memory/stack, and verify traps cannot leave privileged partial effects.",
+      "Review a WebAssembly plugin runtime that executes untrusted customer modules. Prove memory/type validation, deny ambient filesystem/network/process authority, constrain host imports, bound fuel/memory/stack/output, make denials and traps observable, and verify recovery cannot leave privileged partial effects.",
       "Investigate a custom compiler where a bounds check works at -O0 but disappears at -O2. Trace source overflow semantics through lowering and LLVM IR assumptions, minimize the reproducer, and determine whether undefined/poison behavior invalidates the source-language guarantee.",
       "Harden a bytecode verifier and JIT against validation/execution differentials. Ensure identical bytes/features are validated and executed, reject malformed encodings and post-validation mutation, and compare interpreter and JIT behavior on adversarial modules.",
       "Secure an FFI boundary between a memory-safe runtime and a native C extension. Define ownership, lifetime, aliasing, thread, exception, and buffer-layout rules and verify that malformed guest inputs cannot turn the native bridge into an escape hatch.",
-      "Design resource confinement for untrusted scripts: cap memory, tables, stack, code size, compile/JIT time, instruction budget, host-call cost, output, and cancellation while preserving deterministic cleanup on trap or exhaustion."
+      "Design resource confinement for untrusted scripts: cap memory, tables, stack, code size, compile/JIT time, wall/CPU time, instruction budget, host-call cost, output, concurrency, and cancellation while preserving observable accounting, deterministic cleanup, and a permitted retry after trap or exhaustion."
     ],
     "negative": [
       "Harden an HTTP upload endpoint against path traversal, SSRF, malformed archives, SQL injection, and command argument injection. No custom interpreter, compiler, bytecode, plugin, or untrusted-code runtime is involved.",
@@ -72,7 +86,7 @@
       },
       {
         "id": "language-runtime-security-ambiguous-2",
-        "prompt": "A service compiles user expressions and then executes them. application-security owns request parsing and API limits; language-runtime-security owns compiler/IR semantics, module validation, host capabilities, JIT/native boundaries, and untrusted-code confinement.",
+        "prompt": "A service compiles user expressions and then executes them. application-security owns request parsing and API limits; language-runtime-security owns compiler/IR semantics, module validation, host capabilities, resource exhaustion, JIT/native boundaries, observable denial, and untrusted-code confinement.",
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
@@ -81,7 +95,7 @@
       },
       {
         "id": "language-runtime-security-ambiguous-3",
-        "prompt": "A sandboxed module may call a host signing service. applied-cryptography owns signature construction and key policy; language-runtime-security owns whether the guest can reach that capability, with what parameters/identity, under what limits, and whether denial is enforceable.",
+        "prompt": "A sandboxed module may call a host signing service. applied-cryptography owns signature construction and key policy; language-runtime-security owns whether the guest can reach that capability, with what parameters/identity, under what limits, whether denial is enforceable, and whether a trap or retry can create an unaccounted signing effect.",
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
@@ -130,20 +144,29 @@
       "verifiedAt": "2026-09-05"
     },
     {
+      "url": "https://wasi.dev/",
+      "sourceType": "spec",
+      "versionScope": "Official WASI project documentation and specification entry point as verified 2026-10-17; proposal, preview, engine, and host embedding versions must be resolved for a concrete claim",
+      "revision": "WASI project entry point 2026-10-17",
+      "staleAfterDays": 90,
+      "notes": "Capability-oriented system interfaces and the guest-to-host authority boundary. WASI presence does not prove operating-system isolation, filesystem/network/process confinement, or a specific engine's enforcement.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
       "url": "https://llvm.org/docs/UndefinedBehavior.html",
       "sourceType": "official-docs",
-      "versionScope": "LLVM IR Undefined Behavior manual in current LLVM 24.0.0git documentation as verified 2026-09-05",
+      "versionScope": "LLVM IR Undefined Behavior manual in current LLVM 24.0.0git documentation as verified 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Immediate UB, poison, undef/freeze semantics, and optimizer assumptions relevant to cross-layer security checks and miscompilations.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://llvm.org/docs/Security.html",
       "sourceType": "official-docs",
-      "versionScope": "LLVM Security Response Group scope in current LLVM 24.0.0git documentation as verified 2026-09-05",
+      "versionScope": "LLVM Security Response Group scope in current LLVM 24.0.0git documentation as verified 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Documents which LLVM components and malformed/untrusted-input scenarios the project considers security-sensitive or explicitly not hardened, preventing overgeneralized trust claims.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     }
   ],
   "authoringMaturity": "individual"

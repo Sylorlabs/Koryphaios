@@ -107,10 +107,10 @@
     {
       "url": "https://www.postgresql.org/docs/current/",
       "sourceType": "official-docs",
-      "versionScope": "Current PostgreSQL documentation as available 2026-09-04",
+      "versionScope": "Current PostgreSQL documentation as available 2026-10-19",
       "staleAfterDays": 45,
       "notes": "SQL, transactions, locking, indexes, planning, replication, and operations reference.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-10-19"
     }
   ],
   "authoringMaturity": "individual"

@@ -51,13 +51,13 @@
 - **Agent Skills specification**: https://agentskills.io/specification
   - Type: `spec`
   - Scope: portable Agent Skills metadata and progressive-disclosure format as available 2026-09-05.
-  - Verified: 2026-09-05; refresh after 90 days.
+  - Verified: 2026-11-03; refresh after 90 days.
   - Relevance: keeps discovery metadata discriminating and detailed execution guidance inside the skill body.
 
 - **OpenAI skill creator reference**: https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md
   - Type: `reference-implementation`
-  - Scope: OpenAI public skill-authoring guidance on `main` as inspected 2026-09-05.
-  - Verified: 2026-09-05; refresh after 60 days.
+  - Scope: OpenAI public skill-authoring guidance on `main` as inspected 2026-11-03.
+  - Verified: 2026-11-03; refresh after 60 days.
   - Relevance: supports focused triggers, progressive disclosure, narrow corrections from observed failures, and behavioral validation rather than prose-only checks.
 
 - **Anthropic: Agent Skills architecture**: https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills

@@ -1,7 +1,7 @@
 {
   "id": "search-indexing-full-task-2-individual",
   "maturity": "individual",
-  "prompt": "Fix a multi-tenant search endpoint where relevance scoring runs before a poorly selective tenant filter and one cached query can return ids from another tenant under load. Establish tenant authorization/filter as a non-negotiable search boundary, correct cache-key identity, preserve ranking within the tenant corpus, and verify two tenants with same query, empty tenant, pagination, cache warm/cold, and relevance golden set.",
+  "prompt": "Fix a multi-tenant search endpoint where relevance scoring runs before a poorly selective tenant filter and one cached query can return ids from another tenant under load. The bounded fixture fields are exactly tenant, query, page, pageSize, documents entries shaped {id, tenant, text, score}, and warmCache. Return exactly {cacheKey, ids, cacheHit}. Build cacheKey as tenant|query|page|pageSize; a warm hit is valid only for that exact key and tenant-owned ids. On a cold path derive lexical matching from document text and query, then rank by score descending, id as the deterministic tiebreaker, and paginate. Establish tenant authorization/filter as a non-negotiable search boundary, correct cache-key identity, preserve ranking within the tenant corpus, and verify two tenants with same query, empty tenant, pagination, cache warm/cold, and relevance golden set.",
   "environment": {
     "kind": "synthetic",
     "startingState": "fixture://search-indexing/tenant-filter-ranking",

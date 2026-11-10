@@ -21,8 +21,9 @@ Compose `application-security` when the change affects privileged IPC, command e
 ## Decisions that change the implementation
 
 - In Electron, keep context isolation and a narrow preload bridge. Do not expose raw `ipcRenderer` or generic shell and filesystem primitives to renderer code. Validate IPC sender and arguments at the privileged handler.
+- Register process-wide IPC handlers at process scope, with per-window ownership tied to the live `webContents` and its frame lifecycle. Handle renderer reload, window destruction, and simultaneous windows without stale owners, duplicate listeners, or duplicate writes; validate the sender at the time of each request and avoid losing valid requests during a navigation transition.
 - In Tauri v2, grant only the command and resource capability needed by the target window or webview. Treat allow and deny scopes as the enforcement boundary rather than copying Electron preload patterns.
-- Treat deep links, file-open events, update URLs, and navigation targets as external input before they reach privileged operations.
+- Treat deep links, file open events, update URLs, and navigation targets as external input before they reach privileged operations.
 - Preserve the repository's packaging, signing, and update model unless the task explicitly changes distribution.
 
 ## Failure discriminators
@@ -35,8 +36,9 @@ Compose `application-security` when the change affects privileged IPC, command e
 ## Verification at the desktop boundary
 
 - Exercise the packaged artifact on every supported OS affected by the change, not only browser dev mode.
-- For privileged calls, verify one allowed request and the highest-risk denied or malformed request from the actual renderer or webview boundary.
+- For privileged calls, verify one allowed request and the denied or malformed request with the highest risk from the actual renderer or webview boundary.
 - Cover cold start, second-window or deep-link activation where applicable, close versus quit behavior, and state restoration.
+- For window-owned IPC, verify one action after reload and independent actions from concurrent windows, then prove each produces one authorized effect and no stale listener persists after closure.
 - If updates change, test download, verification, restart, and recovery behavior using the configured update channel or a faithful test channel.
 - Record which security model was exercised: Electron process isolation or Tauri capabilities.
 

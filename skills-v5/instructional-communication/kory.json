@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "instructional-communication",
-  "version": "5.1.1",
+  "version": "5.1.3",
   "skillKind": "artifact",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -42,32 +42,35 @@
     "trace which repository test loads the fixture"
   ],
   "evidence": [
+    "Named audience, task boundary, medium, and permissions",
     "Prerequisites and observable starting state",
-    "Ordered actions with expected feedback",
+    "Ordered actions with stage feedback and decision conditions",
     "Decision branches, warnings, and recovery",
+    "Accessible equivalent action or status path for the target medium",
     "Objective completion checks and walkthrough evidence",
     "Hierarchy boundary and selected specialist rationale",
     "Representative success, negative-path, and recovery verification"
   ],
   "routing": {
     "positive": [
-      "Write a setup guide for a new developer to get this repository running from a clean machine. Include prerequisites, version checks, exact commands/placeholders, expected outputs, common failure branches, and a final test that proves the app works.",
-      "Create an operational runbook for rotating the signing credential without downtime. Define the trigger and permissions, ordered safe actions, validation after each phase, rollback, failure branches, escalation, and final verification.",
-      "Write a step-by-step migration procedure for moving from the legacy configuration to the new schema while preserving existing data. Include backup, preflight, compatibility checks, commands, expected feedback, rollback, and post-migration validation.",
-      "Build an onboarding guide for an on-call engineer to safely handle the three most common service alerts, including how to identify the alert condition, diagnostics, decision branches, mitigations, escalation, and recovery checks.",
-      "Create a troubleshooting procedure for failed local authentication setup. Start from observable symptoms, map each diagnostic to a branch, give recovery steps, and end with an objective login/API verification."
+      "Write a clean-machine setup guide for a new developer who has terminal access but no repository-specific expertise. Include version checks, defined placeholders, expected feedback after each start command, two failure branches, and a final test that proves the app works.",
+      "Create an operational runbook for an on-call operator rotating a signing credential without downtime. Define trigger, permissions, overlap, stage feedback, rollback, propagation failure, escalation, and final service verification.",
+      "Write a step-by-step migration procedure for an operator moving legacy configuration to a new schema while preserving user data. Include source/version boundary, backup, preflight compatibility check, target-exists branch, expected feedback, rollback, and post-migration validation.",
+      "Build an onboarding guide for a new on-call engineer to handle three common service alerts. For each alert, include the observable symptom, diagnostic decision, safe mitigation, text-readable status feedback, escalation owner, and recovery check.",
+      "Create a troubleshooting procedure for a user whose local authentication setup failed. Start from observable symptoms, map each diagnostic to a branch, give safe recovery steps, and end with an objective login or API verification."
     ],
     "negative": [
-      "Write an architecture explanation for maintainers covering components, interfaces, data flow, failure semantics, alternatives, and design rationale. This is explanatory, not a procedure to follow.",
-      "Generate an API reference with exact endpoint fields, types, defaults, errors, examples, and version scope for lookup; no ordered task procedure is requested.",
-      "Prepare a one-page executive brief on outage impact, residual risk, remediation status, options, and decisions needed; operators already have a runbook.",
-      "Implement the credential rotation change in the repository and run its tests. No runbook, setup guide, or tutorial deliverable is requested.",
-      "Write user-facing release notes from the verified diff and issue list; do not turn them into setup or migration instructions."
+      "Write an architecture explanation for maintainers covering components, interfaces, data flow, failure semantics, alternatives, and design rationale. This is explanatory, not an ordered procedure.",
+      "Generate an API reference with exact endpoint fields, types, defaults, errors, examples, and version scope for lookup. Do not write a how-to or runbook.",
+      "Prepare a one-page executive brief on outage impact, residual risk, remediation status, options, and decisions needed. Operators already have the runbook.",
+      "Implement the credential rotation change in the repository and run its tests. No tutorial, setup guide, migration procedure, or runbook is requested.",
+      "Write user-facing release notes from the verified diff and issue list. Do not turn them into setup or migration instructions.",
+      "Audit the supplied interface for accessibility conformance and report findings. Do not write an instructional procedure or claim a task walkthrough."
     ],
     "ambiguous": [
       {
         "id": "instructional-communication-ambiguous-1",
-        "prompt": "Implement the new local setup flow and also write a clean-machine setup guide with prerequisites, exact steps, expected outputs, troubleshooting, and completion checks. Verify the code change and walkthrough separately.",
+        "prompt": "Implement the new local setup flow and also write a clean-machine setup guide for a first-time developer with prerequisites, exact steps, expected feedback, troubleshooting, and completion checks. Verify the code change and walkthrough separately.",
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
@@ -76,7 +79,7 @@
       },
       {
         "id": "instructional-communication-ambiguous-2",
-        "prompt": "Write the technical explanation of the failure mode and a separate operator runbook that turns the verified mechanism into diagnostics, branches, mitigations, rollback, escalation, and completion checks.",
+        "prompt": "Write the technical explanation of the failure mode and a separate operator runbook that turns the verified mechanism into diagnostics, observable feedback, branches, mitigations, rollback, escalation, and completion checks.",
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
@@ -85,7 +88,7 @@
       },
       {
         "id": "instructional-communication-ambiguous-3",
-        "prompt": "Create the exact configuration reference for all supported fields and also a migration how-to that tells an operator which fields to change, in what order, how to validate them, and how to roll back.",
+        "prompt": "Create the exact configuration reference for all supported fields and also a migration how-to for an operator that tells them which fields to change, in what order, how to validate them, and how to roll back safely.",
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
@@ -157,12 +160,28 @@
       "verifiedAt": "2026-09-05"
     },
     {
+      "url": "https://developers.google.com/style/accessibility",
+      "sourceType": "official-docs",
+      "versionScope": "Google developer documentation accessibility guidance as available 2026-10-09",
+      "staleAfterDays": 90,
+      "notes": "Keyboard reachability, readable structure, non-visual status, descriptive labels, and equivalent text for visual or audio information.",
+      "verifiedAt": "2026-10-09"
+    },
+    {
+      "url": "https://www.w3.org/WAI/fundamentals/accessibility-intro/",
+      "sourceType": "official-docs",
+      "versionScope": "W3C WAI accessibility fundamentals updated 2026-02-03",
+      "staleAfterDays": 180,
+      "notes": "Boundary between accessible design guidance and actual evaluation; accessibility covers perception, understanding, navigation, and interaction across disability and situational contexts.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
       "url": "https://agentskills.io/specification",
       "sourceType": "spec",
       "versionScope": "Agent Skills specification as available 2026-09-05",
       "staleAfterDays": 90,
       "notes": "Portable discovery metadata and progressive disclosure.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md",
@@ -170,7 +189,7 @@
       "versionScope": "OpenAI public skill-creator guidance on main as inspected 2026-09-05",
       "staleAfterDays": 60,
       "notes": "Bounded specialist triggers and behavioral evaluation.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     }
   ],
   "authoringMaturity": "individual"

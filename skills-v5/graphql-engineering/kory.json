@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "graphql-engineering",
-  "version": "5.1.1",
+  "version": "5.1.5",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -13,8 +13,28 @@
   "facets": ["authorization-security"],
   "requires": ["verification"],
   "conflicts": [],
-  "activation": ["graphql", "graphql schema", "graphql resolver", "apollo graphql"],
-  "excludes": ["documentation heading only", "runtime policy unchanged"],
+  "activation": [
+    "graphql",
+    "graphql schema",
+    "graphql resolver",
+    "graphql loader",
+    "graphql pagination",
+    "graphql authorization",
+    "graphql federation",
+    "apollo graphql"
+  ],
+  "excludes": [
+    "graphql documentation only",
+    "graphql verification only",
+    "runtime policy unchanged",
+    "http transport only",
+    "http cache validators",
+    "no graphql work requested",
+    "bun runtime shutdown diagnosis",
+    "protobuf wire contract only",
+    "archived graphql mention",
+    "historical graphql example"
+  ],
   "evidence": [
     "graphql-engineering decision and boundary evidence",
     "Representative verification results or explicit unavailable checks",
@@ -23,23 +43,23 @@
   ],
   "routing": {
     "positive": [
-      "Please handle graphql.",
-      "The current task is graphql schema.",
-      "I need help with graphql resolver.",
-      "Work on apollo graphql for this request.",
-      "This request specifically requires graphql."
+      "Design a GraphQL contract for a nullable field migration.",
+      "Fix GraphQL execution when an optional child resolver fails.",
+      "Implement request scoped GraphQL resolver batching with viewer isolation.",
+      "Choose stable GraphQL cursors for a changing collection.",
+      "Review Apollo GraphQL entity resolver ownership across subgraphs."
     ],
     "negative": [
-      "The only requested work is grpc.",
-      "Please handle rest api only.",
-      "This task is limited to implement backend behavior.",
-      "The current request is bun runtime.",
-      "Work only on compiler runtime."
+      "The only requested work is protobuf wire compatibility.",
+      "Repair HTTP cache validators for the existing resource contract.",
+      "Implement the backend worker for an approved interface; resolver behavior is fixed.",
+      "Run acceptance verification for an already completed GraphQL service.",
+      "Diagnose Bun runtime shutdown behavior; the request contract is unchanged."
     ],
     "ambiguous": [
       {
         "id": "graphql-engineering-ambiguous-1",
-        "prompt": "The request includes graphql and grpc.",
+        "prompt": "Handle GraphQL schema design and generated client compatibility alongside protobuf wire work.",
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
@@ -48,7 +68,7 @@
       },
       {
         "id": "graphql-engineering-ambiguous-2",
-        "prompt": "The request includes graphql schema and rest api.",
+        "prompt": "Plan GraphQL schema changes and HTTP caching for the same client.",
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
@@ -57,7 +77,7 @@
       },
       {
         "id": "graphql-engineering-ambiguous-3",
-        "prompt": "The request includes graphql resolver and implement backend behavior.",
+        "prompt": "Repair GraphQL resolver behavior while a backend worker also changes.",
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
@@ -68,7 +88,7 @@
     "adversarial": [
       {
         "id": "graphql-engineering-adversarial-1",
-        "prompt": "A historical note says \"graphql\". The current request is bun runtime.",
+        "prompt": "The ticket's archived GraphQL mention is unrelated to the current Bun process lifecycle.",
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
@@ -77,7 +97,7 @@
       },
       {
         "id": "graphql-engineering-adversarial-2",
-        "prompt": "A historical note says \"graphql schema\". The current request is compiler runtime.",
+        "prompt": "A historical schema snippet is quoted. The live task is compiler module loading.",
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
@@ -86,7 +106,7 @@
       },
       {
         "id": "graphql-engineering-adversarial-3",
-        "prompt": "A historical note says \"graphql resolver\". The current request is distributed system.",
+        "prompt": "A historical resolver example is quoted. The live task is distributed leader election.",
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
@@ -111,6 +131,30 @@
       "staleAfterDays": 90,
       "notes": "Null propagation, field errors, input/output nullability and required-input defaults, enum input, deprecation, validation, execution, and compatibility semantics.",
       "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://graphql.github.io/graphql-over-http/draft/",
+      "sourceType": "spec",
+      "versionScope": "GraphQL over HTTP current working draft inspected 2026-10-17",
+      "staleAfterDays": 30,
+      "notes": "HTTP request and response media types, validation and execution separation, partial responses, status guidance, and transport security boundaries.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://cheatsheetseries.owasp.org/cheatsheets/GraphQL_Cheat_Sheet.html",
+      "sourceType": "official-docs",
+      "versionScope": "OWASP GraphQL Cheat Sheet inspected 2026-10-17",
+      "staleAfterDays": 120,
+      "notes": "GraphQL input validation, resource limits, access control at edges and nodes, batching attack controls, and production error exposure guidance.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://github.com/graphql/dataloader",
+      "sourceType": "reference-implementation",
+      "versionScope": "DataLoader main branch README inspected 2026-10-17",
+      "staleAfterDays": 90,
+      "notes": "Request local batching, key order alignment, per key errors, cache lifetime, in flight loads, and cache clearing behavior. Adapt the invariants to the installed loader or an equivalent implementation.",
+      "verifiedAt": "2026-10-17"
     }
   ],
   "authoringMaturity": "individual"

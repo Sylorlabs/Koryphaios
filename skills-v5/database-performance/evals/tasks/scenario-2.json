@@ -1,7 +1,7 @@
 {
   "id": "database-performance-full-task-2-individual",
   "maturity": "individual",
-  "prompt": "A migration adding a non-null derived column is safe on staging but blocks production writes because the production table is 400x larger and has long-running transactions. Design and validate a low-lock migration/tuning approach for the actual database version, including backfill batching, lock/statement timeouts, index/constraint validation strategy, abort/recovery, and post-migration plan checks. Preserve correctness/isolation; do not simply weaken transaction guarantees.",
+  "prompt": "A migration adding a non-null derived column is safe on staging but blocks production writes because the production table is 400x larger and has long-running transactions. Treat the supplied fixture as synthetic evidence, establish the actual database engine/version and target authorization before claiming production safety, and design and validate a low-lock migration/tuning approach for the actual database version, including backfill batching, lock/statement timeouts, index/constraint validation strategy, abort/recovery, and post-migration plan checks. Preserve correctness/isolation; do not simply weaken transaction guarantees.",
   "environment": {
     "kind": "synthetic",
     "startingState": "fixture://database-performance/migration-lock-amplification",
@@ -10,6 +10,7 @@
       "database version and current indexes/constraints",
       "long-running transaction fixture exposing lock acquisition delay",
       "migration harness that can abort mid-backfill and resume safely",
+      "evidence record that labels fixture timings synthetic and real target lock checks unavailable unless executed",
       "paired same-model skill/no-skill execution from the identical starting snapshot"
     ]
   },
@@ -46,7 +47,7 @@
     "Hierarchy boundary and selected specialist rationale",
     "hierarchy boundary and selected specialist rationale",
     "paired skill/no-skill run artifacts",
-    "explicit unavailable, simulated, inferred, or stale evidence labels"
+    "explicit synthetic, unavailable, simulated, inferred, or stale evidence labels"
   ],
   "requiredArtifacts": [
     "database-performance-individual-scenario-2-result",
@@ -60,7 +61,18 @@
     },
     {
       "id": "operating-contract",
-      "assertion": "Capture the exact query, parameters, schema, statistics, data distribution, concurrency, and latency/resource symptom before tuning."
+      "assertion": "Capture the actual engine/version, authorization boundary, exact migration SQL, staging-to-production ratio, row counts, write rate, constraints/indexes, long-transaction distribution, concurrency, timeouts, and measurement boundary before changing the schema.",
+      "source": "https://www.postgresql.org/docs/17/sql-altertable.html"
+    },
+    {
+      "id": "migration-phase-contract",
+      "assertion": "Separate writer compatibility, nullable-column DDL, resumable committed backfill, optional concurrent index work, constraint validation, and final NOT NULL enforcement; do not present all phases as one long transaction.",
+      "source": "https://www.postgresql.org/docs/17/sql-altertable.html"
+    },
+    {
+      "id": "timeout-and-blocker-boundary",
+      "assertion": "Set lock and statement timeout budgets from the workload, identify blockers after a timeout, preserve committed checkpoints, and show that an interrupted batch can resume without skipped or duplicated rows.",
+      "source": "https://www.postgresql.org/docs/17/sql-altertable.html"
     },
     {
       "id": "execution-invariant",
@@ -68,7 +80,7 @@
     },
     {
       "id": "verification-discipline",
-      "assertion": "Compare before/after plans and latency distributions under representative data and concurrency, confirm write/storage side effects of indexes or materialization, and monitor regressions on neighboring queries."
+      "assertion": "Compare before/after plans and latency distributions under representative data and concurrency, confirm write/storage side effects of indexes or materialization, validate constraint and index state, and monitor neighboring-query and writer regressions; staging or fixture timings do not prove production lock safety."
     },
     {
       "id": "anti-pattern-resistance",
@@ -76,7 +88,7 @@
     },
     {
       "id": "evidence-and-uncertainty",
-      "assertion": "Every material completion claim must map to observable evidence (database-performance decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+      "assertion": "Every material completion claim must map to observable evidence (database-performance decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with synthetic, simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
     }
   ]
 }

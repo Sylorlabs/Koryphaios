@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "name": "llm-evaluation",
-  "version": "5.1.1",
+  "version": "5.1.5",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
   "domains": ["ai", "evaluation"],
   "targetMedia": ["any"],
   "pathScopes": [],
-  "contextBudget": 8000,
+  "contextBudget": 9000,
   "broader": ["data-analysis", "testing-engineering"],
   "facets": [],
   "requires": ["verification"],
@@ -60,6 +60,7 @@
     "Comparable candidate/baseline model, prompt, tool, retrieval, environment and retry configuration",
     "Deterministic outcome checks plus calibrated independent semantic graders with disagreement evidence",
     "Repeated-trial raw artifacts, uncertainty, invalid-run accounting, slice results and regression ledger",
+    "Harness-level equivalence and paired skill/no-skill or candidate/baseline traces with blind reviewer independence",
     "Hierarchy boundary and selected specialist rationale",
     "Representative success, negative-path, and recovery verification"
   ],
@@ -141,34 +142,58 @@
     {
       "url": "https://developers.openai.com/api/docs/guides/evaluation-best-practices",
       "sourceType": "official-docs",
-      "versionScope": "Rolling OpenAI evaluation best-practices documentation inspected 2026-09-06",
+      "versionScope": "Rolling OpenAI evaluation best-practices documentation inspected 2026-11-07",
       "staleAfterDays": 14,
       "notes": "Task-specific eval design, representative datasets, automation, human calibration, continuous evaluation and model-judge practices; not a platform-retirement authority.",
-      "verifiedAt": "2026-09-26"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://developers.openai.com/api/docs/guides/graders",
       "sourceType": "official-docs",
-      "versionScope": "Rolling OpenAI grader documentation as available 2026-10-02",
+      "versionScope": "Rolling OpenAI grader documentation as available 2026-11-07; legacy Evals lifecycle is tracked separately",
       "staleAfterDays": 14,
       "notes": "Current deterministic/text/model grader types, grader-prompt iteration, calibration examples and reward/grader-hacking cautions.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://developers.openai.com/api/docs/guides/agent-evals",
       "sourceType": "official-docs",
-      "versionScope": "Rolling OpenAI agent-evaluation documentation as available 2026-10-02",
+      "versionScope": "Rolling OpenAI agent-evaluation documentation as available 2026-11-07",
       "staleAfterDays": 14,
       "notes": "Trace grading, workflow-level evidence, datasets and repeatable eval runs for agent systems.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-07"
+    },
+    {
+      "url": "https://developers.openai.com/api/docs/deprecations",
+      "sourceType": "official-docs",
+      "versionScope": "OpenAI official platform deprecations inspected 2026-11-07",
+      "staleAfterDays": 14,
+      "notes": "OpenAI legacy Evals platform announced deprecated June 3, 2026; read-only from October 31, 2026; dashboard/API scheduled to shut down November 30, 2026. Distinguishes legacy Evals APIs from current Datasets and trace workflows.",
+      "verifiedAt": "2026-11-07"
+    },
+    {
+      "url": "https://developers.openai.com/cookbook/examples/evaluation/moving-from-openai-evals-to-promptfoo",
+      "sourceType": "official-docs",
+      "versionScope": "OpenAI migration cookbook published 2026-06-03 and inspected 2026-10-10",
+      "staleAfterDays": 90,
+      "notes": "Manual translation of OpenAI Evals tasks, prompts, providers and graders into portable Promptfoo configurations; independently validate migrated grader behavior and scores.",
+      "verifiedAt": "2026-10-10"
+    },
+    {
+      "url": "https://developers.openai.com/cookbook/examples/partners/harness_aware_plugin_evals/harness_aware_plugin_evals",
+      "sourceType": "official-docs",
+      "versionScope": "OpenAI/deepsense.ai harness-aware plugin evaluation cookbook published 2026-09-23 and inspected 2026-10-10",
+      "staleAfterDays": 90,
+      "notes": "Same-case comparison across standalone and product-harness levels, tool bridge traces, preserved failures, and distinguishing harness effects from model behavior.",
+      "verifiedAt": "2026-10-10"
     },
     {
       "url": "https://platform.claude.com/docs/en/test-and-evaluate/develop-tests",
       "sourceType": "official-docs",
-      "versionScope": "Rolling Claude Platform evaluation guidance as available 2026-09-05",
+      "versionScope": "Rolling Claude Platform evaluation guidance as available 2026-10-04",
       "staleAfterDays": 30,
       "notes": "Task-distribution fidelity, edge cases and automation across exact, code, semantic and LLM-based grading approaches.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents",

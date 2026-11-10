@@ -5,13 +5,24 @@
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
-  "domains": ["ai", "ml", "training"],
-  "targetMedia": ["any"],
+  "domains": [
+    "ai",
+    "ml",
+    "training"
+  ],
+  "targetMedia": [
+    "any"
+  ],
   "pathScopes": [],
   "contextBudget": 8000,
-  "broader": ["implementation"],
+  "broader": [
+    "implementation"
+  ],
   "facets": [],
-  "requires": ["verification", "ml-evaluation"],
+  "requires": [
+    "verification",
+    "ml-evaluation"
+  ],
   "conflicts": [],
   "activation": [
     "fine tuning",
@@ -32,7 +43,13 @@
     "openai fine tune",
     "fine tune a model",
     "training setup eval gates",
-    "model training"
+    "model training",
+    "training data leakage",
+    "label leakage",
+    "dataset split leakage",
+    "checkpoint promotion",
+    "adapter promotion",
+    "model weight update"
   ],
   "excludes": [
     "evaluation only",
@@ -47,13 +64,16 @@
     "quoted old fine tuning",
     "quoted historical training",
     "documentation heading only",
-    "rename that heading only"
+    "rename that heading only",
+    "label data only",
+    "audit a frozen trained model only",
+    "benchmark a frozen model only"
   ],
   "evidence": [
     "Provider/runtime/base-model/tokenizer eligibility and lifecycle identity",
-    "Authorized, deduplicated and leakage-safe train/validation/test dataset provenance",
-    "Objective/hyperparameter/checkpoint/seed/runtime identity plus training and validation evidence",
-    "Untouched base-versus-adapted target/regression/safety evaluation plus serving and rollback evidence",
+    "Authorized, deduplicated and label/teacher-leakage-safe train/validation/test dataset provenance",
+    "Objective/hyperparameter/checkpoint/seed/runtime identity plus trainable-parameter, training and validation evidence",
+    "Untouched base-versus-adapted fixed-boundary target/regression/safety evaluation plus fresh reload, serving and rollback evidence",
     "Hierarchy boundary and selected specialist rationale",
     "Representative success, negative-path, and recovery verification"
   ],
@@ -75,30 +95,45 @@
     "ambiguous": [
       {
         "id": "fine-tuning-training-ambiguous-1",
-        "prompt": "We need to supervised-fine-tune a model and prove the change is better. fine-tuning-training owns data/objective/checkpoints and keeping the decision holdout out of training; llm-evaluation owns the representative held-out comparison and grader validity.",
+        "prompt": "We need to supervised-fine-tune a model and prove the change is better. fine-tuning-training owns data/objective/checkpoints, label and split leakage controls, and keeping the decision holdout out of training; llm-evaluation owns the representative held-out comparison, grader validity and uncertainty.",
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["llm-evaluation"],
-        "tags": ["ambiguous", "neighbor-boundary"]
+        "adjacentSkills": [
+          "llm-evaluation"
+        ],
+        "tags": [
+          "ambiguous",
+          "neighbor-boundary"
+        ]
       },
       {
         "id": "fine-tuning-training-ambiguous-2",
-        "prompt": "The product needs better behavior plus frequently changing private facts. fine-tuning-training owns the demonstrated behavioral adaptation only when weight changes are justified; rag-retrieval-systems owns fresh, access-controlled knowledge and citations.",
+        "prompt": "The product needs better behavior plus frequently changing private facts. fine-tuning-training owns the demonstrated behavioral adaptation only when weight changes are justified and labels are kept out of inputs; rag-retrieval-systems owns fresh, access-controlled knowledge and citations.",
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["rag-retrieval-systems"],
-        "tags": ["ambiguous", "scope-control"]
+        "adjacentSkills": [
+          "rag-retrieval-systems"
+        ],
+        "tags": [
+          "ambiguous",
+          "scope-control"
+        ]
       },
       {
         "id": "fine-tuning-training-ambiguous-3",
-        "prompt": "Run LoRA training and then productionize the resulting adapter. fine-tuning-training owns base/adapter identity, dataset, optimization and checkpoint verification; mlops owns registry, deployment orchestration, rollout and monitoring.",
+        "prompt": "Run LoRA training and then productionize the resulting adapter. fine-tuning-training owns base/adapter identity, leakage-audited dataset, optimization, checkpoint selection and fresh reload verification; mlops owns registry, deployment orchestration, rollout and monitoring.",
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["mlops"],
-        "tags": ["ambiguous", "scope-control"]
+        "adjacentSkills": [
+          "mlops"
+        ],
+        "tags": [
+          "ambiguous",
+          "scope-control"
+        ]
       }
     ],
     "adversarial": [
@@ -108,8 +143,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["documentation"],
-        "tags": ["adversarial", "quoted-decoy"]
+        "adjacentSkills": [
+          "documentation"
+        ],
+        "tags": [
+          "adversarial",
+          "quoted-decoy"
+        ]
       },
       {
         "id": "fine-tuning-training-adversarial-2",
@@ -117,8 +157,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["incident-response"],
-        "tags": ["adversarial", "scope-control"]
+        "adjacentSkills": [
+          "incident-response"
+        ],
+        "tags": [
+          "adversarial",
+          "scope-control"
+        ]
       },
       {
         "id": "fine-tuning-training-adversarial-3",
@@ -126,8 +171,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["documentation"],
-        "tags": ["adversarial", "scope-control"]
+        "adjacentSkills": [
+          "documentation"
+        ],
+        "tags": [
+          "adversarial",
+          "scope-control"
+        ]
       }
     ]
   },
@@ -135,58 +185,82 @@
     {
       "url": "https://developers.openai.com/api/docs/guides/fine-tuning-best-practices",
       "sourceType": "official-docs",
-      "versionScope": "Rolling OpenAI fine-tuning best-practices documentation as available 2026-10-02",
+      "versionScope": "Rolling OpenAI fine-tuning best-practices documentation reviewed 2026-11-08",
       "staleAfterDays": 7,
       "notes": "Current platform wind-down notice, data quality/quantity, train/test separation, prompt inclusion, hyperparameter iteration and training-example token limits.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-08"
     },
     {
       "url": "https://developers.openai.com/api/docs/guides/supervised-fine-tuning",
       "sourceType": "official-docs",
-      "versionScope": "Rolling OpenAI supervised fine-tuning documentation as available 2026-10-02",
+      "versionScope": "Rolling OpenAI supervised fine-tuning documentation reviewed 2026-11-08",
       "staleAfterDays": 7,
       "notes": "Eval-first SFT workflow, representative datasets, base-model comparison, checkpoints, overfitting and provider safety checks.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-08"
     },
     {
       "url": "https://developers.openai.com/api/docs/guides/direct-preference-optimization",
       "sourceType": "official-docs",
-      "versionScope": "Rolling OpenAI DPO documentation as available 2026-10-02",
+      "versionScope": "Rolling OpenAI DPO documentation reviewed 2026-11-08",
       "staleAfterDays": 7,
       "notes": "Current preference-pair objective and constraints, beta semantics, SFT-before-DPO guidance and safety checks.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-08"
     },
     {
-      "url": "https://developers.openai.com/api/docs/guides/rft-use-cases",
+      "url": "https://developers.openai.com/api/reference/resources/fine_tuning",
       "sourceType": "official-docs",
-      "versionScope": "Rolling OpenAI reinforcement fine-tuning use-case documentation as available 2026-10-02",
+      "versionScope": "OpenAI Fine Tuning API reference inspected 2026-11-08; the former RFT use-case guide now redirects here, so RFT suitability guidance is treated as retired rather than re-verified",
       "staleAfterDays": 7,
-      "notes": "RFT suitability, eval-first requirement, base-model learning signal, grader robustness and reward-hacking considerations.",
-      "verifiedAt": "2026-10-02"
+      "notes": "Current fine-tuning job, grader and reinforcement-method API surfaces. The reference does not establish RFT task suitability; that judgment must come from the task's own measurable reward.",
+      "verifiedAt": "2026-11-08"
+    },
+    {
+      "url": "https://developers.openai.com/api/docs/guides/model-optimization",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling OpenAI model-optimization documentation reviewed 2026-11-01",
+      "staleAfterDays": 14,
+      "notes": "Baseline/eval/prompt/fine-tuning decision loop, method boundaries, current fine-tuning transition status and representative-input measurement.",
+      "verifiedAt": "2026-11-01"
+    },
+    {
+      "url": "https://developers.openai.com/api/docs/guides/evals",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling OpenAI Evals documentation reviewed 2026-11-01",
+      "staleAfterDays": 14,
+      "notes": "Explicit test-data schemas, reference-label separation, grader-backed runs and the current read-only/shutdown transition for the hosted Evals surface.",
+      "verifiedAt": "2026-11-01"
+    },
+    {
+      "url": "https://developers.openai.com/api/docs/guides/graders",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling OpenAI grader documentation reviewed 2026-11-01",
+      "staleAfterDays": 14,
+      "notes": "Item/sample namespaces, deterministic versus model graders, score ranges, grader calibration and reward-hacking controls; documented transition status is not treated as runtime availability.",
+      "verifiedAt": "2026-11-01"
     },
     {
       "url": "https://developers.openai.com/api/docs/deprecations",
       "sourceType": "official-docs",
-      "versionScope": "OpenAI deprecations page retrieved on 2026-10-02; self-serve fine-tuning and base-model lifetime sections inspected",
+      "versionScope": "OpenAI deprecations rechecked 2026-11-07; eligibility restrictions, 2027-01-06 new-job cutoff and 2027-01-14 listed GPT-4-series inference shutdown checked",
       "staleAfterDays": 3,
-      "notes": "Current self-serve training eligibility restrictions and 2027-01-06 new-job cutoff remain documented; inference ends with underlying base-model deprecation. No account eligibility or live training was verified.",
-      "verifiedAt": "2026-10-02"
+      "notes": "Already-active accounts lose new fine-tuning job creation on 2027-01-06. Listed GPT-4-series base models and their fine-tunes shut down on 2027-01-14; existing fine-tuned inference otherwise follows its underlying base-model lifetime. These are separate deadlines. No account eligibility or live training was verified.",
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://huggingface.co/docs/transformers/en/peft",
       "sourceType": "official-docs",
-      "versionScope": "Rolling Hugging Face Transformers PEFT integration documentation as available 2026-09-05",
+      "versionScope": "Rolling Hugging Face Transformers PEFT integration documentation reviewed 2026-10-17",
       "staleAfterDays": 30,
       "notes": "Adapter-only trainable parameters/checkpoints, resume/distributed behavior, base-model loading and current LoRA adapter serving mechanics.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-10-17"
     },
     {
       "url": "https://huggingface.co/docs/peft/en/developer_guides/checkpoint",
       "sourceType": "official-docs",
-      "versionScope": "Rolling Hugging Face PEFT checkpoint documentation as available 2026-09-05",
+      "versionScope": "Rolling Hugging Face PEFT checkpoint documentation reviewed 2026-10-17",
       "staleAfterDays": 30,
       "notes": "PEFT checkpoint structure, adapter weights/config, base-model identity and portable reload requirements.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-10-17"
     }
   ],
   "authoringMaturity": "individual"

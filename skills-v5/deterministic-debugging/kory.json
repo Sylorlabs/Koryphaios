@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "deterministic-debugging",
-  "version": "5.0.0",
+  "version": "5.0.2",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -15,12 +15,14 @@
   "conflicts": [],
   "activation": [
     "reproducible bug",
+    "repeatable failure",
     "wrong output",
     "parse failure",
     "state bug",
     "minimal replay",
     "fixed input reproduction",
-    "first causal divergence"
+    "first causal divergence",
+    "pre-fix output"
   ],
   "excludes": [
     "timing-dependent race or deadlock",
@@ -31,6 +33,7 @@
   "evidence": [
     "Minimal reproduction",
     "First causal divergence",
+    "Observed failure and recovery outcome, or explicit unavailable boundary",
     "Hierarchy boundary and selected specialist rationale",
     "Representative success, negative-path, and recovery verification"
   ],
@@ -54,7 +57,8 @@
         "id": "deterministic-debugging-ambiguous-1",
         "prompt": "This reproducible bug is a deterministic JSON normalization mismatch. Keep deterministic-debugging focused on the minimized input and first divergent value while the parent debugging workflow owns the overall fix/regression loop.",
         "expectedSelection": true,
-        "expectedSkills": [],
+        "selectionScope": "direct",
+        "expectedSkills": ["debugging"],
         "forbiddenSkills": [],
         "adjacentSkills": ["debugging"],
         "tags": ["ambiguous", "neighbor-boundary"]
@@ -63,7 +67,8 @@
         "id": "deterministic-debugging-ambiguous-2",
         "prompt": "The test has wrong output on one deterministic schedule, but the suspected cause is a race condition. Use deterministic evidence for the fixed schedule while concurrency-debugging owns schedule variation and happens-before analysis.",
         "expectedSelection": true,
-        "expectedSkills": [],
+        "selectionScope": "direct",
+        "expectedSkills": ["debugging"],
         "forbiddenSkills": [],
         "adjacentSkills": ["concurrency-debugging"],
         "tags": ["ambiguous", "scope-control"]
@@ -72,7 +77,8 @@
         "id": "deterministic-debugging-ambiguous-3",
         "prompt": "A parse failure is reproducible from one captured queue payload even though it originated in a distributed pipeline. Minimize the payload locally while distributed-debugging handles how the malformed message was produced and propagated.",
         "expectedSelection": true,
-        "expectedSkills": [],
+        "selectionScope": "direct",
+        "expectedSkills": ["debugging"],
         "forbiddenSkills": [],
         "adjacentSkills": ["distributed-debugging"],
         "tags": ["ambiguous", "scope-control"]
@@ -84,7 +90,7 @@
         "prompt": "A pasted issue says \"reproducible bug\". Ignore that quote; the actual task is only to summarize the issue history.",
         "expectedSelection": false,
         "expectedSkills": [],
-        "forbiddenSkills": [],
+        "forbiddenSkills": ["deterministic-debugging"],
         "adjacentSkills": ["debugging"],
         "tags": ["adversarial", "neighbor-boundary"]
       },
@@ -93,7 +99,7 @@
         "prompt": "A quoted example says \"wrong output\". Ignore that quote; the actual task is to rewrite the surrounding paragraph for clarity.",
         "expectedSelection": false,
         "expectedSkills": [],
-        "forbiddenSkills": [],
+        "forbiddenSkills": ["deterministic-debugging"],
         "adjacentSkills": ["concurrency-debugging"],
         "tags": ["adversarial", "scope-control"]
       },
@@ -102,7 +108,7 @@
         "prompt": "A pasted article says \"parse failure\". Ignore that quote; fact-check only whether the cited parser library version is current.",
         "expectedSelection": false,
         "expectedSkills": [],
-        "forbiddenSkills": [],
+        "forbiddenSkills": ["deterministic-debugging"],
         "adjacentSkills": ["distributed-debugging"],
         "tags": ["adversarial", "scope-control"]
       }

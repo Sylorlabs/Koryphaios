@@ -6,28 +6,28 @@
 
 - Package authorship is independent from empirical qualification; the audit/evaluation ledger is authoritative for qualification status.
 - Hierarchy: broader implementation; narrower children agentic-systems, prompt-context-engineering, rag-retrieval-systems.
-- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held-out cases through the real resolver.
-- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no-skill pairing, regression retention, and blind semantic judging.
+- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held out cases through the real resolver.
+- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no skill pairing, regression retention, and blind semantic judging.
 - Source discipline: authoritative/spec/reference sources outrank community patterns when they conflict; runtime evidence outranks examples for behavioral claims.
 
 ## Maintained sources
 
 - **OpenAI structured outputs**: https://developers.openai.com/api/docs/guides/structured-outputs
-  - Scope: rolling OpenAI API structured-output documentation as available 2026-09-19.
+  - Scope: rolling OpenAI API structured-output documentation inspected 2026-10-25.
   - Use: schema-constrained model output, supported schema subset, refusal/streaming/output handling and provider-specific structured-response mechanics.
-  - Verified: 2026-09-19; refresh after 14 days.
+  - Verified: 2026-11-08; refresh after 14 days.
 - **OpenAI function calling**: https://developers.openai.com/api/docs/guides/function-calling
-  - Scope: rolling OpenAI API function/tool-calling documentation as available 2026-09-19.
+  - Scope: rolling OpenAI API function/tool-calling documentation inspected 2026-10-25.
   - Use: JSON-Schema function definitions and current strict-mode behavior; strict mode requires schema constraints and current API defaults must be rechecked rather than assumed.
-  - Verified: 2026-09-19; refresh after 14 days.
+  - Verified: 2026-11-08; refresh after 14 days.
 - **Claude tool use**: https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview
-  - Scope: rolling Claude Platform tool-use documentation as available 2026-09-19.
+  - Scope: rolling Claude Platform tool-use documentation inspected 2026-10-25.
   - Use: client-tool `input_schema`, `tool_use` / `tool_result` round trip, and distinction between client-executed and server-executed tools.
-  - Verified: 2026-09-19; refresh after 14 days.
+  - Verified: 2026-11-08; refresh after 14 days.
 - **Claude prompt caching**: https://platform.claude.com/docs/en/build-with-claude/prompt-caching
-  - Scope: rolling Claude Platform prompt-caching documentation as available 2026-09-19.
+  - Scope: rolling Claude Platform prompt-caching documentation inspected 2026-10-25.
   - Use: provider-specific evidence that prompt caching is a latency/cost optimization over stable prefixes, with current default 5-minute and optional 1-hour cache lifetimes; it is not durable application memory.
-  - Verified: 2026-09-19; refresh after 14 days.
+  - Verified: 2026-11-08; refresh after 14 days.
 - **NIST AI RMF Generative AI Profile (NIST AI 600-1)**: https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence
   - Scope: NIST AI 600-1, published 2024-07-26 and NIST page updated 2026-04-08.
   - Use: cross-sector generative-AI risk identification and lifecycle govern/map/measure/manage framing for application risk and evaluation evidence.

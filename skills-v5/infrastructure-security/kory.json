@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "infrastructure-security",
-  "version": "5.1.1",
+  "version": "5.1.4",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -16,44 +16,62 @@
   "activation": [
     "infrastructure security",
     "host hardening",
+    "container runtime",
+    "container runtime hardening",
+    "seccomp policy",
+    "host firewall",
+    "rootless container",
+    "no-new-privileges",
+    "service account token",
+    "service account automount",
+    "default-deny egress",
+    "dependency egress",
+    "admission enforcement",
+    "control-plane port",
     "network policy",
     "deployment security",
     "operational control plane",
     "host network runtime boundary",
     "exposed services segmentation",
-    "privileged execution"
+    "privileged execution",
+    "effective security policy",
+    "break-glass recovery"
   ],
   "excludes": [
     "cloud-provider IAM/resource-policy posture as the primary task",
     "artifact provenance/dependency/signing integrity as the primary task",
-    "application-level authorization or browser security"
+    "application-level authorization or browser security",
+    "application parser/input/session hardening as the primary task",
+    "final executed security verdict for already-defined controls"
   ],
   "evidence": [
     "Runtime privilege and surface inventory",
     "Effective network/admission/deployment policy",
+    "Enforcement decision and runtime-provider capability evidence",
     "Desired-versus-running hardening verification",
     "Hierarchy boundary and selected specialist rationale",
-    "Representative success, negative-path, and recovery verification"
+    "Representative allowed, denied, rollback, and recovery verification",
+    "Explicit synthetic, unavailable, and unverified evidence boundaries"
   ],
   "routing": {
     "positive": [
-      "Review infrastructure security for a Kubernetes workload: non-root execution, capabilities, host namespaces/mounts, service accounts, Pod Security Standards, network policy, admin endpoints, patching, and runtime verification.",
-      "Harden Linux hosts that run a service by removing unused daemons/packages, separating admin identities, reducing sudo/root paths, restricting listeners, applying supported patches, and auditing effective configuration.",
-      "Design network policy for API, worker, database, broker, and admin components with explicit ingress/egress needs, DNS/proxy caveats, management-plane isolation, and runtime reachability tests.",
-      "Review deployment security for a containerized service that currently runs privileged with hostPath mounts and a default service account. Reduce privilege and document any unavoidable exception.",
-      "Secure the operational control plane: authenticated admin access, break-glass ownership, audit logs, configuration-change evidence, immutable deployment defaults, and recovery-safe patch rollout."
+      "Review infrastructure security for a Kubernetes workload: non-root execution, security contexts, seccomp/MAC profiles, host namespaces/mounts, service accounts and token automount, Pod Security Standards admission, default-deny network policy, dependency egress, admin/control-plane ports, and runtime verification.",
+      "Harden Linux hosts that run a service by removing unused daemons/packages, separating admin identities, reducing sudo/root paths, applying host firewall and service-manager restrictions, limiting listeners, applying supported patches, and auditing effective configuration.",
+      "Design network policy for API, worker, database, broker, DNS, proxy, and admin components with explicit default-deny ingress/egress, dependency ports, management/control-plane isolation, policy-provider caveats, and allowed/denied runtime reachability tests.",
+      "Review deployment security for a containerized service that currently runs privileged with hostPath mounts and a default service account. Reduce privilege, constrain devices/namespaces/tokens, prove the runtime result, and document any unavoidable exception.",
+      "Secure the operational control plane: authenticated admin access, break-glass ownership, audit logs, configuration-change evidence, immutable deployment defaults, and recovery-safe patch rollout with a tested rollback path."
     ],
     "negative": [
-      "Audit AWS organization SCPs, account roles, S3 bucket policies, KMS grants, and managed-service public exposure; this is cloud-provider control-plane posture.",
-      "Verify SLSA provenance, Sigstore signatures, dependency lock integrity, SBOM contents, and CI builder identity before artifacts are deployed.",
-      "Design tenant/object/field/action permissions inside the application; host and cluster privilege are already minimized.",
+      "Audit AWS organization SCPs, account roles, S3 bucket policies, KMS grants, provider security groups, workload identity bindings, and managed-service public exposure; this is cloud-provider control-plane posture.",
+      "Verify SLSA provenance, Sigstore signatures, dependency lock integrity, SBOM contents, and CI builder identity before artifacts are deployed; runtime privilege remains a separate infrastructure concern.",
+      "Design tenant/object/field/action permissions, delegation, and revocation inside the application; host and cluster privilege are already minimized.",
       "Design secure boot, signed firmware updates, anti-rollback, debug-port lockdown, and device identity provisioning for an embedded controller.",
-      "Execute the finished host/container/network hardening test plan and issue the security verdict; infrastructure design is already fixed."
+      "Execute the finished host/container/network hardening test plan and issue the final security verdict; infrastructure design is already fixed."
     ],
     "ambiguous": [
       {
         "id": "infrastructure-security-ambiguous-1",
-        "prompt": "The cloud workload also needs infrastructure security inside the cluster: container privilege, Pod Security Standards, host mounts, service accounts, network policy, and admin-plane isolation. Keep provider IAM/resource policy in cloud-security.",
+        "prompt": "The cloud workload also needs infrastructure security inside the cluster: container privilege, runtime profiles, Pod Security Standards, host mounts, service accounts, network policy, and admin-plane isolation. Keep provider IAM, security groups, resource policy, and workload identity bindings in cloud-security.",
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
@@ -62,7 +80,7 @@
       },
       {
         "id": "infrastructure-security-ambiguous-2",
-        "prompt": "The release pipeline verifies signed provenance, then the deployed container must still run with least privilege and constrained network access. Supply-chain-security owns artifact integrity; infrastructure-security owns runtime hardening.",
+        "prompt": "The release pipeline verifies signed provenance, then the deployed container must still run with least privilege, runtime profiles, bounded resources, and constrained network access. Supply-chain-security owns artifact integrity; infrastructure-security owns runtime hardening and evidence of what was admitted and running.",
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
@@ -71,7 +89,7 @@
       },
       {
         "id": "infrastructure-security-ambiguous-3",
-        "prompt": "The service needs application authorization and deployment security. Keep user/resource entitlement in authorization-security while infrastructure-security owns host/container identity, privilege, mounts, listeners, and network segmentation.",
+        "prompt": "The service needs application authorization and deployment security. Keep user/resource entitlement in authorization-security while infrastructure-security owns host/container identity, privilege, mounts, runtime profiles, listeners, and network segmentation.",
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
@@ -132,7 +150,47 @@
       "versionScope": "Kubernetes Pod Security Standards documentation modified 2026-08-02",
       "staleAfterDays": 60,
       "notes": "Privileged/Baseline/Restricted workload controls; pin policy version to the cluster release instead of relying blindly on `latest` in production policy evidence.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
+    },
+    {
+      "url": "https://kubernetes.io/docs/concepts/services-networking/network-policies/",
+      "sourceType": "official-docs",
+      "versionScope": "Kubernetes NetworkPolicy documentation for pod ingress/egress isolation, verified 2026-10-17",
+      "staleAfterDays": 60,
+      "notes": "Workload traffic policy, additive ingress/egress behavior, default-deny construction, and the need to verify enforcement by the installed network provider.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://kubernetes.io/docs/concepts/security/security-checklist/",
+      "sourceType": "official-docs",
+      "versionScope": "Kubernetes Security Checklist documentation verified 2026-10-17",
+      "staleAfterDays": 60,
+      "notes": "Official cluster and workload security checklist covering API exposure, service accounts, pod policy, network policy, audit, nodes, and runtime assumptions.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://csrc.nist.gov/pubs/sp/800/41/r1/final",
+      "sourceType": "spec",
+      "versionScope": "NIST SP 800-41 Rev. 1, current final firewall policy guidance verified 2026-10-17",
+      "staleAfterDays": 365,
+      "notes": "Firewall policy design, management/service path separation, policy ownership, deployment, and testing context.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://docs.docker.com/engine/security/",
+      "sourceType": "official-docs",
+      "versionScope": "Docker Engine security guidance verified 2026-10-17",
+      "staleAfterDays": 180,
+      "notes": "Container daemon exposure, namespaces/cgroups, capabilities, MAC profiles, user namespaces, and container configuration hardening; adapt to the actual runtime.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html",
+      "sourceType": "official-docs",
+      "versionScope": "systemd.exec execution-environment reference, verified 2026-10-17",
+      "staleAfterDays": 180,
+      "notes": "Linux service identity, filesystem/device/namespace restrictions, capabilities, and NoNewPrivileges; confirm directive support on the installed systemd version.",
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://www.cisa.gov/sites/default/files/2023-06/principles_approaches_for_security-by-design-default_508c.pdf",

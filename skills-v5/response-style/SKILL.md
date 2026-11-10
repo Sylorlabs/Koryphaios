@@ -15,6 +15,6 @@ Preserve exact material that matters to correctness, including file paths, comma
 
 When reporting completed work, end with the material outcome: what changed, how it was verified, and any decision or limitation still open. Do not recap the full conversation or manufacture a pending question when none exists.
 
-This skill does not own document type, tutorial structure, technical-document content, executive framing, reference formatting, or dash-free rewriting. Those responsibilities remain with their dedicated communication skills when requested. Apply this style to their output without replacing their task-specific contracts.
+This skill does not own document type, tutorial structure, technical-document content, executive framing, reference formatting, or dash-free rewriting. Those responsibilities remain with their dedicated communication skills when requested. Apply this style to their output without replacing their task specific contracts.
 
 Read [the maintained source map](references/sources.md) when refreshing the clarity, portability, or evaluation basis for this package.

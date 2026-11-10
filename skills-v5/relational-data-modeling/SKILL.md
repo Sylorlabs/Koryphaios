@@ -11,6 +11,8 @@ Start from entities, identities, invariants, lifecycle, cardinality, ownership, 
 
 Verification focus: Validate representative inserts, updates, deletes, concurrent transactions, migrations, uniqueness, referential integrity, and high-value query plans against realistic data shapes.
 
+Preflight the actual database engine, version, isolation behavior, existing schema, and required parent tables before choosing DDL or interpreting a failed check. Keep engine-specific syntax and claims in the selected child skill. A migration is valid only when its intermediate and final rows satisfy the declared invariants; for temporal rows, explicitly resolve legacy timestamps and constraint ordering before creating indexes or checks. Do not describe expected SQL behavior as observed execution.
+
 Failure boundaries: Do not use JSON columns to postpone every modeling decision, rely solely on application validation for database invariants, or choose surrogate keys without understanding natural uniqueness.
 
 ## Hierarchy and routing
@@ -32,6 +34,8 @@ Failure boundaries: Do not use JSON columns to postpone every modeling decision,
 - Attempt representative valid and invalid inserts, updates, and deletes to prove uniqueness, nullability, checks, and referential behavior.
 - Exercise concurrent writes for invariants that can race, using the target engine's transaction semantics.
 - Run migrations from realistic prior schemas and verify both data preservation and constraint establishment.
+- Establish prerequisite tables and representative legacy rows in the verification environment; distinguish a blocked setup from a passing constraint test.
+- Validate migration/backfill data before enabling each dependent constraint or unique index, and record the ordering used.
 - Inspect high-value query plans against representative data shapes after normalization, denormalization, or key changes.
 - Record retention, deletion, timezone, and historical-model assumptions that are product decisions and cannot be proven from SQL documentation alone.
 

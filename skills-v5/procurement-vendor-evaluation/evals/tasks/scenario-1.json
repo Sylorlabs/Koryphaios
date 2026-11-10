@@ -54,9 +54,9 @@
     "explicit unavailable, simulated, inferred, or stale evidence labels"
   ],
   "requiredArtifacts": [
-    "procurement-vendor-evaluation-individual-scenario-1-result",
-    "procurement-vendor-evaluation-individual-scenario-1-verification",
-    "procurement-vendor-evaluation-individual-scenario-1-paired-evaluation"
+    "procurement-vendor-review-individual-scenario-1-result",
+    "procurement-vendor-review-individual-scenario-1-verification",
+    "procurement-vendor-review-individual-scenario-1-paired-comparison"
   ],
   "falsifiableChecks": [
     {

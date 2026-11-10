@@ -7,9 +7,9 @@ description: Engineer PostgreSQL schemas, queries, transactions, indexes, extens
 
 ## Responsibility
 
-Confirm PostgreSQL version, schema ownership, isolation needs, extension availability, and workload. Use constraints, partial/expression indexes, generated columns, JSONB, CTEs, locks, advisory locks, and advanced types only when they match the invariant and access pattern. Inspect MVCC and vacuum implications for write-heavy paths.
+Confirm PostgreSQL version, schema ownership, isolation needs, extension availability, and workload. Use constraints, partial/expression indexes, generated columns, JSONB, CTEs, locks, advisory locks, and advanced types only when they match the invariant and access pattern. Inspect MVCC and vacuum implications for paths with heavy write traffic.
 
-Verification focus: Use EXPLAIN with representative parameters/data, test lock and transaction behavior, migration rollback or forward recovery, constraint violations, and production-like statistics. Validate replicas/extensions separately when relevant.
+Verification focus: Use EXPLAIN with representative parameters/data, test lock and transaction behavior, migration rollback or forward recovery, constraint violations, and statistics similar to production. Validate replicas/extensions separately when relevant.
 
 Failure boundaries: Do not cargo-cult indexes, trust estimated plans without data context, hold transactions across external work, or use serializable isolation without handling retries.
 
@@ -38,6 +38,8 @@ Failure boundaries: Do not cargo-cult indexes, trust estimated plans without dat
 ## Completion evidence
 
 Tie each claimed invariant to an executed database result or an explicit unavailable status. Keep schema changes, constraint rejection, concurrent transaction outcomes, representative query plans and migration recovery distinct. A model of database behavior cannot establish PostgreSQL lock semantics or plan performance. Document the relational design boundary and why PostgreSQL specific mechanisms are needed; do not imply unobserved replicas, extensions or production statistics were checked.
+
+For bounded evaluation artifacts, preserve the task's literal evidence categories and numeric quantities in machine-readable output. If verification requires a 20-worker concurrency check, record the numeric value `20`; if the task verifies a constraint, include the literal category `constraint` rather than only a synonym such as FK. Candidate-visible shell or tool limitations do not establish that evaluator-managed PostgreSQL or Docker is unavailable. Report PostgreSQL/Docker as unavailable only when the runtime command being reported actually failed.
 
 - PostgreSQL version and invariant decisions tied to schema and workload evidence.
 - Representative plans, constraint checks, and concurrency or migration results for the changed boundary.

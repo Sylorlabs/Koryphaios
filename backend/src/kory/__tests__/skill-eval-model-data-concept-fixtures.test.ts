@@ -28,8 +28,12 @@ describe('model and data concept fixtures', () => {
       BUILTIN_SKILL_EVAL_SCORERS,
     );
     expect(MODEL_DATA_CONCEPTS).toHaveLength(4);
-    for (const d of MODEL_DATA_CONCEPTS)
-      expect(rows.find((r) => r.scenarioId === d.id)?.ready, d.id).toBe(true);
+    for (const definition of MODEL_DATA_CONCEPTS) {
+      const row = rows.find((item) => item.scenarioId === definition.id);
+      expect(row, definition.id).toBeDefined();
+      expect(row?.ready, definition.id).toBe(definition.blockers?.length ? false : true);
+      expect(row?.reasons, definition.id).toEqual(definition.blockers ?? []);
+    }
   });
   test('representative scenarios start red', async () => {
     for (const d of [MODEL_DATA_CONCEPTS[0]!, MODEL_DATA_CONCEPTS[2]!]) {

@@ -22,7 +22,7 @@ Verify model grain, invariant tests, critical metric reconciliation, incremental
 ## Primary sources
 
 - dbt documentation root: https://docs.getdbt.com/docs/introduction
-  - Existing navigation source retained from 2026-09-04.
+  - Current navigation source rechecked 2026-10-19.
 - Configure incremental models: https://docs.getdbt.com/docs/build/incremental-models
   - Adopted for incremental filters, `unique_key`, schema-change behavior, and full refresh.
   - Verified 2026-09-06. Page reports last update 2026-09-03.

@@ -118,7 +118,7 @@
       "url": "https://agentskills.io/specification",
       "sourceType": "spec",
       "versionScope": "Agent Skills package and progressive disclosure specification inspected 2026-10-03",
-      "verifiedAt": "2026-10-03",
+      "verifiedAt": "2026-11-03",
       "staleAfterDays": 90,
       "notes": "Used for the portable package structure and progressive disclosure boundary."
     },

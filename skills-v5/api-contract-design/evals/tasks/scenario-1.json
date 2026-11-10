@@ -1,7 +1,7 @@
 {
   "id": "api-contract-design-full-task-1-individual",
   "maturity": "individual",
-  "prompt": "Design the public contract for starting a long-running account export. Clients may retry after a timeout, the same idempotency key with a different body must be rejected, exports can be cancelled only before packaging begins, and status polling must expose retryable versus terminal failures without leaking backend topology. Define request/response schemas, status/error semantics, idempotency behavior, compatibility rules, and runnable contract examples. Backend queue implementation is a separate responsibility.",
+  "prompt": "Complete the executable public contract for starting a long-running account export in src/export-contract.ts and expand tests/export-contract.test.ts. Clients retry after a timeout; omitted includeHistory and false are the same semantic request; the same key with a different normalized body must be rejected. Cancellation is allowed only in queued or running, and polling must distinguish retryable and terminal failures without leaking backend topology. Preserve the supplied contract-context.md byte for byte at its existing path. It is the normative caller reference, not the document to rewrite. Keep the existing exported interfaces and legacyStartClientView compatible. Put any additional request/response, lifecycle, retry, and compatibility guidance or runnable examples in a separate owned artifact. Run maintained caller tests, demonstrate that they reject the original defective implementation, and restore the repair. Backend queue implementation is a separate responsibility.",
   "environment": {
     "kind": "repository",
     "startingState": "fixture://api-contract-design/idempotent-export-api",
@@ -10,7 +10,9 @@
       "state model covering queued, running, packaging, complete, cancelled, and failed",
       "idempotency-key collision fixture with same key/different normalized body",
       "compatibility fixture for an older client that ignores additive response fields",
-      "paired same-model skill/no-skill execution from the identical starting snapshot"
+      "immutable contract-context.md plus editable src/export-contract.ts and tests/export-contract.test.ts",
+      "repository test command: bun test; no queue, database, or deployment service is required",
+      "paired same-model skill/no-skill execution from the identical starting snapshot, owned by the evaluator"
     ]
   },
   "scorers": [
@@ -25,7 +27,9 @@
         "Representative success, negative-path, and recovery verification",
         "hierarchy boundary and specialist selection rationale",
         "representative negative/recovery verification",
-        "source/version boundary when facts can drift"
+        "source/version boundary when facts can drift",
+        "normative input byte preservation and executable caller assertions",
+        "maintained tests pass the repair and reject the original defect for behavioral reasons"
       ]
     },
     {
@@ -44,23 +48,26 @@
     "idempotent-export-api scenario evidence",
     "api-contract-design decision and boundary evidence",
     "Hierarchy boundary and selected specialist rationale",
-    "hierarchy boundary and selected specialist rationale",
-    "paired skill/no-skill run artifacts",
+    "normative input preservation, implementation diff, and caller-promise-to-test mapping",
+    "executed maintained regression results on the repair and original defective implementation",
+    "paired skill/no-skill run artifacts supplied by the evaluator, not authored by the candidate",
     "explicit unavailable, simulated, inferred, or stale evidence labels"
   ],
   "requiredArtifacts": [
     "api-contract-design-individual-scenario-1-result",
     "api-contract-design-individual-scenario-1-verification",
-    "api-contract-design-individual-scenario-1-paired-evaluation"
+    "api-contract-design-individual-scenario-1-paired-evaluation",
+    "src/export-contract.ts",
+    "tests/export-contract.test.ts"
   ],
   "falsifiableChecks": [
     {
       "id": "scope-and-hierarchy",
-      "assertion": "The result must establish the actual api-contract-design boundary and relevant environment before acting, preserve the hierarchy relationship (broader=developer-experience; children=graphql-engineering,grpc-protobuf,http-rest-engineering; near-neighbor=backend-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+      "assertion": "The executable work stays at the caller contract boundary rather than building queue workers or persistence. The evaluator checks the hierarchy relationship (broader=developer-experience; children=graphql-engineering,grpc-protobuf,http-rest-engineering; near-neighbor=backend-engineering) from routing and delivery records; the candidate need not invent a skill-selection narrative."
     },
     {
       "id": "operating-contract",
-      "assertion": "Model domain concepts and caller journeys before choosing transport syntax."
+      "assertion": "The maintained artifact set defines request identity, replay response, legal lifecycle transitions, safe public failures, and installed-client behavior. contract-context.md remains the normative input; any extra schemas or runnable examples agree with it and with the existing in-process caller entry points."
     },
     {
       "id": "execution-invariant",
@@ -68,15 +75,23 @@
     },
     {
       "id": "verification-discipline",
-      "assertion": "Use contract tests and runnable examples for the semantic partitions this export contract actually exposes: a new start, same-key replay, same-key/different-body rejection, cancellation before and after the packaging boundary, retryable versus terminal failure polling, compatibility with the supplied older client, and recovery from an uncertain prior start. Do not invent unrelated pagination, authorization-denial, or deprecation cases."
+      "assertion": "Use maintained contract tests and runnable examples for the semantic partitions this export contract actually exposes: a new start, same-key replay including omitted versus false normalization and current state, same-key/different-body rejection with one logical export, cancellation in queued/running and rejection without mutation in packaging/complete/cancelled/failed, missing-resource errors, retryable versus terminal failure polling, compatibility through the supplied older client, and recovery from an uncertain prior start. Assert values, classifications, identities, and observable state rather than only success flags or test names. Do not invent unrelated pagination, authorization-denial, or deprecation cases."
     },
     {
       "id": "anti-pattern-resistance",
       "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not expose persistence tables directly, return 200 for every semantic failure, add breaking fields/enum behavior casually, or force callers to reverse-engineer retryability."
     },
     {
+      "id": "normative-input-integrity",
+      "assertion": "contract-context.md remains at its original path with identical bytes. Implementation and maintained tests fulfill its promises; additional owned guidance does not weaken it. Editing, removing, moving, or regenerating the normative reference is an integrity failure."
+    },
+    {
+      "id": "executed-regression-rejection",
+      "assertion": "tests/export-contract.test.ts passes against the repaired implementation and fails against the original defective src/export-contract.ts because a caller assertion detects a defect. Restore the repaired source afterward. Hidden checks, keyword-only tests, import failures, and a prose coverage list cannot substitute for maintained executable regression evidence. Rejection of one defect is not proof that all semantic partitions are covered."
+    },
+    {
       "id": "evidence-and-uncertainty",
-      "assertion": "Every material completion claim must map to observable evidence (api-contract-design decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+      "assertion": "Every material completion claim maps to changed artifacts and observed commands/results, with simulated, unavailable, inferred, stale, or unresolved evidence labeled. The evaluator supplies hierarchy observations, paired run artifacts, and independent review records. Do not require the candidate to author those records or infer production queue durability from this local in-process fixture."
     }
   ]
 }

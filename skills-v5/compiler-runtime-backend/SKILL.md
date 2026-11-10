@@ -31,6 +31,8 @@ Engineer language, compiler, interpreter, VM, or runtime machinery with explicit
 4. Add introspection, deterministic fixtures, malformed inputs, and cleanup checks.
 5. Verify semantics, diagnostics, compatibility, performance, and resource lifetime.
 
+Match the proof to the requested scope. For a helper local to one phase, name the producer/consumer representation boundary and verify the local invariant there; do not present a helper test as evidence for the whole compiler, runtime, ABI, or toolchain. When the requested behavior crosses phases, add an end to end or legitimate differential/oracle check through the affected phases, or mark that evidence unavailable. Exercise malformed or partial state and a representative recovery path. Where the affected component is incremental, cancellable, concurrent, restartable, or owns resources, verify the corresponding invalidation, interruption/retry, determinism, and cleanup behavior instead of assuming it from a successful unit test. Do not invent concurrency or recovery semantics that the component does not have.
+
 ### Decisions that must be explicit
 
 - Which layer owns each invariant and diagnostic.
@@ -49,10 +51,11 @@ Engineer language, compiler, interpreter, VM, or runtime machinery with explicit
 
 For garbage collector maps, derive roots from liveness and value kind at the safepoint across registers and spill slots. Preserve every live reference location while excluding integers and dead values; test mixed locations and movement across spills. Tie the result to the phase, representation and runtime contract being changed. A small helper test establishes only that helper, not a complete compiler or ABI claim.
 
-- Semantic and representation contract.
+- Semantic and affected representation/phase contract.
 - Positive, negative, and malformed corpus.
-- Differential or oracle comparison where legitimate.
+- Scope-matched executed regression evidence, plus differential, oracle, or end-to-end comparison where the claim legitimately crosses those boundaries.
 - Target/runtime identity and resource results.
+- Recovery, interruption, invalidation, determinism, and cleanup evidence matched to the behaviors the component actually exposes.
 
 ### Anti-misinterpretation boundaries
 
@@ -63,7 +66,8 @@ For garbage collector maps, derive roots from liveness and value kind at the saf
 
 ## Completion evidence
 
-- Semantic and phase contract
-- Differential and end-to-end language tests
+- Semantic and affected phase/representation contract
+- Scope-matched executed regressions plus legitimate differential, oracle, or end-to-end language checks
+- Negative/malformed and recovery/cleanup evidence when those behaviors are applicable
 
 Use [the maintained source map](references/sources.md) for version-sensitive facts and source conflicts.

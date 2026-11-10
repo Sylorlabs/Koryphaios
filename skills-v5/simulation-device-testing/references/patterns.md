@@ -55,7 +55,7 @@ Always include a clean baseline and a post-fault recovery case. If the fault can
 For a scenario executed at multiple evidence levels:
 
 1. Use the same logical input trace and oracle where the systems expose comparable observables.
-2. Record level-specific setup separately; do not pretend virtual time and wall-clock time are equivalent.
+2. Record level-specific setup separately; do not pretend virtual time and wall clock time are equivalent.
 3. Compare state transitions, ordering, accepted/rejected inputs, and timing only within declared tolerances.
 4. Classify each mismatch as `implementation`, `model`, `fixture`, `calibration`, `timing`, or `unresolved` only when evidence supports the label.
 5. Preserve unresolved divergence as a failed/blocked qualification result.

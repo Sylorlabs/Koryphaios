@@ -102,31 +102,31 @@
       "versionScope": "Expo documentation index inspected 2026-10-03",
       "staleAfterDays": 30,
       "notes": "Expo platform discovery covering universal JavaScript/TypeScript apps, EAS workflows, Expo Router, SDK modules, examples, and deployment entry points.",
-      "verifiedAt": "2026-10-03"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://docs.expo.dev/develop/development-builds/introduction/?buildenv=build-with-eas",
       "sourceType": "official-docs",
-      "versionScope": "Expo development-build introduction as verified 2026-09-06",
+      "versionScope": "Expo development-build introduction as inspected 2026-11-07",
       "staleAfterDays": 30,
       "notes": "Adopted for distinguishing custom native development builds from Expo Go's fixed native runtime.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://docs.expo.dev/develop/development-builds/faq/",
       "sourceType": "official-docs",
-      "versionScope": "Expo development-build FAQ as verified 2026-09-06",
+      "versionScope": "Expo development-build FAQ as inspected 2026-11-07",
       "staleAfterDays": 30,
       "notes": "Adopted for conditional rebuild requirements when native libraries or configuration change.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://docs.expo.dev/eas-update/runtime-versions/",
       "sourceType": "official-docs",
-      "versionScope": "EAS Update runtime-version documentation as verified 2026-09-06",
+      "versionScope": "Expo runtime-version documentation as inspected 2026-11-07",
       "staleAfterDays": 30,
       "notes": "Adopted for native-runtime and OTA update compatibility boundaries; matching versions do not prove app correctness.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     }
   ],
   "authoringMaturity": "individual"

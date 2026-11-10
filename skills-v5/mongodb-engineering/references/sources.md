@@ -16,27 +16,27 @@
 
 Documentation establishes MongoDB semantics and supported mechanisms. It does not prove the target collection's cardinality, index selectivity, aggregation memory profile, replication behavior, or latency. Those claims require current `explain` output, representative data, and deployment evidence.
 
-The four specific pages below were reopened on 2026-09-06 and registered in `kory.json`; refresh within 60 days. Adapt their modeling and plan evidence to the target server version. The manual index remains a discovery source with its inherited date, not a replacement for these specific records.
+The four specific pages below were reopened on 2026-11-07 and registered in `kory.json`; refresh within 60 days. Adapt their modeling and plan evidence to the target server version. The manual index was re-opened on 2026-10-19 as a current discovery source, not a replacement for these specific records.
 
 ## Qualification basis
 
 - Package authorship is independent from empirical qualification; the audit/evaluation ledger is authoritative for qualification status.
 - Hierarchy: broader backend-engineering.
-- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held-out cases through the real resolver.
-- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no-skill pairing, regression retention, and blind semantic judging.
+- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held out cases through the real resolver.
+- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no skill pairing, regression retention, and blind semantic judging.
 - Source discipline: authoritative/spec/reference sources outrank community patterns when they conflict; runtime evidence outranks examples for behavioral claims.
 
 ## Maintained sources
 
 - **MongoDB data modeling best practices**: https://www.mongodb.com/docs/manual/data-modeling/best-practices/
-  - Scope: current MongoDB manual, checked 2026-09-06.
+  - Scope: current MongoDB manual, checked 2026-11-07.
   - Use: single-document atomicity, embedding/reference tradeoffs, and index cost framing.
 - **Embedded data in your MongoDB schema**: https://www.mongodb.com/docs/manual/data-modeling/embedding/
-  - Scope: current MongoDB manual, checked 2026-09-06.
+  - Scope: current MongoDB manual, checked 2026-11-07.
   - Use: embedding benefits, read locality, atomic update boundary, and document size constraint.
 - **Reference data in your MongoDB schema**: https://www.mongodb.com/docs/manual/data-modeling/referencing/
-  - Scope: current MongoDB manual, checked 2026-09-06.
+  - Scope: current MongoDB manual, checked 2026-11-07.
   - Use: conditions that favor references over embedding.
 - **MongoDB explain results**: https://www.mongodb.com/docs/manual/reference/explain-results/
-  - Scope: current MongoDB manual, checked 2026-09-06.
+  - Scope: current MongoDB manual, checked 2026-11-07.
   - Use: observable query-plan evidence.

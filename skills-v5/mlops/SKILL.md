@@ -7,6 +7,8 @@ description: Engineer reproducible ML pipelines, model lineage, promotion, servi
 
 Treat production ML as a lineage graph, not a model file. A deployable revision must be traceable to code, data, feature definitions, environment, training run, model artifact/signature, evaluation, approval, serving configuration and rollback state.
 
+Use a fail-closed promotion record with separate, immutable identities for every node in that graph: dataset manifest, feature/view revision, source revision, training run, artifact digest and signature, evaluation report and slices, approval, registry version, deployment/endpoint revision, serving configuration, and rollback target. A mutable alias, a caller-supplied boolean such as `featureParity: true`, or a single rollback string is evidence of a state claim, not proof of the underlying artifact, comparison, or approval. Missing identity or evidence blocks promotion.
+
 ## Workflow
 
 1. **Define lifecycle identities.** Distinguish source revision, dataset snapshot, feature-definition/view revision, training run, model artifact/digest, registry version/alias, evaluation report, endpoint/deployment revision and runtime configuration. Do not collapse “model version” and “what production serves” into one mutable name.
@@ -17,6 +19,7 @@ Treat production ML as a lineage graph, not a model file. A deployable revision 
 6. **Gate on evaluation evidence.** A registry status is metadata, not proof of quality. Tie promotion to the exact evaluation report and slices that were run on the exact artifact/configuration. Keep final decision data outside training and automated hyperparameter/checkpoint selection.
 7. **Verify train-serving parity.** Compare representative offline and online features, schemas, preprocessing and model outputs. Exercise missing entities, nulls/defaults, stale data, categorical/schema changes and dependency/version skew before canary traffic.
 8. **Deploy reversibly.** Use shadow, canary or staged traffic when appropriate. Pin endpoint configuration, model artifact, feature view/store revision and resource settings. Define health/quality gates and a rollback that restores a known-good deployment without retraining.
+9. **Make the control loops idempotent and independent of the candidate.** A trigger that repeats must not fork a second pipeline run: key the run on the trigger's stable identity, treat the repeat as a no-op that returns the existing run, and resume a failed pipeline from its failed stage rather than restarting the graph. Rollback decisions must be driven by production monitoring of the deployed artifact, not by the candidate's own evaluation metrics, because a candidate that reports its own health can always promote itself. Promotion requires the complete healthy evidence set for that exact artifact: when any node of the lineage graph is missing, stale or unverified, the gate stays closed and says which one blocked it.
 9. **Monitor service and model behavior separately.** Track request/error/latency/resource health plus schema violations, feature freshness, missingness, distribution shifts, prediction distribution and delayed outcome quality. A service can be healthy while model quality degrades, and vice versa.
 10. **Treat drift as evidence, not an automatic retraining command.** Define baseline/window/sample requirements and action thresholds. Diagnose pipeline/schema/product changes before retraining. New training data must pass provenance, leakage and evaluation gates just like the original release.
 11. **Design retraining idempotently.** Scheduled/event-triggered jobs need bounded concurrency, immutable run inputs, deduplicated triggers, resumable/idempotent stages and explicit failure state. A failed retrain must not replace the currently serving model.
@@ -24,15 +27,17 @@ Treat production ML as a lineage graph, not a model file. A deployable revision 
 13. **Audit registry and feature-store product semantics.** Verify current platform version, alias/stage behavior, online-store null/freshness semantics, sync state and deprecations before encoding operational assumptions. Do not infer semantics from old examples.
 14. **Close the lineage loop.** Persist deployment decisions, artifacts, hashes, evaluation evidence, monitoring incidents and rollback results so any production prediction can be mapped back to the serving model/configuration and its qualification record.
 
+Keep candidate-pipeline state, serving state, and monitoring/rollback state independently observable. A duplicate trigger must resolve to the same immutable input identity and resume from a recorded failed stage; degraded production quality must be able to roll back the known-good serving revision even when a candidate pipeline is healthy or incomplete. Test both transitions, rather than merely toggling a gate value in memory.
+
 ## Boundaries
 
 Represent promotion as a conjunction of explicit lineage, artifact trust, approval, feature parity and canary gates. A missing gate is not a pass and healthy service metrics do not establish model compatibility. Keep candidate pipeline state separate from serving state so production rollback remains possible while training is incomplete. Deduplicate triggers by immutable input identity and resume from the failed stage without replaying already committed stages. Preserve the gate observations and recovery results with the deployment record.
 
 - `fine-tuning-training` owns how model/adapter weights are changed and checkpointed. `mlops` owns reproducible orchestration, packaging, qualification, registry, deployment and operations of the resulting artifact.
 - `ml-evaluation` owns general evaluation design and statistics. `mlops` owns binding an approved evaluation to an immutable artifact and enforcing it as a release gate.
-- `cicd-engineering` owns generic software build/test/release automation. `mlops` adds ML-specific data/feature/model lineage, offline-online parity, model qualification and retraining lifecycle.
+- `cicd-engineering` owns generic software build/test/release automation. `mlops` adds data, feature and model lineage that is specific to ML, offline/online parity, model qualification and retraining lifecycle.
 - `release-planning` owns release sequencing/stakeholder rollout strategy. `mlops` owns model-serving revisions, canary/shadow evidence and technical rollback contracts.
-- `observability-sre` owns broad service telemetry/reliability. `mlops` owns ML-specific feature/schema/prediction/outcome monitoring and model-quality actions.
+- `observability-sre` owns broad service telemetry/reliability. `mlops` owns monitoring of features, schemas, predictions and outcomes that is specific to ML, plus model quality actions.
 - Model architecture selection, pure data-science experimentation, ANN tuning or application behavior do not activate this skill unless lifecycle/serving/registry/feature-store operations are part of the current task.
 
 Use [the maintained source map](references/sources.md) before relying on platform-specific registry, feature-store, pipeline or serving behavior.

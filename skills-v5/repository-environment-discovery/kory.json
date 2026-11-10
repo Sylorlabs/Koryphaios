@@ -126,8 +126,8 @@
     {
       "url": "https://developers.openai.com/codex/agent-configuration/agents-md",
       "sourceType": "official-docs",
-      "versionScope": "OpenAI Codex AGENTS.md guidance retrieved on 2026-10-02; redirects to ChatGPT Learn",
-      "verifiedAt": "2026-10-02",
+      "versionScope": "OpenAI Codex AGENTS.md guidance retrieved on 2026-11-01; redirects to ChatGPT Learn",
+      "verifiedAt": "2026-11-01",
       "staleAfterDays": 30,
       "notes": "Instruction discovery and precedence for global and repository-scoped AGENTS.md guidance."
     },

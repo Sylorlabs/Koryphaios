@@ -10,7 +10,7 @@ Optimize for exact retrieval, not narrative teaching. A reference is trustworthy
 ## Workflow
 
 1. Define the reference surface and version boundary: API/service version, command release, configuration/schema dialect, product edition, language/runtime, platform, generated artifact revision, or repository commit/tag. Do not merge incompatible versions into one timeless table.
-2. Identify the source-of-truth hierarchy. Prefer normative specifications and generated schemas/IDL/OpenAPI where they govern; then active parser/handler/configuration code and tests; then maintained docs/examples. If generated schema and normative specification disagree, preserve the authoritative precedence for that technology and flag the inconsistency.
+2. Identify the source-of-truth hierarchy. Prefer normative specifications and generated schemas/IDL/OpenAPI where they govern; then active parser/handler/configuration code and tests; then maintained docs/examples. If generated schema and normative specification disagree, preserve the authoritative precedence for that technology and flag the inconsistency. Do not flatten distinct authoritative layers into one guessed generic shape: a generated schema can remain authoritative for declared fields while an active validator owns defaults/nullability and handlers own runtime-only errors.
 3. Inventory coverage before writing. Enumerate endpoints/operations, commands/subcommands/flags, configuration keys, schema properties, enum values, errors, events, or other reference units from the source of truth so undocumented omissions are detectable.
 4. For each applicable item capture exact semantics:
    - canonical name/path/signature;
@@ -21,10 +21,11 @@ Optimize for exact retrieval, not narrative teaching. A reference is trustworthy
    - errors/status codes/failure conditions where relevant;
    - security/permission/scope requirements where relevant;
    - minimal examples tied to the documented version.
-5. Distinguish `omitted`, `null`, empty, defaulted, and inferred values when the system does. Do not manufacture a default because an example repeatedly uses one.
-6. Validate examples against the real schema/parser/CLI/API/test fixture where practical. A syntactically plausible example is not evidence that the target accepts it. Label illustrative examples if validation is unavailable.
-7. Structure for lookup: stable headings, consistent field order, searchable canonical names, tables where they improve exact comparison, and cross-links rather than duplicated definitions. Keep rationale and procedures brief or link to the appropriate explanation/how-to artifact.
-8. Run a coverage/fidelity review: source units documented, documented units still exist, names/types/defaults/constraints/errors match source, examples validate, deprecated/versioned behavior is scoped, and aliases do not silently create duplicate canonical entries.
+5. Distinguish `omitted`, `null`, empty, defaulted, and inferred values when the system does. Read the actual representation used by the active source before transforming it: for example, a validator may expose an `omittedDefaults` map and a `nullAllowed` list rather than per-field objects. Preserve the requested output shape and semantics instead of inventing a normalized representation. Do not manufacture a default because an example repeatedly uses one.
+6. When the task identifies stale prose-only fields, errors, aliases, or examples, explicitly account for them as ignored/conflicting stale material while deriving the published facts from active sources. Do not silently drop the stale-item inventory when the reference contract requires showing what was excluded.
+7. Validate examples against the real schema/parser/CLI/API/test fixture where practical. A syntactically plausible example is not evidence that the target accepts it. Label illustrative examples if validation is unavailable.
+8. Structure for lookup: stable headings, consistent field order, searchable canonical names, tables where they improve exact comparison, and cross-links rather than duplicated definitions. Keep rationale and procedures brief or link to the appropriate explanation/how-to artifact.
+9. Run a coverage/fidelity review: source units documented, documented units still exist, names/types/defaults/constraints/errors match source, examples validate, deprecated/versioned behavior is scoped, stale-only material is accounted for, and aliases do not silently create duplicate canonical entries.
 
 ## Boundaries
 

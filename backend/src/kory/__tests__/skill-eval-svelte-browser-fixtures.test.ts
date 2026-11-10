@@ -10,8 +10,10 @@ import {
   SVELTE_BROWSER_SKILL_EVAL_MATERIALIZERS,
   SVELTE_BROWSER_SKILL_EVAL_SCORERS,
 } from '../skill-eval-svelte-browser-fixtures';
+import { browserControlTest } from './browser-runtime-test-policy';
 
 const roots: string[] = [];
+const browserTest = browserControlTest('Svelte browser', SVELTE_BROWSER_SKILL_EVAL_MATERIALIZERS.flatMap((item) => item.readinessBlockers ?? []));
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -194,7 +196,16 @@ function writeArtifacts(root: string, number: 1 | 2): void {
 }
 
 describe('Svelte 5 real-browser V5 fixtures', () => {
-  test('derived-state scenario starts red then passes real runes, shared-control, state, focus, and destruction checks', async () => {
+  test('both Svelte scenarios keep their real-runtime registrations when assets are unavailable', () => {
+    for (const id of [SVELTE_BROWSER_EVAL_CONSTANTS.stateScenario, SVELTE_BROWSER_EVAL_CONSTANTS.routeScenario]) {
+      const { materializer, scorer } = input(id, 'unused');
+      expect(materializer.id).toContain('real-browser');
+      expect(scorer.scenarioIds).toContain(id);
+      expect((materializer.readinessBlockers ?? []).every((reason) => reason.length > 10)).toBe(true);
+    }
+  });
+
+  browserTest('derived-state scenario starts red then passes real runes, shared-control, state, focus, and destruction checks', async () => {
     const root = workspace();
     const { materializer, scorer, scoreInput } = input(
       SVELTE_BROWSER_EVAL_CONSTANTS.stateScenario,
@@ -214,7 +225,7 @@ describe('Svelte 5 real-browser V5 fixtures', () => {
     expect(green.verification).toBe(1);
   }, 30_000);
 
-  test('route-race scenario starts red then passes real async teardown, history, retry/focus, and destruction checks', async () => {
+  browserTest('route-race scenario starts red then passes real async teardown, history, retry/focus, and destruction checks', async () => {
     const root = workspace();
     const { materializer, scorer, scoreInput } = input(
       SVELTE_BROWSER_EVAL_CONSTANTS.routeScenario,
@@ -234,7 +245,7 @@ describe('Svelte 5 real-browser V5 fixtures', () => {
     expect(green.verification).toBe(1);
   }, 30_000);
 
-  test('honest not-run artifacts allow host-owned real-browser verification', async () => {
+  browserTest('honest not-run artifacts allow host-owned real-browser verification', async () => {
     const root = workspace();
     const { materializer, scorer, scoreInput } = input(
       SVELTE_BROWSER_EVAL_CONSTANTS.stateScenario,
@@ -250,8 +261,10 @@ describe('Svelte 5 real-browser V5 fixtures', () => {
           status: 'not_run',
           reason: 'No browser tool was available to the authoring agent.',
           authored_evidence: {
-            success_path: 'Derived visible state preserves a chosen item through unrelated prop updates.',
-            failure_recovery_path: 'When the chosen item disappears, selection falls back to a remaining visible item.',
+            success_path:
+              'Derived visible state preserves a chosen item through unrelated prop updates.',
+            failure_recovery_path:
+              'When the chosen item disappears, selection falls back to a remaining visible item.',
             browser_observations: [],
           },
         },
@@ -268,15 +281,40 @@ describe('Svelte 5 real-browser V5 fixtures', () => {
           environment: {
             reactivity: 'Svelte 5 runes are present in the candidate and shared control.',
             exact_versions: 'Unknown to the authoring agent.',
-            execution_boundary: 'Derived state renders during component updates; focus behavior is browser owned.',
+            execution_boundary:
+              'Derived state renders during component updates; focus behavior is browser owned.',
           },
           scenarios: [
-            { name: 'selection survives unrelated prop updates', steps: ['choose Beta', 'rapid update'], expect: ['Beta remains selected'] },
-            { name: 'removed selection recovers', steps: ['remove Beta'], expect: ['remaining item becomes selected'] },
-            { name: 'loading, empty, error, and recovery', steps: ['exercise states'], expect: ['states render and recover'] },
-            { name: 'keyboard and focus', steps: ['Enter', 'ArrowDown', 'Enter'], expect: ['selection and focus restore'] },
-            { name: 'narrow viewport', steps: ['set viewport to 390'], expect: ['no horizontal overflow'] },
-            { name: 'destruction', steps: ['destroy component'], expect: ['shared control tears down'] },
+            {
+              name: 'selection survives unrelated prop updates',
+              steps: ['choose Beta', 'rapid update'],
+              expect: ['Beta remains selected'],
+            },
+            {
+              name: 'removed selection recovers',
+              steps: ['remove Beta'],
+              expect: ['remaining item becomes selected'],
+            },
+            {
+              name: 'loading, empty, error, and recovery',
+              steps: ['exercise states'],
+              expect: ['states render and recover'],
+            },
+            {
+              name: 'keyboard and focus',
+              steps: ['Enter', 'ArrowDown', 'Enter'],
+              expect: ['selection and focus restore'],
+            },
+            {
+              name: 'narrow viewport',
+              steps: ['set viewport to 390'],
+              expect: ['no horizontal overflow'],
+            },
+            {
+              name: 'destruction',
+              steps: ['destroy component'],
+              expect: ['shared control tears down'],
+            },
           ],
         },
         null,
@@ -287,9 +325,9 @@ describe('Svelte 5 real-browser V5 fixtures', () => {
     expect(scorer.id).toEndWith('@2');
     expect(green.passed, green.evidence.join('\n')).toBe(true);
     expect(green.verification).toBe(1);
-    expect(green.evidence.some((item) => item.includes('host real-browser execution remains required'))).toBe(
-      true,
-    );
+    expect(
+      green.evidence.some((item) => item.includes('host real-browser execution remains required')),
+    ).toBe(true);
   }, 30_000);
 
   test('tampering with the fixed shared control fails integrity', async () => {

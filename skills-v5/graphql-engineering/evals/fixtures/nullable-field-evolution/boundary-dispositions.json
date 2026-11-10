@@ -1,0 +1,30 @@
+{
+  "fixture": "nullable-field-evolution",
+  "evidenceStatus": "local-fixture-only",
+  "boundaries": {
+    "mutation-authorization": {
+      "status": "not-applicable",
+      "reason": "The supplied operation and fixture are read-only and expose no avatar mutation."
+    },
+    "n-plus-one-and-batching": {
+      "status": "not-applicable",
+      "reason": "The fixture resolves one User and does not contain repeated avatar lookups or a backend call-count seam."
+    },
+    "pagination": {
+      "status": "not-applicable",
+      "reason": "The migration targets singular Query.user and contains no collection or connection boundary."
+    },
+    "authorization-bypass": {
+      "status": "unavailable",
+      "reason": "No viewer context, authorization policy, protected field, or live resolver boundary is supplied by the fixture."
+    },
+    "query-cost-and-abuse-limits": {
+      "status": "unavailable",
+      "reason": "No installed validator, cost analyzer, transport limit, or downstream workload is supplied by the fixture."
+    }
+  },
+  "nonClaims": [
+    "These dispositions do not prove production authorization, batching, pagination stability, or query safety.",
+    "The executor probe reports GraphQL execution and introspection as unavailable when graphql-js cannot be imported."
+  ]
+}

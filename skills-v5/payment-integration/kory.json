@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "payment-integration",
-  "version": "5.1.2",
+  "version": "5.1.3",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -107,26 +107,26 @@
     {
       "url": "https://docs.stripe.com/api/idempotent_requests",
       "sourceType": "official-docs",
-      "versionScope": "Stripe idempotent requests documentation inspected 2026-09-06",
+      "versionScope": "Stripe idempotent requests documentation inspected 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Adopt logical-operation identity and provider-defined retry semantics; adapt to the configured payment provider rather than requiring Stripe.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://docs.stripe.com/payments/paymentintents/lifecycle",
       "sourceType": "official-docs",
-      "versionScope": "Stripe PaymentIntent lifecycle documentation inspected 2026-09-06",
+      "versionScope": "Stripe PaymentIntent lifecycle documentation inspected 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Asynchronous lifecycle example; reject treating client redirects as proof of final payment state or imposing PaymentIntents universally.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
-      "url": "https://docs.stripe.com/webhooks/signature",
+      "url": "https://docs.stripe.com/events/manage-webhook-endpoints",
       "sourceType": "official-docs",
-      "versionScope": "Stripe webhook signature guidance inspected 2026-09-06",
+      "versionScope": "Stripe webhook signature guidance inspected 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Signature validation uses the unmodified request body and correct endpoint secret; runtime verification remains required.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://docs.stripe.com/webhooks",
@@ -134,7 +134,7 @@
       "versionScope": "Stripe webhook delivery guidance inspected 2026-09-06",
       "staleAfterDays": 60,
       "notes": "Delivery retries, duplicate events, and lack of event-order guarantee; adapt state reconciliation to the actual provider contract.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://docs.stripe.com/payments",
@@ -142,7 +142,7 @@
       "versionScope": "Stripe payments landing page inspected 2026-10-03",
       "staleAfterDays": 30,
       "notes": "Stripe payment integration discovery across Checkout, advanced payment forms, subscriptions, payment methods, and build/test resources. Lifecycle, idempotency, and webhook semantics are sourced by the more specific maintained entries.",
-      "verifiedAt": "2026-10-03"
+      "verifiedAt": "2026-11-03"
     }
   ],
   "authoringMaturity": "individual"

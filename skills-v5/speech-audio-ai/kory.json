@@ -5,13 +5,25 @@
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
-  "domains": ["ai", "ml", "audio", "speech"],
-  "targetMedia": ["any"],
+  "domains": [
+    "ai",
+    "ml",
+    "audio",
+    "speech"
+  ],
+  "targetMedia": [
+    "any"
+  ],
   "pathScopes": [],
   "contextBudget": 7000,
-  "broader": ["implementation"],
+  "broader": [
+    "implementation"
+  ],
   "facets": [],
-  "requires": ["verification", "ml-evaluation"],
+  "requires": [
+    "verification",
+    "ml-evaluation"
+  ],
   "conflicts": [],
   "activation": [
     "speech recognition",
@@ -82,8 +94,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["agentic-systems"],
-        "tags": ["ambiguous", "neighbor-boundary"]
+        "adjacentSkills": [
+          "agentic-systems"
+        ],
+        "tags": [
+          "ambiguous",
+          "neighbor-boundary"
+        ]
       },
       {
         "id": "speech-audio-ai-ambiguous-2",
@@ -91,8 +108,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["fine-tuning-training"],
-        "tags": ["ambiguous", "scope-control"]
+        "adjacentSkills": [
+          "fine-tuning-training"
+        ],
+        "tags": [
+          "ambiguous",
+          "scope-control"
+        ]
       },
       {
         "id": "speech-audio-ai-ambiguous-3",
@@ -100,8 +122,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["embedding-systems"],
-        "tags": ["ambiguous", "scope-control"]
+        "adjacentSkills": [
+          "embedding-systems"
+        ],
+        "tags": [
+          "ambiguous",
+          "scope-control"
+        ]
       }
     ],
     "adversarial": [
@@ -111,8 +138,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["implementation"],
-        "tags": ["adversarial", "quoted-decoy"]
+        "adjacentSkills": [
+          "implementation"
+        ],
+        "tags": [
+          "adversarial",
+          "quoted-decoy"
+        ]
       },
       {
         "id": "speech-audio-ai-adversarial-2",
@@ -120,8 +152,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["documentation"],
-        "tags": ["adversarial", "inert-evidence"]
+        "adjacentSkills": [
+          "documentation"
+        ],
+        "tags": [
+          "adversarial",
+          "inert-evidence"
+        ]
       },
       {
         "id": "speech-audio-ai-adversarial-3",
@@ -129,8 +166,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["documentation"],
-        "tags": ["adversarial", "filename-decoy"]
+        "adjacentSkills": [
+          "documentation"
+        ],
+        "tags": [
+          "adversarial",
+          "filename-decoy"
+        ]
       }
     ]
   },
@@ -138,26 +180,34 @@
     {
       "url": "https://developers.openai.com/api/docs/models/gpt-transcribe",
       "sourceType": "official-docs",
-      "versionScope": "OpenAI GPT-Transcribe model documentation as available 2026-10-02",
+      "versionScope": "OpenAI GPT-Transcribe model documentation as available 2026-11-01",
       "staleAfterDays": 14,
       "notes": "Current file/streaming transcription model behavior, hints and supported transcription surfaces.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-01"
     },
     {
       "url": "https://developers.openai.com/api/docs/models",
       "sourceType": "official-docs",
-      "versionScope": "OpenAI model catalog as available 2026-10-02",
+      "versionScope": "OpenAI realtime, transcription and speech model catalog reviewed 2026-11-08 via its Markdown documentation variant",
       "staleAfterDays": 7,
-      "notes": "Current realtime, transcription and speech-generation model families; verify aliases and deprecations before migrations.",
-      "verifiedAt": "2026-10-02"
+      "notes": "Catalog lists GPT-Realtime-2.1, GPT-Live-Transcribe and GPT-Transcribe alongside older models. Catalog inclusion does not establish account access or retirement dates; consult the separately cited deprecations schedule and verify aliases and migration endpoints.",
+      "verifiedAt": "2026-11-08"
+    },
+    {
+      "url": "https://developers.openai.com/api/docs/deprecations",
+      "sourceType": "official-docs",
+      "versionScope": "OpenAI dated speech synthesis and transcription retirement notices reviewed 2026-11-07 via the Markdown documentation variant",
+      "staleAfterDays": 3,
+      "notes": "tts-1, tts-1-hd and listed gpt-4o-mini-tts snapshots retire 2027-01-06. whisper-1 and listed GPT-4o transcription variants retire 2027-02-26; the v1 audio translation endpoint also closes then. Check exact snapshot rows and migration endpoints before use. No account eligibility or live inference was verified.",
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://docs.cloud.google.com/speech-to-text/docs/streaming-recognize",
       "sourceType": "official-docs",
-      "versionScope": "Google Cloud Speech-to-Text streaming documentation as available 2026-09-05",
+      "versionScope": "Google Cloud Speech-to-Text streaming documentation as available 2026-10-04",
       "staleAfterDays": 30,
       "notes": "Streaming recognition request/result semantics and current transport constraints.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://docs.cloud.google.com/speech-to-text/docs/reference/rest/v2/StreamingRecognitionResult",
@@ -165,15 +215,15 @@
       "versionScope": "Google Cloud Speech-to-Text v2 streaming result reference",
       "staleAfterDays": 30,
       "notes": "Interim versus final results, stability, result end offsets, channel tags and language codes.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://docs.cloud.google.com/text-to-speech/docs/reference/rest/v1/AudioConfig",
       "sourceType": "official-docs",
-      "versionScope": "Google Cloud Text-to-Speech AudioConfig reference as available 2026-09-05",
+      "versionScope": "Google Cloud Text-to-Speech AudioConfig reference as available 2026-10-04",
       "staleAfterDays": 30,
       "notes": "Encoding, speaking rate, pitch, volume, sample rate and playback-profile configuration.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://www.nist.gov/itl/ai-risk-management-framework",

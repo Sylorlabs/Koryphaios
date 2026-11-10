@@ -1,38 +1,47 @@
 {
   "id": "infrastructure-security-full-task-1",
   "maturity": "individual",
-  "prompt": "Harden a Kubernetes namespace hosting an API, worker, Redis, and an admin-only diagnostics endpoint. The current manifests use the default service account, allow privilege escalation, run one container as root, mount `/var/run` from the host, have no NetworkPolicy, and expose diagnostics through the same ingress as the public API. Produce a deployment-security design that pins an appropriate Pod Security Standards version, reduces container privilege/capabilities/mounts, creates purpose-specific service accounts, separates the admin control plane, defines explicit ingress/egress including DNS/dependency needs, and verifies effective runtime identity, mounts, capabilities, listeners, and reachability after deployment. Image provenance is already handled by supply-chain-security.",
+  "prompt": "Harden a Kubernetes namespace hosting an API, worker, Redis, and an admin-only diagnostics endpoint. The current manifests use the default service account, allow privilege escalation, run one container as root, mount `/var/run` from the host, have no NetworkPolicy, and expose diagnostics through the same ingress as the public API. Produce a deployment-security design that pins an appropriate Pod Security Standards version and enforce mode, applies complete workload security contexts (fixed non-root UID/GID, privileged false, no privilege escalation, dropped capabilities, seccomp/MAC, read-only root, devices/namespaces/mounts, and bounded CPU/memory/PID/storage), creates purpose-specific service accounts with least-privilege Role/RoleBinding evidence and token-automount controls, separates the admin control plane, and defines explicit default-deny ingress and egress including DNS and named dependency destinations. Declare one port map and use it consistently for public API, admin diagnostics, Redis, DNS, dependencies, and any Kubernetes/host control-plane path; do not conflate admin and control-plane ports. Verify effective identity, mounts, capabilities, profiles, resources, listeners, admission, policy-provider enforcement, and reachability after deployment. Include an allowed dependency/DNS path, denied public/admin, lateral, IPv6, host, proxy/mesh, and runtime-socket paths, plus rollback/recovery evidence. Image provenance is already handled by supply-chain-security.",
   "environment": {
     "kind": "synthetic",
     "startingState": "fixture://infrastructure-security/scenario-1",
     "requirements": [
-      "Kubernetes namespace and manifests with stated insecure defaults",
-      "cluster-version fixture for version-pinned Pod Security policy",
-      "network reachability matrix",
-      "runtime pod/identity/capability inspection",
+      "synthetic policy intent, cluster-version, workload, and reachability fixtures",
+      "candidate-supplied admission/enforcement, probe, and rollback evidence when available",
+      "synthetic evidence only; no live cluster, CNI, admission, resource/profile, audit, or rollback receipt is supplied",
       "paired same-model skill/no-skill execution"
     ]
   },
   "falsifiableChecks": [
     {
       "id": "infrastructure-security-pod-policy-1",
-      "assertion": "The namespace/workloads use an explicit version-pinned Pod Security policy and named exceptions only where justified; root, privilege escalation, host namespaces/mounts, and unnecessary capabilities are removed or explicitly documented."
+      "assertion": "The namespace/workloads use an explicit version-pinned Pod Security policy in an enforce mode supported by the cluster and named exceptions only where justified; every workload declares privileged=false, fixed non-root UID/GID, no privilege escalation, dropped ALL capabilities, seccomp/MAC profiles, no unsafe devices or host namespaces/mounts, read-only roots with allow-listed writable paths, and bounded CPU/memory/PID/storage resources."
     },
     {
       "id": "infrastructure-security-identities-1",
-      "assertion": "API, worker, and administrative paths use purpose-specific identities/service accounts with no reliance on the namespace default credential for privileged operations."
+      "assertion": "API, worker, Redis, and administrative paths use purpose-specific identities/service accounts with explicit least-privilege Role/RoleBinding evidence, no reliance on the namespace default credential for privileged operations, automatic service-account token mounting disabled where unused, and only named short-lived audience-bound projected tokens where an API dependency requires one."
+    },
+    {
+      "id": "infrastructure-security-runtime-1",
+      "assertion": "Running workloads expose the intended non-root UID/GID, effective capability set, seccomp/MAC profile, namespace/device view, read-only or allow-listed writable mounts, service-account/token identity, and bounded CPU/memory/PID/storage resources; manifest intent alone is labeled insufficient and each unavailable live field is marked unavailable/unverified."
     },
     {
       "id": "infrastructure-security-network-1",
-      "assertion": "Ingress/egress rules allow only the documented API, worker, Redis, DNS, dependency, and admin paths, and the admin endpoint is not reachable through the public ingress."
+      "assertion": "An explicit default-deny ingress and egress policy (or equivalent) allows only the documented API, worker, Redis, DNS, dependency, admin, and separately identified control-plane paths with one consistent source/destination/port/protocol map. The admin endpoint is not reachable through public ingress, lateral workload paths, IPv6, host networking, proxy, service-mesh, or runtime-socket bypasses. Record one permitted dependency and DNS probe plus denied neighbor, public-admin/control-plane, and bypass probes with the enforcing provider, raw result, and side-effect result identified.",
+      "source": "https://kubernetes.io/docs/concepts/services-networking/network-policies/"
     },
     {
       "id": "infrastructure-security-runtime-proof-1",
-      "assertion": "Verification inspects the running workload's UID, capabilities, mounts, service-account identity, listeners, and effective network reachability instead of concluding from manifest text alone."
+      "assertion": "Verification inspects the running workload's UID/GID, capabilities, seccomp/MAC profile, mounts/devices/namespaces, service-account and token state, listeners, resource limits, admission decision, enforcing CNI/firewall result, and effective network reachability instead of concluding from manifest text alone; synthetic or unavailable evidence is labeled as such."
     },
     {
       "id": "infrastructure-security-ops-1",
       "assertion": "Administrative access and configuration changes are authenticated/audited and have an explicit break-glass/recovery path without shared standing root credentials."
+    },
+    {
+      "id": "infrastructure-security-recovery-1",
+      "assertion": "A permitted API/dependency operation remains healthy after hardening, denied public-to-admin/control-plane and lateral probes have no service or durable side effect, and a failed rollout has a named known-good revision, health gate, rollback action, and post-rollback inspection proving the hardened service-account, token, mount, privilege, reachability, and diagnostics posture is retained. If live admission/CNI/probe/side-effect/rollback receipts are unavailable, record them as unavailable or unverified rather than as results.",
+      "source": "https://kubernetes.io/docs/concepts/security/security-checklist/"
     }
   ],
   "scorers": [
@@ -44,7 +53,10 @@
         "hardened deployment policy",
         "network/identity matrix",
         "runtime privilege evidence",
-        "admin/recovery contract"
+        "policy-provider/admission evidence or explicit unavailable status",
+        "allowed/denied reachability and side-effect probes",
+        "admin/recovery contract",
+        "explicit unavailable runtime boundaries"
       ]
     },
     {
@@ -61,9 +73,12 @@
   ],
   "requiredEvidence": [
     "cluster and policy version",
+    "policy-provider enforcement/admission decision or explicit unavailable status",
     "runtime identity/capability/mount evidence",
-    "network reachability results",
+    "runtime profile/device/resource evidence",
+    "allowed and denied network/dependency/control-plane reachability results",
     "admin-plane controls",
+    "rollback/recovery evidence with result or explicit unavailable live-runtime boundary",
     "paired skill/no-skill run artifacts"
   ],
   "requiredArtifacts": [

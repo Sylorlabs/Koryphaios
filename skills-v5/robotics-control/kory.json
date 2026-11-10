@@ -121,12 +121,12 @@
       "notes": "Distinguish continuous drifting local odometry from discontinuous global localization and explicit transform ownership. No claim of physical safety certification."
     },
     {
-      "url": "https://docs.ros.org/en/rolling/",
+      "url": "https://raw.githubusercontent.com/ros2/ros2_documentation/rolling/source/index.rst",
       "sourceType": "official-docs",
-      "versionScope": "ROS 2 Rolling documentation as available 2026-09-04",
+      "versionScope": "ROS 2 Rolling documentation source as available 2026-10-19",
       "staleAfterDays": 45,
       "notes": "Robotics nodes, messages, QoS, coordinate frames, lifecycle, and tooling reference.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-10-19"
     }
   ],
   "authoringMaturity": "individual"

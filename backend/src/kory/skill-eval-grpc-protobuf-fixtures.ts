@@ -86,6 +86,47 @@ test('new reader accepts old urgent=true message', () => {
 });
 `;
 
+function stripProtoComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//gu, '').replace(/\/\/.*$/gmu, '');
+}
+
+function protoPackageIs(source: string, packageName: string): boolean {
+  const normalized = stripProtoComments(source);
+  return new RegExp(`^\\s*package\\s+${packageName.replace(/\./gu, '\\.')}\\s*;`, 'mu').test(
+    normalized,
+  );
+}
+
+function protoMessageBody(source: string, messageName: string): string | null {
+  const normalized = stripProtoComments(source);
+  const start = new RegExp(`\\bmessage\\s+${messageName}\\s*\\{`, 'u').exec(normalized);
+  if (!start) return null;
+  const openingBrace = normalized.indexOf('{', start.index);
+  let depth = 0;
+  for (let index = openingBrace; index < normalized.length; index += 1) {
+    const char = normalized[index];
+    if (char === '{') depth += 1;
+    if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return normalized.slice(openingBrace + 1, index);
+    }
+  }
+  return null;
+}
+
+function protoArtifacts(directory: string): string[] {
+  const artifacts: string[] = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      artifacts.push(...protoArtifacts(path));
+    } else if (entry.isFile() && /\.proto(?:\.|$)/u.test(entry.name)) {
+      artifacts.push(path);
+    }
+  }
+  return artifacts;
+}
+
 const fieldEvolutionMaterializer: SkillEvalFixtureMaterializer = {
   id: 'grpc-protobuf/proto-field-evolution@1',
   matches: (scenario) => scenario.id === FIELD_EVOLUTION,
@@ -120,36 +161,45 @@ Evolve \`proto/job.proto\` and the small reference wire codec in \`src/wire.ts\`
 };
 
 const fieldEvolutionScorer: SkillEvalDeterministicScorer = {
-  id: 'grpc-protobuf/proto-field-evolution-scorer@2',
+  id: 'grpc-protobuf/proto-field-evolution-scorer@6',
   scenarioIds: [FIELD_EVOLUTION],
   score: ({ workingDirectory }) => {
     const liveProto = readFileSync(join(workingDirectory, 'proto/job.proto'), 'utf8');
     const protoDirectory = join(workingDirectory, 'proto');
-    const postWindow =
-      readdirSync(protoDirectory, { withFileTypes: true })
-        .filter(
-          (entry) => entry.isFile() && entry.name.endsWith('.proto') && entry.name !== 'job.proto',
-        )
-        .map((entry) => readFileSync(join(protoDirectory, entry.name), 'utf8'))
-        .find(
-          (source) =>
-            /reserved\s+2\s*;/iu.test(source) &&
-            /reserved\s+"urgent"\s*;/iu.test(source) &&
-            /Priority\s+priority\s*=\s*3\s*;/iu.test(source) &&
-            !/bool\s+urgent\s*=\s*2/iu.test(source),
-        ) ?? '';
+    const postWindowCandidates = protoArtifacts(protoDirectory)
+      .filter((path) => path !== join(protoDirectory, 'job.proto'))
+      .map((path) => readFileSync(path, 'utf8'));
+    const liveMessage = protoMessageBody(liveProto, 'StartJobRequest');
+    const liveMessageBody = liveMessage ?? '';
+    const liveIdentity = protoPackageIs(liveProto, 'kory.jobs.v1') && liveMessage !== null;
+    const postWindowIdentity = postWindowCandidates.some(
+      (source) =>
+        protoPackageIs(source, 'kory.jobs.v1') &&
+        protoMessageBody(source, 'StartJobRequest') !== null,
+    );
     const liveSchema =
-      /bool\s+urgent\s*=\s*2\s*\[[^\]]*deprecated\s*=\s*true[^\]]*\]/iu.test(liveProto) &&
+      liveIdentity &&
+      /string\s+name\s*=\s*1\s*;/iu.test(liveMessageBody) &&
+      /bool\s+urgent\s*=\s*2\s*\[[^\]]*deprecated\s*=\s*true[^\]]*\]/iu.test(liveMessageBody) &&
       /enum\s+Priority\s*\{[^}]*UNSPECIFIED\s*=\s*0[^}]*NORMAL\s*=\s*1[^}]*HIGH\s*=\s*2/isu.test(
-        liveProto,
+        stripProtoComments(liveProto),
       ) &&
-      /Priority\s+priority\s*=\s*3\s*;/iu.test(liveProto) &&
-      !/reserved\s+2\b/iu.test(liveProto);
-    const futureSchema =
-      /reserved\s+2\s*;/iu.test(postWindow) &&
-      /reserved\s+"urgent"\s*;/iu.test(postWindow) &&
-      /Priority\s+priority\s*=\s*3\s*;/iu.test(postWindow) &&
-      !/bool\s+urgent\s*=\s*2/iu.test(postWindow);
+      /Priority\s+priority\s*=\s*3\s*;/iu.test(liveMessageBody) &&
+      !/reserved\s+2\b/iu.test(liveMessageBody);
+    // Evaluate each artifact as one coherent message contract. A draft in an
+    // earlier file must not mask a later, valid migration schema.
+    const futureSchema = postWindowCandidates.some((source) => {
+      if (!protoPackageIs(source, 'kory.jobs.v1')) return false;
+      const body = protoMessageBody(source, 'StartJobRequest');
+      return (
+        body !== null &&
+        /reserved\s+2\s*;/iu.test(body) &&
+        /reserved\s+"urgent"\s*;/iu.test(body) &&
+        /string\s+name\s*=\s*1\s*;/iu.test(body) &&
+        /Priority\s+priority\s*=\s*3\s*;/iu.test(body) &&
+        !/\burgent\s*=\s*2\b/iu.test(body)
+      );
+    });
     const hidden = runHiddenBunTest(
       workingDirectory,
       `import { expect, test } from 'bun:test';
@@ -185,6 +235,26 @@ test('hidden: unknown future enum numeric survives round trip', () => {
   expect(roundTrip.priority).toBeNull();
   expect(roundTrip.priorityNumeric).toBe(7);
 });
+
+test('hidden: multibyte unknown enum numeric survives decode and re-encode', () => {
+  const base = Array.from(encodeOld({ name: 'large-future', urgent: false }));
+  const future = Uint8Array.from([...base, (3 << 3) | 0, 0x96, 0x01]);
+  const decoded = decodeNew(future);
+  expect(decoded.priority).toBeNull();
+  expect(decoded.priorityNumeric).toBe(150);
+  const roundTrip = decodeNew(encodeNew(decoded));
+  expect(roundTrip.priority).toBeNull();
+  expect(roundTrip.priorityNumeric).toBe(150);
+});
+
+test('hidden: unrelated unknown fields survive the normal codec path', () => {
+  const base = Array.from(encodeOld({ name: 'future-field', urgent: false }));
+  const future = Uint8Array.from([...base, (9 << 3) | 0, 17]);
+  const decoded = decodeNew(future);
+  expect(decoded.unknownFields.map((bytes) => Array.from(bytes))).toContainEqual([72, 17]);
+  const roundTrip = decodeNew(encodeNew(decoded));
+  expect(roundTrip.unknownFields.map((bytes) => Array.from(bytes))).toContainEqual([72, 17]);
+});
 `,
     );
     const tests = readFileSync(join(workingDirectory, 'tests/wire.test.ts'), 'utf8');
@@ -192,7 +262,9 @@ test('hidden: unknown future enum numeric survives round trip', () => {
       /old|legacy|cross[- ]version/iu.test(tests) &&
       /new|priority/iu.test(tests) &&
       /unknown|future/iu.test(tests) &&
-      /round[- ]?trip|binary/iu.test(tests);
+      /encode(?:New|Old)|decode(?:New|Old)/u.test(tests) &&
+      /expect\s*\(/u.test(tests) &&
+      /to(?:Be|Equal|Match|Contain|Have)/u.test(tests);
     const passed = liveSchema && futureSchema && hidden.passed && coverage;
     return {
       passed,
@@ -200,10 +272,12 @@ test('hidden: unknown future enum numeric survives round trip', () => {
       verification: liveSchema && futureSchema && hidden.passed ? 1 : 0,
       integrityFailure: false,
       evidence: [
+        `live message identity: ${liveIdentity ? 'pass' : 'fail'}`,
         `live compatibility schema: ${liveSchema ? 'pass' : 'fail'}`,
+        `post-window message identity: ${postWindowIdentity ? 'pass' : 'fail'}`,
         `post-window reservation schema: ${futureSchema ? 'pass' : 'fail'}`,
         `hidden old/new/unknown-enum wire behavior: ${hidden.passed ? 'pass' : 'fail'}`,
-        `representative compatibility tests: ${coverage ? 'present' : 'missing'}`,
+        `representative compatibility tests with executable assertions: ${coverage ? 'present' : 'missing'}`,
         hidden.evidence,
       ],
     };
@@ -301,7 +375,7 @@ Repair \`src/stream.ts\` against the lifecycle contract and expand tests for slo
 };
 
 const streamScorer: SkillEvalDeterministicScorer = {
-  id: 'grpc-protobuf/stream-cancellation-backpressure-scorer@1',
+  id: 'grpc-protobuf/stream-cancellation-backpressure-scorer@2',
   scenarioIds: [STREAM_LIFECYCLE],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
@@ -318,6 +392,17 @@ test('hidden: slow reader applies bounded backpressure', async () => {
   expect(result.resourcesOpen).toBe(0);
 });
 
+test('hidden: a long slow-reader stream still has a bounded queue and completes', async () => {
+  const values = Array.from({ length: 37 }, (_, index) => index + 10);
+  const result = await runStream({ values, queueLimit: 1, clientReadEveryTicks: 7 });
+  expect(result.status).toBe('OK');
+  expect(result.received).toEqual(values);
+  expect(result.produced).toBe(values.length);
+  expect(result.maxQueued).toBeLessThanOrEqual(1);
+  expect(result.producerStopped).toBe(true);
+  expect(result.resourcesOpen).toBe(0);
+});
+
 test('hidden: cancellation stops producer and cannot become OK', async () => {
   const result = await runStream({ values: [1,2,3,4,5,6,7,8], queueLimit: 2, clientReadEveryTicks: 1, cancelAfterReceived: 2 });
   expect(result.status).toBe('CANCELLED');
@@ -325,6 +410,24 @@ test('hidden: cancellation stops producer and cannot become OK', async () => {
   expect(result.produced).toBeLessThan(8);
   expect(result.producerStopped).toBe(true);
   expect(result.resourcesOpen).toBe(0);
+});
+
+test('hidden: cancellation on different reader progress points bounds in-flight work', async () => {
+  const values = Array.from({ length: 26 }, (_, index) => index + 1);
+  for (const cancelAfterReceived of [1, 4, 9]) {
+    const result = await runStream({
+      values,
+      queueLimit: 2,
+      clientReadEveryTicks: 5,
+      cancelAfterReceived,
+    });
+    expect(result.status).toBe('CANCELLED');
+    expect(result.received).toEqual(values.slice(0, cancelAfterReceived));
+    expect(result.produced).toBeLessThanOrEqual(cancelAfterReceived + 2);
+    expect(result.maxQueued).toBeLessThanOrEqual(2);
+    expect(result.producerStopped).toBe(true);
+    expect(result.resourcesOpen).toBe(0);
+  }
 });
 
 test('hidden: deadline owns terminal status and cleanup', async () => {
@@ -338,6 +441,8 @@ test('hidden: downstream failures map and remain terminal', async () => {
   for (const status of ['UNAVAILABLE', 'INTERNAL'] as const) {
     const result = await runStream({ values: [1,2,3,4], queueLimit: 2, clientReadEveryTicks: 1, downstreamErrorAt: 2, downstreamErrorStatus: status });
     expect(result.status).toBe(status);
+    expect(result.produced).toBeLessThanOrEqual(2);
+    expect(result.received.every((value) => value < 3)).toBe(true);
     expect(result.producerStopped).toBe(true);
     expect(result.resourcesOpen).toBe(0);
   }
@@ -351,16 +456,32 @@ test('hidden: client half-close permits server to finish output', async () => {
   expect(result.producerStopped).toBe(true);
   expect(result.resourcesOpen).toBe(0);
 });
+
+test('hidden: concurrent requests keep terminal status and resources independent', async () => {
+  const [cancelled, successful] = await Promise.all([
+    runStream({ values: [11,12,13,14,15,16], queueLimit: 1, clientReadEveryTicks: 3, cancelAfterReceived: 2 }),
+    runStream({ values: [21,22,23,24], queueLimit: 1, clientReadEveryTicks: 4, clientHalfClosesAtTick: 1 }),
+  ]);
+  expect(cancelled.status).toBe('CANCELLED');
+  expect(cancelled.received).toEqual([11,12]);
+  expect(successful.status).toBe('OK');
+  expect(successful.received).toEqual([21,22,23,24]);
+  expect(cancelled.resourcesOpen).toBe(0);
+  expect(successful.resourcesOpen).toBe(0);
+});
 `,
     );
     const tests = readFileSync(join(workingDirectory, 'tests/stream.test.ts'), 'utf8');
     const coverage =
+      /runStream\s*\(/u.test(tests) &&
+      /expect\s*\(/u.test(tests) &&
       /backpressure|slow|queue/iu.test(tests) &&
       /cancel/iu.test(tests) &&
       /deadline/iu.test(tests) &&
       /unavailable|internal|downstream/iu.test(tests) &&
       /half[- ]close/iu.test(tests) &&
-      /resource|cleanup|leak/iu.test(tests);
+      /resource|cleanup|leak/iu.test(tests) &&
+      /status|received|maxQueued|producerStopped|resourcesOpen/iu.test(tests);
     const passed = hidden.passed && coverage;
     return {
       passed,
@@ -369,7 +490,7 @@ test('hidden: client half-close permits server to finish output', async () => {
       integrityFailure: false,
       evidence: [
         `hidden cancellation/backpressure/status lifecycle: ${hidden.passed ? 'pass' : 'fail'}`,
-        `representative stream regression coverage: ${coverage ? 'present' : 'missing'}`,
+        `representative stream regression coverage with executable assertions: ${coverage ? 'present' : 'missing'}`,
         hidden.evidence,
       ],
     };

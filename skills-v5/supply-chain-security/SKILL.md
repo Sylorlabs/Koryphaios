@@ -31,6 +31,15 @@ Return evidence that another reviewer can reproduce:
 
 Do not convert “scanner clean,” “SBOM generated,” “signature valid,” or “build reproduced” into a broader supply-chain assurance claim than the evidence supports.
 
+## Deliverable fidelity
+
+- Read the fixture README and the supplied simulator before writing. The declared type is the contract: every field it names appears with the stated type and name, and the exported helper keeps its declared signature.
+- Derive scope from enforced evidence, not from a stale document. The versions, digests, and affected artifacts in your answer come from the supplied corpus, and the fixed simulator decides whether your state transitions are coherent.
+- State uncertainty explicitly where the evidence cannot prove it, and keep the synthetic or live status of the evidence accurate.
+- Copy identifiers, versions, digests, thresholds, and literal strings from the supplied evidence and README instead of inventing plausible values.
+- Do not edit files the README marks as supplied evidence or fixtures; the evaluator compares them byte for byte and records an integrity failure when they change.
+- Write generated output only to the path the README names, and keep observed facts separate from claims the fixture cannot support.
+
 ## Boundaries
 
 - `application-security` owns vulnerabilities in application behavior; this skill owns whether dependencies/build inputs/artifacts are the expected trusted ones.

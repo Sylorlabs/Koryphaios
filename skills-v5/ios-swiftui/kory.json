@@ -99,34 +99,34 @@
     {
       "url": "https://developer.apple.com/documentation/swiftui",
       "sourceType": "official-docs",
-      "versionScope": "Apple SwiftUI documentation as available 2026-09-04",
+      "versionScope": "Apple SwiftUI documentation as available 2026-10-19",
       "staleAfterDays": 45,
       "notes": "SwiftUI scene, state, layout, navigation, lifecycle, and accessibility reference.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-10-19"
     },
     {
       "url": "https://developer.apple.com/documentation/swiftui/managing-user-interface-state?changes=__1",
       "sourceType": "official-docs",
-      "versionScope": "SwiftUI state-management guidance as verified 2026-09-06",
+      "versionScope": "SwiftUI state-management guidance as verified 2026-10-20",
       "staleAfterDays": 45,
       "notes": "Adopted for source-of-truth ownership and view-lifetime state; not a mandate to globalize state.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-10-20"
     },
     {
       "url": "https://developer.apple.com/documentation/swiftui/scenephase?changes=_4",
       "sourceType": "official-docs",
-      "versionScope": "SwiftUI ScenePhase documentation as verified 2026-09-06",
+      "versionScope": "SwiftUI ScenePhase documentation as verified 2026-10-20",
       "staleAfterDays": 45,
       "notes": "Adopted for active, inactive, and background lifecycle verification when feature behavior depends on scene transitions.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-10-20"
     },
     {
       "url": "https://developer.apple.com/documentation/SwiftUI/View-Accessibility",
       "sourceType": "official-docs",
-      "versionScope": "SwiftUI accessibility documentation as verified 2026-09-06",
+      "versionScope": "SwiftUI accessibility documentation as verified 2026-10-20",
       "staleAfterDays": 45,
       "notes": "Adopted for preserving and verifying accessibility semantics when interactions change.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-10-20"
     }
   ],
   "authoringMaturity": "individual"

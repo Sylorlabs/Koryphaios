@@ -1,9 +1,44 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import {
+  accessSync,
+  constants,
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
+import { canonicalizePath, findExecutableOnPath, looksLikePath } from '../backend/src/runtime/platform';
+import { createNativeArchiveDirectory } from './native-reviewer-archive';
+import { archiveNativeStageEvidence, verifyNativeStageEvidence, type NativeStageEvidence } from './native-reviewer-stage-evidence';
+import { NATIVE_MAC_STAGE_MODE } from './native-reviewer-sandbox';
+import { strictJson, validateAdjudication } from './reviewer-json';
 
 const projectRoot = resolve(import.meta.dir, '..');
+const reviewerAdapter =
+  process.argv
+    .find((argument) => argument.startsWith('--reviewer-adapter='))
+    ?.slice('--reviewer-adapter='.length)
+    .trim() ||
+  process.env.KORY_SKILL_BLIND_REVIEWER_ADAPTER?.trim() ||
+  'chatgpt-web';
+// The adapter runs from a private review directory. Resolve explicit relative
+// paths against the project before changing cwd; bare commands still use PATH.
+const reviewerCommand = reviewerAdapter === 'chatgpt-web'
+  ? 'codex'
+  : looksLikePath(reviewerAdapter)
+    ? resolve(projectRoot, reviewerAdapter)
+    : reviewerAdapter;
+const nativeReviewerAdapter = ['kory-native-stateless-reviewer', 'kory-native-stateless-reviewer.ts'].includes(basename(reviewerAdapter));
+const reviewerProvider =
+  process.env.KORY_SKILL_BLIND_REVIEWER_PROVIDER?.trim() ||
+  (reviewerAdapter === 'chatgpt-web' ? 'chatgpt-web' : 'independent-agent');
 const requestedSkills = process.argv
   .filter((argument) => argument.startsWith('--skill='))
   .map((argument) => argument.slice('--skill='.length).trim())
@@ -14,7 +49,7 @@ const reviewerModel =
     ?.slice('--reviewer-model='.length)
     .trim() ||
   process.env.KORY_SKILL_BLIND_REVIEWER_MODEL?.trim() ||
-  'chatgpt-web/high';
+  (reviewerAdapter === 'chatgpt-web' ? 'chatgpt-web/high' : 'reviewer-model-v1');
 const reasoningEffort =
   process.argv
     .find((argument) => argument.startsWith('--reasoning-effort='))
@@ -22,13 +57,37 @@ const reasoningEffort =
     .trim() ||
   process.env.KORY_SKILL_BLIND_REASONING_EFFORT?.trim() ||
   'high';
-const reviewerBaseUrl =
+function parseReviewerBaseUrl(value: string): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`Invalid ChatGPT Web reviewer base URL: ${JSON.stringify(value)}`);
+  }
+  if (
+    !['http:', 'https:'].includes(url.protocol) ||
+    !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) ||
+    url.pathname !== '/v1' ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error(
+      `Invalid ChatGPT Web reviewer base URL: ${JSON.stringify(value)}; expected a loopback /v1 endpoint`,
+    );
+  }
+  return url.href;
+}
+
+const reviewerBaseUrl = parseReviewerBaseUrl(
   process.argv
     .find((argument) => argument.startsWith('--reviewer-base-url='))
     ?.slice('--reviewer-base-url='.length)
     .trim() ||
-  process.env.KORY_SKILL_CHATGPT_WEB_BASE_URL?.trim() ||
-  'http://127.0.0.1:17841/v1';
+    process.env.KORY_SKILL_CHATGPT_WEB_BASE_URL?.trim() ||
+    'http://127.0.0.1:17841/v1',
+);
 const concurrency = Number(
   process.argv
     .find((argument) => argument.startsWith('--concurrency='))
@@ -61,15 +120,30 @@ const reviewerWallClockMs = Number(
     '180000',
 );
 const dryRun = process.argv.includes('--dry-run');
+const diagnoseReviewer = process.argv.includes('--diagnose-reviewer');
+// This campaign only stages evidence. Ledger ingestion belongs to the coordinator
+// and must be invoked separately with the importer after inspecting the evidence.
+const reviewOnly = true;
+const retryFailed = process.argv.includes('--retry-failed');
 
-if (!/^chatgpt-web\/[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$/u.test(reviewerModel)) {
-  throw new Error(`Reviewer model must be a chatgpt-web/... identity, received ${reviewerModel}`);
+if (process.argv.some((argument) => argument === '--ingest' || argument.startsWith('--ingest='))) {
+  throw new Error('The campaign cannot ingest evaluations; use the coordinator importer');
+}
+
+if (!reviewerAdapter.trim()) {
+  throw new Error('Reviewer adapter must be non-empty');
+}
+if (!reviewerModel.trim()) {
+  throw new Error('Reviewer model metadata must be non-empty');
 }
 if (!['low', 'medium', 'high', 'xhigh'].includes(reasoningEffort)) {
   throw new Error(`Invalid --reasoning-effort=${reasoningEffort}`);
 }
 if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 4) {
   throw new Error(`Invalid --concurrency=${String(concurrency)}; expected 1-4`);
+}
+if (!dryRun && !diagnoseReviewer && concurrency !== 1) {
+  throw new Error('Live independent browser reviews must run serially (--concurrency=1)');
 }
 if (
   maxAssignments !== Number.POSITIVE_INFINITY &&
@@ -112,11 +186,12 @@ function runCommand(input: {
   stdin?: string;
   timeoutMs?: number;
   killProcessGroup?: boolean;
+  env?: NodeJS.ProcessEnv;
 }): Promise<CommandResult> {
   return new Promise((resolveResult, reject) => {
     const child = spawn(input.command, input.args, {
       cwd: input.cwd,
-      env: process.env,
+      env: input.env ?? process.env,
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: input.killProcessGroup === true,
     });
@@ -211,159 +286,151 @@ function browserControlIsBusy(result: CommandResult | null): boolean {
   );
 }
 
-async function terminateStaleBrowserHelpers(): Promise<number> {
-  const processList = await runCommand({
-    command: 'ps',
-    args: ['-axo', 'pid=,command='],
-    cwd: projectRoot,
-    timeoutMs: 10_000,
-  });
-  if (processList.code !== 0) return 0;
-  const helperPids = processList.stdout
-    .split(/\r?\n/u)
-    .flatMap((line) => {
-      if (!/Codex Web GPT.*browser-helper\.cjs/iu.test(line)) return [];
-      const match = line.trim().match(/^(\d+)\s/u);
-      return match ? [Number(match[1])] : [];
-    })
-    .filter((pid) => Number.isInteger(pid) && pid > 1 && pid !== process.pid);
-  let terminated = 0;
-  for (const pid of helperPids) {
-    try {
-      process.kill(pid, 'SIGTERM');
-      terminated += 1;
-    } catch {
-      // The helper may have exited between ps and kill; the follow-up check is authoritative.
-    }
-  }
-  return terminated;
-}
-
-async function restartChatGptWebLauncher(): Promise<{
-  restarted: boolean;
-  detail: string;
-}> {
-  const processList = await runCommand({
-    command: 'ps',
-    args: ['-axo', 'pid=,ppid=,command='],
-    cwd: projectRoot,
-    timeoutMs: 10_000,
-  });
-  if (processList.code !== 0) {
-    return { restarted: false, detail: compactControlDetail(processList) };
-  }
-  const launcherPids = processList.stdout
-    .split(/\r?\n/u)
-    .flatMap((line) => {
-      const match = line.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/u);
-      if (!match) return [];
-      const pid = Number(match[1]);
-      const parentPid = Number(match[2]);
-      const command = match[3] ?? '';
-      if (
-        parentPid !== 1 ||
-        command !== '/Applications/Codex Web GPT.app/Contents/MacOS/Codex Web GPT'
-      ) {
-        return [];
-      }
-      return [pid];
-    })
-    .filter((pid) => Number.isInteger(pid) && pid > 1 && pid !== process.pid);
-
-  for (const pid of launcherPids) {
-    try {
-      process.kill(pid, 'SIGTERM');
-    } catch {
-      // A concurrent exit is equivalent to successful termination here.
-    }
-  }
-  if (launcherPids.length) await delay(750);
-
-  const opened = await runCommand({
-    command: 'open',
-    args: ['-a', 'Codex Web GPT'],
-    cwd: projectRoot,
-    timeoutMs: 10_000,
-  });
-  if (opened.code !== 0) {
-    return { restarted: false, detail: compactControlDetail(opened) };
-  }
-
-  let last = 'launcher restarted but browser readiness was not observed';
-  for (let attempt = 0; attempt < 12; attempt += 1) {
-    if (attempt) await delay(750);
-    const check = await runChatGptWebControl(['browser', 'check']);
-    last = compactControlDetail(check);
-    if (check?.code === 0) return { restarted: true, detail: last };
-  }
-  return { restarted: false, detail: last };
-}
-
-async function ensureChatGptWebReviewerReady(): Promise<{
+async function inspectChatGptWebReviewer(): Promise<{
+  canAttempt: boolean;
   ready: boolean;
-  recovered: boolean;
+  routeVerified: boolean;
+  browserBusy: boolean;
   detail: string;
 }> {
+  const route = await runChatGptWebControl(['route', 'status']);
+  if (route?.code !== 0) {
+    return {
+      canAttempt: false,
+      ready: false,
+      routeVerified: false,
+      browserBusy: false,
+      detail: `ChatGPT Web route unavailable: ${compactControlDetail(route)}`,
+    };
+  }
+  let routeStatus: {
+    installed?: boolean;
+    active?: boolean;
+    routeUrl?: string;
+    errors?: unknown[];
+  };
+  try {
+    routeStatus = JSON.parse(route.stdout) as typeof routeStatus;
+  } catch {
+    return {
+      canAttempt: false,
+      ready: false,
+      routeVerified: false,
+      browserBusy: false,
+      detail: 'ChatGPT Web route status is not valid JSON',
+    };
+  }
+  if (
+    !routeStatus ||
+    routeStatus.installed !== true ||
+    routeStatus.active !== true ||
+    routeStatus.routeUrl !== reviewerBaseUrl ||
+    !Array.isArray(routeStatus.errors) ||
+    routeStatus.errors.length !== 0
+  ) {
+    return {
+      canAttempt: false,
+      ready: false,
+      routeVerified: false,
+      browserBusy: false,
+      detail: 'ChatGPT Web route is inactive or does not match the configured reviewer endpoint',
+    };
+  }
   const initial = await runChatGptWebControl(['browser', 'check']);
   if (initial?.code === 0) {
-    return { ready: true, recovered: false, detail: compactControlDetail(initial) };
+    return {
+      canAttempt: true,
+      ready: true,
+      routeVerified: true,
+      browserBusy: false,
+      detail: compactControlDetail(initial),
+    };
   }
-  // When this campaign is itself launched from Native2, the outer task owns a
-  // healthy ChatGPT Web turn. The launcher supports additional tabs, so "busy"
-  // is not a stale-browser signal and must never trigger cancellation/restart.
+  // Busy is not proof of an authenticated, independent reviewer. Do not submit
+  // another turn or disturb the turn currently owned by the browser launcher.
   if (browserControlIsBusy(initial)) {
     return {
-      ready: true,
-      recovered: false,
-      detail: `browser busy with an active Codex turn; concurrent reviewer allowed: ${compactControlDetail(initial)}`,
-    };
-  }
-  if (concurrency !== 1) {
-    return {
+      canAttempt: false,
       ready: false,
-      recovered: false,
-      detail: `reviewer recovery requires serial execution; ${compactControlDetail(initial)}`,
+      routeVerified: true,
+      browserBusy: true,
+      detail: `browser has an active Codex turn; independent reviewer readiness is unverified: ${compactControlDetail(initial)}`,
     };
   }
-
-  await runChatGptWebControl(['service', 'cancel-turns']);
-  const afterCancel = await runChatGptWebControl(['browser', 'check']);
-  if (afterCancel?.code === 0) {
-    return { ready: true, recovered: true, detail: compactControlDetail(afterCancel) };
-  }
-  if (browserControlIsBusy(afterCancel)) {
-    return {
-      ready: true,
-      recovered: true,
-      detail: `browser remained busy with a live Codex turn after cancellation request; concurrent reviewer allowed: ${compactControlDetail(afterCancel)}`,
-    };
-  }
-
-  const staleBrowser =
-    /running Codex turn|launcher.*unavailable|browser.*unavailable|502|bad gateway/iu.test(
-      `${compactControlDetail(initial)}\n${compactControlDetail(afterCancel)}`,
-    );
-  if (!staleBrowser) {
-    return { ready: false, recovered: false, detail: compactControlDetail(afterCancel) };
-  }
-
-  const terminated = await terminateStaleBrowserHelpers();
-  if (terminated) await delay(750);
-  const afterRestart = await runChatGptWebControl(['browser', 'check']);
-  if (afterRestart?.code === 0) {
-    return {
-      ready: true,
-      recovered: terminated > 0,
-      detail: compactControlDetail(afterRestart),
-    };
-  }
-
-  const launcherRestart = await restartChatGptWebLauncher();
   return {
-    ready: launcherRestart.restarted,
-    recovered: terminated > 0 || launcherRestart.restarted,
-    detail: launcherRestart.detail,
+    canAttempt: false,
+    ready: false,
+    routeVerified: true,
+    browserBusy: false,
+    detail: compactControlDetail(initial),
   };
+}
+
+async function inspectReviewerAdapter(): Promise<{
+  canAttempt: boolean;
+  ready: boolean;
+  routeVerified: boolean;
+  browserBusy: boolean;
+  executableAvailable?: boolean;
+  isolationVerified?: boolean;
+  stageOnlyAttemptAllowed?: boolean;
+  detail: string;
+}> {
+  if (reviewerAdapter !== 'chatgpt-web') {
+    let executableAvailable = false;
+    try {
+      const executable = looksLikePath(reviewerAdapter)
+        ? reviewerCommand
+        : findExecutableOnPath(reviewerAdapter);
+      if (executable && statSync(executable).isFile()) {
+        accessSync(executable, constants.X_OK);
+        executableAvailable = true;
+      }
+    } catch {
+      // Missing or non-executable adapters cannot produce staged evidence.
+    }
+    return {
+      canAttempt: false,
+      ready: false,
+      routeVerified: false,
+      browserBusy: false,
+      executableAvailable,
+      isolationVerified: false,
+      // Explicit generic campaigns may stage unqualified evidence for coordinator
+      // inspection. Executability is not proof of an isolated reviewer route.
+      stageOnlyAttemptAllowed: !diagnoseReviewer && executableAvailable,
+      detail: executableAvailable
+        ? 'Provider-neutral reviewer executable is available; route and isolation are unverified. Stage-only evidence requires coordinator qualification before ingestion.'
+        : 'Provider-neutral reviewer executable is unavailable; route and isolation are unverified.',
+    };
+  }
+  return inspectChatGptWebReviewer();
+}
+
+function canStageReviewerAttempt(status: Awaited<ReturnType<typeof inspectReviewerAdapter>>): boolean {
+  return status.canAttempt || status.stageOnlyAttemptAllowed === true;
+}
+
+if (diagnoseReviewer) {
+  const status = await inspectReviewerAdapter();
+  console.log(
+    JSON.stringify(
+      {
+        schemaVersion: 1,
+        mode: 'diagnostic',
+        reviewerAdapter,
+        reviewerProvider,
+        reviewerModel,
+        reviewerBaseUrl,
+        ...status,
+        trustedNetworkContext: 'unverified (cannot be granted by child CLI configuration)',
+        independentReviewerCompleted: false,
+      },
+      null,
+      2,
+    ),
+  );
+  process.exit(0);
 }
 
 interface PreparedAssignment {
@@ -375,8 +442,235 @@ interface PreparedAssignment {
   promptSha256: string;
 }
 
+interface SealedAssignment {
+  prompt: string;
+  privatePath: string;
+  privateSha256: string;
+  snapshotPath: string;
+}
+
+const sha256 = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
+const validHash = (value: unknown): value is string =>
+  typeof value === 'string' && /^[a-f0-9]{64}$/u.test(value);
+
+function sealAssignment(assignment: PreparedAssignment, runRoot: string): SealedAssignment {
+  if (!/^[a-zA-Z0-9_-]{1,120}$/u.test(assignment.assignmentId)) {
+    throw new Error('Prepared assignment has an invalid id');
+  }
+  if (!validHash(assignment.promptSha256)) {
+    throw new Error(`Prepared assignment ${assignment.assignmentId} has an invalid prompt hash`);
+  }
+  const privatePath = join(
+    dirname(assignment.promptPath),
+    `${assignment.assignmentId}.private.json`,
+  );
+  const privateBytes = readFileSync(privatePath);
+  const privateRecord = JSON.parse(privateBytes.toString('utf8')) as Record<string, unknown>;
+  if (
+    privateRecord.schemaVersion !== 3 ||
+    privateRecord.assignmentId !== assignment.assignmentId ||
+    privateRecord.skill !== assignment.skill ||
+    privateRecord.scenarioId !== assignment.scenarioId ||
+    privateRecord.pairId !== assignment.pairId ||
+    privateRecord.promptPath !== assignment.promptPath ||
+    privateRecord.promptSha256 !== assignment.promptSha256 ||
+    !validHash(privateRecord.artifactASha256) ||
+    !validHash(privateRecord.artifactBSha256)
+  ) {
+    throw new Error(
+      `Prepared assignment ${assignment.assignmentId} has inconsistent private evidence`,
+    );
+  }
+  const promptBytes = readFileSync(assignment.promptPath);
+  if (sha256(promptBytes) !== assignment.promptSha256) {
+    throw new Error(`Prepared assignment ${assignment.assignmentId} prompt hash mismatch`);
+  }
+  const prompt = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(promptBytes);
+  if (!prompt.trim()) throw new Error(`Prepared assignment ${assignment.assignmentId} is empty`);
+
+  // Feed the reviewer these verified bytes. Preserve a protected local snapshot
+  // so a failed attempt can be audited without relying on a mutable pending file.
+  const snapshotPath = join(runRoot, 'review-task.prompt.txt');
+  writeFileSync(snapshotPath, promptBytes, { flag: 'wx', mode: nativeReviewerAdapter ? 0o600 : 0o400 });
+  return { prompt, privatePath, privateSha256: sha256(privateBytes), snapshotPath };
+}
+
+function assertAssignmentSealed(assignment: PreparedAssignment, seal: SealedAssignment): void {
+  if (
+    sha256(readFileSync(assignment.promptPath)) !== assignment.promptSha256 ||
+    sha256(readFileSync(seal.snapshotPath)) !== assignment.promptSha256 ||
+    sha256(readFileSync(seal.privatePath)) !== seal.privateSha256
+  ) {
+    throw new Error(`Prepared assignment ${assignment.assignmentId} changed during review`);
+  }
+}
+
+interface ReviewerEvent extends Record<string, unknown> {
+  type: string;
+  item?: { type?: string; text?: string };
+}
+
+function verifiedReviewerThread(stdout: string, output: string): string {
+  const events = stdout
+    .split(/\r?\n/u)
+    .filter(Boolean)
+    .map((line) => {
+      let event: ReviewerEvent;
+      try {
+        event = JSON.parse(line) as ReviewerEvent;
+      } catch {
+        throw new Error('Reviewer Codex event stream contains invalid JSON');
+      }
+      if (!event || typeof event !== 'object' || typeof event.type !== 'string') {
+        throw new Error('Reviewer Codex event stream contains an invalid event');
+      }
+      return event;
+    });
+  const threads = events.filter((event) => event.type === 'thread.started');
+  const starts = events.filter((event) => event.type === 'turn.started');
+  const completions = events.filter((event) => event.type === 'turn.completed');
+  const failed = events.find((event) => event.type === 'turn.failed');
+  if (
+    threads.length !== 1 ||
+    starts.length !== 1 ||
+    completions.length !== 1 ||
+    failed ||
+    events.indexOf(threads[0]!) > events.indexOf(starts[0]!) ||
+    events.indexOf(starts[0]!) > events.indexOf(completions[0]!)
+  ) {
+    const reason =
+      failed && typeof (failed.error as { message?: unknown } | undefined)?.message === 'string'
+        ? `: ${(failed.error as { message: string }).message}`
+        : '';
+    throw new Error(`Reviewer did not confirm a completed single Codex turn${reason}`);
+  }
+  const threadId = threads[0]?.thread_id ?? threads[0]?.threadId;
+  if (
+    typeof threadId !== 'string' ||
+    !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/iu.test(threadId)
+  ) {
+    throw new Error('Reviewer did not expose a valid independent Codex task id');
+  }
+  const lastMessage = events
+    .filter((event) => event.type === 'item.completed' && event.item?.type === 'agent_message')
+    .at(-1);
+  if (
+    !lastMessage ||
+    typeof lastMessage.item?.text !== 'string' ||
+    events.indexOf(lastMessage) <= events.indexOf(starts[0]!) ||
+    events.indexOf(lastMessage) >= events.indexOf(completions[0]!) ||
+    lastMessage.item.text.trimEnd() !== output.trimEnd()
+  ) {
+    throw new Error('Reviewer result artifact differs from its completed Codex agent message');
+  }
+  if (
+    !output.trim() ||
+    !['artifactA', 'artifactB', 'preference', 'rationale'].every((key) =>
+      new RegExp(`"${key}"\\s*:`, 'u').test(output),
+    )
+  ) {
+    throw new Error('Reviewer returned an incomplete semantic adjudication');
+  }
+  return threadId;
+}
+
+interface GenericReviewerEvent {
+  type: 'review.started' | 'review.completed';
+  reviewerId: string;
+  outputSha256?: string;
+}
+
+interface GenericReviewerResponse {
+  schemaVersion: 1;
+  reviewerId: string;
+  completed: true;
+  output: string;
+  events: GenericReviewerEvent[];
+}
+
+function verifiedGenericReviewer(stdout: string): GenericReviewerResponse {
+  let response: GenericReviewerResponse;
+  try {
+    response = (nativeReviewerAdapter ? strictJson(stdout) : JSON.parse(stdout)) as GenericReviewerResponse;
+  } catch {
+    throw new Error('Generic reviewer adapter returned invalid JSON');
+  }
+  if (
+    !response ||
+    typeof response !== 'object' ||
+    response.schemaVersion !== 1 ||
+    response.completed !== true ||
+    typeof response.reviewerId !== 'string' ||
+    !/^[A-Za-z0-9._:-]{1,200}$/u.test(response.reviewerId) ||
+    typeof response.output !== 'string' ||
+    !response.output.trim() ||
+    !Array.isArray(response.events)
+  ) {
+    throw new Error('Generic reviewer adapter returned an invalid completion envelope');
+  }
+  const events = response.events;
+  if (
+    events.length !== 2 ||
+    events[0]?.type !== 'review.started' ||
+    events[1]?.type !== 'review.completed' ||
+    events.some(
+      (event) =>
+        !event ||
+        typeof event !== 'object' ||
+        event.reviewerId !== response.reviewerId ||
+        (event.type === 'review.completed' &&
+          event.outputSha256 !== sha256(response.output)),
+    )
+  ) {
+    throw new Error(
+      'Generic reviewer adapter did not provide one ordered start/completion event pair bound to its output',
+    );
+  }
+  return response;
+}
+
+function validateReviewerAdjudication(output: string): void {
+  let result: Record<string, unknown>;
+  try {
+    result = JSON.parse(output) as Record<string, unknown>;
+  } catch {
+    throw new Error('Reviewer returned invalid adjudication JSON');
+  }
+  const validScore = (input: unknown): boolean => {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return false;
+    const score = input as Record<string, unknown>;
+    return (
+      typeof score.passed === 'boolean' &&
+      typeof score.quality === 'number' &&
+      Number.isFinite(score.quality) &&
+      score.quality >= 0 &&
+      score.quality <= 1 &&
+      typeof score.verification === 'number' &&
+      Number.isFinite(score.verification) &&
+      score.verification >= 0 &&
+      score.verification <= 1 &&
+      typeof score.integrityFailure === 'boolean' &&
+      Array.isArray(score.evidence) &&
+      score.evidence.every((item: unknown) => typeof item === 'string')
+    );
+  };
+  if (
+    !result ||
+    typeof result !== 'object' ||
+    Array.isArray(result) ||
+    !validScore(result.artifactA) ||
+    !validScore(result.artifactB) ||
+    !['A', 'B', 'tie'].includes(result.preference as string) ||
+    !Array.isArray(result.rationale) ||
+    !result.rationale.every((item: unknown) => typeof item === 'string')
+  ) {
+    throw new Error('Reviewer returned an invalid adjudication schema');
+  }
+}
+
 interface PrepareResult {
   preparedAssignments: PreparedAssignment[];
+  eligible?: Array<{ skill: string; scenarioId: string; pairId: string }>;
   skippedExistingReviews: number;
   queuedPairs: number;
 }
@@ -386,16 +680,21 @@ interface ReviewResult {
   runRoot: string;
   attempts: number;
   reviewerThread?: string;
+  reviewerEventsPath?: string;
   envelopePath?: string;
+  seal?: SealedAssignment;
+  nativeStageEvidence?: NativeStageEvidence;
   failure?: string;
+  stopCampaign?: boolean;
 }
 
 const prepareArgs = [
   'run',
   'scripts/run-skill-v5-blind-review.ts',
-  '--prepare-only',
+  dryRun ? '--dry-run' : '--prepare-only',
   '--concurrency=1',
   `--max-per-skill=${String(maxPerSkill)}`,
+  ...(retryFailed ? ['--retry-failed'] : []),
   ...requestedSkills.map((skill) => `--skill=${skill}`),
 ];
 const preparedProcess = await runCommand({ command: 'bun', args: prepareArgs, cwd: projectRoot });
@@ -411,6 +710,14 @@ const assignments = prepared.preparedAssignments.slice(
 );
 
 if (dryRun) {
+  const selected = (prepared.eligible ?? [])
+    .slice(0, Number.isFinite(maxAssignments) ? maxAssignments : undefined)
+    .map(({ skill, scenarioId, pairId }) => ({
+      assignmentId: `blind-v5-${sha256(`${skill}\0${scenarioId}\0${pairId}`).slice(0, 20)}`,
+      skill,
+      scenarioId,
+      pairId,
+    }));
   console.log(
     JSON.stringify(
       {
@@ -421,17 +728,14 @@ if (dryRun) {
         reasoningEffort,
         concurrency,
         maxPerSkill,
+        retryFailed,
         maxReviewerAttempts,
         reviewerWallClockMs,
+        reviewOnly,
         requestedSkills,
         skippedExistingReviews: prepared.skippedExistingReviews,
-        availableAssignments: prepared.preparedAssignments.length,
-        selectedAssignments: assignments.map(({ assignmentId, skill, scenarioId, pairId }) => ({
-          assignmentId,
-          skill,
-          scenarioId,
-          pairId,
-        })),
+        availableAssignments: prepared.eligible?.length ?? 0,
+        selectedAssignments: selected,
       },
       null,
       2,
@@ -442,155 +746,355 @@ if (dryRun) {
 
 let cursor = 0;
 let completed = 0;
-let persisted = 0;
+let reviewed = 0;
 let infrastructureFailures = 0;
+let terminalBlocker: string | undefined;
+const usedReviewerThreads = new Set<string>();
+const stagedReviews: Array<{
+  assignmentId: string;
+  reviewerThread: string;
+  attestationPath: string;
+  envelopePath: string;
+}> = [];
 const failures: Array<{ assignmentId: string; skill: string; scenarioId: string; detail: string }> =
   [];
-let ingestTail = Promise.resolve();
 
-function queuedIngest(result: ReviewResult): Promise<void> {
-  const run = async () => {
-    if (!result.envelopePath) throw new Error('Missing blind review import envelope');
-    const ingest = await runCommand({
-      command: 'bun',
-      args: [
-        'run',
-        'scripts/run-skill-v5-blind-review.ts',
-        `--skill=${result.assignment.skill}`,
-        `--ingest=${result.envelopePath}`,
-      ],
-      cwd: projectRoot,
-    });
-    if (ingest.code !== 0) {
-      throw new Error(`Blind review ingest failed: ${ingest.stderr || ingest.stdout}`);
-    }
-    const parsed = JSON.parse(ingest.stdout) as { persistedReviews?: number };
-    if (parsed.persistedReviews !== 1) {
-      throw new Error(`Blind review ingest persisted ${String(parsed.persistedReviews)} reviews`);
-    }
-    persisted += 1;
+function validateReviewForFinalization(result: ReviewResult): void {
+  if (!result.envelopePath) throw new Error('Missing blind review import envelope');
+  if (!result.seal) throw new Error('Missing sealed blind review assignment');
+  if (!result.reviewerThread) throw new Error('Missing independent reviewer task id');
+  if (!result.reviewerEventsPath) throw new Error('Missing independent reviewer event evidence');
+  if (usedReviewerThreads.has(result.reviewerThread)) {
+    throw new Error(`Reviewer task ${result.reviewerThread} was reused across blind assignments`);
+  }
+  assertAssignmentSealed(result.assignment, result.seal);
+  usedReviewerThreads.add(result.reviewerThread);
+}
+
+function verifyNativeFinalization(result: ReviewResult): void {
+  if (!nativeReviewerAdapter) return;
+  if (!result.nativeStageEvidence || !result.envelopePath || !result.seal) {
+    throw new Error('Native reviewer stage is missing fresh archived evidence');
+  }
+  const envelope = strictJson(readFileSync(result.envelopePath, 'utf8')) as {
+    nativeStageEvidence: unknown; reviews: Array<{ output: string }>; reviewer: { agentId: string; model: string };
   };
-  const promise = ingestTail.then(run);
-  ingestTail = promise.catch(() => undefined);
-  return promise;
+  if (envelope.reviewer.agentId !== result.reviewerThread || envelope.reviewer.model !== reviewerModel ||
+    envelope.reviews.length !== 1 || JSON.stringify(envelope.nativeStageEvidence) !== JSON.stringify(result.nativeStageEvidence)) {
+    throw new Error('Native reviewer import envelope changed its completion binding');
+  }
+  verifyNativeStageEvidence(envelope.nativeStageEvidence, dirname(result.nativeStageEvidence.rawEvents.path),
+    result.seal.prompt, reviewerModel, canonicalizePath(projectRoot), envelope.reviews[0]!.output, result.reviewerThread);
+}
+
+async function stageReviewOnly(result: ReviewResult): Promise<void> {
+  validateReviewForFinalization(result);
+  verifyNativeFinalization(result);
+  const envelopePath = result.envelopePath!;
+  const eventsPath = result.reviewerEventsPath!;
+  const seal = result.seal!;
+  const reviewerThread = result.reviewerThread!;
+  const initialEnvelopeSha256 = sha256(readFileSync(envelopePath));
+  const validation = await runCommand({
+    command: 'bun',
+    args: [
+      'run',
+      'scripts/run-skill-v5-blind-review.ts',
+      `--skill=${result.assignment.skill}`,
+      `--validate-only=${envelopePath}`,
+      ...(nativeReviewerAdapter ? ['--allow-native-stage'] : []),
+    ],
+    cwd: projectRoot,
+  });
+  if (validation.code !== 0) {
+    throw new Error(`Blind review validation failed: ${validation.stderr || validation.stdout}`);
+  }
+  let validated: { mode?: string; validatedReviews?: number; persistedReviews?: number };
+  try {
+    validated = JSON.parse(validation.stdout) as typeof validated;
+  } catch {
+    throw new Error('Blind review validator returned an invalid summary');
+  }
+  if (
+    validated.mode !== 'validate' ||
+    validated.validatedReviews !== 1 ||
+    validated.persistedReviews !== 0
+  ) {
+    throw new Error('Blind review validator did not confirm one unpersisted valid review');
+  }
+  assertAssignmentSealed(result.assignment, seal);
+  verifyNativeFinalization(result);
+  const envelope = readFileSync(envelopePath);
+  if (sha256(envelope) !== initialEnvelopeSha256) {
+    throw new Error('Blind review envelope changed during validation');
+  }
+  const reviewer = JSON.parse(envelope.toString('utf8')) as {
+    reviews: Array<{ output: string }>;
+  };
+  const attestationPath = join(result.runRoot, 'review-attestation.json');
+  writeFileSync(
+    attestationPath,
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        status: 'unimported',
+        assignmentId: result.assignment.assignmentId,
+        skill: result.assignment.skill,
+        scenarioId: result.assignment.scenarioId,
+        pairId: result.assignment.pairId,
+        reviewerThread,
+        reviewerIdentitySource:
+          nativeReviewerAdapter ? 'host-observed-native-cli-session-id' :
+          reviewerAdapter === 'chatgpt-web' ? 'codex-jsonl-thread.started' : 'external-reviewer-adapter-output',
+        reviewerAdapter,
+        reviewerModel,
+        reviewerModelSource:
+          nativeReviewerAdapter ? 'native-cli-empty-tool-init-model' :
+          reviewerAdapter === 'chatgpt-web' ? 'codex-cli-model-selection-and-matching-local-route' : 'configured-provider-model-metadata',
+        ...(result.nativeStageEvidence ? { nativeStageEvidence: result.nativeStageEvidence } : {}),
+        reviewerBaseUrl,
+        promptSha256: result.assignment.promptSha256,
+        privateAssignmentSha256: seal.privateSha256,
+        reviewerEventsSha256: sha256(readFileSync(eventsPath)),
+        judgeOutputSha256: sha256(reviewer.reviews[0]!.output),
+        envelopeSha256: sha256(envelope),
+        importValidation: {
+          mode: validated.mode,
+          validatedReviews: validated.validatedReviews,
+          persistedReviews: validated.persistedReviews,
+        },
+        promptSnapshotPath: seal.snapshotPath,
+        reviewerEventsPath: eventsPath,
+        envelopePath,
+        // Original reviewer evidence is retained alongside these hashes. Native
+        // opaque thinking stays only in the protected raw-event archive.
+        // Read-only import validation passed; persistence and qualification
+        // remain coordinator owned.
+      },
+      null,
+      2,
+    )}\n`,
+    { flag: 'wx', mode: 0o600 },
+  );
+  stagedReviews.push({
+    assignmentId: result.assignment.assignmentId,
+    reviewerThread,
+    attestationPath,
+    envelopePath,
+  });
+  reviewed += 1;
+}
+
+// Pair eligibility can move while the reviewer works: any later campaign that
+// records a newer pair for the same scenario supersedes the sealed one. Re-check
+// immediately before writing the envelope so a doomed assignment fails fast
+// instead of producing staged evidence that ingestion must refuse as stale.
+async function assertAssignmentStillEligible(assignment: PreparedAssignment): Promise<void> {
+  const check = await runCommand({
+    command: 'bun',
+    args: [
+      'run',
+      'scripts/run-skill-v5-blind-review.ts',
+      '--prepare-only',
+      '--concurrency=1',
+      `--skill=${assignment.skill}`,
+    ],
+    cwd: projectRoot,
+  });
+  if (check.code !== 0) {
+    throw new Error(
+      `Stale-pair check failed for ${assignment.assignmentId}: ${check.stderr || check.stdout}`,
+    );
+  }
+  let current: PrepareResult;
+  try {
+    current = JSON.parse(check.stdout) as PrepareResult;
+  } catch {
+    throw new Error(`Stale-pair check returned invalid JSON for ${assignment.assignmentId}`);
+  }
+  const stillEligible = (current.eligible ?? []).some(
+    (item) =>
+      item.skill === assignment.skill &&
+      item.scenarioId === assignment.scenarioId &&
+      item.pairId === assignment.pairId,
+  );
+  if (!stillEligible) {
+    throw new Error(
+      `Blind assignment ${assignment.assignmentId} became stale before finalization; ` +
+        'a newer eligible pair exists for this scenario. Rerun the campaign after qualification and regression retests settle.',
+    );
+  }
 }
 
 async function reviewAssignment(assignment: PreparedAssignment): Promise<ReviewResult> {
-  const runRoot = mkdtempSync(join(tmpdir(), 'kory-v5-blind-review-'));
+  const runRoot = canonicalizePath(mkdtempSync(join(canonicalizePath(tmpdir()), 'kory-v5-blind-review-')));
   let attempts = 0;
+  let stopCampaign = false;
   try {
-    if (!existsSync(assignment.promptPath)) throw new Error('Prepared prompt is missing');
-    const prompt = readFileSync(assignment.promptPath, 'utf8');
+    const seal = sealAssignment(assignment, runRoot);
+    const prompt = seal.prompt;
     let reviewerThread: string | undefined;
+    let reviewerEventsPath: string | undefined;
     let output: string | undefined;
+    let genericReviewerEvidence: string | undefined;
+    let nativeStageEvidence: NativeStageEvidence | undefined;
     let lastFailure = 'Reviewer did not complete';
 
-    const recoverReviewer = async (reason: string): Promise<boolean> => {
-      const recovery = await ensureChatGptWebReviewerReady();
+    const checkReviewer = async (reason: string) => {
+      const status = await inspectReviewerAdapter();
       console.log(
         JSON.stringify({
-          type: 'reviewer-recovery',
+          type: 'reviewer-status',
           assignmentId: assignment.assignmentId,
           skill: assignment.skill,
           scenarioId: assignment.scenarioId,
           reason,
-          ready: recovery.ready,
-          recovered: recovery.recovered,
-          detail: recovery.detail,
+          ready: status.ready,
+          canAttempt: status.canAttempt,
+          routeVerified: status.routeVerified,
+          browserBusy: status.browserBusy,
+          executableAvailable: status.executableAvailable,
+          isolationVerified: status.isolationVerified,
+          stageOnlyAttemptAllowed: status.stageOnlyAttemptAllowed,
+          detail: status.detail,
         }),
       );
-      return recovery.ready;
+      return status;
     };
 
-    if (concurrency === 1) {
-      const ready = await recoverReviewer('preflight');
-      if (!ready) throw new Error('ChatGPT Web reviewer preflight recovery failed');
+    const preflight = await checkReviewer('preflight');
+    if (!canStageReviewerAttempt(preflight)) {
+      stopCampaign = true;
+      throw new Error(`Reviewer preflight failed: ${preflight.detail}`);
     }
 
     for (let attempt = 1; attempt <= maxReviewerAttempts; attempt += 1) {
       attempts = attempt;
       const resultPath = join(runRoot, `result-${String(attempt)}.txt`);
       rmSync(resultPath, { force: true });
+      const genericReviewer = reviewerAdapter !== 'chatgpt-web';
+      const archiveDirectory = nativeReviewerAdapter ? createNativeArchiveDirectory(runRoot) : undefined;
       const reviewer = await runCommand({
-        command: 'codex',
-        args: [
-          'exec',
-          '--skip-git-repo-check',
-          '--ignore-rules',
-          '--ignore-user-config',
-          '-c',
-          `openai_base_url=${JSON.stringify(reviewerBaseUrl)}`,
-          '--sandbox',
-          'read-only',
-          '--ephemeral',
-          '-m',
-          reviewerModel,
-          '-c',
-          `model_reasoning_effort="${reasoningEffort}"`,
-          '--json',
-          '-o',
-          resultPath,
-          '-',
-        ],
+        command: reviewerCommand,
+        args: genericReviewer
+          ? ['-p', 'Return only the required JSON adjudication object. Do not add commentary.']
+          : [
+              'exec',
+              '--skip-git-repo-check',
+              '--strict-config',
+              '--ignore-user-config',
+              '-c',
+              `openai_base_url=${JSON.stringify(reviewerBaseUrl)}`,
+              '--sandbox',
+              'workspace-write',
+              '--ephemeral',
+              '-m',
+              reviewerModel,
+              '-c',
+              `model_reasoning_effort="${reasoningEffort}"`,
+              '--json',
+              '-o',
+              resultPath,
+              '-',
+            ],
         cwd: runRoot,
         stdin: prompt,
         timeoutMs: reviewerWallClockMs,
         killProcessGroup: true,
+        ...(archiveDirectory ? { env: {
+          ...process.env,
+          KORY_NATIVE_REVIEW_ARCHIVE_DIR: archiveDirectory,
+          KORY_NATIVE_REVIEW_PENDING_ROOT: canonicalizePath(dirname(assignment.promptPath)),
+          KORY_NATIVE_REVIEW_STAGE_SANDBOX: NATIVE_MAC_STAGE_MODE,
+          KORY_NATIVE_REVIEW_MODEL: reviewerModel,
+          KORY_NATIVE_REVIEW_TIMEOUT_MS: String(Math.min(reviewerWallClockMs, 550_000)),
+        } } : {}),
       });
       if (reviewer.code !== 0) {
-        const detail = (reviewer.stderr || reviewer.stdout).slice(-6000);
+        const detail = nativeReviewerAdapter ? 'Native reviewer diagnostics redacted; no completed archived stage.' :
+          `${reviewer.stderr}\n${reviewer.stdout}`.slice(-6000);
         lastFailure = reviewer.timedOut
           ? `Reviewer exceeded ${String(reviewerWallClockMs)}ms wall-clock budget: ${detail}`
           : `Reviewer process failed: ${detail}`;
-        const nonRetryable = /model is not supported|unknown model|invalid model/iu.test(detail);
+        const nonRetryable =
+          /model is not supported|unknown model|invalid model|Free usage limit reached|ChatGPT web turn is missing network access in trusted Codex environment context|This tool call was blocked by OpenAI|couldn't determine the safety status of the request/iu.test(
+            detail,
+          );
+        if (nonRetryable) stopCampaign = true;
         if (nonRetryable || attempt === maxReviewerAttempts) break;
         const rateLimited =
           /rate limit exceeded|too many requests|try again in a few minutes/iu.test(detail);
-        if (!rateLimited && concurrency === 1) {
-          await recoverReviewer(
+        if (!rateLimited) {
+          const status = await checkReviewer(
             reviewer.timedOut ? 'reviewer timeout' : 'reviewer process failure',
           );
+          if (!canStageReviewerAttempt(status)) {
+            stopCampaign = true;
+            break;
+          }
         }
         await delay(rateLimited ? 45_000 : Math.min(4_000, attempt * 1_000));
         continue;
       }
+      if (genericReviewer) {
+        const genericResponse = verifiedGenericReviewer(reviewer.stdout.trim());
+        if (archiveDirectory) {
+          nativeStageEvidence = archiveNativeStageEvidence(genericResponse, archiveDirectory, prompt,
+            reviewerModel, canonicalizePath(projectRoot));
+        }
+        writeFileSync(resultPath, genericResponse.output, { flag: 'wx', mode: 0o600 });
+        reviewerThread = genericResponse.reviewerId;
+        genericReviewerEvidence = JSON.stringify(genericResponse, null, 2);
+      }
       if (!existsSync(resultPath)) {
         lastFailure = 'Reviewer returned no final result artifact';
         if (attempt === maxReviewerAttempts) break;
-        if (concurrency === 1) await recoverReviewer('missing result artifact');
+        if (!canStageReviewerAttempt(await checkReviewer('missing result artifact'))) {
+          stopCampaign = true;
+          break;
+        }
         await delay(Math.min(4_000, attempt * 1_000));
         continue;
       }
-      const threadEvent = reviewer.stdout
-        .split(/\r?\n/u)
-        .filter(Boolean)
-        .flatMap((line) => {
-          try {
-            return [JSON.parse(line) as Record<string, unknown>];
-          } catch {
-            return [];
+      const resultStat = lstatSync(resultPath);
+      if (!resultStat.isFile() || resultStat.size > 1_048_576) {
+        lastFailure = 'Reviewer result artifact is not a bounded regular file';
+        if (attempt === maxReviewerAttempts) break;
+        if (!canStageReviewerAttempt(await checkReviewer('invalid reviewer result artifact'))) {
+          stopCampaign = true;
+          break;
+        }
+        await delay(Math.min(4_000, attempt * 1_000));
+        continue;
+      }
+      const attemptOutput = readFileSync(resultPath, 'utf8');
+      try {
+        if (genericReviewer) {
+          if (!genericReviewerEvidence) {
+            throw new Error('Generic reviewer evidence was not retained');
           }
-        })
-        .find((event) => event.type === 'thread.started');
-      reviewerThread =
-        typeof threadEvent?.thread_id === 'string'
-          ? threadEvent.thread_id
-          : typeof threadEvent?.threadId === 'string'
-            ? threadEvent.threadId
-            : undefined;
-      if (!reviewerThread) {
-        lastFailure = 'Reviewer did not expose a task id for provenance';
+        } else {
+          reviewerThread = verifiedReviewerThread(reviewer.stdout, attemptOutput);
+        }
+        if (nativeReviewerAdapter) validateAdjudication(attemptOutput);
+        else validateReviewerAdjudication(attemptOutput);
+        if (nativeStageEvidence) {
+          verifyNativeStageEvidence(nativeStageEvidence, archiveDirectory!, prompt, reviewerModel,
+            canonicalizePath(projectRoot), attemptOutput, reviewerThread);
+          reviewerEventsPath = nativeStageEvidence.hostReceipt.path;
+        } else {
+          reviewerEventsPath = join(runRoot, genericReviewer ? 'reviewer-events.json' : 'reviewer-events.jsonl');
+          writeFileSync(reviewerEventsPath, genericReviewer ? `${genericReviewerEvidence}\n` : reviewer.stdout,
+            { flag: 'wx', mode: 0o600 });
+        }
+        output = attemptOutput;
+      } catch (error) {
+        lastFailure = error instanceof Error ? error.message : String(error);
         if (attempt === maxReviewerAttempts) break;
-        if (concurrency === 1) await recoverReviewer('missing reviewer task id');
-        await delay(Math.min(4_000, attempt * 1_000));
-        continue;
-      }
-      output = readFileSync(resultPath, 'utf8');
-      if (!output.trim()) {
-        reviewerThread = undefined;
-        lastFailure = 'Reviewer returned an empty final result';
-        if (attempt === maxReviewerAttempts) break;
-        if (concurrency === 1) await recoverReviewer('empty reviewer result');
+        if (!canStageReviewerAttempt(await checkReviewer('unverified reviewer result'))) {
+          stopCampaign = true;
+          break;
+        }
         await delay(Math.min(4_000, attempt * 1_000));
         continue;
       }
@@ -598,6 +1102,8 @@ async function reviewAssignment(assignment: PreparedAssignment): Promise<ReviewR
     }
 
     if (!reviewerThread || output === undefined) throw new Error(lastFailure);
+    assertAssignmentSealed(assignment, seal);
+    await assertAssignmentStillEligible(assignment);
     const envelopePath = join(runRoot, 'import.json');
     writeFileSync(
       envelopePath,
@@ -605,29 +1111,46 @@ async function reviewAssignment(assignment: PreparedAssignment): Promise<ReviewR
         {
           schemaVersion: 1,
           reviewer: {
-            agentId: `chatgpt-web-reviewer:${reviewerThread}`,
-            provider: 'chatgpt-web',
+            // ChatGPT Web identities come from the completed Codex event stream;
+            // provider-neutral adapters must supply their own stable identity in
+            // the signed-by-convention completion envelope. Never synthesize an
+            // identity from a model label or from the anonymous prompt.
+            agentId: reviewerThread,
+            provider: reviewerProvider,
             model: reviewerModel,
           },
           reviews: [{ assignmentId: assignment.assignmentId, output }],
+          ...(nativeStageEvidence ? { nativeStageEvidence } : {}),
         },
         null,
         2,
       )}\n`,
+      { flag: 'wx', mode: 0o600 },
     );
-    return { assignment, runRoot, attempts, reviewerThread, envelopePath };
+    return {
+      assignment,
+      runRoot,
+      attempts,
+      reviewerThread,
+      reviewerEventsPath,
+      envelopePath,
+      seal,
+      nativeStageEvidence,
+    };
   } catch (error) {
     return {
       assignment,
       runRoot,
       attempts,
       failure: error instanceof Error ? error.message : String(error),
+      stopCampaign,
     };
   }
 }
 
 async function worker(): Promise<void> {
   while (true) {
+    if (terminalBlocker) return;
     const index = cursor;
     cursor += 1;
     const assignment = assignments[index];
@@ -636,6 +1159,7 @@ async function worker(): Promise<void> {
     try {
       if (result.failure) {
         infrastructureFailures += 1;
+        if (result.stopCampaign) terminalBlocker = result.failure;
         failures.push({
           assignmentId: assignment.assignmentId,
           skill: assignment.skill,
@@ -643,7 +1167,7 @@ async function worker(): Promise<void> {
           detail: result.failure,
         });
       } else {
-        await queuedIngest(result);
+        await stageReviewOnly(result);
       }
     } catch (error) {
       infrastructureFailures += 1;
@@ -666,11 +1190,11 @@ async function worker(): Promise<void> {
           scenarioId: assignment.scenarioId,
           reviewerThread: result.reviewerThread ?? null,
           attempts: result.attempts,
-          persisted: success,
+          persisted: false,
+          staged: success,
           infrastructureFailure: !success,
         }),
       );
-      if (success) rmSync(result.runRoot, { recursive: true, force: true });
     }
   }
 }
@@ -678,18 +1202,19 @@ async function worker(): Promise<void> {
 await Promise.all(
   Array.from({ length: Math.min(concurrency, assignments.length) }, () => worker()),
 );
-await ingestTail;
 
 console.log(
   JSON.stringify(
     {
       schemaVersion: 1,
       dryRun: false,
+      reviewOnly,
       reviewerModel,
       reviewerBaseUrl,
       reasoningEffort,
       concurrency,
       maxPerSkill,
+      retryFailed,
       maxReviewerAttempts,
       reviewerWallClockMs,
       requestedSkills,
@@ -697,7 +1222,11 @@ console.log(
       availableAssignments: prepared.preparedAssignments.length,
       queued: assignments.length,
       completed,
-      persisted,
+      notAttempted: assignments.length - completed,
+      terminalBlocker: terminalBlocker ?? null,
+      persisted: 0,
+      reviewed,
+      stagedReviews,
       infrastructureFailures,
       failures: failures.slice(0, 50),
     },
@@ -705,3 +1234,4 @@ console.log(
     2,
   ),
 );
+if (infrastructureFailures > 0) process.exitCode = 1;

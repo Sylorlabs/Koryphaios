@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "privacy-engineering",
-  "version": "5.1.1",
+  "version": "5.1.3",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -128,11 +128,11 @@
     {
       "url": "https://www.nist.gov/privacy-framework",
       "sourceType": "official-docs",
-      "versionScope": "NIST Privacy Framework 1.0 remains the current final framework; Privacy Framework 1.1 is still an Initial Public Draft as verified 2026-09-05",
+      "versionScope": "NIST Privacy Framework 1.0 remains the current final framework; Privacy Framework 1.1 is still an Initial Public Draft as verified 2026-11-07",
       "revision": "1.0 final / 1.1 IPD",
       "staleAfterDays": 90,
       "notes": "Primary organizational privacy-risk framework. Do not present the 1.1 Initial Public Draft as a final release.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://csrc.nist.gov/pubs/ir/8062/final",
@@ -140,7 +140,7 @@
       "versionScope": "NISTIR 8062 final, January 2017; publication record updated May 2026",
       "staleAfterDays": 365,
       "notes": "Defines privacy engineering objectives including predictability, manageability, and disassociability, plus a privacy risk model.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     }
   ],
   "authoringMaturity": "individual"

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "backend-engineering",
-  "version": "5.1.1",
+  "version": "5.1.2",
   "skillKind": "orchestrator",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -15,11 +15,23 @@
   "conflicts": [],
   "activation": [
     "backend engineering",
+    "backend behavior",
+    "backend state",
+    "backend concurrency",
+    "backend reliability",
     "implement backend behavior",
     "design a local service",
     "build a compiler daemon",
     "server side architecture",
-    "server side",
+    "server architecture",
+    "background job",
+    "background jobs",
+    "durable job",
+    "durable jobs",
+    "sync checkpoint",
+    "sync checkpoints",
+    "replay checkpoint",
+    "replay checkpoints",
     "background job design",
     "api and database design"
   ],
@@ -27,7 +39,7 @@
   "evidence": [
     "System boundary contract",
     "Failure and recovery verification",
-    "Hierarchy boundary and selected specialist rationale",
+    "Authoritative state and conflict outcomes",
     "Representative success, negative-path, and recovery verification"
   ],
   "routing": {
@@ -36,14 +48,21 @@
       "The current task is implement backend behavior.",
       "I need help with design a local service.",
       "Work on build a compiler daemon for this request.",
-      "This request specifically requires server side architecture."
+      "This request specifically requires server side architecture.",
+      "Repair backend state updates so concurrent reservations cannot exceed capacity and losing callers receive the existing conflict result.",
+      "Implement background jobs that keep one logical output after a lost upload response and redelivery.",
+      "Make sync checkpoints survive interruption without counting a replayed change twice.",
+      "Improve backend reliability by bounding queued work and preserving accepted jobs during shutdown.",
+      "Fix backend concurrency so a stale worker cannot replace a newer committed result."
     ],
     "negative": [
       "The only requested work is api design.",
       "Please handle c++ only.",
       "This task is limited to email delivery.",
       "The current request is graphql.",
-      "Work only on grpc."
+      "Work only on grpc.",
+      "Run reliability verification of the completed service using its approved fault matrix; do not change backend behavior.",
+      "Investigate the unexplained race from thread traces and identify its cause; implementation changes are out of scope."
     ],
     "ambiguous": [
       {
@@ -107,27 +126,61 @@
   "sources": [
     {
       "url": "https://sre.google/sre-book/handling-overload/",
-      "sourceType": "reference-implementation",
-      "versionScope": "Handling Overload HTML resource and retry sections inspected 2026-09-06",
-      "verifiedAt": "2026-09-06",
+      "sourceType": "official-docs",
+      "versionScope": "Google SRE book chapter 21, resource limits and Deciding to Retry sections inspected 2026-10-17",
+      "verifiedAt": "2026-10-17",
       "staleAfterDays": 365,
       "notes": "Adopt bounded work and retry ownership. Google topology and numerical thresholds are examples, not mandatory architecture."
     },
     {
       "url": "https://www.computer.org/education/bodies-of-knowledge/software-engineering",
       "sourceType": "official-docs",
-      "versionScope": "IEEE Computer Society SWEBOK landing guidance as available 2026-09-04",
+      "versionScope": "IEEE Computer Society SWEBOK landing page, including its v4.0a update notice, inspected 2026-10-17; full guide not inspected",
       "staleAfterDays": 180,
-      "notes": "Software engineering lifecycle, construction, testing, maintenance, and professional-practice baseline.",
-      "verifiedAt": "2026-09-04"
+      "notes": "Orientation and professional responsibility only; the landing page does not establish transaction, queue, or durability guarantees.",
+      "verifiedAt": "2026-10-17"
     },
     {
       "url": "https://sre.google/sre-book/table-of-contents/",
       "sourceType": "official-docs",
       "versionScope": "Google Site Reliability Engineering book as available 2026-09-04",
       "staleAfterDays": 365,
-      "notes": "Reliability, monitoring, incident response, capacity, release, and distributed-systems operating practices.",
+      "notes": "Navigation for reliability topics only. Use the inspected chapter or actual adapter contract for behavioral claims.",
       "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://aws.amazon.com/builders-library/making-retries-safe-with-idempotent-APIs/",
+      "sourceType": "official-docs",
+      "versionScope": "Amazon Builders' Library article, request identity, atomic mutation, semantic equivalence, late requests, and changed intent sections inspected 2026-10-17",
+      "verifiedAt": "2026-10-17",
+      "staleAfterDays": 365,
+      "notes": "Adopt scoped caller intent, atomic effect and deduplication evidence, compatible retry results, and explicit retention. EC2 token lifetime is an example, not a universal expiry policy."
+    },
+    {
+      "url": "https://www.postgresql.org/docs/18/transaction-iso.html",
+      "sourceType": "official-docs",
+      "versionScope": "PostgreSQL 18 section 13.2, Read Committed, Repeatable Read, and Serializable behavior inspected 2026-10-17",
+      "verifiedAt": "2026-10-17",
+      "staleAfterDays": 365,
+      "notes": "Adopt explicit isolation and full transaction retries after serialization failure. PostgreSQL behavior does not establish another engine's locking, isolation, or commit guarantees."
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/graph/delta-query-overview",
+      "sourceType": "official-docs",
+      "versionScope": "Microsoft Graph delta query overview, opaque state tokens, empty pages, replays, and synchronization reset sections inspected 2026-10-17",
+      "revision": "90b4773e1dd61222be4e5feea3cfeeb162115c9f",
+      "verifiedAt": "2026-10-17",
+      "staleAfterDays": 180,
+      "notes": "Adopt inspecting continuation, replay, and reset semantics. Graph entity IDs are not stable change IDs; its resource-specific token durations and status codes are not generic feed guarantees."
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/architecture/patterns/compensating-transaction",
+      "sourceType": "official-docs",
+      "versionScope": "Azure Architecture Center Compensating Transaction pattern, concurrent work, resumable compensation, and irreversible steps inspected 2026-10-17",
+      "revision": "498e83a207cfd512b396489e95ed3f791b372364",
+      "verifiedAt": "2026-10-17",
+      "staleAfterDays": 365,
+      "notes": "Adopt durable compensation progress and domain-specific recovery that preserves concurrent changes. Reject the introductory preference for eventual consistency as a universal rule and do not require Azure services or sagas."
     }
   ],
   "authoringMaturity": "individual"

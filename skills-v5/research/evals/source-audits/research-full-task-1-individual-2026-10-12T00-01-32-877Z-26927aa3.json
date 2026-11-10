@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "kind": "nonqualifying-source-audit",
+  "scenarioId": "research-full-task-1-individual",
+  "observedAt": "2026-10-12T00:01:32.877Z",
+  "historicalCutoff": "2026-09-04T23:59:59Z",
+  "sourcePlanSha256": "a3b5db11444dcd92bbfa371590676373f8f75d88153924f045dade912bd6fece",
+  "candidateProbe": {
+    "scenarioId": "research-full-task-1-individual",
+    "observedAt": "2026-10-12T00:01:32.877Z",
+    "complete": false,
+    "snapshotWritten": false,
+    "observations": [
+      {
+        "id": "agent-skills-spec",
+        "status": "unresolved",
+        "detail": "A 2026-10-10 Internet Archive CDX lookup for the exact https://agentskills.io/specification URL/day (2026-09-04 UTC) returned []; a 2026-10-11 retry returned HTTP 503 and a later evaluator audit timed out. The current archive state is unavailable, and no indexed capture plus replay bytes have been proven. A Git commit or later website is not an equivalent retrieval."
+      },
+      {
+        "id": "cursor-skills-docs",
+        "status": "unresolved",
+        "detail": "A 2026-10-10 Internet Archive CDX lookup for the exact https://cursor.com/docs/skills URL/day (2026-09-04 UTC) returned []; a 2026-10-11 retry returned HTTP 503 and a later evaluator audit timed out. The current archive state is unavailable, and no indexed capture plus replay bytes have been proven. Client docs from a different date cannot satisfy the exact-day fixture."
+      },
+      {
+        "id": "community-client-extension",
+        "status": "unresolved",
+        "detail": "No dated original, independently verifiable community statement that incorrectly universalizes a Cursor-only Agent Skills extension has been established."
+      },
+      {
+        "id": "pre-support-internal-note",
+        "status": "unresolved",
+        "detail": "No authentic, versioned pre-Cursor-support internal note with a verifiable historical Git revision has been supplied or identified. Public documentation cannot be relabeled internal evidence."
+      }
+    ]
+  },
+  "exactDayArchiveIndices": [
+    {
+      "roleId": "agent-skills-spec",
+      "sourceUrl": "https://agentskills.io/specification",
+      "indexUrl": "https://web.archive.org/cdx/search/cdx?url=https%3A%2F%2Fagentskills.io%2Fspecification&output=json&fl=timestamp%2Coriginal%2Cstatuscode%2Cdigest&filter=statuscode%3A200&from=20260904&to=20260904",
+      "checkedAt": "2026-10-12T00:01:32.877Z",
+      "outcome": "no-indexed-200-capture",
+      "detail": "CDX returned an empty capture inventory for the exact URL/day",
+      "httpStatus": 200,
+      "returnedUrl": "https://web.archive.org/cdx/search/cdx?url=https%3A%2F%2Fagentskills.io%2Fspecification&output=json&fl=timestamp%2Coriginal%2Cstatuscode%2Cdigest&filter=statuscode%3A200&from=20260904&to=20260904",
+      "responseBytes": 3,
+      "responseSha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+    },
+    {
+      "roleId": "cursor-skills-docs",
+      "sourceUrl": "https://cursor.com/docs/skills",
+      "indexUrl": "https://web.archive.org/cdx/search/cdx?url=https%3A%2F%2Fcursor.com%2Fdocs%2Fskills&output=json&fl=timestamp%2Coriginal%2Cstatuscode%2Cdigest&filter=statuscode%3A200&from=20260904&to=20260904",
+      "checkedAt": "2026-10-12T00:01:41.744Z",
+      "outcome": "no-indexed-200-capture",
+      "detail": "CDX returned an empty capture inventory for the exact URL/day",
+      "httpStatus": 200,
+      "returnedUrl": "https://web.archive.org/cdx/search/cdx?url=https%3A%2F%2Fcursor.com%2Fdocs%2Fskills&output=json&fl=timestamp%2Coriginal%2Cstatuscode%2Cdigest&filter=statuscode%3A200&from=20260904&to=20260904",
+      "responseBytes": 3,
+      "responseSha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+    }
+  ]
+}

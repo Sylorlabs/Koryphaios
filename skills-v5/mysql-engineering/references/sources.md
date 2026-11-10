@@ -20,21 +20,21 @@ The manual defines MySQL and InnoDB semantics. It does not prove optimizer choic
 
 - Package authorship is independent from empirical qualification; the audit/evaluation ledger is authoritative for qualification status.
 - Hierarchy: broader relational-data-modeling.
-- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held-out cases through the real resolver.
-- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no-skill pairing, regression retention, and blind semantic judging.
+- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held out cases through the real resolver.
+- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no skill pairing, regression retention, and blind semantic judging.
 - Source discipline: authoritative/spec/reference sources outrank community patterns when they conflict; runtime evidence outranks examples for behavioral claims.
 
 ## Maintained sources
 
 - **MySQL 8.4 multiple-column indexes**: https://dev.mysql.com/doc/refman/8.4/en/multiple-column-indexes.html
-  - Scope: MySQL 8.4, checked 2026-09-06.
+  - Scope: MySQL 8.4, checked 2026-11-07.
   - Use: leftmost-prefix behavior and composite-index lookup semantics.
 - **MySQL 8.4 InnoDB next-key locking**: https://dev.mysql.com/doc/refman/8.4/en/innodb-next-key-locking.html
-  - Scope: MySQL 8.4, checked 2026-09-06.
+  - Scope: MySQL 8.4, checked 2026-11-07.
   - Use: record-plus-gap locking and phantom prevention behavior.
 - **MySQL 8.4 EXPLAIN**: https://dev.mysql.com/doc/refman/8.4/en/explain.html
-  - Scope: MySQL 8.4, checked 2026-09-06.
+  - Scope: MySQL 8.4, checked 2026-11-07.
   - Use: optimizer estimates versus actual statement execution by `EXPLAIN ANALYZE`; not a guarantee of harmless diagnosis.
 - **MySQL 8.4 optimization and indexes**: https://dev.mysql.com/doc/refman/8.4/en/optimization-indexes.html
-  - Scope: MySQL 8.4, checked 2026-09-06.
+  - Scope: MySQL 8.4, checked 2026-11-07.
   - Use: index benefit and write/storage cost tradeoff.

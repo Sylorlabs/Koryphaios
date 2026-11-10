@@ -1,6 +1,6 @@
 # Source map
 
-Source curation for `shell-cli-engineering`. Routing fixtures and eval IDs remain in `kory.json`. This revision does not claim paired skill/no-skill or blind qualification.
+Source curation for `shell-cli-engineering`. Routing fixtures and eval IDs remain in `kory.json`. This revision does not claim paired skill/no skill or blind qualification.
 
 ## Adopted primary guidance
 

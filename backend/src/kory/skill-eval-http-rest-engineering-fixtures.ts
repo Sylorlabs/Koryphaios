@@ -1,13 +1,56 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import type {
   SkillEvalDeterministicScorer,
   SkillEvalFixtureMaterializer,
 } from './skill-eval-execution';
-import { packageJson, runHiddenBunTest, writeFixtureFile } from './skill-eval-fixture-helpers';
+import {
+  fixtureTextEquals,
+  packageJson,
+  readFixtureText,
+  runCandidateBunTests,
+  runHiddenBunTest,
+  writeFixtureFile,
+} from './skill-eval-fixture-helpers';
 
 const ETAG = 'http-rest-engineering-full-task-1-individual';
 const PROBLEM = 'http-rest-engineering-full-task-2-individual';
+
+function candidateRejectsStarter(
+  workingDirectory: string,
+  sourcePath: string,
+  brokenSource: string,
+): { passed: boolean; evidence: string[] } {
+  let candidateSource: string;
+  try {
+    candidateSource = readFixtureText(workingDirectory, sourcePath);
+  } catch {
+    return {
+      passed: false,
+      evidence: [`candidate source is missing or unsafe: ${sourcePath}`],
+    };
+  }
+  const repaired = runCandidateBunTests(workingDirectory);
+  let rejected = false;
+  let originalEvidence = 'Skipped: tests did not pass the candidate repair.';
+  if (repaired.completed && repaired.passed) {
+    try {
+      writeFixtureFile(workingDirectory, sourcePath, brokenSource);
+      const broken = runCandidateBunTests(workingDirectory);
+      rejected = broken.completed && !broken.passed;
+      originalEvidence = broken.evidence;
+    } finally {
+      writeFixtureFile(workingDirectory, sourcePath, candidateSource);
+    }
+  }
+  return {
+    passed: repaired.passed && rejected,
+    evidence: [
+      `candidate tests pass the repair: ${repaired.passed ? 'yes' : 'no'}`,
+      `candidate tests reject the original defect: ${rejected ? 'yes' : 'no'}`,
+      repaired.evidence,
+      originalEvidence,
+    ],
+  };
+}
 
 const ETAG_SOURCE = `export interface ResourceState {
   exists: boolean;
@@ -60,17 +103,7 @@ test('GET preserves cache metadata', () => {
 });
 `;
 
-const etagMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'http-rest-engineering/conditional-update-etag@1',
-  matches: (scenario) => scenario.id === ETAG,
-  materialize: (destination) => {
-    writeFixtureFile(destination, 'package.json', packageJson('kory-eval-http-etag'));
-    writeFixtureFile(destination, 'src/resource.ts', ETAG_SOURCE);
-    writeFixtureFile(destination, 'tests/resource.test.ts', ETAG_TEST);
-    writeFixtureFile(
-      destination,
-      'http-contract.md',
-      `# Resource HTTP contract
+const ETAG_CONTRACT = `# Resource HTTP contract
 
 - GET keeps the existing \`Cache-Control: private, max-age=60\` behavior and emits a strong ETag for the selected representation.
 - GET \`If-None-Match\` uses weak comparison semantics: either the matching strong tag or \`W/\` form returns 304. Nonmatching tags return the representation normally.
@@ -78,8 +111,16 @@ const etagMaterializer: SkillEvalFixtureMaterializer = {
 - \`If-Match\` uses strong comparison: a weak validator never satisfies it. \`If-Match: *\` succeeds only when the resource currently exists.
 - Successful PUT increments the representation version and returns the new strong ETag. Successful DELETE returns 204.
 - Old read-only clients use only GET and existing cache headers; keep that path compatible.
-`,
-    );
+`;
+
+const etagMaterializer: SkillEvalFixtureMaterializer = {
+  id: 'http-rest-engineering/conditional-update-etag@1',
+  matches: (scenario) => scenario.id === ETAG,
+  materialize: (destination) => {
+    writeFixtureFile(destination, 'package.json', packageJson('kory-eval-http-etag'));
+    writeFixtureFile(destination, 'src/resource.ts', ETAG_SOURCE);
+    writeFixtureFile(destination, 'tests/resource.test.ts', ETAG_TEST);
+    writeFixtureFile(destination, 'http-contract.md', ETAG_CONTRACT);
     writeFixtureFile(
       destination,
       'README.md',
@@ -92,9 +133,18 @@ Repair \`src/resource.ts\` using the HTTP contract. Expand tests for concurrent/
 };
 
 const etagScorer: SkillEvalDeterministicScorer = {
-  id: 'http-rest-engineering/conditional-update-etag-scorer@1',
+  id: 'http-rest-engineering/conditional-update-etag-scorer@2',
   scenarioIds: [ETAG],
   score: ({ workingDirectory }) => {
+    if (!fixtureTextEquals(workingDirectory, 'http-contract.md', ETAG_CONTRACT)) {
+      return {
+        passed: false,
+        quality: 0,
+        verification: 0,
+        integrityFailure: true,
+        evidence: ['The evaluator-owned HTTP resource contract was modified or removed.'],
+      };
+    }
     const hidden = runHiddenBunTest(
       workingDirectory,
       `import { expect, test } from 'bun:test';
@@ -156,22 +206,29 @@ test('hidden: wildcard If-Match depends on current existence', () => {
 });
 `,
     );
-    const tests = readFileSync(join(workingDirectory, 'tests/resource.test.ts'), 'utf8');
-    const coverage =
-      /428|precondition/iu.test(tests) &&
-      /412|stale/iu.test(tests) &&
-      /304|if-none-match|conditional/iu.test(tests) &&
-      /wildcard|\*/iu.test(tests) &&
-      /retry|concurrent/iu.test(tests);
-    const passed = hidden.passed && coverage;
+    let coverage = false;
+    try {
+      const tests = readFixtureText(workingDirectory, 'tests/resource.test.ts');
+      coverage =
+        /428|precondition/iu.test(tests) &&
+        /412|stale/iu.test(tests) &&
+        /304|if-none-match|conditional/iu.test(tests) &&
+        /wildcard|\*/iu.test(tests) &&
+        /retry|concurrent/iu.test(tests);
+    } catch {
+      coverage = false;
+    }
+    const regression = candidateRejectsStarter(workingDirectory, 'src/resource.ts', ETAG_SOURCE);
+    const passed = hidden.passed && coverage && regression.passed;
     return {
       passed,
       quality: passed ? 1 : hidden.passed ? 0.75 : 0,
-      verification: hidden.passed ? 1 : 0,
+      verification: hidden.passed && coverage && regression.passed ? 1 : 0,
       integrityFailure: false,
       evidence: [
         `hidden HTTP validator/precondition behavior: ${hidden.passed ? 'pass' : 'fail'}`,
         `representative HTTP regression coverage: ${coverage ? 'present' : 'missing'}`,
+        ...regression.evidence,
         hidden.evidence,
       ],
     };
@@ -212,17 +269,7 @@ test('success remains ordinary JSON 200', () => {
 });
 `;
 
-const problemMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'http-rest-engineering/problem-details-retryability@1',
-  matches: (scenario) => scenario.id === PROBLEM,
-  materialize: (destination) => {
-    writeFixtureFile(destination, 'package.json', packageJson('kory-eval-http-problem'));
-    writeFixtureFile(destination, 'src/endpoint.ts', PROBLEM_SOURCE);
-    writeFixtureFile(destination, 'tests/endpoint.test.ts', PROBLEM_TEST);
-    writeFixtureFile(
-      destination,
-      'migration-contract.md',
-      `# Error migration contract
+const PROBLEM_CONTRACT = `# Error migration contract
 
 New clients receive semantic HTTP status plus \`Content-Type: application/problem+json\` and a stable problem object with \`type\`, \`code\`, \`title\`, and boolean \`retryable\`. Do not make callers parse prose.
 
@@ -236,8 +283,16 @@ New clients receive semantic HTTP status plus \`Content-Type: application/proble
 
 - During the documented legacy window, \`legacy: true\` preserves HTTP 200 + \`{ok:false,error:{code,retryable,message}}\` while adding \`Deprecation: true\`. The legacy body still uses stable code/retryability.
 - Success remains 200 JSON.
-`,
-    );
+`;
+
+const problemMaterializer: SkillEvalFixtureMaterializer = {
+  id: 'http-rest-engineering/problem-details-retryability@1',
+  matches: (scenario) => scenario.id === PROBLEM,
+  materialize: (destination) => {
+    writeFixtureFile(destination, 'package.json', packageJson('kory-eval-http-problem'));
+    writeFixtureFile(destination, 'src/endpoint.ts', PROBLEM_SOURCE);
+    writeFixtureFile(destination, 'tests/endpoint.test.ts', PROBLEM_TEST);
+    writeFixtureFile(destination, 'migration-contract.md', PROBLEM_CONTRACT);
     writeFixtureFile(
       destination,
       'README.md',
@@ -250,9 +305,18 @@ Repair \`src/endpoint.ts\` to implement the migration contract. Expand tests acr
 };
 
 const problemScorer: SkillEvalDeterministicScorer = {
-  id: 'http-rest-engineering/problem-details-retryability-scorer@1',
+  id: 'http-rest-engineering/problem-details-retryability-scorer@2',
   scenarioIds: [PROBLEM],
   score: ({ workingDirectory }) => {
+    if (!fixtureTextEquals(workingDirectory, 'migration-contract.md', PROBLEM_CONTRACT)) {
+      return {
+        passed: false,
+        quality: 0,
+        verification: 0,
+        integrityFailure: true,
+        evidence: ['The evaluator-owned HTTP error migration contract was modified or removed.'],
+      };
+    }
     const hidden = runHiddenBunTest(
       workingDirectory,
       `import { expect, test } from 'bun:test';
@@ -306,23 +370,30 @@ test('hidden: success remains ordinary JSON 200', () => {
 });
 `,
     );
-    const tests = readFileSync(join(workingDirectory, 'tests/endpoint.test.ts'), 'utf8');
-    const coverage =
-      /validation|400/iu.test(tests) &&
-      /forbidden|403/iu.test(tests) &&
-      /conflict|409/iu.test(tests) &&
-      /429|rate/iu.test(tests) &&
-      /503|dependency|unavailable/iu.test(tests) &&
-      /legacy|deprecat/iu.test(tests);
-    const passed = hidden.passed && coverage;
+    let coverage = false;
+    try {
+      const tests = readFixtureText(workingDirectory, 'tests/endpoint.test.ts');
+      coverage =
+        /validation|400/iu.test(tests) &&
+        /forbidden|403/iu.test(tests) &&
+        /conflict|409/iu.test(tests) &&
+        /429|rate/iu.test(tests) &&
+        /503|dependency|unavailable/iu.test(tests) &&
+        /legacy|deprecat/iu.test(tests);
+    } catch {
+      coverage = false;
+    }
+    const regression = candidateRejectsStarter(workingDirectory, 'src/endpoint.ts', PROBLEM_SOURCE);
+    const passed = hidden.passed && coverage && regression.passed;
     return {
       passed,
       quality: passed ? 1 : hidden.passed ? 0.75 : 0,
-      verification: hidden.passed ? 1 : 0,
+      verification: hidden.passed && coverage && regression.passed ? 1 : 0,
       integrityFailure: false,
       evidence: [
         `hidden status/problem/retryability behavior: ${hidden.passed ? 'pass' : 'fail'}`,
         `representative HTTP regression coverage: ${coverage ? 'present' : 'missing'}`,
+        ...regression.evidence,
         hidden.evidence,
       ],
     };

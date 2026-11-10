@@ -1,13 +1,13 @@
 # Source map
 
-`implementation` is individually authored, but qualification still depends on routing, paired same-model skill/no-skill task evidence, independent blind evaluation, and regression closure.
+`implementation` is individually authored, but qualification still depends on routing, paired same-model skill/no skill task evidence, independent blind evaluation, and regression closure.
 
 ## Qualification basis
 
 - Package authorship is independent from empirical qualification; the audit/evaluation ledger is authoritative for qualification status.
 - Hierarchy: root responsibility; narrower children c-cpp-systems-engineering, container-engineering, csharp-dotnet-engineering, feature-implementation, game-development, go-engineering, integration-implementation, java-jvm-engineering, kotlin-engineering, llm-application-engineering, php-engineering, python-engineering, refactor-implementation, robotics-control, ruby-engineering, rust-engineering, swift-engineering, typescript-javascript-engineering.
-- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held-out cases through the real resolver.
-- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no-skill pairing, regression retention, and blind semantic judging.
+- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held out cases through the real resolver.
+- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no skill pairing, regression retention, and blind semantic judging.
 - Source discipline: authoritative/spec/reference sources outrank community patterns when they conflict; runtime evidence outranks examples for behavioral claims.
 
 ## Maintained sources

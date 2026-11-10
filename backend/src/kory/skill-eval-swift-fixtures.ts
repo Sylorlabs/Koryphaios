@@ -1,4 +1,3 @@
-import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type {
@@ -7,6 +6,7 @@ import type {
   SkillEvalFixtureMaterializer,
 } from './skill-eval-execution';
 import { writeFixtureFile } from './skill-eval-fixture-helpers';
+import { runSwiftProgram, swiftRuntimeReadiness } from './skill-eval-swift-runtime';
 
 const ACTOR = 'swift-engineering-full-task-1-individual';
 const CALLBACK = 'swift-engineering-full-task-2-individual';
@@ -66,6 +66,12 @@ function runSwift(
   source: string,
   hiddenSource: string,
 ): { passed: boolean; evidence: string } {
+  const selection = {
+    developerDir: process.env.DEVELOPER_DIR,
+    sdkRoot: process.env.SDKROOT,
+  };
+  const readiness = swiftRuntimeReadiness(selection);
+  if (readiness.reasons.length) return { passed: false, evidence: readiness.reasons.join('\n') };
   const build = join(root, '.kory-hidden-swift');
   rmSync(build, { recursive: true, force: true });
   mkdirSync(build, { recursive: true });
@@ -73,56 +79,16 @@ function runSwift(
   writeFixtureFile(root, hidden, hiddenSource);
   const binary = join(build, 'hidden');
   try {
-    const compile = spawnSync(
-      '/usr/bin/swiftc',
-      [
-        '-parse-as-library',
-        '-strict-concurrency=complete',
-        '-warnings-as-errors',
-        join(root, source),
-        join(root, hidden),
-        '-o',
-        binary,
-      ],
-      {
-        cwd: root,
-        encoding: 'utf8',
-        timeout: 20_000,
-        maxBuffer: 1_000_000,
-        env: { PATH: '/usr/bin:/bin', HOME: root, LANG: 'C', LC_ALL: 'C' },
-      },
+    return runSwiftProgram(
+      root,
+      [join(root, source), join(root, hidden)],
+      binary,
+      'KORY_SWIFT_OK',
+      selection,
     );
-    if (compile.status !== 0)
-      return {
-        passed: false,
-        evidence: `swiftc failed\n${compile.stdout ?? ''}\n${compile.stderr ?? ''}`.slice(-6000),
-      };
-    const execute = spawnSync(binary, [], {
-      cwd: root,
-      encoding: 'utf8',
-      timeout: 12_000,
-      maxBuffer: 1_000_000,
-      env: { PATH: '/usr/bin:/bin', HOME: root, LANG: 'C', LC_ALL: 'C' },
-    });
-    return {
-      passed: execute.status === 0 && /KORY_SWIFT_OK/u.test(execute.stdout ?? ''),
-      evidence: `${execute.stdout ?? ''}\n${execute.stderr ?? ''}`.slice(-6000),
-    };
   } finally {
     rmSync(join(root, hidden), { force: true });
     rmSync(build, { recursive: true, force: true });
-  }
-}
-
-function regressionText(root: string, path: string, required: RegExp[]): boolean {
-  try {
-    const text = readFileSync(join(root, path), 'utf8');
-    return required.every((pattern) => {
-      pattern.lastIndex = 0;
-      return pattern.test(text);
-    });
-  } catch {
-    return false;
   }
 }
 
@@ -130,7 +96,9 @@ function swiftRegressionBody(root: string, path: string, required: RegExp[]): bo
   try {
     const source = readFileSync(join(root, path), 'utf8');
     const code = source.replace(/\/\*[\s\S]*?\*\//gu, ' ').replace(/\/\/.*$/gmu, ' ');
-    const hasTestBody = /@Test\b|\bfunc\s+test\w*\s*\(|\bXCTAssert\w*\s*\(|#expect\s*\(/u.test(code);
+    const hasTestBody = /@Test\b|\bfunc\s+test\w*\s*\(|\bXCTAssert\w*\s*\(|#expect\s*\(/u.test(
+      code,
+    );
     return (
       hasTestBody &&
       required.every((pattern) => {
@@ -217,46 +185,84 @@ final class Handle: ImageCancellation, @unchecked Sendable {
 }
 
 final class FakeLegacy: LegacyImageLoading, @unchecked Sendable {
-  struct Pending { let handle: Handle; let completion: @Sendable (Result<String, ImageLoadError>) -> Void }
+  struct Pending { let call: Int; let handle: Handle; let completion: @Sendable (Result<String, ImageLoadError>) -> Void }
   private let lock = NSLock(); private var pending: [String: [Pending]] = [:]; private var calls: [String: Int] = [:]
   func load(_ key: String, completion: @escaping @Sendable (Result<String, ImageLoadError>) -> Void) -> any ImageCancellation {
-    let handle = Handle(); lock.lock(); pending[key, default: []].append(Pending(handle: handle, completion: completion)); calls[key, default: 0] += 1; lock.unlock(); return handle
+    let handle = Handle(); lock.lock(); calls[key, default: 0] += 1; pending[key, default: []].append(Pending(call: calls[key]!, handle: handle, completion: completion)); lock.unlock(); return handle
   }
   func callCount(_ key: String) -> Int { lock.lock(); defer { lock.unlock() }; return calls[key, default: 0] }
-  func complete(_ key: String, _ result: Result<String, ImageLoadError>, twice: Bool = false) {
-    lock.lock(); let callbacks = pending.removeValue(forKey: key) ?? []; lock.unlock();
-    for callback in callbacks { callback.completion(result); if twice { callback.completion(result) } }
+  func complete(_ key: String, _ call: Int, _ result: Result<String, ImageLoadError>, twice: Bool = false) {
+    lock.lock(); let callback = pending[key]?.firstIndex(where: { $0.call == call }).map { pending[key]!.remove(at: $0) }; lock.unlock();
+    if let callback { callback.completion(result); if twice { callback.completion(result) } }
   }
-  func cancelled(_ key: String) -> Bool { lock.lock(); defer { lock.unlock() }; return pending[key]?.first?.handle.isCancelled() ?? false }
+  func cancelled(_ key: String, _ call: Int = 1) -> Bool { lock.lock(); defer { lock.unlock() }; return pending[key]?.first(where: { $0.call == call })?.handle.isCancelled() ?? false }
 }
 
 @main struct __KoryHidden {
   static func main() async throws {
     let fake = FakeLegacy(); let loader = ImageLoader(legacy: fake)
-    let one = Task { try await loader.image("one") }; try await Task.sleep(for: .milliseconds(10)); fake.complete("one", .success("img-one"), twice: true)
+    let one = Task { try await loader.image("one") }; try await Task.sleep(for: .milliseconds(10)); fake.complete("one", 1, .success("img-one"), twice: true)
     if try await one.value != "img-one" { fatalError("success") }
     if try await loader.image("one") != "img-one" || fake.callCount("one") != 1 { fatalError("cache") }
 
     let a = Task { try await loader.image("shared") }; let b = Task { try await loader.image("shared") }
     try await Task.sleep(for: .milliseconds(10)); if fake.callCount("shared") != 1 { fatalError("same-key dedupe") }
-    fake.complete("shared", .success("shared-image")); if try await (a.value, b.value) != ("shared-image", "shared-image") { fatalError("waiters") }
+    fake.complete("shared", 1, .success("shared-image")); if try await (a.value, b.value) != ("shared-image", "shared-image") { fatalError("waiters") }
 
-    let failed = Task { try await loader.image("bad") }; try await Task.sleep(for: .milliseconds(10)); fake.complete("bad", .failure(.failed))
+    let failed = Task { try await loader.image("bad") }; try await Task.sleep(for: .milliseconds(10)); fake.complete("bad", 1, .failure(.failed))
     do { _ = try await failed.value; fatalError("failure became success") } catch ImageLoadError.failed {}
 
     let cancelled = Task { try await loader.image("cancel") }; try await Task.sleep(for: .milliseconds(10)); cancelled.cancel(); try await Task.sleep(for: .milliseconds(20))
     if !fake.cancelled("cancel") { fatalError("legacy cancellation not bridged") }
     do { _ = try await cancelled.value; fatalError("cancel became success") } catch is CancellationError {}
-    fake.complete("cancel", .success("late"), twice: true)
+    fake.complete("cancel", 1, .success("late"), twice: true)
+
+    let staleFailure = Task { try await loader.image("retry-failure") }
+    try await Task.sleep(for: .milliseconds(10)); staleFailure.cancel()
+    do { _ = try await staleFailure.value; fatalError("cancelled flight returned") } catch is CancellationError {}
+    try await Task.sleep(for: .milliseconds(20))
+    let failureRetry = Task { try await loader.image("retry-failure") }
+    try await Task.sleep(for: .milliseconds(10))
+    if fake.callCount("retry-failure") != 2 { fatalError("retry reused cancelled flight") }
+    fake.complete("retry-failure", 1, .failure(.failed), twice: true)
+    try await Task.sleep(for: .milliseconds(10))
+    fake.complete("retry-failure", 2, .success("fresh-after-failure"))
+    if try await failureRetry.value != "fresh-after-failure" { fatalError("stale failure poisoned retry") }
+
+    let staleCancellation = Task { try await loader.image("retry-cancellation") }
+    try await Task.sleep(for: .milliseconds(10)); staleCancellation.cancel()
+    do { _ = try await staleCancellation.value; fatalError("cancelled stale flight returned") } catch is CancellationError {}
+    try await Task.sleep(for: .milliseconds(20))
+    let cancellationRetry = Task { try await loader.image("retry-cancellation") }
+    try await Task.sleep(for: .milliseconds(10))
+    if fake.callCount("retry-cancellation") != 2 { fatalError("cancelled retry was not a new flight") }
+    fake.complete("retry-cancellation", 1, .success("stale"), twice: true)
+    try await Task.sleep(for: .milliseconds(10))
+    fake.complete("retry-cancellation", 2, .success("fresh-after-cancellation"))
+    if try await cancellationRetry.value != "fresh-after-cancellation" { fatalError("stale cancellation completed retry") }
+
+    let continuing = Task { try await loader.image("shared-waiter") }
+    try await Task.sleep(for: .milliseconds(10))
+    let cancelledWaiter = Task { try await loader.image("shared-waiter") }
+    try await Task.sleep(for: .milliseconds(10))
+    if fake.callCount("shared-waiter") != 1 { fatalError("waiters did not share flight") }
+    cancelledWaiter.cancel()
+    do { _ = try await cancelledWaiter.value; fatalError("cancelled waiter returned") } catch is CancellationError {}
+    try await Task.sleep(for: .milliseconds(20))
+    if fake.cancelled("shared-waiter") { fatalError("cancelled waiter cancelled shared flight") }
+    fake.complete("shared-waiter", 1, .success("shared-after-one-cancel"))
+    if try await continuing.value != "shared-after-one-cancel" { fatalError("continuing waiter did not finish") }
     try await Task.sleep(for: .milliseconds(10));
     print("KORY_SWIFT_OK")
   }
 }
 `,
   );
-  const regression = regressionText(root, 'Tests/ImageLoaderRegression.swift', [
+  const regression = swiftRegressionBody(root, 'Tests/ImageLoaderRegression.swift', [
     /duplicate|late|continuation|once/iu,
     /cancel|concurrent|same.?key|cache/iu,
+    /retry|stale|flight/iu,
+    /waiter|shared|continuing/iu,
   ]);
   const source = existsSync(join(root, 'Sources/ImageLoader.swift'))
     ? readFileSync(join(root, 'Sources/ImageLoader.swift'), 'utf8')
@@ -280,6 +286,10 @@ final class FakeLegacy: LegacyImageLoading, @unchecked Sendable {
 export const SWIFT_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMaterializer[] = [
   {
     id: 'swift-engineering/actor-reentrancy-reservation@1',
+    realRuntime: true,
+    get readinessBlockers() {
+      return swiftRuntimeReadiness().reasons;
+    },
     matches: (scenario) => scenario.id === ACTOR,
     materialize: (root) => {
       writeFixtureFile(root, 'Sources/Account.swift', ACTOR_SOURCE);
@@ -296,19 +306,23 @@ export const SWIFT_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMaterializ
     },
   },
   {
-    id: 'swift-engineering/callback-continuation-lifetime@1',
+    id: 'swift-engineering/callback-continuation-lifetime@2',
+    realRuntime: true,
+    get readinessBlockers() {
+      return swiftRuntimeReadiness().reasons;
+    },
     matches: (scenario) => scenario.id === CALLBACK,
     materialize: (root) => {
       writeFixtureFile(root, 'Sources/ImageLoader.swift', CALLBACK_SOURCE);
       writeFixtureFile(
         root,
         'Tests/ImageLoaderRegression.swift',
-        '// Add duplicate/late callback exactly-once, cancellation bridging, concurrent same-key/cache, and failure regressions.\n',
+        '// Add duplicate/late callback exactly-once, cancellation bridging, concurrent same-key/cache, failure/retry stale-flight, and independent waiter cancellation regressions.\n',
       );
       writeFixtureFile(
         root,
         'README.md',
-        '# Swift callback bridge\n\nFix ImageLoader under Swift 6 strict concurrency. Bridge Task cancellation to the legacy cancellation handle, prevent duplicate/late callbacks from resuming a continuation twice, deduplicate concurrent same-key loads, cache only successful live results, and avoid @unchecked Sendable in candidate code.\n',
+        '# Swift callback bridge\n\nFix ImageLoader under Swift 6 strict concurrency. Bridge Task cancellation to the legacy cancellation handle, prevent duplicate/late callbacks from resuming a continuation twice, deduplicate concurrent same-key loads, keep an old failed or cancelled flight from clearing or completing a same-key retry, let one cancelled waiter leave a continuing waiter alive, cache only successful live results, and avoid @unchecked Sendable in candidate code.\n',
       );
     },
   },
@@ -321,7 +335,7 @@ export const SWIFT_SKILL_EVAL_SCORERS: readonly SkillEvalDeterministicScorer[] =
     score: ({ workingDirectory }) => scoreActor(workingDirectory),
   },
   {
-    id: 'swift-engineering/callback-continuation-lifetime-scorer@1',
+    id: 'swift-engineering/callback-continuation-lifetime-scorer@2',
     scenarioIds: [CALLBACK],
     score: ({ workingDirectory }) => scoreCallback(workingDirectory),
   },

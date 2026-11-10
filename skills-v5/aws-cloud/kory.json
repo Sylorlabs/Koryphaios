@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "aws-cloud",
-  "version": "5.1.1",
+  "version": "5.1.2",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -73,7 +73,7 @@
         "id": "aws-cloud-ambiguous-1",
         "prompt": "Design an AWS cross-account workload architecture and its service boundaries. architecture-planning owns system/service decomposition; aws-cloud owns account/OU/Region, IAM, VPC, managed-service, audit, quota and recovery semantics.",
         "expectedSelection": true,
-        "expectedSkills": [],
+        "expectedSkills": ["aws-cloud", "architecture-planning"],
         "forbiddenSkills": [],
         "adjacentSkills": ["architecture-planning"],
         "tags": ["ambiguous", "neighbor-boundary"]
@@ -82,18 +82,18 @@
         "id": "aws-cloud-ambiguous-2",
         "prompt": "Redesign AWS organization roles and resource policies because a security review found cross-account escalation. aws-cloud owns the AWS account/IAM/KMS/resource-plane redesign; cloud-security owns the escalation analysis and security-control verdict.",
         "expectedSelection": true,
-        "expectedSkills": [],
+        "expectedSkills": ["aws-cloud", "cloud-security"],
         "forbiddenSkills": [],
-        "adjacentSkills": ["infrastructure-security"],
+        "adjacentSkills": ["cloud-security"],
         "tags": ["ambiguous", "scope-control"]
       },
       {
         "id": "aws-cloud-ambiguous-3",
         "prompt": "Change AWS Transit Gateway routes, IAM roles and RDS topology expressed in Terraform. aws-cloud owns AWS semantics; terraform-iac owns provider/state/module/plan mechanics and safe state transitions.",
         "expectedSelection": true,
-        "expectedSkills": [],
+        "expectedSkills": ["aws-cloud", "terraform-iac"],
         "forbiddenSkills": [],
-        "adjacentSkills": ["verification"],
+        "adjacentSkills": ["terraform-iac"],
         "tags": ["ambiguous", "scope-control"]
       }
     ],
@@ -131,11 +131,11 @@
     {
       "url": "https://docs.aws.amazon.com/wellarchitected/latest/framework/welcome.html",
       "sourceType": "official-docs",
-      "versionScope": "AWS Well-Architected Framework latest identifies publication date 2024-11-06; applicable snapshot v13",
-      "revision": "v13 / 2024-11-06",
+      "versionScope": "AWS Well-Architected Framework welcome page identifies publication date 2024-11-06; rechecked 2026-10-17",
+      "revision": "2024-11-06",
       "staleAfterDays": 60,
       "notes": "AWS operational excellence, security, reliability, performance, cost, and sustainability architecture framework.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-10-17"
     },
     {
       "url": "https://docs.aws.amazon.com/whitepapers/latest/organizing-your-aws-environment/organizing-your-aws-environment.html",
@@ -143,39 +143,143 @@
       "versionScope": "Organizing Your AWS Environment Using Multiple Accounts, publication date 2025-04-30",
       "staleAfterDays": 90,
       "notes": "Primary account/OU isolation and multi-account organizational baseline.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-10-17"
     },
     {
       "url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html",
       "sourceType": "official-docs",
-      "versionScope": "Rolling AWS IAM security best-practice documentation as available 2026-09-05",
+      "versionScope": "Rolling AWS IAM security best-practice documentation rechecked 2026-10-17",
       "staleAfterDays": 30,
       "notes": "Federation/temporary credentials, workload roles, least privilege and access-analysis guidance.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-10-17"
     },
     {
       "url": "https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/using-cfn-updating-stacks-changesets.html",
       "sourceType": "official-docs",
-      "versionScope": "Rolling CloudFormation change-set guidance as available 2026-09-05",
+      "versionScope": "Rolling CloudFormation change-set guidance rechecked 2026-11-07",
       "staleAfterDays": 21,
       "notes": "Reviewable stack changes and replacement visibility; a change set predicts changes but does not guarantee successful execution.",
-      "verifiedAt": "2026-09-26"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-concepts.html",
       "sourceType": "official-docs",
-      "versionScope": "Rolling CloudTrail concepts as available 2026-10-02",
+      "versionScope": "Rolling CloudTrail concepts rechecked 2026-11-01",
       "staleAfterDays": 14,
-      "notes": "Audit/event-history/trail concepts. Event History is limited to 90 days of management events per account/Region and is not a durable organization audit archive.",
-      "verifiedAt": "2026-10-02"
+      "notes": "Event History is limited to 90 days of management events per account/Region. Trails do not log data events by default; select required data events explicitly.",
+      "verifiedAt": "2026-11-01"
     },
     {
       "url": "https://docs.aws.amazon.com/prescriptive-guidance/latest/security-reference-architecture/doc-history.html",
       "sourceType": "official-docs",
-      "versionScope": "AWS Security Reference Architecture living guidance; latest major document-history update 2026-06-30",
+      "versionScope": "AWS Security Reference Architecture living guidance rechecked 2026-11-07; latest major document-history update 2026-06-30",
       "staleAfterDays": 21,
       "notes": "Fresh security adjacency guard. June 2026 update removed older CloudTrail Lake recommendations; do not reuse stale Lake-centric guidance for new customers.",
-      "verifiedAt": "2026-09-26"
+      "verifiedAt": "2026-11-07"
+    },
+    {
+      "url": "https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_policies_scps.html",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling SCP scope and exceptions rechecked 2026-10-17",
+      "staleAfterDays": 30,
+      "notes": "Member-account principal guardrails, not permission grants; management-account and service-linked-role exceptions; staged OU testing.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_policies_rcps.html",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling RCP scope, supported-service list and exceptions rechecked 2026-11-07",
+      "staleAfterDays": 21,
+      "notes": "Resource-side guardrails including external callers; verify supported services and management-account/service-linked-role exceptions for each task.",
+      "verifiedAt": "2026-11-07"
+    },
+    {
+      "url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_evaluation-logic.html",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling IAM policy evaluation overview rechecked 2026-10-17",
+      "staleAfterDays": 30,
+      "notes": "Identity/resource grants, boundaries, organization controls and explicit denies. Follow linked principal/session and cross-account rules when applicable; no universal all-policies-intersect shortcut.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://docs.aws.amazon.com/vpc/latest/userguide/VPC_Route_Tables.html",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling VPC route-table overview rechecked 2026-10-17",
+      "staleAfterDays": 45,
+      "notes": "Subnet/gateway route ownership and destination/target paths; a route is configuration evidence, not a live connectivity test.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Concepts.MultiAZ.html",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling RDS Multi-AZ DB instance versus DB cluster guidance rechecked 2026-10-17",
+      "staleAfterDays": 30,
+      "notes": "DB instance standby does not serve reads; DB cluster reader instances can. Verify exact engine, deployment type and Region support.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://docs.aws.amazon.com/kms/latest/developerguide/key-policies.html",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling KMS key-policy authorization guidance rechecked 2026-10-17",
+      "staleAfterDays": 30,
+      "notes": "Regional key-policy authority, IAM delegation and grants; an IAM allow alone does not establish effective key access.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://docs.aws.amazon.com/kms/latest/developerguide/multi-region-keys-overview.html",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling KMS multi-Region key shared/independent properties rechecked 2026-10-17",
+      "staleAfterDays": 30,
+      "notes": "Related key material does not synchronize policies, grants, aliases or enabled state; service data replication semantics remain service-specific.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling EKS Pod Identity overview and compatibility restrictions rechecked 2026-11-07",
+      "staleAfterDays": 21,
+      "notes": "Service-account role association, agent/SDK credential chain and IMDS/node-role exposure. Recheck platform/runtime restrictions rather than assuming every EKS workload supports Pod Identity.",
+      "verifiedAt": "2026-11-07"
+    },
+    {
+      "url": "https://docs.aws.amazon.com/config/latest/developerguide/aggregate-data.html",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling AWS Config aggregation overview rechecked 2026-10-17",
+      "staleAfterDays": 30,
+      "notes": "Read-only aggregation of configuration/compliance data from enabled source accounts/Regions; not a source recorder or mutation mechanism.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/cloudwatch_concepts.html",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling CloudWatch metric identity, dimensions, timestamps and alarm concepts rechecked 2026-10-17",
+      "staleAfterDays": 30,
+      "notes": "Tie telemetry to account/Region, namespace, metric name, dimensions, period and observation window; dashboard existence is not signal evidence.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://docs.aws.amazon.com/aws-backup/latest/devguide/restore-testing.html",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling AWS Backup restore testing and validation lifecycle rechecked 2026-11-07",
+      "staleAfterDays": 21,
+      "notes": "Restore jobs, separate validation, key/role failures, cleanup and service-specific support; job completion alone does not prove application usability or end-to-end RTO/RPO.",
+      "verifiedAt": "2026-11-07"
+    },
+    {
+      "url": "https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/drift-aware-change-sets.html",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling drift-aware CloudFormation three-way comparison and limitations rechecked 2026-11-07",
+      "staleAfterDays": 21,
+      "notes": "Actual/previous/desired state, unsupported-type fallback, write-only properties, cross-stack attachments and pre-deployment-state rollback; inspect rather than assuming all drift is covered.",
+      "verifiedAt": "2026-11-07"
+    },
+    {
+      "url": "https://docs.aws.amazon.com/servicequotas/latest/userguide/intro.html",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling Service Quotas applied/default and scope concepts rechecked 2026-10-17",
+      "staleAfterDays": 30,
+      "notes": "Account/Region/resource scope, applied quotas, usage and increase requests; a requested increase is not an approved limit.",
+      "verifiedAt": "2026-10-17"
     }
   ],
   "authoringMaturity": "individual"

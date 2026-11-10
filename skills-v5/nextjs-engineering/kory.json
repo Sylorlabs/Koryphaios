@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "nextjs-engineering",
-  "version": "5.1.1",
+  "version": "5.1.2",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -99,34 +99,34 @@
     {
       "url": "https://nextjs.org/docs",
       "sourceType": "official-docs",
-      "versionScope": "Next.js documentation as fetched 2026-09-06",
+      "versionScope": "Next.js documentation as inspected 2026-11-07",
       "staleAfterDays": 30,
       "notes": "App Router, rendering, data, caching, routing, and deployment behavior.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://nextjs.org/docs/app/getting-started/server-and-client-components",
       "sourceType": "official-docs",
-      "versionScope": "Page last updated 2026-03-16",
+      "versionScope": "Next.js server/client component documentation as inspected 2026-11-07",
       "staleAfterDays": 30,
       "notes": "Server and Client Component boundaries, use client module graph, serialization, and server-only separation.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://nextjs.org/docs/app/getting-started/revalidating",
       "sourceType": "official-docs",
-      "versionScope": "Page last updated 2026-03-03; Cache Components model",
+      "versionScope": "Next.js revalidation documentation as inspected 2026-11-07",
       "staleAfterDays": 30,
       "notes": "cacheLife and on-demand revalidation with revalidateTag, updateTag, and revalidatePath.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://github.com/mattpocock/skills",
       "sourceType": "community-pattern",
-      "versionScope": "main commit 3cca18b368ae95cdbdebbff572ccafa662551015 authored 2026-09-04T08:43:27Z; package 1.2.3",
+      "versionScope": "main commit 4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d fetched 2026-10-05",
       "staleAfterDays": 30,
       "notes": "Community packaging reference for focused composable specialist rules and explicit routing; never Next.js authority.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-03"
     }
   ],
   "authoringMaturity": "individual"

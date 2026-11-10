@@ -112,26 +112,26 @@
     {
       "url": "https://grafana.com/docs/k6/latest/using-k6/scenarios/concepts/open-vs-closed/",
       "sourceType": "official-docs",
-      "versionScope": "Grafana k6 current documentation available 2026-09-05",
+      "versionScope": "Grafana k6 current documentation available 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Open versus closed workload models and coordinated-omission risk when response time controls offered arrival rate.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://grafana.com/docs/k6/latest/using-k6/scenarios/executors/constant-arrival-rate/",
       "sourceType": "official-docs",
-      "versionScope": "Grafana k6 current constant-arrival-rate executor documentation available 2026-09-05",
+      "versionScope": "Grafana k6 current constant-arrival-rate executor documentation available 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Open-model fixed-rate scheduling independent of response duration and virtual-user capacity behavior.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://grafana.com/docs/k6/latest/using-k6/thresholds/",
       "sourceType": "official-docs",
-      "versionScope": "Grafana k6 current threshold documentation available 2026-09-05",
+      "versionScope": "Grafana k6 current threshold documentation available 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Percentile/error/counter threshold semantics and distinction between checks and fail-producing thresholds.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://github.com/google/benchmark/blob/main/docs/user_guide.md",

@@ -41,12 +41,16 @@ Turn data into a reproducible, bounded conclusion without exceeding its provenan
 - Missing data is silently treated as zero.
 - Correlation becomes causation.
 - A convenient sample becomes a population claim.
+- A zero count is still evidence: when a requested quality dimension such as missingness, duplicates, exclusions, or reconciliation has no findings, report the observed zero/none result instead of omitting the check.
+- When the task asks for failure or recovery evidence, execute a representative invalid-input or failed-reconciliation path and its recovery when the environment permits it. Otherwise label that verification unavailable; do not turn a successful happy path into recovery evidence.
 
 ### Evidence required before completion
 
-- Data-quality and provenance report.
+- An explicit analysis invariant: decision, population, unit, window, measures, and success criteria.
+- Data-quality and provenance report covering the requested dimensions, including observed zero/none results and source limitations.
 - Reproducible calculations.
 - Sensitivity and uncertainty results.
+- Representative success plus negative/recovery verification, or an explicit unavailable label for checks the environment cannot execute.
 - Decision-focused output with limitations.
 
 ### Anti-misinterpretation boundaries
@@ -58,6 +62,7 @@ Turn data into a reproducible, bounded conclusion without exceeding its provenan
 
 ## Completion evidence
 
-- Reproducible calculations
+- Reproducible calculations plus the analysis invariant and data-quality/provenance record.
+- Observed negative/recovery evidence when required, with unavailable or simulated checks labeled as such.
 
 Use [the maintained source map](references/sources.md) for version-sensitive facts and source conflicts.

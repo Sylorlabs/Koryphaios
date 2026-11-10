@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "swift-engineering",
-  "version": "5.1.1",
+  "version": "5.1.2",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -110,23 +110,23 @@
       "versionScope": "Swift language documentation as available 2026-09-04",
       "staleAfterDays": 60,
       "notes": "Value/reference semantics, concurrency, ownership, and language contracts.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://docs.swift.org/swift-book/documentation/the-swift-programming-language/automaticreferencecounting/",
       "sourceType": "official-docs",
-      "versionScope": "Swift ARC documentation as verified 2026-09-06",
+      "versionScope": "Swift ARC documentation as verified 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Adopted for strong-cycle diagnosis and weak-versus-unowned lifetime decisions; does not prove an ownership graph is cycle-free.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://docs.swift.org/swift-book/documentation/the-swift-programming-language/concurrency/",
       "sourceType": "official-docs",
-      "versionScope": "Swift concurrency documentation as verified 2026-09-06",
+      "versionScope": "Swift concurrency documentation as verified 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Adopted for actor isolation, Sendable, task ownership, and cancellation; diagnostics depend on Swift language mode and compiler version.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     }
   ],
   "authoringMaturity": "individual"

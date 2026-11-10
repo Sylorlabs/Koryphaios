@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "terraform-iac",
-  "version": "5.0.1",
+  "version": "5.0.2",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -118,18 +118,18 @@
     {
       "url": "https://developer.hashicorp.com/terraform/language/backend",
       "sourceType": "official-docs",
-      "versionScope": "Terraform v1.16.x, labeled latest in HashiCorp documentation as of 2026-09-05",
+      "versionScope": "Terraform latest backend documentation rechecked 2026-11-07",
       "staleAfterDays": 21,
       "notes": "Current Terraform language/backend baseline and CLI-version context.",
-      "verifiedAt": "2026-09-26"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://developer.hashicorp.com/terraform/language/state/backends",
       "sourceType": "official-docs",
-      "versionScope": "Terraform v1.16.x state/backend guidance as of 2026-09-05",
+      "versionScope": "Terraform v1.16.x state/backend guidance as of 2026-10-20",
       "staleAfterDays": 45,
       "notes": "Remote state, backend locking, state operations, and recovery boundaries.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-10-20"
     },
     {
       "url": "https://developer.hashicorp.com/terraform/language/modules/develop/refactoring",
@@ -142,18 +142,18 @@
     {
       "url": "https://developer.hashicorp.com/terraform/language/import",
       "sourceType": "official-docs",
-      "versionScope": "Current Terraform declarative import workflow as of 2026-09-05",
+      "versionScope": "Current Terraform declarative import workflow as of 2026-10-20",
       "staleAfterDays": 45,
       "notes": "Import blocks, matching configuration, plan review, and safe adoption of existing resources.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-10-20"
     },
     {
       "url": "https://developer.hashicorp.com/terraform/cli/commands/plan",
       "sourceType": "official-docs",
-      "versionScope": "Terraform v1.16.x plan guidance as of 2026-09-05",
+      "versionScope": "Terraform v1.16.x plan guidance as of 2026-10-04",
       "staleAfterDays": 30,
       "notes": "Speculative versus saved plans, reviewed apply artifacts, and final-state revalidation requirements.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     }
   ],
   "authoringMaturity": "individual"

@@ -15,4 +15,10 @@ Verify findability with representative tasks and realistic wording. Record where
 
 Keep behavior/state transitions with `interaction-design`, visual treatment with `visual-interface-design`, and storage normalization with engineering.
 
+## Deliverable discipline
+
+Write the requested deliverables once, as complete files, instead of patching the same path repeatedly, and keep them within the stated evaluation budget. Front-load the concept inventory, the hierarchy and label rationale, the entry-path model, and the findability plan as skeletons, then fill them in one pass.
+
+Label every material claim as observed, sourced, assumption, or hypothesis, and label every required element as produced, external, or unavailable with the reason. When the environment supplies only authored records, treat those records as the whole evidence base: trace each one from a claim, and mark anything that needs an unavailable participant, tree test, or runtime as unavailable rather than omitting it. A complete deliverable that states its gaps is worth more than an unfinished one that hides them.
+
 [Sources](references/sources.md).

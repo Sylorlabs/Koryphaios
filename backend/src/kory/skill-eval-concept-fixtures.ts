@@ -66,21 +66,39 @@ export function scoreConceptFixture(
         return false;
       }
     });
+  // A candidate that never writes its module is an ordinary failed attempt: nothing ran, so nothing
+  // can be trusted, but the evaluator's own inputs were not touched. Only a tampered evaluator
+  // input, or a candidate path that is not a regular file (a symlink can leave the sandbox), is an
+  // integrity failure. The two cases have very different consequences further up the ledger: an
+  // integrity failure blocks a skill permanently, a failed attempt only lowers the rate.
+  let candidatePresent = false;
   let regularCandidate = false;
   try {
-    regularCandidate = lstatSync(join(root, 'candidate.ts')).isFile();
+    const candidate = lstatSync(join(root, 'candidate.ts'));
+    candidatePresent = true;
+    regularCandidate = candidate.isFile();
   } catch {
-    /* Missing candidate fails closed. */
+    /* Missing candidate is an ordinary failure, handled below. */
   }
-  if (!fixedInputsIntact() || !regularCandidate) {
+  const inputsIntact = fixedInputsIntact();
+  if (!inputsIntact || (candidatePresent && !regularCandidate)) {
     return {
       passed: false,
       quality: 0,
       verification: 0,
       integrityFailure: true,
       evidence: [
-        'Missing, altered, or symlinked fixed inputs/candidate; no candidate code executed.',
+        'Altered, missing, or symlinked evaluator input or candidate path; no candidate code executed.',
       ],
+    };
+  }
+  if (!candidatePresent) {
+    return {
+      passed: false,
+      quality: 0,
+      verification: 0,
+      integrityFailure: false,
+      evidence: ['Candidate module is absent; nothing was executed and nothing was scored.'],
     };
   }
   const vectors = definition.vectors();

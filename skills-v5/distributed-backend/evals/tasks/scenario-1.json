@@ -1,19 +1,23 @@
 {
   "id": "distributed-backend-full-task-1-individual",
   "maturity": "individual",
-  "prompt": "The evaluation repository asks the agent to \"design a distributed system\". The fixture includes partial failure, cancellation, retry/idempotency pressure, concurrency, and an attractive topology assumption that is not established by evidence. The acceptance boundary is distributed-backend: Design multi-node coordination around partial failure, independent clocks, and split ownership. The adjacent bun-deno-runtime discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "prompt": "The evaluation repository asks the agent to \"design a distributed system\". The fixture includes two-region lease ownership, independent clocks, a network partition, cancellation, a lost response after a possible commit, retry/idempotency pressure, concurrency, stale writers, and an attractive topology assumption that is not established by evidence. The acceptance boundary is distributed-backend: define operation-level consistency and availability, a single authority or explicit fencing rule, stable command identity, one retry owner, unknown-outcome reconciliation, and a recovery gate. The adjacent bun-deno-runtime discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
   "environment": {
     "kind": "repository",
     "startingState": "fixture://distributed-backend/cross-region-lease-failover",
     "requirements": [
-      "two-region scheduler simulation with shared lease store and injectable partition/delay",
-      "monotonic fencing token support and workers that reject stale tokens",
-      "clock-skew fixture and lease expiry/renewal timeline",
-      "trace of dispatch decisions before, during, and after partition recovery",
+      "two-region scheduler simulation with a declared lease authority and injectable partition, delay, loss, duplication, and reordering",
+      "monotonic fencing token support and workers that reject stale tokens even when a former owner has a later wall-clock reading",
+      "per-node deterministic monotonic clocks plus a clock-skew fixture; no wall-clock timestamp is accepted as authority",
+      "dispatch trace carrying command id, attempt, region, authority epoch or fencing token, decision, and effect/ack outcome before, during, and after recovery",
+      "lost-response case that leaves commit status unknown until the operation is queried or reconciled by command id",
+      "one named retry owner with bounded attempts, total retry work, backoff, and jitter; lower layers do not retry independently",
+      "recovery gate that proves convergence, stale-writer rejection, replay/reconciliation accounting, and the first accepted post-recovery write",
+      "mixed-version worker compatibility or an explicit unavailable label for that boundary",
       "paired same-model skill/no-skill execution from the identical starting snapshot",
       "distributed-backend parent/child/neighbor hierarchy boundary fixture",
       "domain-specific tempting anti-pattern or shortcut",
-      "representative negative, interruption, compatibility, or recovery path"
+      "representative negative, interruption, compatibility, or recovery path with observed, simulated, inferred, unavailable, or unresolved evidence labels"
     ]
   },
   "scorers": [
@@ -24,10 +28,11 @@
       "evidence": [
         "Consistency and failure model",
         "Fault-injection or simulation evidence",
-        "Hierarchy boundary and selected specialist rationale",
-        "Representative success, negative-path, and recovery verification",
-        "hierarchy boundary and specialist selection rationale",
-        "representative negative/recovery verification",
+        "Hierarchy boundary and concrete neighboring responsibility behavior",
+        "Representative success, negative-path, unknown-outcome, and recovery verification",
+        "Retry owner, bounded backoff, and idempotency evidence",
+        "Stale-writer fencing and authority-transition trace",
+        "Replay/reconciliation and recovery-gate evidence",
         "source/version boundary when facts can drift"
       ]
     },
@@ -46,12 +51,13 @@
   "requiredEvidence": [
     "Consistency and failure model",
     "Fault-injection or simulation evidence",
-    "Hierarchy boundary and selected specialist rationale",
-    "Representative success, negative-path, and recovery verification",
-    "hierarchy boundary and selected specialist rationale",
-    "representative success plus negative/recovery evidence",
+    "Hierarchy boundary and concrete neighboring responsibility behavior",
+    "Representative success, negative-path, unknown-outcome, and recovery verification",
+    "Retry owner, bounded backoff, and idempotency evidence",
+    "Stale-writer fencing and authority-transition trace",
+    "Replay/reconciliation and recovery-gate evidence",
     "paired skill/no-skill run artifacts",
-    "explicit unavailable, simulated, inferred, or stale evidence labels"
+    "explicit observed, unavailable, simulated, inferred, stale, or unresolved evidence labels"
   ],
   "requiredArtifacts": [
     "distributed-backend-individual-scenario-1-result",
@@ -61,27 +67,42 @@
   "falsifiableChecks": [
     {
       "id": "scope-and-hierarchy",
-      "assertion": "The result must establish the actual distributed-backend boundary and relevant environment before acting, preserve the hierarchy relationship (broader=backend-engineering; children=event-driven-architecture,stream-processing; near-neighbor=bun-deno-runtime), and not absorb the near-neighbor responsibility merely because it is adjacent."
+      "assertion": "The result must establish the actual distributed-backend boundary and relevant environment before acting, preserve the hierarchy relationship (broader=backend-engineering; children=event-driven-architecture,stream-processing; near-neighbor=bun-deno-runtime), and not absorb the near-neighbor responsibility merely because it is adjacent. A package-local check or prose statement is not evidence that a live quorum, broker, or failover was exercised."
     },
     {
-      "id": "operating-contract",
-      "assertion": "Design multi-node coordination around partial failure, independent clocks, and split ownership."
+      "id": "authority-and-fencing",
+      "assertion": "The design names the lease or quorum authority, epoch or fencing-token issuer, ownership of each scheduler partition, and the worker-side stale-token rejection rule. Two reachable regions cannot both be accepted as authority without a declared reconciliation or fencing outcome.",
+      "source": "https://raft.github.io/raft.pdf"
+    },
+    {
+      "id": "partition-availability",
+      "assertion": "The operation matrix states what reads, renewals, dispatches, and failover commands do during the partition and after links recover; it does not claim availability and strong consistency for the same write when the authority cannot be reached.",
+      "source": "https://etcd.io/docs/v3.5/learning/api_guarantees/"
+    },
+    {
+      "id": "retry-and-unknown-outcome",
+      "assertion": "A timeout or lost response is represented as an unknown outcome and reconciled by command identity before a new effect is issued. Exactly one layer owns bounded retries and records attempt, backoff, and terminal reason; a timeout is not treated as proof that no commit occurred.",
+      "source": "https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/"
     },
     {
       "id": "execution-invariant",
-      "assertion": "Name nodes, authorities, state partitions, messages, clocks, and failure model."
+      "assertion": "The result names nodes, authorities, state partitions, messages, independent clocks, command identity, acknowledgement boundary, effect boundary, and the failure model. Causality and authority come from tokens, versions, or a declared coordination protocol rather than wall-clock timestamps.",
+      "source": "https://raft.github.io/raft.pdf"
     },
     {
-      "id": "verification-discipline",
-      "assertion": "State/authority and message model."
-    },
-    {
-      "id": "anti-pattern-resistance",
-      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Wall-clock timestamps are trusted as causality."
+      "id": "recovery-reconciliation",
+      "assertion": "Recovery evidence shows the authority or epoch transition, old-token rejection, delayed or duplicated message handling, reconciliation of interrupted commands, convergence, and the first accepted post-recovery write. Reconnection alone does not count as recovery.",
+      "source": "https://etcd.io/docs/v3.5/learning/api_guarantees/"
     },
     {
       "id": "evidence-and-uncertainty",
-      "assertion": "Every material completion claim must map to observable evidence (Consistency and failure model; Fault-injection or simulation evidence; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+      "assertion": "Every material completion claim maps to observable evidence from the declared environment. Separate observed runtime output from deterministic simulation, inference, unavailable checks, stale source facts, and unresolved unknown outcomes; do not convert any of them into production certainty.",
+      "source": "https://sre.google/sre-book/table-of-contents/"
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not trust wall-clock timestamps as causality, retry a side effect at multiple layers, accept a stale fencing token, call a timed-out effect absent, or infer partition/failover/recovery safety from clean-cluster output alone.",
+      "source": "https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/"
     }
   ]
 }

@@ -17,6 +17,7 @@ export const KOTLIN_COROUTINES_VERSION = '1.10.2';
 
 const KOTLINC = process.env.KORY_EVAL_KOTLINC ?? '/opt/homebrew/bin/kotlinc';
 const JAVA = process.env.KORY_EVAL_JAVA ?? '/opt/homebrew/opt/openjdk/bin/java';
+const HOST_READINESS_TIMEOUT_MS = 30_000;
 const M2 = resolve(import.meta.dir, '../../../.koryphaios/eval-tools/m2');
 const COROUTINES_CORE = join(
   M2,
@@ -65,13 +66,13 @@ function run(executable: string, args: string[], cwd: string, timeoutMs = 12_000
 
 export function kotlinHostReadiness(): string[] {
   const reasons: string[] = [];
-  const compiler = run(KOTLINC, ['-version'], process.cwd(), 3_000);
+  const compiler = run(KOTLINC, ['-version'], process.cwd(), HOST_READINESS_TIMEOUT_MS);
   const compilerText = `${compiler.stdout}${compiler.stderr}`;
   if (compiler.code !== 0 || !compilerText.includes(`kotlinc-jvm ${KOTLIN_VERSION}`))
     reasons.push(
       `Kotlin fixture requires kotlinc ${KOTLIN_VERSION}; observed ${compilerText.trim() || 'unavailable'}.`,
     );
-  const java = run(JAVA, ['-version'], process.cwd(), 3_000);
+  const java = run(JAVA, ['-version'], process.cwd(), HOST_READINESS_TIMEOUT_MS);
   const javaText = `${java.stdout}${java.stderr}`;
   if (java.code !== 0 || !javaText.includes(`openjdk version "${KOTLIN_JAVA_VERSION}"`))
     reasons.push(
@@ -140,12 +141,12 @@ function kotlinTestText(root: string, patterns: RegExp[]): boolean {
 
 const COROUTINE_README = `# Kotlin structured coroutine ownership
 
-Fix src/RequestService.kt. Request-bound work must be a child of the request and stop on parent cancellation/timeout/failure. Intentional durable work must transfer explicitly to the injected durableScope. Preserve the suspend handle API. The declared runtime is Kotlin ${KOTLIN_VERSION}, OpenJDK ${KOTLIN_JAVA_VERSION}, kotlinx-coroutines ${KOTLIN_COROUTINES_VERSION}; use ./.kory-runtime/kotlinc, ./.kory-runtime/java and the classpath file. Add virtual-time regressions for success, cancellation, timeout, child failure and durable ownership.
+Fix src/RequestService.kt. Request-bound work must be a child of the request and stop on parent cancellation/timeout/failure. Intentional durable work must transfer explicitly to the injected durableScope. Preserve the suspend handle API. The declared runtime is Kotlin ${KOTLIN_VERSION}, OpenJDK ${KOTLIN_JAVA_VERSION}, kotlinx-coroutines ${KOTLIN_COROUTINES_VERSION}; use ./.kory-runtime/kotlinc, ./.kory-runtime/java and the classpath file. Add virtual-time regressions for success, cancellation, timeout, request-child failure and durable ownership. Also set ProgressStore.failDurableWrites so a durable child itself fails under a SupervisorJob-owned durable scope, then prove that owner remains active and a later durable child still completes.
 `;
 
 const SEALED_README = `# Kotlin sealed-message queue compatibility
 
-Fix src/QueueCodec.kt. The queue persists one JSON object per line with an explicit type discriminator. Known messages must remain ordered, unknown newer subtypes must be retained with their raw bytes and original index, malformed records must be quarantined without aborting later entries, and a newer codec must be able to reprocess retained supported messages after upgrade. Use the pinned Kotlin/JVM wrappers and add mixed-version/restart regressions.
+Fix src/QueueCodec.kt. The queue persists one JSON object per line with an explicit type discriminator. Known messages must remain ordered, unknown newer subtypes must be retained with their raw bytes and original index, malformed records must be quarantined without aborting later entries, and a newer codec must be able to reprocess retained supported messages after upgrade. Use the pinned Kotlin/JVM wrappers and add mixed-version/restart regressions. Treat this README, fixtures/, and .kory-runtime/ as fixed evaluator inputs; make implementation and regression changes only under src/ and tests/.
 `;
 
 const COROUTINE_STARTER = `package fixture
@@ -155,8 +156,10 @@ import kotlinx.coroutines.*
 class ProgressStore {
     private val events = mutableListOf<String>()
     var failRequestWrites: Boolean = false
+    var failDurableWrites: Boolean = false
     suspend fun write(event: String) {
         if (failRequestWrites && event.startsWith("request:")) throw IllegalStateException("request write failed")
+        if (failDurableWrites && event.startsWith("durable:")) throw IllegalStateException("durable write failed")
         events += event
     }
     fun snapshot(): List<String> = events.toList()
@@ -189,8 +192,10 @@ import kotlinx.coroutines.*
 class ProgressStore {
     private val events = mutableListOf<String>()
     var failRequestWrites: Boolean = false
+    var failDurableWrites: Boolean = false
     suspend fun write(event: String) {
         if (failRequestWrites && event.startsWith("request:")) throw IllegalStateException("request write failed")
+        if (failDurableWrites && event.startsWith("durable:")) throw IllegalStateException("durable write failed")
         events += event
     }
     fun snapshot(): List<String> = events.toList()
@@ -221,7 +226,12 @@ import kotlinx.coroutines.test.*
 
 fun main() = runTest {
     val durableJob = SupervisorJob()
-    val durableScope = CoroutineScope(durableJob + StandardTestDispatcher(testScheduler))
+    val durableFailures = mutableListOf<Throwable>()
+    val durableScope = CoroutineScope(
+        durableJob +
+            StandardTestDispatcher(testScheduler) +
+            CoroutineExceptionHandler { _, failure -> durableFailures += failure }
+    )
     val store = ProgressStore()
     val service = RequestService(store, durableScope)
 
@@ -249,6 +259,21 @@ fun main() = runTest {
     val failure = runCatching { service.handle("failure") }.exceptionOrNull()
     check(failure is IllegalStateException) { "child failure did not propagate: ${'$'}failure" }
     store.failRequestWrites = false
+
+    store.failDurableWrites = true
+    service.handle("durable-failure", startDurable = true)
+    advanceUntilIdle()
+    check(durableFailures.size == 1 && durableFailures.single() is IllegalStateException) {
+        "durable child did not fail under supervisor ownership: ${'$'}durableFailures"
+    }
+    check(durableJob.isActive) { "durable supervisor was cancelled by child failure" }
+    store.failDurableWrites = false
+    service.handle("durable-recovery", startDurable = true)
+    advanceUntilIdle()
+    check("durable:durable-recovery" in store.snapshot()) {
+        "durable owner could not run a later child after supervised failure: ${'$'}{store.snapshot()}"
+    }
+
     durableJob.cancelAndJoin()
     println("KORY_KOTLIN_OK")
 }
@@ -284,11 +309,11 @@ class QueueCodec(private val supportsVideo: Boolean = false) {
         }
     }
     private fun encode(message: Message): String = when (message) {
-        is TextMessage -> "{\"type\":\"text\",\"id\":\"${'$'}{message.id}\",\"text\":\"${'$'}{message.text}\"}"
-        is ImageMessage -> "{\"type\":\"image\",\"id\":\"${'$'}{message.id}\",\"url\":\"${'$'}{message.url}\"}"
-        is VideoMessage -> "{\"type\":\"video\",\"id\":\"${'$'}{message.id}\",\"url\":\"${'$'}{message.url}\"}"
+        is TextMessage -> """{"type":"text","id":"${'$'}{message.id}","text":"${'$'}{message.text}"}"""
+        is ImageMessage -> """{"type":"image","id":"${'$'}{message.id}","url":"${'$'}{message.url}"}"""
+        is VideoMessage -> """{"type":"video","id":"${'$'}{message.id}","url":"${'$'}{message.url}"}"""
     }
-    private fun field(raw: String, name: String): String? = Regex("\\\"${'$'}name\\\"\\s*:\\s*\\\"([^\\\"]*)\\\"").find(raw)?.groupValues?.get(1)
+    private fun field(raw: String, name: String): String? = Regex("""["]${'$'}name["]\\s*:\\s*["]([^"]*)["]""").find(raw)?.groupValues?.get(1)
 }
 `;
 
@@ -339,11 +364,11 @@ class QueueCodec(private val supportsVideo: Boolean = false) {
         }
     }
     private fun encode(message: Message): String = when (message) {
-        is TextMessage -> "{\"type\":\"text\",\"id\":\"${'$'}{message.id}\",\"text\":\"${'$'}{message.text}\"}"
-        is ImageMessage -> "{\"type\":\"image\",\"id\":\"${'$'}{message.id}\",\"url\":\"${'$'}{message.url}\"}"
-        is VideoMessage -> "{\"type\":\"video\",\"id\":\"${'$'}{message.id}\",\"url\":\"${'$'}{message.url}\"}"
+        is TextMessage -> """{"type":"text","id":"${'$'}{message.id}","text":"${'$'}{message.text}"}"""
+        is ImageMessage -> """{"type":"image","id":"${'$'}{message.id}","url":"${'$'}{message.url}"}"""
+        is VideoMessage -> """{"type":"video","id":"${'$'}{message.id}","url":"${'$'}{message.url}"}"""
     }
-    private fun field(raw: String, name: String): String? = Regex("\\\"${'$'}name\\\"\\s*:\\s*\\\"([^\\\"]*)\\\"").find(raw)?.groupValues?.get(1)
+    private fun field(raw: String, name: String): String? = Regex("""["]${'$'}name["]\\s*:\\s*["]([^"]*)["]""").find(raw)?.groupValues?.get(1)
 }
 `;
 
@@ -394,7 +419,8 @@ function scoreKotlin(
   const noGlobalScope = !withCoroutines || !/\bGlobalScope\b/u.test(source);
   const regression = kotlinTestText(root, patterns);
   const nonce = randomUUID().replaceAll('-', '');
-  const hiddenPath = `__KoryHidden_${nonce}.kt`;
+  const hiddenStem = `__KoryHidden_${nonce}`;
+  const hiddenPath = `${hiddenStem}.kt`;
   const jarPath = `.kory-hidden-${nonce}.jar`;
   writeFixtureFile(root, hiddenPath, hidden);
   try {
@@ -419,7 +445,7 @@ function scoreKotlin(
     const classpath = withCoroutines ? `${jarPath}:${COROUTINES_CP}` : jarPath;
     const execute = run(
       join(root, '.kory-runtime/java'),
-      ['-cp', classpath, '__KoryHiddenKt'],
+      ['-cp', classpath, `${hiddenStem}Kt`],
       root,
       10_000,
     );
@@ -451,7 +477,7 @@ function scoreKotlin(
 
 export const V5_KOTLIN_HOST_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMaterializer[] = [
   {
-    id: 'kotlin-engineering/actual-coroutine-ownership@1',
+    id: 'kotlin-engineering/actual-coroutine-ownership@2',
     realRuntime: true,
     readinessBlockers: kotlinHostReadiness(),
     matches: (scenario) => scenario.id === KOTLIN_COROUTINE_SCENARIO,
@@ -467,7 +493,7 @@ export const V5_KOTLIN_HOST_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureM
     },
   },
   {
-    id: 'kotlin-engineering/actual-sealed-json-retention@1',
+    id: 'kotlin-engineering/actual-sealed-json-retention@2',
     realRuntime: true,
     readinessBlockers: kotlinHostReadiness(),
     matches: (scenario) => scenario.id === KOTLIN_SEALED_SCENARIO,
@@ -487,7 +513,7 @@ export const V5_KOTLIN_HOST_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureM
 
 export const V5_KOTLIN_HOST_SKILL_EVAL_SCORERS: readonly SkillEvalDeterministicScorer[] = [
   {
-    id: 'kotlin-engineering/actual-coroutine-ownership-scorer@1',
+    id: 'kotlin-engineering/actual-coroutine-ownership-scorer@2',
     scenarioIds: [KOTLIN_COROUTINE_SCENARIO],
     score: ({ workingDirectory }) =>
       scoreKotlin(
@@ -498,12 +524,15 @@ export const V5_KOTLIN_HOST_SKILL_EVAL_SCORERS: readonly SkillEvalDeterministicS
         [
           /cancel|timeout|virtual|testScheduler|advance/iu,
           /failure|durable|orphan|progress|request/iu,
+          /failDurableWrites|durable.{0,80}fail/isu,
+          /SupervisorJob|supervisorScope/iu,
+          /recovery|after.{0,80}fail|later.{0,80}durable|sibling/isu,
         ],
         true,
       ),
   },
   {
-    id: 'kotlin-engineering/actual-sealed-json-retention-scorer@1',
+    id: 'kotlin-engineering/actual-sealed-json-retention-scorer@2',
     scenarioIds: [KOTLIN_SEALED_SCENARIO],
     score: ({ workingDirectory }) =>
       scoreKotlin(

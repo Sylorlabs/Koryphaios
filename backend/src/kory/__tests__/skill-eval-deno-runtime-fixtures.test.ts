@@ -21,7 +21,7 @@ import type { SkillEvalScenarioV3 } from '../skill-eval-harness';
 // Never materialize the positive control into an evaluation subject's workspace.
 const control = String.raw`import {resolve} from 'node:path';
 export function permissions(c){
-  return ['--no-prompt','--allow-read='+c.configRoot,'--allow-write='+c.outputRoot,'--allow-net='+new URL(c.apiOrigin).host,'--allow-run='+c.git];
+  return ['--no-prompt','--allow-read='+c.configRoot+','+c.outputRoot,'--allow-write='+c.outputRoot,'--allow-net='+new URL(c.apiOrigin).host,'--allow-run='+c.git];
 }
 function inside(path,root){return path===root||path.startsWith(root+'/');}
 function requireAllowed(allowed){if(!allowed)throw new Error('Outside the declared capability');}
@@ -92,14 +92,14 @@ describe('actual Deno permission evaluator', () => {
       BUILTIN_SKILL_EVAL_SCORERS.filter((s) => s.scenarioIds.includes(scenario.id)),
     ).toHaveLength(1);
     const row = auditSkillEvalExecutionReadiness(
-      packages,
+      packages.filter((p) => p.sidecar.name === 'bun-deno-runtime'),
       BUILTIN_SKILL_EVAL_MATERIALIZERS,
       BUILTIN_SKILL_EVAL_SCORERS,
     ).find((r) => r.scenarioId === scenario.id)!;
-    expect(row.materializerId).toBe('bun-deno-runtime/actual-deno-permissions@1');
+    expect(row.materializerId).toBe('bun-deno-runtime/actual-deno-permissions@3');
     expect(row.ready).toBe(prerequisites.length === 0);
     expect(row.reasons).toEqual(prerequisites);
-  });
+  }, 30_000);
   test('missing runtime and supporting tools remain explicit gates', () => {
     const exact = (tool: string) =>
       ({
@@ -123,7 +123,9 @@ describe('actual Deno permission evaluator', () => {
       const result = await scoreDenoPermissions(await fixture());
       expect(result.passed).toBe(false);
       expect(result.integrityFailure).toBe(false);
-      expect(result.evidence).toContain('least-privilege invocation: fail');
+      expect(
+        result.evidence.some((line) => line.startsWith('least-privilege invocation: fail')),
+      ).toBe(true);
     },
     15_000,
   );

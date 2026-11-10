@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "nodejs-runtime",
-  "version": "5.1.2",
+  "version": "5.1.5",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -99,26 +99,26 @@
     {
       "url": "https://nodejs.org/docs/latest/api/",
       "sourceType": "official-docs",
-      "versionScope": "Current Node.js API documentation as available 2026-09-04",
+      "versionScope": "Current Node.js API documentation as available 2026-10-19",
       "staleAfterDays": 45,
       "notes": "Node runtime, modules, streams, events, processes, and async APIs.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-10-19"
     },
     {
       "url": "https://nodejs.org/api/stream.html",
       "sourceType": "official-docs",
-      "versionScope": "Current Node.js streams API as verified 2026-09-06",
+      "versionScope": "Current Node.js streams API as verified 2026-10-20",
       "staleAfterDays": 45,
       "notes": "Adopted for backpressure, buffering, pipeline teardown, and AbortSignal behavior; target Node version still controls API availability.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-10-20"
     },
     {
       "url": "https://nodejs.org/api/process.html",
       "sourceType": "official-docs",
-      "versionScope": "Current Node.js process API as verified 2026-09-06",
+      "versionScope": "Current Node.js process API as verified 2026-10-20",
       "staleAfterDays": 45,
       "notes": "Adopted for process signal, exit, environment, and runtime-lifecycle boundaries; OS behavior can differ.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-10-20"
     }
   ],
   "authoringMaturity": "individual"

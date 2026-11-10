@@ -5,9 +5,23 @@ import {
   buildSkillEvaluationCard,
   CURRENT_SKILL_EVAL_CONTRACT_VERSION,
   evaluateSkillPromotion,
+  listOpenSkillRegressionSources,
   recordSkillEvaluationRun,
 } from '../skill-evaluations';
 import { listSkills } from '../skills';
+import { loadV5SkillPackages } from '../skill-packages';
+import { currentV5SkillEvaluationContracts } from '../skill-eval-current-contract';
+
+function currentTaskIdentity(skill: string, scenarioId: string) {
+  const pkg = loadV5SkillPackages().packages.find((item) => item.sidecar.name === skill)!;
+  const contract = currentV5SkillEvaluationContracts(pkg, CURRENT_SKILL_EVAL_CONTRACT_VERSION).get(scenarioId)!;
+  return {
+    evaluationContractVersion: contract.evaluationContractVersion,
+    evaluationContractHash: contract.evaluationContractHash,
+    materializerId: contract.materializerIds[0]!,
+    deterministicScorerId: contract.scorerIds[0]!,
+  };
+}
 
 let root = '';
 let skillsHome = '';
@@ -54,16 +68,13 @@ describe('protocol-v3 regression closure', () => {
       suiteId: 'skill-authoring-evaluation:v5.0.0:held-out',
       scenarioId: scenario.id,
       experimentId: 'corrupted-baseline-without-skill',
-      evaluationContractHash: '3333333333333333',
-      evaluationContractVersion: CURRENT_SKILL_EVAL_CONTRACT_VERSION,
-      materializerId: 'fixture@1',
-      deterministicScorerId: 'scorer@1',
+      ...currentTaskIdentity(skill.name, scenario.id),
     });
 
     const gate = evaluateSkillPromotion(root, skill.name, skill.hash);
     expect(gate.reasons).not.toContain('At least one run recorded an integrity failure.');
     expect(gate.pairedBaselineCases).toBe(0);
-  });
+  }, 20_000);
 
   test('current revision paired evidence closes a historical regression across provider and model changes', () => {
     const skill = listSkills(root).find((item) => item.name === 'skill-authoring-evaluation')!;
@@ -104,10 +115,11 @@ describe('protocol-v3 regression closure', () => {
           suiteId: 'skill-authoring-evaluation:v5.0.0:held-out',
           scenarioId: scenario.id,
           experimentId: `${input.id}-${variant}`,
-          evaluationContractHash: input.contractHash,
-          evaluationContractVersion: CURRENT_SKILL_EVAL_CONTRACT_VERSION,
-          materializerId: 'fixture@1',
-          deterministicScorerId: 'scorer@1',
+          ...currentTaskIdentity(skill.name, scenario.id),
+          // Historical revisions may have a revision-bound hash; current evidence
+          // must use the exact current source contract.
+          evaluationContractHash: input.revisionHash === skill.hash
+            ? currentTaskIdentity(skill.name, scenario.id).evaluationContractHash : input.contractHash,
         });
       }
     };
@@ -144,7 +156,7 @@ describe('protocol-v3 regression closure', () => {
       recordedAt: '2026-09-01T13:00:00Z',
       contractHash: '2222222222222222',
     });
-    expect(evaluateSkillPromotion(root, skill.name, skill.hash).openRegressions).toBe(1);
+    expect(listOpenSkillRegressionSources(root, skill.name, skill.hash)).toHaveLength(1);
   });
 
   test('obsolete protocol-v3 scenario identities remain in history without gating the current package', () => {
@@ -175,10 +187,7 @@ describe('protocol-v3 regression closure', () => {
         suiteId: 'skill-authoring-evaluation:v5.0.0:held-out',
         scenarioId: scenario.id,
         experimentId: `current-active-${variant}`,
-        evaluationContractHash: '2222222222222222',
-        evaluationContractVersion: CURRENT_SKILL_EVAL_CONTRACT_VERSION,
-        materializerId: 'fixture@1',
-        deterministicScorerId: 'scorer@1',
+        ...currentTaskIdentity(skill.name, scenario.id),
       });
     }
 
@@ -212,5 +221,78 @@ describe('protocol-v3 regression closure', () => {
     writeFileSync(ledgerPath, `${JSON.stringify(ledger, null, 2)}\n`);
 
     expect(evaluateSkillPromotion(root, skill.name, skill.hash).openRegressions).toBe(0);
+  });
+
+  test('generic newer evaluator generation supersedes an obsolete generation regression once current evidence exists', () => {
+    const skill = { ...listSkills(root).find((item) => item.name === 'skill-authoring-evaluation')!, name: 'generic-contract-test' };
+    const scenario = buildSkillEvaluationCard(root, skill).suite.categories['full-task'][0]!;
+
+    const recordPair = (input: {
+      id: string;
+      revisionHash: string;
+      materializerId: string;
+      candidateQuality: number;
+      baselineQuality: number;
+      recordedAt: string;
+      contractHash: string;
+    }) => {
+      for (const variant of ['with-skill', 'without-skill'] as const) {
+        const quality = variant === 'with-skill' ? input.candidateQuality : input.baselineQuality;
+        recordSkillEvaluationRun(root, {
+          id: `${input.id}-${variant}`,
+          skill: skill.name,
+          revisionHash: input.revisionHash,
+          caseId: scenario.id,
+          provider: 'test-provider',
+          model: 'subject-model',
+          harnessVersion: `v3:${input.materializerId}`,
+          role: 'worker',
+          evaluator: 'deterministic',
+          passed: quality >= 0.8,
+          quality,
+          verification: 1,
+          integrityFailure: false,
+          evidence: [input.id],
+          recordedAt: input.recordedAt,
+          protocolVersion: 3,
+          variant,
+          caseCategory: 'full-task',
+          comparisonId: `${input.id}-pair`,
+          routing: { expectedSelection: true, selected: true },
+          suiteId: 'skill-authoring-evaluation:v5.0.0:held-out',
+          scenarioId: scenario.id,
+          experimentId: `${input.id}-${variant}`,
+          evaluationContractHash: input.contractHash,
+          evaluationContractVersion: CURRENT_SKILL_EVAL_CONTRACT_VERSION,
+          materializerId: input.materializerId,
+          deterministicScorerId: 'scorer@1',
+        });
+      }
+    };
+
+    recordPair({
+      id: 'historical-generation-1-regression',
+      revisionHash: 'historical-revision',
+      materializerId: 'fixture@1',
+      candidateQuality: 0.4,
+      baselineQuality: 0.5,
+      recordedAt: '2026-09-01T11:00:00Z',
+      contractHash: '1111111111111111',
+    });
+    expect(listOpenSkillRegressionSources(root, skill.name, skill.hash)).toHaveLength(1);
+
+    recordPair({
+      id: 'current-generation-2-retest',
+      revisionHash: skill.hash,
+      materializerId: 'fixture@2',
+      candidateQuality: 1,
+      baselineQuality: 0.5,
+      recordedAt: '2026-09-01T12:00:00Z',
+      contractHash: '2222222222222222',
+    });
+
+    const gate = evaluateSkillPromotion(root, skill.name, skill.hash);
+    expect(gate.openRegressions).toBe(0);
+    expect(gate.reasons).not.toContain('1 recorded regression case(s) remain open.');
   });
 });

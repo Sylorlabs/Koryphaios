@@ -253,26 +253,49 @@ describe('concept-first evaluation controls', () => {
     expect(result.quality).toBe(0);
   }, 10_000);
 
-  test('remaining concepts are registered, while six component-only tasks retain full-task gates', async () => {
+  test('remaining concepts are registered and native Compose tasks retain full-task gates', async () => {
     const wanted = new Set(
       definitions
         .filter((d) => d.id !== 'bun-deno-runtime-full-task-2-individual')
         .map((d) => d.id),
     );
     const rows = auditSkillEvalExecutionReadiness(
-      packages,
+      packages.filter((pkg) => pkg.evaluation.tasks.some((task) => wanted.has(task.id))),
       BUILTIN_SKILL_EVAL_MATERIALIZERS,
       BUILTIN_SKILL_EVAL_SCORERS,
     ).filter((r) => wanted.has(r.scenarioId));
     expect(rows).toHaveLength(8);
     expect(rows.every((r) => r.materializerId && r.deterministicScorerId)).toBe(true);
-    expect(rows.filter((r) => r.ready)).toHaveLength(2);
-    expect(
-      rows
-        .filter((r) => !r.ready)
-        .every((r) => r.reasons.some((reason) => reason.startsWith('Component'))),
-    ).toBe(true);
-    const definition = definitions.find((d) => d.blockers?.length)!;
+    const composeRows = rows.filter((row) => row.skill === 'android-compose');
+    expect(composeRows.map((row) => row.scenarioId).sort()).toEqual([
+      'android-compose-full-task-1-individual',
+      'android-compose-full-task-2-individual',
+    ]);
+    for (const row of rows) {
+      const materializer = BUILTIN_SKILL_EVAL_MATERIALIZERS.find(
+        (item) => item.id === row.materializerId,
+      )!;
+      const definition = definitions.find((item) => item.id === row.scenarioId)!;
+      const blockers = materializer.readinessBlockers ?? [];
+      expect(row.ready, row.scenarioId).toBe(blockers.length === 0);
+      expect(row.reasons, row.scenarioId).toEqual(blockers);
+      if (row.skill === 'angular-engineering' || row.skill === 'audio-production' ||
+          row.skill === 'android-compose') {
+        // Their synthetic controls remain useful, but full tasks now select
+        // runtime-backed evaluators whose local prerequisites may be absent.
+        expect(materializer.realRuntime, row.scenarioId).toBe(true);
+        expect(row.materializerId).not.toContain('/concept@');
+        expect(row.deterministicScorerId).not.toContain('/concept-scorer@');
+      } else {
+        expect(blockers, row.scenarioId).toEqual(definition.blockers ?? []);
+      }
+    }
+    expect(composeRows.every((row) => !row.ready)).toBe(true);
+    expect(composeRows.every((row) => row.materializerId?.startsWith('android-compose/native-'))).toBe(true);
+    expect(composeRows.every((row) => row.deterministicScorerId?.startsWith('android-compose/native-'))).toBe(true);
+    expect(composeRows.every((row) => row.reasons.some((reason) =>
+      /Android|TalkBack|JDK|Gradle|adb|device|AVD/iu.test(reason)))).toBe(true);
+    const definition = definitions.find((d) => d.id === 'android-compose-full-task-1-individual')!;
     let executed = false;
     await expect(
       runPairedSkillEvaluationV3({
@@ -280,7 +303,7 @@ describe('concept-first evaluation controls', () => {
         skillPackage: packages.find((p) => p.sidecar.name === definition.skill)!,
         scenarioId: definition.id,
         skillRevisionHash: 'f'.repeat(64),
-        harnessVersion: 'component-gate-self-test',
+        harnessVersion: 'native-device-gate-self-test',
         materializers: BUILTIN_SKILL_EVAL_MATERIALIZERS,
         scorers: BUILTIN_SKILL_EVAL_SCORERS,
         executor: {
@@ -297,7 +320,7 @@ describe('concept-first evaluation controls', () => {
           },
         },
       }),
-    ).rejects.toThrow('Component');
+    ).rejects.toThrow();
     expect(executed).toBe(false);
   });
 });

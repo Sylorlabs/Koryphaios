@@ -125,7 +125,7 @@
       "url": "https://agentskills.io/specification",
       "sourceType": "spec",
       "versionScope": "Agent Skills specification as available 2026-09-05",
-      "verifiedAt": "2026-09-05",
+      "verifiedAt": "2026-11-03",
       "staleAfterDays": 90,
       "notes": "Portable skill naming, discovery metadata, package structure, and progressive disclosure."
     },
@@ -133,7 +133,7 @@
       "url": "https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md",
       "sourceType": "reference-implementation",
       "versionScope": "OpenAI public skill-creator guidance on main as inspected 2026-09-05",
-      "verifiedAt": "2026-09-05",
+      "verifiedAt": "2026-11-03",
       "staleAfterDays": 60,
       "notes": "Skill scoping, user-intent preservation, concise entrypoints, explicit invocation policy, and behavioral evaluation guidance."
     }

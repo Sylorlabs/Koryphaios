@@ -1,13 +1,13 @@
 # Source map
 
-`incident-response` owns command and coordination of an active technical incident through verified operational recovery and handoff. It does not replace the subsystem specialist, postmortem analysis, observability design, or planned reliability qualification. Formal V5 promotion still requires paired same-model skill/no-skill evidence and independent blind evaluation.
+`incident-response` owns command and coordination of an active technical incident through verified operational recovery and handoff. It does not replace subsystem specialists, retrospective analysis, observability design, or planned reliability qualification. Formal V5 promotion still requires paired tasks on the same model, with and without the skill, and independent blind evaluation.
 
 ## Qualification basis
 
 - Package authorship is independent from empirical qualification; the audit/evaluation ledger is authoritative for qualification status.
 - Hierarchy: broader reliability-verification.
-- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held-out cases through the real resolver.
-- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no-skill pairing, regression retention, and blind semantic judging.
+- Routing: five positive, five negative cases about neighboring skills, three compound or ambiguous, and three adversarial withheld cases through the real resolver.
+- Full task evaluation: two individual scenarios with six falsifiable checks, pairing on the same model with and without the skill, regression retention, and blind semantic judging.
 - Source discipline: authoritative/spec/reference sources outrank community patterns when they conflict; runtime evidence outranks examples for behavioral claims.
 
 ## Maintained sources
@@ -22,7 +22,7 @@
   - Verified: 2026-09-05; refresh after 365 days.
 - **NIST SP 800-61 Rev. 3**: https://csrc.nist.gov/pubs/sp/800/61/r3/final
   - Scope: final April 2025; supersedes SP 800-61 Rev. 2.
-  - Use: current cybersecurity-incident preparation, detection, response, recovery, and improvement guidance when the incident has a security dimension. Do not apply security-forensic assumptions to every ordinary service outage.
+  - Use: current guidance for preparation, detection, response, recovery, and improvement when an incident has a security dimension. Do not apply forensic requirements to every ordinary outage.
   - Verified: 2026-09-05; refresh after 365 days.
 - **PagerDuty public incident-response roles**: https://response.pagerduty.com/before/different_roles/
   - Scope: practitioner guidance available 2026-09-05.
@@ -34,6 +34,6 @@
 
 - Roles scale with incident size; preserve the single command function even if one person temporarily holds multiple roles.
 - Keep observation, hypothesis, decision, and action distinct in the timeline. A plausible recent deployment is a hypothesis until evidence discriminates it.
-- Prefer reversible impact-reducing mitigation over exploratory production mutation. One mutation should have one owner and an explicit intended observation.
-- Resolution requires user-impact recovery plus relevant state/dependency/backlog evidence through an appropriate observation window.
-- For security/privacy incidents, compose security response requirements and protect forensic evidence; operational restoration must not erase legally or technically significant evidence.
+- Prefer reversible mitigation that reduces impact over exploratory production changes. One mutation should have one owner and an explicit intended observation.
+- Resolution requires user recovery plus relevant state, dependency, and backlog evidence through an appropriate observation window.
+- For security or privacy incidents, compose the relevant response requirements and protect forensic evidence. Operational restoration must not erase legally or technically significant evidence.

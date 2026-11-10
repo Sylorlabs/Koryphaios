@@ -25,6 +25,10 @@ A timeout does not establish whether a side effect committed. Use the provider's
 
 Cancellation stops local waiting only when that is all the provider supports. State whether remote work is canceled, still running, or requires later reconciliation. Define how late results, duplicate deliveries, expired credentials, and incompatible payload versions affect durable state.
 
+## Commit page progress atomically
+
+For paginated pulls, one page's durable mutations and its checkpoint advance are a single commit invariant: commit them together, and advance the checkpoint only after that commit succeeds. On failure, neither the page nor its checkpoint is partially accepted; restart from the last committed checkpoint and make replay safe with provider idempotency or local upsert/deduplication. Keep the checkpoint in durable shared state; an invocation-local `Map` may optimize work but is never the source of truth.
+
 ## Verify the seam
 
 Exercise success, malformed or changed payloads, denied access, timeout after a possible commit, duplicate input, cancellation, and recovery where relevant. Use contract fixtures for reproducibility and a configured sandbox or authorized integration environment for real transport and provider behavior. Identify mocked or unavailable boundaries explicitly. Payment, email, and webhook lifecycle rules belong to their narrower children; `verification` owns the final completion verdict.

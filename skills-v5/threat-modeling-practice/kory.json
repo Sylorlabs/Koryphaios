@@ -126,7 +126,7 @@
       "revision": "1.1 final",
       "staleAfterDays": 365,
       "notes": "Secure software-development practices and risk-based design context; use as lifecycle support, not as a single mandated threat-modeling methodology.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://owasp.org/www-project-threat-modeling/",

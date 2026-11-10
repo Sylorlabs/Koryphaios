@@ -1,7 +1,7 @@
 {
   "id": "deterministic-debugging-full-task-1",
   "maturity": "individual",
-  "prompt": "The supplied TypeScript parser accepts CRLF-delimited records, but the exact fixture `name=alpha\\r\\ntags=\\r\\n` always loses the empty `tags` value and returns an object with no `tags` key. Debug this reproducible bug. Demonstrate the starting output, reduce the fixture if possible without losing the behavior, trace tokenizer and key/value normalization states to the first divergence from the documented empty-value contract, fix the owning transition, and add a regression that distinguishes an explicitly empty value from an absent key. Keep malformed-line behavior unchanged.",
+  "prompt": "The supplied TypeScript parser accepts CRLF-delimited records, but the exact fixture `name=alpha\\r\\ntags=\\r\\n` always loses the empty `tags` value and returns an object with no `tags` key. Debug this reproducible bug. Demonstrate the starting output before editing, reduce the fixture if possible without losing the behavior, trace tokenizer and key/value normalization states to the first divergence from the documented empty-value contract, fix the owning transition, and add a regression that distinguishes an explicitly empty value from an absent key. Exercise the malformed-line failure path and show that a following valid record still recovers without a restart. Keep malformed-line behavior unchanged; if execution is unavailable, label the starting observation and recovery as unexecuted.",
   "environment": {
     "kind": "synthetic",
     "startingState": "fixture://deterministic-debugging/crlf-empty-value",
@@ -10,13 +10,15 @@
       "an LF-only sibling fixture currently behaves correctly",
       "the documented contract distinguishes an empty value from an absent key",
       "malformed-line handling must remain unchanged",
+      "a malformed line is a negative path, and a following valid line proves local recovery",
+      "starting output, causal trace, and recovery status are labeled observed or unexecuted",
       "paired same-model skill/no-skill execution"
     ]
   },
   "falsifiableChecks": [
     {
       "id": "deterministic-crlf-repro",
-      "assertion": "The starting revision demonstrably drops the explicit empty tags value for the supplied CRLF fixture."
+      "assertion": "Before editing, the starting revision demonstrably drops the explicit empty tags value for the supplied CRLF fixture; if the host cannot execute it, the result is explicitly labeled unexecuted rather than inferred."
     },
     {
       "id": "deterministic-crlf-divergence",
@@ -25,6 +27,10 @@
     {
       "id": "deterministic-crlf-regression",
       "assertion": "After the fix, explicit empty tags is preserved, absent tags remains absent, and malformed-line checks remain green."
+    },
+    {
+      "id": "deterministic-crlf-recovery",
+      "assertion": "The malformed-line negative path remains ignored and the next valid record is still committed, proving recovery at the parser boundary without a restart or global reset."
     }
   ],
   "scorers": [
@@ -56,6 +62,9 @@
     "First causal divergence",
     "actual focused diff",
     "passing regression output",
+    "negative malformed-line and following-valid recovery evidence",
+    "registered materializer and deterministic scorer identity",
+    "observed versus unexecuted labels for starting and recovery evidence",
     "paired skill/no-skill run artifacts"
   ],
   "requiredArtifacts": [

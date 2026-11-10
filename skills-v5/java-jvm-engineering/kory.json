@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "java-jvm-engineering",
-  "version": "5.1.2",
+  "version": "5.1.4",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -13,7 +13,16 @@
   "facets": [],
   "requires": ["verification"],
   "conflicts": [],
-  "activation": ["java", "jvm", "maven", "gradle java"],
+  "activation": [
+    "java",
+    "jvm",
+    "maven",
+    "gradle java",
+    "java concurrency",
+    "java serialization",
+    "jvm classloader",
+    "jvm performance"
+  ],
   "excludes": [],
   "evidence": [
     "java-jvm-engineering decision and boundary evidence",
@@ -26,8 +35,10 @@
       "A Java executor keeps non-daemon threads alive after the service closes. Establish shutdown ownership and preserve interruption rather than increasing the timeout.",
       "The Maven library publishes classes targeting a newer JVM than its declared consumers support. Align compilation and packaging, then run a clean older-target consumer.",
       "Repair a Java cache key whose mutable fields make equals and hashCode inconsistent after insertion. Preserve the intended identity contract.",
-      "Our JVM plugin loads twice under separate classloaders and fails a service-provider cast. Trace class identity and verify the real host lifecycle.",
-      "A Gradle Java build accidentally packages a test-only dependency into the library's public API. Repair the dependency boundary and exercise downstream compilation."
+      "Our JVM plugin loads twice under separate classloaders and fails a service-provider cast. Trace class identity, module or service-loading boundaries, and verify the real host lifecycle.",
+      "A Gradle Java build accidentally packages a test-only dependency into the library's public API. Repair the dependency boundary and exercise downstream compilation.",
+      "A Java service's p99 latency worsens after changing executors. Compare the same workload with JFR or profiler evidence, queueing, allocation, GC, and external I/O separated before selecting a runtime change.",
+      "Evolve a Java JSON and persisted-queue DTO while an older producer and consumer remain deployed. Define omitted, null, unknown-enum, malformed-record, and restart behavior, then test the real compatibility matrix."
     ],
     "negative": [
       "Implement Kotlin coroutine cancellation in a multiplatform library. Its Java interop and shared JVM runtime behavior are explicitly unchanged.",
@@ -111,6 +122,30 @@
       "staleAfterDays": 90,
       "notes": "Adopted for executor ownership, shutdown, and best-effort interruption; apply directly only to compatible target JDKs.",
       "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://docs.oracle.com/javase/specs/jls/se25/html/jls-17.html",
+      "sourceType": "spec",
+      "versionScope": "Java Language Specification 25, Chapter 17 Threads and Locks as verified 2026-10-17",
+      "staleAfterDays": 90,
+      "notes": "Adopted for happens-before, visibility, synchronization, volatile, and inter-thread ordering claims; use the target release when it differs.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://docs.oracle.com/en/java/javase/25/docs/api/jdk.jfr/jdk/jfr/package-summary.html",
+      "sourceType": "official-docs",
+      "versionScope": "Java SE 25 Java Flight Recorder API as verified 2026-10-17",
+      "staleAfterDays": 90,
+      "notes": "Adopted for recording runtime observations used to attribute allocation, GC, lock, thread, and latency behavior; recordings are evidence of the measured workload, not a universal performance guarantee.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/lang/ClassLoader.html",
+      "sourceType": "official-docs",
+      "versionScope": "Java SE 25 ClassLoader API as verified 2026-10-17",
+      "staleAfterDays": 90,
+      "notes": "Adopted for class identity and loader-boundary diagnosis; packaged service loading and module configuration still require an executable consumer check.",
+      "verifiedAt": "2026-10-17"
     },
     {
       "url": "https://docs.oracle.com/en/java/javase/25/docs/specs/serialization/version.html",

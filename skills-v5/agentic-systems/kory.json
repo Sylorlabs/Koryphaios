@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "agentic-systems",
-  "version": "5.1.2",
+  "version": "5.1.3",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -124,18 +124,18 @@
     {
       "url": "https://openai.github.io/openai-agents-python/",
       "sourceType": "reference-implementation",
-      "versionScope": "Rolling OpenAI Agents SDK documentation as available 2026-10-02",
+      "versionScope": "Rolling OpenAI Agents SDK documentation as available 2026-11-01",
       "staleAfterDays": 14,
       "notes": "Current agents, tools, guardrails, handoffs/agents-as-tools, sessions, human-in-the-loop and tracing primitives.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-01"
     },
     {
       "url": "https://openai.github.io/openai-agents-python/multi_agent/",
       "sourceType": "reference-implementation",
-      "versionScope": "Rolling OpenAI Agents SDK orchestration guidance as available 2026-10-02",
+      "versionScope": "Rolling OpenAI Agents SDK orchestration guidance as available 2026-11-01",
       "staleAfterDays": 14,
       "notes": "LLM-directed versus code-directed orchestration plus current manager-as-tool and handoff patterns.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-01"
     },
     {
       "url": "https://www.anthropic.com/research/trustworthy-agents",

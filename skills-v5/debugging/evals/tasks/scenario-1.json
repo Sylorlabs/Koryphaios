@@ -1,7 +1,7 @@
 {
   "id": "debugging-full-task-1",
   "maturity": "individual",
-  "prompt": "The supplied TypeScript CLI accepts a valid config with `plugins: []`, but starting with that config crashes with `TypeError: Reduce of empty array with no initial value`. Debug the failure. Reproduce it with the provided fixture, trace the config from parsing to plugin-summary construction, establish which assumption first becomes invalid, implement the narrow correction at the owning boundary, and add a regression test that fails on the starting revision and passes after the fix. Do not redesign plugin configuration or silently convert unrelated invalid configs. Return the reproduction, causal evidence, diff, and focused regression output.",
+  "prompt": "The supplied TypeScript CLI accepts a valid config with `plugins: []`, but starting with that config crashes with `TypeError: Reduce of empty array with no initial value`. Debug the failure. Reproduce it with the provided fixture and exact command, retain a working non-empty control and an invalid-config negative, trace the config from parsing to plugin-summary construction, establish which assumption first becomes invalid, implement the narrow correction at the owning boundary, and add a regression test that fails on the starting revision and passes after the fix. Verify recovery by showing that a later valid config remains usable after the rejected invalid case. Do not redesign plugin configuration or silently convert unrelated invalid configs. Return the reproduction, causal evidence, diff, controls, recovery result, and focused regression output.",
   "environment": {
     "kind": "repository",
     "startingState": "fixture://debugging/empty-plugin-summary-crash",
@@ -9,22 +9,23 @@
       "valid fixture with plugins: [] reliably reproduces the startup crash",
       "config parser intentionally permits an empty plugins array",
       "plugin summary path contains at least two plausible locations for the failure",
-      "existing invalid-config behavior must remain unchanged",
+      "non-empty plugin output is a working control",
+      "existing invalid-config behavior and a later valid parse/build recovery must remain unchanged",
       "unrelated dirty-worktree change must be preserved"
     ]
   },
   "falsifiableChecks": [
     {
       "id": "debugging-empty-plugins-reproduced",
-      "assertion": "The starting revision demonstrably fails for the provided valid empty-plugins fixture with the reported reduce error."
+      "assertion": "The starting revision demonstrably fails for the provided valid empty-plugins fixture with the reported reduce error, using the declared command and environment."
     },
     {
       "id": "debugging-empty-plugins-cause",
-      "assertion": "Evidence identifies the first incorrect assumption in the plugin-summary path rather than merely the top-level crash site."
+      "assertion": "Evidence traces parsed input through normalization to summary construction, tests the parser/normalizer versus summary hypotheses, and identifies the first incorrect assumption in the plugin-summary path rather than merely the top-level crash site."
     },
     {
       "id": "debugging-empty-plugins-regression",
-      "assertion": "A regression check covers the empty valid array and passes after the narrow fix while existing invalid-config checks remain green."
+      "assertion": "A regression check covers the empty valid array and passes after the narrow fix; the non-empty working control, invalid-config negative, and later-valid recovery remain green."
     }
   ],
   "scorers": [
@@ -55,12 +56,14 @@
     "reproduction on starting revision",
     "root-cause evidence",
     "actual diff",
+    "working control, invalid negative, and later-valid recovery with commands and observed statuses",
     "passing regression output",
     "preservation of unrelated user-owned change"
   ],
   "requiredArtifacts": [
     "debugging-scenario-1-reproduction",
     "debugging-scenario-1-root-cause",
+    "debugging-scenario-1-controls",
     "debugging-scenario-1-diff",
     "debugging-scenario-1-regression",
     "debugging-scenario-1-paired-evaluation"

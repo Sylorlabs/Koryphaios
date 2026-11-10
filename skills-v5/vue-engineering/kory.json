@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "vue-engineering",
-  "version": "5.1.1",
+  "version": "5.1.3",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -99,42 +99,50 @@
     {
       "url": "https://vuejs.org/guide/introduction.html",
       "sourceType": "official-docs",
-      "versionScope": "Vue documentation as fetched 2026-09-06",
+      "versionScope": "Vue documentation as fetched 2026-10-20",
       "staleAfterDays": 45,
       "notes": "Vue Composition API, reactivity, components, and lifecycle guidance.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-10-20"
     },
     {
       "url": "https://vuejs.org/guide/essentials/reactivity-fundamentals.html",
       "sourceType": "official-docs",
-      "versionScope": "Vue reactivity guide as fetched 2026-09-06",
+      "versionScope": "Vue reactivity guide as fetched 2026-10-20",
       "staleAfterDays": 45,
       "notes": "Refs, reactive proxies, unwrapping, and destructuring boundaries.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-10-20"
     },
     {
       "url": "https://vuejs.org/guide/essentials/watchers.html",
       "sourceType": "official-docs",
-      "versionScope": "Vue watcher guide as fetched 2026-09-06",
+      "versionScope": "Vue watcher guide as inspected 2026-10-10",
       "staleAfterDays": 45,
-      "notes": "Reactive side effects, watcher sources, cleanup, and async behavior.",
-      "verifiedAt": "2026-09-06"
+      "notes": "Explicit watcher sources, immediate execution, 3.5+ synchronous cleanup, async dependency tracking, flush timing and scope disposal.",
+      "verifiedAt": "2026-10-10"
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/Window/popstate_event",
+      "sourceType": "official-docs",
+      "versionScope": "Browser History API navigation behavior as inspected 2026-10-10",
+      "staleAfterDays": 45,
+      "notes": "pushState does not itself dispatch popstate; back and forward navigation activates history entries.",
+      "verifiedAt": "2026-10-10"
     },
     {
       "url": "https://nuxt.com/docs/4.x/getting-started/data-fetching",
       "sourceType": "official-docs",
-      "versionScope": "Nuxt 4 documentation as fetched 2026-09-06",
+      "versionScope": "Nuxt 4 data-fetching documentation as inspected 2026-11-07",
       "staleAfterDays": 30,
       "notes": "SSR-aware data fetching, payload hydration, shared keys, useFetch, useAsyncData, and $fetch.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://github.com/mattpocock/skills",
       "sourceType": "community-pattern",
-      "versionScope": "main commit 3cca18b368ae95cdbdebbff572ccafa662551015 authored 2026-09-04T08:43:27Z; package 1.2.3",
+      "versionScope": "main commit 4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d fetched 2026-10-05",
       "staleAfterDays": 30,
       "notes": "Community packaging reference for concise composable disciplines and explicit routing; never Vue or Nuxt authority.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-03"
     }
   ],
   "authoringMaturity": "individual"

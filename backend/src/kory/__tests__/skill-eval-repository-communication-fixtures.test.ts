@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
@@ -44,6 +44,58 @@ describe('repository communication and planning fixtures', () => {
         expect(score.passed, scenario.id).toBe(false);
         expect(score.integrityFailure, scenario.id).toBe(false);
       }
+    }
+  });
+
+  test('planning scorer rejects dangling, forward, duplicate, and malformed phase dependencies', async () => {
+    const planning = loadV5SkillPackages().packages.find((candidate) =>
+      candidate.sidecar.name === 'planning',
+    )!;
+    const scenario = buildSkillEvalSuiteV3(planning).scenarios.find(
+      (candidate) => candidate.id === 'planning-full-task-2-individual',
+    )!;
+    const root = mkdtempSync(join(tmpdir(), 'kory-planning-dependencies-'));
+    roots.push(root);
+    await REPOSITORY_COMMUNICATION_SKILL_EVAL_MATERIALIZERS.find((candidate) =>
+      candidate.matches(scenario),
+    )!.materialize(root, scenario);
+    const scorer = REPOSITORY_COMMUNICATION_SKILL_EVAL_SCORERS.find((candidate) =>
+      candidate.scenarioIds.includes(scenario.id),
+    )!;
+    const ids = ['inventory', 'contract', 'outbox', 'shadow-reconcile', 'cutover', 'retire'];
+    const plan = {
+      phases: ids.map((id, index) => ({
+        id,
+        owners: ['Messaging team'],
+        dependsOn: index === 0 ? [] : [ids[index - 1]!],
+        gate: 'Observable compatibility evidence supports proceeding.',
+        rollback: 'Restore the previous delivery owner and reconcile work.',
+      })),
+      openQuestions: ['What is the peak retry volume?'],
+      cutoverEvidence: ['zero missing emails', 'reconciled events', 'roll-back rehearsal'],
+    };
+    writeFileSync(join(root, 'plan.md'), 'password-reset receipt security-alert reconciliation\n');
+    const score = async (phases: unknown) => {
+      writeFileSync(join(root, 'plan.json'), `${JSON.stringify({ ...plan, phases })}\n`);
+      return scorer.score({
+        scenario,
+        experiment: {} as never,
+        workingDirectory: root,
+        observation: { output: '', evidence: [], artifacts: [], durationMs: 0 },
+      });
+    };
+    expect((await score(plan.phases)).passed).toBe(true);
+    const invalid = [
+      plan.phases.map((phase, index) => index === 1 ? { ...phase, dependsOn: ['missing'] } : phase),
+      plan.phases.map((phase, index) => index === 2 ? { ...phase, dependsOn: ['retire'] } : phase),
+      plan.phases.map((phase, index) => index === 3 ? { ...phase, dependsOn: ['shadow-reconcile'] } : phase),
+      plan.phases.map((phase, index) => index === 3 ? { ...phase, id: 'outbox' } : phase),
+      [null, ...plan.phases.slice(1)],
+    ];
+    for (const phases of invalid) {
+      const result = await score(phases);
+      expect(result.passed).toBe(false);
+      expect(result.evidence).toContain('dependency graph: fail');
     }
   });
 });

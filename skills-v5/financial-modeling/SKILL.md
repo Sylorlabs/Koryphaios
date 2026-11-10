@@ -13,6 +13,8 @@ State the model purpose, decision horizon, reporting periods, currency and units
 
 Separate source/historical data, assumptions, calculations, schedules, outputs, and checks. Do not hard-code a forecast result into formulas that should be driven by assumptions. Keep units and signs consistent and document any intentionally unusual convention.
 
+Use an explicit trace path such as source facts → assumptions → operating drivers → schedules → linked statements/cash flows → outputs → checks. For a linked model, make retained earnings, working-capital cash effects, capex/depreciation, debt/interest and financing links visible when they are in scope; a balancing plug is not a substitute for a missing link. Report each check as executed, failed, blocked, or planned/unavailable so a checklist is not mistaken for reconciliation evidence.
+
 ## Historical and driver foundation
 
 Reconcile historical inputs to authoritative source records before forecasting. For public companies, use the actual filing/XBRL fact and period context rather than treating an aggregated frame as a substitute for the filed statement when the distinction matters.

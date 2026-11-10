@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "cloud-security",
-  "version": "5.0.1",
+  "version": "5.0.4",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -113,10 +113,10 @@
     {
       "url": "https://docs.aws.amazon.com/wellarchitected/latest/security-pillar/welcome.html",
       "sourceType": "official-docs",
-      "versionScope": "AWS Well-Architected Security Pillar current documentation available 2026-09-05",
+      "versionScope": "AWS Well-Architected Security Pillar current documentation available 2026-11-07",
       "staleAfterDays": 90,
       "notes": "AWS identity/access, detection, infrastructure/data protection, incident response, and security foundations.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html",
@@ -124,7 +124,7 @@
       "versionScope": "AWS IAM security best practices current 2026",
       "staleAfterDays": 90,
       "notes": "Federation/temporary credentials, MFA, least privilege, Access Analyzer, conditions, and organization guardrails.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://cloud.google.com/iam/docs/using-iam-securely",
@@ -132,7 +132,7 @@
       "versionScope": "Google Cloud IAM secure-use guidance current 2026",
       "staleAfterDays": 90,
       "notes": "Workforce/workload identity federation, service-account key avoidance, least privilege, role/condition design, and project hierarchy practices.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://learn.microsoft.com/en-us/security/benchmark/azure/overview",
@@ -140,7 +140,7 @@
       "versionScope": "Microsoft cloud security benchmark v2 overview current 2026",
       "staleAfterDays": 90,
       "notes": "Azure/multicloud control guidance for network, identity, privilege, data, logging, posture, endpoint, backup, and governance domains.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     }
   ],
   "authoringMaturity": "individual"

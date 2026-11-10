@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "information-architecture",
-  "version": "5.0.1",
+  "version": "5.0.2",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "domains": ["ux", "information-architecture"],
@@ -133,7 +133,7 @@
       "url": "https://github.com/rampstackco/claude-skills/blob/main/skills/information-architecture/SKILL.md",
       "sourceType": "community-pattern",
       "versionScope": "rampstackco/claude-skills main information-architecture skill at e5bc67519991 as inspected 2026-10-03",
-      "verifiedAt": "2026-10-03",
+      "verifiedAt": "2026-11-03",
       "staleAfterDays": 30,
       "license": "MIT",
       "notes": "Community workflow patterns for inventories, labeling, hierarchy/faceting, and findability evaluation. Fixed navigation or taxonomy counts are treated only as contextual heuristics."

@@ -22,7 +22,7 @@ Use this skill when Rust ownership, async runtime behavior, Cargo features, unsa
 - Before adding `unsafe`, state the invariant safe Rust cannot express and identify the code responsible for maintaining it. Keep the unsafe region as small as practical.
 - Treat an `unsafe impl Send` or `Sync` as a correctness promise about all reachable state, not a compiler workaround. Raw pointers and interior mutability require explicit reasoning.
 - Choose cloning, `Arc`, mutexes, channels, and borrowing from actual sharing and lifetime needs rather than from borrow-checker convenience.
-- Treat async cancellation as dropping an in-progress future at an await boundary. Keep externally visible partial state recoverable when cancellation can occur there.
+- Treat async cancellation as dropping an in progress future at an await boundary. Keep externally visible partial state recoverable when cancellation can occur there.
 - Check feature combinations that consumers can realistically enable. Do not assume the default feature set represents all supported builds.
 
 ## Failure discriminators

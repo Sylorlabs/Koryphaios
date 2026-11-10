@@ -1,45 +1,45 @@
 {
   "id": "documents-communication-full-task-2-individual",
   "maturity": "individual",
-  "prompt": "The evaluation repository asks the agent to \"write the release notes\". The fixture contains version/runtime ambiguity, a tempting shortcut, a compatibility edge case, and a failure path that distinguishes real expertise from generic completion. The acceptance boundary is documents-communication: Identify the audience, target medium, required structure, and repository conventions. The adjacent accessibility-verification discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "prompt": "The synthetic fixture asks the agent to turn a closed packet of dated project notes into a Markdown handoff. The packet includes a supplied decision and owner, a superseded duplicate, an unresolved contradiction, and unknown fields, but it does not supply every audience, deadline, compatibility, or runtime value that a polished handoff might normally contain. The acceptance boundary is documents-communication: identify the supplied reader and template only when supported, preserve the evidence boundary, distinguish current notes from history, and leave missing values unresolved. Demonstrate a blocked or negative path and recovery status rather than claiming that a handoff is complete because the Markdown or JSON parses.",
   "environment": {
     "kind": "synthetic",
     "startingState": "fixture://documents-communication/project-handoff-packet",
     "requirements": [
-      "closed packet of dated project notes with source identifiers",
+      "closed packet of dated project notes with source identifiers and missing value boundaries",
       "at least one explicit decision and named owner",
-      "one superseded duplicate, one unresolved contradiction, and two unknown fields",
-      "target Markdown handoff template or surrounding convention",
-      "paired same-model skill/no-skill execution",
-      "documents-communication parent/child/neighbor hierarchy boundary fixture",
-      "domain-specific tempting anti-pattern or shortcut",
-      "representative negative, interruption, compatibility, or recovery path"
+      "one explicitly superseded duplicate, one unresolved contradiction, and two unknown fields",
+      "target Markdown handoff template or surrounding convention when supplied",
+      "sealed packet starter result, verification, and typed evidence map",
+      "documents-communication parent and child hierarchy boundary fixture",
+      "a polished note or latest timestamp as a tempting but insufficient resolution",
+      "negative unsupported audience or compatibility claim and recovery status"
     ]
   },
   "falsifiableChecks": [
     {
       "id": "scope-and-hierarchy",
-      "assertion": "The result must establish the actual documents-communication boundary and relevant environment before acting, preserve the hierarchy relationship (children=dash-free-writing,executive-communication,instructional-communication,reference-communication,technical-communication; near-neighbor=accessibility-verification), and not absorb the near-neighbor responsibility merely because it is adjacent."
+      "assertion": "Before writing, the result must state the supplied handoff reader and Markdown medium only when supported, identify the parent documents-communication boundary, and keep accessibility verification outside the task unless separately requested."
     },
     {
       "id": "operating-contract",
-      "assertion": "Identify the audience, target medium, required structure, and repository conventions."
+      "assertion": "The result must identify the packet evidence boundary, target Markdown template, current state, decisions, owners, open questions, history, and source links, marking any unsupported audience or purpose as unresolved."
     },
     {
       "id": "execution-invariant",
-      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+      "assertion": "The result must preserve the named decision and owner, retain the superseded note as history, show both sides of the unresolved contradiction with source IDs, and preserve both unknown fields without assigning likely values."
     },
     {
       "id": "verification-discipline",
-      "assertion": "Format and factual review"
+      "assertion": "The result must reconcile each material handoff statement to a packet source, validate the supplied evidence-map field types and status values, and separately record structure, reader-action, factual, and format checks."
     },
     {
       "id": "anti-pattern-resistance",
-      "assertion": "The result must not treat a happy path, generated artifact, compilation, or unsupported assumption as sufficient proof of documents-communication correctness."
+      "assertion": "The result must not treat a polished handoff, a later timestamp, a valid JSON parse, or a described requirement as proof that an owner, audience, compatibility result, or contradiction resolution exists."
     },
     {
       "id": "evidence-and-uncertainty",
-      "assertion": "Every material completion claim must map to observable evidence (Audience, purpose, and target-format contract; Source-fact and uncertainty trace; Structure and reader-action review; Final factual and format QA), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+      "assertion": "Every material handoff claim must map to a provided source ID and confidence state, and every missing audience, deadline, compatibility value, unresolved contradiction, unavailable check, and recovery step must remain explicitly labeled rather than converted into certainty."
     }
   ],
   "scorers": [

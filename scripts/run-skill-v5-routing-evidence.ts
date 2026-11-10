@@ -1,6 +1,8 @@
 import { resolve } from 'node:path';
+import { newRoutingCampaignId, routingComparisonId } from './skill-v5-routing-identity';
 import { createTaskContract } from '../backend/src/kory/prompts';
 import {
+  evaluateSkillPromotion,
   recordSkillEvaluationRuns,
   type SkillEvaluationRun,
 } from '../backend/src/kory/skill-evaluations';
@@ -24,13 +26,22 @@ const requested = process.argv
   .filter(Boolean);
 const summaryOnly = process.argv.includes('--summary');
 const dryRun = process.argv.includes('--dry-run');
-const selectedPackages = requested.length
+const requestedPackages = requested.length
   ? requested.map((name) => {
       const skillPackage = packages.find((item) => item.sidecar.name === name);
       if (!skillPackage) throw new Error(`Unknown V5 skill package ${name}`);
       return skillPackage;
     })
   : packages;
+// Do not repeatedly add passing routing observations to already measured revisions.
+const selectedPackages = process.argv.includes('--missing-current-only')
+  ? requestedPackages.filter((skillPackage) => {
+      const revision = currentByName.get(skillPackage.sidecar.name);
+      if (!revision) throw new Error(`${skillPackage.sidecar.name} has no active valid revision`);
+      const gate = evaluateSkillPromotion(projectRoot, revision.name, revision.hash);
+      return gate.routingPrecision === null || gate.routingRecall === null;
+    })
+  : requestedPackages;
 
 interface RoutingOutcome {
   actual: boolean;
@@ -96,6 +107,7 @@ const observations: Array<{
 }> = [];
 const runsToPersist: SkillEvaluationRun[] = [];
 const now = new Date().toISOString();
+const campaignId = newRoutingCampaignId();
 
 for (const skillPackage of selectedPackages) {
   const target = currentByName.get(skillPackage.sidecar.name);
@@ -133,7 +145,12 @@ for (const skillPackage of selectedPackages) {
     });
     if (dryRun) continue;
 
-    const comparisonId = `v5-routing@1:${skillPackage.sidecar.name}:${testCase.id}`;
+    const comparisonId = routingComparisonId(
+      skillPackage.sidecar.name,
+      testCase.id,
+      target.hash,
+      campaignId,
+    );
     for (const [variant, outcome] of [
       ['with-skill', withSkill],
       ['without-skill', withoutSkill],

@@ -24,6 +24,8 @@ Learn what the data can support before making explanatory or causal claims. Iden
 
 Profile completeness, cardinality, ranges, distributions, outliers, time coverage, subgroup balance, relationships, and contradictions. Inspect records as well as summaries; a smooth aggregate can hide unit errors, merged populations, retries, or impossible values. Compare alternative reasonable cleaning and aggregation choices, and mark discoveries as hypotheses rather than results. Ask what process generated each field and whether absence, zero, and unknown are distinct. Explore meaningful slices supplied by the domain, but avoid repeated fishing that turns visual surprise into a confident finding.
 
+Before computing a headline summary, write down the observation unit and denominator as observed facts or explicitly unresolved questions. Keep record-, entity-, exposure-, and time-window denominators separate; do not infer row semantics from field names, labels, or an attractive aggregate. Classify each statement as observed, computed from supplied rows, hypothesis, or unavailable. If only a sealed packet, metadata, or a description is available, provide the reproducible profiling plan and preserve numeric findings as unavailable rather than filling them from the description.
+
 ## Evidence and failure modes
 
 Publish a data-quality profile, transformation log, representative examples, exploration outputs, and open questions. State which dimensions cannot be assessed. Do not assume tabular data, SQL, a notebook, or a particular language. Common failures are silently dropping missing values, treating event rows as people, mixing clock domains, double-counting retries, comparing raw counts with unequal exposure, overfitting a story to an outlier, and presenting exploratory correlations as confirmed effects.
@@ -35,6 +37,7 @@ Publish a data-quality profile, transformation log, representative examples, exp
 - Exploratory findings
 - Hierarchy boundary and selected specialist rationale
 - Representative success, negative-path, and recovery verification
+- For recovery, distinguish an executed rerun after a failed cleaning/aggregation choice from a proposed procedure; label procedural evidence as unexecuted.
 - Preserve contradictory or missing evidence explicitly.
 - Verify the highest-value invalid, partial, compatibility, interruption, or recovery path for the actual environment.
 - Do not claim success from compilation, a screenshot, a happy-path example, or source documentation alone when runtime or operational evidence is required.

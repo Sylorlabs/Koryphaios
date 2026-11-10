@@ -21,18 +21,44 @@ afterEach(() => {
 });
 
 describe('AI/retrieval protocol concept fixtures', () => {
-  test('all explicit protocol scenarios are full-task executable', () => {
-    const packages = loadV5SkillPackages().packages;
+  test('all explicit protocol scenarios are registered with their active full-task gates', () => {
+    const skills = new Set(AI_PROTOCOL_CONCEPTS.map((definition) => definition.skill));
+    const packages = loadV5SkillPackages().packages.filter((pkg) => skills.has(pkg.sidecar.name));
     const readiness = auditSkillEvalExecutionReadiness(
       packages,
       BUILTIN_SKILL_EVAL_MATERIALIZERS,
       BUILTIN_SKILL_EVAL_SCORERS,
     );
     expect(AI_PROTOCOL_CONCEPTS).toHaveLength(16);
-    for (const definition of AI_PROTOCOL_CONCEPTS)
-      expect(readiness.find((row) => row.scenarioId === definition.id)?.ready, definition.id).toBe(
-        true,
-      );
+    for (const definition of AI_PROTOCOL_CONCEPTS) {
+      const scenario = buildSkillEvalSuiteV3(
+        packages.find((pkg) => pkg.sidecar.name === definition.skill)!,
+      ).scenarios.find((item) => item.id === definition.id)!;
+      const materializer = AI_PROTOCOL_SKILL_EVAL_MATERIALIZERS.find((item) =>
+        item.matches(scenario),
+      )!;
+      const scorer = AI_PROTOCOL_SKILL_EVAL_SCORERS.find((item) =>
+        item.scenarioIds.includes(definition.id),
+      )!;
+      expect(materializer, definition.id).toBeDefined();
+      expect(scorer, definition.id).toBeDefined();
+      const row = readiness.find((item) => item.scenarioId === definition.id);
+      expect(row, definition.id).toBeDefined();
+      expect(row?.materializerId, definition.id).toBe(materializer.id);
+      expect(row?.deterministicScorerId, definition.id).toBe(scorer.id);
+      // Vector concepts now dispatch through Elasticsearch. Registration is
+      // unconditional; executability follows that adapter's runtime probe.
+      const blockers = materializer.readinessBlockers ?? [];
+      expect(row?.ready, definition.id).toBe(blockers.length === 0);
+      expect(row?.reasons, definition.id).toEqual(blockers);
+      if (definition.skill === 'vector-search-systems') {
+        expect(materializer.realRuntime, definition.id).toBe(true);
+        expect(materializer.id).toContain('/concept-elasticsearch@3');
+        expect(scorer.id).toContain('/concept-elasticsearch-scorer@3');
+      } else {
+        expect(blockers, definition.id).toEqual(definition.blockers ?? []);
+      }
+    }
   });
 
   test('delegation vectors use the declared-scope field promised by the public contract', () => {
@@ -47,6 +73,28 @@ describe('AI/retrieval protocol concept fixtures', () => {
         expect(Array.isArray(specialist.declaredScope)).toBe(true);
         expect(specialist.scope).toBeUndefined();
       }
+    }
+  });
+
+  test('LLM scorer fixtures disclose their distinct identity and blind-label input contracts', () => {
+    const one = AI_PROTOCOL_CONCEPTS.find(
+      (item) => item.id === 'llm-evaluation-full-task-1-individual',
+    )!;
+    const two = AI_PROTOCOL_CONCEPTS.find(
+      (item) => item.id === 'llm-evaluation-full-task-2-individual',
+    )!;
+    expect(one.contract).toContain('blindLabels:string[]');
+    expect(one.contract).toContain('caseId:string');
+    expect(two.contract).toContain('taskId:string');
+    expect(two.contract).toContain('leakage:string[]');
+    for (const vector of one.vectors()) {
+      const input = vector.input as { blindLabels: unknown; runs: Record<string, unknown>[] };
+      expect(Array.isArray(input.blindLabels)).toBe(true);
+      expect(input.runs.every((run) => typeof run.caseId === 'string')).toBe(true);
+    }
+    for (const vector of two.vectors()) {
+      const input = vector.input as { runs: Record<string, unknown>[] };
+      expect(input.runs.every((run) => typeof run.taskId === 'string')).toBe(true);
     }
   });
 

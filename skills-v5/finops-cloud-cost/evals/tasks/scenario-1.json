@@ -31,7 +31,7 @@
     },
     {
       "id": "verification-discipline",
-      "assertion": "Reconcile billing exports to provider totals, compare unit cost over time, model commitment utilization/risk, validate savings after changes, and monitor performance/reliability guardrails."
+      "assertion": "Reconcile billed rows to the invoice total, allocate direct/shared/unallocated spend, compare transaction-normalized unit cost over time, deduplicate overlapping recommendations, defer the list-price commitment estimate while migration risk is unresolved, validate measured before/after effective savings, and verify reliability, rollback, and governance evidence. Do not require unrelated full commitment purchase-sizing or post-purchase monitoring evidence beyond correct C1 deferral and provenance/risk labeling."
     },
     {
       "id": "anti-pattern-resistance",
@@ -39,7 +39,7 @@
     },
     {
       "id": "evidence-and-uncertainty",
-      "assertion": "Every material completion claim must map to observable evidence (Billing/export/schema/currency/cost-lens reconciliation to provider or invoice totals; Allocation/shared-cost/unallocated coverage plus business/resource unit-economics definitions and driver decomposition; Usage/rightsize/rate/commitment scenarios using effective costs, coverage/utilization, overlapping recommendation and risk evidence; Implemented before/after realized savings, reliability/performance guardrails, owner/governance and rollback/action ledger), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+      "assertion": "Every material completion claim must map to observable scenario-1 evidence: billing/export/schema/currency/cost-lens reconciliation to the invoice total; direct/shared/unallocated allocation plus transaction unit economics and period-over-period comparison; overlapping recommendation handling plus C1 deferral from list-price provenance and unresolved migration risk; and implemented before/after effective-cost savings with reliability/performance guardrails, owner/governance, and rollback. Full commitment purchase-sizing and post-purchase monitoring are outside this fixture except for correctly deferring C1. Simulated, unavailable, inferred, stale, or unresolved evidence must be labeled rather than converted into certainty."
     }
   ],
   "scorers": [
@@ -50,8 +50,9 @@
       "evidence": [
         "Billing/export/schema/currency/cost-lens reconciliation to provider or invoice totals",
         "Allocation/shared-cost/unallocated coverage plus business/resource unit-economics definitions and driver decomposition",
-        "Usage/rightsize/rate/commitment scenarios using effective costs, coverage/utilization, overlapping recommendation and risk evidence",
-        "Implemented before/after realized savings, reliability/performance guardrails, owner/governance and rollback/action ledger",
+        "Overlapping recommendation deduplication plus explicit C1 deferral from list-price provenance and unresolved migration risk",
+        "Implemented before/after effective-cost realized savings, transaction-normalized unit cost, reliability/performance guardrails, owner/governance and rollback/action ledger",
+        "Scenario boundary: do not require unrelated full commitment purchase-sizing or post-purchase monitoring evidence beyond C1 deferral",
         "Hierarchy boundary and selected specialist rationale",
         "Representative success, negative-path, and recovery verification",
         "hierarchy boundary and specialist selection rationale",
@@ -74,8 +75,9 @@
   "requiredEvidence": [
     "Billing/export/schema/currency/cost-lens reconciliation to provider or invoice totals",
     "Allocation/shared-cost/unallocated coverage plus business/resource unit-economics definitions and driver decomposition",
-    "Usage/rightsize/rate/commitment scenarios using effective costs, coverage/utilization, overlapping recommendation and risk evidence",
-    "Implemented before/after realized savings, reliability/performance guardrails, owner/governance and rollback/action ledger",
+    "Overlapping recommendation deduplication plus explicit C1 deferral from list-price provenance and unresolved migration risk",
+    "Implemented before/after effective-cost realized savings, transaction-normalized unit cost, reliability/performance guardrails, owner/governance and rollback/action ledger",
+    "Scenario boundary: do not require unrelated full commitment purchase-sizing or post-purchase monitoring evidence beyond C1 deferral",
     "Hierarchy boundary and selected specialist rationale",
     "Representative success, negative-path, and recovery verification",
     "hierarchy boundary and selected specialist rationale",

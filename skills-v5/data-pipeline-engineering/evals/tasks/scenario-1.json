@@ -1,13 +1,13 @@
 {
   "id": "data-pipeline-engineering-full-task-1-individual",
   "maturity": "individual",
-  "prompt": "Repair a CDC ingestion job where a replayed Kafka partition after checkpoint loss duplicates warehouse rows and a historical backfill can arrive after newer updates. Define event identity and ordering, make writes idempotent, preserve checkpoint/replay semantics, and verify crash/restart, duplicate delivery, late records, poison messages, and bounded backfill without changing downstream analytics model ownership.",
+  "prompt": "Repair a CDC ingestion job for one Kafka partition (p0) where replay after checkpoint loss duplicates warehouse rows and a historical backfill can arrive after newer updates. Define event identity and partition-local ordering, make writes idempotent, preserve checkpoint/replay semantics, and verify duplicate delivery, late records, poison messages, bounded backfill, and the failure/replay behavior the fixture can actually observe without changing downstream analytics model ownership. The synthetic fixture is in-memory and has no persistent checkpoint or deduplication store, so do not claim a real process-durable restart unless you implement and verify one. Schema-evolution behavior is exercised separately by scenario 2.",
   "environment": {
     "kind": "synthetic",
     "startingState": "fixture://data-pipeline-engineering/idempotent-cdc-backfill",
     "requirements": [
-      "CDC events with stable source LSN/id, duplicate deliveries, and out-of-order historical backfill records",
-      "checkpoint store that can be rolled back to reproduce replay",
+      "single-partition p0 CDC events with stable source LSN/id, duplicate deliveries, and out-of-order historical backfill records",
+      "in-memory partition-local checkpoint that can be rolled back to reproduce replay, without pretending that rollback proves process-durable restart",
       "sink table with known expected latest-state and append/audit semantics",
       "fault injection around checkpoint and sink-write boundaries",
       "paired same-model skill/no-skill execution from the identical starting snapshot"
@@ -60,19 +60,21 @@
     },
     {
       "id": "operating-contract",
-      "assertion": "Define source authority, event/record identity, watermark, partition, schema, transformation lineage, retry semantics, and destination guarantees."
+      "assertion": "Define source authority, event and record identity, the single partition p0 ordering and checkpoint boundary, transformation lineage, retry semantics, and destination guarantees. State that schema evolution is outside this fixture and is exercised by scenario 2 rather than inventing schema evidence here.",
+      "source": "https://airflow.apache.org/docs/apache-airflow/stable/best-practices.html"
     },
     {
       "id": "execution-invariant",
-      "assertion": "Replay and backfill are safe because source event identity/order and sink mutation semantics are explicit; restarting cannot create additional logical records."
+      "assertion": "Replay and backfill are safe because source event identity/order and sink mutation semantics are explicit; duplicate delivery cannot create additional logical records within the verified fixture boundary. The fixture proves in-memory replay behavior only unless a durable state mechanism is added and exercised."
     },
     {
       "id": "verification-discipline",
-      "assertion": "Test reruns, partial batches, late/out-of-order data, schema additions/removals, malformed records, backfills, reconciliation totals, and lineage from output rows to source inputs."
+      "assertion": "Test reruns, partial-failure/replay behavior, late and out-of-order data, malformed and poison records, backfills, reconciliation totals, and lineage from output rows to source inputs. Distinguish the in-memory replay simulation from unavailable process-durable restart evidence.",
+      "source": "https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/backfill.html"
     },
     {
       "id": "anti-pattern-resistance",
-      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not use processing time when event time matters, assume exactly-once from retries alone, discard bad rows without accounting, or let a backfill bypass normal quality gates."
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not use processing time when event time matters, assume exactly once from retries alone, discard bad rows without accounting, or let a backfill bypass normal quality gates."
     },
     {
       "id": "evidence-and-uncertainty",

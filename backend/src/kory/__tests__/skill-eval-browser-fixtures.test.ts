@@ -15,8 +15,11 @@ import { auditSkillEvalExecutionReadiness } from '../skill-eval-execution';
 import { readJsonArtifact, writeFixtureFile } from '../skill-eval-fixture-helpers';
 import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
 import { loadV5SkillPackages } from '../skill-packages';
+import { browserControlTest } from './browser-runtime-test-policy';
 
 const roots: string[] = [];
+const browserTest = browserControlTest('Web browser', BROWSER_SKILL_EVAL_MATERIALIZERS[0].readinessBlockers ?? []);
+const visualTest = browserControlTest('Dashboard browser', BROWSER_SKILL_EVAL_MATERIALIZERS[2].readinessBlockers ?? []);
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -172,7 +175,7 @@ async function scoreScenario(id: string, root: string) {
 }
 
 describe('real browser V5 fixtures', () => {
-  test('async operations console starts red then passes real URL/history/focus/network/viewport checks', async () => {
+  browserTest('async operations console starts red then passes real URL/history/focus/network/viewport checks', async () => {
     const root = workspace('kory-browser-console-');
     const { scorer, input } = await scoreScenario(
       'web-interface-full-task-async-operations-console',
@@ -224,7 +227,7 @@ describe('real browser V5 fixtures', () => {
     expect(green.verification).toBe(1);
   }, 60_000);
 
-  test('content-led page starts red then passes supplied-content, semantic, accessibility, responsive, and reduced-motion checks', async () => {
+  browserTest('content-led page starts red then passes supplied-content, semantic, accessibility, responsive, and reduced-motion checks', async () => {
     const root = workspace('kory-browser-content-');
     const { scorer, input } = await scoreScenario(
       'web-interface-full-task-content-led-product-page',
@@ -278,7 +281,7 @@ describe('real browser V5 fixtures', () => {
     expect(green.quality).toBe(1);
   }, 60_000);
 
-  test('visual verification starts red and only passes when the candidate audit matches the real 24-capture browser matrix', async () => {
+  visualTest('visual verification starts red and only passes when the candidate audit matches the real 24-capture browser matrix', async () => {
     const root = workspace('kory-browser-visual-');
     const { scorer, input } = await scoreScenario('visual-verification-full-task-1', root);
     const red = await scorer.score(input);
@@ -370,7 +373,11 @@ describe('real browser V5 fixtures', () => {
       'visual-verification-full-task-1',
     ]) {
       const row = rows.find((item) => item.scenarioId === id)!;
-      expect(row.ready, id).toBe(true);
+      const materializer = BROWSER_SKILL_EVAL_MATERIALIZERS.find((item) => item.id === row.materializerId)!;
+      expect(materializer, id).toBeDefined();
+      const blockers = materializer.readinessBlockers ?? [];
+      expect(row.ready, id).toBe(blockers.length === 0);
+      expect(row.reasons, id).toEqual(blockers);
       expect(row.materializerId, id).toContain('real-browser');
       expect(row.deterministicScorerId, id).toContain('real-browser');
     }

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "mlops",
-  "version": "5.1.1",
+  "version": "5.2.0",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -134,34 +134,34 @@
     {
       "url": "https://cloud.google.com/architecture/mlops-continuous-delivery-and-automation-pipelines-in-machine-learning",
       "sourceType": "official-docs",
-      "versionScope": "Google Cloud MLOps architecture guidance as available 2026-09-05",
+      "versionScope": "Google Cloud MLOps architecture guidance as available 2026-10-04",
       "staleAfterDays": 30,
       "notes": "ML system CI/CD/continuous training, validation, deployment and monitoring lifecycle guidance.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://mlflow.org/docs/latest/ml/model-registry",
       "sourceType": "reference-implementation",
-      "versionScope": "Rolling MLflow model-registry documentation as available 2026-10-02",
+      "versionScope": "Rolling MLflow model-registry documentation as available 2026-11-01",
       "staleAfterDays": 14,
       "notes": "Current model registry versioning, lineage, aliases/tags, model signatures and production workflow semantics.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-01"
     },
     {
       "url": "https://docs.cloud.google.com/gemini-enterprise-agent-platform/machine-learning/featurestore/latest/online-serving-types",
       "sourceType": "official-docs",
-      "versionScope": "Google Cloud Feature Store online serving documentation updated 2026-09-01",
+      "versionScope": "Google Cloud Feature Store online serving documentation as available 2026-11-01",
       "staleAfterDays": 14,
       "notes": "Current online-serving modes and deprecation-sensitive feature-store behavior; verify platform product naming/version before implementation.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-01"
     },
     {
       "url": "https://docs.cloud.google.com/gemini-enterprise-agent-platform/machine-learning/featurestore/latest/serve-feature-values",
       "sourceType": "official-docs",
-      "versionScope": "Google Cloud Feature Store serving documentation updated 2026-09-02",
+      "versionScope": "Google Cloud Feature Store serving documentation as available 2026-11-01",
       "staleAfterDays": 14,
       "notes": "Latest-value/entity semantics, sync requirements and feature timestamps for online serving.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-01"
     },
     {
       "url": "https://www.nist.gov/itl/ai-risk-management-framework",

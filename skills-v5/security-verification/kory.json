@@ -115,7 +115,7 @@
       "versionScope": "OWASP ASVS 5.0.0 stable as available 2026-09-05",
       "staleAfterDays": 90,
       "notes": "Current stable application-security verification requirements and control taxonomy.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://csrc.nist.gov/pubs/sp/800/218/final",
@@ -123,7 +123,7 @@
       "versionScope": "NIST SP 800-218 SSDF version 1.1 final",
       "staleAfterDays": 365,
       "notes": "Secure-development verification and vulnerability recurrence-prevention context.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://owasp.org/www-project-web-security-testing-guide/v42/4-Web_Application_Security_Testing/05-Authorization_Testing/02-Testing_for_Bypassing_Authorization_Schema",
@@ -131,7 +131,7 @@
       "versionScope": "OWASP WSTG 4.2 authorization testing guidance available 2026-09-05",
       "staleAfterDays": 90,
       "notes": "Horizontal and vertical authorization testing across roles and identities.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://owasp.org/www-project-web-security-testing-guide/v42/4-Web_Application_Security_Testing/05-Authorization_Testing/04-Testing_for_Insecure_Direct_Object_References",
@@ -139,7 +139,7 @@
       "versionScope": "OWASP WSTG 4.2 object-reference testing guidance available 2026-09-05",
       "staleAfterDays": 90,
       "notes": "Object-reference access-control testing across user-controlled resource identifiers.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://datatracker.ietf.org/doc/rfc9700/",
@@ -147,7 +147,7 @@
       "versionScope": "RFC 9700 / BCP 240, January 2025",
       "staleAfterDays": 180,
       "notes": "OAuth 2.0 best current security practice when token/code/redirect behavior affects the boundary under test.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     }
   ],
   "authoringMaturity": "individual"

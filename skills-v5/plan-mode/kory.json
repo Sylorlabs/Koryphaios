@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "plan-mode",
-  "version": "5.1.0",
+  "version": "5.2.1",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "domains": ["planning", "decision-making", "verification"],
@@ -101,7 +101,7 @@
       "url": "https://developers.openai.com/plugins/plan/use-case",
       "sourceType": "official-docs",
       "versionScope": "OpenAI plugin planning guidance available on 2026-09-04",
-      "verifiedAt": "2026-09-04",
+      "verifiedAt": "2026-11-03",
       "staleAfterDays": 60,
       "notes": "Use-case planning patterns for user goals, required context, expected results, safety boundaries, and explicit build decisions."
     },
@@ -109,7 +109,7 @@
       "url": "https://developers.openai.com/codex/guides/agents-md/",
       "sourceType": "official-docs",
       "versionScope": "OpenAI Codex AGENTS.md guidance inspected 2026-10-03",
-      "verifiedAt": "2026-10-03",
+      "verifiedAt": "2026-11-03",
       "staleAfterDays": 30,
       "notes": "Repository instruction discovery and precedence: global guidance first, then project guidance from repository root toward the current directory, with closer applicable guidance taking precedence."
     },
@@ -117,7 +117,7 @@
       "url": "https://agentskills.io/specification",
       "sourceType": "spec",
       "versionScope": "Agent Skills specification as published and verified on 2026-09-04",
-      "verifiedAt": "2026-09-04",
+      "verifiedAt": "2026-11-03",
       "staleAfterDays": 60,
       "notes": "Portable skill package structure and progressive-disclosure boundary."
     }

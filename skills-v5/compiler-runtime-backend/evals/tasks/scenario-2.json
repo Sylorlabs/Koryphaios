@@ -1,7 +1,7 @@
 {
   "id": "compiler-runtime-backend-full-task-2-individual",
   "maturity": "individual",
-  "prompt": "The evaluation repository asks the agent to \"create a language server\". The fixture includes compatibility-sensitive callers, restart or migration behavior, stale/duplicate input, and a happy path that can hide resource or recovery defects. The acceptance boundary is compiler-runtime-backend: Engineer language, compiler, interpreter, VM, or runtime machinery with explicit semantic and resource contracts. The adjacent distributed-backend discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "prompt": "This repository holds the root-map half of a paused JIT frame's GC bookkeeping. solve(input) receives { live: Array<{ vreg: string; kind: 'ref' | 'ref-dead' | 'int'; location: string }>, safepoint: boolean }. At a safepoint the roots are exactly the location values of live entries whose kind is 'ref', in the order the live entries appear. int entries are never roots and a ref-dead entry must not be reported even when its vreg still has a location. A non-safepoint frame is not being collected, so it has no roots. Always return { roots: string[] }, including the empty array. Implement the pure solve(input) export in candidate.ts and keep README.md, contract.json and package.json unchanged; they are evaluator owned fixed inputs. Report the negative cases you actually exercised (dead reference, non-reference register, non-safepoint frame) rather than a happy-path claim, and state the semantic contract your root map relies on, including what a spill slot means for a dead reference. The neighboring distributed-backend discipline is a routing decoy unless its separate responsibility is actually requested.",
   "environment": {
     "kind": "repository",
     "startingState": "fixture://compiler-runtime-backend/gc-safepoint-register-map",
@@ -40,7 +40,10 @@
         "independent evaluator record",
         "quality comparison without variant labels"
       ],
-      "blindTo": ["skill-variant", "expected-outcome"]
+      "blindTo": [
+        "skill-variant",
+        "expected-outcome"
+      ]
     }
   ],
   "requiredEvidence": [

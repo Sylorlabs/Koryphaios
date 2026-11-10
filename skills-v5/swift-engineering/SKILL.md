@@ -23,6 +23,7 @@ Use this skill for Swift language, package, ARC, actor, and concurrency behavior
 - Treat actor isolation and `Sendable` as concurrency contracts. Avoid `@unchecked Sendable` until the type's synchronization invariant is explicit and reviewed.
 - Model closure captures under ARC. Use weak references when the referenced object may validly disappear and unowned only when the lifetime relationship guarantees the reference remains valid.
 - Treat task cancellation as cooperative. Check cancellation at meaningful boundaries and keep cleanup valid if a task stops after partial progress.
+- Give each coalesced request a stable flight identity and clear in-flight state only if the completing task still owns that identity; an old failure or cancellation must not erase a newer retry. Decide whether cancellation belongs to one waiter or the shared operation, and verify that policy with one cancelled and one continuing same-key caller.
 - Resolve Swift language mode, package tools version, and platform availability before adopting concurrency or API behavior that changes by toolchain.
 
 ## Failure discriminators
@@ -35,14 +36,15 @@ Use this skill for Swift language, package, ARC, actor, and concurrency behavior
 ## Verification at the Swift boundary
 
 - Run the supported Swift Package or Xcode test path under affected toolchain and language modes.
-- Exercise actor-isolated mutation from the intended callers and test cancellation after partial progress for changed async APIs.
-- Verify ARC-sensitive objects release in the expected lifecycle when capture ownership changes.
+- Exercise mutation of actor isolated state from the intended callers and test cancellation after partial progress for changed async APIs.
+- Exercise cancellation or failure followed by an immediate same-key retry, late completion from the old flight, and concurrent waiters with different cancellation states. A generic callback pass does not establish stale-flight protection or independent-waiter semantics.
+- Verify objects that are sensitive to ARC release in the expected lifecycle when capture ownership changes.
 - Test Codable or Objective-C interop with representative existing consumers when those public contracts change.
 - Use the actual supported Apple platform for framework or device claims that host-only Swift tests cannot establish.
 
 ## Completion evidence
 
-- Swift language mode, ownership, isolation, and public-contract assumptions affected
+- Swift language mode, ownership, isolation, and public contract assumptions affected
 - Cancellation, actor, and ARC evidence when those boundaries changed
 - Platform or existing-consumer evidence when package, Codable, Objective-C, or Apple API behavior is claimed
 

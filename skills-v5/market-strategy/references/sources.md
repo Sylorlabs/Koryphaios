@@ -4,13 +4,13 @@
 
 The market research and competitive analysis section of [SBA business planning](https://www.sba.gov/counseling/plan-your-business/) was inspected. Adopt demand, reachable segments, indirect alternatives, barriers, and the distinction between broad secondary evidence and a particular customer's decision. Do not turn its illustrative planning format or broad market statistics into a universal strategy template or precise obtainable revenue. Refresh within 180 days. The revised decision criteria are not evidence of live market validation or model uplift.
 
-`market-strategy` is an individually authored V5 skill package; empirical qualification is tracked separately in the audit/evaluation ledger. These maintained sources bound factual and version-sensitive guidance; qualification is tested with hierarchy-aware held-out routing, paired same-model skill/no-skill tasks, and independent blind evaluation.
+`market-strategy` is an individually authored V5 skill package; empirical qualification is tracked separately in the audit/evaluation ledger. These maintained sources bound factual and version-sensitive guidance; qualification is tested with hierarchy-aware held out routing, paired same-model skill/no skill tasks, and independent blind evaluation.
 
 ## Qualification basis
 
 - Hierarchy: broader market-competitive-research.
-- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held-out cases through the real resolver.
-- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no-skill pairing, regression retention, and blind semantic judging.
+- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held out cases through the real resolver.
+- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no skill pairing, regression retention, and blind semantic judging.
 - Source discipline: authoritative/spec/reference sources outrank community patterns when they conflict; runtime evidence outranks examples for behavioral claims.
 
 ## Maintained sources

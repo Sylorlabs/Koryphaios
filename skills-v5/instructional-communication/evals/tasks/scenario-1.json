@@ -1,15 +1,17 @@
 {
   "id": "instructional-communication-full-task-1-individual",
   "maturity": "individual",
-  "prompt": "The evaluation repository asks the agent to \"write a setup guide\". The fixture contains a plausible happy path, an adjacent-skill decoy, one invalid or partial state, and a recovery condition that must be demonstrated rather than assumed. The acceptance boundary is instructional-communication: Define prerequisites, starting state, goal, actions, decisions, expected feedback, failure recovery, warnings, and completion checks. The adjacent dash-free-writing discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "prompt": "The evaluation repository asks the agent to \"write a setup guide\" for a first-time developer with terminal access but no repository-specific expertise. The fixture contains a plausible happy path, an adjacent-skill decoy, one invalid or partial state, a version boundary, and a recovery condition that must be demonstrated rather than assumed. The acceptance boundary is instructional-communication: Define audience, medium, permissions, prerequisites, observable starting state, goal, ordered actions, stage feedback, decision conditions, accessible equivalent status or action paths, warnings, failure recovery, escalation, and objective completion checks. The adjacent dash-free-writing discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path, generated guide, or command exit code alone is insufficient.",
   "environment": {
     "kind": "repository",
     "startingState": "fixture://instructional-communication/clean-machine-setup",
     "requirements": [
       "repository fixture with project instructions, manifests, lockfile, environment template, and bootstrap scripts",
-      "supported toolchain/version boundary and one version-specific startup difference",
+      "supported toolchain/version boundary and one version-specific startup difference with an exact read-only check and mismatch branch",
       "two common setup failures with observable diagnostics and recoveries",
+      "stage feedback and liveness evidence for both backend and frontend startup",
       "backend and frontend verification targets",
+      "audience, target medium, permissions, and accessible text/status boundary",
       "paired same-model skill/no-skill execution",
       "instructional-communication parent/child/neighbor hierarchy boundary fixture",
       "domain-specific tempting anti-pattern or shortcut",
@@ -19,27 +21,27 @@
   "falsifiableChecks": [
     {
       "id": "scope-and-hierarchy",
-      "assertion": "The result must establish the actual instructional-communication boundary and relevant environment before acting, preserve the hierarchy relationship (broader=documents-communication; near-neighbor=dash-free-writing), and not absorb the near-neighbor responsibility merely because it is adjacent."
+      "assertion": "The result must establish the first-time developer audience, target medium, permissions, relevant environment, and actual instructional-communication boundary before acting; preserve the hierarchy relationship (broader=documents-communication; near-neighbor=dash-free-writing); and not absorb the near-neighbor responsibility merely because it is adjacent."
     },
     {
       "id": "operating-contract",
-      "assertion": "Define prerequisites, starting state, goal, actions, decisions, expected feedback, failure recovery, warnings, and completion checks."
+      "assertion": "Define audience, medium, prerequisites, observable starting state, goal, ordered actions, permissions, stage feedback, decision conditions, warnings, failure recovery, escalation, accessible equivalent action or status paths, and completion checks."
     },
     {
       "id": "execution-invariant",
-      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+      "assertion": "The result must make its version boundary, placeholders, consequential assumptions, ownership, target-exists behavior, preservation guarantees, and decision sequence explicit and reproducible."
     },
     {
       "id": "verification-discipline",
-      "assertion": "Walkthrough result; Recovery and completion checks"
+      "assertion": "Walkthrough result; stage feedback and liveness; recovery and completion checks"
     },
     {
       "id": "anti-pattern-resistance",
-      "assertion": "The result must not treat a happy path, generated artifact, compilation, or unsupported assumption as sufficient proof of instructional-communication correctness."
+      "assertion": "The result must not treat a happy path, generated artifact, compilation, command exit code, or unsupported assumption as sufficient proof of instructional-communication correctness; it must include an observable invalid or recovery path and final user-goal proof."
     },
     {
       "id": "evidence-and-uncertainty",
-      "assertion": "Every material completion claim must map to observable evidence (Prerequisites and observable starting state; Ordered actions with expected feedback; Decision branches, warnings, and recovery; Objective completion checks and walkthrough evidence), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+      "assertion": "Every material completion claim must map to observable evidence (audience and start state; ordered actions with stage feedback and decisions; warnings, preservation, and recovery; accessible equivalent path; objective completion checks and walkthrough evidence), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
     }
   ],
   "scorers": [
@@ -48,15 +50,17 @@
       "kind": "deterministic",
       "weight": 0.75,
       "evidence": [
-        "Prerequisites and observable starting state",
-        "Ordered actions with expected feedback",
-        "Decision branches, warnings, and recovery",
+        "Audience, medium, permissions, prerequisites, and observable starting state",
+        "Ordered actions with stage feedback, liveness, and decision conditions",
+        "Decision branches, warnings, state preservation, and recovery",
+        "Accessible equivalent action or status path",
         "Objective completion checks and walkthrough evidence",
         "Hierarchy boundary and selected specialist rationale",
         "Representative success, negative-path, and recovery verification",
         "hierarchy boundary and specialist selection rationale",
         "representative negative/recovery verification",
-        "source/version boundary when facts can drift"
+        "source/version boundary when facts can drift",
+        "walkthrough limitation and evidence state"
       ]
     },
     {
@@ -72,14 +76,16 @@
     }
   ],
   "requiredEvidence": [
-    "Prerequisites and observable starting state",
-    "Ordered actions with expected feedback",
-    "Decision branches, warnings, and recovery",
+    "Audience, medium, permissions, prerequisites, and observable starting state",
+    "Ordered actions with stage feedback, liveness, and decision conditions",
+    "Decision branches, warnings, state preservation, and recovery",
+    "Accessible equivalent action or status path",
     "Objective completion checks and walkthrough evidence",
     "Hierarchy boundary and selected specialist rationale",
     "Representative success, negative-path, and recovery verification",
     "hierarchy boundary and selected specialist rationale",
     "representative success plus negative/recovery evidence",
+    "walkthrough limitation and evidence state",
     "paired skill/no-skill run artifacts",
     "explicit unavailable, simulated, inferred, or stale evidence labels"
   ],

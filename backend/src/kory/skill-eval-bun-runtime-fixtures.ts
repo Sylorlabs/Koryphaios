@@ -169,7 +169,7 @@ for (const name of ['api', 'cli', 'timer', 'worker']) copyFileSync('src/' + name
   'reference/api.mjs': api,
   'reference/cli.mjs': cli,
   'reference/timer.mjs': timer,
-  'README.md': `# Node-to-Bun observable compatibility\n\nMigrate this small package at the versions in .bun-version and .node-version. The reference package manager is npm ${BUN_MIGRATION_VERSIONS.npm}. reference/ is the preserved working Node source; src/ is an incomplete migration with broken timer cancellation and interruption behavior. Preserve the public CLI and exports, install-generated data, source assets, and npm lockfile. Keep the one local dependency unchanged. No registry dependency or network access is needed.\n\nUse bun install with its existing postinstall hook, build, and tests. Commit the resulting bun.lock; the explicit package-manager migration is authorized, but never overwrite package-lock.json or bypass a frozen-lockfile mismatch. Do not hand-create generated/config.json or ship stale dist files instead of repairing source.\n\nCLI contracts: --version prints 1.0.0; --echo VALUE serializes describe(VALUE); --fail N (1–99) reports Requested failure on stderr and exits N; invalid options exit 2. --watch starts the supplied worker and acknowledges READY only after worker readiness; SIGINT must stop/reap it, remove the handler, and exit 130. defer(callback,ms,clock=globalThis) returns an idempotent cancellation function affecting only that timer. Internal implementation is unrestricted within those interfaces.\n\nFixed reference, tests, worker, build/generator scripts, schema and runtime pins are evaluation evidence; do not edit them. Add regression tests if needed. Report compatibility deviations and runtime evidence, not merely a success declaration. The evaluator rebuilds clean copies and compares real Node/Bun behavior, including varied inputs and OS signals. Disposable workspaces and sanitized environments are not a hostile-code OS sandbox.\n`,
+  'README.md': `# Node-to-Bun observable compatibility\n\nMigrate this small package at the versions in .bun-version and .node-version. The reference package manager is npm ${BUN_MIGRATION_VERSIONS.npm}. reference/ is the preserved working Node source; src/ is an incomplete migration with broken timer cancellation and interruption behavior. Preserve the public CLI and exports, install-generated data, source assets, and npm lockfile. Keep the one local dependency unchanged. No registry dependency or network access is needed.\n\nUse bun install with its existing postinstall hook, build, and tests. Commit the resulting bun.lock; the explicit package-manager migration is authorized, but never overwrite package-lock.json or bypass a frozen-lockfile mismatch. Do not hand-create generated/config.json or ship stale dist files instead of repairing source.\n\nCLI contracts: --version prints 1.0.0; --echo VALUE serializes describe(VALUE); --fail N (1–99) reports Requested failure on stderr and exits N; invalid options exit 2. --watch starts the supplied worker and acknowledges READY only after worker readiness; SIGINT must stop/reap it, remove the handler, and exit 130. defer(callback,ms,clock=globalThis) returns an idempotent cancellation function affecting only that timer. Internal implementation is unrestricted within those interfaces.\n\nFixed reference, tests, worker, build/generator scripts, schema and runtime pins are evaluation evidence; do not edit them. Add regression tests if needed, but always in a new file such as tests/regression.test.mjs; editing an existing test file, the reference tree, or a generated artifact is recorded as an integrity failure and discards the attempt. Report compatibility deviations and runtime evidence, not merely a success declaration. The evaluator rebuilds clean copies and compares real Node/Bun behavior, including varied inputs and OS signals. Disposable workspaces and sanitized environments are not a hostile-code OS sandbox.\n`,
 };
 
 function fixedIntact(root: string): boolean {
@@ -582,7 +582,7 @@ export async function scoreBunMigration(root: string): Promise<SkillEvalDetermin
 
 export const BUN_RUNTIME_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMaterializer[] = [
   {
-    id: 'bun-deno-runtime/actual-bun-migration@1',
+    id: 'bun-deno-runtime/actual-bun-migration@3',
     get readinessBlockers() {
       return bunMigrationReadiness();
     },
@@ -632,7 +632,7 @@ export const BUN_RUNTIME_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMate
 ];
 export const BUN_RUNTIME_SKILL_EVAL_SCORERS: readonly SkillEvalDeterministicScorer[] = [
   {
-    id: 'bun-deno-runtime/actual-bun-migration-scorer@1',
+    id: 'bun-deno-runtime/actual-bun-migration-scorer@3',
     scenarioIds: [BUN_MIGRATION_SCENARIO],
     score: ({ workingDirectory }) => scoreBunMigration(workingDirectory),
   },

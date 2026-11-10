@@ -21,6 +21,16 @@ afterEach(() => {
 });
 
 describe('interface search and graphics concept fixtures', () => {
+  test('terminal narrow-mode label is part of the public evaluator contract', () => {
+    const terminal = INTERFACE_SEARCH_GRAPHICS_CONCEPTS.find(
+      (definition) => definition.id === 'terminal-interface-full-task-1-individual',
+    )!;
+    expect(terminal.generation).toBe(2);
+    expect(terminal.contract).toContain(
+      'If tty=true and width<40 return mode compact with columns name,status',
+    );
+  });
+
   test('all explicit local scenarios are executable', () => {
     const packages = loadV5SkillPackages().packages;
     const readiness = auditSkillEvalExecutionReadiness(
@@ -29,10 +39,24 @@ describe('interface search and graphics concept fixtures', () => {
       BUILTIN_SKILL_EVAL_SCORERS,
     );
     expect(INTERFACE_SEARCH_GRAPHICS_CONCEPTS).toHaveLength(7);
-    for (const definition of INTERFACE_SEARCH_GRAPHICS_CONCEPTS)
-      expect(readiness.find((row) => row.scenarioId === definition.id)?.ready, definition.id).toBe(
-        true,
+    for (const definition of INTERFACE_SEARCH_GRAPHICS_CONCEPTS) {
+      const row = readiness.find((item) => item.scenarioId === definition.id);
+      expect(row, definition.id).toBeDefined();
+      const materializer = BUILTIN_SKILL_EVAL_MATERIALIZERS.find(
+        (item) => item.id === row?.materializerId,
       );
+      expect(materializer, definition.id).toBeDefined();
+      // The search-indexing concepts are gated on a real Elasticsearch runtime, so
+      // their blockers come from the environment rather than the static fixture.
+      // The audit row has to mirror the materializer's own blockers, and a concept
+      // that declares blockers statically must have them reported.
+      const blockers = materializer?.readinessBlockers ?? [];
+      for (const declared of definition.blockers ?? []) {
+        expect(blockers, definition.id).toContain(declared);
+      }
+      expect(row?.reasons, definition.id).toEqual(blockers);
+      expect(row?.ready, definition.id).toBe(blockers.length === 0);
+    }
   });
 
   test('representative fixtures start red', async () => {

@@ -1,17 +1,17 @@
 # Routing sources
 
-Use these references when changing routing semantics, package metadata, or the held-out routing suite. They are evidence inputs, not execution authority.
+Use these references when changing routing semantics, package metadata, or the held out routing suite. They are evidence inputs, not execution authority.
 
 ## Agent Skills specification
 
 - Source: https://agentskills.io/specification
-- Verified: 2026-09-01
+- Verified: 2026-11-03
 - Relevant contract: `name` and `description` are discovery metadata; full instructions load only after activation; longer detail should be progressively disclosed through references.
 
 ## Agent Skills description optimization
 
 - Source: https://agentskills.io/skill-creation/optimizing-descriptions
-- Verified: 2026-09-01
+- Verified: 2026-11-03
 - Relevant contract: routing quality must account for both under-triggering and over-triggering. Trigger descriptions should be tested against realistic positive and confusable negative prompts.
 
 ## OpenAI skill creator

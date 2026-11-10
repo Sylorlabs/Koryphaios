@@ -1,50 +1,33 @@
 ---
 name: nodejs-runtime
-description: Engineer Node.js runtime systems with event-loop, stream, process, module, resource, and shutdown discipline. Use when the request specifically requires node.js, nodejs, node stream, node process; prefer a narrower child only when its boundary is established.
+description: Diagnose and repair Node.js (nodejs) event loop latency, stream backpressure, process lifecycle, module loading, and resource leaks. Use when Node stream, Node process, worker, or config reload behavior determines correctness; generic backend design belongs to backend-engineering.
 ---
 
-# Nodejs Runtime
+# Node.js Runtime
 
-## Boundary
+## Boundary and routing
 
-Confirm Node version and module mode. Keep event-loop work, worker threads, streams and backpressure, `AbortSignal`, child processes, handles, file descriptors, environment, and process signals explicit. Diagnose saturation, buffering, and leaked resources as different failure classes.
+Check the supported Node majors, actual runtime, package module mode, and owning process before changing code. Select this skill when streams, the event loop, workers, child processes, `AbortSignal`, module loading, or shutdown determine the outcome. Quoted, historical, negated, or fixture text about Node is not a live trigger.
 
-## Hierarchy and routing
+- Broader skill: `backend-engineering`; use it for architecture or business logic independent of Node.
+- No narrower bundled child. Route Bun/Deno behavior to `bun-deno-runtime` and compiler process design to `compiler-runtime-backend`.
+- Required skill: `verification`.
 
-- Broader skills: backend-engineering.
-- No narrower bundled child is declared.
-- Required skills: verification.
+## Choose the repair by runtime failure
 
-Use this skill when the Node runtime itself, process lifecycle, streams, modules, or asynchronous resource ownership is material. A generic backend change that does not depend on Node semantics stays with the broader backend skill. Quoted, historical, negated, fixture-only, or example text is not a live trigger.
+- **CPU delay:** Profile the actual parse, transform, validation, cloning, or serialization cost and measure event loop delay. If the API supplies `offload(raw, signal)`, pass it the original workload and cancellation signal, await its complete candidate, and establish which executor actually performs the CPU work. `async`, `await`, a Promise, a timer, or `setImmediate` does not move synchronous CPU work to another thread; heavy CPU validation or copying after the `await` can still stall the main event loop. Select workers, a process, a service, or bounded incremental work only after measuring cost and considering ownership, cancellation, queue limits, serialization, and failures. Follow [CPU reload and latency verification](references/reload-latency.md) for an offload or reload change.
+- **Stale config reload:** Validate the whole candidate before replacing the last good value. Check for an already aborted caller before advancing the generation or starting work. Preserve the caller's exact `signal.reason` whether the caller aborts before the work starts or while it is still running (including an explicitly supplied `null` reason); replacing it with a generic `AbortError` loses the cancellation contract. Use a generation check so an older completion cannot overwrite newer state; block publication after abort or shutdown. Test overlapping completions and failure.
+- **Stream stalls or memory growth:** Prefer `pipeline` with `AbortSignal` when composing streams; it forwards failure and destroys streams on abort. For manual writes, stop producing when `write()` returns false and resume on `drain`. Inspect `highWaterMark`, object versus byte buffering, pending transforms, and retained listeners. Cancel upstream database reads when the consumer disconnects.
+- **Lingering process or abort errors:** Assign owners to timers, sockets, workers, children, listeners, and file handles. Release them on error, cancellation, and signals; verify shutdown reaches process exit. Distinguish expected stream teardown from a separate producer or child failure before suppressing an error.
+- **Module or spawn failure:** Resolve ESM versus CommonJS using package `type`, file extensions, exports, loader behavior, and APIs for the supported Node releases. For child processes, handle spawn failure, nonzero exit, termination, and partial stdout/stderr consumption.
 
-## Decisions that change the implementation
+## Verification that changes the conclusion
 
-- Keep CPU-heavy or long synchronous work off latency-sensitive event-loop paths. Use worker threads only when the workload and ownership justify their cost.
-- Respect writable backpressure. A `write()` result and drain behavior are part of the producer-consumer contract, not optional performance hints.
-- Prefer stream composition that propagates errors and teardown coherently. When using `pipeline` with `AbortSignal`, account for abort destroying the participating streams.
-- Give timers, sockets, child processes, and listeners explicit lifecycle owners so shutdown can reach a terminal state.
-- Resolve ESM versus CommonJS and supported Node versions before changing import, package export, loader, or global API behavior.
+- **Streams:** Use a slow sink with its write callback held open to sample source read counts and peak buffer lengths _while blocked_; then release it and verify all rows arrive. On abort, record `readsAtAbort` and `readsAfterAbort` as the **additional reads after cancellation** (final count minus count at abort), which must be zero, rather than reporting the cumulative count twice. Test source, transform, and destination errors, premature close, empty input, and shutdown. Confirm the full chain settles and owned resources close under native Node as well as any alternate test runner. For an HTTP endpoint, also test a real paused HTTP client and live socket cancellation before claiming HTTP backpressure or disconnect evidence; follow [HTTP stream verification](references/http-stream-evidence.md).
+- **Reloads:** Check old value visibility during awaited work, complete atomic publication, malformed or partial input, out of order reloads, executor rejection, abort, shutdown, and late completion. A deferred callback verifies this contract, but cannot prove CPU offloading.
+- **Processes and modules:** Exercise affected signals, active handles, child exit paths, and both relevant module consumers on the supported Node versions.
+- **Performance:** Compare the same real work, input corpus, traffic, concurrency, and measurement window before and after. Record input bytes/items, transform passes, equivalent output contents/count, sample counts, and executor location; measure main event loop delay and request latency while the complete expensive workload runs. Account for executor startup, IPC/serialization, and combined process or worker memory when relevant. A delayed mock returning a smaller config, a Promise wrapping synchronous CPU work, or a shorter measurement window cannot prove offloading or a p99 improvement; a percentile with zero samples is unavailable. Keep CPU profiles, event loop delay, latency, memory, and handle evidence consistent with retained artifacts; label synthetic probes and unavailable checks explicitly.
 
-## Failure discriminators
+When a fixture supplies a native Node verification/receipt command, use this order: establish the package/runtime boundary, make the smallest repair supported by evidence, run the fixture's focused tests, then run its unchanged collector before optional profiles or benchmarks. Retain its stdout and derive the machine readable report from **that completed run**. A separately authored microbenchmark may add diagnostic evidence but cannot substitute its Worker counts, request samples, or HTTP counters for the fixture workload; an independent evaluator may run a different sequence. If the native probe fails or a loopback listener is denied, retain the exact error and leave the corresponding observation unavailable. Do not spend the task budget building a replacement probe or broad workload after the supplied collector has established the blocker. Never mark a test as passed solely because it was written, bundled, or passed a syntax check.
 
-- If latency spikes without high CPU across the process, distinguish event-loop blocking from downstream I/O, queueing, and stream backpressure.
-- If memory grows during streaming, inspect buffering, `highWaterMark`, ignored backpressure, retained listeners, and unconsumed data before raising memory limits.
-- If tests finish but the process does not exit, inspect active handles, timers, child processes, sockets, and worker ownership.
-- If cancellation reports errors after expected abort, determine whether stream teardown or child-process termination is the actual source before suppressing the error.
-
-## Verification at the Node boundary
-
-- Run focused tests under every supported Node major affected by module or API behavior.
-- Exercise stream producer faster than consumer, downstream failure, partial output, and cancellation for changed stream pipelines.
-- Verify signal-driven shutdown closes owned handles and reaches expected process termination without leaking work.
-- For child-process changes, cover nonzero exit, spawn failure, signal termination, and partial stdout or stderr consumption.
-- Measure event-loop or memory behavior only with a representative workload when making runtime performance claims. Before/after comparisons must execute the same logical work, input, concurrency, and measurement window unless the changed workload itself is the intended intervention; replacing CPU work with a timer or otherwise changing the exercised cost does not prove offloading improved that workload.
-- Keep reported latency, CPU, memory, and event-loop numbers traceable to the retained measurement artifact. If a profile, trace, or heap artifact is cited as evidence, retain that artifact or explicitly mark the claim as unavailable; do not restate figures that differ from the source evidence.
-
-## Completion evidence
-
-- Node version, module mode, and resource ownership affected
-- Stream, cancellation, or process-lifecycle evidence at the real runtime boundary
-- Active-handle, memory, or event-loop evidence when those behaviors are part of the claim
-
-Use [the maintained source map](references/sources.md) for version-sensitive facts and source conflicts.
+Report the affected Node version and module mode, resource owner, observed failure transitions, and which performance claims were actually measured. When a fixture requests a machine readable evidence file, write the requested file with traceable measurements and labels for unavailable evidence; prose alone is insufficient. State hierarchy boundaries by their actual identifiers (such as `backend-engineering`, `bun-deno-runtime`, and `compiler-runtime-backend`) rather than relying on camelCase field names. Consult [Node source references](references/sources.md) for versioned API contracts.

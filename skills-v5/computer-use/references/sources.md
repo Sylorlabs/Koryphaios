@@ -14,9 +14,9 @@
 
 - **Agent Skills specification**: https://agentskills.io/specification
   - Type: `spec`
-  - Scope: Agent Skills package and progressive disclosure specification inspected 2026-10-03.
+  - Scope: Agent Skills package and progressive disclosure specification inspected 2026-11-03.
   - Use: portable package structure, discovery metadata, and the progressive disclosure boundary between the entry point and its references.
-  - Verified: 2026-10-03; refresh after 90 days.
+  - Verified: 2026-11-03; refresh after 90 days.
 
 - **Apple Accessibility trust API**: https://developer.apple.com/documentation/applicationservices/1459186-axisprocesstrustedwithoptions
   - Type: `official-docs`

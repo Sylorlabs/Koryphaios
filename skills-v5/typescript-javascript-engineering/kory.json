@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "typescript-javascript-engineering",
-  "version": "5.1.1",
+  "version": "5.1.2",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -99,10 +99,10 @@
     {
       "url": "https://www.typescriptlang.org/docs/handbook/intro.html",
       "sourceType": "official-docs",
-      "versionScope": "TypeScript documentation as fetched 2026-09-06",
+      "versionScope": "TypeScript documentation as fetched 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Language, type-system, module, and declaration reference.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://www.typescriptlang.org/docs/handbook/2/narrowing",
@@ -110,23 +110,23 @@
       "versionScope": "Narrowing page last updated 2026-08-31",
       "staleAfterDays": 60,
       "notes": "Control-flow narrowing, discriminated unions, never, and exhaustive checks.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://www.typescriptlang.org/docs/handbook/modules/reference",
       "sourceType": "official-docs",
-      "versionScope": "Modules reference as fetched 2026-09-06",
+      "versionScope": "Modules reference as fetched 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Module and moduleResolution behavior, package exports, and conditional resolution.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://github.com/mattpocock/skills",
       "sourceType": "community-pattern",
-      "versionScope": "main commit 3cca18b368ae95cdbdebbff572ccafa662551015 authored 2026-09-04T08:43:27Z; package 1.2.3",
+      "versionScope": "main commit 4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d fetched 2026-10-05",
       "staleAfterDays": 30,
       "notes": "Community pattern for concise model-invoked engineering disciplines and explicit routing; never language authority.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-03"
     }
   ],
   "authoringMaturity": "individual"

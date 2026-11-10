@@ -1,13 +1,13 @@
 {
   "id": "shell-cli-engineering-full-task-1-individual",
   "maturity": "individual",
-  "prompt": "Harden a shell CLI that batch-renames files from a CSV mapping. Current code word-splits paths, overwrites existing destinations, and leaves half the directory renamed when one move fails. Preserve dry-run and exit-code behavior, handle spaces/newlines as far as the documented format permits, preflight collisions/cycles, perform recoverable ordering, and verify partial failure, interrupt, duplicate destination, symlink, and dry-run with no mutation.",
+  "prompt": "Harden a shell CLI that batch-renames files from a CSV mapping. Current code word-splits paths, overwrites existing destinations, and leaves half the directory renamed when one move fails. Preserve dry-run and exit-code behavior, keep the script executable, preflight collisions/cycles, perform recoverable ordering, and verify partial failure, interrupt, duplicate destination, symlink, and dry-run with no mutation. The documented CSV grammar is one unquoted source,destination pair per line; commas or embedded newlines inside a filename are outside this fixture contract, while spaces in either field are supported. Add focused candidate regression tests for the required path, dry-run, collision/cycle/preflight, and rollback behavior before optional polish.",
   "environment": {
     "kind": "cli",
     "startingState": "fixture://shell-cli-engineering/safe-batch-rename-cli",
     "requirements": [
       "temporary filesystem corpus with spaces, symlinks, rename cycles, and destination collision",
-      "CSV mapping grammar and existing dry-run/output/exit-code contract",
+      "CSV mapping grammar of one unquoted source,destination pair per line, with spaces supported and commas or embedded newlines inside filenames out of contract, plus the existing dry-run/output/exit-code contract",
       "fault injection on one move plus signal interruption sequence",
       "before/after tree manifest proving no silent overwrite/data loss",
       "paired same-model skill/no-skill execution from the identical starting snapshot"
@@ -68,7 +68,7 @@
     },
     {
       "id": "verification-discipline",
-      "assertion": "Exercise paths with spaces and special characters, missing inputs, failed child commands, interrupted execution, non-interactive use, and the supported shell/runtime."
+      "assertion": "Exercise paths with spaces and special characters, missing inputs, failed child commands, interrupted execution, non-interactive use, and the supported shell/runtime. Candidate-authored regression tests must cover the material path/dry-run and collision/cycle/preflight/rollback behavior rather than relying only on ad hoc checks."
     },
     {
       "id": "anti-pattern-resistance",

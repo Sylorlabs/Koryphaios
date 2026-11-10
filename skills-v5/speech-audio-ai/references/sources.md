@@ -6,32 +6,36 @@
 
 - Package authorship is independent from empirical qualification; the audit/evaluation ledger is authoritative for qualification status.
 - Hierarchy: broader implementation.
-- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held-out cases through the real resolver.
-- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no-skill pairing, regression retention, and blind semantic judging.
+- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held out cases through the real resolver.
+- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no skill pairing, regression retention, and blind semantic judging.
 - Source discipline: authoritative/spec/reference sources outrank community patterns when they conflict; runtime evidence outranks examples for behavioral claims.
 
 ## Maintained sources
 
 - **OpenAI GPT-Transcribe model**: https://developers.openai.com/api/docs/models/gpt-transcribe
-  - Scope: OpenAI GPT-Transcribe documentation as available 2026-09-19.
+  - Scope: OpenAI GPT-Transcribe documentation as available 2026-10-16.
   - Use: current transcription model surfaces, context/keyword/language hints and supported file/realtime behavior.
-  - Verified: 2026-09-19; refresh after 14 days.
+  - Verified: 2026-10-16; refresh after 14 days.
 - **OpenAI model catalog**: https://developers.openai.com/api/docs/models
-  - Scope: rolling OpenAI model catalog as available 2026-09-17.
-  - Use: current realtime, transcription and speech-generation families. Recheck aliases, snapshots and deprecations before provider migration.
-  - Verified: 2026-09-17; refresh after 7 days.
+  - Scope: OpenAI model catalog reviewed 2026-10-23 via its Markdown documentation variant for realtime, transcription and speech-generation families. This catalog review does not establish live account eligibility.
+  - Use: the catalog lists GPT-Realtime-2.1, GPT-Live-Transcribe and GPT-Transcribe alongside older models; inclusion does not establish account access, retirement dates or continued availability. Verify aliases and snapshots against the separate deprecations schedule before migrating.
+  - Verified: 2026-11-08; refresh after 7 days. The catalog does not establish live account eligibility or successful inference.
+- **OpenAI deprecations**: https://developers.openai.com/api/docs/deprecations
+  - Scope: dated speech synthesis and transcription retirement notices reviewed 2026-10-27 via the Markdown documentation variant.
+  - Use: `tts-1`, `tts-1-hd` and listed `gpt-4o-mini-tts` snapshots shut down 2027-01-06. `whisper-1` and listed GPT-4o transcription variants shut down 2027-02-26; the v1 audio translation endpoint also closes then. Verify the exact snapshot rows and migration endpoint before relying on a model alias.
+  - Verified: 2026-10-27; refresh after 3 days. This dated schedule does not verify any account's access or a live inference run.
 - **Google Cloud streaming Speech-to-Text**: https://docs.cloud.google.com/speech-to-text/docs/streaming-recognize
-  - Scope: Google Cloud Speech-to-Text streaming guide as available 2026-09-05.
+  - Scope: Google Cloud Speech-to-Text streaming guide as available 2026-10-04.
   - Use: current bidirectional streaming recognition workflow and transport/streaming constraints.
-  - Verified: 2026-09-05; refresh after 30 days.
+  - Verified: 2026-11-03; refresh after 30 days.
 - **Google Cloud `StreamingRecognitionResult`**: https://docs.cloud.google.com/speech-to-text/docs/reference/rest/v2/StreamingRecognitionResult
-  - Scope: Google Cloud Speech-to-Text v2 result reference as available 2026-09-05.
+  - Scope: Google Cloud Speech-to-Text v2 result reference as available 2026-10-04.
   - Use: interim versus final results, stability, result-end offsets, channel tags and language codes; model these explicitly in streaming assembly.
-  - Verified: 2026-09-05; refresh after 30 days.
+  - Verified: 2026-11-03; refresh after 30 days.
 - **Google Cloud Text-to-Speech `AudioConfig`**: https://docs.cloud.google.com/text-to-speech/docs/reference/rest/v1/AudioConfig
-  - Scope: Google Cloud Text-to-Speech v1 audio configuration as available 2026-09-05.
+  - Scope: Google Cloud Text-to-Speech v1 audio configuration as available 2026-10-04.
   - Use: output encoding, speaking rate, pitch, gain, sample rate and device-profile configuration; verify selected provider semantics rather than assuming portability.
-  - Verified: 2026-09-05; refresh after 30 days.
+  - Verified: 2026-11-03; refresh after 30 days.
 - **NIST AI Risk Management Framework**: https://www.nist.gov/itl/ai-risk-management-framework
   - Scope: NIST AI RMF materials as available 2026-09-05.
   - Use: representative lifecycle evaluation, transparency and governance for speech systems with material user impact.
@@ -46,4 +50,4 @@
 - For live systems measure latency from capture to the first partial result, from capture to the final or committed result, and at the end of the turn. Include buffering, network, and endpointing rather than measuring only offline model speed.
 - TTS quality depends on text normalization, pronunciation, voice/model identity, output encoding and playback path. Evaluate critical prompts on the actual target channel and inspect clipping/truncation/chunk joins.
 - Require authorization/provenance for custom or cloned voices. Do not treat technical capability as permission to imitate a real person.
-- Model/provider changes are migrations: dual-run the same held-out audio/text, pin artifacts, preserve regressions and keep a tested rollback when quality, hallucination, language or latency gates fail.
+- Model/provider changes are migrations: dual-run the same held out audio/text, pin artifacts, preserve regressions and keep a tested rollback when quality, hallucination, language or latency gates fail.

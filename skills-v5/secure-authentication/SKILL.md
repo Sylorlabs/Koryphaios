@@ -17,6 +17,8 @@ Treat authentication as a lifecycle, not a login form. Define enrollment, bindin
 6. **Reauthenticate for sensitive transitions.** Credential changes, recovery, adding/removing strong authenticators, high-risk secret export, and other critical actions should require appropriately fresh authentication. Invalidate or constrain existing sessions when account compromise/recovery requires it.
 7. **Make failure and lifecycle observable.** Preserve security-relevant events for enrollment, failed verification, throttling, recovery, authenticator replacement, and revocation without storing secrets or raw authenticator material unnecessarily.
 
+When a supplied task includes an executable contract or corpus, treat its exported interfaces and field paths as the output schema. Preserve that contract exactly and validate the supplied cases; do not replace it with a semantically similar shape that the verifier does not consume.
+
 ## Boundaries
 
 - `oauth-oidc` owns authorization-code/PKCE, redirects, issuer/audience, ID/access/refresh token validation, nonce/state, and federation protocol details.

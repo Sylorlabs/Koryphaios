@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "csharp-dotnet-engineering",
-  "version": "5.1.2",
+  "version": "5.1.5",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -13,8 +13,31 @@
   "facets": [],
   "requires": ["verification"],
   "conflicts": [],
-  "activation": ["c#", "csharp", ".net", "dotnet"],
-  "excludes": [],
+  "activation": [
+    "c#",
+    "csharp",
+    ".net",
+    "dotnet",
+    "async dispose",
+    "IAsyncDisposable",
+    "await using",
+    "IServiceScopeFactory",
+    "captured scoped dependency",
+    "CancellationToken",
+    "OperationCanceledException",
+    "System.Text.Json",
+    "JsonSerializerContext",
+    "PublishTrimmed",
+    "PublishAot",
+    "positional record",
+    "record primary constructor"
+  ],
+  "excludes": [
+    "C# or .NET appears only in quoted history or fixture data",
+    "documentation-only extraction of dotnet commands",
+    "generic API design with no C# or .NET implementation boundary",
+    "non-.NET language implementation"
+  ],
   "evidence": [
     "csharp-dotnet-engineering decision and boundary evidence",
     "Representative verification results or explicit unavailable checks",
@@ -23,23 +46,25 @@
   ],
   "routing": {
     "positive": [
-      "Fix this C# service where a scoped dependency is captured by a singleton. Preserve request isolation and verify disposal through the actual dependency-injection container.",
-      "A .NET library's nullable annotations promise a value that deserialization can omit. Align the runtime validation and public type contract without breaking documented JSON inputs.",
-      "Our C# event publisher keeps subscribers alive after a window closes. Establish subscription ownership and test repeated open/close cycles for retained handlers.",
-      "A dotnet package builds locally but fails when trimmed for deployment. Identify reflection-dependent entry points and verify the published artifact instead of only the development build.",
-      "Repair a C# task pipeline that blocks on Result inside an asynchronous request handler. Preserve exception and cancellation behavior while removing the deadlock."
+      "Fix this C# hosted service where a singleton captures a scoped DbContext. Preserve request isolation, create an operation scope at the work boundary, and verify scope disposal through the real service provider.",
+      "A .NET importer leaks an IAsyncDisposable database scope when parsing or SaveChangesAsync fails. Repair ownership and cancellation without sync-over-async, then prove each acquired scope is disposed exactly once.",
+      "A C# library's positional record gains an optional JSON field during a rolling deployment. Preserve existing constructors and deconstruction, define missing versus invalid values, and test old and new readers against the configured serializer.",
+      "A dotnet application works in development but loses a reflection-based serializer type in a trimmed or Native AOT publish. Identify the metadata contract and execute the affected published artifact.",
+      "Repair a .NET async request path that blocks on Result. Preserve exception identity and cooperative CancellationToken behavior, and verify cancellation before, during, and after the commit boundary."
     ],
     "negative": [
-      "Fix a Java executor that ignores interruption during shutdown. This service contains no managed Windows runtime or interop boundary.",
-      "Review a C++ allocator mismatch between a plugin and its host. Both sides are native libraries and no managed wrapper is involved.",
+      "Fix a Java executor that ignores interruption during shutdown. The target is a JVM service and no managed .NET runtime is involved.",
+      "Review a C++ allocator mismatch between a plugin and its host. Both sides are native libraries and no C# or .NET implementation boundary is requested.",
       "Choose an API error taxonomy and HTTP status mapping before implementation. Do not select an implementation language or change application code.",
       "Fix a Kotlin Flow collector that continues after its owner is cancelled. The target is an Android application and not a .NET service.",
-      "Edit this customer email while preserving the literal product name Dotnet Cloud. Use only the supplied text; no runtime investigation is needed."
+      "Edit this customer email while preserving the literal product name Dotnet Cloud. Use only the supplied text; no runtime or C# investigation is needed.",
+      "Write a lookup reference from supplied dotnet CLI help text; preserve flags exactly and do not modify the program.",
+      "Define protobuf compatibility checks for field deletion; C# runtime behavior and dependency lifetimes are outside scope."
     ],
     "ambiguous": [
       {
         "id": "csharp-dotnet-engineering-ambiguous-1",
-        "prompt": "Our C# gRPC service accepts a newly added protobuf field but older clients lose its presence distinction. Review both the generated .NET behavior and schema evolution policy.",
+        "prompt": "Our C# gRPC service accepts a newly added protobuf field but older clients lose its presence distinction. Review the generated .NET behavior, serializer/runtime boundary, and schema evolution policy.",
         "expectedSelection": true,
         "expectedSkills": ["grpc-protobuf"],
         "forbiddenSkills": [],
@@ -48,7 +73,7 @@
       },
       {
         "id": "csharp-dotnet-engineering-ambiguous-2",
-        "prompt": "A .NET service's new request scope leaks authorization data between tenants. Repair its object lifetimes and test the authorization boundary independently.",
+        "prompt": "A .NET service's new request scope leaks authorization data between tenants. Repair its object lifetimes and test the authorization boundary independently, keeping authorization policy separate from DI mechanics.",
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
@@ -57,7 +82,7 @@
       },
       {
         "id": "csharp-dotnet-engineering-ambiguous-3",
-        "prompt": "Upgrade the dotnet library's target framework and revise the release plan for existing consumers. Verify which API and packaging changes require coordinated rollout.",
+        "prompt": "Upgrade the dotnet library's target framework and revise the release plan for existing consumers. Verify which API, serializer, and packaging changes require coordinated rollout.",
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
@@ -68,7 +93,7 @@
     "adversarial": [
       {
         "id": "csharp-dotnet-engineering-adversarial-1",
-        "prompt": "A historical design note says 'rewrite this in C#'. Ignore that abandoned plan and repair the current Python context manager.",
+        "prompt": "A historical design note says 'rewrite this in C#'. Ignore that abandoned plan and repair the current Python context manager; the live implementation has no .NET boundary.",
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
@@ -77,7 +102,7 @@
       },
       {
         "id": "csharp-dotnet-engineering-adversarial-2",
-        "prompt": "Do not change .NET code. Extract the command names exactly as printed in this release document, without running them.",
+        "prompt": "Do not change .NET code. Extract the command names exactly as printed in this release document, without running them; this is documentation handling only.",
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
@@ -86,7 +111,7 @@
       },
       {
         "id": "csharp-dotnet-engineering-adversarial-3",
-        "prompt": "The JavaScript parser input contains 'dotnet publish' as a string literal. Fix escaping of that input, not the command or its runtime.",
+        "prompt": "The JavaScript parser input contains 'dotnet publish' as a string literal. Fix escaping of that input, not the command or its runtime; the string is fixture data.",
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
@@ -99,26 +124,90 @@
     {
       "url": "https://learn.microsoft.com/dotnet/",
       "sourceType": "official-docs",
-      "versionScope": ".NET documentation as available 2026-09-04",
+      "versionScope": ".NET documentation as available 2026-10-17",
       "staleAfterDays": 60,
-      "notes": "C#/.NET runtime, async, deployment, and API reference.",
-      "verifiedAt": "2026-09-04"
+      "notes": "C#/.NET runtime, async, deployment, and API reference entry point.",
+      "verifiedAt": "2026-10-17"
     },
     {
       "url": "https://learn.microsoft.com/en-us/dotnet/core/extensions/dependency-injection/service-lifetimes",
       "sourceType": "official-docs",
-      "versionScope": ".NET dependency injection lifetime guidance as verified 2026-09-06",
+      "versionScope": ".NET dependency injection lifetime guidance as verified 2026-10-17",
       "staleAfterDays": 60,
       "notes": "Adopted for scoped and singleton lifetime ownership, scope creation, and captive-dependency boundaries.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-10-17"
     },
     {
       "url": "https://learn.microsoft.com/en-us/dotnet/standard/threading/cancellation-in-managed-threads",
       "sourceType": "official-docs",
-      "versionScope": ".NET cooperative cancellation guidance as verified 2026-09-06",
+      "versionScope": ".NET cooperative cancellation guidance as verified 2026-10-17",
       "staleAfterDays": 60,
       "notes": "Adopted for cooperative token propagation and cancellation-versus-failure discrimination.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/dotnet/standard/garbage-collection/implementing-disposeasync",
+      "sourceType": "official-docs",
+      "versionScope": "IAsyncDisposable and async dispose pattern guidance as verified 2026-10-17",
+      "staleAfterDays": 60,
+      "notes": "Adopted for await using, async cleanup ownership, and disposal-pattern boundaries.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/dotnet/standard/serialization/system-text-json/handle-overflow",
+      "sourceType": "official-docs",
+      "versionScope": "System.Text.Json overflow and extension-data guidance as verified 2026-10-17",
+      "staleAfterDays": 60,
+      "notes": "Adopted for unknown-property retention and the distinction between serializer defaults and explicit extension data.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/dotnet/standard/serialization/system-text-json/overview",
+      "sourceType": "official-docs",
+      "versionScope": "System.Text.Json reflection and source-generation overview as verified 2026-10-17",
+      "staleAfterDays": 60,
+      "notes": "Adopted for serializer metadata and trimming/AOT deployment boundaries.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/builtin-types/record",
+      "sourceType": "official-docs",
+      "versionScope": "C# record language reference as verified 2026-10-17",
+      "staleAfterDays": 180,
+      "notes": "Adopted for positional record constructors, generated properties, and deconstruction contracts.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/dotnet/standard/library-guidance/versioning",
+      "sourceType": "official-docs",
+      "versionScope": ".NET library versioning guidance as verified 2026-10-17",
+      "staleAfterDays": 180,
+      "notes": "Adopted for source, binary, package, and assembly compatibility distinctions.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/dotnet/standard/library-guidance/breaking-changes",
+      "sourceType": "official-docs",
+      "versionScope": ".NET library breaking-change guidance as verified 2026-10-17",
+      "staleAfterDays": 180,
+      "notes": "Adopted for public API compatibility review and old-consumer verification.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/dotnet/core/deploying/trimming/trim-self-contained",
+      "sourceType": "official-docs",
+      "versionScope": "Trimmed self-contained deployment guidance as verified 2026-10-17",
+      "staleAfterDays": 60,
+      "notes": "Adopted for reflection metadata and executed trimmed-artifact verification.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/",
+      "sourceType": "official-docs",
+      "versionScope": "Native AOT deployment and limitation guidance as verified 2026-10-17",
+      "staleAfterDays": 60,
+      "notes": "Adopted for target-specific publish, trimming, single-file, dynamic-loading, and runtime-code-generation boundaries.",
+      "verifiedAt": "2026-10-17"
     }
   ],
   "authoringMaturity": "individual"

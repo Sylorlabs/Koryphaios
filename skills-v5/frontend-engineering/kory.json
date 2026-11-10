@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "frontend-engineering",
-  "version": "5.0.0",
+  "version": "5.0.1",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "domains": ["ui", "frontend", "interaction"],
@@ -116,16 +116,16 @@
     {
       "url": "https://developer.android.com/develop/adaptive-apps/guides/support-different-display-sizes",
       "sourceType": "official-docs",
-      "versionScope": "Android adaptive-app display-size guidance as available 2026-09-04",
-      "verifiedAt": "2026-09-04",
+      "versionScope": "Android adaptive-app display-size guidance rechecked 2026-10-23",
+      "verifiedAt": "2026-10-23",
       "staleAfterDays": 90,
-      "notes": "Current Android evidence that available app-window size can change at runtime and adaptive behavior must be tested across representative window sizes."
+      "notes": "Android evidence that available app-window size can change through resize, orientation, folding and unfolding; use actual app-window space rather than physical screen size. Representative-size testing is Kory's engineering verification adaptation, not an explicit requirement stated by this page."
     },
     {
       "url": "https://html.spec.whatwg.org/multipage/interaction.html",
       "sourceType": "spec",
       "versionScope": "WHATWG HTML Living Standard user-interaction section, last updated 2026-10-03 when verified",
-      "verifiedAt": "2026-10-03",
+      "verifiedAt": "2026-11-03",
       "staleAfterDays": 30,
       "notes": "Browser-specific interaction, activation, focus, and inertness semantics. Used to reinforce web as a specialized medium rather than the default frontend model."
     },

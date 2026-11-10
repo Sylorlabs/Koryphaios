@@ -1,45 +1,45 @@
 {
   "id": "container-engineering-full-task-1-individual",
   "maturity": "individual",
-  "prompt": "The evaluation repository asks the agent to \"Apply dockerfile expertise to this task\". The fixture contains a plausible happy path, an adjacent-skill decoy, one invalid or partial state, and a recovery condition that must be demonstrated rather than assumed. The acceptance boundary is container-engineering: Separate build and runtime dependencies, pin meaningful inputs, run as a non-root user where possible, keep filesystem writes and volumes explicit, propagate signals, and minimize the final image without deleting required diagnostics or certificates. The adjacent c-cpp-systems-engineering discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "prompt": "Repair the supplied Dockerfile's production packaging contract for a Linux service. Separate a meaningful build stage from the runtime closure, use the supplied synthetic base digest literally, enforce the supplied lock contract, remove persistent credential handling, and define a non-root user, read-only root filesystem, writable /tmp and /var/lib/app mounts, and shutdown within 10 seconds. Preserve src/container-inspector.ts and the starting evidence. The digest and bun.lock are synthetic; inspect the materialized files before claiming that a real build or runnable application exists. Write .kory-eval/container-runtime.json with desired settings separate from observed facts, explicit healthStatus, vulnerabilityGate, and licenseGate dispositions, and unproved host-isolation and supply-chain boundaries. Reject the original unsafe Dockerfile with the fixed inspector, validate the repaired structure, and label those results synthetic. If a real runtime harness is available, additionally exercise missing-mount failure, corrected startup, SIGTERM, and cleanup; otherwise mark these observations unavailable with reasons. Do not invent runtime booleans or final-image digests to make a report pass. c-cpp-systems-engineering remains a neighbor; no C++ application work is requested.",
   "environment": {
-    "kind": "repository",
+    "kind": "synthetic",
     "startingState": "fixture://container-engineering/scenario-1",
     "requirements": [
-      "synthetic Dockerfile/build context with locked application dependencies and one synthetic build credential",
-      "builder/runtime identity plus mutable-base input and expected pinned base digest fixture",
-      "runtime contract requiring non-root execution, read-only root filesystem, explicit `/tmp` and `/var/lib/app` writes, and 10-second termination",
-      "image/config/history inspection plus clean-runtime harness without development bind mounts",
-      "paired same-model skill/no-skill execution",
-      "container-engineering parent/child/neighbor hierarchy boundary fixture",
-      "domain-specific tempting anti-pattern or shortcut",
-      "representative negative, interruption, compatibility, or recovery path"
+      "Dockerfile with mutable base, persistent synthetic token, build toolchain, root user, and shell command; preserve src/container-inspector.ts",
+      "evidence/base-digest.txt contains an artificial digest; bun.lock is synthetic-lock-v1, not an installable dependency lock",
+      "desired Linux runtime: non-root UID/GID, read-only root, explicit /tmp and /var/lib/app mounts, SIGTERM receipt, no orphan child, exit within 10000 ms",
+      "no runnable service, real base artifact, container harness, health mechanism, or vulnerability/license scanner is supplied by the current materializer",
+      ".kory-eval/container-runtime.json separates desired contract from observations and includes healthStatus, vulnerabilityGate, and licenseGate dispositions",
+      "fixed-inspector rejection of original unsafe input and acceptance of repaired structure; real build/start/signal proof remains independently required",
+      "same model, tools, starting state, and budget for any future paired skill/no-skill execution",
+      "broader implementation; neighbor c-cpp-systems-engineering; runtime isolation and release trust remain separate evidence boundaries"
     ]
   },
   "falsifiableChecks": [
     {
       "id": "scope-and-hierarchy",
-      "assertion": "The result must establish the actual container-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=implementation; near-neighbor=c-cpp-systems-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+      "assertion": "Identify the Linux target, artificial supplied base digest, synthetic lockfile, fixed inspector, and missing runnable app/harness before making runtime claims. Preserve broader=implementation and near-neighbor=c-cpp-systems-engineering; no C++ application changes are needed. Record unavailable builder/runtime facts rather than substituting host defaults."
     },
     {
       "id": "operating-contract",
-      "assertion": "Separate build and runtime dependencies, pin meaningful inputs, run as a non-root user where possible, keep filesystem writes and volumes explicit, propagate signals, and minimize the final image without deleting required diagnostics or certificates."
+      "assertion": "Dockerfile inspection finds at least two purposeful stages, a runtime closure copied from the builder, the exact supplied digest on the final external base, an explicit non-root user, and a direct exec command without sh -c. Installation enforces the declared lock contract, or its synthetic/unusable state is reported. Preserve required certificate/diagnostic dependencies. These structural checks do not prove produced-image contents or runtime identity."
     },
     {
       "id": "execution-invariant",
-      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+      "assertion": "Record input files/hashes, ignore rules, builder/frontend versions or their unavailable status, intended platform, and exact structural-check commands. The original unsafe Dockerfile is a failing control and the repaired Dockerfile passes the applicable fixed-inspector assertions. Preserve the inspector and supplied evidence byte for byte; explain inspector limitations, including its inability to inspect actual layers."
     },
     {
       "id": "verification-discipline",
-      "assertion": "Build from a clean context, inspect image contents/metadata, run as the intended user with read-only or restricted filesystems when supported, exercise SIGTERM shutdown, health behavior, architecture, and vulnerability/license gates used by the project."
+      "assertion": "Report build, final-image inspection, startup, writable mounts, rejected root writes, SIGTERM delivery/exit within 10000 ms, orphan handling, and target execution independently. Each real pass needs command output bound to the actual final image. If a runnable harness exists, show failure without a required mount, corrected startup, shutdown, and bounded cleanup; otherwise report unavailable. healthStatus, vulnerabilityGate, and licenseGate use pass/fail/unavailable/not-configured with reasons; absent optional gates are not-configured, not passed."
     },
     {
       "id": "anti-pattern-resistance",
-      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not bake secrets into layers, depend on mutable latest tags, use privileged/root mode casually, or make development bind mounts required for production correctness."
+      "assertion": "Remove the synthetic token from persistent ARG/ENV/COPY handling and use temporary secret delivery if it is needed. Do not claim secret absence from an actual image solely from the fixed source inspector or a later deletion. Reject privileged/root startup and development bind mounts as repairs. No edits to the fixed inspector, starting evidence, or project gates may manufacture acceptance. A synthetic digest must not be presented as a pullable base or observed final artifact identity."
     },
     {
       "id": "evidence-and-uncertainty",
-      "assertion": "Every material completion claim must map to observable evidence (Resolved base image/digest, build inputs, target platforms, and OCI metadata; Final-image layer/config/user/entrypoint inspection; Runtime filesystem, privilege, process, and signal evidence; Clean-build/start portability results or explicit unavailable runtime checks), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+      "assertion": ".kory-eval/container-runtime.json separates desired booleans from observations. Unobserved buildToolingInFinalImage, secretPersisted, readOnlyRoot, sigtermReachedApp, exitMs, orphanChild, UID/GID, and final digest remain null/unavailable with reasons rather than copied from desired settings. Include health and policy dispositions plus separate unproved host-isolation and supply-chain claims. Synthetic inspection success cannot turn missing runtime evidence into a pass, even if the registered scorer accepts self-reported fields."
     }
   ],
   "scorers": [
@@ -51,11 +51,12 @@
         "Resolved base image/digest, build inputs, target platforms, and OCI metadata",
         "Final-image layer/config/user/entrypoint inspection",
         "Runtime filesystem, privilege, process, and signal evidence",
+        "Health-contract and vulnerability/license-gate disposition",
         "Clean-build/start portability results or explicit unavailable runtime checks",
         "Hierarchy boundary and selected specialist rationale",
         "Representative success, negative-path, and recovery verification",
-        "hierarchy boundary and specialist selection rationale",
-        "representative negative/recovery verification",
+        "Preserved inspector and unsafe-input/repaired-input structural check outputs",
+        "Desired contract separated from observed facts and unavailable runtime proof",
         "source/version boundary when facts can drift"
       ]
     },
@@ -75,17 +76,19 @@
     "Resolved base image/digest, build inputs, target platforms, and OCI metadata",
     "Final-image layer/config/user/entrypoint inspection",
     "Runtime filesystem, privilege, process, and signal evidence",
+    "Health-contract and vulnerability/license-gate disposition",
     "Clean-build/start portability results or explicit unavailable runtime checks",
     "Hierarchy boundary and selected specialist rationale",
     "Representative success, negative-path, and recovery verification",
-    "hierarchy boundary and selected specialist rationale",
-    "representative success plus negative/recovery evidence",
+    "Preserved inspector and unsafe-input/repaired-input structural check outputs",
+    "Desired contract separated from observed facts and unavailable runtime proof",
     "paired skill/no-skill run artifacts",
     "explicit unavailable, simulated, inferred, or stale evidence labels"
   ],
   "requiredArtifacts": [
     "container-engineering-individual-scenario-1-result",
     "container-engineering-individual-scenario-1-verification",
-    "container-engineering-individual-scenario-1-paired-evaluation"
+    "container-engineering-individual-scenario-1-paired-evaluation",
+    ".kory-eval/container-runtime.json"
   ]
 }

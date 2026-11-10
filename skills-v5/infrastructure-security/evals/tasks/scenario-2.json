@@ -1,38 +1,48 @@
 {
   "id": "infrastructure-security-full-task-2",
   "maturity": "individual",
-  "prompt": "Review host hardening for a Linux service fleet built from a mutable VM image. Hosts expose SSH and an internal admin port broadly, several unused daemons/packages remain installed, the service runs under a shared privileged account, patches are applied manually without a rollback policy, and local privilege elevation is poorly audited. Design a secure baseline covering supported image/package lifecycle, dedicated non-root service identity, minimized installed/listening surface, restricted management network path, sudo/admin separation, file/config permissions, logging of privileged/config changes, immutable-image rebuild preference, emergency access, and evidence comparing desired configuration with the running host. Keep cloud-account IAM and resource policies in cloud-security.",
+  "prompt": "Review host hardening for a Linux service fleet built from a mutable VM image. Hosts expose SSH and an internal admin port broadly, several unused daemons/packages remain installed, the service runs under a shared privileged account, patches are applied manually without a rollback policy, and local privilege elevation is poorly audited. Design a secure baseline covering supported image/package lifecycle, dedicated non-root service identity, minimized installed/listening/device/socket surface, host firewall and service-manager restrictions, restricted management network path, sudo/admin separation, file/config permissions, logging of privileged/config changes, immutable-image rebuild preference, emergency access, and evidence comparing desired configuration with the running host. Declare one consistent port/protocol map for the service, SSH, admin/control-plane paths, dependency/DNS or patch-proxy egress, and non-network runtime sockets; keep admin/control-plane ports on the management path only. Include permitted service/management/dependency paths, denied general-network/admin/control-plane paths across IPv4 and IPv6, and rollback/recovery observations; label unavailable host receipts explicitly. Keep cloud-account IAM and resource policies in cloud-security.",
   "environment": {
     "kind": "synthetic",
     "startingState": "fixture://infrastructure-security/scenario-2",
     "requirements": [
-      "Linux host inventory and package/listener snapshot",
-      "service/admin identity fixture",
-      "management and service network topology",
-      "patch/rebuild/rollback controls",
+      "synthetic host inventory, identity, topology, and patch lifecycle fixtures",
+      "candidate-supplied firewall/service-manager, probe, and rollback evidence when available",
+      "synthetic evidence only; no live fleet, kernel, firewall, service-manager, audit, or rollback receipt is supplied",
       "paired same-model skill/no-skill execution"
     ]
   },
   "falsifiableChecks": [
     {
       "id": "infrastructure-security-surface-2",
-      "assertion": "Unused services/packages/listeners are identified and removed/disabled, with the remaining service and management ports tied to explicit operational need."
+      "assertion": "Unused services/packages/listeners are identified and removed/disabled, with the remaining service, SSH, admin/control-plane, dependency, and patch-proxy ports tied to explicit operational need and one consistent protocol/port map; runtime sockets, debug listeners, and unnecessary host devices are included in the surface inventory."
     },
     {
       "id": "infrastructure-security-least-privilege-2",
-      "assertion": "The application runs under a dedicated non-root identity and administrative privilege is separated, time/audit constrained, and not shared with normal service execution."
+      "assertion": "The application runs under a dedicated non-root identity with a recorded effective and bounding capability set, no unnecessary privilege, protected service-account/credential access, and administrative privilege separated, time/audit constrained, and not shared with normal service execution."
     },
     {
       "id": "infrastructure-security-management-2",
-      "assertion": "SSH/admin interfaces are reachable only from the intended management path and are not exposed on the general service network."
+      "assertion": "SSH/admin/control-plane interfaces are reachable only from the intended management path and exact ports, and are not exposed on the general service network, alternate address family, runtime socket, or broad host-firewall rule; record one permitted management probe and denied service-network, public, IPv6, and unauthorized control-plane probes with firewall/provider and raw result.",
+      "source": "https://csrc.nist.gov/pubs/sp/800/41/r1/final"
+    },
+    {
+      "id": "infrastructure-security-runtime-2",
+      "assertion": "The effective service-manager/runtime state proves the intended UID/GID, capability bounding set, no-new-privileges, filesystem/device/namespace restrictions, protected config/secret permissions, resource limits, listeners, and dependency egress; a unit file or desired baseline alone is not runtime proof and unavailable live fields remain explicitly unverified.",
+      "source": "https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html"
     },
     {
       "id": "infrastructure-security-patching-2",
-      "assertion": "The design defines supported base-image/package update ownership, risk-based remediation timing, rebuild/rollback behavior, and how emergency fixes converge back to managed configuration."
+      "assertion": "The design defines supported base-image/package update ownership, named dependency/repository egress, risk-based remediation timing, immutable rebuild and known-good rollback behavior, health gating, and how emergency fixes converge back to managed configuration without leaving a mutable drift path."
     },
     {
       "id": "infrastructure-security-effective-state-2",
-      "assertion": "A post-deploy check compares intended packages, listeners, identities, permissions, network exposure, patch versions, and audit controls to actual running state."
+      "assertion": "A post-deploy check compares intended packages, listeners, identities, capabilities, permissions, network exposure, runtime restrictions, dependency egress, patch versions, and audit controls to actual running state, recording command, host scope, revision, provider, timestamp, and raw result."
+    },
+    {
+      "id": "infrastructure-security-recovery-2",
+      "assertion": "A normal service request, permitted dependency operation, and intended management operation remain available after hardening; denied service-network admin/control-plane and unauthorized privilege-elevation attempts have no configuration or durable side effect; rollback names a known-good revision, restores service health and the hardened baseline, and proves emergency access expires and is reconciled. Missing live host/firewall/service-manager/audit/probe/rollback receipts remain unavailable or unverified rather than being inferred.",
+      "source": "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
     }
   ],
   "scorers": [
@@ -44,7 +54,10 @@
         "host baseline",
         "identity and management-path rules",
         "patch/rebuild lifecycle",
-        "effective-state verification"
+        "host firewall/service-manager enforcement evidence or explicit unavailable status",
+        "allowed/denied management, dependency, and side-effect probes",
+        "effective-state verification",
+        "rollback/recovery evidence with result or explicit unavailable boundary"
       ]
     },
     {
@@ -62,9 +75,12 @@
   "requiredEvidence": [
     "host/package/listener inventory",
     "service/admin identity controls",
-    "management reachability",
+    "host firewall/service-manager enforcement result or explicit unavailable status",
+    "allowed and denied management/dependency reachability",
+    "runtime capability/filesystem/device/resource evidence",
     "patch/rollback policy",
     "desired-versus-running evidence",
+    "recovery evidence with result or unavailable live-host boundaries",
     "paired skill/no-skill run artifacts"
   ],
   "requiredArtifacts": [

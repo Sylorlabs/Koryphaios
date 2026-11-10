@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "realtime-systems",
-  "version": "5.1.2",
+  "version": "5.1.3",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -18,7 +18,7 @@
   "evidence": [
     "realtime-systems decision and boundary evidence",
     "Representative verification results or explicit unavailable checks",
-    "Hierarchy boundary and selected specialist rationale",
+    "Concrete scope boundary and neighboring responsibility behavior",
     "Representative success, negative-path, and recovery verification"
   ],
   "routing": {

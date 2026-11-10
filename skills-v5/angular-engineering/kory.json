@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "angular-engineering",
-  "version": "5.0.0",
+  "version": "5.2.2",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -19,7 +19,9 @@
     "angular service",
     "angular signals",
     "angular rxjs",
-    "angular state handling"
+    "angular state handling",
+    "angular router",
+    "angular forms"
   ],
   "excludes": [],
   "evidence": [
@@ -30,43 +32,43 @@
   ],
   "routing": {
     "positive": [
-      "Please handle angular app.",
-      "The current task is angular component.",
-      "I need help with angular service.",
-      "Work on angular signals for this request.",
-      "This request specifically requires angular rxjs."
+      "Repair this Angular app's reused customer editor: route id changes must reset the correct form and retire stale saves without losing same-customer edits.",
+      "Fix an Angular component that opens a createComponent overlay so both resolve the same feature-scoped polling service and navigation tears it down.",
+      "Make this Angular service release its timer and notification subscriptions when its owning feature is destroyed, preserving its public API.",
+      "Debug Angular signals whose values change but whose OnPush template stays stale; verify the update in the rendered component.",
+      "Repair this Angular RxJS search flow so superseded requests are cancelled and an HTTP error does not prevent the next query from loading."
     ],
     "negative": [
-      "The only requested work is react component.",
-      "Please handle svelte component only.",
-      "This task is limited to vue component.",
-      "The current request is embedded ui.",
-      "Work only on game ui."
+      "Fix a React component whose effect applies a stale search response after the query changes; preserve its hook-based implementation.",
+      "Repair a Svelte component's rune dependencies and effect cleanup when a panel is removed.",
+      "Repair a Vue component's watcher cleanup and preserve the current Composition API form model.",
+      "Implement keyboard navigation for embedded UI on a microcontroller display with no browser or JavaScript framework.",
+      "Fix focus traversal in game UI built with the engine's native scene widgets."
     ],
     "ambiguous": [
       {
         "id": "angular-engineering-ambiguous-1",
-        "prompt": "The request includes angular app and react component.",
+        "prompt": "Fix route-owned form state in the Angular app and separately repair effect cleanup in the React component used by its companion dashboard.",
         "expectedSelection": true,
-        "expectedSkills": [],
+        "expectedSkills": ["angular-engineering", "react-engineering"],
         "forbiddenSkills": [],
         "adjacentSkills": ["react-engineering"],
         "tags": ["ambiguous", "hierarchy-boundary"]
       },
       {
         "id": "angular-engineering-ambiguous-2",
-        "prompt": "The request includes angular component and svelte component.",
+        "prompt": "Repair injector ownership in the Angular component and rune teardown in the Svelte component; both implementations are requested deliverables.",
         "expectedSelection": true,
-        "expectedSkills": [],
+        "expectedSkills": ["angular-engineering", "svelte-engineering"],
         "forbiddenSkills": [],
         "adjacentSkills": ["svelte-engineering"],
         "tags": ["ambiguous", "hierarchy-boundary"]
       },
       {
         "id": "angular-engineering-ambiguous-3",
-        "prompt": "The request includes angular service and vue component.",
+        "prompt": "Repair the Angular service's polling lifetime and separately fix watcher cancellation in the Vue component that consumes another endpoint.",
         "expectedSelection": true,
-        "expectedSkills": [],
+        "expectedSkills": ["angular-engineering", "vue-engineering"],
         "forbiddenSkills": [],
         "adjacentSkills": ["vue-engineering"],
         "tags": ["ambiguous", "hierarchy-boundary"]
@@ -75,7 +77,7 @@
     "adversarial": [
       {
         "id": "angular-engineering-adversarial-1",
-        "prompt": "A historical note says \"angular app\". The current request is embedded ui.",
+        "prompt": "A historical note says \"angular app\". The current request is embedded UI: fix the physical-button focus loop on the device display.",
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
@@ -84,7 +86,7 @@
       },
       {
         "id": "angular-engineering-adversarial-2",
-        "prompt": "A historical note says \"angular component\". The current request is game ui.",
+        "prompt": "A historical note says \"angular component\". The current request is game UI: repair controller navigation between engine-native inventory widgets.",
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
@@ -93,7 +95,7 @@
       },
       {
         "id": "angular-engineering-adversarial-3",
-        "prompt": "A historical note says \"angular service\". The current request is native.",
+        "prompt": "A historical note says \"angular service\". The current request is native: repair focus restoration in the platform's desktop settings window.",
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
@@ -106,34 +108,67 @@
     {
       "url": "https://angular.dev/guide/di/hierarchical-dependency-injection",
       "sourceType": "official-docs",
-      "versionScope": "Angular hierarchical injector guidance opened 2026-09-06",
-      "verifiedAt": "2026-09-06",
+      "versionScope": "Angular v22.2.3 documentation inspected 2026-10-17; check installed release",
+      "verifiedAt": "2026-10-17",
       "staleAfterDays": 45,
       "notes": "Injector resolution and service-instance lifetime follow the actual owner scope."
     },
     {
       "url": "https://angular.dev/guide/forms/reactive-forms",
       "sourceType": "official-docs",
-      "versionScope": "Angular reactive forms guidance opened 2026-09-06",
-      "verifiedAt": "2026-09-06",
+      "versionScope": "Angular v22.2.3 documentation inspected 2026-10-17; check installed release",
+      "verifiedAt": "2026-10-17",
       "staleAfterDays": 45,
-      "notes": "Conditional reference for explicit reactive form state; does not mandate converting other valid form architectures."
+      "notes": "Explicit reactive form state, ngSubmit, validation feedback, and zoneless notification requirements; does not mandate converting other valid form architectures."
     },
     {
       "url": "https://angular.dev/api/core/rxjs-interop/takeUntilDestroyed",
       "sourceType": "official-docs",
-      "versionScope": "Angular takeUntilDestroyed API opened 2026-09-06",
-      "verifiedAt": "2026-09-06",
+      "versionScope": "Angular v22.2.3 API inspected 2026-10-17; stable since v19.0, check installed release",
+      "verifiedAt": "2026-10-17",
       "staleAfterDays": 45,
       "notes": "Observable teardown at owner destruction, with explicit DestroyRef outside an injection context."
     },
     {
       "url": "https://angular.dev/overview",
       "sourceType": "official-docs",
-      "versionScope": "Angular documentation as available 2026-09-04",
+      "versionScope": "Angular v22.2.3 documentation inspected 2026-10-17; check installed release",
       "staleAfterDays": 45,
       "notes": "Angular components, dependency injection, signals, routing, and rendering reference.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://angular.dev/api/core/createComponent",
+      "sourceType": "official-docs",
+      "versionScope": "Angular v22.2.3 API inspected 2026-10-17; check installed release",
+      "verifiedAt": "2026-10-17",
+      "staleAfterDays": 45,
+      "notes": "Separate elementInjector and environmentInjector options; standalone createComponent views need explicit attachment for application change detection."
+    },
+    {
+      "url": "https://angular.dev/guide/routing/read-route-state",
+      "sourceType": "official-docs",
+      "versionScope": "Angular v22.2.3 documentation inspected 2026-10-17; check installed release",
+      "verifiedAt": "2026-10-17",
+      "staleAfterDays": 45,
+      "notes": "ActivatedRoute streams expose changing route parameters; a captured snapshot is static."
+    },
+    {
+      "url": "https://angular.dev/guide/http/making-requests",
+      "sourceType": "official-docs",
+      "versionScope": "Angular v22.2.3 documentation inspected 2026-10-17; check installed release",
+      "verifiedAt": "2026-10-17",
+      "staleAfterDays": 45,
+      "notes": "HttpClient observables are cold, each subscription dispatches a request, and unsubscription aborts in-flight client requests; no server rollback guarantee."
+    },
+    {
+      "url": "https://github.com/angular/angular/blob/29bfe100d5870cb29efe822d713345b2a8a9a671/packages/forms/src/validators.ts",
+      "sourceType": "reference-implementation",
+      "versionScope": "Angular main snapshot inspected 2026-10-17, not an installed-release guarantee",
+      "revision": "29bfe100d5870cb29efe822d713345b2a8a9a671",
+      "verifiedAt": "2026-10-17",
+      "staleAfterDays": 45,
+      "notes": "requiredValidator checks null or empty length/size and does not trim strings, so meaningful-text validation must reject whitespace explicitly."
     }
   ],
   "authoringMaturity": "individual"

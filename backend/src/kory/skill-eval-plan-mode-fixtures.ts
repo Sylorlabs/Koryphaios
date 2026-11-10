@@ -334,45 +334,108 @@ function readyDecisionsPreserved(note: PlanNote | null): boolean {
   );
 }
 
+const ROLLOUT_PHASE_PATTERNS: readonly RegExp[] = [
+  /dual[- ]read/iu,
+  /shadow[- ]write/iu,
+  /v2[- ]write|v2 write|cutover/iu,
+  /cleanup/iu,
+];
+
+/**
+ * The rollout phases are judged where the plan actually states the sequence, not
+ * on the first mention of each phase name anywhere in the document.
+ *
+ * A correct plan must name the pre-cutover rollback boundary ("rollback to v4.8
+ * is supported only before v2 write cutover"), and that boundary necessarily
+ * contains a phase name before the rollout statement that follows it. Scoring
+ * first document-wide mentions therefore rejected plans whose sequence was
+ * stated correctly. A plan whose rollout sequence is shuffled still fails,
+ * because no single statement then lists the phases in order.
+ */
+function readyRolloutOrdered(text: string): boolean {
+  if (!ROLLOUT_PHASE_PATTERNS.every((pattern) => pattern.test(text))) return false;
+  return text.split('\n').some((line) => {
+    const positions = ROLLOUT_PHASE_PATTERNS.map((pattern) => line.search(pattern));
+    return (
+      positions.every((position) => position >= 0) &&
+      positions.every((position, index) => index === 0 || position > positions[index - 1])
+    );
+  });
+}
+
+/**
+ * A window that stays inside one sentence while still spanning dotted version
+ * tokens. `v4.8` and `v4.9` contain periods, so a plain `[^.\n]` window cannot
+ * span "rollback to v4.8 is supported only before v2 write cutover" and the
+ * check silently rejected correct plans. A real sentence-ending period is never
+ * followed by another digit, so the sentence boundary is preserved.
+ */
+const SENTENCE_RUN = '(?:[^.\\n]|\\d\\.\\d+)';
+
+function readyRollbackBoundaryStated(text: string): boolean {
+  const rollbackTarget = new RegExp(
+    `rollback${SENTENCE_RUN}{0,80}v4\\.8|v4\\.8${SENTENCE_RUN}{0,80}rollback`,
+    'iu',
+  ).test(text);
+  // "only before", "until the cutover", "available prior to", "possible up to".
+  const preCutover =
+    new RegExp(
+      `rollback${SENTENCE_RUN}{0,120}(?:only|available|supported|ends|end|possible)${SENTENCE_RUN}{0,80}(?:until|prior to|up to|up until|before|at|pre[- ]cutover|cutover)`,
+      'iu',
+    ).test(text) ||
+    new RegExp(
+      `(?:until|prior to|up to|up until|before|pre[- ]cutover)${SENTENCE_RUN}{0,100}rollback`,
+      'iu',
+    ).test(text);
+  const postCutoverRecovery =
+    new RegExp(
+      `(?:after|post[- ]cutover|subsequent)${SENTENCE_RUN}{0,120}(?:forward[- ]repair|repair forward)`,
+      'iu',
+    ).test(text) ||
+    new RegExp(
+      `(?:forward[- ]repair|repair forward)${SENTENCE_RUN}{0,120}(?:after|post[- ]cutover|subsequent)`,
+      'iu',
+    ).test(text);
+  // "downgrade is unavailable", "rollback is blocked", "cannot downgrade" all
+  // state the boundary; the multi-word forms keep "unavailable" from matching
+  // the disqualifying phrases below.
+  const postCutoverClosed =
+    new RegExp(
+      `rollback${SENTENCE_RUN}{0,120}(?:ends|ended|blocked|unavailable|not supported|unsupported|not possible|impossible)`,
+      'iu',
+    ).test(text) ||
+    new RegExp(
+      `(?:downgrade|rollback)${SENTENCE_RUN}{0,120}(?:is unavailable|is blocked|is not supported|is unsupported|is not possible|is impossible)`,
+      'iu',
+    ).test(text) ||
+    /(?:no|never|cannot|can not)[^.\n]{0,80}(?:rollback|downgrade)/iu.test(text);
+  // The disqualifying case: a plan that claims rollback survives the cutover.
+  // Only a positive claim disqualifies; "downgrade remains unavailable" states
+  // the boundary and must not be read as a claim that rollback survives it.
+  const claimsRollbackAfterCutover =
+    new RegExp(
+      `(?:after|post[- ]cutover)${SENTENCE_RUN}{0,160}(?:rollback|downgrade)${SENTENCE_RUN}{0,80}(?:remains?\\s+(?:available|supported|possible)|is still\\s+(?:available|supported|possible)|stays?\\s+available)`,
+      'iu',
+    ).test(text) ||
+    new RegExp(
+      `(?:rollback|downgrade)${SENTENCE_RUN}{0,80}(?:remains?\\s+(?:available|supported|possible)|is still\\s+(?:available|supported|possible))${SENTENCE_RUN}{0,80}(?:after|post[- ]cutover)`,
+      'iu',
+    ).test(text);
+  return (
+    rollbackTarget &&
+    preCutover &&
+    postCutoverRecovery &&
+    postCutoverClosed &&
+    !claimsRollbackAfterCutover
+  );
+}
+
 function readyDecisionTextPreserved(text: string): boolean {
   const compatibility =
     /v4\.8/iu.test(text) &&
     /v4\.9/iu.test(text) &&
     /dual[- ]read|two[- ]release|two release/iu.test(text);
-  const rollbackTarget = /rollback[^.\n]{0,80}v4\.8|v4\.8[^.\n]{0,80}rollback/iu.test(text);
-  const preCutoverBoundary =
-    /rollback[^.\n]{0,120}(?:only|available|supported|ends|end)[^.\n]{0,80}(?:before|at|pre[- ]cutover|cutover)/iu.test(
-      text,
-    ) || /(?:before|pre[- ]cutover)[^.\n]{0,100}rollback/iu.test(text);
-  const postCutoverRecovery =
-    /(?:after|post[- ]cutover|subsequent)[^.\n]{0,120}(?:forward[- ]repair|repair forward)/iu.test(
-      text,
-    ) ||
-    /(?:forward[- ]repair|repair forward)[^.\n]{0,120}(?:after|post[- ]cutover|subsequent)/iu.test(
-      text,
-    );
-  const noPostCutoverRollback =
-    /rollback[^.\n]{0,120}(?:ends|ended|blocked|unavailable|not supported|unsupported)/iu.test(
-      text,
-    ) ||
-    /(?:no|never)[^.\n]{0,80}(?:rollback|downgrade)|(?:rollback|downgrade)[^.\n]{0,80}(?:not supported|unsupported)/iu.test(
-      text,
-    );
-  const rollback =
-    rollbackTarget && preCutoverBoundary && postCutoverRecovery && noPostCutoverRollback;
-  const rolloutTerms = [
-    /dual[- ]read/iu,
-    /shadow[- ]write/iu,
-    /v2[- ]write|v2 write|cutover/iu,
-    /cleanup/iu,
-  ];
-  const rolloutPositions = rolloutTerms.map((pattern) => text.search(pattern));
-  const rollout =
-    rolloutPositions.every((position) => position >= 0) &&
-    rolloutPositions.every(
-      (position, index) => index === 0 || position > rolloutPositions[index - 1],
-    );
-  return compatibility && rollback && rollout;
+  return compatibility && readyRollbackBoundaryStated(text) && readyRolloutOrdered(text);
 }
 
 function readyNoteActionable(note: PlanNote | null): boolean {
@@ -397,7 +460,7 @@ function readyNoteActionable(note: PlanNote | null): boolean {
 }
 
 const readyScorer: SkillEvalDeterministicScorer = {
-  id: 'plan-mode/ready-handoff-scorer@3',
+  id: 'plan-mode/ready-handoff-scorer@4',
   scenarioIds: [READY_HANDOFF],
   score: ({ workingDirectory, observation }) => {
     const implementationPreserved = implementationTreePreserved(workingDirectory);

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "documents-communication",
-  "version": "5.1.2",
+  "version": "5.1.5",
   "skillKind": "artifact",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -15,7 +15,9 @@
   "conflicts": [],
   "activation": [
     "release notes",
+    "release note",
     "changelog",
+    "write a changelog",
     "rewrite this document",
     "edit this document",
     "draft a document",
@@ -26,6 +28,9 @@
     "source-backed report",
     "project handoff",
     "handoff document",
+    "markdown handoff",
+    "handoff memo",
+    "draft a memo",
     "turn these notes into",
     "rough implementation notes",
     "polish this document",
@@ -35,8 +40,15 @@
     "implement the code",
     "fix the bug without writing documentation",
     "only answer the question",
+    "only extract the facts",
+    "research only without a document",
     "analyze the dataset without writing a report",
     "do not draft or rewrite a document",
+    "accessibility audit only",
+    "only test accessibility",
+    "code change only",
+    "not a source-backed release note",
+    "do not draft, rewrite, or polish a document",
     "compute the supplied checksum values",
     "trace which local parser"
   ],
@@ -50,11 +62,11 @@
   ],
   "routing": {
     "positive": [
-      "Write release notes for the next tagged version from the merged PRs and commit range, keeping breaking changes, user-visible fixes, and known limitations separate from internal refactors.",
-      "Turn these project notes into a cross-team handoff document with current state, decisions, owners, open questions, source links, and next steps without inventing missing facts.",
-      "Rewrite this supplied policy document for clarity and scanning while preserving its requirements, exceptions, defined terms, and unresolved placeholders exactly.",
-      "Prepare a general project report from the supplied milestones, metrics, decisions, and risks. Keep measured facts separate from commentary and follow the existing Markdown template.",
-      "Polish this document into publication-ready Markdown, preserve every citation and date qualifier, repair structure and duplication, and flag factual conflicts rather than smoothing them over."
+      "Write customer-facing release notes for the confirmed v5.3.0 tag range from the merged PRs, commit diff, and existing template. Keep user-visible features and fixes separate from internal refactors and unverified impact, and preserve source names and IDs.",
+      "Turn a closed packet of dated project notes into a cross-team handoff with current state, explicit decisions, owners, open questions, source links, historical duplicates, and unresolved contradictions. Do not infer the reader or fill unknown fields.",
+      "Rewrite this supplied policy document for clarity and scanning while preserving requirements, exceptions, defined terms, citations, version qualifiers, and unresolved placeholders exactly. Return the revised document and identify conflicts that remain.",
+      "Prepare a general project report from supplied milestones, metrics, decisions, and risks. Follow the existing Markdown template, separate measured facts from commentary, state the reader action, and mark unsupported outcomes as pending.",
+      "Polish this document into publication-ready Markdown. Preserve every citation and date qualifier, repair structure and duplication, reconcile claims to sources, and flag factual conflicts instead of smoothing them over."
     ],
     "negative": [
       "Implement the requested API endpoint in the existing service and verify its tests; no documentation artifact is requested.",
@@ -124,28 +136,36 @@
   },
   "sources": [
     {
-      "url": "https://www.plainlanguage.gov/guidelines/",
+      "url": "https://digital.gov/guides/plain-language/principles/",
       "sourceType": "official-docs",
-      "versionScope": "U.S. federal plain-language guidance as available 2026-09-05",
+      "versionScope": "U.S. federal plain-language principles as available 2026-10-17",
       "staleAfterDays": 180,
-      "notes": "Audience-centered structure, wording, and readability guidance.",
-      "verifiedAt": "2026-09-05"
+      "notes": "Define the audience, state the purpose and bottom line early, organize for retrieval, and use active wording, lists, or tables when they help the reader.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://digital.gov/guides/plain-language/test/",
+      "sourceType": "official-docs",
+      "versionScope": "U.S. federal plain-language testing guidance as available 2026-10-17",
+      "staleAfterDays": 180,
+      "notes": "Test early, revise, and test again; distinguish paraphrase, usability, and comparative testing from unsupported claims about reader understanding.",
+      "verifiedAt": "2026-10-17"
     },
     {
       "url": "https://learn.microsoft.com/en-us/style-guide/welcome/",
       "sourceType": "official-docs",
-      "versionScope": "Microsoft public writing style and terminology guidance as available 2026-09-05",
+      "versionScope": "Microsoft public writing style and terminology guidance updated 2026-10-15 and inspected 2026-10-17",
       "staleAfterDays": 180,
       "notes": "Concise, consistent, reader-centered technology communication; style guidance, not authority for artifact subject facts.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-10-17"
     },
     {
       "url": "https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository",
       "sourceType": "official-docs",
-      "versionScope": "GitHub release and release-note behavior as available 2026-09-05",
+      "versionScope": "GitHub release and release-note behavior as available 2026-10-17",
       "staleAfterDays": 90,
       "notes": "Release tags, previous-tag scope, drafts/prereleases, generated notes, and publication mechanics.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-10-17"
     },
     {
       "url": "https://semver.org/spec/v2.0.0.html",
@@ -153,23 +173,31 @@
       "versionScope": "Semantic Versioning 2.0.0",
       "staleAfterDays": 365,
       "notes": "Major/minor/patch semantics only when the target project explicitly follows SemVer.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-10-17"
     },
     {
       "url": "https://agentskills.io/specification",
       "sourceType": "spec",
-      "versionScope": "Agent Skills specification as available 2026-09-05",
+      "versionScope": "Agent Skills specification as available 2026-10-17",
       "staleAfterDays": 90,
       "notes": "Portable discovery metadata and progressive disclosure.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md",
       "sourceType": "reference-implementation",
-      "versionScope": "OpenAI public skill-creator guidance on main as inspected 2026-09-05",
+      "versionScope": "OpenAI public skill-creator guidance on main as inspected 2026-10-17",
       "staleAfterDays": 60,
       "notes": "Bounded triggers, specialist separation, and behavioral validation.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
+    },
+    {
+      "url": "https://developers.google.com/style",
+      "sourceType": "official-docs",
+      "versionScope": "Google developer documentation style guidance last updated 2026-10-09 and inspected 2026-10-17",
+      "staleAfterDays": 90,
+      "notes": "Use project-specific guidance first, then authoritative style guidance; keep technical terminology, reader purpose, and document type distinct.",
+      "verifiedAt": "2026-10-17"
     }
   ],
   "authoringMaturity": "individual"

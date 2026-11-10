@@ -126,7 +126,7 @@ Write \`.kory-eval/github-cicd-evidence.json\` with fork/failure/cancel/approval
 };
 
 const githubScorer: SkillEvalDeterministicScorer = {
-  id: 'cicd-engineering/github-actions-trust-promotion-scorer@1',
+  id: 'cicd-engineering/github-actions-trust-promotion-scorer@2',
   scenarioIds: [GITHUB_CICD],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
@@ -144,7 +144,7 @@ test('hidden: prod gate/OIDC/serialization are scoped',()=>{
   expect(githubDeployAllowed(spec,false)).toBe(false);
   expect(githubDeployAllowed(spec,true)).toBe(true);
   expect(spec.production.oidc.repository).toBeTruthy();
-  expect(spec.production.oidc.ref).toMatch(/main|refs\/heads\/main/);
+  expect(spec.production.oidc.ref).toMatch(new RegExp('main|refs/heads/main'));
   expect(spec.production.concurrency.serial).toBe(true);
   expect(spec.production.concurrency.group).toMatch(/prod/i);
 });
@@ -271,7 +271,7 @@ export function inspectDockerfile(source:string):ImageInspection {
 `;
 
 const containerRuntimeMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'container-engineering/production-image-runtime@3',
+  id: 'container-engineering/production-image-runtime@4',
   matches: (scenario) => scenario.id === CONTAINER_RUNTIME,
   materialize: (destination) => {
     writeFixtureFile(destination, 'package.json', packageJson('kory-eval-container-runtime'));
@@ -295,22 +295,23 @@ const containerRuntimeMaterializer: SkillEvalFixtureMaterializer = {
 
 Repair \`Dockerfile\` while preserving the fixed inspector. Use a clean multi-stage build with the supplied lockfile and the exact synthetic digest in \`evidence/base-digest.txt\` as the literal digest-pinned final base identity. The synthetic registry token may be consumed only through a non-persisting build-secret mechanism and must not appear in Dockerfile ENV/ARG defaults or final history/config/files. Final process is non-root and directly execs the app (no \`sh -c\`).
 
-Write \`.kory-eval/container-runtime.json\`. At the top level it must contain \`buildToolingInFinalImage:false\`, \`secretPersisted:false\`, \`readOnlyRoot:true\`, \`writableMounts:["/tmp","/var/lib/app"]\`, \`sigtermReachedApp:true\`, numeric \`exitMs\` no greater than 10000, and \`orphanChild:false\`. Also record numeric non-root UID/GID, final image digest/config/history inspection, clean-context/lockfile identity, and synthetic/local evidence. Keep host-isolation and supply-chain claims explicitly unproved unless separately exercised.
+Write \`.kory-eval/container-runtime.json\`. At the top level it must contain \`buildToolingInFinalImage:false\`, \`secretPersisted:false\`, \`readOnlyRoot:true\`, \`writableMounts:["/tmp","/var/lib/app"]\`, \`sigtermReachedApp:true\`, numeric \`exitMs\` no greater than 10000, and \`orphanChild:false\`. Also record numeric non-root UID/GID, final image digest/config/history inspection, clean-context/lockfile identity, and synthetic/local evidence. Set explicit \`healthStatus\`, \`vulnerabilityGate\`, and \`licenseGate\` dispositions, each as either the disposition string \`pass\`/\`fail\`/\`unavailable\`/\`not-configured\` or an object with \`status\` (or \`disposition\`) set to one of those values and an optional reason. Keep host-isolation and supply-chain claims explicitly unproved unless separately exercised.
 `,
     );
   },
 };
 
 const containerRuntimeScorer: SkillEvalDeterministicScorer = {
-  id: 'container-engineering/production-image-runtime-scorer@1',
+  id: 'container-engineering/production-image-runtime-scorer@2',
   scenarioIds: [CONTAINER_RUNTIME],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
       workingDirectory,
       `import {expect,test} from 'bun:test';import {readFileSync} from 'node:fs';import {inspectDockerfile} from '../src/container-inspector';
 const image=inspectDockerfile(readFileSync('Dockerfile','utf8'));const report=JSON.parse(readFileSync('.kory-eval/container-runtime.json','utf8')) as any;
+const disposition=(value:unknown)=>typeof value==='string'?value:(value&&typeof value==='object'&&((value as any).status??(value as any).disposition))||value;
 test('hidden: final build shape and process identity',()=>{expect(image.stages).toBeGreaterThanOrEqual(2);expect(image.finalBasePinned).toBe(true);expect(image.syntheticSecretPresent).toBe(false);expect(image.shellEntrypoint).toBe(false);expect(image.finalUser).toBeTruthy();expect(image.finalUser).not.toMatch(/^root$|^0(?::0)?$/);});
-test('hidden: runtime contract',()=>{expect(report.secretPersisted).toBe(false);expect(report.buildToolingInFinalImage).toBe(false);expect(report.readOnlyRoot).toBe(true);expect(new Set(report.writableMounts)).toEqual(new Set(['/tmp','/var/lib/app']));expect(report.sigtermReachedApp).toBe(true);expect(report.exitMs).toBeLessThanOrEqual(10000);expect(report.orphanChild).toBe(false);});
+test('hidden: runtime contract and gate dispositions',()=>{expect(report.secretPersisted).toBe(false);expect(report.buildToolingInFinalImage).toBe(false);expect(report.readOnlyRoot).toBe(true);expect(new Set(report.writableMounts)).toEqual(new Set(['/tmp','/var/lib/app']));expect(report.sigtermReachedApp).toBe(true);expect(report.exitMs).toBeLessThanOrEqual(10000);expect(report.orphanChild).toBe(false);for(const key of ['healthStatus','vulnerabilityGate','licenseGate'])expect(['pass','fail','unavailable','not-configured']).toContain(disposition(report[key]));});
 `,
     );
     const fixed =
@@ -542,7 +543,7 @@ export function adoptionConverged(s:AdoptionSpec){return s.importBlocks.length==
 export function refactorConverged(s:RefactorSpec){return s.movedBlocks.length>=2&&s.accidentalReplacementRejected&&s.reviewedPlanDigest===s.appliedPlanDigest&&!s.contextChangedBetweenPlanApply&&s.historicalMovesPreserved&&Object.values(s.freshPlan).every(x=>x===0);}
 `;
 const tfImportMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'terraform-iac/declarative-import-adoption@1',
+  id: 'terraform-iac/declarative-import-adoption@2',
   matches: (s) => s.id === TF_IMPORT,
   materialize: (d) => {
     writeFixtureFile(d, 'package.json', packageJson('kory-eval-tf-import'));
@@ -550,13 +551,25 @@ const tfImportMaterializer: SkillEvalFixtureMaterializer = {
     writeFixtureFile(
       d,
       'evidence/backend.json',
-      `${JSON.stringify({ backend: 'remote://org/prod', workspace: 'prod', lineage: 'lineage-88', lock: 'held-by-plan', staleLocalState: 'lineage-71', liveResources: ['bucket-123', 'queue-456'], dangerousDelta: 'replace bucket-123' }, null, 2)}\n`,
+      `${JSON.stringify({ cliVersion: '1.9.8', providerVersions: ['registry.terraform.io/hashicorp/aws@5.74.0'], lockfile: '.terraform.lock.hcl', evidenceSource: 'evaluator-owned synthetic starting state', liveProviderVerified: false, backend: 'remote://org/prod', workspace: 'prod', lineage: 'lineage-88', lock: 'held-by-plan', staleLocalState: 'lineage-71', liveResources: ['bucket-123', 'queue-456'], dangerousDelta: 'replace bucket-123' }, null, 2)}\n`,
+    );
+    writeFixtureFile(
+      d,
+      '.terraform.lock.hcl',
+      `# Synthetic evaluator-owned provider selection; no provider package checksums verified.
+provider "registry.terraform.io/hashicorp/aws" {
+  version     = "5.74.0"
+  constraints = "= 5.74.0"
+}
+`,
     );
     writeFixtureFile(d, 'tests/.gitkeep', '');
     writeFixtureFile(
       d,
       'README.md',
       `# Declarative Terraform adoption simulator
+
+Preserve the evaluator-owned starting context in \`evidence/backend.json\` and the pinned provider selection in \`.terraform.lock.hcl\`. The CLI/provider versions are supplied synthetic task facts, not an observed CLI execution or live account/provider verification. The lockfile models the exact provider selection only; it does not attest downloaded provider package checksums. No external Terraform runtime or cloud credentials are required for this simulator.
 
 Write \`.kory-eval/terraform-adoption.json\` matching \`AdoptionSpec\`. Record exact CLI/provider/lockfile/backend/workspace before state change; the supplied stale local state is never authoritative. Use exactly two declarative import blocks and matching resource configuration for the existing resource identities. Reject/correct the dangerous replacement before apply, preserve remote locking/lineage and a recoverable pre-change state artifact, and never directly edit state JSON or hide drift with blanket ignore_changes.
 
@@ -698,7 +711,10 @@ test('hidden: poison record returns only failed id while successes remain',()=>{
       /alias/u.test(cfg.text) &&
       /rollback/u.test(cfg.text) &&
       bool(cfg.artifact, 'usesDirectLambdaRetrySemantics', false) &&
-      bool(cfg.artifact, 'durableDedupInWarmGlobalOrTmp', false);
+      bool(cfg.artifact, 'durableDedupInWarmGlobalOrTmp', false) &&
+      bool(cfg.artifact, 'atomicIdempotencyBoundary', true) &&
+      bool(cfg.artifact, 'crossInstanceConcurrencyVerified', true) &&
+      bool(cfg.artifact, 'livePlatformVerified', false);
     const passed = hidden.passed && reg && bounded;
     return {
       passed,

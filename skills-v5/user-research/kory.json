@@ -147,7 +147,7 @@
       "url": "https://github.com/rampstackco/claude-skills/blob/main/skills/ux-research/SKILL.md",
       "sourceType": "community-pattern",
       "versionScope": "rampstackco/claude-skills main at 3d4510a94a76ead80122c691b5c480f92f3fbe40, inspected 2026-10-03",
-      "verifiedAt": "2026-10-03",
+      "verifiedAt": "2026-11-03",
       "staleAfterDays": 30,
       "license": "MIT",
       "notes": "Pattern source for decision-first framing, method-following-question routing, synthesis traceability, and explicit boundaries with usability testing and quantitative measurement."

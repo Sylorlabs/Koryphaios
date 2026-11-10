@@ -1,24 +1,24 @@
 # Source map
 
-`bun-deno-runtime` is an individually authored V5 skill package; empirical qualification is tracked separately in the audit/evaluation ledger. These maintained sources bound factual and version-sensitive guidance; qualification is tested with hierarchy-aware held-out routing, paired same-model skill/no-skill tasks, and independent blind evaluation.
+`bun-deno-runtime` is an individually authored V5 skill package; empirical qualification is tracked separately in the audit/evaluation ledger. These maintained sources bound factual and version-sensitive guidance; qualification is tested with hierarchy-aware held out routing, paired same-model skill/no skill tasks, and independent blind evaluation.
 
 ## Qualification basis
 
 - Hierarchy: broader backend-engineering.
-- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held-out cases through the real resolver.
-- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no-skill pairing, regression retention, and blind semantic judging.
+- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held out cases through the real resolver.
+- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no skill pairing, regression retention, and blind semantic judging.
 - Source discipline: authoritative/spec/reference sources outrank community patterns when they conflict; runtime evidence outranks examples for behavioral claims.
 
 ## Maintained sources
 
 - **Bun documentation**: https://bun.com/docs
-  - Scope: Bun documentation as available and inspected 2026-10-03
+  - Scope: Bun documentation as available and inspected 2026-11-03
   - Use: Bun runtime, package, test, server, and compatibility behavior.
-  - Verified: 2026-10-03; refresh after 30 days.
+  - Verified: 2026-11-03; refresh after 30 days.
 - **Deno documentation**: https://docs.deno.com/
-  - Scope: Deno runtime getting-started documentation last modified 2026-07-29 and inspected 2026-10-03.
+  - Scope: Deno runtime getting-started documentation last modified 2026-07-29 and inspected 2026-11-03.
   - Use: Deno runtime, secure-default permissions, package and built-in toolchain, server, and Node compatibility behavior.
-  - Verified: 2026-10-03; refresh after 30 days.
+  - Verified: 2026-11-03; refresh after 30 days.
 
 ## Targeted permission review, 2026-10-02
 

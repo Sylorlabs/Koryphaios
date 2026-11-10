@@ -1,13 +1,13 @@
 {
   "id": "kotlin-engineering-full-task-1-individual",
   "maturity": "individual",
-  "prompt": "Fix a Kotlin service that launches work in `GlobalScope` from a request handler, so cancelled requests continue writing progress and tests race after completion. Move work to an explicit structured-concurrency owner, preserve intentional background work separately, propagate cancellation, and verify child failure, timeout, cancellation, supervisor behavior where needed, and no orphan coroutine after request completion.",
+  "prompt": "Fix a Kotlin service that launches work in `GlobalScope` from a request handler, so cancelled requests continue writing progress and tests race after completion. Move work to an explicit structured-concurrency owner, preserve intentional background work separately, propagate cancellation, and verify request-child failure, timeout, cancellation, and no orphan coroutine after request completion. Durable work runs in an injected SupervisorJob-owned scope; make a durable child itself fail and prove the durable owner remains active and can run a later durable child.",
   "environment": {
     "kind": "repository",
     "startingState": "fixture://kotlin-engineering/coroutine-scope-leak",
     "requirements": [
       "Kotlin coroutine request handler with one request-bound child and one explicitly durable background action",
-      "test dispatcher/virtual time plus cancellation and child-failure injection",
+      "test dispatcher/virtual time plus cancellation, request-child failure, and durable-child supervision failure injection",
       "instrumented progress store detecting writes after request termination",
       "existing public suspend API and error semantics to preserve",
       "paired same-model skill/no-skill execution from the identical starting snapshot"

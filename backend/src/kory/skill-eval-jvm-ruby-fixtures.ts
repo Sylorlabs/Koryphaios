@@ -1,6 +1,8 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { javaToolchainExecutables } from '../runtime/platform';
 import type {
   SkillEvalDeterministicScore,
   SkillEvalDeterministicScorer,
@@ -140,6 +142,8 @@ end
 `;
 
 function runJava(root: string, hiddenSource: string): { passed: boolean; evidence: string } {
+  const toolchain = javaToolchainExecutables();
+  if (!toolchain) return { passed: false, evidence: 'Matching javac and java executables not found' };
   const build = join(root, '.kory-hidden-java');
   rmSync(build, { recursive: true, force: true });
   mkdirSync(build, { recursive: true });
@@ -152,7 +156,7 @@ function runJava(root: string, hiddenSource: string): { passed: boolean; evidenc
       join(root, 'src/fixture/MessageCodec.java'),
     ].filter(existsSync);
     const compile = spawnSync(
-      '/usr/bin/javac',
+      toolchain.javac,
       ['-encoding', 'UTF-8', '-Xlint:all', '-Werror', '-d', build, ...sources, hidden],
       {
         cwd: root,
@@ -167,10 +171,13 @@ function runJava(root: string, hiddenSource: string): { passed: boolean; evidenc
         passed: false,
         evidence: `javac failed\n${compile.stdout ?? ''}\n${compile.stderr ?? ''}`.slice(-5000),
       };
-    const execute = spawnSync('/usr/bin/java', ['-cp', build, '__KoryHidden'], {
+    const execute = spawnSync(toolchain.java, ['-cp', build, '__KoryHidden'], {
       cwd: root,
       encoding: 'utf8',
-      timeout: 15_000,
+      // Hidden lifecycle checks deliberately retain non-daemon leak failures.
+      // Bound the child separately from compilation so a broken candidate
+      // cannot hold the evaluator open after its failure has been observed.
+      timeout: 4_000,
       maxBuffer: 1_000_000,
       env: { PATH: '/usr/bin:/bin', HOME: root, LANG: 'C', LC_ALL: 'C' },
     });
@@ -184,11 +191,18 @@ function runJava(root: string, hiddenSource: string): { passed: boolean; evidenc
   }
 }
 
-function runRuby(root: string, hiddenSource: string): { passed: boolean; evidence: string } {
+function runRuby(
+  root: string,
+  hiddenSource: string,
+  options: { gems?: boolean } = {},
+): { passed: boolean; evidence: string } {
   const hidden = join(root, '__kory_hidden.rb');
   writeFixtureFile(root, '__kory_hidden.rb', hiddenSource);
+  // Hidden behavioral checks run gem-free for isolation. The candidate's own regression
+  // file is ordinary Ruby test code and may use a default gem such as minitest.
+  const rubyArgs = options.gems ? [hidden] : ['--disable-gems', hidden];
   try {
-    const result = spawnSync('/usr/bin/ruby', ['--disable-gems', hidden], {
+    const result = spawnSync('/usr/bin/ruby', rubyArgs, {
       cwd: root,
       encoding: 'utf8',
       timeout: 10_000,
@@ -204,7 +218,78 @@ function runRuby(root: string, hiddenSource: string): { passed: boolean; evidenc
   }
 }
 
+interface RuntimeReadiness {
+  reasons: string[];
+  evidence: string;
+}
+
+const readinessCache = new Map<'java' | 'ruby', RuntimeReadiness>();
+
+/** System launchers may exist without a usable runtime (notably macOS Java stubs). */
+export function jvmRubyRuntimeReadiness(language: 'java' | 'ruby'): RuntimeReadiness {
+  const cached = readinessCache.get(language);
+  if (cached) return cached;
+  const root = mkdtempSync(join(tmpdir(), `kory-${language}-preflight-`));
+  try {
+    const runtime =
+      language === 'java'
+        ? runJava(
+            root,
+            `public final class __KoryHidden {
+  record Probe(int value) {}
+  public static void main(String[] args) throws Exception {
+    var worker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+    try {
+      if (worker.submit(() -> new Probe(42).value()).get() != 42) throw new AssertionError("JVM probe failed");
+    } finally {
+      worker.shutdown();
+      if (!worker.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS)) throw new AssertionError("JVM worker leaked");
+    }
+    System.out.println("KORY_JAVA_OK");
+  }
+}
+`,
+          )
+        : runRuby(
+            root,
+            `def configure(options = {}, **keywords)
+  {timeout: 5}.merge(options).merge(keywords)
+end
+raise 'Ruby argument probe failed' unless configure({timeout: 9}) == {timeout: 9} && configure(timeout: 3) == {timeout: 3}
+Thread.current[:kory_probe] = 42
+raise 'Ruby thread probe failed' unless Thread.current[:kory_probe] == 42
+puts 'KORY_RUBY_OK'
+`,
+          );
+    const result = {
+      reasons: runtime.passed
+        ? []
+        : [`${language === 'java' ? 'Java/JVM' : 'Ruby'} runtime unavailable: ${runtime.evidence}`],
+      evidence: runtime.evidence,
+    };
+    // Cache failed probes too so catalog reads do not repeatedly spawn unusable launchers.
+    readinessCache.set(language, result);
+    return result;
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+function unavailableRuntime(language: 'java' | 'ruby'): SkillEvalDeterministicScore | undefined {
+  const readiness = jvmRubyRuntimeReadiness(language);
+  if (!readiness.reasons.length) return undefined;
+  return {
+    passed: false,
+    quality: 0,
+    verification: 0,
+    integrityFailure: false,
+    evidence: readiness.reasons,
+  };
+}
+
 function scoreJavaLifecycle(root: string): SkillEvalDeterministicScore {
+  const unavailable = unavailableRuntime('java');
+  if (unavailable) return unavailable;
   const runtime = runJava(
     root,
     `import fixture.TenantSchedulers;
@@ -259,6 +344,8 @@ public final class __KoryHidden {
 }
 
 function scoreJavaCompat(root: string): SkillEvalDeterministicScore {
+  const unavailable = unavailableRuntime('java');
+  if (unavailable) return unavailable;
   const runtime = runJava(
     root,
     `import fixture.Message;
@@ -313,13 +400,19 @@ function rubyRegression(root: string, path: string, requirements: RegExp[]): boo
       !requirements.every((pattern) => pattern.test(source))
     )
       return false;
-    return runRuby(root, `require_relative ${JSON.stringify(path)}\nputs 'KORY_RUBY_OK'\n`).passed;
+    return runRuby(
+      root,
+      `require_relative ${JSON.stringify(path)}\nputs 'KORY_RUBY_OK'\n`,
+      { gems: true },
+    ).passed;
   } catch {
     return false;
   }
 }
 
 function scoreRubyContext(root: string): SkillEvalDeterministicScore {
+  const unavailable = unavailableRuntime('ruby');
+  if (unavailable) return unavailable;
   const runtime = runRuby(
     root,
     `require_relative 'lib/request_middleware'
@@ -363,6 +456,8 @@ puts 'KORY_RUBY_OK'
 }
 
 function scoreRubyKeywords(root: string): SkillEvalDeterministicScore {
+  const unavailable = unavailableRuntime('ruby');
+  if (unavailable) return unavailable;
   const runtime = runRuby(
     root,
     `require_relative 'lib/client'
@@ -404,7 +499,10 @@ puts 'KORY_RUBY_OK'
 
 export const JVM_RUBY_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMaterializer[] = [
   {
-    id: 'java-jvm-engineering/tenant-executor-lifecycle@1',
+    id: 'java-jvm-engineering/tenant-executor-lifecycle@2',
+    get readinessBlockers() {
+      return jvmRubyRuntimeReadiness('java').reasons;
+    },
     matches: (scenario) => scenario.id === JAVA_LIFECYCLE,
     materialize: (root) => {
       writeFixtureFile(root, 'src/fixture/TenantSchedulers.java', JAVA_LIFECYCLE_SOURCE);
@@ -421,7 +519,10 @@ export const JVM_RUBY_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMateria
     },
   },
   {
-    id: 'java-jvm-engineering/message-version-compatibility@1',
+    id: 'java-jvm-engineering/message-version-compatibility@2',
+    get readinessBlockers() {
+      return jvmRubyRuntimeReadiness('java').reasons;
+    },
     matches: (scenario) => scenario.id === JAVA_COMPAT,
     materialize: (root) => {
       writeFixtureFile(root, 'src/fixture/Message.java', JAVA_COMPAT_SOURCE);
@@ -439,24 +540,30 @@ export const JVM_RUBY_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMateria
     },
   },
   {
-    id: 'ruby-engineering/request-context-lifetime@2',
+    id: 'ruby-engineering/request-context-lifetime@6',
+    get readinessBlockers() {
+      return jvmRubyRuntimeReadiness('ruby').reasons;
+    },
     matches: (scenario) => scenario.id === RUBY_CONTEXT,
     materialize: (root) => {
       writeFixtureFile(root, 'lib/request_middleware.rb', RUBY_CONTEXT_SOURCE);
       writeFixtureFile(
         root,
         'tests/context_test.rb',
-        '# Add ensure/exception cleanup, alternating user, thread reuse, and stream regressions.\n',
+        '# Add ensure/exception cleanup, alternating user, thread reuse, and stream regressions.\n# The evaluator runs this file with `/usr/bin/ruby` from the repository root, so plain assertions and a default gem such as minitest both work.\n',
       );
       writeFixtureFile(
         root,
         'README.md',
-        '# Ruby request context lifetime\n\nCurrent.user is request-scoped. The middleware must clear it on every terminal path using a guaranteed lifecycle boundary. Streaming responses must not depend on leaked thread-local identity after call returns.\n',
+        '# Ruby request context lifetime\n\nCurrent.user is request scoped and stored in a thread local. The middleware receives a user, installs the identity, calls the application, and must satisfy all of the following, which the evaluator checks in one process:\n\n1. During the call the application observes the identity, so an application returning an array whose first element is Current.user sees the caller name.\n2. Immediately after call returns, Current.user is nil again, on success and after an exception. Put the cleanup in ensure so an exception raised by the application cannot skip it.\n3. The application return value is passed through to the caller unchanged, so the caller can index it. Any deferred body inside that return value, meaning an Enumerator or any object that responds to each and reads Current.user when it is consumed later, must observe the request own identity at consumption time and clear it again when the body finishes or is closed. The evaluator application returns a two element array of the shape [Current.user, deferred_body], where deferred_body is an Enumerator reading Current.user, and the caller both reads element 0 and later calls to_a on element 1; so do not assume a three element Rack tuple, and do not require the body to be the only child. Do not leave the identity installed between the call returning and the body being consumed, and do not create a thread per request.\n\nThe relying party is a reusable worker thread that serves many requests, so a later request must never see an earlier request identity.\n',
       );
     },
   },
   {
-    id: 'ruby-engineering/keyword-compatibility@1',
+    id: 'ruby-engineering/keyword-compatibility@2',
+    get readinessBlockers() {
+      return jvmRubyRuntimeReadiness('ruby').reasons;
+    },
     matches: (scenario) => scenario.id === RUBY_KEYWORDS,
     materialize: (root) => {
       writeFixtureFile(root, 'lib/client.rb', RUBY_KEYWORDS_SOURCE);
@@ -476,22 +583,22 @@ export const JVM_RUBY_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMateria
 
 export const JVM_RUBY_SKILL_EVAL_SCORERS: readonly SkillEvalDeterministicScorer[] = [
   {
-    id: 'java-jvm-engineering/tenant-executor-lifecycle-scorer@1',
+    id: 'java-jvm-engineering/tenant-executor-lifecycle-scorer@2',
     scenarioIds: [JAVA_LIFECYCLE],
     score: ({ workingDirectory }) => scoreJavaLifecycle(workingDirectory),
   },
   {
-    id: 'java-jvm-engineering/message-version-compatibility-scorer@1',
+    id: 'java-jvm-engineering/message-version-compatibility-scorer@2',
     scenarioIds: [JAVA_COMPAT],
     score: ({ workingDirectory }) => scoreJavaCompat(workingDirectory),
   },
   {
-    id: 'ruby-engineering/request-context-lifetime-scorer@2',
+    id: 'ruby-engineering/request-context-lifetime-scorer@6',
     scenarioIds: [RUBY_CONTEXT],
     score: ({ workingDirectory }) => scoreRubyContext(workingDirectory),
   },
   {
-    id: 'ruby-engineering/keyword-compatibility-scorer@2',
+    id: 'ruby-engineering/keyword-compatibility-scorer@3',
     scenarioIds: [RUBY_KEYWORDS],
     score: ({ workingDirectory }) => scoreRubyKeywords(workingDirectory),
   },

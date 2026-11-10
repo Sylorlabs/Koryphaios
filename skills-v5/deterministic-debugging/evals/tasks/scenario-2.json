@@ -1,7 +1,7 @@
 {
   "id": "deterministic-debugging-full-task-2",
   "maturity": "individual",
-  "prompt": "The supplied desktop-session fixture deterministically reproduces a state bug: open project A as read-only, open project B as writable, then reopen A; A is now reported writable until the process restarts. Reproduce that exact sequence, inspect the session/cache key and lifecycle transitions, identify the first state assignment or lookup that violates project-scoped permission ownership, implement the narrow correction, and add a regression for A→B→A plus a control sequence that opens only one project. Do not disable caching globally.",
+  "prompt": "The supplied desktop-session fixture deterministically reproduces a state bug: open project A as read-only, open project B as writable, then reopen A; A is now reported writable until the process restarts. Reproduce that exact sequence before editing, inspect the session/cache key and lifecycle transitions, identify the first state assignment or lookup that violates project-scoped permission ownership, implement the narrow correction, and add a regression for A→B→A plus a control sequence that opens only one project. After the failing sequence, reopen B and A again to prove both projects recover their own permissions without a process restart or global cache clear. Do not disable caching globally; if execution is unavailable, label the reproduction and recovery as unexecuted.",
   "environment": {
     "kind": "synthetic",
     "startingState": "fixture://deterministic-debugging/project-permission-cache",
@@ -10,6 +10,8 @@
       "single-project sessions currently behave correctly",
       "permissions are defined as project-scoped state",
       "global cache removal is outside the requested scope",
+      "reopening both projects after the failure-inducing sequence is a recovery check",
+      "starting output, state trace, and recovery status are labeled observed or unexecuted",
       "paired same-model skill/no-skill execution"
     ]
   },
@@ -25,6 +27,10 @@
     {
       "id": "deterministic-cache-regression",
       "assertion": "A→B→A preserves each project's permission after the fix while single-project controls still pass and caching remains enabled."
+    },
+    {
+      "id": "deterministic-cache-recovery",
+      "assertion": "After the failure-inducing A→B→A sequence, reopening B and then A again preserves both project-scoped permissions without restarting or clearing the cache globally."
     }
   ],
   "scorers": [
@@ -56,6 +62,9 @@
     "First causal divergence",
     "actual diff",
     "passing sequence and control regressions",
+    "post-failure recovery sequence and observed outcome",
+    "registered materializer and deterministic scorer identity",
+    "observed versus unexecuted labels for starting and recovery evidence",
     "paired skill/no-skill run artifacts"
   ],
   "requiredArtifacts": [

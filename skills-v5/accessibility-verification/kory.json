@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "accessibility-verification",
-  "version": "5.0.2",
+  "version": "5.0.3",
   "skillKind": "verification",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -134,20 +134,36 @@
       "verifiedAt": "2026-09-05"
     },
     {
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/",
+      "sourceType": "official-docs",
+      "versionScope": "W3C APG modal dialog pattern available 2026-10-10",
+      "staleAfterDays": 90,
+      "notes": "Keyboard focus containment, Escape, and focus restoration guidance for web modal dialogs; non-normative pattern guidance.",
+      "verifiedAt": "2026-10-10"
+    },
+    {
+      "url": "https://www.w3.org/WAI/WCAG22/Understanding/focus-not-obscured-minimum",
+      "sourceType": "official-docs",
+      "versionScope": "WCAG 2.2 Understanding SC 2.4.11 available 2026-10-10",
+      "staleAfterDays": 90,
+      "notes": "Focus visibility and obscuration examples for keyboard operation, including dialogs and sticky overlays.",
+      "verifiedAt": "2026-10-10"
+    },
+    {
       "url": "https://developer.android.com/guide/topics/ui/accessibility/testing",
       "sourceType": "official-docs",
-      "versionScope": "Android accessibility testing guidance available 2026-09-05",
+      "versionScope": "Android accessibility testing guidance available 2026-11-07",
       "staleAfterDays": 60,
       "notes": "TalkBack, alternate switch input, scanning, and automated accessibility tests on Android.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://developer.apple.com/design/human-interface-guidelines/accessibility",
       "sourceType": "official-docs",
-      "versionScope": "Apple HIG accessibility guidance available 2026-09-05",
+      "versionScope": "Apple HIG accessibility guidance available 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Apple-platform accessibility, adaptability, and alternate interaction guidance.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     }
   ],
   "authoringMaturity": "individual"

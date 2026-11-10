@@ -154,7 +154,7 @@
       "versionScope": "Agent Skills specification as available 2026-09-05",
       "staleAfterDays": 90,
       "notes": "Portable discovery metadata and progressive disclosure.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md",
@@ -162,7 +162,7 @@
       "versionScope": "OpenAI public skill-creator guidance on main as inspected 2026-09-05",
       "staleAfterDays": 60,
       "notes": "Bounded specialist triggers and behavioral evaluation.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     }
   ],
   "authoringMaturity": "individual"

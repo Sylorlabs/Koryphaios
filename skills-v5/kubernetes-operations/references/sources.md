@@ -6,28 +6,28 @@
 
 - Package authorship is independent from empirical qualification; the audit/evaluation ledger is authoritative for qualification status.
 - Hierarchy: broader architecture-planning.
-- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held-out cases through the real resolver.
-- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no-skill pairing, regression retention, and blind semantic judging.
+- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held out cases through the real resolver.
+- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no skill pairing, regression retention, and blind semantic judging.
 - Source discipline: authoritative/spec/reference sources outrank community patterns when they conflict; runtime evidence outranks examples for behavioral claims.
 
 ## Maintained sources
 
 - **Kubernetes Releases**: https://kubernetes.io/releases/
-  - Scope: as of 2026-09-05, maintained branches are 1.37, 1.36, and 1.35; 1.37.0 released 2026-08-26.
+  - Scope: as of 2026-10-04, maintained branches are 1.37, 1.36, and 1.35; latest patches are 1.37.1, 1.36.5, and 1.35.9, released 2026-09-15.
   - Use: resolve current supported minor/patch status before version-sensitive operational guidance.
-  - Verified: 2026-09-05; refresh after 30 days.
+  - Verified: 2026-11-03; refresh after 30 days.
 - **Kubernetes Version Skew Policy**: https://kubernetes.io/releases/version-skew-policy/
-  - Scope: current supported-version skew policy as available 2026-09-05.
+  - Scope: current supported-version skew policy as available 2026-11-07.
   - Use: control-plane, kubelet, kube-proxy, and kubectl compatibility during upgrades.
-  - Verified: 2026-09-05; refresh after 60 days.
+  - Verified: 2026-11-03; refresh after 60 days.
 - **Deployments**: https://kubernetes.io/docs/concepts/workloads/controllers/deployment/
-  - Scope: Kubernetes 1.37 documentation as available 2026-09-05.
+  - Scope: Kubernetes 1.37 documentation as available 2026-11-07.
   - Use: rollout strategy, availability, progress, revision history, pause/resume, and rollback semantics.
-  - Verified: 2026-09-05; refresh after 60 days.
+  - Verified: 2026-11-07; refresh after 60 days.
 - **Disruptions / PodDisruptionBudget**: https://kubernetes.io/docs/concepts/workloads/pods/disruptions/
-  - Scope: Kubernetes 1.37 documentation as available 2026-09-05.
+  - Scope: Kubernetes 1.37 documentation as available 2026-11-07.
   - Use: voluntary/involuntary disruption and PDB behavior; prevents treating PDBs as universal availability guarantees.
-  - Verified: 2026-09-05; refresh after 60 days.
+  - Verified: 2026-11-07; refresh after 60 days.
 
 ## Interpretation rules
 

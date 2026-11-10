@@ -1,7 +1,7 @@
 {
   "id": "agentic-systems-full-task-1-individual",
   "maturity": "individual",
-  "prompt": "The evaluation repository asks the agent to \"Apply ai agent expertise to this task\". The fixture contains a plausible happy path, an adjacent-skill decoy, one invalid or partial state, and a recovery condition that must be demonstrated rather than assumed. The acceptance boundary is agentic-systems: Separate goal interpretation, planning, tool discovery, authorization, execution, observation, memory, delegation, and completion judgment. The adjacent prompt-context-engineering discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "prompt": "Repair a bounded service-remediation agent that chooses diagnostics from current observations, proposes an approved restart or feature-flag change, and stops only after independent health evidence matches the current deployment. Preserve the supplied tool and result interfaces. Demonstrate denied approval, a deployment race, an uncertain mutation outcome, finite no-progress termination, and an unavailable completion oracle. First read the executable environment's actual contract: the registered individual exercise currently provides a pure solve(input) execution-state evaluator, not a live service or durable agent runtime. Implement that supplied evaluator exactly and label live authority, recovery, tool integration, and external completion-oracle obligations not exercised by it as unverified. Reconcile action and revision identifiers by structural JSON value, not object identity. Retain a detailed trace row for every required negative or recovery scenario without claiming an unexecuted receipt. Agentic-systems owns next-action choice, authority, run state, recovery and completion; llm-application-engineering owns bounded model/tool integration, and prompt-context-engineering is adjacent unless prompt construction is separately requested.",
   "environment": {
     "kind": "repository",
     "startingState": "fixture://agentic-systems/scenario-1",
@@ -11,9 +11,13 @@
       "uncertain mutation timeout, duplicate retry, denied approval and repeated no-progress error fixtures",
       "durable run/execution log plus independent health checker and explicit step/tool/time budgets",
       "paired same-model skill/no-skill execution",
-      "agentic-systems parent/child/neighbor hierarchy boundary fixture",
-      "domain-specific tempting anti-pattern or shortcut",
-      "representative negative, interruption, compatibility, or recovery path"
+      "broader llm-application-engineering and adjacent prompt-context-engineering responsibility boundaries",
+      "mutation receipt mistaken for health evidence and a fresh retry key after timeout as explicit negative controls",
+      "approval denial, stale revision, uncertain outcome and unavailable health evidence with inspectable terminal results",
+      "verify-only events cannot establish the observed revision, fresh unhealthy verification replaces healthy state, and new mutations or observations invalidate prior health evidence",
+      "the registered individual materializer supplies a synthetic execution-state evaluator only; live tool enforcement, durable operation identity and process-resume evidence remain separate requirements",
+      "the package-local trace-evidence fixture requires explicit unverified labels and detailed traces without fabricated execution",
+      "the result includes an evidence artifact with executionStatus, observedResult, unverifiedObligations, and per-scenario traces, and compares current revision and current evidence generation at the terminal gate"
     ]
   },
   "falsifiableChecks": [
@@ -23,23 +27,23 @@
     },
     {
       "id": "operating-contract",
-      "assertion": "Separate goal interpretation, planning, tool discovery, authorization, execution, observation, memory, delegation, and completion judgment."
+      "assertion": "Identify the supplied event fields, output shape and reason precedence before implementation. In a runtime deliverable, separate observation, action selection, approval, execution and independent verification; discover actual tool schemas before choosing a call. Reconcile action and revision fields as structural JSON values, with recursive ordered arrays, key-order-insensitive objects, and missing distinct from null. A pure evaluator must preserve its declared JSON contract rather than adding runtime-only output fields."
     },
     {
       "id": "execution-invariant",
-      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+      "assertion": "Trace approval and current revision before every permitted mutation. A runtime dispatch must persist one logical operation identity before the call, reuse it only under the adapter's retry guarantee, and charge failed calls and reconciliation against finite shared budgets. The synthetic evaluator must enforce its declared request authorization, mutation-budget and uncertainty rules without claiming a remote effect occurred."
     },
     {
       "id": "verification-discipline",
-      "assertion": "Use scenario suites covering tool success/failure, stale observations, partial side effects, denied permissions, duplicate retries, delegation errors, long-horizon drift, and independent verification of final state."
+      "assertion": "Exercise approved success, denial, stale revision, timeout before retry, verify-only, fresh healthy then unhealthy verification, and health after a new mutation or observation in the supplied evaluator. Verify-only cannot advance latestObservedRevision; fresh unhealthy replaces healthy; new evidence invalidates prior health. For runtime cases, retain rows for healthy-at-entry, deployment race, timeout after apply without duplicate mutation, exhausted budget and unavailable health, with ordered events, revision/generation, authority, operation key, budget, transition, terminal decision, observedResult and missingEvidence. Mark live authority, recovery, tool integration and external completion-oracle cases not executed as unverified; do not fabricate receipts."
     },
     {
       "id": "anti-pattern-resistance",
-      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not let prompts grant authority, let agents self-certify irreversible work, retry non-idempotent actions blindly, or add subagents when decomposition does not improve evidence or throughput."
+      "assertion": "Do not treat a mutation acknowledgement as completion, convert a timeout into definite failure to permit a retry, reuse approval for another revision, or count only successful calls against the budget. Do not add specialists to a single remediation decision without an evidence or throughput benefit."
     },
     {
       "id": "evidence-and-uncertainty",
-      "assertion": "Every material completion claim must map to observable evidence (Goal/terminal-condition plus run/delegation budget evidence; Tool/agent authority, approval and side-effect classification evidence; Idempotency/reconciliation/state-memory and retry evidence; Trace plus independent final-state/completion evidence), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+      "assertion": "Every material completion claim must map to observable evidence (Goal/terminal-condition plus run/delegation budget evidence; Tool/agent authority, approval and side-effect classification evidence; Idempotency/reconciliation/state-memory and retry evidence; Trace plus independent final-state/completion evidence), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty. The terminal gate must compare both the current observed revision and current evidence generation, not merely record a generation counter."
     }
   ],
   "scorers": [
@@ -81,11 +85,14 @@
     "hierarchy boundary and selected specialist rationale",
     "representative success plus negative/recovery evidence",
     "paired skill/no-skill run artifacts",
-    "explicit unavailable, simulated, inferred, or stale evidence labels"
+    "explicit unavailable, simulated, inferred, stale, unresolved, and unverified evidence labels",
+    "detailed per-scenario negative/recovery traces with event order, budget use, state transitions, terminal decisions, observedResult and missing proof",
+    "evidence artifact with executionStatus, observedResult, unverifiedObligations, current revision and current evidence generation"
   ],
   "requiredArtifacts": [
     "agentic-systems-individual-scenario-1-result",
     "agentic-systems-individual-scenario-1-verification",
+    "agentic-systems-individual-scenario-1-trace-evidence",
     "agentic-systems-individual-scenario-1-paired-evaluation"
   ]
 }

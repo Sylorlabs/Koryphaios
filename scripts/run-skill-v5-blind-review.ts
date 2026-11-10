@@ -1,6 +1,27 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { completePairForScenario } from '../backend/src/kory/skill-eval-blind-review';
+import { selectEligibleSkillEvaluationEvidence } from '../backend/src/kory/skill-eval-eligibility';
+import { existsSync, mkdirSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import {
+  anonymousArtifact,
+  MAX_BLIND_IMPORT_BYTES,
+  readBoundedBlindFile,
+  SNAPSHOT_HASH_EXPLANATION,
+  verifyPreparedArtifactHashes,
+  verifyPreparedCurrentBinding,
+  verifyPreparedPromptBinding,
+  writeProtectedBlindFile,
+} from './blind-review-import-validation';
+import {
+  requireNativeStageOptIn,
+  retainNativeBlindReviewEvidence,
+  verifyNativeBlindReviewImport,
+  type NativeStageEvidence,
+} from './blind-review-native-import';
+import { canonicalizePath } from '../backend/src/runtime/platform';
+import { homedir } from 'node:os';
+import { strictJson } from './reviewer-json';
 import {
   BUILTIN_SKILL_EVAL_MATERIALIZERS,
   BUILTIN_SKILL_EVAL_SCORERS,
@@ -14,11 +35,13 @@ import {
 import {
   blindJudgeQuoteIsStructural,
   buildBlindReviewJudgePrompt,
+  findBlindJudgeArtifactMismatch,
   findBlindJudgeRubricViolation,
   type BlindPairExecutionEvidence,
-  type BlindReviewArtifact,
 } from '../backend/src/kory/skill-eval-blind-review';
 import { loadV5SkillPackages, type V5FullTaskFixture } from '../backend/src/kory/skill-packages';
+import { skillEvaluationV5ContractHash } from '../backend/src/kory/skill-eval-contract-hash';
+import type { SkillEvalScenarioV3 } from '../backend/src/kory/skill-eval-harness';
 import { listSkills } from '../backend/src/kory/skills';
 import {
   buildSkillStewardDisplayLabel,
@@ -28,8 +51,25 @@ import {
 
 const projectRoot = resolve(import.meta.dir, '..');
 const evaluationContractVersion = CURRENT_SKILL_EVAL_CONTRACT_VERSION;
-const BLIND_HARNESS_VERSION = 'v5-blind-semantic@7';
-const BLIND_EVALUATOR_ID = 'chatgpt-web-blind-semantic-v7';
+const BLIND_HARNESS_VERSION = 'v5-blind-semantic@8';
+const BLIND_EVALUATOR_ID = 'independent-blind-semantic-v7';
+/**
+ * Record who actually graded. The steward display label is the trusted-reviewer
+ * boundary: the promotion gate reads it to decide whether a blind review came
+ * from the sanctioned channel. Forcing it onto every importer envelope made the
+ * recorded provenance claim a ChatGPT Web identity the reviewer never had, so
+ * the saved evidence could not be audited for the identity it asserted. A
+ * reviewer that genuinely is the trusted channel keeps the steward label; every
+ * other reviewer is recorded under its own provider.
+ */
+function blindReviewerDisplayLabel(
+  skill: string,
+  reviewer: { provider: string; model: string },
+): string {
+  return isChatGptWebSkillStewardIdentity(reviewer.provider, reviewer.model)
+    ? buildSkillStewardDisplayLabel(skill)
+    : `${reviewer.provider} reviewer — ${skill}`;
+}
 const packages = loadV5SkillPackages(resolve(projectRoot, 'skills-v5')).packages;
 const currentByName = new Map(
   listSkills(projectRoot)
@@ -46,7 +86,13 @@ const ingestPath = process.argv
   .find((argument) => argument.startsWith('--ingest='))
   ?.slice('--ingest='.length)
   .trim();
+const validateOnlyPath = process.argv
+  .find((argument) => argument.startsWith('--validate-only='))
+  ?.slice('--validate-only='.length)
+  .trim();
 const summaryOnly = process.argv.includes('--summary');
+const retryFailed = process.argv.includes('--retry-failed');
+const allowNativeStage = process.argv.includes('--allow-native-stage');
 const concurrency = Number(
   process.argv
     .find((argument) => argument.startsWith('--concurrency='))
@@ -61,9 +107,12 @@ const maxPerSkill = maxPerSkillArgument ? Number(maxPerSkillArgument) : Number.P
 if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 8) {
   throw new Error(`Invalid blind-review concurrency ${String(concurrency)}; expected 1-8`);
 }
-if (!dryRun && !prepareOnly && !ingestPath && !summaryOnly) {
+if (ingestPath && validateOnlyPath) {
+  throw new Error('Choose --ingest or --validate-only, not both');
+}
+if (!dryRun && !prepareOnly && !ingestPath && !validateOnlyPath && !summaryOnly) {
   throw new Error(
-    'Direct V5 blind judging is disabled. Use --prepare-only, delegate the anonymous assignment to an actual chatgpt-web/... reviewer, then use --ingest=<result.json>.',
+    'Direct V5 blind judging is disabled. Use --prepare-only, delegate the anonymous assignment to an actual chatgpt-web/... reviewer, then use --validate-only=<result.json> or --ingest=<result.json>.',
   );
 }
 if (
@@ -82,18 +131,42 @@ const selectedPackages = requested.length
 
 const sha256 = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 
-function currentEvaluationContractHash(skill: string, task: V5FullTaskFixture): string | null {
+function currentEvaluationContract(
+  skill: string,
+  task: V5FullTaskFixture,
+): {
+  evaluationContractVersion: number;
+  evaluationContractHash: string;
+  materializerIds: string[];
+  scorerIds: string[];
+} | null {
   const skillPackage = packages.find((item) => item.sidecar.name === skill);
   if (!skillPackage) return null;
-  const materializerIds = BUILTIN_SKILL_EVAL_MATERIALIZERS.filter((item) => item.matches(task))
+  // Match the same full-task scenario shape used by the execution campaign;
+  // passing only a task silently breaks materializers that inspect skill/scope.
+  const scenario: SkillEvalScenarioV3 = {
+    ...task,
+    skill,
+    category: 'full-task',
+    expectedSelection: true,
+    expectedSkills: [],
+    forbiddenSkills: [],
+    heldOut: true,
+    adjacentSkills: [],
+    tags: ['held-out', 'full-task'],
+  };
+  const materializerIds = BUILTIN_SKILL_EVAL_MATERIALIZERS.filter((item) => item.matches(scenario))
     .map((item) => item.id)
     .sort();
   const scorerIds = BUILTIN_SKILL_EVAL_SCORERS.filter((item) => item.scenarioIds.includes(task.id))
     .map((item) => item.id)
     .sort();
   if (!materializerIds.length || !scorerIds.length) return null;
-  return sha256(
-    JSON.stringify({
+  return {
+    evaluationContractVersion,
+    materializerIds,
+    scorerIds,
+    evaluationContractHash: skillEvaluationV5ContractHash({
       contractVersion: evaluationContractVersion,
       skill,
       packageVersion: skillPackage.sidecar.version,
@@ -101,138 +174,21 @@ function currentEvaluationContractHash(skill: string, task: V5FullTaskFixture): 
       materializerIds,
       scorerIds,
     }),
-  ).slice(0, 16);
-}
-
-function completePairForScenario(
-  runs: readonly SkillEvaluationRun[],
-  scenarioId: string,
-  contractHash: string,
-): { withSkill: SkillEvaluationRun; withoutSkill: SkillEvaluationRun } | null {
-  const eligible = runs.filter(
-    (run) =>
-      run.protocolVersion === 3 &&
-      run.evaluator === 'deterministic' &&
-      run.caseCategory === 'full-task' &&
-      run.scenarioId === scenarioId &&
-      run.evaluationContractHash === contractHash &&
-      !run.infrastructureFailure &&
-      Boolean(run.comparisonId),
-  );
-  const byPair = new Map<string, SkillEvaluationRun[]>();
-  for (const run of eligible) {
-    byPair.set(run.comparisonId!, [...(byPair.get(run.comparisonId!) ?? []), run]);
-  }
-  const pairs = [...byPair.entries()]
-    .flatMap(([comparisonId, pairRuns]) => {
-      const withSkill = pairRuns.find((run) => run.variant === 'with-skill');
-      const withoutSkill = pairRuns.find((run) => run.variant === 'without-skill');
-      if (!withSkill || !withoutSkill) return [];
-      if (
-        withSkill.provider !== withoutSkill.provider ||
-        withSkill.model !== withoutSkill.model ||
-        withSkill.harnessVersion !== withoutSkill.harnessVersion ||
-        withSkill.evaluationContractVersion !== withoutSkill.evaluationContractVersion ||
-        withSkill.evaluationContractHash !== withoutSkill.evaluationContractHash ||
-        withSkill.materializerId !== withoutSkill.materializerId ||
-        withSkill.deterministicScorerId !== withoutSkill.deterministicScorerId
-      ) {
-        return [];
-      }
-      return [{ comparisonId, withSkill, withoutSkill }];
-    })
-    .sort((left, right) => {
-      const leftTime = [left.withSkill.recordedAt, left.withoutSkill.recordedAt].sort().at(-1)!;
-      const rightTime = [right.withSkill.recordedAt, right.withoutSkill.recordedAt].sort().at(-1)!;
-      return (
-        rightTime.localeCompare(leftTime) || right.comparisonId.localeCompare(left.comparisonId)
-      );
-    });
-  return pairs[0] ?? null;
-}
-
-function readBoundedText(path: string, maxChars: number): string | undefined {
-  if (!existsSync(path)) return undefined;
-  const buffer = readFileSync(path);
-  if (buffer.includes(0)) return undefined;
-  return buffer.toString('utf8').slice(0, maxChars);
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
-}
-
-function scrubBlindText(value: string, skill: string): string {
-  return value
-    .replace(/\bwithout-skill\b/giu, 'workspace')
-    .replace(/\bwith-skill\b/giu, 'workspace')
-    .replace(new RegExp(escapeRegExp(skill), 'giu'), 'target-guidance');
-}
-
-function anonymousArtifact(run: SkillEvaluationRun, skill: string): BlindReviewArtifact {
-  const manifestArtifact = run.artifacts?.find(
-    (artifact) => artifact.kind === 'report' && basename(artifact.location) === 'run-manifest.json',
-  );
-  const outputArtifact = run.artifacts?.find(
-    (artifact) => artifact.kind === 'report' && basename(artifact.location) === 'final-output.txt',
-  );
-  if (!manifestArtifact || !outputArtifact) {
-    throw new Error(`Run ${run.id} lacks durable manifest/output artifacts`);
-  }
-  const manifest = JSON.parse(readFileSync(manifestArtifact.location, 'utf8')) as {
-    changes?: Array<{
-      path?: unknown;
-      change?: unknown;
-      beforeSha256?: unknown;
-      afterSha256?: unknown;
-    }>;
-    evidence?: unknown;
-    score?: { evidence?: unknown };
   };
-  let remaining = 80_000;
-  const artifactRoot = dirname(manifestArtifact.location);
-  const changes = (manifest.changes ?? []).flatMap((change) => {
-    if (typeof change.path !== 'string' || typeof change.change !== 'string') return [];
-    const beforePath = join(artifactRoot, 'before-files', change.path);
-    const afterPath = join(artifactRoot, 'files', change.path);
-    const beforeText =
-      remaining > 0 ? readBoundedText(beforePath, Math.min(20_000, remaining)) : undefined;
-    if (beforeText) remaining -= beforeText.length;
-    const afterText =
-      remaining > 0 ? readBoundedText(afterPath, Math.min(20_000, remaining)) : undefined;
-    if (afterText) remaining -= afterText.length;
-    return [
-      {
-        path: change.path,
-        change: change.change,
-        beforeSha256: typeof change.beforeSha256 === 'string' ? change.beforeSha256 : null,
-        afterSha256: typeof change.afterSha256 === 'string' ? change.afterSha256 : null,
-        ...(beforeText ? { beforeText: scrubBlindText(beforeText, skill) } : {}),
-        ...(afterText ? { afterText: scrubBlindText(afterText, skill) } : {}),
-      },
-    ];
-  });
-  const manifestEvidence = Array.isArray(manifest.evidence)
-    ? manifest.evidence.filter((item): item is string => typeof item === 'string')
-    : [];
-  const scoreEvidence = Array.isArray(manifest.score?.evidence)
-    ? manifest.score.evidence.filter((item): item is string => typeof item === 'string')
-    : [];
-  let evidenceRemaining = 45_000;
-  const executionEvidence = [...manifestEvidence, ...scoreEvidence].flatMap((item) => {
-    if (evidenceRemaining <= 0) return [];
-    const bounded = item.slice(0, evidenceRemaining);
-    evidenceRemaining -= bounded.length;
-    return [scrubBlindText(bounded, skill)];
-  });
-  return {
-    finalOutput: scrubBlindText(
-      readFileSync(outputArtifact.location, 'utf8').slice(0, 30_000),
-      skill,
-    ),
-    executionEvidence,
-    changes,
-  };
+}
+
+function matchesCurrentSourceContract(
+  run: SkillEvaluationRun,
+  current: NonNullable<ReturnType<typeof currentEvaluationContract>>,
+): boolean {
+  return (
+    run.evaluationContractVersion === current.evaluationContractVersion &&
+    run.evaluationContractHash === current.evaluationContractHash &&
+    typeof run.materializerId === 'string' &&
+    current.materializerIds.includes(run.materializerId) &&
+    typeof run.deterministicScorerId === 'string' &&
+    current.scorerIds.includes(run.deterministicScorerId)
+  );
 }
 
 interface JudgeArtifactScore {
@@ -277,7 +233,11 @@ function parseJudgeResult(output: string): JudgeResult {
           if (
             !escaped &&
             char === '\\' &&
-            (nextChar === '[' || nextChar === ']' || nextChar === '_' || nextChar === '`')
+            (nextChar === '[' ||
+              nextChar === ']' ||
+              nextChar === '_' ||
+              nextChar === '`' ||
+              nextChar === '*')
           ) {
             continue;
           }
@@ -310,7 +270,13 @@ function parseJudgeResult(output: string): JudgeResult {
           let runEnd = index;
           while (structuralCandidate[runEnd] === '\\') runEnd += 1;
           const following = structuralCandidate[runEnd];
-          if (following === '[' || following === ']' || following === '_' || following === '`') {
+          if (
+            following === '[' ||
+            following === ']' ||
+            following === '_' ||
+            following === '`' ||
+            following === '*'
+          ) {
             index = runEnd - 1;
             continue;
           }
@@ -367,6 +333,23 @@ function parseJudgeResult(output: string): JudgeResult {
 }
 
 const blindRoot = join(projectRoot, '.koryphaios', 'skills', 'blind-reviews');
+const allRuns = listSkillEvaluationRuns(projectRoot);
+const evidenceEligibility = selectEligibleSkillEvaluationEvidence(allRuns);
+const requestedSkillNames = new Set(
+  selectedPackages.map((skillPackage) => skillPackage.sidecar.name),
+);
+const relevantRunIds = new Set(
+  allRuns
+    .filter(
+      (run) =>
+        currentByName.get(run.skill)?.hash === run.revisionHash &&
+        requestedSkillNames.has(run.skill),
+    )
+    .map((run) => run.id),
+);
+const excludedEvidence = evidenceEligibility.excludedEvidence.filter((item) =>
+  relevantRunIds.has(item.runId),
+);
 const eligible: Array<{
   skill: string;
   task: V5FullTaskFixture;
@@ -376,18 +359,22 @@ const eligible: Array<{
 for (const skillPackage of selectedPackages) {
   const revision = currentByName.get(skillPackage.sidecar.name);
   if (!revision) continue;
-  const runs = listSkillEvaluationRuns(projectRoot, skillPackage.sidecar.name).filter(
-    (run) => run.revisionHash === revision.hash,
+  const runs = evidenceEligibility.runs.filter(
+    (run) => run.skill === skillPackage.sidecar.name && run.revisionHash === revision.hash,
   );
   for (const task of skillPackage.evaluation.tasks) {
-    const contractHash = currentEvaluationContractHash(skillPackage.sidecar.name, task);
-    if (!contractHash) continue;
-    const pair = completePairForScenario(runs, task.id, contractHash);
+    const current = currentEvaluationContract(skillPackage.sidecar.name, task);
+    if (!current) continue;
+    const pair = completePairForScenario(
+      runs.filter((run) => matchesCurrentSourceContract(run, current)),
+      task.id,
+      current.evaluationContractHash,
+    );
     if (pair) eligible.push({ skill: skillPackage.sidecar.name, task, pair });
   }
 }
 
-const currentBlindReviews = listSkillEvaluationRuns(projectRoot).filter((run) => {
+const currentBlindReviews = evidenceEligibility.runs.filter((run) => {
   if (
     run.evaluator !== 'blind-review' ||
     run.harnessVersion !== BLIND_HARNESS_VERSION ||
@@ -397,20 +384,26 @@ const currentBlindReviews = listSkillEvaluationRuns(projectRoot).filter((run) =>
   ) {
     return false;
   }
+  const skillPackage = packages.find((item) => item.sidecar.name === run.skill);
+  const task = skillPackage?.evaluation.tasks.find((item) => item.id === run.scenarioId);
+  const current = task ? currentEvaluationContract(run.skill, task) : null;
+  if (!current || !matchesCurrentSourceContract(run, current)) {
+    return false;
+  }
   const provenance = run.evaluatorProvenance;
   const steward = getSkillSteward(projectRoot, run.skill);
   return Boolean(
     provenance?.agentId &&
-    provenance.provider &&
-    provenance.model &&
     provenance.displayLabel === buildSkillStewardDisplayLabel(run.skill) &&
-    isChatGptWebSkillStewardIdentity(provenance.provider, provenance.model) &&
     steward &&
     provenance.agentId !== steward.agentId,
   );
 });
+const blockingBlindReviews = retryFailed
+  ? currentBlindReviews.filter((run) => run.passed)
+  : currentBlindReviews;
 const reviewedPairKeys = new Set(
-  currentBlindReviews.map(
+  blockingBlindReviews.map(
     (run) => `${run.skill}\0${run.scenarioId ?? run.caseId}\0${run.comparisonId}`,
   ),
 );
@@ -421,7 +414,7 @@ const pending = eligible.filter(
     ),
 );
 const currentReviewCountBySkill = new Map<string, number>();
-for (const run of currentBlindReviews) {
+for (const run of blockingBlindReviews) {
   currentReviewCountBySkill.set(run.skill, (currentReviewCountBySkill.get(run.skill) ?? 0) + 1);
 }
 const queue = pending.filter((item, index, items) => {
@@ -457,6 +450,7 @@ interface PreparedAssignmentRecord {
 
 interface BlindReviewImportEnvelope {
   schemaVersion: 1;
+  nativeStageEvidence?: NativeStageEvidence;
   reviewer: {
     agentId: string;
     provider: string;
@@ -510,17 +504,33 @@ function prepareAssignment(item: (typeof eligible)[number]): PreparedAssignmentR
   const assignmentId = assignmentIdFor(item);
   const withArtifact = anonymousArtifact(item.pair.withSkill, item.skill);
   const withoutArtifact = anonymousArtifact(item.pair.withoutSkill, item.skill);
+  if (
+    JSON.stringify(withArtifact.publicContract) !== JSON.stringify(withoutArtifact.publicContract)
+  ) {
+    throw new Error(`Blind review pair ${pairId} has mismatched public contract snapshots`);
+  }
   const withIsA = Number.parseInt(sha256(`${assignmentId}\0arm-order`).slice(0, 2), 16) % 2 === 0;
   const artifactA = withIsA ? withArtifact : withoutArtifact;
   const artifactB = withIsA ? withoutArtifact : withArtifact;
-  const prompt = buildBlindReviewJudgePrompt({
+  const promptPath = join(pendingRoot, `${assignmentId}.prompt.txt`);
+  const privatePath = join(pendingRoot, `${assignmentId}.private.json`);
+  // Existing seals are historical bytes: never overwrite them to add guidance.
+  if (existsSync(privatePath) || existsSync(promptPath)) {
+    const existing = readPreparedAssignment(assignmentId);
+    verifyPreparedCurrentBinding(existing, item.pair.withSkill);
+    if (existing.withIsA !== withIsA)
+      throw new Error(
+        'Prepared blind assignment arm mapping differs from its sealed randomized order',
+      );
+    verifyPreparedArtifactHashes(existing, artifactA, artifactB);
+    return existing;
+  }
+  const prompt = `${SNAPSHOT_HASH_EXPLANATION}\n\n${buildBlindReviewJudgePrompt({
     task: item.task,
     artifactA,
     artifactB,
     pairEvidence: pairExecutionEvidence(item.pair.withSkill, item.pair.withoutSkill),
-  });
-  const promptPath = join(pendingRoot, `${assignmentId}.prompt.txt`);
-  const privatePath = join(pendingRoot, `${assignmentId}.private.json`);
+  })}`;
   const record: PreparedAssignmentRecord = {
     schemaVersion: 3,
     assignmentId,
@@ -540,48 +550,103 @@ function prepareAssignment(item: (typeof eligible)[number]): PreparedAssignmentR
     promptPath,
     preparedAt: new Date().toISOString(),
   };
-  writeFileSync(promptPath, prompt, { mode: 0o600 });
-  writeFileSync(privatePath, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
+  writeProtectedBlindFile(promptPath, Buffer.from(prompt));
+  writeProtectedBlindFile(privatePath, Buffer.from(`${JSON.stringify(record, null, 2)}\n`));
   return record;
 }
 
 function readPreparedAssignment(assignmentId: string): PreparedAssignmentRecord {
+  if (typeof assignmentId !== 'string' || !/^[A-Za-z0-9_-]{1,120}$/u.test(assignmentId)) {
+    throw new Error('Invalid prepared blind assignment id');
+  }
   const path = join(pendingRoot, `${assignmentId}.private.json`);
   if (!existsSync(path)) throw new Error(`Unknown prepared blind assignment ${assignmentId}`);
-  const record = JSON.parse(readFileSync(path, 'utf8')) as PreparedAssignmentRecord;
-  if (record.schemaVersion !== 3 || record.assignmentId !== assignmentId) {
+  const record = strictJson(
+    readBoundedBlindFile(path, MAX_BLIND_IMPORT_BYTES, true).toString('utf8'),
+  ) as PreparedAssignmentRecord;
+  if (
+    !record ||
+    record.schemaVersion !== 3 ||
+    record.assignmentId !== assignmentId ||
+    typeof record.withIsA !== 'boolean' ||
+    ['skill', 'scenarioId', 'pairId', 'revisionHash'].some(
+      (key) =>
+        typeof record[key as keyof PreparedAssignmentRecord] !== 'string' ||
+        !record[key as keyof PreparedAssignmentRecord],
+    ) ||
+    ['promptSha256', 'artifactASha256', 'artifactBSha256'].some(
+      (key) => !/^[a-f0-9]{64}$/u.test(String(record[key as keyof PreparedAssignmentRecord])),
+    ) ||
+    record.promptPath !== join(pendingRoot, `${assignmentId}.prompt.txt`)
+  ) {
     throw new Error(`Invalid prepared blind assignment ${assignmentId}`);
   }
   if (!existsSync(record.promptPath))
-    throw new Error(`Blind assignment prompt is missing: ${record.promptPath}`);
-  if (sha256(readFileSync(record.promptPath)) !== record.promptSha256) {
+    throw new Error(`Blind assignment prompt is missing for ${assignmentId}`);
+  if (
+    sha256(readBoundedBlindFile(record.promptPath, MAX_BLIND_IMPORT_BYTES, true)) !==
+    record.promptSha256
+  ) {
     throw new Error(`Blind assignment prompt hash mismatch for ${assignmentId}`);
   }
   return record;
 }
 
-function ingestBlindReviews(path: string): void {
-  const envelope = JSON.parse(readFileSync(resolve(path), 'utf8')) as BlindReviewImportEnvelope;
+let validatedReviews = 0;
+function ingestBlindReviews(path: string, writeEvaluation: boolean): void {
+  const envelopeBytes = readBoundedBlindFile(resolve(path), MAX_BLIND_IMPORT_BYTES);
+  const envelope = strictJson(envelopeBytes.toString('utf8')) as BlindReviewImportEnvelope;
   if (
+    !envelope ||
     envelope.schemaVersion !== 1 ||
-    !envelope.reviewer?.agentId ||
-    !envelope.reviewer.provider ||
-    !envelope.reviewer.model ||
+    typeof envelope.reviewer?.agentId !== 'string' ||
+    !envelope.reviewer.agentId.trim() ||
+    typeof envelope.reviewer.provider !== 'string' ||
+    !envelope.reviewer.provider.trim() ||
+    typeof envelope.reviewer.model !== 'string' ||
+    !envelope.reviewer.model.trim() ||
     !Array.isArray(envelope.reviews)
   ) {
     throw new Error('Invalid blind-review import envelope');
   }
-  if (!isChatGptWebSkillStewardIdentity(envelope.reviewer.provider, envelope.reviewer.model)) {
-    throw new Error('Blind-review import must come from an actual chatgpt-web/... reviewer');
+  const nativeStage = requireNativeStageOptIn(envelope, allowNativeStage);
+  if (
+    nativeStage &&
+    !readBoundedBlindFile(resolve(path), MAX_BLIND_IMPORT_BYTES, true).equals(envelopeBytes)
+  ) {
+    throw new Error('Native import envelope changed during validation');
   }
+  // Provider/model are provenance metadata. The integrity boundary is the
+  // sealed assignment, completed event evidence, and reviewer identity being
+  // distinct from the registered skill steward. Any reviewer adapter may
+  // produce a valid envelope; no vendor or model family is privileged here.
   for (const review of envelope.reviews) {
     if (
-      !review?.assignmentId ||
-      (typeof review.output !== 'string' && typeof review.output !== 'object')
+      typeof review?.assignmentId !== 'string' ||
+      !review.assignmentId ||
+      (nativeStage && typeof review.output !== 'string') ||
+      (typeof review.output !== 'string' &&
+        (!review.output || typeof review.output !== 'object' || Array.isArray(review.output)))
     ) {
       throw new Error('Blind-review import contains an invalid review entry');
     }
     const prepared = readPreparedAssignment(review.assignmentId);
+    const excludedPairRunIds = new Set(
+      allRuns
+        .filter(
+          (run) =>
+            run.skill === prepared.skill &&
+            run.revisionHash === prepared.revisionHash &&
+            (run.scenarioId ?? run.caseId) === prepared.scenarioId &&
+            run.comparisonId === prepared.pairId,
+        )
+        .map((run) => run.id),
+    );
+    const exclusion = evidenceEligibility.excludedEvidence.find((item) =>
+      excludedPairRunIds.has(item.runId),
+    );
+    if (exclusion)
+      throw new Error(`Blind assignment ${review.assignmentId} is excluded: ${exclusion.reason}`);
     const item = eligible.find(
       (candidate) =>
         candidate.skill === prepared.skill &&
@@ -593,6 +658,8 @@ function ingestBlindReviews(path: string): void {
         `Blind assignment ${review.assignmentId} is stale; its exact current revision/contract pair is no longer eligible`,
       );
     }
+    verifyPreparedCurrentBinding(prepared, item.pair.withSkill);
+    pairExecutionEvidence(item.pair.withSkill, item.pair.withoutSkill);
     const steward = getSkillSteward(projectRoot, prepared.skill);
     if (!steward) throw new Error(`Skill ${prepared.skill} has no registered steward identity`);
     if (envelope.reviewer.agentId === steward.agentId) {
@@ -601,10 +668,86 @@ function ingestBlindReviews(path: string): void {
     const rawOutput =
       typeof review.output === 'string' ? review.output : JSON.stringify(review.output);
     const result = parseJudgeResult(rawOutput);
+    const withArtifact = anonymousArtifact(item.pair.withSkill, prepared.skill);
+    const withoutArtifact = anonymousArtifact(item.pair.withoutSkill, prepared.skill);
+    verifyPreparedArtifactHashes(
+      prepared,
+      prepared.withIsA ? withArtifact : withoutArtifact,
+      prepared.withIsA ? withoutArtifact : withArtifact,
+    );
+    if (
+      JSON.stringify(withArtifact.publicContract) !== JSON.stringify(withoutArtifact.publicContract)
+    ) {
+      throw new Error('Current blind pair has mismatched public contract snapshots');
+    }
+    const currentPrompt = readBoundedBlindFile(prepared.promptPath, MAX_BLIND_IMPORT_BYTES, true);
+    if (sha256(currentPrompt) !== prepared.promptSha256)
+      throw new Error('Blind assignment prompt changed during validation');
+    verifyPreparedPromptBinding(
+      currentPrompt.toString('utf8'),
+      buildBlindReviewJudgePrompt({
+        task: item.task,
+        artifactA: prepared.withIsA ? withArtifact : withoutArtifact,
+        artifactB: prepared.withIsA ? withoutArtifact : withArtifact,
+        pairEvidence: pairExecutionEvidence(item.pair.withSkill, item.pair.withoutSkill),
+      }),
+    );
+    const sourceMismatch = findBlindJudgeArtifactMismatch(
+      result,
+      prepared.withIsA ? withArtifact : withoutArtifact,
+      prepared.withIsA ? withoutArtifact : withArtifact,
+    );
+    if (sourceMismatch)
+      throw new Error(`Blind judge contradicted source evidence: ${sourceMismatch}`);
+    const nativeEvidence = nativeStage
+      ? verifyNativeBlindReviewImport({
+          stage: envelope.nativeStageEvidence,
+          reviewer: envelope.reviewer,
+          output: rawOutput,
+          promptSha256: prepared.promptSha256,
+          requiredProtectedRoots: [
+            projectRoot,
+            homedir(),
+            pendingRoot,
+            ...[
+              'HOME',
+              'USERPROFILE',
+              'CLAUDE_CONFIG_DIR',
+              'KORYPHAIOS_DATA_DIR',
+              'KORYPHAIOS_SKILLS_HOME',
+            ].flatMap((key) =>
+              process.env[key]?.trim() ? [canonicalizePath(process.env[key]!.trim())] : [],
+            ),
+          ].map((root) => canonicalizePath(root)),
+        })
+      : undefined;
+    if (!writeEvaluation) {
+      validatedReviews += 1;
+      continue;
+    }
     const withScore = prepared.withIsA ? result.artifactA : result.artifactB;
-    const assignmentPath = join(blindRoot, `${review.assignmentId}.json`);
     const recordedAt = new Date().toISOString();
+    const preparedBytes = readBoundedBlindFile(
+      join(pendingRoot, `${review.assignmentId}.private.json`),
+      MAX_BLIND_IMPORT_BYTES,
+      true,
+    );
+    if (JSON.stringify(JSON.parse(preparedBytes.toString('utf8'))) !== JSON.stringify(prepared)) {
+      throw new Error('Prepared blind assignment changed during validation');
+    }
+    const retainedNativeArtifacts = nativeEvidence
+      ? retainNativeBlindReviewEvidence(blindRoot, nativeEvidence, envelopeBytes, preparedBytes)
+      : [];
+    // Native assignments live with their seven immutable evidence copies. A
+    // re-import cannot overwrite an earlier assignment or follow its symlink.
+    const assignmentPath = join(
+      nativeEvidence ? dirname(retainedNativeArtifacts[0]!.location) : blindRoot,
+      `${review.assignmentId}.json`,
+    );
     const assignmentRecord = {
+      ...(nativeEvidence
+        ? { nativeEvidence: { ...nativeEvidence.provenance, artifacts: retainedNativeArtifacts } }
+        : {}),
       schemaVersion: 3,
       assignmentId: review.assignmentId,
       skill: prepared.skill,
@@ -621,7 +764,7 @@ function ingestBlindReviews(path: string): void {
         agentId: envelope.reviewer.agentId,
         provider: envelope.reviewer.provider,
         model: envelope.reviewer.model,
-        displayLabel: buildSkillStewardDisplayLabel(prepared.skill),
+        displayLabel: blindReviewerDisplayLabel(prepared.skill, envelope.reviewer),
       },
       harnessVersion: BLIND_HARNESS_VERSION,
       promptSha256: prepared.promptSha256,
@@ -631,10 +774,10 @@ function ingestBlindReviews(path: string): void {
       result,
       recordedAt,
     };
-    writeFileSync(assignmentPath, `${JSON.stringify(assignmentRecord, null, 2)}\n`, {
-      mode: 0o600,
-    });
-    const assignmentSha = sha256(readFileSync(assignmentPath));
+    const assignmentSha = writeProtectedBlindFile(
+      assignmentPath,
+      Buffer.from(`${JSON.stringify(assignmentRecord, null, 2)}\n`),
+    );
     persisted.push({
       id: `${review.assignmentId}:with-skill`,
       skill: prepared.skill,
@@ -654,7 +797,9 @@ function ingestBlindReviews(path: string): void {
         `blind preference: ${result.preference}`,
         ...result.rationale,
       ],
-      notes: 'Independent randomized A/B semantic adjudication by an actual ChatGPT Web reviewer.',
+      notes: nativeEvidence
+        ? 'Randomized A/B semantic adjudication with retained host-observed native empty-tool stream and canonical macOS private-root profile; unsigned, no upstream identity or universal OS read-allowlist attestation.'
+        : 'Independent randomized A/B semantic adjudication by a provider-neutral reviewer.',
       recordedAt,
       protocolVersion: 3,
       variant: 'with-skill',
@@ -667,7 +812,7 @@ function ingestBlindReviews(path: string): void {
         provider: envelope.reviewer.provider,
         model: envelope.reviewer.model,
         agentId: envelope.reviewer.agentId,
-        displayLabel: buildSkillStewardDisplayLabel(prepared.skill),
+        displayLabel: blindReviewerDisplayLabel(prepared.skill, envelope.reviewer),
         assignmentId: review.assignmentId,
         blindTo: ['skill-variant', 'expected-outcome'],
         evidence: [
@@ -677,6 +822,14 @@ function ingestBlindReviews(path: string): void {
           `artifact-b-sha256:${prepared.artifactBSha256}`,
           `judge-output-sha256:${sha256(rawOutput)}`,
           `reviewer-agent:${envelope.reviewer.agentId}`,
+          ...retainedNativeArtifacts.map(
+            (artifact) => `native-evidence:${artifact.location}#sha256=${artifact.sha256}`,
+          ),
+          ...(nativeEvidence
+            ? [
+                `native-boundary:${nativeEvidence.provenance.qualification};unsigned;upstream-identity-unverified;universal-read-allowlist-false`,
+              ]
+            : []),
         ],
       },
       suiteId: prepared.suiteId,
@@ -686,10 +839,13 @@ function ingestBlindReviews(path: string): void {
       evaluationContractVersion: prepared.evaluationContractVersion,
       materializerId: prepared.materializerId,
       deterministicScorerId: prepared.deterministicScorerId,
-      artifacts: [{ kind: 'report', location: assignmentPath, sha256: assignmentSha }],
+      artifacts: [
+        { kind: 'report', location: assignmentPath, sha256: assignmentSha },
+        ...retainedNativeArtifacts,
+      ],
     });
   }
-  if (persisted.length) recordSkillEvaluationRuns(projectRoot, persisted);
+  if (writeEvaluation && persisted.length) recordSkillEvaluationRuns(projectRoot, persisted);
 }
 
 const preparedAssignments: PreparedAssignmentRecord[] = [];
@@ -699,7 +855,10 @@ if (prepareOnly) {
 }
 if (ingestPath) {
   mkdirSync(blindRoot, { recursive: true, mode: 0o700 });
-  ingestBlindReviews(ingestPath);
+  ingestBlindReviews(ingestPath, true);
+}
+if (validateOnlyPath) {
+  ingestBlindReviews(validateOnlyPath, false);
 }
 
 console.log(
@@ -707,11 +866,21 @@ console.log(
     {
       schemaVersion: 1,
       dryRun,
-      mode: dryRun ? 'dry-run' : prepareOnly ? 'prepare' : ingestPath ? 'ingest' : 'disabled',
+      mode: dryRun
+        ? 'dry-run'
+        : prepareOnly
+          ? 'prepare'
+          : ingestPath
+            ? 'ingest'
+            : validateOnlyPath
+              ? 'validate'
+              : 'disabled',
       concurrency,
       maxPerSkill: Number.isFinite(maxPerSkill) ? maxPerSkill : null,
+      retryFailed,
       skillsRequested: selectedPackages.length,
       eligiblePairs: eligible.length,
+      excludedEvidence,
       skippedExistingReviews: eligible.length - pending.length,
       queuedPairs: queue.length,
       preparedAssignments: preparedAssignments.map((item) => ({
@@ -723,6 +892,7 @@ console.log(
         promptSha256: item.promptSha256,
       })),
       persistedReviews: persisted.length,
+      validatedReviews,
       failedReviews: failures.length,
       ...(summaryOnly
         ? {

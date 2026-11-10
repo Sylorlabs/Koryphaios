@@ -1,13 +1,13 @@
 # Source map
 
-`integration-fault-testing` is individually authored for controlled failures at real component boundaries. Promotion still requires paired same-model skill/no-skill observations and independent blind evaluation; these sources constrain the testing mechanics and fault semantics rather than proving a candidate is qualified.
+`integration-fault-testing` is individually authored for controlled failures at real component boundaries. Promotion still requires paired same-model skill/no skill observations and independent blind evaluation; these sources constrain the testing mechanics and fault semantics rather than proving a candidate is qualified.
 
 ## Qualification basis
 
 - Package authorship is independent from empirical qualification; the audit/evaluation ledger is authoritative for qualification status.
 - Hierarchy: broader testing-engineering.
-- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held-out cases through the real resolver.
-- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no-skill pairing, regression retention, and blind semantic judging.
+- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held out cases through the real resolver.
+- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no skill pairing, regression retention, and blind semantic judging.
 - Source discipline: authoritative/spec/reference sources outrank community patterns when they conflict; runtime evidence outranks examples for behavioral claims.
 
 ## Maintained sources

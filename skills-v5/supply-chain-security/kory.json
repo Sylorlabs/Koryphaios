@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "supply-chain-security",
-  "version": "5.1.1",
+  "version": "5.1.2",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -123,7 +123,7 @@
       "versionScope": "SLSA specification Version 1.2, Approved",
       "staleAfterDays": 180,
       "notes": "Current SLSA Build and Source track boundaries and attestation model; avoids importing draft Build Environment requirements into approved Build levels.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://slsa.dev/spec/v1.2/verifying-artifacts",
@@ -131,7 +131,7 @@
       "versionScope": "SLSA 1.2 Build artifact verification, Approved",
       "staleAfterDays": 180,
       "notes": "Primary provenance-verification source for trusted builder roots, envelope signature, artifact subject digest, predicate type, canonical source, buildType, externalParameters, and dependency checks.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://docs.sigstore.dev/cosign/verifying/verify/",
@@ -139,7 +139,7 @@
       "versionScope": "Sigstore cosign signature verification docs as available 2026-09-05",
       "staleAfterDays": 90,
       "notes": "Artifact and blob verification, keyless issuer/identity constraints, digest/claim verification, transparency evidence, and attestation verification entry points.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://docs.sigstore.dev/cosign/verifying/attestation/",
@@ -155,7 +155,7 @@
       "versionScope": "NIST SP 800-218 Secure Software Development Framework Version 1.1, final February 2022",
       "staleAfterDays": 365,
       "notes": "Secure software-development, supplier/acquisition, integrity, provenance, and vulnerability-response practice framing.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://spdx.dev/use/specifications/",

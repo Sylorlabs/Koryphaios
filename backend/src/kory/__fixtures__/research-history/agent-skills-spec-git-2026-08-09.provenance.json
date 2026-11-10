@@ -1,0 +1,19 @@
+{
+  "kind": "supporting-github-history-only",
+  "publisher": "agentskills/agentskills",
+  "originalDocument": "https://agentskills.io/specification",
+  "sourceUrl": "https://raw.githubusercontent.com/agentskills/agentskills/69ef37e9424c0a7ea9dd2293b559e43ec8176379/docs/specification.mdx",
+  "commitApiUrl": "https://api.github.com/repos/agentskills/agentskills/commits/69ef37e9424c0a7ea9dd2293b559e43ec8176379",
+  "commitSha": "69ef37e9424c0a7ea9dd2293b559e43ec8176379",
+  "committerDate": "2026-08-09T20:36:04Z",
+  "path": "docs/specification.mdx",
+  "gitBlobSha1": "d9a2db099d905da8b879a5c6f996728073985279",
+  "sha256": "b9079c0c10b7930e8c6a20ff2bc10cda2a3343c55185120e3f1116a1a529b220",
+  "byteLength": 7166,
+  "fetchedAt": "2026-10-10T05:54:08Z",
+  "limitations": [
+    "Git committer timestamp is commit metadata; it is not an independent 2026-09-04 website capture",
+    "Does not qualify for research-full-task-1-individual source role agent-skills-spec",
+    "No claims made about exact website content served on 2026-09-04"
+  ]
+}

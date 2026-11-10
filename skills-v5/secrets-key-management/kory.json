@@ -116,7 +116,7 @@
       "versionScope": "NIST SP 800-57 Part 1 Rev. 5, May 2020",
       "staleAfterDays": 365,
       "notes": "General cryptographic key-management lifecycle, protection requirements, cryptoperiods, compromise, backup/recovery, and destruction concepts.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://docs.aws.amazon.com/kms/latest/developerguide/best-practices.html",
@@ -140,7 +140,7 @@
       "versionScope": "OWASP Secrets Management guidance available 2026-09-05",
       "staleAfterDays": 120,
       "notes": "Secret lifecycle, centralization, rotation, revocation, least privilege, dynamic credentials, auditing, and common delivery/storage failure patterns.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     }
   ],
   "authoringMaturity": "individual"

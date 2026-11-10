@@ -10,6 +10,11 @@
       "recipient identity fixture with address correction and explicit unsuppression action",
       "send-attempt log proving whether suppressed recipients are filtered before provider call",
       "retention/audit requirement for suppression reason and source event",
+      "logical notification and provider-attempt identifiers with request fingerprint and retry-budget fixtures",
+      "provider adapter boundary and two-provider status/event mapping contract",
+      "ambiguous provider timeout, worker restart, outage, and reconciliation recovery fixture",
+      "structured observability, redaction, credential/key, retention, and tenant-isolation requirements",
+      "source map plus provider-contract revision, retrieval date, and stale/revalidation status",
       "paired same-model skill/no-skill execution from the identical starting snapshot"
     ]
   },
@@ -23,8 +28,6 @@
         "Representative verification results or explicit unavailable checks",
         "Hierarchy boundary and selected specialist rationale",
         "Representative success, negative-path, and recovery verification",
-        "hierarchy boundary and specialist selection rationale",
-        "representative negative/recovery verification",
         "source/version boundary when facts can drift"
       ]
     },
@@ -44,7 +47,6 @@
     "transactional-bounce-suppression scenario evidence",
     "email-delivery decision and boundary evidence",
     "Hierarchy boundary and selected specialist rationale",
-    "hierarchy boundary and selected specialist rationale",
     "paired skill/no-skill run artifacts",
     "explicit unavailable, simulated, inferred, or stale evidence labels"
   ],
@@ -60,19 +62,27 @@
     },
     {
       "id": "operating-contract",
-      "assertion": "Separate transactional and marketing streams, configure SPF/DKIM/DMARC ownership, stable From/Return-Path domains, suppression/unsubscribe policy, templates, localization, bounce/complaint webhooks, rate limits, retry behavior, and provider failover."
+      "assertion": "Define the provider-agnostic logical notification, recipient identity, suppression, consent, retry-budget, and audit contract separately from provider adapters that translate statuses, limits, credentials, and event identifiers. Inventory stream, sender identity, unsubscribe applicability, template, rate, retry, and failover controls relevant to this transactional flow."
     },
     {
       "id": "execution-invariant",
-      "assertion": "Permanent delivery failures converge to one auditable suppression state before future sends, while transient failures and deliberate address corrections follow distinct controlled paths."
+      "assertion": "Permanent delivery failures converge to one auditable suppression state before future sends, while transient failures, ambiguous submissions, duplicate or out-of-order events, deliberate address corrections, and explicit unsuppression follow distinct controlled paths. One logical notification and request fingerprint remain stable across provider attempts and restarts."
     },
     {
       "id": "verification-discipline",
-      "assertion": "Validate authentication records, render representative clients, exercise bounce/complaint/suppression and retry behavior, test unsubscribe where applicable, and monitor acceptance versus inbox placement separately."
+      "assertion": "Using the supplied corpus and logs, verify duplicate and out-of-order reconciliation, suppression-before-provider-call, transient retry bounds, permanent-failure stop behavior, same-key idempotent replay, changed-fingerprint rejection, ambiguous-timeout recovery, address-correction and unsuppression boundaries, and provider acceptance separately from mailbox delivery and inbox placement. Mark authentication, rendering, unsubscribe, or live-provider checks unavailable or not applicable when the scenario does not supply them."
     },
     {
       "id": "anti-pattern-resistance",
-      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not retry permanent bounces indefinitely, send marketing mail without consent/unsubscribe requirements, use one reputation stream for everything, or log full message bodies unnecessarily."
+      "assertion": "The result must not retry permanent bounces indefinitely, let a second provider account bypass a shared suppression state, treat event arrival order as truth, reset the retry budget during failover, create a duplicate after an ambiguous timeout, unsuppress a corrected address by mutating the old identity, reuse an idempotency key with changed parameters, or log full message bodies, tokens, credentials, or raw recipient data unnecessarily."
+    },
+    {
+      "id": "observability-security-recovery",
+      "assertion": "Verify or explicitly bound structured logical-notification, attempt, provider, event, retry, queue-age, suppression-hit, and reconciliation telemetry; redaction and access controls for recipient and provider data; credential and signing-key ownership; tenant isolation and retention; worker-restart and provider-outage recovery; and an operator-review state for unresolved contradictions."
+    },
+    {
+      "id": "source-freshness",
+      "assertion": "Record the source URL, protocol or provider revision, verification or retrieval date, stale-after policy, and revalidation action for provider event, idempotency, retry, suppression, and failover claims. Do not treat a stale generic standard or an unverified provider assumption as a provider guarantee."
     },
     {
       "id": "evidence-and-uncertainty",

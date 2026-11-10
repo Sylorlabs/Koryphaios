@@ -8,6 +8,7 @@ import {
 } from '../skill-eval-auth-secrets-security-fixtures';
 import { runHiddenBunTest, writeFixtureFile } from '../skill-eval-fixture-helpers';
 import {
+  hasCookieMutationInventory,
   PRIVACY_WEB_DEVICE_SKILL_EVAL_MATERIALIZERS,
   PRIVACY_WEB_DEVICE_SKILL_EVAL_SCORERS,
 } from '../skill-eval-privacy-web-device-fixtures';
@@ -45,7 +46,7 @@ describe('promotion repair evaluator regressions', () => {
     const root = workspace();
     await materialize(
       root,
-      'web-security/dashboard-browser-boundaries@2',
+      'web-security/dashboard-browser-boundaries@4',
       'web-security-full-task-1',
       PRIVACY_WEB_DEVICE_SKILL_EVAL_MATERIALIZERS,
     );
@@ -54,18 +55,124 @@ describe('promotion repair evaluator regressions', () => {
       "import{expect,test}from'bun:test';import{reportUrl}from'../src/web-policy';test('source parses',()=>expect(typeof reportUrl).toBe('function'));",
     );
     expect(parsed.passed, parsed.evidence).toBe(true);
+    expect(readFileSync(join(root, 'README.md'), 'utf8')).toContain(
+      'immutable evaluator-provided contract',
+    );
     expect(
       PRIVACY_WEB_DEVICE_SKILL_EVAL_SCORERS.some(
-        (item) => item.id === 'web-security/dashboard-browser-boundaries-scorer@3',
+        (item) => item.id === 'web-security/dashboard-browser-boundaries-scorer@8',
       ),
     ).toBe(true);
+  });
+
+  test('web-security inventory accepts a CSRF protected state-changing handler without a literal mutation label', () => {
+    const documented = [
+      {
+        source: 'Cookie-authenticated dashboard actions',
+        transform: 'A session-bound CSRF token in the X-CSRF-Token header',
+        sink: 'JSON state-changing API handlers (POST, PUT, PATCH, DELETE)',
+        control: 'Reject missing or invalid tokens on the server',
+      },
+    ];
+    expect(hasCookieMutationInventory(documented)).toBe(true);
+    expect(
+      hasCookieMutationInventory([
+        {
+          source: 'Cookie-backed session authentication for dashboard requests',
+          transform:
+            'Session-bound CSRF token verified against the authenticated session server-side',
+          sink: 'POST mutations that change dashboard state',
+          control: 'Server validates every CSRF token and rejects missing or invalid tokens',
+        },
+      ]),
+    ).toBe(true);
+    expect(
+      hasCookieMutationInventory([
+        {
+          source: 'Browser session cookie automatically attached to JSON mutation requests',
+          transform:
+            'Send a session-bound CSRF token in the X-CSRF-Token header and validate it server-side before every state change',
+          sink: 'Cookie-authenticated POST, PUT, PATCH, and DELETE handlers',
+          control:
+            'Reject missing or invalid tokens; check exact trusted Origin as a complementary signal',
+        },
+      ]),
+    ).toBe(true);
+    expect(
+      hasCookieMutationInventory([
+        {
+          source:
+            'The HttpOnly session cookie, which the browser automatically attaches to same-origin JSON mutation requests',
+          transform:
+            'A server-issued synchronizer token is placed in X-CSRF-Token and checked against the authenticated session',
+          sink: 'Every POST, PUT, PATCH, and DELETE handler that changes dashboard state',
+          control:
+            'Reject a missing, malformed, expired, or mismatched token before changing state',
+        },
+      ]),
+    ).toBe(true);
+    expect(
+      hasCookieMutationInventory([
+        { source: 'Payment postMessage', sink: 'iframe', control: 'Exact origin validation' },
+      ]),
+    ).toBe(false);
+    expect(
+      hasCookieMutationInventory([
+        {
+          source: 'HttpOnly session cookie',
+          transform: 'The request includes a CSRF token without server verification',
+          sink: 'POST handler changing server state',
+          control: 'Disabled token checks',
+        },
+      ]),
+    ).toBe(false);
+    expect(
+      hasCookieMutationInventory([
+        {
+          source: 'Cookie-backed session authentication for dashboard requests',
+          transform:
+            'Session-bound CSRF token verified against the authenticated session server-side',
+          sink: 'POST mutations that change dashboard state',
+          control:
+            'Server validates every CSRF token and rejects missing or invalid tokens, but CSRF validation disabled for legacy requests',
+        },
+      ]),
+    ).toBe(false);
+    expect(
+      hasCookieMutationInventory([
+        {
+          source: 'Cookie-authenticated action',
+          sink: 'state-changing handler',
+          control: 'No CSRF check',
+        },
+      ]),
+    ).toBe(false);
+    expect(
+      hasCookieMutationInventory([
+        {
+          source: 'HttpOnly session cookie',
+          transform: 'Client sends a synchronizer token but only checks it in JavaScript',
+          sink: 'POST handler mutating dashboard state',
+          control: 'Reject missing token on the client',
+        },
+      ]),
+    ).toBe(false);
+    expect(
+      hasCookieMutationInventory([
+        { source: 'HttpOnly session cookie', sink: 'POST handler changes dashboard state' },
+        {
+          transform: 'CSRF token checked against the authenticated session',
+          control: 'Reject missing token on server',
+        },
+      ]),
+    ).toBe(false);
   });
 
   test('privacy scorer rejects a stable caller identity disguised as aggregate adoption identity', async () => {
     const root = workspace();
     await materialize(
       root,
-      'privacy-engineering/nearby-data-minimization@1',
+      'privacy-engineering/nearby-data-minimization@2',
       'privacy-engineering-full-task-1-individual',
       PRIVACY_WEB_DEVICE_SKILL_EVAL_MATERIALIZERS,
     );
@@ -85,7 +192,7 @@ describe('promotion repair evaluator regressions', () => {
       })}\n`,
     );
     const scorer = PRIVACY_WEB_DEVICE_SKILL_EVAL_SCORERS.find(
-      (item) => item.id === 'privacy-engineering/nearby-data-minimization-scorer@2',
+      (item) => item.id === 'privacy-engineering/nearby-data-minimization-scorer@3',
     );
     expect(scorer).toBeDefined();
     const score = await scorer!.score({ workingDirectory: root } as never);

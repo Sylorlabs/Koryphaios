@@ -10,6 +10,10 @@
       "old client/new server and new client/old server compatibility fixtures",
       "new priority enum including an unknown future numeric value",
       "descriptor/schema-diff check and round-trip binary corpus",
+      "stable fully qualified message and service identities across schema stages",
+      "presence and precedence fixtures for absent, explicit default, legacy, and replacement fields",
+      "normal application decode and encode path that preserves unknown enum numerics and unknown fields",
+      "binary and ProtoJSON compatibility boundaries recorded separately",
       "paired same-model skill/no-skill execution from the identical starting snapshot"
     ]
   },
@@ -44,6 +48,8 @@
     "proto-field-evolution scenario evidence",
     "grpc-protobuf decision and boundary evidence",
     "Hierarchy boundary and selected specialist rationale",
+    "descriptor full-name, field reservation, and wire-type evidence",
+    "application codec unknown-enum and unknown-field round-trip evidence",
     "hierarchy boundary and selected specialist rationale",
     "paired skill/no-skill run artifacts",
     "explicit unavailable, simulated, inferred, or stale evidence labels"
@@ -60,19 +66,33 @@
     },
     {
       "id": "operating-contract",
-      "assertion": "Treat field numbers and wire types as durable compatibility."
+      "assertion": "Treat field numbers, wire types, fully qualified declaration names, and field presence as durable compatibility, and define precedence between legacy and replacement fields.",
+      "source": "https://protobuf.dev/programming-guides/proto3/"
+    },
+    {
+      "id": "descriptor-identity",
+      "assertion": "Schema revisions made in place retain the same package, message, service, request, and response full names; an intentional identity fork is labeled as a parallel route with migration evidence.",
+      "source": "https://protobuf.dev/programming-guides/proto3/"
+    },
+    {
+      "id": "migration-precedence",
+      "assertion": "The staged migration distinguishes absent values from explicit defaults, defines legacy and replacement precedence and dual-write behavior, and supports mixed old and new clients without lockstep deployment.",
+      "source": "https://protobuf.dev/programming-guides/encoding/"
     },
     {
       "id": "execution-invariant",
-      "assertion": "Wire field numbers/types remain compatible and unknown fields/enum values survive or fail according to the documented protobuf/runtime contract without lockstep rollout."
+      "assertion": "Wire field numbers/types remain compatible and unknown fields/enum values survive or fail according to the documented protobuf/runtime contract without lockstep rollout.",
+      "source": "https://protobuf.dev/programming-guides/enum/"
     },
     {
       "id": "verification-discipline",
-      "assertion": "Run cross-version compatibility tests, deadline/cancel behavior, streaming half-close/backpressure, retryable/non-retryable statuses, malformed/unknown fields, and representative generated clients."
+      "assertion": "For this protobuf field-evolution task, run old/new cross-version binary compatibility, descriptor full-name and field reservation checks, presence and precedence checks, and unknown-enum and unknown-field tests through the normal application decode and encode path. Separate binary evidence from ProtoJSON evidence and label unavailable protoc or generated-client checks explicitly. Do not require unrelated streaming, deadline, cancellation, or retry behavior that this scenario does not exercise.",
+      "source": "https://protobuf.dev/programming-guides/encoding/"
     },
     {
       "id": "anti-pattern-resistance",
-      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not reuse removed field numbers, depend on enum unknown-value behavior accidentally, ignore deadlines, or enable retries without idempotency analysis."
+      "assertion": "Do not reuse removed field numbers or names, silently coerce unknown enum numerics to known business values, copy raw bytes around a serializer that loses decoded unknown values, change the meaning or wire type of field 2 during overlap, or require lockstep deployment.",
+      "source": "https://protobuf.dev/programming-guides/enum/"
     },
     {
       "id": "evidence-and-uncertainty",

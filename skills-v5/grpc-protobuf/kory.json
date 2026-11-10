@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "grpc-protobuf",
-  "version": "5.1.2",
+  "version": "5.2.0",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -10,10 +10,20 @@
   "pathScopes": [],
   "contextBudget": 4000,
   "broader": ["api-contract-design"],
-  "facets": [],
+  "facets": ["application-security"],
   "requires": ["verification"],
   "conflicts": [],
-  "activation": ["grpc", "protobuf", "protocol buffers", "grpc streaming"],
+  "activation": [
+    "grpc",
+    "protobuf",
+    "protocol buffers",
+    "grpc streaming",
+    "grpc interceptor",
+    "protobuf wire compatibility",
+    "grpc method routing",
+    "grpc deadline propagation",
+    "grpc metadata security"
+  ],
   "excludes": [],
   "evidence": [
     "grpc-protobuf decision and boundary evidence",
@@ -27,14 +37,20 @@
       "The current task is protobuf.",
       "I need help with protocol buffers.",
       "Work on grpc streaming for this request.",
-      "This request specifically requires grpc."
+      "This request specifically requires grpc.",
+      "Design protobuf wire compatibility.",
+      "Define gRPC interceptor behavior.",
+      "Fix gRPC method routing.",
+      "Set gRPC deadline propagation.",
+      "Secure gRPC metadata and transport."
     ],
     "negative": [
       "The only requested work is graphql.",
       "Please handle rest api only.",
       "This task is limited to implement backend behavior.",
       "The current request is bun runtime.",
-      "Work only on compiler runtime."
+      "Work only on compiler runtime.",
+      "The current task is HTTP service routing."
     ],
     "ambiguous": [
       {
@@ -102,7 +118,7 @@
       "versionScope": "gRPC documentation as available 2026-09-04",
       "staleAfterDays": 60,
       "notes": "RPC lifecycle, deadlines, streaming, status, metadata, and implementation guidance.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://protobuf.dev/",
@@ -110,39 +126,111 @@
       "versionScope": "Protocol Buffers documentation as available 2026-09-04",
       "staleAfterDays": 60,
       "notes": "Schema evolution, wire format, generated API, compatibility, and language guidance.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://protobuf.dev/programming-guides/proto3/",
       "sourceType": "official-docs",
-      "versionScope": "Protocol Buffers proto3 guide as available 2026-09-06",
+      "versionScope": "Protocol Buffers proto3 guide as available 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Field-number reservations, unknown fields, and wire-compatible evolution.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
+    },
+    {
+      "url": "https://protobuf.dev/programming-guides/encoding/",
+      "sourceType": "official-docs",
+      "versionScope": "Protocol Buffers encoding guide as available 2026-10-17",
+      "staleAfterDays": 60,
+      "notes": "Field tags, wire types, packed values, and serialized representation.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://protobuf.dev/programming-guides/enum/",
+      "sourceType": "official-docs",
+      "versionScope": "Protocol Buffers enum behavior guide as available 2026-10-17",
+      "staleAfterDays": 60,
+      "notes": "Open and closed enum behavior and unknown numeric preservation.",
+      "verifiedAt": "2026-10-17"
     },
     {
       "url": "https://grpc.io/docs/guides/deadlines/",
       "sourceType": "official-docs",
-      "versionScope": "gRPC deadlines guide as available 2026-09-06",
+      "versionScope": "gRPC deadlines guide as available 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Deadlines, cancellation, and propagation semantics.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://grpc.io/docs/guides/retry/",
       "sourceType": "official-docs",
-      "versionScope": "gRPC retry guide as available 2026-09-06",
+      "versionScope": "gRPC retry guide as available 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Transparent retry, configured retry policy, backoff, and retry scope.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://grpc.io/docs/guides/status-codes/",
       "sourceType": "official-docs",
-      "versionScope": "gRPC status-code guide as available 2026-09-06",
+      "versionScope": "gRPC status-code guide as available 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Stable RPC failure semantics and retry-relevant status distinctions.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
+    },
+    {
+      "url": "https://grpc.io/docs/guides/interceptors/",
+      "sourceType": "official-docs",
+      "versionScope": "gRPC interceptor guide as available 2026-10-17",
+      "staleAfterDays": 60,
+      "notes": "Per-RPC interceptors, policy use cases, and order-dependent behavior.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://grpc.io/docs/guides/flow-control/",
+      "sourceType": "official-docs",
+      "versionScope": "gRPC flow-control guide as available 2026-10-17",
+      "staleAfterDays": 60,
+      "notes": "Receiver-driven streaming flow control and application write semantics.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://grpc.io/docs/guides/auth/",
+      "sourceType": "official-docs",
+      "versionScope": "gRPC authentication guide as available 2026-10-17",
+      "staleAfterDays": 60,
+      "notes": "TLS, mTLS, channel credentials, call credentials, and server validation.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://grpc.io/docs/guides/metadata/",
+      "sourceType": "official-docs",
+      "versionScope": "gRPC metadata guide as available 2026-10-17",
+      "staleAfterDays": 60,
+      "notes": "Metadata headers and trailers, reserved keys, and header-size considerations.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://grpc.io/docs/guides/error/",
+      "sourceType": "official-docs",
+      "versionScope": "gRPC error handling guide as available 2026-10-17",
+      "staleAfterDays": 60,
+      "notes": "Caller-visible status handling and structured error details.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://grpc.io/docs/guides/service-config/",
+      "sourceType": "official-docs",
+      "versionScope": "gRPC service-config guide as available 2026-10-17",
+      "staleAfterDays": 60,
+      "notes": "Target-scoped method configuration, retry, deadlines, and load balancing.",
+      "verifiedAt": "2026-10-17"
+    },
+    {
+      "url": "https://grpc.io/docs/guides/custom-name-resolution/",
+      "sourceType": "official-docs",
+      "versionScope": "gRPC custom-name-resolution guide as available 2026-10-17",
+      "staleAfterDays": 60,
+      "notes": "Target schemes, resolver ownership, service discovery, and resolver configuration.",
+      "verifiedAt": "2026-10-17"
     }
   ],
   "authoringMaturity": "individual"

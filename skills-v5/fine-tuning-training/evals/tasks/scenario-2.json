@@ -1,15 +1,15 @@
 {
   "id": "fine-tuning-training-full-task-2-individual",
   "maturity": "individual",
-  "prompt": "The evaluation repository asks the agent to \"Apply fine tuning expertise to this task\". The fixture contains version/runtime ambiguity, a tempting shortcut, a compatibility edge case, and a failure path that distinguishes real expertise from generic completion. The acceptance boundary is fine-tuning-training: Start from a measured base-model failure and decide whether training, retrieval, prompting, tools, or product logic is the right intervention. The adjacent embedding-systems discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "prompt": "The evaluation repository asks the agent to \"Apply fine tuning expertise to this task\". The fixture contains version/runtime ambiguity, a tempting shortcut, a compatibility edge case, and a failure path that distinguishes real expertise from generic completion. The acceptance boundary is fine-tuning-training: start from a measured base-model failure, justify weight changes against fixed-weight alternatives, audit entity/duplicate/label leakage, select a LoRA checkpoint only on validation, and keep the immutable decision holdout and deployment evidence outside optimization. The adjacent embedding-systems discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path is insufficient; synthetic adapter vectors do not prove real GPU training, reload, serving, or rollback.",
   "environment": {
     "kind": "repository",
     "startingState": "fixture://fine-tuning-training/scenario-2",
     "requirements": [
-      "pinned local base-model commit/license/tokenizer plus LoRA rank/alpha/target-module candidates",
-      "training data with source/entity near-duplicates and immutable validation/test partitions",
-      "trainable-parameter audit, adapter checkpoints, resume state and PEFT config/weights",
-      "base, adapter-on and optional merged serving/eval traces under a GPU-memory/latency budget",
+      "pinned local base-model commit/license/tokenizer plus LoRA rank/alpha/target-module candidates and runtime identity",
+      "training data with source/entity near-duplicates, target-derived fields and immutable validation/decision-test partitions",
+      "trainable-parameter audit, adapter checkpoints, resume state, PEFT config/weights and base-model identity",
+      "same-boundary base, adapter-on and optional merged serving/eval traces under GPU-memory/latency/cost budgets plus rollback",
       "paired same-model skill/no-skill execution",
       "fine-tuning-training parent/child/neighbor hierarchy boundary fixture",
       "domain-specific tempting anti-pattern or shortcut",
@@ -27,19 +27,19 @@
     },
     {
       "id": "execution-invariant",
-      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible, including target-module compatibility, fresh-process reload, promotion gate, and explicit evidence-status labels."
     },
     {
       "id": "verification-discipline",
-      "assertion": "Compare against the untouched base model on held-out tasks and safety slices, inspect overfitting and catastrophic regressions, measure serving cost/latency, and preserve exact data/model/config provenance for reproducibility."
+      "assertion": "Compare against the untouched base model on the same immutable holdout and safety/regression slices with normalized serving settings, inspect overfitting and catastrophic regressions, measure base/adapter/merged serving cost/latency/memory, prove fresh-process reload and rollback, and preserve exact data/model/config provenance for reproducibility."
     },
     {
       "id": "anti-pattern-resistance",
-      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not train on evaluation answers, assume more epochs improve behavior, use private/licensed data without authority, or claim general capability gains from a narrow training distribution."
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not train on evaluation answers, leak target labels or post-outcome metadata, let an entity or duplicate family cross splits, accept unsupported target modules or an adapter without its base identity, assume more epochs improve behavior, use private/licensed data without authority, or claim general capability gains from a narrow training distribution."
     },
     {
       "id": "evidence-and-uncertainty",
-      "assertion": "Every material completion claim must map to observable evidence (Provider/runtime/base-model/tokenizer eligibility and lifecycle identity; Authorized, deduplicated and leakage-safe train/validation/test dataset provenance; Objective/hyperparameter/checkpoint/seed/runtime identity plus training and validation evidence; Untouched base-versus-adapted target/regression/safety evaluation plus serving and rollback evidence), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+      "assertion": "Every material completion claim must map to observable evidence (provider/runtime/base-model/tokenizer eligibility and lifecycle identity; authorized, deduplicated and entity/label-leakage-safe train/validation/test provenance; objective/hyperparameter/checkpoint/seed/runtime identity plus trainable-parameter and validation evidence; untouched base-versus-adapted target/regression/safety evaluation; adapter/base compatibility, fresh reload, serving and rollback evidence), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
     }
   ],
   "scorers": [
@@ -49,9 +49,9 @@
       "weight": 0.75,
       "evidence": [
         "Provider/runtime/base-model/tokenizer eligibility and lifecycle identity",
-        "Authorized, deduplicated and leakage-safe train/validation/test dataset provenance",
-        "Objective/hyperparameter/checkpoint/seed/runtime identity plus training and validation evidence",
-        "Untouched base-versus-adapted target/regression/safety evaluation plus serving and rollback evidence",
+        "Authorized, deduplicated and entity/label-leakage-safe train/validation/test dataset provenance",
+        "Objective/hyperparameter/checkpoint/seed/runtime identity plus trainable-parameter, training and validation evidence",
+        "Untouched base-versus-adapted fixed-boundary target/regression/safety evaluation plus fresh reload, serving and rollback evidence",
         "Hierarchy boundary and selected specialist rationale",
         "Representative success, negative-path, and recovery verification",
         "hierarchy boundary and specialist selection rationale",
@@ -73,9 +73,9 @@
   ],
   "requiredEvidence": [
     "Provider/runtime/base-model/tokenizer eligibility and lifecycle identity",
-    "Authorized, deduplicated and leakage-safe train/validation/test dataset provenance",
-    "Objective/hyperparameter/checkpoint/seed/runtime identity plus training and validation evidence",
-    "Untouched base-versus-adapted target/regression/safety evaluation plus serving and rollback evidence",
+    "Authorized, deduplicated and entity/label-leakage-safe train/validation/test dataset provenance",
+    "Objective/hyperparameter/checkpoint/seed/runtime identity plus trainable-parameter, training and validation evidence",
+    "Untouched base-versus-adapted fixed-boundary target/regression/safety evaluation plus fresh reload, serving and rollback evidence",
     "Hierarchy boundary and selected specialist rationale",
     "Representative success, negative-path, and recovery verification",
     "hierarchy boundary and selected specialist rationale",

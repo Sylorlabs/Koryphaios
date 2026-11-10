@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { existsSync, lstatSync, mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
@@ -11,8 +11,11 @@ import {
   NOVEL_UI_TOOLKIT_SKILL_EVAL_SCORERS,
 } from '../skill-eval-novel-ui-toolkit-fixtures';
 import { loadV5SkillPackages } from '../skill-packages';
+import { isUnix } from '../../runtime/platform';
 
 const roots: string[] = [];
+const DEFAULT_BRAVE_PATH = '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser';
+const browserTest = test.skipIf(!existsSync(DEFAULT_BRAVE_PATH));
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -83,18 +86,16 @@ const VALID_CANVAS_TOOLKIT = `export function createNodeEditor({ canvas, semanti
     status.dataset.theme = highContrast ? 'high-contrast' : 'default';
     status.textContent = 'Selected ' + selected + '; ' + nodes.length + ' nodes; ' + edges.length + ' edges';
     semanticRoot.replaceChildren();
-    const tree = document.createElement('div');
-    tree.setAttribute('role', 'tree');
-    tree.setAttribute('aria-label', 'Node graph');
+    semanticRoot.setAttribute('role', 'tree');
+    semanticRoot.setAttribute('aria-label', 'Node graph');
     for (const node of nodes) {
       const item = document.createElement('div');
       item.setAttribute('role', 'treeitem');
       item.dataset.nodeId = node.id;
       item.setAttribute('aria-current', String(node.id === selected));
       item.textContent = node.label + (node.id === selected ? ', selected' : '');
-      tree.append(item);
+      semanticRoot.append(item);
     }
-    semanticRoot.append(tree);
   }
 
   function draw() {
@@ -231,7 +232,7 @@ const VALID_PALETTE_WIDGET = `export function createCommandPalette({ host, comma
   canvas.style.height = manifest.viewportHeight + 'px';
   const status = document.createElement('p');
   status.dataset.commandStatus = '';
-  status.setAttribute('role', 'status');
+  status.setAttribute('aria-live', 'polite');
   const feedback = document.createElement('div');
   const semantics = document.createElement('div');
   semantics.dataset.commandSemantics = '';
@@ -360,16 +361,11 @@ const VALID_PALETTE_WIDGET = `export function createCommandPalette({ host, comma
       rows = [];
       activeIndex = 0;
       expose('error', query, 'Command search failed');
-      const alert = document.createElement('div');
-      alert.dataset.commandError = '';
-      alert.setAttribute('role', 'alert');
-      alert.textContent = error.message;
       const retry = document.createElement('button');
       retry.type = 'button';
-      retry.dataset.commandRetry = '';
       retry.textContent = 'Retry search';
       retry.addEventListener('click', () => void run(query, true), { once: true });
-      feedback.append(alert, retry);
+      feedback.append(retry);
       invalidate();
     }
   }
@@ -443,6 +439,11 @@ const NON_VIRTUALIZED_PALETTE_WIDGET = VALID_PALETTE_WIDGET.replace(
   }`,
 );
 
+const DROPS_RECOVERY_FOCUS_PALETTE_WIDGET = VALID_PALETTE_WIDGET.replace(
+  '      if (restoreFocus) input.focus();',
+  '      if (restoreFocus) document.body.focus();',
+);
+
 const DOM_ONLY_CANVAS = `export function createNodeEditor({ canvas, semanticRoot, status }) {
   const list = document.createElement('div');
   list.innerHTML = '<button>Source</button><button>Transform</button><button>Sink</button>';
@@ -470,125 +471,198 @@ function expectScreenshot(root: string, relativePath: string): void {
 }
 
 describe('novel-ui-toolkit real-browser V5 evaluators', () => {
-  test('canvas editor starts red then a valid custom control passes real geometry, input, focus, semantics, contrast, and render budgets', async () => {
-    const root = workspace('kory-novel-canvas-');
-    const { materializer, scorer, scoreInput } = fixture(
-      NOVEL_UI_TOOLKIT_EVAL_CONSTANTS.canvasScenario,
-      root,
-    );
-    await materializer.materialize(root, scoreInput.scenario);
+  browserTest(
+    'canvas editor starts red then a valid custom control passes real geometry, input, focus, semantics, contrast, and render budgets',
+    async () => {
+      const root = workspace('kory-novel-canvas-');
+      const { materializer, scorer, scoreInput } = fixture(
+        NOVEL_UI_TOOLKIT_EVAL_CONSTANTS.canvasScenario,
+        root,
+      );
+      await materializer.materialize(root, scoreInput.scenario);
 
-    const red = await scorer.score(scoreInput);
-    expect(red.passed).toBe(false);
-    expect(red.integrityFailure).toBe(false);
-    expect(red.evidence.some((line) => line.includes('fail'))).toBe(true);
+      const red = await scorer.score(scoreInput);
+      expect(red.passed).toBe(false);
+      expect(red.integrityFailure).toBe(false);
+      expect(red.evidence.some((line) => line.includes('fail'))).toBe(true);
 
-    writeFixtureFile(root, 'src/toolkit.js', VALID_CANVAS_TOOLKIT);
-    const green = await scorer.score(scoreInput);
-    expect(green.passed, green.evidence.join('\n')).toBe(true);
-    expect(green.integrityFailure).toBe(false);
-    expect(green.quality).toBe(1);
-    expect(green.verification).toBe(1);
+      writeFixtureFile(root, 'src/toolkit.js', VALID_CANVAS_TOOLKIT);
+      const green = await scorer.score(scoreInput);
+      expect(green.passed, green.evidence.join('\n')).toBe(true);
+      expect(green.integrityFailure).toBe(false);
+      expect(green.quality).toBe(1);
+      expect(green.verification).toBe(1);
 
-    const receipt = readJsonArtifact<{
-      collector: string;
-      screenshots: string[];
-      checks: Array<{ passed: boolean }>;
-    }>(root, 'evaluation/scenario-1/runtime-receipt.json')!;
-    expect(receipt.collector).toBe('evaluator-owned Playwright/Brave');
-    expect(receipt.checks.every((check) => check.passed)).toBe(true);
-    expect(receipt.screenshots).toEqual([
-      'evaluation/scenario-1/initial.png',
-      'evaluation/scenario-1/final-high-contrast.png',
-    ]);
-    for (const screenshot of receipt.screenshots) expectScreenshot(root, screenshot);
-  }, 45_000);
+      const delegatedListeners = VALID_PALETTE_WIDGET.replace(
+        'export function createCommandPalette({ host, commands, manifest, search, onInvoke }) {',
+        'export function createCommandPalette({ host, commands, manifest, search, onInvoke }) {\n  const listen = (target, type, handler, options) => target.addEventListener(type, handler, options);',
+      )
+        .replace(
+          "input.addEventListener('keydown', keyboard);",
+          "listen(input, 'keydown', keyboard);",
+        )
+        .replace(
+          "canvas.addEventListener('wheel', wheel, { passive: false });",
+          "listen(canvas, 'wheel', wheel, { passive: false });",
+        )
+        .replace(
+          "canvas.addEventListener('pointerdown', pointer);",
+          "listen(canvas, 'pointerdown', pointer);",
+        );
+      writeFixtureFile(root, 'src/widget.js', delegatedListeners);
+      const delegatedGreen = await scorer.score(scoreInput);
+      expect(delegatedGreen.passed, delegatedGreen.evidence.join('\n')).toBe(true);
 
-  test('command palette starts red then a valid custom widget passes virtualization, async race, recovery, interaction, viewport, and cleanup checks', async () => {
-    const root = workspace('kory-novel-palette-');
-    const { materializer, scorer, scoreInput } = fixture(
-      NOVEL_UI_TOOLKIT_EVAL_CONSTANTS.paletteScenario,
-      root,
-    );
-    await materializer.materialize(root, scoreInput.scenario);
+      const receipt = readJsonArtifact<{
+        collector: string;
+        screenshots: string[];
+        checks: Array<{ passed: boolean }>;
+      }>(root, 'evaluation/scenario-1/runtime-receipt.json')!;
+      expect(receipt.collector).toBe('evaluator-owned Playwright/Brave');
+      expect(receipt.checks.every((check) => check.passed)).toBe(true);
+      expect(receipt.screenshots).toEqual([
+        'evaluation/scenario-1/initial.png',
+        'evaluation/scenario-1/final-high-contrast.png',
+      ]);
+      for (const screenshot of receipt.screenshots) expectScreenshot(root, screenshot);
+    },
+    45_000,
+  );
 
-    const red = await scorer.score(scoreInput);
-    expect(red.passed).toBe(false);
-    expect(red.integrityFailure).toBe(false);
-    expect(red.evidence.join('\n')).toContain(
-      'subject publishes the command status contract and reaches the ready state: fail',
-    );
+  browserTest(
+    'command palette starts red then a valid custom widget passes virtualization, async race, recovery, interaction, viewport, and cleanup checks',
+    async () => {
+      const root = workspace('kory-novel-palette-');
+      const { materializer, scorer, scoreInput } = fixture(
+        NOVEL_UI_TOOLKIT_EVAL_CONSTANTS.paletteScenario,
+        root,
+      );
+      await materializer.materialize(root, scoreInput.scenario);
 
-    writeFixtureFile(root, 'src/widget.js', VALID_PALETTE_WIDGET);
-    const green = await scorer.score(scoreInput);
-    expect(green.passed, green.evidence.join('\n')).toBe(true);
-    expect(green.integrityFailure).toBe(false);
-    expect(green.quality).toBe(1);
-    expect(green.verification).toBe(1);
+      const red = await scorer.score(scoreInput);
+      expect(red.passed).toBe(false);
+      expect(red.integrityFailure).toBe(false);
+      expect(red.evidence.join('\n')).toContain(
+        'subject owns a custom canvas widget implementation: fail — unchanged materializer starter',
+      );
 
-    const receipt = readJsonArtifact<{
-      collector: string;
-      screenshots: string[];
-      checks: Array<{ passed: boolean }>;
-    }>(root, 'evaluation/scenario-2/runtime-receipt.json')!;
-    expect(receipt.collector).toBe('evaluator-owned Playwright/Brave');
-    expect(receipt.checks.every((check) => check.passed)).toBe(true);
-    expect(receipt.screenshots).toEqual([
-      'evaluation/scenario-2/initial.png',
-      'evaluation/scenario-2/recovered.png',
-    ]);
-    for (const screenshot of receipt.screenshots) expectScreenshot(root, screenshot);
+      writeFixtureFile(root, 'src/widget.js', VALID_PALETTE_WIDGET);
+      const green = await scorer.score(scoreInput);
+      expect(green.passed, green.evidence.join('\n')).toBe(true);
+      expect(green.integrityFailure).toBe(false);
+      expect(green.quality).toBe(1);
+      expect(green.verification).toBe(1);
 
-    // Strong negative control: identical status contract, geometry, and semantics, no windowing.
-    expect(NON_VIRTUALIZED_PALETTE_WIDGET).not.toBe(VALID_PALETTE_WIDGET);
-    writeFixtureFile(root, 'src/widget.js', NON_VIRTUALIZED_PALETTE_WIDGET);
-    const nonVirtualized = await scorer.score(scoreInput);
-    expect(nonVirtualized.passed).toBe(false);
-    expect(nonVirtualized.integrityFailure).toBe(false);
-    expect(nonVirtualized.evidence.join('\n')).toContain(
-      '20,000-item custom canvas list is genuinely virtualized: fail',
-    );
-  }, 120_000);
+      const receipt = readJsonArtifact<{
+        collector: string;
+        screenshots: string[];
+        checks: Array<{ passed: boolean }>;
+      }>(root, 'evaluation/scenario-2/runtime-receipt.json')!;
+      expect(receipt.collector).toBe('evaluator-owned Playwright/Brave');
+      expect(receipt.checks.every((check) => check.passed)).toBe(true);
+      expect(receipt.screenshots).toEqual([
+        'evaluation/scenario-2/initial.png',
+        'evaluation/scenario-2/recovered.png',
+      ]);
+      for (const screenshot of receipt.screenshots) expectScreenshot(root, screenshot);
 
-  test('DOM-only controls and candidate-authored evidence cannot substitute for browser behavior', async () => {
-    const root = workspace('kory-novel-dom-only-');
-    const { materializer, scorer, scoreInput } = fixture(
-      NOVEL_UI_TOOLKIT_EVAL_CONSTANTS.canvasScenario,
-      root,
-    );
-    await materializer.materialize(root, scoreInput.scenario);
-    writeFixtureFile(root, 'src/toolkit.js', DOM_ONLY_CANVAS);
-    writeFixtureFile(
-      root,
-      'evaluation/scenario-1/runtime-receipt.json',
-      JSON.stringify({ checks: [{ passed: true }], screenshots: ['invented.png'] }),
-    );
+      // A polite live region plus an accessible Retry button is a valid semantic recovery surface;
+      // the scorer must not require hidden data hooks or a particular status/alert role recipe.
+      expect(VALID_PALETTE_WIDGET).not.toContain('data-command-error');
+      expect(VALID_PALETTE_WIDGET).not.toContain('data-command-retry');
+      expect(VALID_PALETTE_WIDGET).not.toContain("role', 'status");
 
-    const result = await scorer.score(scoreInput);
-    expect(result.passed).toBe(false);
-    expect(result.integrityFailure).toBe(false);
-    expect(result.evidence.join('\n')).toContain('DOM-only or incomplete canvas implementation');
-  });
+      writeFixtureFile(root, 'src/widget.js', DROPS_RECOVERY_FOCUS_PALETTE_WIDGET);
+      const dropsRecoveryFocus = await scorer.score(scoreInput);
+      expect(dropsRecoveryFocus.passed).toBe(false);
+      expect(dropsRecoveryFocus.integrityFailure).toBe(false);
+      expect(dropsRecoveryFocus.evidence.join('\n')).toContain(
+        'error state exposes semantic retry and recovery restores durable widget focus: fail',
+      );
 
-  test('tampered evaluator inputs fail integrity and plausible non-virtualized starter controls stay red', async () => {
-    const paletteRoot = workspace('kory-novel-faulty-palette-');
-    const palette = fixture(NOVEL_UI_TOOLKIT_EVAL_CONSTANTS.paletteScenario, paletteRoot);
-    await palette.materializer.materialize(paletteRoot, palette.scoreInput.scenario);
-    const faulty = await palette.scorer.score(palette.scoreInput);
-    expect(faulty.passed).toBe(false);
-    expect(faulty.integrityFailure).toBe(false);
-    expect(faulty.evidence.join('\n')).toContain(
-      'subject publishes the command status contract and reaches the ready state: fail',
-    );
+      // Strong negative control: identical status contract, geometry, and semantics, no windowing.
+      expect(NON_VIRTUALIZED_PALETTE_WIDGET).not.toBe(VALID_PALETTE_WIDGET);
+      writeFixtureFile(root, 'src/widget.js', NON_VIRTUALIZED_PALETTE_WIDGET);
+      const nonVirtualized = await scorer.score(scoreInput);
+      expect(nonVirtualized.passed).toBe(false);
+      expect(nonVirtualized.integrityFailure).toBe(false);
+      expect(nonVirtualized.evidence.join('\n')).toContain(
+        '20,000-item custom canvas list is genuinely virtualized: fail',
+      );
+    },
+    120_000,
+  );
 
-    const canvasRoot = workspace('kory-novel-tamper-');
-    const canvas = fixture(NOVEL_UI_TOOLKIT_EVAL_CONSTANTS.canvasScenario, canvasRoot);
-    await canvas.materializer.materialize(canvasRoot, canvas.scoreInput.scenario);
-    writeFixtureFile(canvasRoot, 'evaluator/dataset.js', 'export const dataset = {};\n');
-    const tampered = await canvas.scorer.score(canvas.scoreInput);
-    expect(tampered.passed).toBe(false);
-    expect(tampered.integrityFailure).toBe(true);
-  }, 60_000);
+  browserTest(
+    'DOM-only controls and candidate-authored evidence cannot substitute for browser behavior',
+    async () => {
+      const root = workspace('kory-novel-dom-only-');
+      const { materializer, scorer, scoreInput } = fixture(
+        NOVEL_UI_TOOLKIT_EVAL_CONSTANTS.canvasScenario,
+        root,
+      );
+      await materializer.materialize(root, scoreInput.scenario);
+      writeFixtureFile(root, 'src/toolkit.js', DOM_ONLY_CANVAS);
+      writeFixtureFile(
+        root,
+        'evaluation/scenario-1/runtime-receipt.json',
+        JSON.stringify({ checks: [{ passed: true }], screenshots: ['invented.png'] }),
+      );
+
+      const result = await scorer.score(scoreInput);
+      expect(result.passed).toBe(false);
+      expect(result.integrityFailure).toBe(false);
+      expect(result.evidence.join('\n')).toContain('DOM-only or incomplete canvas implementation');
+    },
+  );
+
+  browserTest(
+    'tampered evaluator inputs fail integrity and plausible non-virtualized starter controls stay red',
+    async () => {
+      const paletteRoot = workspace('kory-novel-faulty-palette-');
+      const palette = fixture(NOVEL_UI_TOOLKIT_EVAL_CONSTANTS.paletteScenario, paletteRoot);
+      await palette.materializer.materialize(paletteRoot, palette.scoreInput.scenario);
+      const faulty = await palette.scorer.score(palette.scoreInput);
+      expect(faulty.passed).toBe(false);
+      expect(faulty.integrityFailure).toBe(false);
+      expect(faulty.evidence.join('\n')).toContain(
+        'subject owns a custom canvas widget implementation: fail — unchanged materializer starter',
+      );
+
+      const canvasRoot = workspace('kory-novel-tamper-');
+      const canvas = fixture(NOVEL_UI_TOOLKIT_EVAL_CONSTANTS.canvasScenario, canvasRoot);
+      await canvas.materializer.materialize(canvasRoot, canvas.scoreInput.scenario);
+      writeFixtureFile(canvasRoot, 'evaluator/dataset.js', 'export const dataset = {};\n');
+      const tampered = await canvas.scorer.score(canvas.scoreInput);
+      expect(tampered.passed).toBe(false);
+      expect(tampered.integrityFailure).toBe(true);
+    },
+    60_000,
+  );
+
+  test.skipIf(!isUnix() || !existsSync('/bin/sleep'))(
+    'a launcher that never opens the browser pipe cannot reset the startup budget',
+    async () => {
+      const root = workspace('kory-novel-launch-timeout-');
+      const launcher = join(root, 'stalled-brave');
+      writeFileSync(launcher, '#!/bin/sh\nexec /bin/sleep 60\n');
+      chmodSync(launcher, 0o700);
+      const evaluators = createNovelUiToolkitFixtureEvaluators({
+        bravePath: launcher,
+        runTimeoutMs: 1_000,
+      });
+      const control = fixture(NOVEL_UI_TOOLKIT_EVAL_CONSTANTS.canvasScenario, root, evaluators);
+      await control.materializer.materialize(root, control.scoreInput.scenario);
+      writeFixtureFile(root, 'src/toolkit.js', NONTERMINATING_CANVAS);
+      const started = performance.now();
+      const result = await control.scorer.score(control.scoreInput);
+      expect(result.passed).toBe(false);
+      expect(result.integrityFailure).toBe(false);
+      expect(result.evidence.join('\n')).toMatch(/Brave launch failed after [12] bounded attempts/);
+      expect(performance.now() - started).toBeLessThan(8_000);
+    },
+    15_000,
+  );
 
   test('unavailable Brave and nontermination fail closed within a bounded run', async () => {
     const unavailableRoot = workspace('kory-novel-unavailable-');
@@ -611,6 +685,8 @@ describe('novel-ui-toolkit real-browser V5 evaluators', () => {
     const unavailableResult = await unavailableFixture.scorer.score(unavailableFixture.scoreInput);
     expect(unavailableResult.passed).toBe(false);
     expect(unavailableResult.evidence.join('\n')).toContain('Brave executable unavailable');
+
+    if (!existsSync(DEFAULT_BRAVE_PATH)) return;
 
     const hangingRoot = workspace('kory-novel-hanging-');
     const bounded = createNovelUiToolkitFixtureEvaluators({ runTimeoutMs: 2_000 });

@@ -1,13 +1,13 @@
 # Source map
 
-`financial-modeling` is individually authored for V5; empirical qualification is tracked separately in the audit/evaluation ledger. Sources bound data provenance and model-quality guidance; behavioral qualification still requires paired same-model skill/no-skill runs, deterministic checks, and independent blind evaluation.
+`financial-modeling` is individually authored for V5; empirical qualification is tracked separately in the audit/evaluation ledger. Sources bound data provenance and model-quality guidance; behavioral qualification still requires paired same-model skill/no skill runs, deterministic checks, and independent blind evaluation.
 
 ## Qualification basis
 
 - Package authorship is independent from empirical qualification; the audit/evaluation ledger is authoritative for qualification status.
 - Hierarchy: broader data-analysis.
-- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held-out cases through the real resolver.
-- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no-skill pairing, regression retention, and blind semantic judging.
+- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held out cases through the real resolver.
+- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no skill pairing, regression retention, and blind semantic judging.
 - Source discipline: authoritative/spec/reference sources outrank community patterns when they conflict; runtime evidence outranks examples for behavioral claims.
 
 ## Maintained sources
@@ -31,11 +31,11 @@
 - **Agent Skills specification**: https://agentskills.io/specification
   - Scope: Agent Skills specification as available 2026-09-05.
   - Use: Portable discovery metadata and progressive disclosure for this package.
-  - Verified: 2026-09-05; refresh after 90 days.
+  - Verified: 2026-11-03; refresh after 90 days.
 - **OpenAI public skill-creator reference**: https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md
-  - Scope: OpenAI skill-creator guidance on `main` as inspected 2026-09-05.
+  - Scope: OpenAI skill-creator guidance on `main` as inspected 2026-11-03.
   - Use: Narrow activation, explicit boundaries, progressive disclosure, and behavioral evaluation.
-  - Verified: 2026-09-05; refresh after 60 days.
+  - Verified: 2026-11-03; refresh after 60 days.
 
 ## Interpretation rules
 

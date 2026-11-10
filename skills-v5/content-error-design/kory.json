@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "content-error-design",
-  "version": "5.0.0",
+  "version": "5.0.1",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "domains": ["ux", "communication"],
@@ -115,32 +115,33 @@
     {
       "url": "https://design-system.service.gov.uk/components/error-message/",
       "sourceType": "official-docs",
-      "versionScope": "GOV.UK Design System Error message guidance available 2026-09-04",
-      "verifiedAt": "2026-09-04",
+      "versionScope": "GOV.UK Design System Error message guidance available 2026-10-17",
+      "verifiedAt": "2026-10-17",
       "staleAfterDays": 90,
       "notes": "Authoritative operational guidance to explain what went wrong and how to fix it, keep relevant input, distinguish user-correctable validation from service/capacity/permission problems, and expose errors accessibly."
     },
     {
       "url": "https://www.w3.org/TR/WCAG22/#error-identification",
       "sourceType": "spec",
-      "versionScope": "WCAG 2.2 Recommendation, Input Assistance and Status Messages",
-      "verifiedAt": "2026-09-04",
+      "versionScope": "WCAG 2.2 Recommendation 2024-12-12, SC 3.3.1-3.3.3 and 4.1.3",
+      "verifiedAt": "2026-10-17",
       "staleAfterDays": 180,
-      "notes": "Normative evidence that detected input errors are identified and described in text, input has labels/instructions where required, and applicable status messages are programmatically determinable."
+      "notes": "Web-content requirements for error identification, labels/instructions, known correction suggestions unless they jeopardize security or purpose, and programmatically determinable status messages where applicable. Not a universal native/terminal implementation contract."
     },
     {
       "url": "https://developer.apple.com/design/human-interface-guidelines/writing",
       "sourceType": "official-docs",
-      "versionScope": "Apple Human Interface Guidelines Writing guidance available 2026-09-04",
-      "verifiedAt": "2026-09-04",
+      "versionScope": "Apple Human Interface Guidelines Writing guidance available 2026-10-17",
+      "verifiedAt": "2026-10-17",
       "staleAfterDays": 90,
       "notes": "Platform-specific evidence that words inside an app are part of the user experience. Apple conventions are applied only when the Apple medium is relevant."
     },
     {
-      "url": "https://github.com/rampstackco/claude-skills/blob/main/skills/content-and-copy/SKILL.md",
+      "url": "https://github.com/rampstackco/claude-skills/blob/ac2b078f5025336c475d72a6fafa256d28aa6173/skills/content-and-copy/SKILL.md",
       "sourceType": "community-pattern",
-      "versionScope": "rampstackco/claude-skills main content-and-copy skill at ac2b078f5025 as inspected 2026-10-03",
-      "verifiedAt": "2026-10-03",
+      "versionScope": "rampstackco/claude-skills content-and-copy skill at ac2b078f5025336c475d72a6fafa256d28aa6173",
+      "revision": "ac2b078f5025336c475d72a6fafa256d28aa6173",
+      "verifiedAt": "2026-10-17",
       "staleAfterDays": 30,
       "license": "MIT",
       "notes": "Community pattern source for explicit reader/goal/voice, editing by priority, clarity, and cutting generic filler. Its editorial/marketing framework is outside this interface-language skill and is not imported as a default."

@@ -1,45 +1,45 @@
 {
   "id": "aws-cloud-full-task-1-individual",
   "maturity": "individual",
-  "prompt": "The evaluation repository asks the agent to \"Apply aws expertise to this task\". The fixture contains a plausible happy path, an adjacent-skill decoy, one invalid or partial state, and a recovery condition that must be demonstrated rather than assumed. The acceptance boundary is aws-cloud: Confirm account, region, workload, compliance, network, identity, data, availability, and operational requirements before selecting services. The adjacent azure-cloud discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "prompt": "Repair the synthetic AWS production baseline: the starting state places a workload in the Organizations management account, uses human IAM access keys, runs compute and RDS in one AZ, relies only on CloudTrail Event History, and has never restored data. Preserve src/cloud-sim.ts and evidence/starting-state.json. Write .kory-eval/cloud-baseline.json and .kory-eval/cloud-baseline-evidence.json using the materialized README and BaselineSpec. Separate member workload and log-archive ownership, use temporary human/workload identities, trace effective IAM/KMS and private network paths, distinguish an RDS Multi-AZ DB instance standby from a readable cluster replica, and specify durable audit/telemetry, quota and CloudFormation change/rollback evidence. Show representative allowed/denied access, a failed or partial check, and a usable restored resource; distinguish evidence actually produced from declarative simulator fields. The starting JSON is not a full account inventory: label chosen identifiers and unsupported configuration/observations as synthetic assumptions or unavailable. Never set liveProviderVerified true. architecture-planning owns broader system decomposition; AWS control-plane correctness is the task, and Azure topology is out of scope. Pairing and blind judging are owned by the outer evaluator.",
   "environment": {
     "kind": "repository",
     "startingState": "fixture://aws-cloud/scenario-1",
     "requirements": [
-      "synthetic AWS Organizations management plus member workload/log archive account fixture",
-      "engineer IAM access keys, single-AZ EC2/RDS topology, ALB, S3 and CloudTrail Event History starting state",
-      "CloudFormation change-set/drift/rollback harness plus service-quota snapshot",
-      "database/object/volume backup-and-restore fixture with observable resource identifiers",
-      "paired same-model skill/no-skill execution",
-      "aws-cloud parent/child/neighbor hierarchy boundary fixture",
-      "domain-specific tempting anti-pattern or shortcut",
-      "representative negative, interruption, compatibility, or recovery path"
+      "repository simulator with fixed src/cloud-sim.ts, BaselineSpec and evidence/starting-state.json",
+      "starting JSON: managementAccountHasWorkload=true, humanCredential=iam-access-key, computeZones=[us-east-1a], database=rds-single-az, audit=cloudtrail-event-history-only, restoreExecuted=false",
+      "candidate-owned .kory-eval/cloud-baseline.json plus .kory-eval/cloud-baseline-evidence.json; no AWS credentials or live account inventory supplied",
+      "member workload/log-archive separation, temporary identities, at least two compute AZs and database availability; DB instance standby must not be claimed as read scale",
+      "effective IAM allowed/denied paths, KMS policy/grant ownership, network path, CloudTrail/Config/CloudWatch and quota/change/rollback evidence with explicit synthetic boundaries",
+      "restored resource ID plus usability evidence; unsupported restore operations, account facts or observations remain unavailable rather than invented",
+      "paired same-model skill/no-skill execution from identical snapshots is evaluator-owned",
+      "fixed simulator and starting state preserved; no AWS deployment or provider verification"
     ]
   },
   "falsifiableChecks": [
     {
       "id": "scope-and-hierarchy",
-      "assertion": "The result must establish the actual aws-cloud boundary and relevant environment before acting, preserve the hierarchy relationship (broader=architecture-planning; near-neighbor=azure-cloud), and not absorb the near-neighbor responsibility merely because it is adjacent."
+      "assertion": "The result targets AWS account/IAM/VPC/KMS/service correctness, identifies architecture-planning as the broader decomposition responsibility, and does not redesign Azure resources. src/cloud-sim.ts and evidence/starting-state.json remain byte-identical. Pairing and blind judgments are not claimed as candidate-produced results."
     },
     {
       "id": "operating-contract",
-      "assertion": "Confirm account, region, workload, compliance, network, identity, data, availability, and operational requirements before selecting services."
+      "assertion": "The evidence identifies target member workload/log-archive ownership, Region, caller principal, workload role and network path, and covers all nine requirementsConfirmed categories. Facts absent from the minimal starting JSON, including account IDs and compliance requirements, are explicitly synthetic assumptions or unresolved rather than presented as discovered inventory."
     },
     {
       "id": "execution-invariant",
-      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+      "assertion": "The baseline removes workloads from the management plane, uses separate workload/logging boundaries and temporary dedicated human/workload identity, spans at least two compute AZs, and provides database availability without treating a DB instance standby as a reader. effectiveAccess records an intended IAM allow and deny plus KMS keyPolicyOwner/grantScope; the explanation names relevant trust, permission, resource and key-policy conditions rather than using identity labels alone."
     },
     {
       "id": "verification-discipline",
-      "assertion": "Validate infrastructure plans, IAM denied/allowed paths, health and rollback, backup/restore where material, quota behavior, and cost-driving usage with the actual target account/environment before claiming readiness."
+      "assertion": "The verification artifact separates configured flags from observations: DNS/private connection and isolation-deny outcomes; received CloudTrail/Config/CloudWatch signals; target quota usage; reviewed CloudFormation change/replacement/drift and rollback; restored database/object/volume-equivalent ID plus data-usability check. Each outcome names its evidence or is explicitly unavailable. A nonempty ID, true boolean or passing baselineReady alone must not be described as an executed restore or live AWS readiness."
     },
     {
       "id": "anti-pattern-resistance",
-      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not infer production identity from a local profile, use wildcard IAM by default, expose services publicly for convenience, or call multi-AZ deployment disaster recovery without recovery evidence."
+      "assertion": "A failure/partial-path record identifies at least one attempted or unavailable IAM/KMS deny, isolation failure, quota/replacement rejection or restore/rollback failure, with expected versus actual result and recovery action. Event History alone, backup existence, broad IAM, public connectivity or a claimed readable DB instance standby cannot satisfy the baseline. Simulated AZ availability is not Regional DR proof."
     },
     {
       "id": "evidence-and-uncertainty",
-      "assertion": "Every material completion claim must map to observable evidence (AWS organization/account/Region and caller/workload identity evidence; Effective IAM/network/KMS/service topology and quota evidence; CloudTrail/Config/CloudWatch operational evidence; Backup/restore or failover plus reviewed change/rollback evidence), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+      "assertion": "Both required .kory-eval artifacts exist, validate against the materialized contract, and consistently set liveProviderVerified=false. The evidence artifact uses evidenceKind=synthetic and a reproducible decisionSequence. Material claims identify their observed, simulated, inferred, stale or unavailable basis and cite current service sources where semantics matter. A deterministic simulator pass is reported only as a simulator pass."
     }
   ],
   "scorers": [
@@ -54,8 +54,8 @@
         "Backup/restore or failover plus reviewed change/rollback evidence",
         "Hierarchy boundary and selected specialist rationale",
         "Representative success, negative-path, and recovery verification",
-        "hierarchy boundary and specialist selection rationale",
-        "representative negative/recovery verification",
+        "Fixed simulator/starting-state integrity and baseline artifact contract",
+        "Observed versus declarative IAM/KMS/network/telemetry/restore evidence",
         "source/version boundary when facts can drift"
       ]
     },
@@ -78,14 +78,14 @@
     "Backup/restore or failover plus reviewed change/rollback evidence",
     "Hierarchy boundary and selected specialist rationale",
     "Representative success, negative-path, and recovery verification",
-    "hierarchy boundary and selected specialist rationale",
-    "representative success plus negative/recovery evidence",
-    "paired skill/no-skill run artifacts",
+    "Fixed simulator and starting-state integrity; observed versus declarative baseline results",
+    "Failure or partial-path expected/actual result, recovery action and explicit unavailable checks",
+    "Paired skill/no-skill run artifacts are evaluator-owned",
     "explicit unavailable, simulated, inferred, or stale evidence labels"
   ],
   "requiredArtifacts": [
-    "aws-cloud-individual-scenario-1-result",
-    "aws-cloud-individual-scenario-1-verification",
+    ".kory-eval/cloud-baseline.json",
+    ".kory-eval/cloud-baseline-evidence.json",
     "aws-cloud-individual-scenario-1-paired-evaluation"
   ]
 }

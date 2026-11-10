@@ -132,7 +132,7 @@
       "versionScope": "OpenAI Codex verification and evidence guidance as available 2026-09-04",
       "staleAfterDays": 60,
       "notes": "First-party agent workflow evidence: tests, linters, type checks, terminal output, and reviewable evidence support completion claims, while generated work still requires validation.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://support.claude.com/en/articles/14554000-claude-code-power-user-tips",
@@ -140,7 +140,7 @@
       "versionScope": "Anthropic Claude Code power-user verification guidance as available 2026-09-04",
       "staleAfterDays": 60,
       "notes": "First-party operational pattern that verification should match the task domain and use the relevant browser, simulator, test suite, or other real execution surface.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://github.com/obra/superpowers/blob/main/skills/verification-before-completion/SKILL.md",

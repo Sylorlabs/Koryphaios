@@ -189,6 +189,11 @@ async function fixture(id: string) {
     candidate.matches(scenario),
   )!;
   await m.materialize(root, scenario);
+  const contract = readFileSync(join(root, 'README.md'), 'utf8');
+  expect(m.id).toEndWith('@2');
+  expect(contract).toContain('blockedBy is always a JSON string array');
+  expect(contract).toContain('monthsAfterDecision as a JSON number array');
+  expect(contract).toContain('Preserve enough machine precision');
   return { root, scenario, packet: businessCasePacket(id) };
 }
 function save(root: string, artifact: unknown) {
@@ -206,6 +211,9 @@ describe('business-case evidence and arithmetic evaluator', () => {
       const { root, scenario, packet } = await fixture(id);
       expect(BUILTIN_SKILL_EVAL_MATERIALIZERS.filter((m) => m.matches(scenario))).toHaveLength(1);
       expect(BUILTIN_SKILL_EVAL_SCORERS.filter((s) => s.scenarioIds.includes(id))).toHaveLength(1);
+      expect(BUILTIN_SKILL_EVAL_SCORERS.find((s) => s.scenarioIds.includes(id))!.id).toEndWith(
+        '@2',
+      );
       expect(scoreBusinessCase(root, id).passed).toBe(false);
       save(root, controlArtifact(packet));
       const result = scoreBusinessCase(root, id);
@@ -263,6 +271,53 @@ describe('business-case evidence and arithmetic evaluator', () => {
     const stage = automation.rows.find((r) => r.optionId === 'stage' && r.caseId === 'base')!;
     for (const [i, value] of [-450_000, -150_000, -150_000, -165_000].entries())
       expect(stage.cashFlows[i]!).toBeCloseTo(value, 6);
+  });
+
+  test('flat comparators and rounded break-even roots do not satisfy reconciliation', async () => {
+    const id = BUSINESS_CASE_SCENARIOS[0],
+      { root, packet } = await fixture(id);
+    const a = controlArtifact(packet);
+    a.breakEvenAdoption.find((r) => r.optionId === 'status-quo')!.rate = 0;
+    save(root, a);
+    expect(scoreBusinessCase(root, id).evidence).toContain('bounded break-even status-quo: fail');
+
+    a.breakEvenAdoption.find((r) => r.optionId === 'status-quo')!.rate = null;
+    a.breakEvenAdoption.find((r) => r.optionId === 'hybrid')!.rate = 0.42;
+    save(root, a);
+    expect(scoreBusinessCase(root, id).evidence).toContain('bounded break-even hybrid: fail');
+  });
+
+  test('stage action is reserved for the explicit reversible stage option', async () => {
+    const id = BUSINESS_CASE_SCENARIOS[0],
+      { root, packet } = await fixture(id);
+    const a = controlArtifact(packet);
+    a.decision.action = 'stage';
+    a.decision.fundingNow = 800_000;
+    save(root, a);
+    expect(scoreBusinessCase(root, id).evidence).toContain(
+      'funding respects unresolved evidence and scope: fail',
+    );
+  });
+
+  test('machine-readable dependency and review fields keep their declared array shapes', async () => {
+    const platformId = BUSINESS_CASE_SCENARIOS[0],
+      platform = await fixture(platformId),
+      platformArtifact = controlArtifact(platform.packet);
+    platformArtifact.constraints.find((c) => c.optionId === 'vendor-a')!.blockedBy =
+      'security' as unknown as string[];
+    save(platform.root, platformArtifact);
+    expect(scoreBusinessCase(platform.root, platformId).evidence).toContain(
+      'dependencies and lock-in vendor-a: fail',
+    );
+
+    const automationId = BUSINESS_CASE_SCENARIOS[1],
+      automation = await fixture(automationId),
+      automationArtifact = controlArtifact(automation.packet);
+    automationArtifact.review.monthsAfterDecision = 6 as unknown as number[];
+    save(automation.root, automationArtifact);
+    expect(scoreBusinessCase(automation.root, automationId).evidence).toContain(
+      'bounded benefits review and unpriced information value: fail',
+    );
   });
 
   const mutants: Array<[string, (a: Artifact) => void]> = [

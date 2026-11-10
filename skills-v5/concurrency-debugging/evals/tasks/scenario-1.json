@@ -1,30 +1,32 @@
 {
   "id": "concurrency-debugging-full-task-1",
   "maturity": "individual",
-  "prompt": "The supplied async document store loses one of two field updates when `saveTitle()` and `saveTags()` start from revision 7 at the same time. Sequential calls are correct. Use the fixture's barriers to force both completion orders, reconstruct each read/modify/write timeline, identify the violated revision/ownership invariant, implement the narrow synchronization or compare-and-swap correction that preserves both updates, and add deterministic regressions for both orders plus a sequential control. Do not solve the race with sleeps or by serializing all document operations globally.",
+  "prompt": "The supplied document-store model loses one of two field updates when `beginTitle()` and `beginTags()` both read revision 7 before either `commit()`. Sequential calls are correct. Execute `runOverlap('title-first')` and `runOverlap('tags-first')` on the starting source before editing, preserving each read/modify/write timeline and full final state/revision. These are controlled two-phase simulations, not real async barriers. Identify the violated revision/ownership invariant, implement the narrow per-document atomic-delta or compare-and-swap correction that preserves both updates, and add deterministic regressions for both orders, a sequential control, unrelated-document independence, and a fresh update on the same document after the stale attempt is handled. Tests must reject the original lost-update behavior and pass the repair. Execute a named bounded repeatability loop asserting the invariant on every schedule execution; in `.kory-eval/concurrency-save.json`, retain a `repeatabilityRegression` or `stressRegression` object with numeric completed `iterations`, exact schedule IDs/counts, per-iteration outcomes or a linked test receipt, command/exit status, and failures. Label fixed simulation as repeatability rather than varied scheduling stress. Do not use sleeps or global serialization, and do not claim native race-detector or production recovery evidence from this model.",
   "environment": {
     "kind": "synthetic",
     "startingState": "fixture://concurrency-debugging/concurrent-document-saves",
     "requirements": [
-      "two deterministic barriers expose both overlapping save orders",
+      "begin/commit checkpoints model both overlapping save orders; runOverlap exposes title-first and tags-first without real threads or async barriers",
       "sequential title and tag saves are correct",
       "the document revision is the existing optimistic-concurrency boundary",
       "global serialization of unrelated documents is outside scope",
+      "revision and complete field state are observed; stale-attempt handling must permit a subsequent valid update on the same document",
+      "executed bounded per-schedule assertions are repeatability evidence only; real scheduling stress and production recovery require separate runtime evidence",
       "paired same-model skill/no-skill execution"
     ]
   },
   "falsifiableChecks": [
     {
       "id": "concurrency-save-two-orders",
-      "assertion": "Both overlap schedules are exercised and at least one reproduces the lost update on the starting revision."
+      "assertion": "Both named overlap schedules and a sequential control are executed on the original source; actor reads at revision 7, commit order, and full observed final state/revision are retained with source/command provenance and a simulated-evidence label. At least one schedule reproduces the lost update; inferred or evaluator-owned results are not claimed as agent observations."
     },
     {
       "id": "concurrency-save-invariant",
-      "assertion": "The causal explanation identifies how two actors violate the existing revision/ownership invariant."
+      "assertion": "The explanation identifies the stale snapshot and non-atomic per-document read/validate/commit boundary, distinguishes a logical race from a native memory data race, and ties the actual correction to preserving independent field deltas and the revision contract. If CAS is used, rejected attempts are retried/rebased or surfaced under the existing policy, never treated as successful commits."
     },
     {
       "id": "concurrency-save-regression",
-      "assertion": "Both fields survive in both controlled orders after the fix, sequential behavior remains correct, and no arbitrary sleep/global lock is used."
+      "assertion": "Authored tests reject the original defect and pass the repair: both fields and revisions are correct in both controlled orders, sequential and unrelated-document behavior remain correct, and a fresh same-document update succeeds after stale-attempt handling. A named bounded loop executes assertions each iteration and retains numeric completed iterations, schedule IDs/counts, outcomes and failures tied to command/exit status. Fixed simulations are not called varied stress or production recovery; no arbitrary sleep/global lock is used."
     }
   ],
   "scorers": [
@@ -37,7 +39,9 @@
         "Violated invariant",
         "Stress regression",
         "both controlled schedules",
-        "actual synchronization/state-transition diff"
+        "actual synchronization/state-transition diff",
+        "executed repeatabilityRegression or stressRegression record with per-schedule assertions",
+        "same-document follow-up update and explicit simulated-runtime limits"
       ]
     },
     {
@@ -47,7 +51,8 @@
       "evidence": [
         "the timeline distinguishes actors and contested state",
         "the repair enforces the stated invariant at the owning boundary",
-        "verification covers alternate interleavings rather than one lucky run"
+        "verification covers alternate interleavings rather than one lucky run",
+        "negative/recovery evidence is tied to stale-attempt handling without overstating the two-phase model"
       ],
       "blindTo": ["skill-variant", "expected-outcome"]
     }
@@ -58,6 +63,8 @@
     "Stress regression",
     "controlled pre-fix schedule evidence",
     "actual diff and both-order regressions",
+    "executed bounded repeatability record, per-iteration schedule assertions, command and exit status",
+    "same-document follow-up and unrelated-document control; explicit model and recovery limits",
     "paired skill/no-skill run artifacts"
   ],
   "requiredArtifacts": [

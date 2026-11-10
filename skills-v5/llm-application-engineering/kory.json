@@ -1,23 +1,36 @@
 {
   "schemaVersion": 1,
   "name": "llm-application-engineering",
-  "version": "5.1.1",
+  "version": "5.1.2",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
-  "domains": ["ai", "llm", "code"],
-  "targetMedia": ["any"],
+  "domains": [
+    "ai",
+    "llm",
+    "code"
+  ],
+  "targetMedia": [
+    "any"
+  ],
   "pathScopes": [],
   "contextBudget": 6100,
-  "broader": ["implementation"],
+  "broader": [
+    "implementation"
+  ],
   "facets": [],
-  "requires": ["verification", "llm-evaluation"],
+  "requires": [
+    "verification",
+    "llm-evaluation"
+  ],
   "conflicts": [],
   "activation": [
     "llm application",
     "language model app",
     "ai assistant backend",
     "structured model output",
+    "bounded model call",
+    "structured output validation",
     "llm tool calling",
     "model inference workflow",
     "model response schema",
@@ -73,8 +86,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["rag-retrieval-systems"],
-        "tags": ["ambiguous", "neighbor-boundary"]
+        "adjacentSkills": [
+          "rag-retrieval-systems"
+        ],
+        "tags": [
+          "ambiguous",
+          "neighbor-boundary"
+        ]
       },
       {
         "id": "llm-application-engineering-ambiguous-2",
@@ -82,8 +100,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["agentic-systems"],
-        "tags": ["ambiguous", "scope-control"]
+        "adjacentSkills": [
+          "agentic-systems"
+        ],
+        "tags": [
+          "ambiguous",
+          "scope-control"
+        ]
       },
       {
         "id": "llm-application-engineering-ambiguous-3",
@@ -91,8 +114,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["llm-evaluation"],
-        "tags": ["ambiguous", "scope-control"]
+        "adjacentSkills": [
+          "llm-evaluation"
+        ],
+        "tags": [
+          "ambiguous",
+          "scope-control"
+        ]
       }
     ],
     "adversarial": [
@@ -102,8 +130,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["implementation"],
-        "tags": ["adversarial", "neighbor-boundary"]
+        "adjacentSkills": [
+          "implementation"
+        ],
+        "tags": [
+          "adversarial",
+          "neighbor-boundary"
+        ]
       },
       {
         "id": "llm-application-engineering-adversarial-2",
@@ -111,8 +144,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["verification"],
-        "tags": ["adversarial", "scope-control"]
+        "adjacentSkills": [
+          "verification"
+        ],
+        "tags": [
+          "adversarial",
+          "scope-control"
+        ]
       },
       {
         "id": "llm-application-engineering-adversarial-3",
@@ -120,8 +158,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["ml-evaluation"],
-        "tags": ["adversarial", "scope-control"]
+        "adjacentSkills": [
+          "ml-evaluation"
+        ],
+        "tags": [
+          "adversarial",
+          "scope-control"
+        ]
       }
     ]
   },
@@ -129,34 +172,34 @@
     {
       "url": "https://developers.openai.com/api/docs/guides/structured-outputs",
       "sourceType": "official-docs",
-      "versionScope": "Rolling OpenAI structured-output documentation as available 2026-10-02",
+      "versionScope": "Rolling OpenAI structured-output documentation inspected 2026-11-08",
       "staleAfterDays": 14,
       "notes": "Current schema-constrained output, refusal, streaming and provider-specific structured-response mechanics.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-08"
     },
     {
       "url": "https://developers.openai.com/api/docs/guides/function-calling",
       "sourceType": "official-docs",
-      "versionScope": "Rolling OpenAI function/tool-calling documentation as available 2026-10-02",
+      "versionScope": "Rolling OpenAI function/tool-calling documentation inspected 2026-11-08",
       "staleAfterDays": 14,
       "notes": "JSON-Schema function definitions and strict-mode behavior; application authorization remains outside the model/tool proposal.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-08"
     },
     {
       "url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview",
       "sourceType": "official-docs",
-      "versionScope": "Rolling Claude Platform tool-use documentation as available 2026-10-02",
+      "versionScope": "Rolling Claude Platform tool-use documentation inspected 2026-11-08",
       "staleAfterDays": 14,
       "notes": "Client tool input_schema and tool_use/tool_result round-trip semantics plus server/client execution boundary.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-08"
     },
     {
       "url": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching",
       "sourceType": "official-docs",
-      "versionScope": "Rolling Claude Platform prompt-caching documentation as available 2026-10-02",
+      "versionScope": "Rolling Claude Platform prompt-caching documentation inspected 2026-11-08",
       "staleAfterDays": 14,
       "notes": "Prompt-prefix caching as latency/cost optimization with current 5-minute default and optional 1-hour lifetime; not durable application memory.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-08"
     },
     {
       "url": "https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence",

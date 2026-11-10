@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "audio-production",
-  "version": "5.0.0",
+  "version": "5.1.0",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -106,26 +106,43 @@
     {
       "url": "https://ffmpeg.org/ffmpeg-filters.html#loudnorm",
       "sourceType": "official-docs",
-      "versionScope": "FFmpeg loudnorm filter documentation opened 2026-09-06",
-      "verifiedAt": "2026-09-06",
+      "versionScope": "FFmpeg nightly filter documentation inspected 2026-10-17, loudnorm section; compare with installed-version help",
+      "verifiedAt": "2026-10-17",
       "staleAfterDays": 90,
-      "notes": "Measured loudness, true peak, normalization modes and output sample rate; defaults are not universal delivery targets."
+      "notes": "Measured loudness, true peak, two-pass inputs, linear-to-dynamic fallback, dual mono and explicit output rate after internal upsampling; defaults are not delivery targets."
+    },
+    {
+      "url": "https://ffmpeg.org/ffmpeg-filters.html#ebur128-1",
+      "sourceType": "official-docs",
+      "versionScope": "FFmpeg nightly filter documentation inspected 2026-10-17, ebur128 section; compare with installed-version help",
+      "verifiedAt": "2026-10-17",
+      "staleAfterDays": 90,
+      "notes": "Complete-program integrated loudness and explicitly enabled oversampled true peak. Default peak mode is none; the meter target does not normalize audio."
+    },
+    {
+      "url": "https://ffmpeg.org/ffprobe.html",
+      "sourceType": "official-docs",
+      "versionScope": "FFmpeg nightly ffprobe command documentation inspected 2026-10-17",
+      "verifiedAt": "2026-10-17",
+      "staleAfterDays": 90,
+      "notes": "Stream/container metadata, audio stream selection and JSON output. Optional fields can be inapplicable; metadata is not complete decoding or listening evidence."
     },
     {
       "url": "https://www.w3.org/TR/webaudio-1.1/",
       "sourceType": "spec",
-      "versionScope": "W3C Web Audio API 1.1",
+      "versionScope": "Web Audio API 1.1, W3C Working Draft of 22 September 2026",
+      "revision": "WD-webaudio-1.1-20260922",
       "staleAfterDays": 180,
-      "notes": "Audio graph, timing, processing, channel, and rendering semantics.",
-      "verifiedAt": "2026-09-04"
+      "notes": "Browser audio graph, timing, processing, channel and rendering semantics only. Working draft, not a mastering standard or proof of implemented browser support.",
+      "verifiedAt": "2026-10-17"
     },
     {
       "url": "https://ffmpeg.org/documentation.html",
       "sourceType": "official-docs",
-      "versionScope": "FFmpeg documentation as available 2026-09-04",
+      "versionScope": "FFmpeg nightly documentation index inspected 2026-10-17; follows the newest revision, not a pinned release",
       "staleAfterDays": 90,
       "notes": "Video/audio codecs, containers, filter graphs, timing, and media-processing reference.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-10-17"
     }
   ],
   "authoringMaturity": "individual"

@@ -1,19 +1,11 @@
-# Source map
+# Node runtime source map
 
-Source curation for `nodejs-runtime`. Routing fixtures and eval IDs remain in `kory.json`. This revision does not claim paired skill/no-skill or blind qualification.
+Check documentation for the project's supported Node major. The latest API index is for discovery; API semantics and measured application performance are different kinds of evidence.
 
-## Adopted primary guidance
+- [Streams](https://nodejs.org/api/stream.html): `pipeline` cancellation and teardown, writable `write()` / `drain`, `highWaterMark`, and stream error behavior. Bounded stream buffers do not bound every upstream queue.
+- [Process](https://nodejs.org/api/process.html): signals, exit, environment, and process lifecycle. Platform behavior varies; documentation cannot identify an application's leaked handles.
+- [Performance hooks](https://nodejs.org/api/perf_hooks.html): `monitorEventLoopDelay` measures observed delay; use a CPU profile to attribute the work causing it.
+- [Worker threads](https://nodejs.org/api/worker_threads.html): CPU execution outside the main JavaScript thread; measure transfer, queue, and worker lifecycle cost before claiming improvement.
+- [API index](https://nodejs.org/docs/latest/api/): locate APIs, then verify availability and behavior on the supported runtime.
 
-- **Node.js streams API**: https://nodejs.org/api/stream.html
-  - Adopted: respect writable backpressure, reason about buffering and `highWaterMark`, and use pipeline teardown and abort semantics deliberately.
-  - Conditional: `AbortSignal` and cleanup options depend on the supported Node release. Check the target major before relying on newer APIs.
-  - Limit: a correct stream pipeline does not establish low event-loop latency or bounded application memory without workload evidence.
-- **Node.js process API**: https://nodejs.org/api/process.html
-  - Adopted: treat process signals, exit behavior, environment, and active-resource ownership as runtime contracts for shutdown-sensitive code.
-  - Conditional: signal availability and behavior vary by operating system and process topology.
-  - Limit: process documentation does not identify which application handle or listener is leaking.
-- **Node.js API documentation index**: https://nodejs.org/docs/latest/api/
-  - Preserved use: current runtime API discovery.
-  - Limit: `latest` is not a substitute for checking the repository's supported Node major.
-
-Runtime diagnostics and representative load control event-loop, memory, and active-handle claims. API documentation controls supported semantics.
+Keep runtime traces, benchmark inputs, and measurements for any performance or resource claim. Docs alone establish API behavior, not workload improvement.

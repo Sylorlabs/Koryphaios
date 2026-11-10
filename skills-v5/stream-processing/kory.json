@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "stream-processing",
-  "version": "5.1.2",
+  "version": "5.2.1",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -18,7 +18,7 @@
   "evidence": [
     "stream-processing decision and boundary evidence",
     "Representative verification results or explicit unavailable checks",
-    "Hierarchy boundary and selected specialist rationale",
+    "Concrete scope boundary and neighboring responsibility behavior",
     "Representative success, negative-path, and recovery verification"
   ],
   "routing": {
@@ -102,7 +102,7 @@
       "versionScope": "Apache Kafka documentation as available 2026-09-04",
       "staleAfterDays": 60,
       "notes": "Streams, partitions, delivery, ordering, replication, and operational behavior.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-11-03"
     }
   ],
   "authoringMaturity": "individual"

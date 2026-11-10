@@ -193,7 +193,7 @@ test('hidden: recovery/replacement/session contracts cannot weaken passkeys',()=
 };
 
 const adminAuthMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'secure-authentication/admin-step-up@2',
+  id: 'secure-authentication/admin-step-up@3',
   matches: (scenario) => scenario.id === ADMIN_AUTH,
   materialize: (destination) => {
     writeFixtureFile(destination, 'package.json', packageJson('kory-eval-admin-auth'));
@@ -204,6 +204,8 @@ const adminAuthMaterializer: SkillEvalFixtureMaterializer = {
       'README.md',
       `# Enterprise admin step-up authentication fixture
 
+Preserve the evaluator: \`src/auth-policy.ts\` is a fixed input that supplies \`canAdmin\` and the shared types, and editing it is recorded as an evaluator integrity failure because the hidden check imports its behaviour. Only \`.kory-eval/admin-auth.json\` is candidate-owned.
+
 Write \`.kory-eval/admin-auth.json\` as \`AdminAuthSpec\`. Password may establish ordinary access, but privileged admin actions require a sufficiently fresh WebAuthn strong-auth event bound to the current session. Map password, WebAuthn, OTP, recovery code, recovery email and helpdesk to actual phishing resistance/privilege assurance; only WebAuthn qualifies as phishing-resistant/admin-qualifying here.
 
 Strong-factor add/remove/replace requires current strong assurance or explicit recovery and records a security event/session response. Recovery codes are single-use and trigger post-recovery restriction/re-enrollment. Helpdesk requires identity/authority checks and audit, cannot rely on knowledge questions, and cannot simply disable strong-factor policy. Set OAuth/OIDC and resource authorization as out of scope.
@@ -212,7 +214,7 @@ Strong-factor add/remove/replace requires current strong assurance or explicit r
   },
 };
 const adminAuthScorer: SkillEvalDeterministicScorer = {
-  id: 'secure-authentication/admin-step-up-scorer@2',
+  id: 'secure-authentication/admin-step-up-scorer@3',
   scenarioIds: [ADMIN_AUTH],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(

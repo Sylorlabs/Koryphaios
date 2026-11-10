@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "php-engineering",
-  "version": "5.1.1",
+  "version": "5.1.2",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -99,10 +99,10 @@
     {
       "url": "https://www.php.net/manual/en/function.exit.php",
       "sourceType": "official-docs",
-      "versionScope": "PHP exit documentation inspected 2026-09-06",
+      "versionScope": "PHP exit documentation inspected 2026-11-07",
       "staleAfterDays": 60,
       "notes": "exit bypasses finally blocks; distinguish explicit termination from normal return and exception unwinding when validating cleanup.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://www.php.net/manual/en/",
@@ -110,23 +110,23 @@
       "versionScope": "PHP manual as available 2026-09-04",
       "staleAfterDays": 60,
       "notes": "PHP language/runtime, type, request, and library reference.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://www.php.net/manual/en/language.types.declarations.php",
       "sourceType": "official-docs",
-      "versionScope": "PHP type declarations documentation as verified 2026-09-06",
+      "versionScope": "PHP type declarations documentation as verified 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Adopted for caller-controlled strict_types scalar coercion and type-boundary diagnosis.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
-      "url": "https://www.php.net/manual/en/language.exceptions.php",
+      "url": "https://www.php.net/manual/en/control-structures.finally.php",
       "sourceType": "official-docs",
-      "versionScope": "PHP exception documentation as verified 2026-09-06",
+      "versionScope": "PHP exception documentation as verified 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Adopted for exception propagation and finally control-flow behavior; transaction semantics remain framework-specific.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     }
   ],
   "authoringMaturity": "individual"

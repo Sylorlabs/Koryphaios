@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "react-engineering",
-  "version": "5.1.1",
+  "version": "5.2.0",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -107,34 +107,50 @@
     {
       "url": "https://react.dev/",
       "sourceType": "official-docs",
-      "versionScope": "React documentation as fetched 2026-09-06",
+      "versionScope": "React documentation as fetched 2026-10-20",
       "staleAfterDays": 45,
       "notes": "Primary React state, rendering, effect, component, and hook guidance.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-10-20"
     },
     {
       "url": "https://react.dev/learn/you-might-not-need-an-effect",
       "sourceType": "official-docs",
-      "versionScope": "React guidance as fetched 2026-09-06",
+      "versionScope": "React guidance as fetched 2026-10-20",
       "staleAfterDays": 45,
       "notes": "Derived state, event logic, and the boundary for Effects.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-10-20"
     },
     {
       "url": "https://react.dev/learn/lifecycle-of-reactive-effects",
       "sourceType": "official-docs",
-      "versionScope": "React guidance as fetched 2026-09-06",
+      "versionScope": "React guidance as fetched 2026-10-20",
       "staleAfterDays": 45,
       "notes": "Effect synchronization lifecycle, dependencies, and cleanup.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-10-20"
+    },
+    {
+      "url": "https://react.dev/learn/synchronizing-with-effects",
+      "sourceType": "official-docs",
+      "versionScope": "React v19.3 documentation read 2026-10-10; check installed version for differences",
+      "staleAfterDays": 45,
+      "notes": "Separate event work from synchronization and clean up or ignore obsolete async completions.",
+      "verifiedAt": "2026-10-10"
+    },
+    {
+      "url": "https://react.dev/learn/preserving-and-resetting-state",
+      "sourceType": "official-docs",
+      "versionScope": "React v19.3 documentation read 2026-10-10; check installed version for differences",
+      "staleAfterDays": 45,
+      "notes": "State identity follows component position and keys; preserve domain IDs across list reordering.",
+      "verifiedAt": "2026-10-10"
     },
     {
       "url": "https://github.com/mattpocock/skills",
       "sourceType": "community-pattern",
-      "versionScope": "main commit 3cca18b368ae95cdbdebbff572ccafa662551015 authored 2026-09-04T08:43:27Z; package 1.2.3",
+      "versionScope": "main commit 4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d fetched 2026-10-05",
       "staleAfterDays": 30,
       "notes": "Community pattern for small composable skills and explicit router versus discipline separation; never React authority.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-03"
     }
   ],
   "authoringMaturity": "individual"

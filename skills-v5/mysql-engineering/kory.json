@@ -102,7 +102,7 @@
       "versionScope": "MySQL 8.4 Optimization and Indexes",
       "staleAfterDays": 60,
       "notes": "Index read benefits versus storage and write costs; reject indiscriminate index additions.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://dev.mysql.com/doc/refman/8.4/en/multiple-column-indexes.html",
@@ -110,7 +110,7 @@
       "versionScope": "MySQL 8.4 Multiple-Column Indexes",
       "staleAfterDays": 60,
       "notes": "Composite-index and leftmost-prefix behavior; index shape remains workload-dependent.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://dev.mysql.com/doc/refman/8.4/en/innodb-next-key-locking.html",
@@ -118,7 +118,7 @@
       "versionScope": "MySQL 8.4 Phantom Rows and next-key locking",
       "staleAfterDays": 60,
       "notes": "Record-plus-gap locks and phantom prevention; actual locking depends on access path and isolation.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://dev.mysql.com/doc/refman/8.4/en/explain.html",
@@ -126,7 +126,7 @@
       "versionScope": "MySQL 8.4 EXPLAIN Statement",
       "staleAfterDays": 60,
       "notes": "Optimizer plans and executed EXPLAIN ANALYZE; diagnostic execution must respect workload and side-effect boundaries.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://dev.mysql.com/doc/refman/8.4/en/",
@@ -134,7 +134,7 @@
       "versionScope": "MySQL 8.4 reference manual as available 2026-09-04",
       "staleAfterDays": 60,
       "notes": "SQL, InnoDB, replication, indexing, locking, and operations reference.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-11-03"
     }
   ],
   "authoringMaturity": "individual"

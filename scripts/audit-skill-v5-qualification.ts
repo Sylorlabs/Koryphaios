@@ -67,6 +67,7 @@ const rows = catalog.packages.map((skillPackage) => {
           pairedFullTaskBaselines: gate.pairedBaselineCategoryCounts['full-task'],
           provenancedBlindReviews: gate.provenancedBlindReviews,
           openRegressions: gate.openRegressions,
+          excludedEvidence: gate.excludedEvidence,
           uplift: {
             passRate: gate.skillBaselinePassRateDelta,
             quality: gate.skillBaselineQualityDelta,
@@ -151,7 +152,14 @@ const report = {
   ...(summaryOnly ? {} : { rows }),
 };
 
-console.log(JSON.stringify(report, null, 2));
+// Drain large reports before exiting with a nonzero qualification status. Bun
+// otherwise may truncate piped JSON when this gate fails.
+await new Promise<void>((resolveOutput, rejectOutput) => {
+  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`, (error) => {
+    if (error) rejectOutput(error);
+    else resolveOutput();
+  });
+});
 
 // This command is a qualification gate, not just an inventory. Static quality
 // must be clean and every package must have genuinely complete empirical

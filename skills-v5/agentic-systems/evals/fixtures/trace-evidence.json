@@ -1,0 +1,665 @@
+{
+  "schemaVersion": 1,
+  "fixtureKind": "package-local-trace-contract",
+  "executionStatus": "unverified",
+  "observedResult": null,
+  "evidenceBoundary": {
+    "statement": "These are inspectable synthetic trace requirements and expected transitions, not receipts from a live agent, service, specialist, or external oracle.",
+    "unverifiedObligations": [
+      {
+        "id": "live-authority",
+        "owner": "agentic-systems",
+        "status": "unverified",
+        "missingProof": "No live service, approval authority, or external mutation endpoint is provided by the registered pure evaluator."
+      },
+      {
+        "id": "recovery",
+        "owner": "agentic-systems",
+        "status": "unverified",
+        "missingProof": "No durable process-resume or post-timeout remote-state recovery harness is provided."
+      },
+      {
+        "id": "tool-integration",
+        "owner": "llm-application-engineering",
+        "status": "unverified",
+        "missingProof": "The registered exercise supplies event JSON to solve(input); it does not discover, authorize, or dispatch live tools."
+      },
+      {
+        "id": "external-completion-oracle",
+        "owner": "agentic-systems",
+        "status": "unverified",
+        "missingProof": "No independent health checker or primary external source is available to read back final state."
+      }
+    ]
+  },
+  "structuralIdentifierReconciliation": {
+    "rule": "Compare JSON values recursively. Primitive values use JSON value semantics; arrays preserve order; object key order is irrelevant; missing fields remain distinct from null.",
+    "examples": [
+      {
+        "id": "reordered-action-and-revision-objects",
+        "left": {
+          "action": "restart",
+          "revision": {
+            "epoch": 7,
+            "hash": "abc"
+          }
+        },
+        "right": {
+          "revision": {
+            "hash": "abc",
+            "epoch": 7
+          },
+          "action": "restart"
+        },
+        "structurallyEquivalent": true,
+        "objectIdentityEquivalent": false
+      },
+      {
+        "id": "nested-action-arguments",
+        "left": {
+          "name": "set_feature_flag",
+          "arguments": {
+            "enabled": false,
+            "target": {
+              "service": "checkout",
+              "region": "us-east"
+            }
+          }
+        },
+        "right": {
+          "arguments": {
+            "target": {
+              "region": "us-east",
+              "service": "checkout"
+            },
+            "enabled": false
+          },
+          "name": "set_feature_flag"
+        },
+        "structurallyEquivalent": true,
+        "objectIdentityEquivalent": false
+      },
+      {
+        "id": "ordered-revision-array-is-not-a-set",
+        "left": {
+          "revision": ["region-a", "epoch-7"]
+        },
+        "right": {
+          "revision": ["epoch-7", "region-a"]
+        },
+        "structurallyEquivalent": false,
+        "objectIdentityEquivalent": false
+      }
+    ]
+  },
+  "traces": [
+    {
+      "id": "scenario-1-approved-current-success",
+      "scenarioId": "agentic-systems-full-task-1-individual",
+      "kind": "success",
+      "executionStatus": "unverified",
+      "observedResult": null,
+      "requiredTrace": [
+        {
+          "step": 1,
+          "event": "observe",
+          "expectedState": "latestObservedRevision=r2; evidenceGeneration=1",
+          "expectedDecision": "Use the fresh revision as the only mutation target.",
+          "budgetCharge": 1
+        },
+        {
+          "step": 2,
+          "event": "request",
+          "expectedState": "approval and action/revision binding match r2",
+          "expectedDecision": "allow one authorized mutation",
+          "budgetCharge": 1
+        },
+        {
+          "step": 3,
+          "event": "result",
+          "expectedState": "receipt is not completion evidence",
+          "expectedDecision": "remain blocked until independent verification",
+          "budgetCharge": 1
+        },
+        {
+          "step": 4,
+          "event": "verify",
+          "expectedState": "fresh healthy evidence matches r2 and generation 1",
+          "expectedDecision": "complete",
+          "budgetCharge": 1
+        }
+      ],
+      "missingEvidence": "No live mutation or independent health read occurred."
+    },
+    {
+      "id": "scenario-1-healthy-at-entry-zero-write",
+      "scenarioId": "agentic-systems-full-task-1-individual",
+      "kind": "negative",
+      "executionStatus": "unverified",
+      "observedResult": null,
+      "requiredTrace": [
+        {
+          "step": 1,
+          "event": "independent-health-read",
+          "expectedState": "healthy at current revision",
+          "expectedDecision": "skip restart and feature-flag mutation",
+          "budgetCharge": 1
+        },
+        {
+          "step": 2,
+          "event": "mutation-count",
+          "expectedState": "writes=0",
+          "expectedDecision": "retain zero-write evidence",
+          "budgetCharge": 0
+        }
+      ],
+      "missingEvidence": "The pure evaluator has no live entry health read."
+    },
+    {
+      "id": "scenario-1-approval-denied",
+      "scenarioId": "agentic-systems-full-task-1-individual",
+      "kind": "negative",
+      "executionStatus": "unverified",
+      "observedResult": null,
+      "requiredTrace": [
+        {
+          "step": 1,
+          "event": "observe",
+          "expectedState": "current revision is known",
+          "expectedDecision": "evaluate the proposed action only",
+          "budgetCharge": 1
+        },
+        {
+          "step": 2,
+          "event": "approval-denied",
+          "expectedState": "approval does not bind authority",
+          "expectedDecision": "reject request with no mutation",
+          "budgetCharge": 1
+        },
+        {
+          "step": 3,
+          "event": "terminal",
+          "expectedState": "writes=0; completion=false",
+          "expectedDecision": "blocked with denial evidence",
+          "budgetCharge": 0
+        }
+      ],
+      "missingEvidence": "No approval authority or side-effect counter is connected to the pure evaluator."
+    },
+    {
+      "id": "scenario-1-deployment-race",
+      "scenarioId": "agentic-systems-full-task-1-individual",
+      "kind": "negative-recovery",
+      "executionStatus": "unverified",
+      "observedResult": null,
+      "requiredTrace": [
+        {
+          "step": 1,
+          "event": "observe",
+          "expectedState": "approval targets revision r2",
+          "expectedDecision": "hold the proposed action",
+          "budgetCharge": 1
+        },
+        {
+          "step": 2,
+          "event": "revision-changed",
+          "expectedState": "authoritative revision becomes r3",
+          "expectedDecision": "invalidate action and approval for r2",
+          "budgetCharge": 1
+        },
+        {
+          "step": 3,
+          "event": "reobserve",
+          "expectedState": "latestObservedRevision=r3",
+          "expectedDecision": "replan and request fresh approval",
+          "budgetCharge": 1
+        }
+      ],
+      "missingEvidence": "The pure evaluator cannot change external deployment state while approval is pending."
+    },
+    {
+      "id": "scenario-1-timeout-after-remote-apply",
+      "scenarioId": "agentic-systems-full-task-1-individual",
+      "kind": "negative-recovery",
+      "executionStatus": "unverified",
+      "observedResult": null,
+      "requiredTrace": [
+        {
+          "step": 1,
+          "event": "dispatch",
+          "expectedState": "logicalOperationId persisted before call; attempt=1",
+          "expectedDecision": "dispatch the approved action",
+          "budgetCharge": 1
+        },
+        {
+          "step": 2,
+          "event": "timeout",
+          "expectedState": "operation=unknown; do not call a new logical key",
+          "expectedDecision": "reconcile before retry",
+          "budgetCharge": 1
+        },
+        {
+          "step": 3,
+          "event": "authoritative-readback",
+          "expectedState": "remote apply is confirmed or remains unknown",
+          "expectedDecision": "avoid duplicate mutation; retry only under the same idempotency guarantee",
+          "budgetCharge": 1
+        },
+        {
+          "step": 4,
+          "event": "independent-health",
+          "expectedState": "health and current revision are independently checked",
+          "expectedDecision": "complete only if every terminal predicate passes",
+          "budgetCharge": 1
+        }
+      ],
+      "missingEvidence": "The pure evaluator has no remote operation record, idempotency adapter, or health oracle."
+    },
+    {
+      "id": "scenario-1-no-progress-budget-exhausted",
+      "scenarioId": "agentic-systems-full-task-1-individual",
+      "kind": "negative",
+      "executionStatus": "unverified",
+      "observedResult": null,
+      "requiredTrace": [
+        {
+          "step": 1,
+          "event": "tool-error",
+          "expectedState": "attempt=1; predicate unchanged",
+          "expectedDecision": "record the failed call",
+          "budgetCharge": 1
+        },
+        {
+          "step": 2,
+          "event": "tool-error",
+          "expectedState": "attempt=2; no new evidence",
+          "expectedDecision": "stop rather than loop",
+          "budgetCharge": 1
+        },
+        {
+          "step": 3,
+          "event": "budget-exhausted",
+          "expectedState": "remainingBudget=0; unsatisfiedPredicate is explicit",
+          "expectedDecision": "blocked or partial, never complete",
+          "budgetCharge": 1
+        }
+      ],
+      "missingEvidence": "The pure evaluator has no tool-error stream or wall-clock budget."
+    },
+    {
+      "id": "scenario-1-unavailable-completion-oracle",
+      "scenarioId": "agentic-systems-full-task-1-individual",
+      "kind": "negative",
+      "executionStatus": "unverified",
+      "observedResult": null,
+      "requiredTrace": [
+        {
+          "step": 1,
+          "event": "mutation-receipt",
+          "expectedState": "write acknowledged; health unknown",
+          "expectedDecision": "do not mark complete",
+          "budgetCharge": 1
+        },
+        {
+          "step": 2,
+          "event": "oracle-unavailable",
+          "expectedState": "independent completion evidence missing",
+          "expectedDecision": "return blocked/unverified with missing proof",
+          "budgetCharge": 1
+        }
+      ],
+      "missingEvidence": "No external completion oracle is available in the registered exercise."
+    },
+    {
+      "id": "scenario-1-verify-only",
+      "scenarioId": "agentic-systems-full-task-1-individual",
+      "kind": "negative",
+      "executionStatus": "unverified",
+      "observedResult": null,
+      "requiredTrace": [
+        {
+          "step": 1,
+          "event": "verify",
+          "expectedState": "latestObservedRevision remains absent or unchanged",
+          "expectedDecision": "do not create a current target",
+          "budgetCharge": 1
+        },
+        {
+          "step": 2,
+          "event": "terminal",
+          "expectedState": "completion=false",
+          "expectedDecision": "blocked/unverified",
+          "budgetCharge": 0
+        }
+      ],
+      "missingEvidence": "This fixture records the contract transition, not a candidate execution receipt."
+    },
+    {
+      "id": "scenario-1-fresh-unhealthy-replaces-healthy",
+      "scenarioId": "agentic-systems-full-task-1-individual",
+      "kind": "negative-recovery",
+      "executionStatus": "unverified",
+      "observedResult": null,
+      "requiredTrace": [
+        {
+          "step": 1,
+          "event": "verify",
+          "expectedState": "healthy=true for generation 1",
+          "expectedDecision": "retain a replaceable completion candidate",
+          "budgetCharge": 1
+        },
+        {
+          "step": 2,
+          "event": "verify",
+          "expectedState": "fresh healthy=false for the same revision; generation 2",
+          "expectedDecision": "clear prior healthy evidence and block",
+          "budgetCharge": 1
+        },
+        {
+          "step": 3,
+          "event": "verify",
+          "expectedState": "later fresh healthy=true for generation 3",
+          "expectedDecision": "allow completion only after the new evidence",
+          "budgetCharge": 1
+        }
+      ],
+      "missingEvidence": "No candidate trace is executed by this package-local fixture."
+    },
+    {
+      "id": "scenario-1-new-observation-invalidates-health",
+      "scenarioId": "agentic-systems-full-task-1-individual",
+      "kind": "negative-recovery",
+      "executionStatus": "unverified",
+      "observedResult": null,
+      "requiredTrace": [
+        {
+          "step": 1,
+          "event": "verify",
+          "expectedState": "healthy evidence belongs to revision r2/generation 1",
+          "expectedDecision": "completion may be considered only for r2",
+          "budgetCharge": 1
+        },
+        {
+          "step": 2,
+          "event": "observe",
+          "expectedState": "fresh revision r3/generation 2",
+          "expectedDecision": "invalidate r2 health immediately",
+          "budgetCharge": 1
+        },
+        {
+          "step": 3,
+          "event": "terminal",
+          "expectedState": "no current-generation health evidence",
+          "expectedDecision": "blocked until independently reverified",
+          "budgetCharge": 0
+        }
+      ],
+      "missingEvidence": "The pure evaluator contract does not emit an execution trace."
+    },
+    {
+      "id": "scenario-1-mutation-invalidates-health",
+      "scenarioId": "agentic-systems-full-task-1-individual",
+      "kind": "negative-recovery",
+      "executionStatus": "unverified",
+      "observedResult": null,
+      "requiredTrace": [
+        {
+          "step": 1,
+          "event": "verify",
+          "expectedState": "healthy evidence is current before mutation",
+          "expectedDecision": "retain only as pre-mutation evidence",
+          "budgetCharge": 1
+        },
+        {
+          "step": 2,
+          "event": "mutation-attempt",
+          "expectedState": "evidenceGeneration increments; completion verification cleared",
+          "expectedDecision": "do not reuse the prior healthy result",
+          "budgetCharge": 1
+        },
+        {
+          "step": 3,
+          "event": "independent-health",
+          "expectedState": "fresh result is tied to the post-mutation generation",
+          "expectedDecision": "complete only after the new check passes",
+          "budgetCharge": 1
+        }
+      ],
+      "missingEvidence": "No mutation adapter or independent post-mutation health read is available."
+    },
+    {
+      "id": "scenario-1-timeout-recovery-unhealthy-then-healthy",
+      "scenarioId": "agentic-systems-full-task-1-individual",
+      "kind": "recovery",
+      "executionStatus": "unverified",
+      "observedResult": null,
+      "requiredTrace": [
+        {
+          "step": 1,
+          "event": "timeout",
+          "expectedState": "operation=unknown",
+          "expectedDecision": "reconcile before any retry",
+          "budgetCharge": 1
+        },
+        {
+          "step": 2,
+          "event": "verify",
+          "expectedState": "fresh healthy=false clears uncertainty but not completion",
+          "expectedDecision": "remain blocked",
+          "budgetCharge": 1
+        },
+        {
+          "step": 3,
+          "event": "verify",
+          "expectedState": "later fresh healthy=true at the same current revision",
+          "expectedDecision": "complete if no other predicate is unresolved",
+          "budgetCharge": 1
+        }
+      ],
+      "missingEvidence": "The registered pure evaluator does not prove remote apply or recovery."
+    },
+    {
+      "id": "scenario-2-current-agreement",
+      "scenarioId": "agentic-systems-full-task-2-individual",
+      "kind": "success",
+      "executionStatus": "unverified",
+      "observedResult": null,
+      "requiredTrace": [
+        {
+          "step": 1,
+          "event": "child-result",
+          "expectedState": "dependency artifact is complete, in scope, status=ok, revision=current",
+          "expectedDecision": "accept dependency evidence",
+          "budgetCharge": 1
+        },
+        {
+          "step": 2,
+          "event": "child-result",
+          "expectedState": "test artifact is complete, in scope, status=ok, revision=current",
+          "expectedDecision": "accept test evidence",
+          "budgetCharge": 1
+        },
+        {
+          "step": 3,
+          "event": "independent-verification",
+          "expectedState": "both primary sources are current and readable",
+          "expectedDecision": "complete only after manager-owned terminal checks",
+          "budgetCharge": 1
+        }
+      ],
+      "missingEvidence": "No child dispatcher or independent primary-source readback is provided."
+    },
+    {
+      "id": "scenario-2-scope-expansion",
+      "scenarioId": "agentic-systems-full-task-2-individual",
+      "kind": "negative",
+      "executionStatus": "unverified",
+      "observedResult": null,
+      "requiredTrace": [
+        {
+          "step": 1,
+          "event": "child-request",
+          "expectedState": "requestedScope is wider than declaredScope",
+          "expectedDecision": "deny expansion before dispatch",
+          "budgetCharge": 1
+        },
+        {
+          "step": 2,
+          "event": "acceptance",
+          "expectedState": "expanded child evidence is excluded",
+          "expectedDecision": "record scope-expansion rejection",
+          "budgetCharge": 1
+        },
+        {
+          "step": 3,
+          "event": "terminal",
+          "expectedState": "no accepted artifact for the rejected child",
+          "expectedDecision": "blocked or partial, never complete",
+          "budgetCharge": 0
+        }
+      ],
+      "missingEvidence": "No child grant or dispatch boundary is exercised here."
+    },
+    {
+      "id": "scenario-2-timeout-missing-artifact",
+      "scenarioId": "agentic-systems-full-task-2-individual",
+      "kind": "negative-recovery",
+      "executionStatus": "unverified",
+      "observedResult": null,
+      "requiredTrace": [
+        {
+          "step": 1,
+          "event": "child-timeout",
+          "expectedState": "status=partial or timed_out; spent budget is charged",
+          "expectedDecision": "checkpoint the partial trace",
+          "budgetCharge": 1
+        },
+        {
+          "step": 2,
+          "event": "artifact-check",
+          "expectedState": "required artifact is absent",
+          "expectedDecision": "reject claimed completion",
+          "budgetCharge": 1
+        },
+        {
+          "step": 3,
+          "event": "resume-decision",
+          "expectedState": "only eligible work may resume under remaining budget",
+          "expectedDecision": "partial/blocked if the contract cannot resume it",
+          "budgetCharge": 1
+        }
+      ],
+      "missingEvidence": "The pure evaluator does not run children or persist checkpoints."
+    },
+    {
+      "id": "scenario-2-completed-child-resume",
+      "scenarioId": "agentic-systems-full-task-2-individual",
+      "kind": "recovery",
+      "executionStatus": "unverified",
+      "observedResult": null,
+      "requiredTrace": [
+        {
+          "step": 1,
+          "event": "checkpoint-read",
+          "expectedState": "completed artifact matches current input revision",
+          "expectedDecision": "reuse the completed child",
+          "budgetCharge": 1
+        },
+        {
+          "step": 2,
+          "event": "resume-dispatch",
+          "expectedState": "only missing/eligible child work is dispatched",
+          "expectedDecision": "preserve the completed artifact and charge new work",
+          "budgetCharge": 1
+        },
+        {
+          "step": 3,
+          "event": "terminal",
+          "expectedState": "parent budget includes prior and resumed spend",
+          "expectedDecision": "complete only after manager-owned verification",
+          "budgetCharge": 1
+        }
+      ],
+      "missingEvidence": "No durable resume harness is available."
+    },
+    {
+      "id": "scenario-2-contradictory-current-evidence",
+      "scenarioId": "agentic-systems-full-task-2-individual",
+      "kind": "negative-recovery",
+      "executionStatus": "unverified",
+      "observedResult": null,
+      "requiredTrace": [
+        {
+          "step": 1,
+          "event": "child-results",
+          "expectedState": "both artifacts are current and complete but conclusions differ",
+          "expectedDecision": "retain both claims and all source references",
+          "budgetCharge": 1
+        },
+        {
+          "step": 2,
+          "event": "primary-readback",
+          "expectedState": "supporting evidence for both claims is inspected",
+          "expectedDecision": "resolve only from authoritative current evidence",
+          "budgetCharge": 1
+        },
+        {
+          "step": 3,
+          "event": "terminal",
+          "expectedState": "unresolved contradiction remains visible if evidence is ambiguous",
+          "expectedDecision": "needs-review/partial/blocked, never majority-vote completion",
+          "budgetCharge": 1
+        }
+      ],
+      "missingEvidence": "No independent primary evidence is read by the package-local fixture."
+    },
+    {
+      "id": "scenario-2-stale-memory",
+      "scenarioId": "agentic-systems-full-task-2-individual",
+      "kind": "negative",
+      "executionStatus": "unverified",
+      "observedResult": null,
+      "requiredTrace": [
+        {
+          "step": 1,
+          "event": "memory-read",
+          "expectedState": "memory revision differs from current input revision",
+          "expectedDecision": "mark memory superseded and exclude it from completion",
+          "budgetCharge": 1
+        },
+        {
+          "step": 2,
+          "event": "current-evidence",
+          "expectedState": "current specialist evidence is evaluated independently",
+          "expectedDecision": "do not let stale memory veto or complete the run",
+          "budgetCharge": 1
+        }
+      ],
+      "missingEvidence": "No durable memory provenance or current external source is connected."
+    },
+    {
+      "id": "scenario-2-unavailable-primary-source",
+      "scenarioId": "agentic-systems-full-task-2-individual",
+      "kind": "negative",
+      "executionStatus": "unverified",
+      "observedResult": null,
+      "requiredTrace": [
+        {
+          "step": 1,
+          "event": "artifact-acceptance",
+          "expectedState": "specialist artifact is present and internally valid",
+          "expectedDecision": "keep the specialist claim as conditional evidence",
+          "budgetCharge": 1
+        },
+        {
+          "step": 2,
+          "event": "primary-read-failed",
+          "expectedState": "independent completion source is unavailable",
+          "expectedDecision": "return partial/blocked/unverified and name the missing source",
+          "budgetCharge": 1
+        }
+      ],
+      "missingEvidence": "The registered exercise cannot contact an independent completion oracle."
+    }
+  ]
+}

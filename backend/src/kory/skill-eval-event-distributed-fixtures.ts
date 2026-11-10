@@ -152,7 +152,7 @@ Write \`.kory-eval/event-outbox.json\` with the transaction boundary, crash matr
 };
 
 const outboxScorer: SkillEvalDeterministicScorer = {
-  id: 'event-driven-architecture/outbox-order-created-scorer@1',
+  id: 'event-driven-architecture/outbox-order-created-scorer@2',
   scenarioIds: [OUTBOX],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
@@ -202,8 +202,6 @@ test('hidden: publish/ack uncertainty is recovered with stable identity and idem
       contains(report.text, [
         /at-least-once|at least once/u,
         /transaction|atomic/u,
-        /distributed-backend/u,
-        /stream-processing/u,
         /synthetic|local/u,
       ]) &&
       hasBoolean(report.artifact, 'exactlyOnceTransport', false);
@@ -216,7 +214,7 @@ test('hidden: publish/ack uncertainty is recovered with stable identity and idem
       evidence: [
         `atomic visibility + publish/ack recovery: ${hidden.passed ? 'pass' : 'fail'}`,
         `repository regression coverage: ${regression ? 'present' : 'missing'}`,
-        `bounded at-least-once/hierarchy evidence: ${bounded ? 'present' : 'missing'}`,
+        `bounded at-least-once evidence: ${bounded ? 'present' : 'missing'}`,
         hidden.evidence,
       ],
     };
@@ -340,7 +338,7 @@ Write \`.kory-eval/event-schema-evolution.json\` with explicit rollout phases, o
 };
 
 const eventEvolutionScorer: SkillEvalDeterministicScorer = {
-  id: 'event-driven-architecture/event-schema-consumer-evolution-scorer@1',
+  id: 'event-driven-architecture/event-schema-consumer-evolution-scorer@2',
   scenarioIds: [EVENT_EVOLUTION],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
@@ -408,8 +406,6 @@ test('hidden: incompatible old delivery can be recovered from dead letter after 
         /modern|new/u,
         /historical|replay/u,
         /dead.?letter|dlq/u,
-        /distributed-backend/u,
-        /realtime-systems/u,
         /synthetic|local/u,
       ]) &&
       hasBoolean(report.artifact, 'undocumentedDeploymentFlag', false);
@@ -529,7 +525,7 @@ Write \`.kory-eval/distributed-lease.json\` with the failure/consistency model, 
 };
 
 const leaseFailoverScorer: SkillEvalDeterministicScorer = {
-  id: 'distributed-backend/cross-region-lease-failover-scorer@1',
+  id: 'distributed-backend/cross-region-lease-failover-scorer@2',
   scenarioIds: [LEASE_FAILOVER],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
@@ -578,9 +574,6 @@ test('hidden: recovery uses a newer fence and clock skew does not confer authori
         /partial|partition|failure/u,
         /fenc|token/u,
         /recover|failover/u,
-        /backend-engineering/u,
-        /event-driven-architecture/u,
-        /stream-processing/u,
         /synthetic|local|simulation/u,
       ]) &&
       hasBoolean(report.artifact, 'wallClockOwnershipProof', false);
@@ -593,7 +586,7 @@ test('hidden: recovery uses a newer fence and clock skew does not confer authori
       evidence: [
         `split-brain fencing + recovery simulation: ${hidden.passed ? 'pass' : 'fail'}`,
         `partition/skew/fencing regressions: ${regression ? 'present' : 'missing'}`,
-        `failure-model/hierarchy evidence: ${bounded ? 'bounded' : 'missing'}`,
+        `failure-model evidence: ${bounded ? 'bounded' : 'missing'}`,
         hidden.evidence,
       ],
     };
@@ -683,7 +676,7 @@ Add duplicate-cross-region, reordering, bidirectional convergence, retention-flo
 };
 
 const replicatedCounterScorer: SkillEvalDeterministicScorer = {
-  id: 'distributed-backend/replicated-counter-dedup-scorer@1',
+  id: 'distributed-backend/replicated-counter-dedup-scorer@2',
   scenarioIds: [REPLICATED_COUNTER],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
@@ -744,8 +737,6 @@ test('hidden: conflicting reuse of a retained event id is rejected', () => {
         /identity|event.?id/u,
         /converg|merge/u,
         /retention|replay/u,
-        /backend-engineering/u,
-        /event-driven-architecture|stream-processing/u,
         /synthetic|local|simulation/u,
       ]) &&
       hasBoolean(report.artifact, 'sharedSingleDatabase', false);

@@ -1,15 +1,15 @@
 {
   "id": "java-jvm-engineering-full-task-1-individual",
   "maturity": "individual",
-  "prompt": "Fix a Java service component that creates a scheduled executor per tenant but never shuts it down when the tenant configuration is removed. Threads accumulate and prevent clean JVM termination. Establish component/executor lifetime, preserve scheduling semantics, make shutdown idempotent, and verify tenant add/remove churn, task exception, concurrent removal, and process shutdown with thread-leak evidence. Do not rely on finalizers.",
+  "prompt": "Fix a Java service component that creates a scheduled executor per tenant but never shuts it down when the tenant configuration is removed. Threads accumulate and prevent clean JVM termination. Establish component/executor lifetime, preserve scheduling semantics, make shutdown idempotent, and verify tenant add/remove churn, task exception, concurrent removal, and process shutdown with thread-leak evidence across supported JDK/build targets. Do not rely on finalizers.",
   "environment": {
     "kind": "repository",
     "startingState": "fixture://java-jvm-engineering/executor-shutdown-leak",
     "requirements": [
       "Java tenant scheduler fixture with named threads and lifecycle callbacks",
-      "high-churn tenant add/remove sequence plus concurrent task execution",
-      "thread-count/JVM-termination checks and task-exception fixture",
-      "existing scheduling interval/API compatibility contract",
+      "high-churn tenant add/remove sequence plus concurrent task execution coordinated without sleeps",
+      "thread-count/JVM-termination checks, bounded await, rejection, interruption, and task-exception fixtures",
+      "existing scheduling interval/API compatibility contract and supported JDK/build matrix",
       "paired same-model skill/no-skill execution from the identical starting snapshot"
     ]
   },
@@ -60,15 +60,18 @@
     },
     {
       "id": "operating-contract",
-      "assertion": "Confirm language and JVM targets, build tool, dependency graph, nullability conventions, framework lifecycle, and concurrency model."
+      "assertion": "Confirm language and JVM targets, build tool, dependency graph, nullability conventions, framework lifecycle, and concurrency model.",
+      "source": "https://docs.oracle.com/en/java/javase/"
     },
     {
       "id": "execution-invariant",
-      "assertion": "Every executor has one explicit component owner and deterministic shutdown path; removing a tenant or stopping the service leaves no live scheduler thread owned by it."
+      "assertion": "Every executor has one explicit component owner and deterministic, idempotent shutdown path; removing a tenant or stopping the service leaves no live scheduler thread owned by it, or reports an observed interrupt-ignoring residual with its owner.",
+      "source": "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/concurrent/ExecutorService.html"
     },
     {
       "id": "verification-discipline",
-      "assertion": "Run the authoritative Gradle or Maven checks plus focused tests across supported runtime targets."
+      "assertion": "Run the authoritative Gradle or Maven checks plus focused tests across supported runtime targets, using deterministic coordination and named-thread evidence rather than timing luck.",
+      "source": "https://docs.oracle.com/en/java/javase/25/docs/api/jdk.jfr/jdk/jfr/package-summary.html"
     },
     {
       "id": "anti-pattern-resistance",
@@ -76,7 +79,8 @@
     },
     {
       "id": "evidence-and-uncertainty",
-      "assertion": "Every material completion claim must map to observable evidence (java-jvm-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+      "assertion": "Every material completion claim must map to observable evidence (java-jvm-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty.",
+      "source": "https://docs.oracle.com/javase/specs/jls/se25/html/jls-17.html"
     }
   ]
 }

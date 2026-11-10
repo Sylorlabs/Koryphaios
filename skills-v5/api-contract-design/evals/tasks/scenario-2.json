@@ -1,16 +1,19 @@
 {
   "id": "api-contract-design-full-task-2-individual",
   "maturity": "individual",
-  "prompt": "Evolve a list-events API from offset pagination to cursor pagination without breaking an installed client that still sends page/limit. Events may be inserted concurrently and one enum will gain a new server value. Specify a staged compatibility contract, stable ordering/cursor semantics, invalid/expired cursor errors, enum forward-compatibility guidance, deprecation telemetry, and executable examples for concurrent inserts and old-client behavior. Do not redesign persistence tables.",
+  "prompt": "Evolve the executable list-events contract in src/events-contract.ts from offset pagination to cursor pagination and expand tests/events-contract.test.ts. Preserve compatibility-contract.md byte for byte at its existing path; it is the normative installed-client reference, not the document to rewrite. Keep both existing request modes and the exported entry point. Continue supporting page/limit, map restored to updated only for the strict legacy enum client, and return restored unchanged to cursor clients. Implement stable tuple ordering across newer concurrent inserts, integrity-checked opaque cursors with the supplied 3600-second lifetime, distinct invalid/expired errors, deprecation metadata, and separate usage telemetry. Put additional migration stages, removal conditions, signer lifecycle limits, and runnable caller examples in a separate owned artifact. Run maintained caller tests, demonstrate that they reject the original defective implementation, and restore the repair. Use the existing execution/configuration surface; do not add a required deployment secret or redesign persistence tables.",
   "environment": {
     "kind": "repository",
     "startingState": "fixture://api-contract-design/cursor-pagination-versioning",
     "requirements": [
-      "v1 client fixture using page/limit and strict JSON decoding of known fields",
+      "v1 page/limit caller ignores additive top-level metadata but strictly decodes known event-kind enum values",
       "concurrent insert fixture that exposes duplicate/omitted rows under offset pagination",
       "new enum value that older clients have not compiled against",
       "deprecation window and contract-test harness for both request styles",
-      "paired same-model skill/no-skill execution from the identical starting snapshot"
+      "immutable compatibility-contract.md plus editable src/events-contract.ts and tests/events-contract.test.ts",
+      "request.now is in seconds; issued + 3600 is valid and issued + 3601 is expired",
+      "repository test command: bun test; no external service or new required environment variable",
+      "paired same-model skill/no-skill execution from the identical starting snapshot, owned by the evaluator"
     ]
   },
   "scorers": [
@@ -25,7 +28,9 @@
         "Representative success, negative-path, and recovery verification",
         "hierarchy boundary and specialist selection rationale",
         "representative negative/recovery verification",
-        "source/version boundary when facts can drift"
+        "source/version boundary when facts can drift",
+        "normative input byte preservation and old/new caller partitions",
+        "maintained tests pass the repair and reject the original defect for behavioral reasons"
       ]
     },
     {
@@ -44,23 +49,26 @@
     "cursor-pagination-versioning scenario evidence",
     "api-contract-design decision and boundary evidence",
     "Hierarchy boundary and selected specialist rationale",
-    "hierarchy boundary and selected specialist rationale",
-    "paired skill/no-skill run artifacts",
+    "normative input preservation, implementation diff, and caller-promise-to-test mapping",
+    "executed maintained regression results on the repair and original defective implementation",
+    "paired skill/no-skill run artifacts supplied by the evaluator, not authored by the candidate",
     "explicit unavailable, simulated, inferred, or stale evidence labels"
   ],
   "requiredArtifacts": [
     "api-contract-design-individual-scenario-2-result",
     "api-contract-design-individual-scenario-2-verification",
-    "api-contract-design-individual-scenario-2-paired-evaluation"
+    "api-contract-design-individual-scenario-2-paired-evaluation",
+    "src/events-contract.ts",
+    "tests/events-contract.test.ts"
   ],
   "falsifiableChecks": [
     {
       "id": "scope-and-hierarchy",
-      "assertion": "The result must establish the actual api-contract-design boundary and relevant environment before acting, preserve the hierarchy relationship (broader=developer-experience; children=graphql-engineering,grpc-protobuf,http-rest-engineering; near-neighbor=bun-deno-runtime), and not absorb the near-neighbor responsibility merely because it is adjacent."
+      "assertion": "The work evolves caller-visible pagination and compatibility without redesigning persistence, adding a transport or version dimension, or requiring new deployment configuration. The evaluator checks hierarchy (broader=developer-experience; children=graphql-engineering,grpc-protobuf,http-rest-engineering; neighbors=backend-engineering,migration-planning) from routing and delivery records; candidate scope evidence is the actual contract and implementation boundary."
     },
     {
       "id": "operating-contract",
-      "assertion": "Model domain concepts and caller journeys before choosing transport syntax."
+      "assertion": "The maintained artifact set keeps occurredAt DESC, id DESC ordering and seeks strictly after the last returned tuple using the same comparison as sorting. compatibility-contract.md remains normative. Additional owned migration guidance states coexistence, deprecation/removal conditions, token lifetime and signer limits, and what traversal guarantees do and do not cover."
     },
     {
       "id": "execution-invariant",
@@ -68,15 +76,23 @@
     },
     {
       "id": "verification-discipline",
-      "assertion": "Use contract tests and runnable examples for both supported request styles, stable cursor traversal under concurrent inserts, invalid/tampered/expired cursors, enum forward compatibility, deprecation telemetry/removal conditions, and the supplied older-client behavior. Do not invent unrelated authorization-denial or idempotency cases unless the contract under test introduces them."
+      "assertion": "Use maintained contract tests and runnable examples for both supported request styles, stable cursor traversal under concurrent inserts and equal timestamps, first/empty/final pages, malformed or tampered tokens including a changed final encoded character, validity exactly at expiry and expired_cursor just afterward, and restarting traversal after rejection. Verify legacy page/limit results, restored-to-updated adaptation only on v1, the unmodified restored value on v2, deprecation metadata, and separate legacy/cursor telemetry. Assert observable rows, errors, and counts; document removal conditions. Do not invent unrelated authorization-denial or idempotency cases unless the contract under test introduces them."
     },
     {
       "id": "anti-pattern-resistance",
       "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not expose persistence tables directly, return 200 for every semantic failure, add breaking fields/enum behavior casually, or force callers to reverse-engineer retryability."
     },
     {
+      "id": "normative-input-integrity",
+      "assertion": "compatibility-contract.md remains at its original path with identical bytes. Additional migration decisions and examples live in a separate owned artifact. Editing, removing, moving, or regenerating the normative reference is an integrity failure, even if tests otherwise pass."
+    },
+    {
+      "id": "executed-regression-rejection",
+      "assertion": "tests/events-contract.test.ts passes against the repaired implementation and fails against the original defective src/events-contract.ts because a caller assertion detects unstable traversal or another requested defect. Restore the repaired source afterward. Hidden checks, keyword-only tests, import failures, and prose coverage lists cannot substitute for maintained executable regression evidence. Check each compatibility partition separately."
+    },
+    {
       "id": "evidence-and-uncertainty",
-      "assertion": "Every material completion claim must map to observable evidence (api-contract-design decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+      "assertion": "Every material completion claim maps to changed artifacts and observed commands/results, with simulated, unavailable, inferred, stale, or unresolved evidence labeled. The evaluator supplies hierarchy observations, paired run artifacts, and independent review records. Do not require the candidate to author those records or treat local traversal tests as production multi-instance signer or persistence evidence."
     }
   ]
 }

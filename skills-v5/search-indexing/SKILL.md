@@ -9,7 +9,7 @@ description: Engineer full-text and structured search around indexing, analyzers
 
 Define search intents, corpus fields, language, analyzers, synonyms, filters, facets, ranking signals, freshness, and update/delete semantics before tuning queries. Separate lexical retrieval quality from UI presentation and make index rebuild/versioning a deployable lifecycle.
 
-Verification focus: Maintain judged query sets spanning head/tail, exact/fuzzy, multilingual, empty/noisy, authorization-filtered, and freshness-sensitive cases. Measure retrieval and ranking changes against that set plus index/update performance.
+Verification focus: Maintain judged query sets spanning head/tail, exact/fuzzy, multilingual, empty/noisy, cases filtered by authorization, and freshness-sensitive cases. Measure retrieval and ranking changes against that set plus index/update performance.
 
 Failure boundaries: Do not tune from a handful of favorite queries, expose unauthorized documents through search, use wildcard scans as a default, or change analyzers without a reindex strategy.
 
@@ -40,5 +40,7 @@ Failure boundaries: Do not tune from a handful of favorite queries, expose unaut
 - Search-intent and analyzer/mapping decision tied to representative corpus and judged-query evidence.
 - Relevance evaluation plus authorization, freshness, and reindex/cutover checks that were actually run.
 - Explicit unknowns for production corpus distribution, latency, and operational cutover behavior.
+
+For bounded fixtures, treat supplied input field names and the required JSON result shape as part of the executable contract. Read the fields exactly as supplied, return only the required result fields, and do not invent aliases, precomputed match flags, or extra diagnostic fields. Consume the supplied warm-cache field exactly when present. Derive lexical matches from the provided query and document text unless the fixture explicitly supplies another matching contract. Apply authorization before cache reuse, candidate ranking, or pagination.
 
 Use [the maintained source map](references/sources.md) for version-sensitive facts and source conflicts.

@@ -13,4 +13,10 @@ Use the smallest specialist set that owns the real uncertainty. Route unmet need
 
 For consequential recommendations, identify the evidence that would falsify the current interpretation and the next cheapest way to obtain it. When evidence is unavailable, return the assumption and decision risk explicitly rather than presenting a polished design opinion as validated fact.
 
+## Deliverable discipline
+
+Write the requested deliverables once, as complete files, instead of patching the same path repeatedly. A fixed evaluation budget is part of the conditions of use, so front-load the journey map, the evidence matrix, and the decision record as skeletons, then fill them in a single pass.
+
+Label every material claim as observed, sourced, assumption, or hypothesis, and label every required element as produced, external, or unavailable with the reason. When the environment supplies only authored records, treat those records as the whole evidence base: trace each one from a claim, and mark anything that needs an unavailable channel, participant, or runtime as unavailable rather than omitting it. An incomplete deliverable hides its own gaps, which is worse than a complete one that states them.
+
 [Sources](references/sources.md).

@@ -16,7 +16,7 @@
 
 ## Community-pattern review
 
-SecondSky's MIT-licensed `frontend-design` skill is valuable for forcing an explicit aesthetic direction and rejecting context-free generated design. Kory preserves the intent while rejecting rigid universal prescriptions such as banning Inter/system fonts, forcing dramatic visual differentiation, fixed 320/768/1024/1440 breakpoints, or assuming a particular animation/performance recipe. Those decisions remain product-, content-, browser-, and evidence-specific.
+SecondSky's MIT licensed `frontend-design` skill is valuable for forcing an explicit aesthetic direction and rejecting generated design without context. Kory preserves the intent while rejecting rigid universal prescriptions such as banning Inter/system fonts, forcing dramatic visual differentiation, fixed 320/768/1024/1440 breakpoints, or assuming a particular animation/performance recipe. Those decisions remain specific to the product, content, browser, and evidence.
 
 ## Verification record
 

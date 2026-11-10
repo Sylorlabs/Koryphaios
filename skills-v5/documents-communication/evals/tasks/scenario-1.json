@@ -1,45 +1,45 @@
 {
   "id": "documents-communication-full-task-1-individual",
   "maturity": "individual",
-  "prompt": "The evaluation repository asks the agent to \"write the release notes\". The fixture contains a plausible happy path, an adjacent-skill decoy, one invalid or partial state, and a recovery condition that must be demonstrated rather than assumed. The acceptance boundary is documents-communication: Identify the audience, target medium, required structure, and repository conventions. The adjacent accessibility-practice discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "prompt": "The repository fixture asks the agent to write customer facing release notes for the v5.3.0 release from the v5.2.0 to v5.3.0 evidence packet, merged PR metadata, actual change range, and existing template. The packet includes two confirmed reader visible changes, one internal refactor, one change with unmeasured impact, an incomplete starter note, and a typed evidence map. The acceptance boundary is documents-communication: establish the reader, medium, template, release boundary, source inventory, and publication state before drafting. Preserve the parent boundary and compose a narrower child only if the document purpose changes. The task must demonstrate a safe partial state and recovery checks; a generated summary, PR title, or happy path alone is insufficient.",
   "environment": {
     "kind": "repository",
     "startingState": "fixture://documents-communication/release-notes-v5-3",
     "requirements": [
-      "repository fixture with v5.2.0 and v5.3.0 release boundaries",
-      "merged PR/issue metadata plus the actual diff/commit range",
-      "existing release-note or changelog template",
-      "at least one internal-only change and one ambiguous user-impact change",
-      "paired same-model skill/no-skill execution",
-      "documents-communication parent/child/neighbor hierarchy boundary fixture",
-      "domain-specific tempting anti-pattern or shortcut",
-      "representative negative, interruption, compatibility, or recovery path"
+      "repository fixture with an explicit v5.2.0 previous release and v5.3.0 target release",
+      "merged PR and issue metadata plus the actual diff and commit range",
+      "existing release note template with Highlights, Fixes, and Known limitations",
+      "PR-101 and PR-102 confirmed reader visible changes, PR-103 internal only, and PR-104 unmeasured impact",
+      "starter release note containing TODO and evidence map arrays containing no IDs",
+      "documents-communication parent and child hierarchy boundary fixture",
+      "generated release notes and PR titles as tempting but insufficient evidence",
+      "negative missing boundary and recovery after completing the partial starter"
     ]
   },
   "falsifiableChecks": [
     {
       "id": "scope-and-hierarchy",
-      "assertion": "The result must establish the actual documents-communication boundary and relevant environment before acting, preserve the hierarchy relationship (children=dash-free-writing,executive-communication,instructional-communication,reference-communication,technical-communication; near-neighbor=accessibility-practice), and not absorb the near-neighbor responsibility merely because it is adjacent."
+      "assertion": "Before drafting, the result must state that the deliverable is a customer facing release note, identify its reader, Markdown medium, required Highlights, Fixes, and Known limitations sections, target v5.3.0, previous v5.2.0, and the documents-communication parent boundary without absorbing accessibility practice."
     },
     {
       "id": "operating-contract",
-      "assertion": "Identify the audience, target medium, required structure, and repository conventions."
+      "assertion": "The result must identify the intended release-note reader, publication state, repository template, exact previous to target release range, and source boundary before making a publication claim."
     },
     {
       "id": "execution-invariant",
-      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+      "assertion": "The result must inventory PR-101 through PR-104, classify each source once, retain the recognizable names and IDs of confirmed changes, exclude PR-103 from every customer section, and hold PR-104 until impact evidence exists."
     },
     {
       "id": "verification-discipline",
-      "assertion": "Format and factual review"
+      "assertion": "The result must independently reconcile the final release note and evidence map to the packet, showing v5.3.0, PR-101, PR-102, string IDs in included, excluded, and uncertain arrays, and the required headings."
     },
     {
       "id": "anti-pattern-resistance",
-      "assertion": "The result must not treat a happy path, generated artifact, compilation, or unsupported assumption as sufficient proof of documents-communication correctness."
+      "assertion": "The result must not treat generated release notes, a PR title, a diff alone, or a successful JSON parse as proof of shipment, reader impact, or publication readiness, and must record the initial TODO state before recovery."
     },
     {
       "id": "evidence-and-uncertainty",
-      "assertion": "Every material completion claim must map to observable evidence (Audience, purpose, and target-format contract; Source-fact and uncertainty trace; Structure and reader-action review; Final factual and format QA), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+      "assertion": "Every material release claim must map to an inspected source ID and evidence state, while the unmeasured PR-104 impact remains explicitly uncertain and the final factual, version, structure, reader action, and format checks are reported separately."
     }
   ],
   "scorers": [

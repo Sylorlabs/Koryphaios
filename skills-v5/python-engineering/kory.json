@@ -102,23 +102,23 @@
       "versionScope": "Current supported Python 3 documentation as available 2026-09-04",
       "staleAfterDays": 60,
       "notes": "Language, standard library, packaging/runtime, and concurrency reference.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://docs.python.org/3/library/asyncio-task.html",
       "sourceType": "official-docs",
-      "versionScope": "Python asyncio task documentation as verified 2026-09-06",
+      "versionScope": "Python asyncio task documentation as verified 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Adopted for cancellation propagation, cleanup, and structured-concurrency limits; API availability depends on supported Python versions.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://docs.python.org/3/library/contextlib.html",
       "sourceType": "official-docs",
-      "versionScope": "Python contextlib documentation as verified 2026-09-06",
+      "versionScope": "Python contextlib documentation as verified 2026-11-07",
       "staleAfterDays": 60,
       "notes": "Adopted for synchronous and asynchronous resource ownership through context-manager boundaries.",
-      "verifiedAt": "2026-09-06"
+      "verifiedAt": "2026-11-07"
     }
   ],
   "authoringMaturity": "individual"

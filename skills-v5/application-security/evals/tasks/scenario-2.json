@@ -7,16 +7,17 @@
     "startingState": "fixture://application-security/scenario-2",
     "requirements": [
       "native desktop sync client with deep-link and local IPC entry points",
-      "persisted queue/credential store with malformed and stale-state fixtures",
-      "user-selected filesystem roots plus attempted escape paths",
-      "session lifecycle fixture covering expiry, revocation, restart, and recovery-export reauthentication",
+      "JSON queue/session serialization helpers; no protected credential store or durable queue writer is supplied",
+      "real temporary authorized root and canonical-path helper, not a desktop file-opening integration",
+      "recovery-export eligibility predicate covering expiry/revocation/reauthentication; no renewal or restart lifecycle is executed",
+      "implement and test supplied helpers; label absent deep-link decoding, IPC dispatch, OS storage, persistence, and session lifecycle integration as unverified",
       "paired same-model skill/no-skill execution"
     ]
   },
   "falsifiableChecks": [
     {
       "id": "application-security-typed-input-2",
-      "assertion": "Deep-link and IPC messages are decoded once into explicit typed/versioned schemas with bounded string/list/payload sizes and reject unknown privileged operations or malformed representations before dispatch."
+      "assertion": "Test every valid version-1 Command operation plus malformed JSON, unknown operations/fields, wrong versions/types, missing values, and oversized input. Bound serialized bytes before parsing and string/list/payload sizes before dispatch. Define deep-link decoding and reject parser differentials; distinguish tested JSON parsing from the absent deep-link/IPC transport."
     },
     {
       "id": "application-security-files-2",
@@ -28,11 +29,16 @@
     },
     {
       "id": "application-security-session-2",
-      "assertion": "Expiry, renewal, revocation, restart restoration, and sensitive-action reauthentication are explicit state transitions; a stale/revoked session cannot silently regain authority from cached local state."
+      "assertion": "Test permitted fresh export and deny expired/revoked sessions, null/stale/future reauthentication, and invalid timestamps at exact expiry/freshness boundaries. Define renewal, revocation, and restart state transitions without letting cached state restore authority. Distinguish the tested eligibility predicate from absent lifecycle/storage integration."
     },
     {
       "id": "application-security-persistence-2",
-      "assertion": "Persisted queued operations are validated again when loaded, unsupported or malformed entries fail closed without executing privileged work, and partial processing does not corrupt the queue into an implicitly trusted state."
+      "assertion": "Permit valid sync/open-path queue entries; reject malformed JSON, unsupported versions/operations, missing operation-specific fields, invalid paths, and oversized queues. Revalidate paths/authority at execution. Define corrupt-state quarantine and failed-write/restart recovery without treating invalid data as an empty successful queue; label absent durable writer/dispatcher execution as unverified."
+    },
+    {
+      "id": "application-security-diagnostics-2",
+      "assertion": "Preserve useful safe diagnostic text while removing access/refresh credential values, bare aliases, full bearer Authorization headers, and unsafe terminal/control content; test multiple secrets separated by newlines and delimiters plus oversized messages. Define an explicit byte cap and verify it on the sanitized result. A single field-name regex/sample is insufficient, and absent crash/analytics integrations remain unverified.",
+      "source": "https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html"
     }
   ],
   "scorers": [
@@ -44,7 +50,7 @@
         "typed IPC/deep-link schema",
         "filesystem and persistence invariants",
         "credential/session lifecycle contract",
-        "negative malformed/stale-state cases"
+        "executable permitted, malformed/stale-state, and multi-credential diagnostic regressions"
       ]
     },
     {
@@ -64,7 +70,8 @@
     "typed validation and filesystem constraints",
     "credential/log/crash storage rules",
     "session/reauthentication state machine",
-    "persisted-queue negative cases",
+    "executable helper regressions and commands/results",
+    "persisted-queue negative cases and unverified durable-recovery boundaries",
     "paired skill/no-skill run artifacts"
   ],
   "requiredArtifacts": [

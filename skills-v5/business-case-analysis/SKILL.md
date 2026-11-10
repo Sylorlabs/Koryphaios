@@ -27,6 +27,8 @@ Use a consistent time horizon, units, price basis, discounting convention, and s
 
 Build the reconciled quantitative comparison before writing the recommendation. For every material option and decision-relevant scenario, show the time-phased incremental cash costs/benefits, separately identified capacity or opportunity costs, and the calculation basis needed to reproduce the result. When break-even or sensitivity is decision-relevant, calculate it from that same reconciled model rather than leaving the economic matrix implicit in prose.
 
+When the task requires a machine-readable appendix, preserve the requested field types and cardinality exactly and retain enough numeric precision for independent reconciliation. Round display prose separately from machine evidence.
+
 Include strategic fit, dependencies, capacity consumption, reversibility, vendor/technology lock-in, delivery/adoption risk, option value, and opportunity cost alongside quantified economics. Distinguish committed benefits from contingent benefits that require adoption, behavior change, future scale, or another investment.
 
 ## Uncertainty and recommendation
@@ -34,6 +36,10 @@ Include strategic fit, dependencies, capacity consumption, reversibility, vendor
 Build a base case plus bounded downside/upside or other decision-relevant scenarios. Sensitivity-test the assumptions most able to flip the recommendation, and show break-even values where they are decision-useful. Correlated risks should not be varied independently if that creates impossible combinations.
 
 Recommend an option only after showing why alternatives are inferior under the stated evidence. State confidence, assumptions that can reverse the recommendation, decision gates, prerequisites, and what new evidence would trigger reconsideration. For staged or reversible investments, prefer explicit pilot/option gates when they materially reduce downside or buy information.
+
+Use a staged decision only when the alternative set contains an explicit reversible stage or pilot that is itself being authorized. Do not use `stage` as a synonym for conditional approval of a different option.
+
+Treat the decision action as a typed commitment state, not narrative shorthand. If the selected option is not the explicit stage/pilot alternative, never emit a `stage` action for it merely because only part of that option would be funded. Use the contract's conditional, defer, reject, or approve semantics instead. Keep present funding aligned to that action: conditional/defer/reject release no funds; a stage action can release only the bounded upfront amount of the explicitly modeled stage/pilot and cannot smuggle rollout funding for another option under a reversible-stage label.
 
 Define post-decision measures that can validate the case: adoption/volume assumptions, realized costs, realized benefits, guardrails, and a review point. Approval is not proof that the forecast was correct.
 

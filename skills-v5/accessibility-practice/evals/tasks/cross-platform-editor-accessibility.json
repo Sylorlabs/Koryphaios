@@ -1,36 +1,41 @@
 {
   "id": "accessibility-practice-full-task-cross-platform-editor",
-  "prompt": "Define the accessibility contract for a mature cross-platform desktop editor. Core tasks include opening and navigating large projects, editing, search, diagnostics, command discovery, conflict resolution, and recovery after interruption. The product runs on macOS and Windows, has custom tree/grid controls, dense diagnostics, keyboard-heavy expert workflows, light/dark themes, motion, and scalable text. Produce implementation-ready accessibility requirements and a verification matrix without claiming tests that have not been run.",
+  "prompt": "Define an implementation-ready accessibility contract for a mature cross-platform desktop editor on macOS and Windows; do not claim to have run the editor or assistive technology. The editor opens projects with 50,000 lazy-loaded tree entries, has a virtualized diagnostic grid, an editable document with unsaved changes, asynchronous find/results, a command palette, a merge-conflict resolver, and an interrupted-save/restart path. In the current product brief, search filters can recycle the selected tree row, diagnostics update while keyboard focus remains in the document, conflicts may replace the focused editor, and a save can be interrupted after local changes but before sync confirmation. Design specific accessible behavior for those states, including exposed names/roles/states/relationships, focus versus selection, announcements, non-pointer operation, text scaling, themes/contrast, reduced motion, and recovery without losing user work. Specify platform/toolkit discovery questions rather than inventing native API behavior. Output a task-to-barrier-to-alternative contract and a verification matrix with distinct macOS/VoiceOver and Windows/Narrator or NVDA rows, keyboard and other alternative-input coverage, expected observations, methods, execution status, untested combinations, and risk ownership. Write the requested .kory-eval/editor-contract.json artifact when the harness provides a workspace; label all unexecuted steps planned or untested, never passed. The scope corpus lists the required task identifiers; preserve them. This is design work, with real AT/runtime verdicts delegated to accessibility-verification.",
   "environment": {
     "kind": "synthetic",
     "startingState": "fixture://accessibility-practice/cross-platform-editor",
     "requirements": [
-      "platform and toolkit inventory",
-      "critical-task and state inventory",
-      "existing semantics/input/accessibility-service behavior",
-      "paired same-model execution"
+      "fixed scope corpus and synthetic README from the registered materializer",
+      "platform and toolkit identity must be requested when absent, not invented",
+      "lazy tree, recycled selection, asynchronous diagnostics, merge conflict, and interrupted-save task states",
+      "the evaluator does not supply a live macOS/Windows editor or AT capture; planned rows cannot become measured passes",
+      "paired same-model execution requires independently recorded baseline and candidate artifacts"
     ]
   },
   "falsifiableChecks": [
     {
       "id": "editor-critical-task-equivalence",
-      "assertion": "The contract covers opening/navigating projects, editing, search, diagnostics, command discovery, conflict resolution, and interruption recovery with equivalent operability that is not dependent on pointer-only or vision-only interaction."
+      "assertion": "The contract binds all eight named scope-corpus task IDs to a user goal, success state, consequential negative/recovery state, concrete barrier, alternate path, and a preserved user outcome. Lazy project loading, search recycling selection, and interrupted save are explicit cases."
     },
     {
       "id": "editor-custom-control-semantics",
-      "assertion": "Custom tree/grid and dense diagnostic controls define exposed role/name/state/relationship, focus, keyboard operation, and state-change announcement requirements instead of assuming native accessibility is inherited automatically."
+      "assertion": "The custom virtualized tree and diagnostic grid distinguish focus from selection and specify platform-exposed role/name/state/relationships, meaningful update announcements, focus behavior after filtering/recycling, navigation and action alternatives, and a recovery path when an editor or conflict dialog replaces focused content."
     },
     {
       "id": "editor-perception-and-adaptation",
-      "assertion": "Text scaling, contrast/theme behavior, motion, and time-sensitive or sensory information have explicit non-single-channel requirements that preserve critical information across supported states."
+      "assertion": "Requirements cover large/scaled text without hiding dirty-state and conflict actions, theme/contrast and non-color status cues, reduced motion that preserves asynchronous state orientation, and independently accessible error, conflict, and save-pending information."
     },
     {
       "id": "editor-verification-matrix",
-      "assertion": "Verification names representative macOS and Windows task/state combinations, applicable assistive technologies and input methods, manual versus automatable checks, and explicitly marks combinations that remain untested."
+      "assertion": "Matrix rows name platform, app/toolkit if known, input/AT, task and negative-path state, expected observation, verification method, execution status, observed result or null, artifact provenance if executed, and residual risk. Mac and Windows coverage is distinct; no synthetic check is represented as spoken AT output."
     },
     {
       "id": "editor-evidence-honesty",
-      "assertion": "The result separates universal requirements from platform/toolkit-specific behavior and does not claim conformance or runtime success for tests that were not actually executed."
+      "assertion": "The result distinguishes WCAG's web-content scope from platform-native requirements and real from planned evidence. It never marks VoiceOver, Narrator, NVDA, or live editor behavior passed without a reproducible device/input observation."
+    },
+    {
+      "id": "editor-regression-paths",
+      "assertion": "Acceptance checks would fail if a recycled tree row silently loses focus, a diagnostic arrives without accessible context, conflict resolution traps input, or an interrupted save hides whether changes were preserved. Each failure has an explicit detection oracle and recovery invariant."
     }
   ],
   "scorers": [
@@ -39,11 +44,11 @@
       "kind": "deterministic",
       "weight": 0.4,
       "evidence": [
-        "critical tasks and platform services identified",
-        "alternative-input and assistive-technology requirements",
-        "semantics/names/relationships/state requirements",
-        "scaling contrast motion and non-single-channel requirements",
-        "platform-specific versus universal requirements separated"
+        "all eight fixed task IDs with equivalent outcomes",
+        "barrier/alternative and recovery invariants for row recycling and unsaved conflicts",
+        "custom control semantics and state-change requirements",
+        "scaling, contrast, motion, and non-single-channel requirements",
+        "native platform claims separated from web guidance"
       ]
     },
     {
@@ -51,11 +56,11 @@
       "kind": "deterministic",
       "weight": 0.35,
       "evidence": [
-        "representative task/state matrix",
-        "manual plus applicable automation plan",
-        "assistive-technology/platform combinations named",
-        "untested combinations explicit",
-        "no unearned compliance claim"
+        "macOS and Windows matrix with success, failure, and recovery",
+        "separate manual AT, alternative input, and automatable checks",
+        "methods, status, observed result, and execution provenance",
+        "unavailable hardware/AT marked untested",
+        "no inferred runtime or conformance claim"
       ]
     },
     {
@@ -68,10 +73,11 @@
   ],
   "requiredEvidence": [
     "applicable standard/platform scope",
-    "critical-task access model",
-    "alternative-input and assistive-technology requirements",
-    "verification matrix",
-    "unverified combinations and residual risk"
+    "eight-task access model with barriers, equivalent outcomes, and negative/recovery states",
+    "native semantics, focus/selection, and input/AT requirements",
+    "execution-status-aware verification matrix with evidence method and provenance",
+    "regression checks for recycled focus, async diagnostics, conflict, and interrupted saves",
+    "unverified runtime combinations and residual risk"
   ],
   "requiredArtifacts": [
     "cross-platform-accessibility-contract",

@@ -67,7 +67,7 @@
     },
     {
       "id": "verification-discipline",
-      "assertion": "Acceptance criteria"
+      "assertion": "The plan must distinguish checks already observed from proposed verification and give each rollout gate an observable pass/fail result: a session issued under the old shared secret still verifying after key-id issuance, rollback proven while both key types are accepted, and old-key retirement only after the maximum session TTL. Restating acceptance criteria or naming an unrun command is not verification evidence."
     },
     {
       "id": "anti-pattern-resistance",

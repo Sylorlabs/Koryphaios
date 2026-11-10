@@ -1,36 +1,41 @@
 {
   "id": "accessibility-practice-full-task-game-system",
-  "prompt": "Design an accessibility system for a controller-first action game across menus, HUD, tutorials, combat cues, communication, pause/settings, and error recovery. The game supports dialogue and non-speech audio cues, fast visual events, camera motion, remappable controls, online co-op, and a dense upgrade menu. Produce a platform-appropriate accessibility design and validation matrix rather than applying a browser checklist.",
+  "prompt": "Design an implementation-ready accessibility system for a controller-first action game, using the six game task IDs and five information channels from the supplied scope corpus. Current scenarios: remapping the Confirm button conflicts with Back and Pause; a controller disconnects during a timed boss attack; an urgent directional, non-speech alarm is conveyed only by audio; the boss shows a brief red-only attack telegraph; health, stamina, and ammunition change quickly; camera shake and automatic tracking cause motion sensitivity; a 40-item upgrade tree is dense; and online co-op uses voice-only instructions and cannot pause the whole session. Define reachable input and recovery behavior (including reconnect and saved bindings), captions/descriptions that convey source and urgency, redundant spatial and status cues, visual clarity and optional timing adjustments, motion/camera controls, screen narration, readable menu/HUD and upgrade navigation, text or ping alternatives to voice, and an online-safe pause/settings path with stated gameplay tradeoffs. Specify accessible task outcomes, negative states, fail/recovery invariants, component ownership, and priority for each. Produce .kory-eval/game-accessibility.json and a verification matrix spanning game platform/build, controller and alternative input, accessibility settings, representative tutorial/combat/co-op/menu/recovery state, expected observable behavior, method, status, result/evidence reference, and remaining risk. The synthetic fixture provides no console/PC game runtime, controller hardware, or assistive-technology session: record unexecuted rows as planned/untested; never invent passed tests. Use game/platform guidance as best practice rather than a universal compliance verdict; do not import web markup/CSS mechanics. Baseline/candidate comparisons and blind judgment require independent execution, which is not supplied by this design task.",
   "environment": {
     "kind": "synthetic",
     "startingState": "fixture://accessibility-practice/action-game",
     "requirements": [
-      "gameplay/UI task inventory",
-      "input/camera/audio/visual communication inventory",
-      "current platform accessibility options",
-      "paired same-model execution"
+      "fixed task/channel scope corpus and synthetic README from registered materializer",
+      "controller remap collisions, disconnection mid-combat, sensory-only cues, and upgrade-menu orientation",
+      "offline and online pause constraints must be distinguished; actual platform and game build are unknown",
+      "no real game runtime, controller, accessibility settings capture, or co-op session is provided",
+      "paired same-model comparison requires independently recorded baseline and candidate artifacts"
     ]
   },
   "falsifiableChecks": [
     {
       "id": "game-input-equivalence",
-      "assertion": "Required menu and gameplay actions remain reachable with remappable/controller-compatible input without introducing an input trap or requiring one fixed physical control where the platform permits alternatives."
+      "assertion": "All six scope-corpus game task IDs have success, failure, and recovery routes; remapping a reserved Confirm/Back/Pause binding reports a conflict, keeps essential actions reachable by an alternative input method, offers a recoverable choice/default, and persists or rolls back safely when a controller disconnects during combat."
     },
     {
       "id": "game-sensory-redundancy",
-      "assertion": "Dialogue, non-speech audio cues, fast visual events, combat/status cues, and communication define redundant or configurable channels so critical gameplay information is not conveyed by sound, color, or brief motion alone."
+      "assertion": "All five fixed information channels have independently usable alternatives. A directional non-speech alarm conveys source/direction and urgency without audio; a short red-only attack telegraph has a persistent or adjustable, non-color channel; health/stamina/ammunition changes and co-op instructions remain comprehensible without a single sensory channel or voice chat."
     },
     {
       "id": "game-motion-and-readable-information",
-      "assertion": "Camera/motion intensity, text/readability, HUD information, timing-sensitive prompts, and dense upgrade-menu navigation have concrete configuration or equivalent-access requirements without removing the core gameplay objective."
+      "assertion": "Camera shake/tracking controls, optional cue durations or safe alternatives, legible/scale-aware HUD, independent health/stamina/ammo status, screen narration, and a keyboard/controller/alternative-input path through a 40-item upgrade tree specify focus/selection, purchase/undo, and return-to-context behavior without erasing core gameplay objectives."
     },
     {
       "id": "game-runtime-validation-matrix",
-      "assertion": "Validation spans representative menu, tutorial, combat, co-op communication, pause/settings, and recovery tasks across named input/accessibility configurations and identifies which hardware/runtime combinations remain unverified."
+      "assertion": "A matrix covers menu, tutorial, combat, co-op communication, pause/settings, and recovery with device/build identity if known, input/AT/configuration, exact triggered state, expected observable result, method, execution status, observed result or null, provenance and residual risk. Distinguish solo/offline pause from online shared-time constraints, and mark absent runtime/hardware untested."
     },
     {
       "id": "game-platform-boundary",
-      "assertion": "The design uses game/platform accessibility guidance as requirements or best-practice evidence where applicable, does not import DOM/CSS/browser mechanics, and does not convert guidance into an unsupported compliance claim."
+      "assertion": "Requirements use relevant platform/game guidance as best practice, separate assumptions from known game constraints, avoid HTML/DOM/CSS navigation mechanics, and never infer conformance or spoken game narration from a static or synthetic plan."
+    },
+    {
+      "id": "game-regression-recovery-oracles",
+      "assertion": "Regression probes give a reproducible trigger, failure observation and recovery invariant for remap collisions that strand Back, disconnect/reconnect during an attack, directionless audio-only alarms, missed short color-only telegraphs, upgrade selection lost on pagination, online Pause falsely freezing shared play, and voice-only co-op decisions."
     }
   ],
   "scorers": [
@@ -39,12 +44,12 @@
       "kind": "deterministic",
       "weight": 0.4,
       "evidence": [
-        "controller/alternative-input strategy",
-        "captions and narration strategy",
-        "redundant sensory cues",
-        "motion/camera customization",
-        "menu/HUD navigation and readable information",
-        "gameplay priorities preserved"
+        "all six fixed tasks and five information channels have equivalent objectives",
+        "conflicting remaps and controller disconnect/reconnect recovery",
+        "dialogue captions, directional non-speech alternatives and non-color combat cues",
+        "motion/camera, cue timing, HUD and upgrade-tree access",
+        "voice-independent co-op communication and online pause limitations",
+        "negative-path/regression oracles tied to observable game state"
       ]
     },
     {
@@ -52,11 +57,11 @@
       "kind": "deterministic",
       "weight": 0.35,
       "evidence": [
-        "representative gameplay and menu task matrix",
-        "assistive/input configurations named",
-        "runtime/hardware validation plan",
-        "XAG-style guidance treated as best practice not compliance",
-        "no DOM/CSS/browser mechanics imported"
+        "six-task gameplay, menu and recovery matrix, including online and offline constraints",
+        "platform/build, input/AT/configuration and triggered state",
+        "methods, status, observed result, evidence provenance and risk",
+        "synthetic design cannot attest real controller or narration results",
+        "XAG-style best practices without browser mechanics or invented conformance"
       ]
     },
     {
@@ -68,11 +73,11 @@
     }
   ],
   "requiredEvidence": [
-    "game task and accessibility scope",
-    "input and sensory alternative design",
-    "platform-specific accessibility rationale",
-    "runtime verification matrix",
-    "unverified combinations and limitations"
+    "six game tasks, five channels, barrier/alternate path and negative/recovery states",
+    "remap collision, disconnect, alarm, telegraph, upgrades, online co-op and pause requirements",
+    "platform/game guidance and component ownership without inferred compliance",
+    "status-aware hardware, input, settings, task/state and evidence verification matrix",
+    "reproducible regression oracles and explicitly untested runtime combinations"
   ],
   "requiredArtifacts": [
     "game-accessibility-design",

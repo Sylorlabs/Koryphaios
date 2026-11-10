@@ -7,7 +7,7 @@ description: Turn production or process data into decisions while accounting for
 
 ## Responsibility
 
-Start from the operational decision. Validate metric definitions, event generation, clocks, sampling, aggregation, retries, identity, late data, schema changes, and observability gaps. Compare meaningful baselines and segments and tie findings to thresholds and verification.
+Start from the operational decision and identify the selected specialty explicitly as **operational-data-analysis**. Validate metric definitions, event generation, clocks, sampling, aggregation, retries, identity, late data, schema changes, and observability gaps. Compare meaningful baselines and segments and tie findings to thresholds and verification. Do not substitute a vague label such as target guidance for the scope boundary.
 
 ## Hierarchy and routing
 
@@ -33,6 +33,7 @@ Return metric lineage, data-quality caveats, baseline rationale, segment results
 - Metric lineage, query or extraction method, population, windows, and aggregation definition
 - Comparable baseline and segment results with missing-data and instrumentation caveats
 - Decision-linked findings, uncertainty, and an observable check for the proposed action
+- Exact operational-data-analysis scope label, with broader, child, and neighboring responsibilities kept distinct
 
 `observability-sre` owns production instrumentation and alert-system design; this skill analyzes the resulting evidence. `finops-cloud-cost` owns cloud billing and allocation semantics when that narrower boundary is material.
 

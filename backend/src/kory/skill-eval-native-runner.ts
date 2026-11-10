@@ -1,10 +1,11 @@
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { lstatSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { lstatSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import type { SkillEvalDeterministicScore } from './skill-eval-execution';
 import { readFixtureText, writeFixtureFile } from './skill-eval-fixture-helpers';
+import { canonicalizePath, hostOS, isMac } from '../runtime/platform';
 
 export interface NativeFixture {
   id: string;
@@ -17,6 +18,51 @@ export interface NativeFixture {
 }
 
 export type NativeMode = 'optimized' | 'address-undefined' | 'thread';
+/** Caller-owned macOS selection, never taken from candidate fixture files. */
+export interface NativeToolchain {
+  developerDir?: string;
+  sdkRoot?: string;
+}
+
+// Only these two caller-selected environment values may enter compiler processes.
+// Passing an explicit object (including {}) overrides the environment selection.
+const callerToolchain = (): NativeToolchain => ({
+  developerDir: process.env.DEVELOPER_DIR,
+  sdkRoot: process.env.SDKROOT,
+});
+
+function resolveToolchain(selection: NativeToolchain): NativeToolchain {
+  const directory = (name: string, value: string | undefined): string | undefined => {
+    if (value === undefined) return undefined;
+    if (typeof value !== 'string' || !isAbsolute(value) || /[\x00-\x1f\x7f]/u.test(value))
+      throw new Error(`${name} must be an absolute directory path without control characters`);
+    try {
+      const path = canonicalizePath(value);
+      if (!statSync(path).isDirectory()) throw new Error('not a directory');
+      return path;
+    } catch {
+      throw new Error(`${name} must name an existing directory`);
+    }
+  };
+  const developerDir = directory('DEVELOPER_DIR', selection.developerDir);
+  const sdkRoot = directory('SDKROOT', selection.sdkRoot);
+  if ((developerDir !== undefined || sdkRoot !== undefined) && !isMac())
+    throw new Error('DEVELOPER_DIR/SDKROOT native toolchain selection requires macOS');
+  return { developerDir, sdkRoot };
+}
+
+interface NativePreflight {
+  reasons: string[];
+  version: string;
+  runs: NativeRun[];
+}
+
+const invalidToolchain = (error: unknown): NativePreflight => ({
+  reasons: [error instanceof Error ? error.message : String(error)],
+  version: 'Native toolchain unavailable',
+  runs: [],
+});
+
 export interface NativeRun {
   phase: string;
   command: string[];
@@ -38,6 +84,13 @@ const modeFlags = (mode: NativeMode): string[] =>
         mode === 'thread' ? '-fsanitize=thread' : '-fsanitize=address,undefined',
       ];
 const compiler = (language: NativeFixture['language']) => (language === 'c' ? 'clang' : 'clang++');
+const compilerCommand = (
+  language: NativeFixture['language'],
+  toolchain: NativeToolchain,
+): string[] =>
+  toolchain.developerDir !== undefined || toolchain.sdkRoot !== undefined
+    ? ['/usr/bin/xcrun', '--sdk', toolchain.sdkRoot ?? 'macosx', compiler(language)]
+    : [compiler(language)];
 const extension = (language: NativeFixture['language']) => (language === 'c' ? 'c' : 'cpp');
 const environment = (root: string): NodeJS.ProcessEnv => ({
   PATH: process.env.PATH ?? '',
@@ -53,11 +106,21 @@ const environment = (root: string): NodeJS.ProcessEnv => ({
   TSAN_OPTIONS: 'halt_on_error=1:exitcode=66',
 });
 
-function run(root: string, phase: string, command: string[], timeout = 8_000): NativeRun {
+function run(
+  root: string,
+  phase: string,
+  command: string[],
+  timeout = 8_000,
+  toolchain: NativeToolchain = {},
+): NativeRun {
   const started = Date.now();
   const result = spawnSync(command[0]!, command.slice(1), {
     cwd: root,
-    env: environment(root),
+    env: {
+      ...environment(root),
+      ...(toolchain.developerDir !== undefined ? { DEVELOPER_DIR: toolchain.developerDir } : {}),
+      ...(toolchain.sdkRoot !== undefined ? { SDKROOT: toolchain.sdkRoot } : {}),
+    },
     encoding: 'utf8',
     timeout,
     killSignal: 'SIGKILL',
@@ -80,23 +143,29 @@ const hash = (text: string) => createHash('sha256').update(text).digest('hex');
 export function probeNativeModes(
   language: NativeFixture['language'],
   modes: readonly NativeMode[],
-): {
-  reasons: string[];
-  version: string;
-  runs: NativeRun[];
-} {
+  selection: NativeToolchain = callerToolchain(),
+): NativePreflight {
+  let toolchain: NativeToolchain;
+  try {
+    toolchain = resolveToolchain(selection);
+  } catch (error) {
+    return invalidToolchain(error);
+  }
+  const command = compilerCommand(language, toolchain);
   const root = mkdtempSync(join(tmpdir(), 'kory-native-preflight-'));
   const runs: NativeRun[] = [];
   const reasons: string[] = [];
   try {
-    const version = run(root, 'compiler-version', [compiler(language), '--version'], 3_000);
+    const version = run(root, 'compiler-version', [...command, '--version'], 3_000, toolchain);
     runs.push(version);
-    if (!successful(version))
+    if (!successful(version)) {
+      const diagnostic = `${compiler(language)} is unavailable: ${version.error ?? (version.output || version.signal || `exit ${version.status}`)}`;
       return {
-        reasons: [`${compiler(language)} is unavailable: ${version.error ?? version.output}`],
-        version: version.output,
+        reasons: [diagnostic],
+        version: diagnostic,
         runs,
       };
+    }
     writeFixtureFile(
       root,
       `probe.${extension(language)}`,
@@ -110,7 +179,7 @@ export function probeNativeModes(
         root,
         `preflight-build-${mode}`,
         [
-          compiler(language),
+          ...command,
           language === 'c' ? '-std=c11' : '-std=c++20',
           '-pthread',
           ...modeFlags(mode),
@@ -119,6 +188,7 @@ export function probeNativeModes(
           target,
         ],
         20_000,
+        toolchain,
       );
       runs.push(build);
       if (!successful(build)) {
@@ -140,18 +210,29 @@ export function probeNativeModes(
   }
 }
 
-const preflights = new Map<string, ReturnType<typeof probeNativeModes>>();
-export function nativeFixturePreflight(fixture: Pick<NativeFixture, 'language' | 'modes'>) {
+const preflights = new Map<string, NativePreflight>();
+export function nativeFixturePreflight(
+  fixture: Pick<NativeFixture, 'language' | 'modes'>,
+  selection: NativeToolchain = callerToolchain(),
+) {
+  let toolchain: NativeToolchain;
+  try {
+    toolchain = resolveToolchain(selection);
+  } catch (error) {
+    return invalidToolchain(error);
+  }
   const key = JSON.stringify([
-    process.platform,
+    hostOS(),
     process.arch,
     process.env.PATH,
+    toolchain.developerDir,
+    toolchain.sdkRoot,
     fixture.language,
     fixture.modes,
   ]);
   let result = preflights.get(key);
   if (!result) {
-    result = probeNativeModes(fixture.language, fixture.modes);
+    result = probeNativeModes(fixture.language, fixture.modes, toolchain);
     preflights.set(key, result);
   }
   return result;
@@ -202,7 +283,9 @@ function compileProgram(
   receipt: string,
   runs: NativeRun[],
   phase: string,
+  toolchain: NativeToolchain,
 ): NativeRun | null {
+  const command = compilerCommand(fixture.language, toolchain);
   for (const [path, text] of Object.entries(sources)) writeFixtureFile(root, path, text);
   const harnessPath = `harness.${extension(fixture.language)}`;
   writeFixtureFile(root, harnessPath, testSource);
@@ -228,8 +311,9 @@ function compileProgram(
     const result = run(
       root,
       `${phase}-compile-${index}`,
-      [compiler(fixture.language), ...args, '-c', unit, '-o', object],
+      [...command, ...args, '-c', unit, '-o', object],
       20_000,
+      toolchain,
     );
     runs.push(result);
     if (!successful(result)) return null;
@@ -239,8 +323,9 @@ function compileProgram(
   const link = run(
     root,
     `${phase}-link`,
-    [compiler(fixture.language), '-pthread', ...modeFlags(mode), ...objects, '-o', executable],
+    [...command, '-pthread', ...modeFlags(mode), ...objects, '-o', executable],
     20_000,
+    toolchain,
   );
   runs.push(link);
   if (!successful(link)) return null;
@@ -253,6 +338,7 @@ function compileProgram(
 export function scoreNativeFixture(
   root: string,
   fixture: NativeFixture,
+  selection: NativeToolchain = callerToolchain(),
 ): SkillEvalDeterministicScore {
   const runs: NativeRun[] = [];
   const fail = (message: string, integrityFailure = false): SkillEvalDeterministicScore => ({
@@ -272,8 +358,12 @@ export function scoreNativeFixture(
       'Fixed native contract or public example was changed, omitted, or replaced with a symlink.',
       true,
     );
-  const preflight = nativeFixturePreflight(fixture);
-  if (preflight.reasons.length) return fail(preflight.reasons.join('\n'));
+  let toolchain: NativeToolchain;
+  try {
+    toolchain = resolveToolchain(selection);
+  } catch (error) {
+    return fail(invalidToolchain(error).reasons.join('\n'));
+  }
   let sources: Record<string, string>;
   let regression: string;
   try {
@@ -293,6 +383,10 @@ export function scoreNativeFixture(
     }
     return fail(error instanceof Error ? error.message : String(error), true);
   }
+  // Filesystem integrity does not depend on compiler readiness. A missing SDK
+  // or cached failed probe must not mask unsafe candidate sources or regressions.
+  const preflight = nativeFixturePreflight(fixture, toolchain);
+  if (preflight.reasons.length) return fail(preflight.reasons.join('\n'));
   const ownedFiles = {
     ...fixture.fixedFiles,
     ...sources,
@@ -310,7 +404,17 @@ export function scoreNativeFixture(
         writeFixtureFile(build, path, text);
       const receipt = `KORY_NATIVE_${randomUUID().replaceAll('-', '')}`;
       const hidden = fixture.harness(receipt);
-      const result = compileProgram(build, fixture, mode, sources, hidden, receipt, runs, mode);
+      const result = compileProgram(
+        build,
+        fixture,
+        mode,
+        sources,
+        hidden,
+        receipt,
+        runs,
+        mode,
+        toolchain,
+      );
       const passed =
         !!result &&
         successful(result) &&
@@ -341,6 +445,7 @@ export function scoreNativeFixture(
         '',
         runs,
         `regression-${variant}`,
+        toolchain,
       );
       const executed = !!result && !result.error && result.signal === null;
       checks.push({
@@ -361,7 +466,8 @@ export function scoreNativeFixture(
       evidenceKind: 'actual-local-native-runtime',
       language: fixture.language,
       compiler: preflight.version,
-      platform: process.platform,
+      toolchain,
+      platform: hostOS(),
       architecture: process.arch,
       sourceFingerprint,
       fixedFingerprint: hash(JSON.stringify(fixture.fixedFiles)),

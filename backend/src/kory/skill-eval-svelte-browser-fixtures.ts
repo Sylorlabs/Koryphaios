@@ -18,9 +18,7 @@ const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(MODULE_DIR, '../../..');
 const FRONTEND_ROOT = join(PROJECT_ROOT, 'frontend');
 const SVELTE_PACKAGE = join(FRONTEND_ROOT, 'node_modules/svelte/package.json');
-const SVELTE_ROOT = dirname(realpathSync(SVELTE_PACKAGE));
 const SVELTE_COMPILER = join(FRONTEND_ROOT, 'node_modules/svelte/compiler/index.js');
-const svelteRequire = createRequire(join(SVELTE_ROOT, 'package.json'));
 
 let sharedBrowser: Browser | null = null;
 let sharedBrowserUsers = 0;
@@ -436,6 +434,9 @@ function svelteVersion(): string {
 }
 
 async function buildSvelteFixture(root: string): Promise<string> {
+  // Registration and integrity checks do not require an installed compiler/runtime.
+  const SVELTE_ROOT = dirname(realpathSync(SVELTE_PACKAGE));
+  const svelteRequire = createRequire(join(SVELTE_ROOT, 'package.json'));
   const runtime = join(root, 'evaluation', 'svelte-runtime');
   mkdirSync(runtime, { recursive: true });
   const compilerModule = await import(pathToFileURL(SVELTE_COMPILER).href);
@@ -992,7 +993,7 @@ export const SVELTE_BROWSER_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureM
       writeFixtureFile(
         root,
         'README.md',
-        '# Svelte 5 derived-state fixture\n\nFix only the candidate component and its verification artifacts. The harness and shared KorySelect are fixed repository contracts. Preserve user-owned selection across prop updates, recover when the selected item disappears, and verify loading, empty, error, keyboard/focus, 390px, and destruction behavior in the real browser.\n',
+        `# Svelte 5 derived-state fixture\n\nFix only the candidate component and its verification artifacts. The harness and shared KorySelect are fixed repository contracts. Preserve user-owned selection across prop updates, recover when the selected item disappears, and verify loading, empty, error, keyboard/focus, 390px, and destruction behavior in the real browser.\n${svelteEvidenceInstructions(1)}`,
       );
     },
   },
@@ -1010,11 +1011,71 @@ export const SVELTE_BROWSER_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureM
       writeFixtureFile(
         root,
         'README.md',
-        '# Svelte 5 route-race fixture\n\nFix the candidate component without changing the route harness or detail source. The active route owns its subscription: superseded routes and component destruction must tear down immediately, late responses must not overwrite current state, and the existing error/retry/focus behavior plus browser history must remain intact. Record current-version browser evidence under verification/.\n',
+        `# Svelte 5 route-race fixture\n\nFix the candidate component without changing the route harness or detail source. The active route owns its subscription: superseded routes and component destruction must tear down immediately, late responses must not overwrite current state, and the existing error/retry/focus behavior plus browser history must remain intact. Record current-version browser evidence under verification/.\n${svelteEvidenceInstructions(2)}`,
       );
     },
   },
 ] as const;
+
+// The scorer requires exact field names and check identifiers. React, Vue and
+// Next publish the same contract in the task packet; Svelte did not, so a
+// correct candidate could fail on serialization alone.
+// Check identifiers the scorer requires in verification.checks, in the order the
+// task narrative presents them.
+const SVELTE_CHECKS: Record<1 | 2, readonly string[]> = {
+  1: [
+    'rapid-prop-update',
+    'selection-removal',
+    'keyboard-focus',
+    'loading-empty-error',
+    'narrow-viewport',
+    'component-destroy',
+  ],
+  2: [
+    'out-of-order-route',
+    'resource-cleanup',
+    'browser-history',
+    'error-retry-focus',
+    'component-destroy',
+  ],
+};
+
+function svelteEvidenceInstructions(scenario: 1 | 2): string {
+  const nearNeighbor = scenario === 1 ? 'angular-engineering' : 'react-engineering';
+  const checks = [...SVELTE_CHECKS[scenario]];
+  return `
+### Evidence artifact contract (exact JSON field names)
+
+Write both files below as JSON objects. They are candidate-authored claims; the evaluator separately builds your code and drives real Chromium. Do not claim a browser check you did not perform.
+
+\`verification/scenario-${scenario}-result.json\` requires these flat fields:
+
+\`\`\`json
+{
+  "status": "TODO",
+  "svelteVersion": "${svelteVersion()}",
+  "reactivityGeneration": "runes",
+  "executionBoundary": "browser-only",
+  "sharedControl": "KorySelect.svelte",
+  "broaderSkill": "frontend-engineering",
+  "nearNeighbor": "${nearNeighbor}"
+}
+\`\`\`
+
+\`verification/scenario-${scenario}-verification.json\` requires these flat fields:
+
+\`\`\`json
+{
+  "status": "TODO",
+  "evidenceType": "real-browser",
+  "checks": ${JSON.stringify(checks)},
+  "negativeRecovery": ["<observed failure and how it recovered>"]
+}
+\`\`\`
+
+Set the status to verified only after the browser run completed.
+`;
+}
 
 export const SVELTE_BROWSER_SKILL_EVAL_SCORERS: readonly SkillEvalDeterministicScorer[] = [
   {

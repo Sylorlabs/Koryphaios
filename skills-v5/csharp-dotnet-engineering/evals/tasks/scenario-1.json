@@ -1,7 +1,7 @@
 {
   "id": "csharp-dotnet-engineering-full-task-1-individual",
   "maturity": "individual",
-  "prompt": "Fix a .NET background importer that creates an async database scope per file but leaks connections when cancellation arrives between parsing and SaveChangesAsync. Preserve the public importer API, propagate CancellationToken correctly, make disposal deterministic, and avoid sync-over-async. Verify cancellation at each await boundary, normal completion, parser failure, and that pooled connection counts return to baseline.",
+  "prompt": "Fix a .NET background importer that creates an async database scope per file but leaks connections when cancellation arrives between parsing and SaveChangesAsync. First inspect the supplied project and host contract. Preserve the public importer API, propagate the caller's CancellationToken through operations that can observe it, make disposal deterministic, and avoid sync-over-async. Define the pre-commit and post-commit outcomes before changing code. Verify cancellation at each relevant await boundary, normal completion, parser failure, and that pooled connection counts return to baseline.",
   "environment": {
     "kind": "repository",
     "startingState": "fixture://csharp-dotnet-engineering/async-disposal-cancellation",
@@ -9,7 +9,7 @@
       ".NET project using async EF-style scopes with instrumented connection-pool counts",
       "cancellation injection before parse, before save, during save, and after commit",
       "existing public importer contract and result/error types",
-      "tests that detect sync blocking and undisposed async resources",
+      "designated executable regression entry point with tests that detect sync blocking and undisposed async resources",
       "paired same-model skill/no-skill execution from the identical starting snapshot"
     ]
   },
@@ -44,7 +44,9 @@
     "async-disposal-cancellation scenario evidence",
     "csharp-dotnet-engineering decision and boundary evidence",
     "Hierarchy boundary and selected specialist rationale",
-    "hierarchy boundary and selected specialist rationale",
+    "Target framework, host, and serializer configuration evidence",
+    "Resource acquisition/disposal trace and connection-pool baseline evidence",
+    "Pre-commit cancellation, post-commit success, parser failure, and normal-completion evidence",
     "paired skill/no-skill run artifacts",
     "explicit unavailable, simulated, inferred, or stale evidence labels"
   ],
@@ -56,23 +58,23 @@
   "falsifiableChecks": [
     {
       "id": "scope-and-hierarchy",
-      "assertion": "The result must establish the actual csharp-dotnet-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=implementation; near-neighbor=c-cpp-systems-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+      "assertion": "The result must establish the supplied .NET project, host, importer boundary, and relevant environment before acting. Preserve the hierarchy relationship (broader=implementation; native C/C++ interop remains a separate near-neighbor) without importing a native boundary that the fixture does not exercise."
     },
     {
       "id": "operating-contract",
-      "assertion": "Confirm target frameworks, nullable context, hosting model, dependency lifetimes, async flow, and serializer configuration."
+      "assertion": "Record target frameworks, C# and nullable settings, hosting model, dependency lifetimes, async flow, serializer configuration, and the actual regression command from the supplied project."
     },
     {
       "id": "execution-invariant",
-      "assertion": "Async lifetime and cancellation ownership are explicit: every acquired disposable is released exactly once and cancellation cannot be converted into partial success."
+      "assertion": "Async lifetime and cancellation ownership are explicit: every successfully acquired scope is released exactly once, acquisition failure does not dispose a nonexistent scope, parser or dependency failure leaves the pool at baseline, and cancellation before commit does not publish partial success. Cancellation observed after an irreversible successful commit must not be rewritten as a false rollback."
     },
     {
       "id": "verification-discipline",
-      "assertion": "Run dotnet build/test for supported target frameworks, exercise cancellation and disposal, and validate serialization, trimming, or AOT paths when affected."
+      "assertion": "Run the designated executable regression program or test project, not only dotnet build. Exercise normal completion, parser failure, cancellation before parse, between parse and save, during save, and immediately after commit; record connection-pool baseline and exactly-once disposal. Validate serialization, trimming, or AOT only if the supplied importer contract uses those paths, and label unsupported checks unavailable."
     },
     {
       "id": "anti-pattern-resistance",
-      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not block async tasks with .Result or .Wait in request paths, capture scoped services in singletons, suppress nullable warnings without proof, or depend on reflection that deployment modes remove."
+      "assertion": "The result must not block async work with .Result or .Wait, capture a scoped importer dependency in a singleton, dispose a resource before ownership is established, or translate a matching OperationCanceledException into an unrelated parser or database failure."
     },
     {
       "id": "evidence-and-uncertainty",

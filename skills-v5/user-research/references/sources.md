@@ -12,7 +12,7 @@ Use GOV.UK Service Manual guidance as the primary operational reference for cont
 
 ## Community pattern review
 
-The MIT-licensed Rampstack `ux-research` skill has useful decision-first and method-routing patterns, plus a clear boundary between discovery research and usability testing. Do not import its numerical recruiting heuristics, incentive amounts, or claims that a fixed interview count is sufficient without task-specific evidence.
+The MIT-licensed Rampstack `ux-research` skill has useful decision-first and method-routing patterns, plus a clear boundary between discovery research and usability testing. Do not import its numerical recruiting heuristics, incentive amounts, or claims that a fixed interview count is sufficient without task specific evidence.
 
 ## Verification record
 

@@ -28,10 +28,14 @@ const EDGE_SIM = `export interface PrivacyPolicy {
   cacheSetCookie:boolean;
   keyDimensions:string[];
   purgeDimensions:string[];
+  ttlSeconds:number;
+  staleWhileRevalidateSeconds:number;
+  staleIfErrorSeconds:number;
+  rollbackRevision:string;
   unrelatedAssetCacheable:boolean;
 }
 
-export interface Request { path:string; user?:string; query?:string; rewrite?:string; logout?:boolean }
+export interface Request { path:string; user?:string; query?:string; rewrite?:string; logout?:boolean; encoding?:'br'|'gzip'|'identity' }
 export function representation(req:Request):string {
   if(req.path==='/account') return req.logout||!req.user?'anon-account':'account:'+req.user;
   return 'asset:'+req.path;
@@ -39,7 +43,7 @@ export function representation(req:Request):string {
 export function keyFor(policy:PrivacyPolicy,req:Request):string|null {
   if(req.path==='/account'&&req.user&&policy.accountMode==='bypass')return null;
   const parts=[req.path];
-  for(const dim of policy.keyDimensions){if(dim==='user'&&req.user)parts.push('u='+req.user);if(dim==='query')parts.push('q='+(req.query??''));if(dim==='rewrite')parts.push('r='+(req.rewrite??''));}
+  for(const dim of policy.keyDimensions){if(dim==='user'&&req.user)parts.push('u='+req.user);if(dim==='query')parts.push('q='+(req.query??''));if(dim==='rewrite')parts.push('r='+(req.rewrite??''));if(dim==='encoding')parts.push('e='+(req.encoding??'identity'));}
   return parts.join('|');
 }
 export function privacySafe(policy:PrivacyPolicy):boolean {
@@ -54,6 +58,7 @@ export interface TieredPolicy {
   purgeDimensions:string[];
   ttlSeconds:number;
   staleWhileRevalidateSeconds:number;
+  staleIfErrorSeconds:number;
   validators:boolean;
   tiered:boolean;
   originTlsHostnameVerified:boolean;
@@ -64,15 +69,16 @@ export function tieredOriginFetches(policy:TieredPolicy,pops:number):number {
   if(!policy.tiered)return pops;
   return 1;
 }
-export function staleBehavior(policy:TieredPolicy,ageSeconds:number,originHealthy:boolean):'fresh'|'stale-updating'|'error'|'expired' {
+export function staleBehavior(policy:TieredPolicy,ageSeconds:number,originHealthy:boolean):'fresh'|'stale-updating'|'stale-if-error'|'error'|'expired' {
   if(ageSeconds<=policy.ttlSeconds)return'fresh';
-  if(ageSeconds<=policy.ttlSeconds+policy.staleWhileRevalidateSeconds)return originHealthy?'stale-updating':'stale-updating';
+  if(originHealthy&&ageSeconds<=policy.ttlSeconds+policy.staleWhileRevalidateSeconds)return'stale-updating';
+  if(!originHealthy&&ageSeconds<=policy.ttlSeconds+policy.staleIfErrorSeconds)return'stale-if-error';
   return originHealthy?'expired':'error';
 }
 `;
 
 const edgePrivacyMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'edge-cdn/account-cache-privacy@1',
+  id: 'edge-cdn/account-cache-privacy@2',
   matches: (s) => s.id === EDGE_PRIVACY,
   materialize: (d) => {
     writeFixtureFile(d, 'package.json', packageJson('kory-eval-edge-privacy'));
@@ -104,28 +110,48 @@ const edgePrivacyMaterializer: SkillEvalFixtureMaterializer = {
       'README.md',
       `# Shared-CDN authenticated-cache privacy fixture
 
-Preserve the trace evidence/simulator. Write \`.kory-eval/edge-privacy-policy.json\` as \`PrivacyPolicy\`. The safest valid correction is authenticated account-page bypass/private behavior; a bounded auditable account-id key is accepted only when every personalized representation dimension is actually keyed. Never use an unbounded raw Authorization/Cookie string as the cache key. \`Set-Cookie\` responses are not shared-cacheable.
+Preserve the trace evidence/simulator. Write \`.kory-eval/edge-privacy-policy.json\` as \`PrivacyPolicy\`. The safest valid correction is authenticated account-page bypass/private behavior; a bounded auditable account-id key is accepted only when every personalized representation dimension is actually keyed. Never use an unbounded raw Authorization/Cookie string as the cache key. \`Set-Cookie\` responses are not shared-cacheable. For shared cacheable responses, the executable key must partition normalized \`br\`, \`gzip\`, and \`identity\` encodings and targeted purge must cover that dimension.
 
-The old contaminated path-only variants and any new bounded-key variants must be targeted for purge with dimensions matching actual old/new key semantics. Unrelated static assets remain cacheable. Write \`.kory-eval/edge-privacy-evidence.json\` reconstructing current route cacheability/key, exact missing dimension, cold/warm POP verification for anonymous/alice/bob/logout/login/query/rewrite, cache-status/Age/body identity, targeted purge, origin-load impact, deployed revision and rollback safety. Synthetic provider evidence must stay labeled synthetic.
+Set explicit TTL, stale-while-revalidate, and stale-if-error windows. The simulator treats stale-if-error as its own stale-age allowance during origin timeout/5xx; demonstrate the in-window stale response and the error after that window expires. Set \`rollbackRevision\` to a known-safe revision or the new safe revision; the supplied contaminated revision is not a valid rollback target.
+
+The old contaminated path-only variants and any new bounded-key variants must be targeted for purge with dimensions matching actual old/new key semantics. Unrelated static assets remain cacheable. Write \`.kory-eval/edge-privacy-evidence.json\` reconstructing current route cacheability/key, exact missing dimension, cold/warm POP verification for anonymous/alice/bob/logout/login/query/rewrite/encoding, cache-status/Age/body identity, targeted purge, origin-load impact, deployed revision and rollback safety. Include an environment object with the deployed revision, deployment timestamp, and at least two observed POPs, and bound any unobserved rollout state. Synthetic provider evidence must stay labeled synthetic.
 `,
     );
   },
 };
 const edgePrivacyScorer: SkillEvalDeterministicScorer = {
-  id: 'edge-cdn/account-cache-privacy-scorer@1',
+  id: 'edge-cdn/account-cache-privacy-scorer@3',
   scenarioIds: [EDGE_PRIVACY],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
       workingDirectory,
-      `import{expect,test}from'bun:test';import{readFileSync}from'node:fs';import{keyFor,privacySafe,representation,type PrivacyPolicy}from'../src/edge-sim';const p=JSON.parse(readFileSync('.kory-eval/edge-privacy-policy.json','utf8')) as PrivacyPolicy;
+      `import{expect,test}from'bun:test';import{readFileSync}from'node:fs';import{keyFor,privacySafe,representation,staleBehavior,type PrivacyPolicy,type TieredPolicy}from'../src/edge-sim';const p=JSON.parse(readFileSync('.kory-eval/edge-privacy-policy.json','utf8')) as PrivacyPolicy;
 test('hidden: authenticated representations cannot cross cache identity',()=>{expect(privacySafe(p)).toBe(true);const a={path:'/account',user:'alice'},b={path:'/account',user:'bob'};const ka=keyFor(p,a),kb=keyFor(p,b);if(ka!==null&&kb!==null)expect(ka).not.toBe(kb);expect(representation(a)).not.toBe(representation(b));expect(p.cacheSetCookie).toBe(false);});
-test('hidden: unrelated cache efficiency survives and purge covers key dimensions',()=>{expect(p.unrelatedAssetCacheable).toBe(true);for(const dim of p.keyDimensions)if(['query','rewrite','user'].includes(dim))expect(p.purgeDimensions).toContain(dim);});
+test('hidden: unrelated cache efficiency survives and purge covers key dimensions',()=>{expect(p.unrelatedAssetCacheable).toBe(true);for(const dim of p.keyDimensions)if(['query','rewrite','user','encoding'].includes(dim))expect(p.purgeDimensions).toContain(dim);});
+test('hidden: compression, stale-if-error, and rollback are executable',()=>{expect(p.keyDimensions).toContain('encoding');const keys=['br','gzip','identity'].map(encoding=>keyFor(p,{path:'/account',encoding:encoding as 'br'|'gzip'|'identity'}));expect(new Set(keys).size).toBe(3);expect(p.purgeDimensions).toContain('encoding');expect(p.ttlSeconds).toBeGreaterThan(0);expect(p.staleWhileRevalidateSeconds).toBeGreaterThan(0);expect(p.staleIfErrorSeconds).toBeGreaterThan(0);const t={revision:p.revision,keyDimensions:p.keyDimensions,purgeDimensions:p.purgeDimensions,ttlSeconds:p.ttlSeconds,staleWhileRevalidateSeconds:p.staleWhileRevalidateSeconds,staleIfErrorSeconds:p.staleIfErrorSeconds,validators:true,tiered:true,originTlsHostnameVerified:true,originTlsTrustVerified:true,rollbackRevision:p.rollbackRevision} satisfies TieredPolicy;expect(staleBehavior(t,p.ttlSeconds+1,false)).toBe('stale-if-error');expect(staleBehavior(t,p.ttlSeconds+p.staleIfErrorSeconds+1,false)).toBe('error');expect(p.rollbackRevision).not.toBe('rev-bad-42');});
 `,
     );
     const fixed = readFileSync(join(workingDirectory, 'src/edge-sim.ts'), 'utf8') === EDGE_SIM;
     const trace = readFileSync(join(workingDirectory, 'evidence/traces.json'), 'utf8');
     const preserved = /rev-bad-42/.test(trace) && /account:alice/.test(trace);
     const ev = artifactText(workingDirectory, '.kory-eval/edge-privacy-evidence.json');
+    const evidence = ev.artifact as {
+      environment?: {
+        pops?: unknown[];
+        observedPops?: unknown[];
+        deployedRevision?: unknown;
+        deploymentTimestamp?: unknown;
+      };
+    } | null;
+    const observedPops = evidence?.environment?.observedPops ?? evidence?.environment?.pops;
+    const rollout =
+      Array.isArray(observedPops) &&
+      observedPops.length >= 2 &&
+      typeof evidence?.environment?.deployedRevision === 'string' &&
+      evidence.environment.deployedRevision.length > 0 &&
+      typeof evidence.environment.deploymentTimestamp === 'string' &&
+      evidence.environment.deploymentTimestamp.length > 0 &&
+      /propagation|rollout|observed/u.test(ev.text);
     const bounded =
       Boolean(ev.artifact) &&
       /cold/u.test(ev.text) &&
@@ -137,7 +163,7 @@ test('hidden: unrelated cache efficiency survives and purge covers key dimension
       /age|cache-status|hit|miss/u.test(ev.text) &&
       /rollback/u.test(ev.text) &&
       /synthetic/u.test(ev.text);
-    const passed = hidden.passed && fixed && preserved && bounded;
+    const passed = hidden.passed && fixed && preserved && bounded && rollout;
     return {
       passed,
       quality: passed ? 1 : hidden.passed && fixed ? 0.8 : hidden.passed ? 0.6 : 0,
@@ -147,6 +173,7 @@ test('hidden: unrelated cache efficiency survives and purge covers key dimension
         `cache isolation simulation: ${hidden.passed ? 'pass' : 'fail'}`,
         `contamination evidence preserved: ${preserved ? 'yes' : 'no'}`,
         `POP/purge/rollback evidence: ${bounded ? 'bounded' : 'missing'}`,
+        `revision/timestamp rollout evidence: ${rollout ? 'bounded' : 'missing'}`,
         hidden.evidence,
       ],
     };
@@ -154,7 +181,7 @@ test('hidden: unrelated cache efficiency survives and purge covers key dimension
 };
 
 const edgeTieredMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'edge-cdn/tiered-swr-delivery@1',
+  id: 'edge-cdn/tiered-swr-delivery@2',
   matches: (s) => s.id === EDGE_TIERED,
   materialize: (d) => {
     writeFixtureFile(d, 'package.json', packageJson('kory-eval-edge-tiered'));
@@ -162,7 +189,7 @@ const edgeTieredMaterializer: SkillEvalFixtureMaterializer = {
     writeFixtureFile(
       d,
       'evidence/tiered-traces.json',
-      `${JSON.stringify({ revision: 'rev-old', pops: ['SFO', 'IAD', 'FRA'], oldKey: ['path', 'locale'], newKey: ['path', 'locale', 'build'], badPurge: ['path', 'locale'], origin: { etag: 'v1', cacheControl: 'public, max-age=60, stale-while-revalidate=120' }, faults: ['timeout', '503'], tls: { hostname: 'origin.example', sni: 'origin.example' } }, null, 2)}\n`,
+      `${JSON.stringify({ revision: 'rev-old', pops: ['SFO', 'IAD', 'FRA'], oldKey: ['path', 'locale', 'encoding'], newKey: ['path', 'locale', 'build', 'encoding'], badPurge: ['path', 'locale', 'encoding'], origin: { etag: 'v1', cacheControl: 'public, max-age=60, stale-while-revalidate=120, stale-if-error=300' }, faults: ['timeout', '503'], tls: { hostname: 'origin.example', sni: 'origin.example' } }, null, 2)}\n`,
     );
     writeFixtureFile(d, 'tests/.gitkeep', '');
     writeFixtureFile(
@@ -170,26 +197,32 @@ const edgeTieredMaterializer: SkillEvalFixtureMaterializer = {
       'README.md',
       `# Tiered cache + stale-while-revalidate fixture
 
-Write \`.kory-eval/edge-tiered-policy.json\` as \`TieredPolicy\`. Enable explicit tiering, TTL/freshness, validators and bounded asynchronous stale-while-revalidate. Cache retention is not freshness. Lower-tier MISS may be an upper-tier HIT and therefore not an origin request. The new deployment key includes the supplied \`build\` dimension; targeted purge must include every key dimension so stale deployment artifacts cannot survive a mismatched purge.
+Write \`.kory-eval/edge-tiered-policy.json\` as \`TieredPolicy\`. Enable explicit tiering, TTL/freshness, validators, bounded asynchronous stale-while-revalidate, and an explicit stale-if-error window. Cache retention is not freshness. Lower-tier MISS may be an upper-tier HIT and therefore not an origin request. The new deployment key includes the supplied \`build\` and normalized \`encoding\` dimensions; targeted purge must include every key dimension so stale deployment artifacts cannot survive a mismatched purge.
 
-Origin timeout/5xx behavior and edge→origin TLS hostname/trust are independent checks. Write \`.kory-eval/edge-tiered-evidence.json\` for cold/warm/expired-updating/origin-failed/recovered POP states, lower/upper/origin observations, origin request reduction, validator/Age/cache status, corrected purge across tiers, TLS evidence, pinned revision and rollback without incompatible cached variants.
+Origin timeout/5xx behavior and edge→origin TLS hostname/trust are independent checks. Exercise stale-if-error while its window is valid and the error path after it expires. Write \`.kory-eval/edge-tiered-evidence.json\` for cold/warm/expired-updating/origin-failed/recovered POP states, lower/upper/origin observations, origin request reduction, validator/Age/cache status, corrected purge across tiers, compression variants, TLS evidence, pinned revision and rollback without incompatible cached variants. Include the deployed revision, deployment timestamp, and observations for at least two supplied POPs; bound any remaining rollout state.
 `,
     );
   },
 };
 const edgeTieredScorer: SkillEvalDeterministicScorer = {
-  id: 'edge-cdn/tiered-swr-delivery-scorer@1',
+  id: 'edge-cdn/tiered-swr-delivery-scorer@2',
   scenarioIds: [EDGE_TIERED],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
       workingDirectory,
-      `import{expect,test}from'bun:test';import{readFileSync}from'node:fs';import{staleBehavior,tieredOriginFetches,type TieredPolicy}from'../src/edge-sim';const p=JSON.parse(readFileSync('.kory-eval/edge-tiered-policy.json','utf8')) as TieredPolicy;
-test('hidden: tiering reduces fanout and stale policy is bounded',()=>{expect(p.tiered).toBe(true);expect(tieredOriginFetches(p,3)).toBeLessThan(3);expect(p.validators).toBe(true);expect(staleBehavior(p,p.ttlSeconds+1,true)).toBe('stale-updating');expect(staleBehavior(p,p.ttlSeconds+p.staleWhileRevalidateSeconds+1,false)).toBe('error');});
-test('hidden: key/purge/TLS/rollback contract complete',()=>{expect(p.keyDimensions).toContain('build');for(const d of p.keyDimensions)expect(p.purgeDimensions).toContain(d);expect(p.originTlsHostnameVerified).toBe(true);expect(p.originTlsTrustVerified).toBe(true);expect(p.rollbackRevision).toBeTruthy();});
+      `import{expect,test}from'bun:test';import{readFileSync}from'node:fs';import{keyFor,staleBehavior,tieredOriginFetches,type PrivacyPolicy,type TieredPolicy}from'../src/edge-sim';const p=JSON.parse(readFileSync('.kory-eval/edge-tiered-policy.json','utf8')) as TieredPolicy;
+test('hidden: tiering reduces fanout and stale policy is bounded',()=>{expect(p.tiered).toBe(true);expect(tieredOriginFetches(p,3)).toBeLessThan(3);expect(p.validators).toBe(true);expect(staleBehavior(p,p.ttlSeconds+1,true)).toBe('stale-updating');expect(staleBehavior(p,p.ttlSeconds+1,false)).toBe('stale-if-error');expect(staleBehavior(p,p.ttlSeconds+p.staleIfErrorSeconds+1,false)).toBe('error');});
+test('hidden: key/purge/compression/TLS/rollback contract complete',()=>{expect(p.keyDimensions).toContain('build');expect(p.keyDimensions).toContain('encoding');for(const d of p.keyDimensions)expect(p.purgeDimensions).toContain(d);const keyPolicy=p as unknown as PrivacyPolicy;const keys=['br','gzip','identity'].map(encoding=>keyFor(keyPolicy,{path:'/asset.js',encoding:encoding as 'br'|'gzip'|'identity'}));expect(new Set(keys).size).toBe(3);expect(p.originTlsHostnameVerified).toBe(true);expect(p.originTlsTrustVerified).toBe(true);expect(p.rollbackRevision).toBeTruthy();});
 `,
     );
     const fixed = readFileSync(join(workingDirectory, 'src/edge-sim.ts'), 'utf8') === EDGE_SIM;
     const ev = artifactText(workingDirectory, '.kory-eval/edge-tiered-evidence.json');
+    const rollout =
+      /deploymenttimestamp|deployedat/u.test(ev.text) &&
+      /deployedrevision|revision/u.test(ev.text) &&
+      /sfo/u.test(ev.text) &&
+      /iad/u.test(ev.text) &&
+      /rollout|propagation|observed/u.test(ev.text);
     const bounded =
       Boolean(ev.artifact) &&
       /lower/u.test(ev.text) &&
@@ -197,9 +230,11 @@ test('hidden: key/purge/TLS/rollback contract complete',()=>{expect(p.keyDimensi
       /origin/u.test(ev.text) &&
       /expired|updating/u.test(ev.text) &&
       /timeout|503/u.test(ev.text) &&
+      /stale-if-error|stale if error/u.test(ev.text) &&
+      /br|gzip|identity/u.test(ev.text) &&
       /tls/u.test(ev.text) &&
       /rollback/u.test(ev.text);
-    const passed = hidden.passed && fixed && bounded;
+    const passed = hidden.passed && fixed && bounded && rollout;
     return {
       passed,
       quality: passed ? 1 : hidden.passed && fixed ? 0.8 : hidden.passed ? 0.6 : 0,
@@ -208,6 +243,7 @@ test('hidden: key/purge/TLS/rollback contract complete',()=>{expect(p.keyDimensi
       evidence: [
         `tier/SWR/purge simulation: ${hidden.passed ? 'pass' : 'fail'}`,
         `tier/origin/TLS evidence: ${bounded ? 'present' : 'missing'}`,
+        `revision/timestamp rollout evidence: ${rollout ? 'bounded' : 'missing'}`,
         hidden.evidence,
       ],
     };

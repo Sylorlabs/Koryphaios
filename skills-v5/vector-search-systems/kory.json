@@ -141,10 +141,10 @@
     {
       "url": "https://github.com/pgvector/pgvector",
       "sourceType": "reference-implementation",
-      "versionScope": "pgvector repository and README as available 2026-09-05",
+      "versionScope": "pgvector repository and README as available 2026-10-04",
       "staleAfterDays": 30,
       "notes": "Exact search baseline; HNSW/IVFFlat tradeoffs; distance-specific indexes; filters, iterative scans, tenant partitioning, quantization, vacuuming/scaling and recall monitoring.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-03"
     },
     {
       "url": "https://www.postgresql.org/docs/current/indexes-partial.html",

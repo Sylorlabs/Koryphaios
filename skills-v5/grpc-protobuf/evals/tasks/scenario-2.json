@@ -1,7 +1,7 @@
 {
   "id": "grpc-protobuf-full-task-2-individual",
   "maturity": "individual",
-  "prompt": "Fix a bidirectional gRPC stream where the server keeps producing updates after the client cancels, queues unbounded messages for a slow reader, and occasionally reports OK after a downstream error. Establish context/cancellation ownership, bounded backpressure, status-code mapping, and stream shutdown order; verify slow client, cancellation, downstream failure, half-close, deadline, and no goroutine/resource leak.",
+  "prompt": "Fix a bidirectional gRPC stream where the server keeps producing updates after the client cancels, queues unbounded messages for a slow reader, and occasionally reports OK after a downstream error. Establish context/cancellation ownership, bounded backpressure, status-code mapping, ordered interceptor behavior, method routing, transport and metadata security, and stream shutdown order; verify slow client, cancellation, downstream failure, half-close, deadline, authorization denial, message-limit rejection, route mismatch, and no goroutine/resource leak.",
   "environment": {
     "kind": "repository",
     "startingState": "fixture://grpc-protobuf/stream-cancellation-backpressure",
@@ -10,6 +10,9 @@
       "downstream producer that can block, error, or respect cancellation",
       "bounded queue/memory measurement and deadline fixtures",
       "status assertions distinguishing cancelled, deadline, unavailable, and internal outcomes",
+      "ordered server interceptor harness for authentication, authorization, size limits, redacted telemetry, and error mapping",
+      "method and target routing fixtures with an intended backend and a mismatched or unavailable route",
+      "TLS or mTLS peer verification and metadata or message limit fixtures with denied-call no-effect assertions",
       "paired same-model skill/no-skill execution from the identical starting snapshot"
     ]
   },
@@ -44,6 +47,8 @@
     "stream-cancellation-backpressure scenario evidence",
     "grpc-protobuf decision and boundary evidence",
     "Hierarchy boundary and selected specialist rationale",
+    "interceptor ordering, authorization, limit, and redaction evidence",
+    "method routing and transport security evidence",
     "hierarchy boundary and selected specialist rationale",
     "paired skill/no-skill run artifacts",
     "explicit unavailable, simulated, inferred, or stale evidence labels"
@@ -60,19 +65,33 @@
     },
     {
       "id": "operating-contract",
-      "assertion": "Treat field numbers and wire types as durable compatibility."
+      "assertion": "Bind producer lifetime to the RPC context, keep buffering bounded under slow readers, preserve one stable terminal status once failure or cancellation is chosen, and make half-close ownership explicit.",
+      "source": "https://grpc.io/docs/guides/flow-control/"
+    },
+    {
+      "id": "interceptor-and-security",
+      "assertion": "The ordered interceptor chain authenticates and authorizes before handler effects, rejects oversized or malformed metadata and messages, redacts sensitive diagnostics, and proves denied calls create no handler or downstream side effect.",
+      "source": "https://grpc.io/docs/guides/interceptors/"
+    },
+    {
+      "id": "routing-and-status",
+      "assertion": "The target authority, resolver or service configuration, fully qualified method route, fallback behavior, and terminal status mapping are explicit; a route mismatch or downstream error cannot be converted into OK by a later layer.",
+      "source": "https://grpc.io/docs/guides/service-config/"
     },
     {
       "id": "execution-invariant",
-      "assertion": "Stream lifetime follows RPC context and bounded flow control; once terminal status is chosen, producers/resources terminate and no later message can convert failure into success."
+      "assertion": "Stream lifetime follows RPC context and bounded flow control; once terminal status is chosen, producers/resources terminate and no later message can convert failure into success.",
+      "source": "https://grpc.io/docs/guides/deadlines/"
     },
     {
       "id": "verification-discipline",
-      "assertion": "Run cross-version compatibility tests, deadline/cancel behavior, streaming half-close/backpressure, retryable/non-retryable statuses, malformed/unknown fields, and representative generated clients."
+      "assertion": "For this streaming-lifecycle task, verify slow-reader backpressure, client cancellation, half-close, deadline expiry and downstream deadline propagation, downstream failure and status mapping, interceptor order, authorization and limit rejection, method routing, transport security, bounded queues, producer shutdown, and resource cleanup. Label simulated security or transport boundaries separately. Do not require unrelated protobuf field-evolution, reservation, unknown-enum, or generated-client migration evidence.",
+      "source": "https://grpc.io/docs/guides/error/"
     },
     {
       "id": "anti-pattern-resistance",
-      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not reuse removed field numbers, depend on enum unknown-value behavior accidentally, ignore deadlines, or enable retries without idempotency analysis."
+      "assertion": "Do not detach producers from RPC cancellation, buffer without a bound, authorize from untrusted metadata, bypass TLS or peer verification, report OK after a terminal downstream error, keep emitting after terminal status, route by an unchecked target or method fallback, or treat a transport retry as making unsafe replay semantics correct.",
+      "source": "https://grpc.io/docs/guides/auth/"
     },
     {
       "id": "evidence-and-uncertainty",

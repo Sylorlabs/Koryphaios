@@ -22,6 +22,7 @@ Use this skill when Ruby runtime, gems, Bundler, Rake, exception flow, or Ruby c
 - Rescue the narrow exception class the operation can handle. Bare `rescue` targets `StandardError`; rescuing `Exception` also catches control-flow and system exceptions that usually should escape.
 - Put must-run cleanup in `ensure`. Treat `retry` as a loop with an explicit stopping condition because it restarts the protected `begin` body.
 - Give spawned threads an owner that joins, stops, or otherwise accounts for them. The main process can exit while unjoined threads still have work.
+- Treat a lazy streaming response as part of the request lifecycle. Keep request context available until the body has been consumed or explicitly closed, then clear it in the same guaranteed cleanup boundary; clearing it immediately after returning an Enumerator makes deferred work observe the wrong identity. Verify cleanup after normal, exceptional, and abandoned or closed streams without creating a thread per request.
 - Use `Queue` or another synchronization primitive for cross-thread producer-consumer state instead of assuming ordinary array or hash mutation is coordinated.
 - Keep monkey patches and refinements bounded to the intended runtime surface, and do not depend on incidental load order.
 
@@ -39,6 +40,7 @@ Treat request context as owned by the request, not the reusable thread. Clear it
 - Run the configured tests under the supported Ruby version or versions affected by the change.
 - Exercise handled and unhandled exception paths plus `ensure` cleanup when exception flow changes.
 - For thread changes, verify completion and shutdown with representative producer-consumer load.
+- For request-context changes, exercise deferred stream consumption and stream close/abandonment on a reused worker, as well as exceptions before and after authorization. The regression must execute on the same worker when that is the behavior under test; a newly created thread is not equivalent evidence.
 - Verify transaction rollback, time, encoding, or nil behavior only when those boundaries are materially changed.
 - Reproduce gem and Bundler behavior from the committed dependency state rather than an incidental local gem set.
 

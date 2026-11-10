@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "edge-cdn",
-  "version": "5.1.1",
+  "version": "5.1.2",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -153,42 +153,42 @@
     {
       "url": "https://developers.cloudflare.com/cache/concepts/default-cache-behavior/",
       "sourceType": "official-docs",
-      "versionScope": "Cloudflare default cache behavior updated 2026-09-03",
+      "versionScope": "Cloudflare default cache behavior updated 2026-09-14",
       "staleAfterDays": 14,
       "notes": "Current Cloudflare cacheability/default behavior including request methods, Cache-Control and Set-Cookie interactions.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-01"
     },
     {
       "url": "https://developers.cloudflare.com/cache/how-to/cache-keys/",
       "sourceType": "official-docs",
-      "versionScope": "Cloudflare cache-key documentation updated 2026-08-28",
+      "versionScope": "Cloudflare cache-key documentation updated 2026-09-29",
       "staleAfterDays": 14,
       "notes": "Current default/custom cache-key composition and cache-sharding implications.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-01"
     },
     {
       "url": "https://developers.cloudflare.com/cache/how-to/purge-cache/",
       "sourceType": "official-docs",
-      "versionScope": "Cloudflare purge documentation updated 2026-08-14",
+      "versionScope": "Cloudflare purge documentation updated 2026-09-29",
       "staleAfterDays": 14,
       "notes": "Targeted purge options and current recommendation to prefer granular single-file/key-aware purge over routine purge-all.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-01"
     },
     {
       "url": "https://developers.cloudflare.com/cache/concepts/revalidation/",
       "sourceType": "official-docs",
-      "versionScope": "Cloudflare revalidation documentation updated 2026-06-26",
+      "versionScope": "Cloudflare revalidation documentation updated 2026-09-29",
       "staleAfterDays": 14,
       "notes": "Current asynchronous stale-while-revalidate and validator behavior; this changed in 2026 and must not be inferred from older examples.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-01"
     },
     {
       "url": "https://developers.cloudflare.com/cache/how-to/tiered-cache/",
       "sourceType": "official-docs",
-      "versionScope": "Cloudflare Tiered Cache documentation updated 2026-08-14",
+      "versionScope": "Cloudflare Tiered Cache documentation updated 2026-09-29",
       "staleAfterDays": 14,
       "notes": "Lower/upper-tier origin request topology and origin shielding semantics.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-01"
     },
     {
       "url": "https://developers.cloudflare.com/cache/concepts/cache-responses/",
@@ -196,7 +196,7 @@
       "versionScope": "Cloudflare cache-response documentation updated 2026-09-04",
       "staleAfterDays": 14,
       "notes": "Current CF-Cache-Status and Age evidence, including tiered-cache age interpretation.",
-      "verifiedAt": "2026-10-02"
+      "verifiedAt": "2026-11-01"
     }
   ],
   "authoringMaturity": "individual"

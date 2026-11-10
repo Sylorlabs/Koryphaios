@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "growth-engineering",
-  "version": "5.1.1",
+  "version": "5.1.2",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -115,10 +115,10 @@
     {
       "url": "https://developers.google.com/analytics",
       "sourceType": "official-docs",
-      "versionScope": "Google Analytics developer documentation as available 2026-09-04",
+      "versionScope": "Google Analytics developer documentation as available 2026-10-19",
       "staleAfterDays": 45,
       "notes": "Event, measurement, reporting, and analytics implementation reference.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-10-19"
     },
     {
       "url": "https://www.itl.nist.gov/div898/handbook/",

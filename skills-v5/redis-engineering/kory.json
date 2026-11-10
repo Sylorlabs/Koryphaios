@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "redis-engineering",
-  "version": "5.1.2",
+  "version": "5.1.3",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -99,10 +99,34 @@
     {
       "url": "https://redis.io/docs/latest/",
       "sourceType": "official-docs",
-      "versionScope": "Redis documentation as available 2026-09-04",
+      "versionScope": "Redis documentation as available 2026-10-19",
       "staleAfterDays": 45,
       "notes": "Redis data types, persistence, replication, clustering, and command behavior.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-10-19"
+    },
+    {
+      "url": "https://redis.io/docs/latest/develop/clients/patterns/distributed-locks/",
+      "sourceType": "official-docs",
+      "versionScope": "Redis lock guidance checked 2026-10-10; DELEX IFEQ introduced in 8.4",
+      "staleAfterDays": 45,
+      "notes": "Unique ownership tokens, atomic compare-and-delete, bounded lease extension and fencing limitations.",
+      "verifiedAt": "2026-10-10"
+    },
+    {
+      "url": "https://redis.io/docs/latest/commands/xautoclaim/",
+      "sourceType": "official-docs",
+      "versionScope": "Redis Streams command available in 6.2+; documentation checked 2026-10-10",
+      "staleAfterDays": 45,
+      "notes": "Idle pending recovery, ownership reset, JUSTID attempt-count behavior and version-dependent replies.",
+      "verifiedAt": "2026-10-10"
+    },
+    {
+      "url": "https://redis.io/docs/latest/commands/xpending/",
+      "sourceType": "official-docs",
+      "versionScope": "Redis XPENDING IDLE filter available in 6.2+; documentation checked 2026-10-10",
+      "staleAfterDays": 45,
+      "notes": "Inspection of pending delivery age, consumer ownership, and recovery evidence.",
+      "verifiedAt": "2026-10-10"
     }
   ],
   "authoringMaturity": "individual"

@@ -23,6 +23,7 @@ Use HTTP semantics deliberately: safe/idempotent methods, status classes, Locati
 - Exercise cache miss, fresh hit, stale revalidation, `Vary` variants, and authenticated or personalized responses at the actual cache boundary.
 - Send malformed content, unsupported media types, invalid preconditions, missing auth, and denied auth, then verify status and response semantics.
 - Test validator-based concurrent modification with stale and current validators.
+- When a task requests regression tests, execute them against the repaired HTTP behavior and the original failing implementation. Require a test failure that exposes the original defect; test names or comments mentioning statuses, validators, or retryability alone are not evidence.
 - Exercise timeout and streaming disconnect behavior through the same proxy or gateway path used in deployment.
 
 ## Failure boundaries

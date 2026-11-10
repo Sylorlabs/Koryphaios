@@ -130,7 +130,7 @@ export function run(argv:string[]):number{
 if(import.meta.main) process.exitCode=run(process.argv.slice(2));
 `;
 
-function runTests(root: string): { passed: boolean; output: string } {
+function runTests(root: string): { passed: boolean; infrastructureFailure: boolean; output: string } {
   const result = spawnSync(process.execPath, ['test', '--no-env-file', 'tests'], {
     cwd: root,
     encoding: 'utf8',
@@ -140,6 +140,7 @@ function runTests(root: string): { passed: boolean; output: string } {
   });
   return {
     passed: result.status === 0,
+    infrastructureFailure: result.status === null || result.signal !== null || result.error !== undefined,
     output: `${result.stdout ?? ''}\n${result.stderr ?? ''}`.slice(-5000),
   };
 }
@@ -147,7 +148,7 @@ function runTests(root: string): { passed: boolean; output: string } {
 function mutationRun(
   root: string,
   replacements: Record<string, string>,
-): { passed: boolean; output: string } {
+): { passed: boolean; infrastructureFailure: boolean; output: string } {
   const copy = mkdtempSync(join(tmpdir(), 'kory-testing-mutation-'));
   try {
     cpSync(root, copy, { recursive: true });
@@ -196,21 +197,25 @@ function scoreRetry(root: string): SkillEvalDeterministicScore {
   const fixed = runTests(root);
   const abortMutation = mutationRun(root, { 'src/client.ts': CLIENT_ABORT_BUG });
   const noRetryMutation = mutationRun(root, { 'src/client.ts': CLIENT_NO_RETRY });
+  const abortKilled = !abortMutation.passed && !abortMutation.infrastructureFailure;
+  const noRetryKilled = !noRetryMutation.passed && !noRetryMutation.infrastructureFailure;
+  const runtimeHealthy = !fixed.infrastructureFailure && !abortMutation.infrastructureFailure && !noRetryMutation.infrastructureFailure;
   const text = candidateTestText(root);
   const publicBoundary =
     /requestWithRetry/u.test(text) && !/pending\(\)|jobs|nextId|private/u.test(text);
-  const passed = fixed.passed && !abortMutation.passed && !noRetryMutation.passed && publicBoundary;
+  const passed = runtimeHealthy && fixed.passed && abortKilled && noRetryKilled && publicBoundary;
   return {
     passed,
     quality:
-      [fixed.passed, !abortMutation.passed, !noRetryMutation.passed, publicBoundary].filter(Boolean)
+      [runtimeHealthy && fixed.passed, abortKilled, noRetryKilled, publicBoundary].filter(Boolean)
         .length / 4,
-    verification: fixed.passed && !abortMutation.passed && !noRetryMutation.passed ? 1 : 0,
+    verification: runtimeHealthy && fixed.passed && abortKilled && noRetryKilled ? 1 : 0,
     integrityFailure: false,
     evidence: [
       `fixed suite: ${fixed.passed ? 'pass' : 'fail'}`,
-      `abort mutation killed: ${!abortMutation.passed ? 'yes' : 'no'}`,
-      `ordinary-retry mutation killed: ${!noRetryMutation.passed ? 'yes' : 'no'}`,
+      `mutation infrastructure: ${runtimeHealthy ? 'healthy' : 'failed'}`,
+      `abort mutation killed: ${abortKilled ? 'yes' : 'no'}`,
+      `ordinary-retry mutation killed: ${noRetryKilled ? 'yes' : 'no'}`,
       `public API boundary: ${publicBoundary ? 'yes' : 'no'}`,
       fixed.output,
       abortMutation.output,
@@ -241,6 +246,12 @@ function scoreCli(root: string): SkillEvalDeterministicScore {
   const argsMutation = mutationRun(root, { 'src/args.ts': ARGS_REJECT_JSON });
   const serializeMutation = mutationRun(root, { 'src/serialize.ts': SERIALIZE_BUG });
   const stderrMutation = mutationRun(root, { 'src/cli.ts': CLI_STDOUT_BUG });
+  const argsKilled = !argsMutation.passed && !argsMutation.infrastructureFailure;
+  const serializationKilled = !serializeMutation.passed && !serializeMutation.infrastructureFailure;
+  const stderrKilled = !stderrMutation.passed && !stderrMutation.infrastructureFailure;
+  const runtimeHealthy = [fixed, argsMutation, serializeMutation, stderrMutation].every(
+    (run) => !run.infrastructureFailure,
+  );
   const text = candidateTestText(root);
   const layered =
     /normalizeArgs/u.test(text) &&
@@ -248,31 +259,32 @@ function scoreCli(root: string): SkillEvalDeterministicScore {
     /(spawn|Bun\.spawn|subprocess|cli\.ts)/u.test(text) &&
     !/toMatchSnapshot/u.test(text);
   const passed =
-    fixed.passed &&
-    !argsMutation.passed &&
-    !serializeMutation.passed &&
-    !stderrMutation.passed &&
+    runtimeHealthy && fixed.passed &&
+    argsKilled &&
+    serializationKilled &&
+    stderrKilled &&
     layered;
   return {
     passed,
     quality:
       [
-        fixed.passed,
-        !argsMutation.passed,
-        !serializeMutation.passed,
-        !stderrMutation.passed,
+        runtimeHealthy && fixed.passed,
+        argsKilled,
+        serializationKilled,
+        stderrKilled,
         layered,
       ].filter(Boolean).length / 5,
     verification:
-      fixed.passed && !argsMutation.passed && !serializeMutation.passed && !stderrMutation.passed
+      runtimeHealthy && fixed.passed && argsKilled && serializationKilled && stderrKilled
         ? 1
         : 0,
     integrityFailure: false,
     evidence: [
       `fixed suite: ${fixed.passed ? 'pass' : 'fail'}`,
-      `argument mutation killed: ${!argsMutation.passed ? 'yes' : 'no'}`,
-      `serialization mutation killed: ${!serializeMutation.passed ? 'yes' : 'no'}`,
-      `stdout/stderr mutation killed: ${!stderrMutation.passed ? 'yes' : 'no'}`,
+      `mutation infrastructure: ${runtimeHealthy ? 'healthy' : 'failed'}`,
+      `argument mutation killed: ${argsKilled ? 'yes' : 'no'}`,
+      `serialization mutation killed: ${serializationKilled ? 'yes' : 'no'}`,
+      `stdout/stderr mutation killed: ${stderrKilled ? 'yes' : 'no'}`,
       `layered semantic tests: ${layered ? 'yes' : 'no'}`,
       fixed.output,
       argsMutation.output,

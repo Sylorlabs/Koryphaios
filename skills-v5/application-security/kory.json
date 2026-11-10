@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "application-security",
-  "version": "5.1.1",
+  "version": "5.2.0",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -21,11 +21,11 @@
     "path containment",
     "web application security",
     "common attack paths",
-    "untrusted data flows",
-    "authorization review"
+    "untrusted data flows"
   ],
   "excludes": [
     "resource authorization policy as the primary task",
+    "only entitlement policy",
     "browser-specific origin, XSS, CSRF, CSP, CORS, or postMessage security as the primary task",
     "final evidence-only verification of already-defined security controls"
   ],
@@ -56,7 +56,7 @@
         "id": "application-security-ambiguous-1",
         "prompt": "The broad security review found several risky data flows. Apply application security to trace file, URL, parser, database, template, and subprocess sources to sinks with concrete invariants; keep finding severity and cross-domain review synthesis in security-review.",
         "expectedSelection": true,
-        "expectedSkills": [],
+        "expectedSkills": ["security-review"],
         "forbiddenSkills": [],
         "adjacentSkills": ["security-review"],
         "tags": ["ambiguous", "neighbor-boundary"]
@@ -65,7 +65,7 @@
         "id": "application-security-ambiguous-2",
         "prompt": "The service needs an authorization review and application security hardening. Let authorization-security define who may act on each resource, while application-security owns untrusted parsing, file paths, outbound URLs, serialization, and process sinks.",
         "expectedSelection": true,
-        "expectedSkills": [],
+        "expectedSkills": ["authorization-security"],
         "forbiddenSkills": [],
         "adjacentSkills": ["authorization-security"],
         "tags": ["ambiguous", "scope-control"]
@@ -74,7 +74,7 @@
         "id": "application-security-ambiguous-3",
         "prompt": "Harden input validation and privileged IPC in the Electron app. Desktop engineering owns window/process/runtime mechanics; application-security owns trust boundaries, schema limits, canonical paths, external URLs, and privileged sink invariants.",
         "expectedSelection": true,
-        "expectedSkills": [],
+        "expectedSkills": ["desktop-electron-tauri"],
         "forbiddenSkills": [],
         "adjacentSkills": ["desktop-electron-tauri"],
         "tags": ["ambiguous", "scope-control"]
@@ -115,9 +115,17 @@
       "url": "https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html",
       "sourceType": "official-docs",
       "versionScope": "OWASP OS Command Injection Defense Cheat Sheet opened 2026-09-06",
-      "verifiedAt": "2026-09-06",
+      "verifiedAt": "2026-11-07",
       "staleAfterDays": 120,
       "notes": "Argument injection remains possible without shell interpolation; adapt parameter separation and effect restrictions to the actual tool contract."
+    },
+    {
+      "url": "https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html",
+      "sourceType": "official-docs",
+      "versionScope": "OWASP SSRF Prevention Cheat Sheet inspected 2026-10-11",
+      "verifiedAt": "2026-11-07",
+      "staleAfterDays": 120,
+      "notes": "Per-hop destination policy, DNS rebinding and parser disagreement defenses, and connection-time enforcement while preserving TLS hostname checks."
     },
     {
       "url": "https://owasp.org/www-project-application-security-verification-standard/",
@@ -126,15 +134,16 @@
       "revision": "5.0.0",
       "staleAfterDays": 120,
       "notes": "Primary application-security requirements across validation, encoding, APIs, files/resources, authentication/session, data protection, and secure communication.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
-      "url": "https://owasp.org/www-project-web-security-testing-guide/stable/4-Web_Application_Security_Testing/",
+      "url": "https://wstg.owasp.org/v4.2/4-Web_Application_Security_Testing",
       "sourceType": "official-docs",
-      "versionScope": "OWASP WSTG current stable site available 2026-09-05",
+      "versionScope": "OWASP WSTG 4.2, versioned testing taxonomy rechecked at the official redirected site 2026-10-23",
+      "revision": "4.2",
       "staleAfterDays": 120,
-      "notes": "Current stable testing taxonomy for input validation, session management, error handling, business logic, API, and related application security cases; browser-specific cases remain with web-security.",
-      "verifiedAt": "2026-09-05"
+      "notes": "Current stable testing taxonomy for input validation, session management, error handling, business logic, API, and related application security cases; browser-specific cases remain with web-security. The old OWASP versioned URL redirects to this official version-pinned site.",
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://csrc.nist.gov/pubs/sp/800/218/final",
@@ -142,15 +151,23 @@
       "versionScope": "NIST SP 800-218 SSDF 1.1",
       "staleAfterDays": 365,
       "notes": "Secure software-development practices, design requirements, implementation protection, vulnerability prevention, and remediation discipline.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html",
       "sourceType": "official-docs",
       "versionScope": "OWASP Input Validation Cheat Sheet available 2026-09-05",
+      "verifiedAt": "2026-11-07",
       "staleAfterDays": 120,
-      "notes": "Syntactic/semantic allowlist validation, canonicalization concerns, file-upload considerations, and the rule that validation is not the primary defense against every sink-specific injection class.",
-      "verifiedAt": "2026-09-05"
+      "notes": "Syntactic/semantic allowlist validation, canonicalization concerns, file-upload considerations, and the rule that validation is not the primary defense against every sink-specific injection class."
+    },
+    {
+      "url": "https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html",
+      "sourceType": "official-docs",
+      "versionScope": "OWASP Logging Cheat Sheet inspected 2026-10-17",
+      "verifiedAt": "2026-11-07",
+      "staleAfterDays": 120,
+      "notes": "Data to exclude, untrusted event sanitization, log resource limits, and failure testing. Alias coverage and redaction ordering are package adaptations to the actual credential data flow, not a prescribed OWASP regex."
     }
   ],
   "authoringMaturity": "individual"

@@ -122,7 +122,7 @@
       "sourceType": "official-docs",
       "versionScope": "Hypothesis 6.167.1 documentation; release dated 2026-08-30",
       "revision": "6.167.1",
-      "verifiedAt": "2026-09-05",
+      "verifiedAt": "2026-11-07",
       "staleAfterDays": 60,
       "notes": "Primary property-based testing reference for generated domains, shrinking, settings, stateful testing, seeds, and replay behavior."
     },
@@ -131,16 +131,16 @@
       "sourceType": "official-docs",
       "versionScope": "Go fuzzing documentation checked against the current Go 1.27.1 release line",
       "revision": "go1.27.1 / docs snapshot 2026-09-05",
-      "verifiedAt": "2026-09-05",
+      "verifiedAt": "2026-11-07",
       "staleAfterDays": 60,
       "notes": "Official guidance for deterministic fuzz targets, seed/generated corpora, coverage-guided execution, supported input types, and regression execution."
     },
     {
       "url": "https://llvm.org/docs/LibFuzzer.html",
       "sourceType": "reference-implementation",
-      "versionScope": "LLVM libFuzzer documentation snapshot 2026-09-05; libFuzzer requires matching Clang",
+      "versionScope": "LLVM libFuzzer documentation snapshot 2026-11-07; libFuzzer requires matching Clang",
       "revision": "LLVM docs snapshot 2026-09-05",
-      "verifiedAt": "2026-09-05",
+      "verifiedAt": "2026-11-07",
       "staleAfterDays": 60,
       "notes": "Coverage-guided corpus behavior, random seed reporting, crash artifact reproduction/minimization, bounded runs, and corpus merging."
     },

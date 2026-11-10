@@ -1,7 +1,7 @@
 {
   "id": "graphql-engineering-full-task-1-individual",
   "maturity": "individual",
-  "prompt": "Evolve a GraphQL User field from a guaranteed legacy `avatarUrl` string to a richer optional avatar object while old mobile clients still query `avatarUrl`. Define a staged schema/resolver/deprecation path, null/error semantics, compatibility tests, and introspection/deprecation evidence. Avoid a breaking non-null change and do not move backend storage concerns into the schema contract.",
+  "prompt": "Evolve a GraphQL User field from a guaranteed legacy `avatarUrl` string to a richer optional avatar object while old mobile clients still query `avatarUrl`. Define a staged schema/resolver/deprecation path, null/error semantics, compatibility tests, and introspection/deprecation evidence. Avoid a breaking non-null change and do not move backend storage concerns into the schema contract. The supplied `migration-contract.md` and `persisted-queries/legacy-mobile.graphql` are read-only compatibility inputs: preserve their contents byte-for-byte, and put the staged rollout plan in a separate file.",
   "environment": {
     "kind": "repository",
     "startingState": "fixture://graphql-engineering/nullable-field-evolution",
@@ -9,7 +9,10 @@
       "current GraphQL schema/resolvers and persisted query from an old mobile client",
       "new avatar object shape with legitimately absent avatars",
       "compatibility window requiring legacy avatarUrl query to keep working",
-      "schema-diff and execution tests for null, present, and resolver-error cases",
+      "immutable migration contract and persisted legacy query, with new rollout notes kept in a separate file",
+      "schema-diff and execution tests for null, present, nested non-null resolver-error, and introspection cases",
+      "executor package/version and observed __type evidence, or an explicit unavailable record with the lookup and unperformed checks",
+      "explicit disposition of mutation, N+1, pagination, authorization, and query-cost boundaries",
       "paired same-model skill/no-skill execution from the identical starting snapshot"
     ]
   },
@@ -56,27 +59,33 @@
   "falsifiableChecks": [
     {
       "id": "scope-and-hierarchy",
-      "assertion": "The result must establish the actual graphql-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=api-contract-design; near-neighbor=grpc-protobuf), and not absorb the near-neighbor responsibility merely because it is adjacent."
+      "assertion": "The result must establish the actual graphql-engineering boundary and relevant GraphQL executor before acting, preserve the hierarchy relationship (broader=api-contract-design; near-neighbor=grpc-protobuf), and keep storage migration and protobuf wire work outside the GraphQL schema contract.",
+      "source": "https://spec.graphql.org/September2025/"
     },
     {
       "id": "operating-contract",
-      "assertion": "Design schema types from durable domain semantics and client composition needs."
+      "assertion": "Design schema types from durable domain semantics and client composition needs, keeping a legitimately absent avatar nullable and present avatar fields non null only when guaranteed.",
+      "source": "https://spec.graphql.org/September2025/"
     },
     {
       "id": "execution-invariant",
-      "assertion": "Schema evolution preserves the supported query contract and makes nullability/deprecation explicit; old clients do not fail because new richer data is optional."
+      "assertion": "Schema evolution preserves the supplied persisted query, makes nullability and deprecation explicit, and retains the parent object when an optional avatar resolver fails.",
+      "source": "https://spec.graphql.org/September2025/"
     },
     {
       "id": "verification-discipline",
-      "assertion": "Test representative queries/mutations, N+1/batching, partial errors, null propagation, pagination, authorization bypass attempts, schema compatibility, and query-cost controls."
+      "assertion": "Execute the supplied persisted operation and introspection through the installed GraphQL executor when available, assert nullable and non null error paths including nested Avatar.url bubbling to nullable User.avatar, and run independent negative controls against the old schema and old resolver. If no executor is installed, provide an explicit unavailable record naming the lookup and unperformed checks rather than claiming execution evidence.",
+      "source": "https://spec.graphql.org/September2025/"
     },
     {
       "id": "anti-pattern-resistance",
-      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not expose arbitrary database graphs, make every field nullable to avoid schema decisions, put authorization only in top-level resolvers, or break clients by changing nullability/enums casually."
+      "assertion": "The result must not expose arbitrary database graphs, make every field nullable, or alter the immutable migration contract and persisted query. GraphQL validation must not be treated as authorization or as proof of resolver safety.",
+      "source": "https://cheatsheetseries.owasp.org/cheatsheets/GraphQL_Cheat_Sheet.html"
     },
     {
       "id": "evidence-and-uncertainty",
-      "assertion": "Every material completion claim must map to observable evidence (graphql-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+      "assertion": "Every material completion claim must map to observable evidence, with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty. Mutation, N+1, pagination, authorization, and query-cost boundaries must be marked exercised, not applicable with a fixture reason, or unavailable with the missing boundary. Production client parsing and traffic remain unavailable unless exercised.",
+      "source": "https://graphql.github.io/graphql-over-http/draft/"
     }
   ]
 }

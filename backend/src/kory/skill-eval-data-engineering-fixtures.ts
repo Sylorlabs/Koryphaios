@@ -642,7 +642,7 @@ const CDC_EVENTS = `${JSON.stringify(
 )}\n`;
 
 const pipelineCdcMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'data-pipeline-engineering/idempotent-cdc-backfill@1',
+  id: 'data-pipeline-engineering/idempotent-cdc-backfill@3',
   matches: (scenario) => scenario.id === PIPELINE_CDC,
   materialize: (destination) => {
     writeFixtureFile(destination, 'package.json', packageJson('kory-eval-pipeline-cdc'));
@@ -654,18 +654,20 @@ const pipelineCdcMaterializer: SkillEvalFixtureMaterializer = {
       'README.md',
       `# Data pipeline engineering — CDC replay/backfill
 
-Repair the existing \`CdcPipeline\` without changing its public methods. Source authority/order is \`sourceLsn\`; logical event identity is \`eventId\`. Sink latest-state must never regress to an older LSN merely because a backfill arrives later. Replayed event IDs are idempotent at sink/audit semantics. Poison records are accounted for in quarantine with raw event provenance and stable reason \`INVALID_RECORD\`.
+Repair the existing \`CdcPipeline\` without changing its public methods. This fixture represents exactly one Kafka partition, \`p0\`; \`sourceLsn\` is authoritative only within that partition and the scalar checkpoint is therefore partition-local. Logical event identity is \`eventId\` across accepted and quarantined dispositions. Sink latest-state must never regress to an older LSN merely because a backfill arrives later. Replayed event IDs are idempotent at sink/audit semantics. Poison records are accounted for in quarantine with raw event provenance and stable reason \`INVALID_RECORD\`.
 
-Add deterministic tests for initial load, checkpoint rollback + duplicate replay, older backfill after newer state, poison record, and bounded rerun. Prove restart/replay cannot create additional logical audit events or regress latest state. Do not redefine analytics marts/metrics.
+Add deterministic tests for initial load, checkpoint rollback + duplicate replay, older backfill after newer state, poison record, bounded rerun, and a representative partial-failure/replay boundary. The fixture's checkpoint, sink state, and deduplication state are in memory: rollback reproduces replay but does not prove persistence across process reconstruction. Label process-durable restart verification unavailable unless you add and test an actual durable state mechanism. Schema evolution is not present in this fixture; it is exercised independently by the schema-drift scenario. Do not redefine analytics marts/metrics.
 
-Write \`.kory-eval/pipeline-cdc.json\` with event identity/order, checkpoint/replay semantics, sink guarantees, quarantine/provenance, lineage/reconciliation, crash/restart + late/backfill evidence, and hierarchy boundary: broader \`data-analysis\`; \`analytics-engineering\` remains a downstream neighbor rather than owned here.
+Keep executable regression tests in \`tests/\` that name the incompatible-timestamp or epoch case, the quarantine path, duplicate or rerun idempotency, and the replay or parser-v2 recovery path; the host reads that test text, so a checked box in the report is not enough.
+
+Write \`.kory-eval/pipeline-cdc.json\` with partition-local event identity/order, checkpoint/replay semantics, sink guarantees, quarantine/provenance, lineage/reconciliation, the observed partial-failure/replay + late/backfill evidence, the durable-restart limitation, the separate schema-evolution boundary, and hierarchy boundary: broader \`data-analysis\`; \`analytics-engineering\` remains a downstream neighbor rather than owned here.
 `,
     );
   },
 };
 
 const pipelineCdcScorer: SkillEvalDeterministicScorer = {
-  id: 'data-pipeline-engineering/idempotent-cdc-backfill-scorer@1',
+  id: 'data-pipeline-engineering/idempotent-cdc-backfill-scorer@3',
   scenarioIds: [PIPELINE_CDC],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
@@ -680,6 +682,11 @@ test('hidden: older backfill cannot regress latest state and poison is accounted
   const s=p.snapshot(); expect(s.latest).toEqual(fixture.expected.latest); expect(new Set(s.audit.map((e)=>e.eventId)).size).toBe(s.audit.length);
   expect(s.audit.map((e)=>e.eventId)).toContain('e-090'); expect(s.quarantine).toHaveLength(1); expect(s.quarantine[0]).toMatchObject({reason:'INVALID_RECORD'}); expect(s.quarantine[0]?.event.eventId).toBe('e-103');
 });
+test('hidden: event identity spans accepted and quarantined dispositions',()=>{
+  const p=new CdcPipeline(); const accepted={...(fixture.initial as any[])[0]}; p.process([accepted] as any); p.rollbackCheckpoint(0);
+  p.process([{...accepted,valid:false}] as any); const s=p.snapshot();
+  expect(s.audit.filter((e)=>e.eventId===accepted.eventId)).toHaveLength(1); expect(s.quarantine.filter((q)=>q.event.eventId===accepted.eventId)).toHaveLength(0);
+});
 `,
     );
     const regression = hasRegressionText(workingDirectory, [
@@ -690,31 +697,50 @@ test('hidden: older backfill cannot regress latest state and poison is accounted
     ]);
     const artifact = readJsonArtifact<unknown>(workingDirectory, '.kory-eval/pipeline-cdc.json');
     const body = JSON.stringify(artifact ?? '').toLowerCase();
+    const idempotency =
+      /idempoten|dedup/u.test(body) ||
+      (/eventid/u.test(body) &&
+        /already.?seen|does not write|not written|without duplicate|at most one|once/u.test(body));
     const contract =
       /eventid/u.test(body) &&
       /sourcelsn|source lsn/u.test(body) &&
-      /idempoten/u.test(body) &&
+      /partition/u.test(body) &&
+      /\bp0\b|single.?partition|partition.?local/u.test(body) &&
+      idempotency &&
       /checkpoint/u.test(body) &&
       /replay/u.test(body) &&
       /backfill|late/u.test(body) &&
       /quarantine/u.test(body) &&
       /invalid_record/u.test(body) &&
       /provenance|lineage/u.test(body);
+    const evidenceBoundary =
+      /in.?memory|memory.?only|simulat/u.test(body) &&
+      /durab|process.?restart|process reconstruction/u.test(body) &&
+      /schema/u.test(body) &&
+      /scenario.?2|separate|not present|not supplied|unavailable/u.test(body);
     const boundary =
       /data-analysis/u.test(body) &&
       /analytics-engineering/u.test(body) &&
       /downstream|not owned|not selected|boundary/u.test(body) &&
       !/arr|funnel|business metric/u.test(body);
-    const passed = hidden.passed && regression && Boolean(artifact) && contract && boundary;
+    const passed =
+      hidden.passed && regression && Boolean(artifact) && contract && evidenceBoundary && boundary;
     return {
       passed,
-      quality: passed ? 1 : hidden.passed && contract ? 0.75 : hidden.passed ? 0.5 : 0,
+      quality: passed
+        ? 1
+        : hidden.passed && contract && evidenceBoundary
+          ? 0.75
+          : hidden.passed
+            ? 0.5
+            : 0,
       verification: hidden.passed ? 1 : 0,
       integrityFailure: false,
       evidence: [
         `replay/backfill/poison hidden oracle: ${hidden.passed ? 'pass' : 'fail'}`,
         `representative recovery regressions: ${regression ? 'present' : 'missing'}`,
         `identity/order/checkpoint/quarantine contract: ${contract ? 'complete' : 'incomplete'}`,
+        `single-partition + durable-restart/schema evidence boundary: ${evidenceBoundary ? 'explicit' : 'missing'}`,
         `pipeline-vs-analytics boundary: ${boundary ? 'explicit' : 'missing'}`,
         hidden.evidence,
       ],
@@ -782,7 +808,7 @@ const DRIFT_DATA = `${JSON.stringify(
 )}\n`;
 
 const pipelineDriftMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'data-pipeline-engineering/schema-drift-quarantine@1',
+  id: 'data-pipeline-engineering/schema-drift-quarantine@2',
   matches: (scenario) => scenario.id === PIPELINE_DRIFT,
   materialize: (destination) => {
     writeFixtureFile(destination, 'package.json', packageJson('kory-eval-pipeline-drift'));
@@ -798,6 +824,8 @@ Repair the existing \`PartnerFeedPipeline\` while preserving its public API. Par
 
 Duplicate delivery of the same \`fileId + recordId\` is idempotent. After the parser update, \`reprocessQuarantine(2)\` moves the previously quarantined epoch row into normalized output exactly once and clears/resolves that quarantine record without duplicating valid rows. Keep raw landing provenance.
 
+Keep executable regression tests in \`tests/\` that name the incompatible-timestamp or epoch row, the quarantine record, duplicate or rerun idempotency, and the parser-v2 reprocess or recovery path; the host reads that test text, so a report row alone is not enough.
+
 Write \`.kory-eval/pipeline-drift.json\` with source/schema versions, compatibility boundary, raw provenance, reason-coded quarantine, rerun idempotency, parser-update recovery/reprocessing, lineage/reconciliation, explicit synthetic evidence label, and hierarchy boundary: broader \`data-analysis\`; \`data-visualization\` and business metrics remain out of scope.
 `,
     );
@@ -805,7 +833,7 @@ Write \`.kory-eval/pipeline-drift.json\` with source/schema versions, compatibil
 };
 
 const pipelineDriftScorer: SkillEvalDeterministicScorer = {
-  id: 'data-pipeline-engineering/schema-drift-quarantine-scorer@1',
+  id: 'data-pipeline-engineering/schema-drift-quarantine-scorer@3',
   scenarioIds: [PIPELINE_DRIFT],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
@@ -841,11 +869,11 @@ test('hidden: duplicate file rerun is idempotent and v2 recovery moves epoch row
       /idempoten/u.test(body) &&
       /reprocess|recovery/u.test(body);
     const boundary =
-      /data-analysis/u.test(body) &&
-      /data-visualization/u.test(body) &&
+      /data[\s_-]?analysis/u.test(body) &&
+      /data[\s_-]?visuali[sz]ation/u.test(body) &&
       /out of scope|not selected|boundary/u.test(body) &&
       /synthetic|fixture/u.test(body) &&
-      !/arr|conversion metric|business metric definition/u.test(body);
+      !/\barr\b|conversion metric|business metric definition/u.test(body);
     const passed = hidden.passed && regression && Boolean(artifact) && contract && boundary;
     return {
       passed,

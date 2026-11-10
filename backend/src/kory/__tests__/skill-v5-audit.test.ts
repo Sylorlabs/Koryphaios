@@ -66,7 +66,7 @@ const readyGate = (): SkillPromotionGate => ({
 });
 
 describe('V5 skill audit ledger', () => {
-  test('initializes all 182 stable skills and marks migrated packages as candidates', () => {
+  test('initializes all bundled skills and marks the 182 V5 packages as candidates', () => {
     const root = mkdtempSync(join(tmpdir(), 'kory-v5-audit-'));
     roots.push(root);
     const definitionAudit = auditBundledSkillDefinitions();
@@ -80,9 +80,9 @@ describe('V5 skill audit ledger', () => {
         now: new Date('2026-09-01T12:00:00Z'),
       },
     );
-    expect(ledger.librarySize).toBe(182);
-    expect(ledger.records).toHaveLength(182);
-    expect(ledger.records.filter((record) => record.cohort === 'base')).toHaveLength(35);
+    expect(ledger.librarySize).toBe(184);
+    expect(ledger.records).toHaveLength(184);
+    expect(ledger.records.filter((record) => record.cohort === 'base')).toHaveLength(37);
     expect(ledger.records.filter((record) => record.cohort === 'professional')).toHaveLength(47);
     expect(ledger.records.filter((record) => record.cohort === 'specialist-v4')).toHaveLength(100);
     for (const skillPackage of V5_SKILL_PACKAGE_CATALOG.packages) {
@@ -117,7 +117,7 @@ describe('V5 skill audit ledger', () => {
     expect(repositoryDiscovery).toMatchObject({
       v5Status: 'candidate',
       freshness: 'fresh',
-      packageVersion: '5.0.0',
+      packageVersion: '5.0.1',
       routing: { positive: 5, negative: 5, ambiguous: 3, adversarial: 3 },
     });
     expect(repositoryDiscovery.steward).toBe('ChatGPT web — repository-environment-discovery');
@@ -125,7 +125,7 @@ describe('V5 skill audit ledger', () => {
     expect(planMode).toMatchObject({
       v5Status: 'candidate',
       freshness: 'fresh',
-      packageVersion: '5.1.0',
+      packageVersion: '5.2.1',
       routing: { positive: 5, negative: 5, ambiguous: 3, adversarial: 3 },
     });
     expect(planMode.steward).toBe('ChatGPT web — plan-mode');
@@ -133,7 +133,7 @@ describe('V5 skill audit ledger', () => {
     expect(humanExperience).toMatchObject({
       v5Status: 'candidate',
       freshness: 'fresh',
-      packageVersion: '5.0.0',
+      packageVersion: '5.0.1',
       routing: { positive: 5, negative: 5, ambiguous: 3, adversarial: 3 },
     });
     expect(humanExperience.steward).toBe('ChatGPT web — human-experience');
@@ -151,7 +151,7 @@ describe('V5 skill audit ledger', () => {
     expect(interactionDesign).toMatchObject({
       v5Status: 'candidate',
       freshness: 'fresh',
-      packageVersion: '5.0.0',
+      packageVersion: '5.1.0',
       routing: { positive: 5, negative: 5, ambiguous: 3, adversarial: 3 },
     });
     expect(interactionDesign.steward).toBe('ChatGPT web — interaction-design');
@@ -161,7 +161,7 @@ describe('V5 skill audit ledger', () => {
     expect(informationArchitecture).toMatchObject({
       v5Status: 'candidate',
       freshness: 'fresh',
-      packageVersion: '5.0.1',
+      packageVersion: '5.0.2',
       routing: { positive: 5, negative: 5, ambiguous: 3, adversarial: 3 },
     });
     expect(informationArchitecture.steward).toBe('ChatGPT web — information-architecture');
@@ -171,7 +171,7 @@ describe('V5 skill audit ledger', () => {
     expect(visualInterfaceDesign).toMatchObject({
       v5Status: 'candidate',
       freshness: 'fresh',
-      packageVersion: '5.0.0',
+      packageVersion: '5.0.2',
       routing: { positive: 5, negative: 5, ambiguous: 3, adversarial: 3 },
     });
     expect(visualInterfaceDesign.steward).toBe('ChatGPT web — visual-interface-design');
@@ -181,7 +181,7 @@ describe('V5 skill audit ledger', () => {
     expect(contentErrorDesign).toMatchObject({
       v5Status: 'candidate',
       freshness: 'fresh',
-      packageVersion: '5.0.0',
+      packageVersion: '5.0.1',
       routing: { positive: 5, negative: 5, ambiguous: 3, adversarial: 3 },
     });
     expect(contentErrorDesign.steward).toBe('ChatGPT web — content-error-design');
@@ -191,8 +191,8 @@ describe('V5 skill audit ledger', () => {
     expect(accessibilityPractice).toMatchObject({
       v5Status: 'candidate',
       freshness: 'fresh',
-      packageVersion: '5.0.0',
-      routing: { positive: 5, negative: 5, ambiguous: 3, adversarial: 3 },
+      packageVersion: '5.0.2',
+      routing: { positive: 6, negative: 6, ambiguous: 4, adversarial: 4 },
     });
     expect(accessibilityPractice.steward).toBe('ChatGPT web — accessibility-practice');
     const usabilityEvaluation = ledger.records.find(
@@ -201,7 +201,7 @@ describe('V5 skill audit ledger', () => {
     expect(usabilityEvaluation).toMatchObject({
       v5Status: 'candidate',
       freshness: 'fresh',
-      packageVersion: '5.0.0',
+      packageVersion: '5.0.3',
       routing: { positive: 5, negative: 5, ambiguous: 3, adversarial: 3 },
     });
     expect(usabilityEvaluation.steward).toBe('ChatGPT web — usability-evaluation');
@@ -221,7 +221,7 @@ describe('V5 skill audit ledger', () => {
     expect(frontendEngineering).toMatchObject({
       v5Status: 'candidate',
       freshness: 'fresh',
-      packageVersion: '5.0.0',
+      packageVersion: '5.0.1',
       routing: { positive: 5, negative: 5, ambiguous: 3, adversarial: 3 },
     });
     expect(frontendEngineering.steward).toBe('ChatGPT web — frontend-engineering');
@@ -229,7 +229,7 @@ describe('V5 skill audit ledger', () => {
     expect(webInterface).toMatchObject({
       v5Status: 'candidate',
       freshness: 'fresh',
-      packageVersion: '5.0.0',
+      packageVersion: '5.0.1',
       routing: { positive: 5, negative: 5, ambiguous: 3, adversarial: 3 },
     });
     expect(webInterface.steward).toBe('ChatGPT web — web-interface');
@@ -250,17 +250,15 @@ describe('V5 skill audit ledger', () => {
       nextAction: 'run held-out routing and paired full-task V5 evaluation suite',
     });
     expect(ledger.records.filter((record) => record.v5Status === 'candidate')).toHaveLength(182);
-    // Bundled skills appear as package candidates once a skills-v5 package
-    // exists. Records stay 'unreviewed' when there is no package to qualify:
-    // user-scoped personal skills are seeded into the personal library rather
-    // than the bundled catalog. Every bundled skill with a V5 package is at
-    // least a package candidate.
+    // The two runtime Critic controls are bundled for host workflow prompts,
+    // but have no V5 package and therefore remain outside the 182-package
+    // qualification inventory.
     expect(
       ledger.records
         .filter((record) => record.v5Status === 'unreviewed')
         .map((record) => record.skill)
         .sort(),
-    ).toEqual([]);
+    ).toEqual(['critic-auto-selection', 'critic-review']);
 
     const firstSerialized = readFileSync(getV5AuditLedgerPath(root), 'utf8');
     syncV5AuditLedger(root, BUNDLED_SKILL_DEFINITIONS, V5_SKILL_PACKAGE_CATALOG.packages, {

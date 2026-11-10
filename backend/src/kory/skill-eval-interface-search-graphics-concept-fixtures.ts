@@ -1,5 +1,10 @@
 import type { ConceptFixture, ConceptVector } from './skill-eval-concept-fixtures';
 import { createConceptFixtures } from './skill-eval-concept-fixtures';
+import {
+  runSearchAnalyzerVersioningRuntime,
+  runSearchTenantAuthorizationRuntime,
+  searchIndexRuntimeReadiness,
+} from './skill-eval-search-index-runtime';
 
 const round = (value: number) => Math.round(value * 1_000) / 1_000;
 
@@ -315,21 +320,15 @@ export const INTERFACE_SEARCH_GRAPHICS_CONCEPTS: readonly ConceptFixture[] = [
   {
     id: 'search-indexing-full-task-1-individual',
     skill: 'search-indexing',
-    generation: 2,
-    blockers: [
-      'Full-task qualification requires representative search-index execution and evidence for analyzer/mapping versioning, authorization/freshness, reindex/cutover/rollback, and query/index performance; this pure synthetic behavior exercise does not furnish that evidence.',
-    ],
+    generation: 3,
     contract: `Build a versioned target search view without mutating oldVersion. Normalize accents by Unicode NFD diacritic removal and lowercase. Treat hyphenated SKU-like tokens containing letters/digits on both sides of '-' as an exact preserved token in addition to natural-language pieces. Apply writesDuringReindex to target before verification. For each query return ids in document order whose analyzed tokens contain all analyzed query tokens. forceBrokenHyphenHandling=true intentionally removes exact hyphen token to model a failed candidate. cutover is true only when every query result exactly matches expected and target document count equals initial unique ids plus new unique writes. rollbackIndex is oldVersion.`,
     vectors: analyzerVectors,
   },
   {
     id: 'search-indexing-full-task-2-individual',
     skill: 'search-indexing',
-    generation: 2,
-    blockers: [
-      'Full-task qualification requires representative search-index execution and evidence for authorization filtering, freshness/update/delete behavior, judged relevance, and latency/index operation; this pure synthetic behavior exercise does not furnish that evidence.',
-    ],
-    contract: `Authorization is applied before ranking. cacheKey is tenant|query|page|pageSize. Only documents for tenant are eligible. Warm cache is usable only for the exact cacheKey and returned ids must all belong to tenant; otherwise ignore it. Cold ranking sorts eligible matching documents by score descending then id, then paginates 1-based. Return cacheKey,ids,cacheHit. Never fall back to another tenant/global cache.`,
+    generation: 4,
+    contract: `Authorization is applied before ranking. cacheKey is tenant|query|page|pageSize. Only documents for tenant are eligible. Warm cache is usable only for the exact cacheKey and returned ids must all belong to tenant; otherwise ignore it. Cold ranking sorts eligible matching documents by score descending then id, then paginates 1-based. Return cacheKey,ids,cacheHit. Never fall back to another tenant/global cache. warmCache is supplied as a plain object mapping cacheKey to the cached id array.`,
     vectors: tenantSearchVectors,
   },
   {
@@ -347,7 +346,8 @@ export const INTERFACE_SEARCH_GRAPHICS_CONCEPTS: readonly ConceptFixture[] = [
   {
     id: 'terminal-interface-full-task-1-individual',
     skill: 'terminal-interface',
-    contract: `If tty=false return mode plain, no columns, one line per row as name<TAB>status<TAB>path. If tty=true and width<40 use compact columns name,status; otherwise table columns name,path,status. visibleRows is min(rows.length,max(0,height-2)) for TTY and all rows for plain. cursorRestored must always be true including signals/errors. Return no escape/control content in plainLines.`,
+    generation: 2,
+    contract: `If tty=false return mode plain, no columns, one line per row as name<TAB>status<TAB>path. If tty=true and width<40 return mode compact with columns name,status; otherwise return mode table with columns name,path,status. visibleRows is min(rows.length,max(0,height-2)) for TTY and all rows for plain. cursorRestored must always be true including signals/errors. Return no escape/control content in plainLines.`,
     vectors: terminalTableVectors,
   },
   {
@@ -364,6 +364,53 @@ export const INTERFACE_SEARCH_GRAPHICS_CONCEPTS: readonly ConceptFixture[] = [
   },
 ];
 
-const fixtures = createConceptFixtures(INTERFACE_SEARCH_GRAPHICS_CONCEPTS);
-export const INTERFACE_SEARCH_GRAPHICS_SKILL_EVAL_MATERIALIZERS = fixtures.materializers;
-export const INTERFACE_SEARCH_GRAPHICS_SKILL_EVAL_SCORERS = fixtures.scorers;
+const searchDefinitions = INTERFACE_SEARCH_GRAPHICS_CONCEPTS.filter(
+  (definition) => definition.skill === 'search-indexing',
+);
+const otherDefinitions = INTERFACE_SEARCH_GRAPHICS_CONCEPTS.filter(
+  (definition) => definition.skill !== 'search-indexing',
+);
+const searchComponents = createConceptFixtures(searchDefinitions);
+const fixtures = createConceptFixtures(otherDefinitions);
+
+const searchMaterializers = searchComponents.materializers.map((materializer) => ({
+  ...materializer,
+  id: materializer.id.replace('/concept@3', '/concept-elasticsearch@3'),
+  realRuntime: true,
+  get readinessBlockers() {
+    return searchIndexRuntimeReadiness();
+  },
+}));
+
+const searchScorers = searchComponents.scorers.map((scorer) => ({
+  ...scorer,
+  id: scorer.id.replace('/concept-scorer@3', '/concept-elasticsearch-scorer@3'),
+  score: async (context: Parameters<typeof scorer.score>[0]) => {
+    const component = await scorer.score(context);
+    if (!component.passed || component.integrityFailure) {
+      return {
+        ...component,
+        evidence: [...component.evidence, 'Elasticsearch runtime skipped because the component contract failed.'],
+      };
+    }
+    const runtime = scorer.scenarioIds.includes('search-indexing-full-task-1-individual')
+      ? runSearchAnalyzerVersioningRuntime()
+      : runSearchTenantAuthorizationRuntime();
+    return {
+      passed: component.passed && runtime.passed,
+      quality: runtime.passed ? component.quality : Math.min(component.quality, 0.8),
+      verification: runtime.passed ? component.verification : 0,
+      integrityFailure: component.integrityFailure,
+      evidence: [...component.evidence, runtime.evidence],
+    };
+  },
+}));
+
+export const INTERFACE_SEARCH_GRAPHICS_SKILL_EVAL_MATERIALIZERS = [
+  ...searchMaterializers,
+  ...fixtures.materializers,
+];
+export const INTERFACE_SEARCH_GRAPHICS_SKILL_EVAL_SCORERS = [
+  ...searchScorers,
+  ...fixtures.scorers,
+];

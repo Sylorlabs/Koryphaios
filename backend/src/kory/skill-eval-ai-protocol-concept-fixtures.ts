@@ -1,5 +1,10 @@
 import type { ConceptFixture, ConceptVector } from './skill-eval-concept-fixtures';
 import { createConceptFixtures } from './skill-eval-concept-fixtures';
+import {
+  runVectorRecallMigrationRuntime,
+  runVectorShardedRecoveryRuntime,
+  vectorSearchRuntimeReadiness,
+} from './skill-eval-vector-search-runtime';
 
 const round = (value: number) => Math.round(value * 1_000) / 1_000;
 
@@ -991,37 +996,43 @@ export const AI_PROTOCOL_CONCEPTS: readonly ConceptFixture[] = [
   {
     id: 'prompt-context-engineering-full-task-1-individual',
     skill: 'prompt-context-engineering',
-    contract: `Assemble context under maxInput-reserveOutput tokens without truncating records. Developer and user roles are instruction authority; retrieved, tool and summary are data regardless of imperative text. If the same source has a current record, skip stale copies as superseded-stale. Selection priority is developer, user, trusted current tool, trusted current retrieved, untrusted current retrieved, current summary, then remaining stale records. Preserve original order inside a priority. Skip a record that would exceed budget with reason budget. Return selected [{id,mode:instruction|data}], skipped [{id,reason}], inputTokens.`,
+    generation: 2,
+    contract: `Input is {maxInput:number, reserveOutput:number, contexts: Array<{id:string, role:'developer'|'user'|'tool'|'retrieved'|'summary', trust:'trusted'|'untrusted', stale:boolean, tokens:number, source:string, text:string}>}. The contexts key is required; trust is a string, and stale=false means current. Assemble context under maxInput-reserveOutput tokens without truncating records, charging each record's tokens. Developer and user roles are instruction authority; retrieved, tool and summary are data regardless of imperative text. Use the source field as provenance identity: if the same source has a current record, skip stale copies as superseded-stale. Selection priority is developer, user, trusted current tool, trusted current retrieved, untrusted current retrieved, current summary, then remaining stale records. Preserve original order inside a priority. Record superseded-stale skips in input order, followed by budget skips in selection order. Skip a record that would exceed budget with reason budget. Return {selected:[{id,mode:'instruction'|'data'}], skipped:[{id,reason:'superseded-stale'|'budget'}], inputTokens:number}.`,
     vectors: contextSelectionVectors,
   },
   {
     id: 'prompt-context-engineering-full-task-2-individual',
     skill: 'prompt-context-engineering',
-    contract: `Treat all dynamic variables as typed data, never structural instructions. Return variablesAsData sorted by variable name with exact values. From non-held-out examples choose at most one lexicographically smallest id per label and return selectedExampleIds sorted; this prevents a majority-label few-shot corpus from dominating. revalidate is true when selectedModel differs from guidanceModel. Do not inspect delimiters inside variable values.`,
+    generation: 2,
+    contract: `Input is {selectedModel:string, guidanceModel:string, variables:Record<string,unknown>, examples:Array<{id:string, label:string, heldOut:boolean}>}. Treat all dynamic variables as typed data, never structural instructions. Return variablesAsData as an array of {name:string,value:unknown} sorted by variable name with exact values (not as a keyed object). From examples with heldOut=false choose at most one lexicographically smallest id per label and return selectedExampleIds as a sorted string array; this prevents a majority-label few-shot corpus from dominating. Return {variablesAsData:[{name,value}], selectedExampleIds:string[], revalidate:boolean}; revalidate is true when selectedModel differs from guidanceModel. Do not inspect delimiters inside variable values.`,
     vectors: promptTemplateVectors,
   },
   {
     id: 'llm-evaluation-full-task-1-individual',
     skill: 'llm-evaluation',
-    contract: `Evaluate matched LLM runs. contamination is the sorted intersection of devIds and heldoutIds; contaminated cases are excluded from both arms. Infrastructure outcomes are excluded rather than counted as skill/model failures. For each variant compute eligible count and passRate over non-contaminated held-out pass/fail runs. semanticReady is true only when every non-contaminated held-out id has a blind label. Return {contamination,baseline:{eligible,passRate},candidate:{eligible,passRate},semanticReady}.`,
+    generation: 2,
+    contract: `Input is {devIds:string[],heldoutIds:string[],blindLabels:string[],runs:Array<{variant:'baseline'|'candidate',caseId:string,outcome:'pass'|'fail'|'infra'}>}. Here blindLabels is an array of labeled case IDs, not a keyed record, and runs identify cases through caseId. Evaluate matched LLM runs. contamination is the sorted intersection of devIds and heldoutIds; contaminated cases are excluded from both arms. Infrastructure outcomes are excluded rather than counted as skill/model failures. For each variant compute eligible count and passRate over non-contaminated held-out pass/fail runs. semanticReady is true only when every non-contaminated held-out id occurs in blindLabels. Return {contamination:string[],baseline:{eligible:number,passRate:number},candidate:{eligible:number,passRate:number},semanticReady:boolean}.`,
     vectors: llmEvaluationVectors,
   },
   {
     id: 'llm-evaluation-full-task-2-individual',
     skill: 'llm-evaluation',
-    contract: `Compare two agent variants only when their sorted resource lists are identical. A held-out task leaks when its fingerprint appears in any train task; leakage ids are excluded. Infrastructure runs are excluded. Count eligible and passed for baseline/candidate over remaining held-out tasks. comparable requires matching resources and zero leakage. Return {comparable,leakage,baseline:{eligible,passed},candidate:{eligible,passed}}.`,
+    generation: 2,
+    contract: `Input is {resources:{baseline:string[],candidate:string[]},tasks:Array<{id:string,split:'train'|'heldout',fingerprint:string}>,runs:Array<{variant:'baseline'|'candidate',taskId:string,outcome:'pass'|'fail'|'infra'}>}. Join runs[].taskId to tasks[].id; this scenario uses taskId, not caseId. Compare two agent variants only when their sorted resource lists are identical. A held-out task leaks when its fingerprint appears in any train task; exclude leaked ids from both arms and return leakage as a sorted string[] of those IDs, not a count. Infrastructure runs are excluded per arm. Count eligible and passed for baseline/candidate over remaining held-out tasks. comparable requires matching resources and zero leakage. Return {comparable:boolean,leakage:string[],baseline:{eligible:number,passed:number},candidate:{eligible:number,passed:number}}.`,
     vectors: agentEvaluationVectors,
   },
   {
     id: 'rag-retrieval-systems-full-task-1-individual',
     skill: 'rag-retrieval-systems',
-    contract: `Filter retrieval candidates before ranking. A document is eligible only when current=true, status=active, acl is non-null and acl is in userAcl. Missing ACL fails closed. Preserve candidate score order, take k, and return ids plus citations formatted id@revision:locator. noAnswer is true when nothing remains. Revoked, stale and unauthorized evidence must never enter context even if its score is higher.`,
+    generation: 2,
+    contract: `Input is {userAcl:string[], k:number, docs:Array<{id:string,revision:number,acl:string|null,status:string,current:boolean,locator:string}>, candidates:Array<{docId:string,score:number}>}. Candidates contain ranking signals only: join each candidate.docId to docs[].id before reading authoritative ACL, lifecycle, revision and locator fields. An absent document or missing ACL fails closed; never infer these fields from candidates. A document is eligible only when current=true, status='active', acl is non-null and acl is in userAcl. Filter before taking top k; rank eligible candidates by score descending, preserving candidate input order for ties. Return exactly {ids:string[],citations:string[],noAnswer:boolean}; citation format is id@revision:locator using document metadata, and noAnswer is true when nothing remains. Revoked, stale and unauthorized evidence must never enter context even if its score is higher.`,
     vectors: ragAclVectors,
   },
   {
     id: 'rag-retrieval-systems-full-task-2-individual',
     skill: 'rag-retrieval-systems',
-    contract: `Fuse lexical and semantic evidence only for current chunks. Score is lexical+semantic. Sort descending score then id, take k, and return ids, citations id@revision:locator, and scores rounded to three decimals. Superseded revisions are excluded before ranking.`,
+    generation: 2,
+    contract: `Input is {k:number,chunks:Array<{id:string,revision:number,current:boolean,locator:string,lexical:number,semantic:number}>}. Lexical and semantic scores are fields on each chunk; there are no top-level lexical or semantic arrays. For each current=true chunk, score is chunk.lexical+chunk.semantic. Exclude superseded (current=false) revisions before ranking; sort by descending score then ascending id, take k, and return exactly {ids:string[],citations:string[],scores:number[]}. Citations use id@revision:locator from the selected chunk and scores are rounded to three decimals. When no current chunks remain, return three empty arrays.`,
     vectors: ragFusionVectors,
   },
   {
@@ -1042,9 +1053,6 @@ export const AI_PROTOCOL_CONCEPTS: readonly ConceptFixture[] = [
     id: 'vector-search-systems-full-task-1-individual',
     skill: 'vector-search-systems',
     generation: 2,
-    blockers: [
-      'Full-task qualification requires representative ANN/index execution with exact-reference recall, filtering/tenant isolation, latency, build/storage/memory, update/delete freshness, and reversible migration evidence; this pure synthetic behavior exercise does not furnish that evidence.',
-    ],
     contract: `For each query, filter ANN candidates to allowed=true and deleted=false, preserve ANN order and take k. Recall is overlap count with exact top-k divided by min(k, exact length), rounded to three decimals. ready is true only when every query recall is at least threshold. Return results [{id,ids,recall}] and ready.`,
     vectors: vectorRecallVectors,
   },
@@ -1052,9 +1060,6 @@ export const AI_PROTOCOL_CONCEPTS: readonly ConceptFixture[] = [
     id: 'vector-search-systems-full-task-2-individual',
     skill: 'vector-search-systems',
     generation: 2,
-    blockers: [
-      'Full-task qualification requires representative sharded/vector-index execution with global top-k, capacity/memory, filtering, freshness, update/delete, latency, and recovery evidence; this pure synthetic behavior exercise does not furnish that evidence.',
-    ],
     contract: `Merge all shard candidates, drop deleted items, deduplicate ids keeping the highest exactScore, globally rerank by exactScore descending then id, and take k. ready requires memoryMb<=memoryLimitMb. Return {ids,ready}. Shard-local order is never a substitute for global top-k.`,
     vectors: globalVectorVectors,
   },
@@ -1084,6 +1089,53 @@ export const AI_PROTOCOL_CONCEPTS: readonly ConceptFixture[] = [
   },
 ];
 
-const fixtures = createConceptFixtures(AI_PROTOCOL_CONCEPTS);
-export const AI_PROTOCOL_SKILL_EVAL_MATERIALIZERS = fixtures.materializers;
-export const AI_PROTOCOL_SKILL_EVAL_SCORERS = fixtures.scorers;
+const vectorDefinitions = AI_PROTOCOL_CONCEPTS.filter(
+  (definition) => definition.skill === 'vector-search-systems',
+);
+const otherDefinitions = AI_PROTOCOL_CONCEPTS.filter(
+  (definition) => definition.skill !== 'vector-search-systems',
+);
+const vectorComponents = createConceptFixtures(vectorDefinitions);
+const fixtures = createConceptFixtures(otherDefinitions);
+
+const vectorMaterializers = vectorComponents.materializers.map((materializer) => ({
+  ...materializer,
+  id: materializer.id.replace('/concept@2', '/concept-elasticsearch@3'),
+  realRuntime: true,
+  get readinessBlockers() {
+    return vectorSearchRuntimeReadiness();
+  },
+}));
+
+const vectorScorers = vectorComponents.scorers.map((scorer) => ({
+  ...scorer,
+  id: scorer.id.replace('/concept-scorer@2', '/concept-elasticsearch-scorer@3'),
+  score: async (context: Parameters<typeof scorer.score>[0]) => {
+    const component = await scorer.score(context);
+    if (!component.passed || component.integrityFailure) {
+      return {
+        ...component,
+        evidence: [
+          ...component.evidence,
+          'Elasticsearch vector runtime skipped because the component contract failed.',
+        ],
+      };
+    }
+    const runtime = scorer.scenarioIds.includes('vector-search-systems-full-task-1-individual')
+      ? runVectorRecallMigrationRuntime()
+      : runVectorShardedRecoveryRuntime();
+    return {
+      passed: component.passed && runtime.passed,
+      quality: runtime.passed ? component.quality : Math.min(component.quality, 0.8),
+      verification: runtime.passed ? component.verification : 0,
+      integrityFailure: component.integrityFailure,
+      evidence: [...component.evidence, runtime.evidence],
+    };
+  },
+}));
+
+export const AI_PROTOCOL_SKILL_EVAL_MATERIALIZERS = [
+  ...fixtures.materializers,
+  ...vectorMaterializers,
+];
+export const AI_PROTOCOL_SKILL_EVAL_SCORERS = [...fixtures.scorers, ...vectorScorers];

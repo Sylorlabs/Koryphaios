@@ -1,13 +1,13 @@
 # Source map
 
-`distributed-debugging` is individually authored. Promotion still requires clean routing, paired same-model skill/no-skill full-task evidence, independent blind evaluation, and regression closure.
+`distributed-debugging` is individually authored. Promotion still requires clean routing, paired same-model skill/no skill full task evidence, independent blind evaluation, and regression closure.
 
 ## Qualification basis
 
 - Package authorship is independent from empirical qualification; the audit/evaluation ledger is authoritative for qualification status.
 - Hierarchy: broader debugging.
-- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held-out cases through the real resolver.
-- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no-skill pairing, regression retention, and blind semantic judging.
+- Routing: five positive, five near-neighbor negative, three compound/ambiguous, and three adversarial held out cases through the real resolver.
+- Full-task evaluation: two individual scenarios with six falsifiable checks, same-model skill/no skill pairing, regression retention, and blind semantic judging.
 - Source discipline: authoritative/spec/reference sources outrank community patterns when they conflict; runtime evidence outranks examples for behavioral claims.
 
 ## Maintained sources

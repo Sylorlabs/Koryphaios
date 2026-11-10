@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "scenarioId": "research-full-task-1-individual",
+      "sources": [
+        {
+          "id": "agent-skills-spec",
+          "kind": "unresolved",
+          "reason": "Exact https://agentskills.io/specification, 2026-09-04 UTC: Internet Archive CDX returned HTTP 200 with empty [] inventory on 2026-10-12 00:01 UTC (3 original response bytes, SHA-256 37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570); it returned HTTP 503 on 2026-10-12 00:05 UTC (11,832 bytes, SHA-256 e084d527921708642a79724e9f0210da659bbc0905c6ce9a3a1f416e4628091c). Neither observation proves a qualifying capture exists or never existed. No exact-day indexed digest and replay bytes have been established; a Git commit or later site is not equivalent."
+        },
+        {
+          "id": "cursor-skills-docs",
+          "kind": "unresolved",
+          "reason": "Exact https://cursor.com/docs/skills, 2026-09-04 UTC: Internet Archive CDX returned HTTP 200 with empty [] inventory on 2026-10-12 00:01 UTC (3 original response bytes, SHA-256 37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570); it returned HTTP 503 on 2026-10-12 00:05 UTC (11,832 bytes, SHA-256 e084d527921708642a79724e9f0210da659bbc0905c6ce9a3a1f416e4628091c). No exact-day indexed digest and replay bytes have been established. Client docs inspected on another date cannot satisfy the fixture."
+        },
+        {
+          "id": "community-client-extension",
+          "kind": "unresolved",
+          "reason": "No independently verifiable, pre-cutoff original community post incorrectly universalizing a Cursor-only Agent Skills extension has been established. Cursor forum thread /t/skills-vs-commands-vs-rules/148875 instead explicitly identifies Agent Skills as portable; a third-party July 16 skills portability article is neither the required mistaken claim nor a September 4 source snapshot."
+        },
+        {
+          "id": "pre-support-internal-note",
+          "kind": "unresolved",
+          "reason": "No authentic, versioned pre-Cursor-support internal note with a verifiable historical Git revision has been supplied or identified. Public documentation cannot be relabeled internal evidence."
+        }
+      ]
+    },
+    {
+      "scenarioId": "research-full-task-2-individual",
+      "sources": [
+        {
+          "id": "protocol-spec",
+          "kind": "github-commit",
+          "repository": "modelcontextprotocol/modelcontextprotocol",
+          "revision": "71f7c162e42ea1cd6ca88d83c70d89324fb6b0da",
+          "path": "docs/specification/2026-07-28/index.mdx",
+          "expectedBlobSha": "452d78601b135b95bbe45287e756c0579534096b",
+          "expectedCommitDate": "2026-07-29T18:19:34Z",
+          "publisher": "Model Context Protocol maintainers",
+          "versionScope": "Normative MCP specification revision 2026-07-28 (commit dated 2026-07-29)",
+          "claimQuote": "Servers offer any of the following features to clients:"
+        },
+        {
+          "id": "official-migration",
+          "kind": "github-commit",
+          "repository": "modelcontextprotocol/typescript-sdk",
+          "revision": "70de0c8b569b0d664a56b90be2f141d1d1645880",
+          "path": "docs/migration/support-2026-07-28.md",
+          "expectedBlobSha": "01ae6f05422985e9e29be42a30cc29a1aff5c2f7",
+          "expectedCommitDate": "2026-08-28T16:23:49Z",
+          "publisher": "Model Context Protocol TypeScript SDK maintainers",
+          "versionScope": "TypeScript SDK migration guide for MCP 2026-07-28 (commit dated 2026-08-28)",
+          "claimQuote": "Nothing in v2 puts a 2026-07-28 byte on the wire by default"
+        },
+        {
+          "id": "legacy-vendor-tutorial",
+          "kind": "github-commit",
+          "repository": "microsoft/mcp-for-beginners",
+          "revision": "f84b977a63631defa0ae765ca5418df025280998",
+          "path": "03-GettingStarted/01-first-server/README.md",
+          "expectedBlobSha": "5da31248d971d084b3ed58ea9ff1ba46d14b2172",
+          "expectedCommitDate": "2025-12-18T19:01:19Z",
+          "publisher": "Microsoft MCP for Beginners maintainers",
+          "versionScope": "Microsoft tutorial using legacy SDK v1 APIs, 2025-12-18 (2025-11-25-era)",
+          "claimQuote": "import { McpServer, ResourceTemplate } from \"@modelcontextprotocol/sdk/server/mcp.js\";"
+        },
+        {
+          "id": "current-vendor-compatibility",
+          "kind": "unresolved",
+          "reason": "Need an original dated, pre-2026-09-05 final 2026-07-28 runtime compatibility statement from microsoft/mcp-for-beginners, the same vendor source as the pinned legacy tutorial. The July 2026 curriculum article calls the revision a release candidate; the curriculum changelog dates final specification alignment to September 9, after cutoff. Microsoft's August 29 wassette 0.7.0 release describes another repository/runtime, not this vendor tutorial's compatibility. None proves the required claim."
+        },
+        {
+          "id": "contradictory-forum-answer",
+          "kind": "unresolved",
+          "reason": "No pre-cutoff original forum answer materially contradicting the official 2026-07-28 TypeScript SDK migration guidance has an independently indexed Wayback digest and replayed bytes. The 2026-08-09 microsoft/vscode issue #329848 concerns the separate VS Code client's lack of dual-era negotiation, so it does not contradict TypeScript SDK opt-in support; a current GitHub page is not an archived original answer."
+        }
+      ]
+    }
+  ]
+}

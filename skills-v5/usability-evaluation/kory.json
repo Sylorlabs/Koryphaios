@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "usability-evaluation",
-  "version": "5.0.0",
+  "version": "5.0.3",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "domains": ["ux", "evaluation"],
@@ -137,7 +137,7 @@
       "url": "https://github.com/rampstackco/claude-skills/blob/main/skills/usability-testing/SKILL.md",
       "sourceType": "community-pattern",
       "versionScope": "rampstackco/claude-skills main usability-testing skill at e5bc67519991 as inspected 2026-10-03",
-      "verifiedAt": "2026-10-03",
+      "verifiedAt": "2026-11-03",
       "staleAfterDays": 30,
       "license": "MIT",
       "notes": "Useful workflow patterns for goal-framed tasks, moderation discipline, observation, synthesis, and retesting. Fixed participant counts, fixed session lengths, issue-discovery percentages, and universal severity/frequency thresholds are not imported."

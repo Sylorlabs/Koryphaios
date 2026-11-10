@@ -29,5 +29,5 @@
 - A finding needs a plausible source/control-flow path, attacker prerequisites, a security-relevant sink or state transition, and concrete evidence that the intended guard is missing or bypassable.
 - Search for downstream guards, framework guarantees, parameterization/encoding, canonicalization, caller constraints, feature/runtime configuration, and unreachable/test-only paths before reporting a candidate.
 - Distinguish static-review confidence from executed proof. Runtime exploitability, allow/deny matrices, isolation, and fix regression belong to `security-verification` when execution is requested or required.
-- Keep application hardening, authorization-policy design, threat-model creation, and infrastructure/cloud posture work with their dedicated specialties when those are the primary deliverables.
+- Keep application hardening, authorization-policy design, threat model creation, and infrastructure/cloud posture work with their dedicated specialties when those are the primary deliverables.
 - Refresh version-sensitive facts when a source exceeds its declared freshness window or the target depends on a newer framework/runtime/provider behavior.

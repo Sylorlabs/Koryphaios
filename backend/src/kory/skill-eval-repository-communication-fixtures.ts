@@ -147,6 +147,9 @@ function scoreRelease(root: string): SkillEvalDeterministicScore {
   const packet = json(RELEASE_PACKET);
   const intact = fixed(root, 'evidence/release.json', packet);
   const notes = regularText(root, 'release-notes.md');
+  const holdMarker = notes?.search(/Editorial hold \(draft only, not for publication\)/iu) ?? -1;
+  const publishableNotes = holdMarker >= 0 ? notes!.slice(0, holdMarker) : notes;
+  const holdNotes = holdMarker >= 0 ? notes!.slice(holdMarker) : null;
   const map = readJsonArtifact<{ included?: string[]; excluded?: string[]; uncertain?: string[] }>(
     root,
     'evidence-map.json',
@@ -159,10 +162,12 @@ function scoreRelease(root: string): SkillEvalDeterministicScore {
     ['internal-only change excluded', !!notes && !/query cache ownership|PR-103/iu.test(notes)],
     [
       'ambiguous impact bounded',
-      containsAll(notes, [
-        /PR-104/iu,
-        /(unconfirmed|unknown|not(?:\s+\w+){0,2}\s+measured|uncertain)/iu,
-      ]),
+      !!holdNotes &&
+        !/Known limitations[\s\S]*PR-104/iu.test(publishableNotes ?? '') &&
+        containsAll(holdNotes, [
+          /PR-104/iu,
+          /(unconfirmed|unknown|not(?:\s+\w+){0,2}\s+measured|uncertain)/iu,
+        ]),
     ],
     [
       'structured provenance',
@@ -235,11 +240,15 @@ function scorePlan(root: string): SkillEvalDeterministicScore {
   const intact = fixed(root, 'evidence/architecture.json', packet);
   const plan = readJsonArtifact<PlanArtifact>(root, 'plan.json');
   const prose = regularText(root, 'plan.md');
-  const phases = Array.isArray(plan?.phases) ? plan!.phases! : [];
+  const rawPhases = Array.isArray(plan?.phases) ? plan.phases : [];
+  const phaseRowsValid = rawPhases.every(
+    (phase) => phase !== null && typeof phase === 'object' && !Array.isArray(phase),
+  );
+  const phases = phaseRowsValid ? rawPhases : [];
   const ids = phases.map((p) => p.id);
   const required = ['inventory', 'contract', 'outbox', 'shadow-reconcile', 'cutover', 'retire'];
-  const phaseComplete = required.every((id) => ids.includes(id));
-  const gated = phases.every(
+  const phaseComplete = phaseRowsValid && required.every((id) => ids.includes(id));
+  const gated = phaseComplete && phases.every(
     (p) =>
       typeof p.gate === 'string' &&
       p.gate.length > 8 &&
@@ -248,9 +257,20 @@ function scorePlan(root: string): SkillEvalDeterministicScore {
       Array.isArray(p.owners) &&
       p.owners.length > 0,
   );
-  const dependency = phases
-    .filter((p) => p.id !== 'inventory')
-    .every((p) => Array.isArray(p.dependsOn) && p.dependsOn.length > 0);
+  const dependency = phaseComplete &&
+    ids[0] === 'inventory' &&
+    new Set(ids).size === phases.length &&
+    phases.every((phase, index) => {
+      if (typeof phase.id !== 'string' || !phase.id.trim()) return false;
+      if (phase.id === 'inventory') {
+        return !phase.dependsOn || (Array.isArray(phase.dependsOn) && phase.dependsOn.length === 0);
+      }
+      const dependencies = phase.dependsOn;
+      return Array.isArray(dependencies) &&
+        dependencies.length > 0 &&
+        new Set(dependencies).size === dependencies.length &&
+        dependencies.every((id) => typeof id === 'string' && ids.indexOf(id) < index && ids.includes(id));
+    });
   const checks: [string, boolean][] = [
     ['packet integrity', intact],
     [
@@ -385,7 +405,7 @@ export const REPOSITORY_COMMUNICATION_SKILL_EVAL_MATERIALIZERS: readonly SkillEv
       },
     },
     {
-      id: 'planning/notification-extraction-plan@1',
+      id: 'planning/notification-extraction-plan@2',
       matches: (s) => s.id === EXTRACTION_PLAN,
       materialize: (root) => {
         writeFixtureFile(root, 'evidence/architecture.json', json(PLAN_PACKET));
@@ -434,7 +454,7 @@ export const REPOSITORY_COMMUNICATION_SKILL_EVAL_SCORERS: readonly SkillEvalDete
       score: ({ workingDirectory }) => scoreSetup(workingDirectory),
     },
     {
-      id: 'planning/notification-extraction-plan-scorer@1',
+      id: 'planning/notification-extraction-plan-scorer@2',
       scenarioIds: [EXTRACTION_PLAN],
       score: ({ workingDirectory }) => scorePlan(workingDirectory),
     },

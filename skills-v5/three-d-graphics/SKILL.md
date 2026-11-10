@@ -1,6 +1,6 @@
 ---
 name: three-d-graphics
-description: Engineer real-time and rendered 3D graphics around geometry, transforms, materials, lighting, cameras, animation, performance, and asset pipelines. Use when the request specifically requires 3d graphics, three.js scene, webgl, rendering pipeline 3d.
+description: Engineer real time and rendered 3D graphics around geometry, transforms, materials, lighting, cameras, animation, performance, and asset pipelines. Use when the request specifically requires 3d graphics, three.js scene, webgl, rendering pipeline 3d.
 ---
 
 # Three D Graphics

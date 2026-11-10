@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "web-security",
-  "version": "5.1.1",
+  "version": "5.1.5",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -110,12 +110,12 @@
   },
   "sources": [
     {
-      "url": "https://www.w3.org/TR/CSP3/",
+      "url": "https://w3c.github.io/webappsec-csp/",
       "sourceType": "spec",
       "versionScope": "Content Security Policy Level 3 Working Draft, 13 August 2026",
       "staleAfterDays": 60,
       "notes": "Current CSP3 Working Draft; use its policy semantics with explicit draft status rather than describing it as a Recommendation.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html",
@@ -123,7 +123,7 @@
       "versionScope": "OWASP XSS Prevention guidance available 2026-09-05",
       "staleAfterDays": 120,
       "notes": "Framework escape hatches, safe sinks, contextual output encoding, HTML sanitization, and CSP as defense in depth rather than the sole XSS defense.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html",
@@ -131,7 +131,7 @@
       "versionScope": "OWASP CSRF Prevention guidance available 2026-09-05",
       "staleAfterDays": 120,
       "notes": "Synchronizer/cookie-to-header patterns, SameSite, Origin/Fetch Metadata options, and client-side CSRF caveats.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     },
     {
       "url": "https://github.com/OWASP/ASVS/tree/master/5.0/en",
@@ -140,7 +140,7 @@
       "revision": "5.0.0",
       "staleAfterDays": 120,
       "notes": "Browser/client, encoding/sanitization, session, API, communication, and related security requirements used as the stable application-security baseline.",
-      "verifiedAt": "2026-09-05"
+      "verifiedAt": "2026-11-07"
     }
   ],
   "authoringMaturity": "individual"
