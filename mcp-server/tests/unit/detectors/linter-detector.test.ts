@@ -128,7 +128,7 @@ describe('LinterErrorDetector', () => {
       expect(errors).toHaveLength(2);
 
       expect(errors[0]).toEqual({
-        file: expect.stringContaining('src/index.js'),
+        file: expect.stringMatching(/src[/\\]index\.js/),
         line: 10,
         column: 5,
         rule: 'no-unused-vars',
@@ -137,7 +137,7 @@ describe('LinterErrorDetector', () => {
       });
 
       expect(errors[1]).toEqual({
-        file: expect.stringContaining('src/utils.js'),
+        file: expect.stringMatching(/src[/\\]utils\.js/),
         line: 25,
         column: 12,
         rule: 'prefer-const',

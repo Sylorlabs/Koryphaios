@@ -101,9 +101,15 @@ describe('provider verification truth', () => {
     try {
       mkdirSync(bin, { recursive: true });
       mkdirSync(settings, { recursive: true });
-      const cline = join(bin, 'cline');
-      writeFileSync(cline, '#!/bin/sh\necho "3.0.57"\n');
-      chmodSync(cline, 0o755);
+      // Windows cannot exec a shebang script; the fake CLI needs a native
+      // shim (`.cmd`) there and a chmod+x shell script elsewhere.
+      const cline = join(bin, process.platform === 'win32' ? 'cline.cmd' : 'cline');
+      if (process.platform === 'win32') {
+        writeFileSync(cline, '@echo off\r\necho 3.0.57\r\n');
+      } else {
+        writeFileSync(cline, '#!/bin/sh\necho "3.0.57"\n');
+        chmodSync(cline, 0o755);
+      }
       writeFileSync(
         join(settings, 'providers.json'),
         JSON.stringify({ selectedProvider: 'openrouter', model: 'synthetic-model' }),

@@ -955,7 +955,7 @@ export class ShadowRepo {
             `Could not write shadow repository lock owner: ${String(error)}`,
           );
         }
-        if (code !== 'EEXIST') {
+        if (!this.isLockContention(code)) {
           throw new ShadowRepoError(`Could not acquire shadow repository lock: ${String(error)}`);
         }
       }
@@ -972,6 +972,16 @@ export class ShadowRepo {
       }
       await sleep(LOCK_RETRY_MS + Math.floor(Math.random() * LOCK_RETRY_MS));
     }
+  }
+
+  /** Whether a failed mkdir means "the lock is held" rather than a real error.
+   * On Windows, mkdir on a directory another process is concurrently deleting
+   * returns EPERM or EACCES (the name is delete-pending) instead of EEXIST;
+   * retrying once the delete completes is the correct lock-wait behavior. */
+  private static isLockContention(code: string | undefined): boolean {
+    if (code === 'EEXIST') return true;
+    if (process.platform === 'win32' && (code === 'EPERM' || code === 'EACCES')) return true;
+    return false;
   }
 
   private static releaseDirectoryLock(lockPath: string, owner: LockOwner): void {
@@ -1045,7 +1055,7 @@ export class ShadowRepo {
         rmSync(reaperPath, { recursive: true, force: true });
         throw new ShadowRepoError(`Could not write shadow lock reaper owner: ${String(error)}`);
       }
-      if (code !== 'EEXIST') {
+      if (!this.isLockContention(code)) {
         throw new ShadowRepoError(`Could not acquire shadow lock reaper: ${String(error)}`);
       }
     }

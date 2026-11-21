@@ -41,10 +41,25 @@ function which(bin: string): string | null {
     if (!dir) continue;
     for (const ext of exts) {
       const full = join(dir, bin + ext);
-      if (existsSync(full)) return full;
+      if (existsSync(full) && !isWslStub(full)) return full;
     }
   }
   return null;
+}
+
+/**
+ * On Windows, `bash.exe` in the system directory or the per-user WindowsApps
+ * alias directory is the WSL launcher stub — not a POSIX shell. It runs
+ * commands inside a Linux VM (wrong cwd, env, and filesystem) or, with no
+ * distro installed, fails and hangs callers waiting on the child. Only real
+ * POSIX shells (Git Bash, MSYS2, Cygwin) outside those directories are usable.
+ */
+function isWslStub(path: string): boolean {
+  if (process.platform !== 'win32') return false;
+  const normalized = path.replace(/\//g, '\\').toLowerCase();
+  if (!normalized.endsWith('bash.exe')) return false;
+  const windir = (process.env.SystemRoot ?? 'C:\\Windows').replace(/\//g, '\\').toLowerCase();
+  return normalized.startsWith(`${windir}\\`) || normalized.includes('\\windowsapps\\');
 }
 
 /**

@@ -343,7 +343,11 @@ const fileIdentityCache = new Map<string, string>(); // absolute path -> dev:ino
 function fileObjectIdentity(fileStat: Stats): string | null {
   const dev = Number(fileStat.dev);
   const ino = Number(fileStat.ino);
-  return Number.isSafeInteger(dev) && Number.isSafeInteger(ino) && ino > 0 ? `${dev}:${ino}` : null;
+  // NTFS file-index numbers are 64-bit and routinely exceed 2^53, so a
+  // safe-integer check would disable move detection entirely on Windows.
+  // Equality of the (possibly rounded) token is still stable for rename
+  // detection; only reject a missing/zero inode.
+  return Number.isSafeInteger(dev) && ino > 0 ? `${dev}:${ino}` : null;
 }
 /** Tracks whether the initial sync has completed for a given project root.
  * The notes catalog is empty until this resolves — skipping catalog assembly

@@ -16,7 +16,7 @@ const notesScaleDatabaseDir = process.env.DATABASE_URL
   : mkdtempSync(join(tmpdir(), 'kory-notes-scale-'));
 process.env.DATABASE_URL ??= `sqlite:${join(notesScaleDatabaseDir!, 'notes-scale.sqlite')}`;
 
-const { initDb, db } = await import('../../db');
+const { initDb, db, getDb } = await import('../../db');
 const { notes } = await import('../../db/schema');
 import { nanoid } from 'nanoid';
 const {
@@ -36,6 +36,12 @@ const N = 3000;
 
 afterAll(() => {
   if (notesScaleDatabaseDir) {
+    // Windows locks an open SQLite file; close the handle before deleting.
+    try {
+      getDb().close();
+    } catch {
+      // Already closed.
+    }
     rmSync(notesScaleDatabaseDir, { recursive: true, force: true });
   }
 });

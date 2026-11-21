@@ -86,13 +86,39 @@ export class SnapshotManager {
         this.assertWithin(this.baseDir, realpathSync(snapshotDir), 'existing snapshot');
         rmSync(snapshotDir, { recursive: true, force: true });
       }
-      renameSync(temporary, snapshotDir);
+      this.renameSnapshotDir(temporary, snapshotDir);
     } catch (error) {
       rmSync(temporary, { recursive: true, force: true });
       throw error;
     }
 
     koryLog.info({ sessionId, snapshotId, files: files.length }, 'Created file snapshot');
+  }
+
+  /**
+   * Atomically move the staged snapshot into place. On Windows a directory
+   * rename transiently fails with EPERM/EACCES/EBUSY while the antivirus,
+   * indexer, or a just-released Bun.write handle still holds a file inside the
+   * tree; POSIX renames are unaffected. Retry the rename briefly, then surface
+   * the original error if the contention does not clear.
+   */
+  private renameSnapshotDir(temporary: string, snapshotDir: string): void {
+    const transient = new Set(['EPERM', 'EACCES', 'EBUSY', 'ENOTEMPTY']);
+    const maxAttempts = process.platform === 'win32' ? 40 : 1;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        renameSync(temporary, snapshotDir);
+        return;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (attempt >= maxAttempts || !code || !transient.has(code)) throw error;
+        const deadline = Date.now() + 50;
+        while (Date.now() < deadline) {
+          // short busy wait — the contention window is milliseconds, and the
+          // caller is synchronous
+        }
+      }
+    }
   }
 
   /** Restore every exact file recorded by the immutable snapshot manifest. */
