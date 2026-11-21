@@ -315,7 +315,7 @@ export class ShadowRepo {
       } catch (error) {
         // Another process may win this race between existsSync and mkdir; a
         // lost race is only fatal when what landed is not a real directory.
-        if (isLockContention((error as NodeJS.ErrnoException)?.code)) {
+        if (ShadowRepo.isLockContention((error as NodeJS.ErrnoException)?.code)) {
           const lockRootStat = lstatSync(lockRoot);
           if (lockRootStat.isSymbolicLink() || !lockRootStat.isDirectory()) {
             throw new ShadowRepoError(`Unsafe checkpoint lock directory: ${lockRoot}`);
