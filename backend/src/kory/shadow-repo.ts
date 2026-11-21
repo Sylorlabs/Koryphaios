@@ -310,7 +310,20 @@ export class ShadowRepo {
         throw new ShadowRepoError(`Unsafe checkpoint lock directory: ${lockRoot}`);
       }
     } else {
-      mkdirSync(lockRoot, { mode: 0o700 });
+      try {
+        mkdirSync(lockRoot, { mode: 0o700 });
+      } catch (error) {
+        // Another process may win this race between existsSync and mkdir; a
+        // lost race is only fatal when what landed is not a real directory.
+        if (isLockContention((error as NodeJS.ErrnoException)?.code)) {
+          const lockRootStat = lstatSync(lockRoot);
+          if (lockRootStat.isSymbolicLink() || !lockRootStat.isDirectory()) {
+            throw new ShadowRepoError(`Unsafe checkpoint lock directory: ${lockRoot}`);
+          }
+        } else {
+          throw error;
+        }
+      }
     }
     const lockPath = join(lockRoot, LOCK_NAME);
     const release = await this.acquireDirectoryLock(lockPath, purpose);
