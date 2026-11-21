@@ -345,9 +345,13 @@ function fileObjectIdentity(fileStat: Stats): string | null {
   const ino = Number(fileStat.ino);
   // NTFS file-index numbers are 64-bit and routinely exceed 2^53, so a
   // safe-integer check would disable move detection entirely on Windows.
-  // Equality of the (possibly rounded) token is still stable for rename
-  // detection; only reject a missing/zero inode.
-  return Number.isSafeInteger(dev) && ino > 0 ? `${dev}:${ino}` : null;
+  // Some Windows filesystems (ReFS, Dev Drive volumes, sandboxed runners)
+  // report file indices that are not unique per file, so dev:ino alone can
+  // match a copy to the row its source was deleted from. Creation time is
+  // preserved by a rename but not by a fresh write, so it disambiguates;
+  // where birthtime is unsupported it stays a stable per-file constant.
+  const birthtime = Number.isFinite(fileStat.birthtimeMs) ? fileStat.birthtimeMs : 0;
+  return Number.isSafeInteger(dev) && ino > 0 ? `${dev}:${ino}:${birthtime}` : null;
 }
 /** Tracks whether the initial sync has completed for a given project root.
  * The notes catalog is empty until this resolves — skipping catalog assembly
