@@ -303,7 +303,10 @@ export class SecureKeyStorage {
       await execAsync(`security delete-generic-password -s "${key}" 2>/dev/null`);
     } catch (err: unknown) {
       // Ignore if doesn't exist
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'macOS keychain entry does not exist, ignoring');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'macOS keychain entry does not exist, ignoring',
+      );
     }
 
     await execAsync(
@@ -320,7 +323,10 @@ export class SecureKeyStorage {
       const { stdout } = await execAsync(`security find-generic-password -s "${key}" -w`);
       return Buffer.from(stdout.trim(), 'base64').toString('utf8');
     } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'macOS keychain entry not found');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'macOS keychain entry not found',
+      );
       return null;
     }
   }
@@ -334,7 +340,10 @@ export class SecureKeyStorage {
       await execAsync(`security delete-generic-password -s "${key}"`);
     } catch (err: unknown) {
       // Ignore
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'macOS keychain entry already removed, ignoring');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'macOS keychain entry already removed, ignoring',
+      );
     }
   }
 
@@ -353,18 +362,73 @@ export class SecureKeyStorage {
     throw new Error('Linux Secret Service not yet implemented');
   }
 
-  // Windows Credential Manager implementation
+  // Windows Credential Manager implementation (PasswordVault via PowerShell —
+  // the same spawned-CLI approach as the macOS `security` tool; no native
+  // addon needed). One vault credential per key: resource = the key, user =
+  // 'koryphaios', password = base64(data).
+  private windowsVaultScript(body: string): string {
+    return (
+      '$v = [Windows.Security.Credentials.PasswordVault,Windows.Security.Credentials,' +
+      'ContentType=WindowsRuntime]::new(); ' +
+      '$cred = [Windows.Security.Credentials.PasswordCredential,Windows.Security.Credentials,' +
+      'ContentType=WindowsRuntime]; ' +
+      body
+    );
+  }
+
+  private async runWindowsVault(script: string): Promise<string> {
+    const { execFile } = await import('child_process');
+    const { promisify } = await import('util');
+    const { stdout } = await promisify(execFile)(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', script],
+      { windowsHide: true },
+    );
+    return stdout;
+  }
+
+  // Single-quote a string for inline PowerShell (doubles embedded quotes).
+  private psQuote(value: string): string {
+    return `'${value.replace(/'/g, "''")}'`;
+  }
+
   private async storeWindows(key: string, data: string): Promise<void> {
-    // Would use Windows Credential API via native addon
-    throw new Error('Windows Credential Manager not yet implemented');
+    // Replace an existing entry first; PasswordVault.Add throws on a duplicate
+    // resource+user pair.
+    await this.deleteWindows(key).catch(() => {});
+    const b64 = Buffer.from(data, 'utf8').toString('base64');
+    await this.runWindowsVault(
+      this.windowsVaultScript(
+        `$v.Add($cred::new(${this.psQuote(key)}, 'koryphaios', ${this.psQuote(b64)}))`,
+      ),
+    );
   }
 
   private async retrieveWindows(key: string): Promise<string | null> {
-    throw new Error('Windows Credential Manager not yet implemented');
+    try {
+      const stdout = await this.runWindowsVault(
+        this.windowsVaultScript(
+          `Write-Output $v.Retrieve(${this.psQuote(key)}, 'koryphaios').Password`,
+        ),
+      );
+      const b64 = stdout.trim();
+      return b64 ? Buffer.from(b64, 'base64').toString('utf8') : null;
+    } catch {
+      return null;
+    }
   }
 
   private async deleteWindows(key: string): Promise<void> {
-    throw new Error('Windows Credential Manager not yet implemented');
+    try {
+      await this.runWindowsVault(
+        this.windowsVaultScript(`$v.Remove($v.Retrieve(${this.psQuote(key)}, 'koryphaios'))`),
+      );
+    } catch (err: unknown) {
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Windows vault entry already removed, ignoring',
+      );
+    }
   }
 
   // Fallback file-based storage (encrypted)
@@ -402,7 +466,10 @@ export class SecureKeyStorage {
       const envelope = secureEncryption.parse(serialized);
       return await secureEncryption.decrypt(envelope);
     } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to read or decrypt fallback key');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Failed to read or decrypt fallback key',
+      );
       return null;
     }
   }

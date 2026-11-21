@@ -231,10 +231,7 @@ export async function bootstrap(): Promise<AppContext> {
   }
   const recoveredQuestionHandoffs = await kory.recoverDurableQuestionHandoffs();
   if (recoveredQuestionHandoffs.requeued > 0 || recoveredQuestionHandoffs.queued > 0) {
-    serverLog.info(
-      recoveredQuestionHandoffs,
-      'Reconciled durable answered-question handoffs',
-    );
+    serverLog.info(recoveredQuestionHandoffs, 'Reconciled durable answered-question handoffs');
   }
   await goalDriver.recover();
   startBackgroundCleanup(kory, wsManager);
@@ -257,6 +254,13 @@ async function initEncryption() {
       { err: message },
       'Envelope encryption unavailable; credential writes and legacy migrations are disabled until secure key management is restored',
     );
+    serverLog.warn('╔════════════════════════════════════════════════════════════════╗');
+    serverLog.warn('║  WARNING: Secure credential storage is DISABLED.              ║');
+    serverLog.warn('║  The encryption layer failed to initialize, so no API keys    ║');
+    serverLog.warn('║  or credentials can be saved.                                 ║');
+    serverLog.warn('║  Fix: set KORYPHAIOS_KMS_PASSPHRASE in your environment       ║');
+    serverLog.warn('║  (e.g. ~/.config/koryphaios/secrets.env) and restart.         ║');
+    serverLog.warn('╚════════════════════════════════════════════════════════════════╝');
   }
 }
 
