@@ -6,6 +6,7 @@ use std::sync::OnceLock;
 static CONFIG: OnceLock<AppConfig> = OnceLock::new();
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AppConfig {
     pub app: AppInfo,
     pub server: ServerConfig,
@@ -188,28 +189,52 @@ mod tests {
     }
 }
 
+impl Default for AppInfo {
+    fn default() -> Self {
+        Self {
+            name: "Koryphaios".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            identifier: "com.sylorlabs.koryphaios".to_string(),
+        }
+    }
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            host: "127.0.0.1".to_string(),
+            port: 3000,
+            ws_path: default_ws_path(),
+        }
+    }
+}
+
+impl Default for WindowConfig {
+    fn default() -> Self {
+        Self {
+            width: 1280,
+            height: 800,
+            min_width: 1024,
+            min_height: 640,
+            max_width: 3840,
+            max_height: 2160,
+        }
+    }
+}
+
+impl Default for SecurityConfig {
+    fn default() -> Self {
+        Self { csp: None }
+    }
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            app: AppInfo {
-                name: "Koryphaios".to_string(),
-                version: env!("CARGO_PKG_VERSION").to_string(),
-                identifier: "com.sylorlabs.koryphaios".to_string(),
-            },
-            server: ServerConfig {
-                host: "127.0.0.1".to_string(),
-                port: 3000,
-                ws_path: "/ws".to_string(),
-            },
-            window: WindowConfig {
-                width: 1280,
-                height: 800,
-                min_width: 1024,
-                min_height: 640,
-                max_width: 3840,
-                max_height: 2160,
-            },
-            security: SecurityConfig { csp: None },
+            app: AppInfo::default(),
+            server: ServerConfig::default(),
+            window: WindowConfig::default(),
+            security: SecurityConfig::default(),
         }
     }
 }
