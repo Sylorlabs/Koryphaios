@@ -395,7 +395,11 @@ function requireString(
 
 function requireId(value: unknown, label: string): string {
   const id = requireString(value, label, { max: 512 });
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9._:@-]*$/.test(id)) {
+  // nanoid() is the id source for notes, bases, and drafts; its alphabet
+  // includes '-' and '_', so the leading char cannot be restricted to
+  // alphanumerics or ~3% of generated ids become unimportable. A leading '.'
+  // stays rejected so ids cannot produce hidden path segments.
+  if (!/^[a-zA-Z0-9_-][a-zA-Z0-9._:@-]*$/.test(id)) {
     throw new ValidationError(`${label} contains unsupported characters`);
   }
   return id;
