@@ -3,23 +3,23 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { chromiumBlockers } from '../skill-eval-real-web-runtime';
+import { chromiumBlockers } from '../../eval/skills/skill-eval-real-web-runtime';
 import { browserControlTest } from './browser-runtime-test-policy';
 import {
   BROWSER_EVAL_CONSTANTS,
   BROWSER_SKILL_EVAL_MATERIALIZERS,
   dashboardAssetBlockers,
-} from '../skill-eval-browser-fixtures';
-import { BUILTIN_SKILL_EVAL_SCORERS } from '../skill-eval-fixtures';
-import { readJsonArtifact, writeFixtureFile } from '../skill-eval-fixture-helpers';
-import type { SkillEvalScenarioV3 } from '../skill-eval-harness';
+} from '../../eval/skills/skill-eval-browser-fixtures';
+import { BUILTIN_SKILL_EVAL_SCORERS } from '../../eval/skills/skill-eval-fixtures';
+import { readJsonArtifact, writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
+import type { SkillEvalScenarioV3 } from '../../eval/skills/skill-eval-harness';
 import {
   runVisualVerificationBrowserScenario,
   VISUAL_VERIFICATION_BROWSER_RUNTIME_SCORER,
   VISUAL_VERIFICATION_BROWSER_SCENARIO,
   type BrowserVisualCapture,
   type IndependentVisualInspection,
-} from '../skill-eval-visual-verification-runtime';
+} from '../../eval/skills/skill-eval-visual-verification-runtime';
 
 const roots: string[] = [];
 const PNG_HEADER = Buffer.from('89504e470d0a1a0a', 'hex');

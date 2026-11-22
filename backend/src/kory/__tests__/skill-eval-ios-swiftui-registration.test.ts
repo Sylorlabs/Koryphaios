@@ -2,12 +2,12 @@ import { expect, test } from 'bun:test';
 import {
   BUILTIN_SKILL_EVAL_MATERIALIZERS,
   BUILTIN_SKILL_EVAL_SCORERS,
-} from '../skill-eval-fixtures';
+} from '../../eval/skills/skill-eval-fixtures';
 import {
   IOS_SWIFTUI_NATIVE_MATERIALIZERS,
   IOS_SWIFTUI_NATIVE_SCENARIOS,
   IOS_SWIFTUI_NATIVE_SCORERS,
-} from '../skill-eval-ios-swiftui-runtime';
+} from '../../eval/skills/skill-eval-ios-swiftui-runtime';
 
 test('calibrated SwiftUI scenarios use native evaluators ahead of external gates', () => {
   const { navigation, documents } = IOS_SWIFTUI_NATIVE_SCENARIOS;

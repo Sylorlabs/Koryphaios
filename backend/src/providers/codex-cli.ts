@@ -8,17 +8,23 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { whichBinary } from './cli-detection';
 import { discoverCliAccounts, type DiscoveredCliAccount } from './cli-accounts';
 import {
+  type LifecycleCapabilities,
   type Provider,
   type ProviderEvent,
+  type ProviderLifecycle,
   type ProviderMessage,
   type StreamRequest,
 } from './types';
 import { providerLog } from '../logger';
 import { getCliBridge, getKoryphaiosCodexHome, serializeCodexMcpProfile } from './cli-bridges';
+import {
+  koryBridgeUnavailableError,
+  resolveKoryBridgeScript,
+} from './kory-cli-mcp-config';
 import { buildSoftJail } from '../collaboration/sandbox-runner';
 import {
   assertPrivateValuesAbsentFromArgv,
@@ -30,9 +36,11 @@ import {
   appendPrivateDiagnostic,
   safeProviderDiagnostic,
   safeProviderFailureMessage,
+  type SafeProviderDiagnostic,
 } from './provider-diagnostics';
 import { writeManagedCliFile } from './managed-cli-storage';
 import { appendBoundedProviderFrames } from './bounded-provider-stream';
+import { SPEED_TIER_FAST_CODEX } from './speed-tiers';
 import { createKoryBridgeGrantLease } from './bridge-grant';
 import { buildProviderCliEnv } from './cli-environment';
 import { readAllCodexModelsCaches, enrichCodexModelsWithCliCache } from './codex-models-cache';
@@ -209,6 +217,14 @@ export function codexTransientExhaustedMessage(attempts: number): string {
   return `Codex hit a transient ChatGPT disconnect after ${total} ${total === 1 ? 'attempt' : 'attempts'}. Nothing was lost — retry the turn.`;
 }
 
+/** Fail-closed auth message — never retried: it carries the codex-login
+ * markers isCodexAuthFailure checks for, so the registry surfaces it as-is. */
+function codexAuthFailureMessage(diagnostic: SafeProviderDiagnostic): string {
+  return safeProviderFailureMessage('codex', diagnostic, {
+    authenticationAction: 'Run "codex login", then reconnect.',
+  });
+}
+
 type CodexCliModel = {
   id?: string;
   model?: string;
@@ -249,6 +265,7 @@ function modelDefinition(model: CodexCliModel, account: DiscoveredCliAccount): M
     canReason: reasoningLevels.length > 0,
     reasoningLevels,
     supportsFastMode: supportsCodexFastTier(model),
+    ...(supportsCodexFastTier(model) ? { speedTiers: [SPEED_TIER_FAST_CODEX] } : {}),
     supportsAttachments: model.inputModalities?.includes('image') === true,
     supportsStreaming: true,
     tier: model.isDefault ? 'flagship' : undefined,
@@ -260,9 +277,10 @@ function modelDefinition(model: CodexCliModel, account: DiscoveredCliAccount): M
 async function queryCliModels(
   binary: string,
   account: DiscoveredCliAccount,
+  spawnChild: typeof spawn = spawn,
 ): Promise<CodexCliModel[]> {
   return await new Promise((resolve, reject) => {
-    const child = spawn(binary, ['app-server', '--stdio'], {
+    const child = spawnChild(binary, ['app-server', '--stdio'], {
       stdio: ['pipe', 'pipe', 'pipe'],
       // This is the actual profile boundary. A second account is not just a
       // display label: the official CLI reads its own auth store from here.
@@ -616,6 +634,11 @@ export function codexJsonEvents(
       (event.error as { message?: string } | undefined)?.message ??
       (event.message as string | undefined) ??
       '';
+    if (isCodexAuthFailure(raw)) {
+      const diagnostic = safeProviderDiagnostic('codex', 'stdout', raw);
+      events.push({ type: 'error', error: codexAuthFailureMessage(diagnostic) });
+      return { events, completed: true };
+    }
     if (isTransientCodexFailure(raw)) {
       // ChatGPT-side blip inside the CLI's own loop: honest banner, raw
       // detail stays in server logs only. The registry retries this.
@@ -631,6 +654,11 @@ export function codexJsonEvents(
     return { events, completed: true };
   } else if (event.type === 'error') {
     const raw = (event as { message?: string }).message ?? '';
+    if (isCodexAuthFailure(raw)) {
+      const diagnostic = safeProviderDiagnostic('codex', 'stdout', raw);
+      events.push({ type: 'error', error: codexAuthFailureMessage(diagnostic) });
+      return { events, completed: false };
+    }
     if (isTransientCodexFailure(raw)) {
       providerLog.warn(
         safeProviderDiagnostic('codex', 'stdout', raw),
@@ -643,6 +671,13 @@ export function codexJsonEvents(
     events.push({ type: 'error', error: safeProviderFailureMessage('codex', diagnostic) });
   }
   return { events, completed: false };
+}
+
+/** `--config service_tier="fast"` for the composer's Codex fast speed tier —
+ *  a no-op for every other selection, including the retired boolean's legacy
+ *  callers (the API boundary normalizes `fastMode` to `speedTier` upstream). */
+export function codexSpeedTierArgs(speedTier: string | undefined): string[] {
+  return speedTier === 'fast' ? ['--config', 'service_tier="fast"'] : [];
 }
 
 export function codexReasoningArgs(reasoningLevel: string | undefined): string[] {
@@ -723,13 +758,50 @@ function resolveCliModel(modelId: string, models: ModelDef[]): string {
 export class CodexCliProvider implements Provider {
   readonly imageInputTransport = 'native' as const;
   readonly name = 'codex' as const;
+  /**
+   * Lifecycle evidence (verified against this file, not the codex CLI docs):
+   * - interrupt: false. The abort listener (`onAbort`, ~line 1031) SIGTERMs the child,
+   *   but the generator then returns silently (`if (request.signal?.aborted) return;`,
+   *   ~line 1118). No interrupted status is reported to the caller.
+   * - resume / resumeAfterRestart: false. Every turn runs `codex exec --ephemeral`
+   *   (~line 976) and the argv has no resume subcommand or thread id.
+   * - steerInFlight: false. The prompt is written once to stdin (`writePrivatePromptToStdin`,
+   *   ~line 1025) and nothing is written afterwards.
+   * - rollback / fork: false. The prompt is rebuilt from request.messages on each call
+   *   (`buildCodexPrompt`, ~line 891), but this adapter does not declare
+   *   supportsFreshConversation, so that property is not claimed here.
+   * - terminalStatusQuality: weak. Exit 0 without a turn.completed event still yields
+   *   `complete` (~line 1139).
+   * - resumeHandle: null. Codex's thread id is never captured, because nothing resumes it.
+   */
+  readonly lifecycle: ProviderLifecycle = {
+    capabilities: (): LifecycleCapabilities => ({
+      version: 1,
+      interrupt: false,
+      resume: false,
+      resumeAfterRestart: false,
+      steerInFlight: false,
+      rollback: false,
+      fork: false,
+      terminalStatusQuality: 'weak',
+    }),
+    resumeHandle: () => null,
+  };
   private models: ModelDef[] = [];
   private modelsAt = 0;
   private refreshInFlight: Promise<ModelDef[]> | null = null;
   private accountByModelId = new Map<string, DiscoveredCliAccount>();
   private modelDiscoveryError: string | undefined;
 
-  constructor(readonly config: ProviderConfig) {
+  // spawnChild is the process seam: production uses node's spawn; replay tests
+  // inject a recorded-transcript process (see providers/replay/).
+  // profileHome is the account-discovery seam: os.homedir() is fixed at process
+  // start in Bun, so tests that sandbox HOME must pass their home explicitly.
+  constructor(
+    readonly config: ProviderConfig,
+    private readonly spawnChild: typeof spawn = spawn,
+    private readonly profileHome: string = homedir(),
+  ) {
     if (this.isAvailable()) void this.refreshModels();
   }
 
@@ -741,7 +813,7 @@ export class CodexCliProvider implements Provider {
     // Expiry decoded from a cached JWT is only a hint. The official CLI owns
     // refresh and can still have a valid session, so do not hide a discovered
     // profile before the CLI itself gets a chance to report its model list.
-    const discovered = discoverCliAccounts().filter((account) => account.provider === 'codex');
+    const discovered = discoverCliAccounts(this.profileHome).filter((account) => account.provider === 'codex');
     const selectedOrder = this.config.fallbackOrder ?? [];
     if (selectedOrder.length === 0) return discovered;
 
@@ -778,7 +850,7 @@ export class CodexCliProvider implements Provider {
     this.refreshInFlight = Promise.allSettled(
       accounts.map(async (account) => ({
         account,
-        models: await queryCliModels(binary, account),
+        models: await queryCliModels(binary, account, this.spawnChild),
       })),
     )
       .then((results) => {
@@ -905,6 +977,14 @@ export class CodexCliProvider implements Provider {
     if (!researchOnly) {
       try {
         const mcpConfigs = codexBridge?.buildMcpConfig(bridgeCtx);
+        if (
+          bridgeCtx.sessionId &&
+          (!mcpConfigs || mcpConfigs.length === 0) &&
+          !resolveKoryBridgeScript()
+        ) {
+          yield { type: 'error', error: koryBridgeUnavailableError('codex') };
+          return;
+        }
         if (mcpConfigs && mcpConfigs.length > 0) {
           writeManagedCliFile(
             join(codexHome, 'kory.config.toml'),
@@ -947,7 +1027,7 @@ export class CodexCliProvider implements Provider {
       // The official CLI maps service_tier="fast" to Fast mode. Do not use
       // reasoning effort as a fake substitute: it changes model work rather
       // than requesting the supported accelerated tier.
-      ...(request.fastMode ? ['--config', 'service_tier="fast"'] : []),
+      ...codexSpeedTierArgs(request.speedTier),
       ...codexReasoningArgs(request.reasoningLevel),
       ...codexImageArgs(attachmentScope),
       '-',
@@ -972,7 +1052,7 @@ export class CodexCliProvider implements Provider {
     assertPrivateValuesAbsentFromArgv(wrapped.args, [prompt, request.systemPrompt]);
     const child = spawnWithPrivateArtifactCleanup(
       () =>
-        spawn(wrapped.command, wrapped.args, {
+        this.spawnChild(wrapped.command, wrapped.args, {
           cwd,
           stdio: ['pipe', 'pipe', 'pipe'],
           env: jail?.env ?? baseEnv,
@@ -990,6 +1070,12 @@ export class CodexCliProvider implements Provider {
     let stdoutBuffer = '';
     let completed = false;
     let streamFrameFailure: unknown;
+    // Terminal turn.failure events are held until the process exits: stderr
+    // (e.g. an expired-refresh-token report) is better evidence than a
+    // transient-looking turn.failed message, and the registry retries the
+    // first transient error it sees — so a transient banner must not be
+    // yielded before stderr can contradict it.
+    let pendingTurnFailure: ProviderEvent[] | null = null;
     const allowedToolNames = (request.tools ?? []).map((tool) => tool.name);
     const onAbort = () => child.kill('SIGTERM');
     request.signal?.addEventListener('abort', onAbort, { once: true });
@@ -1014,7 +1100,11 @@ export class CodexCliProvider implements Provider {
       try {
         const event = JSON.parse(line) as Record<string, unknown>;
         const translated = codexJsonEvents(event, allowedToolNames, account.id);
-        queue.push(...translated.events);
+        if (translated.completed && translated.events.some((item) => item.type === 'error')) {
+          pendingTurnFailure = translated.events;
+        } else {
+          queue.push(...translated.events);
+        }
         if (translated.completed) completed = true;
         wake();
       } catch {
@@ -1082,6 +1172,17 @@ export class CodexCliProvider implements Provider {
     if (exitCode !== 0) {
       const diagnostic = safeProviderDiagnostic('codex', 'stderr', stderr, { exitCode });
       providerLog.warn(diagnostic, 'Codex CLI exited unsuccessfully');
+      // Auth evidence on stderr wins over any transient-looking turn event:
+      // an expired refresh token must fail closed with the login hint, not
+      // retry as a ChatGPT blip.
+      if (isCodexAuthFailure(stderr)) {
+        yield { type: 'error', error: codexAuthFailureMessage(diagnostic) };
+        return;
+      }
+      if (pendingTurnFailure) {
+        yield* pendingTurnFailure;
+        return;
+      }
       if (isTransientCodexFailure(stderr)) {
         // The CLI's own retry loop (e.g. "Reconnecting... 1/5") exhausted on
         // a ChatGPT-side blip. Honest banner without the raw stderr; the
@@ -1089,13 +1190,16 @@ export class CodexCliProvider implements Provider {
         yield { type: 'error', error: codexTransientFailureMessage() };
         return;
       }
-      yield {
-        type: 'error',
-        error: safeProviderFailureMessage('codex', diagnostic, {
-          authenticationAction: 'Run "codex login", then reconnect.',
-        }),
-      };
+      yield { type: 'error', error: codexAuthFailureMessage(diagnostic) };
       return;
+    }
+    if (pendingTurnFailure) {
+      if (isCodexAuthFailure(stderr)) {
+        const diagnostic = safeProviderDiagnostic('codex', 'stderr', stderr, { exitCode });
+        yield { type: 'error', error: codexAuthFailureMessage(diagnostic) };
+        return;
+      }
+      yield* pendingTurnFailure;
     }
     if (!completed)
       providerLog.warn({ provider: 'codex' }, 'Codex CLI exited without a turn.completed event');

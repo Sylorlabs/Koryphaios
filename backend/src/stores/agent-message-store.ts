@@ -2,7 +2,7 @@
 // Persists every message crossing session/project boundaries so both sides,
 // and the user, can audit the full conversation.
 
-import { and, asc, desc, eq, inArray, or } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, ne, or } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { db } from '../db';
 import { agentMessages } from '../db/schema';
@@ -149,12 +149,19 @@ export async function updateAgentMessageStatus(
   return getAgentMessage(id);
 }
 
-/** Cross-session messages due for delivery retry: queued and older than the backoff window. */
+/** Messages due for push-delivery retry: queued, addressed to another session's
+ *  manager, and older than the backoff window. Same-session mail stays pull-only. */
 export async function listDueForDelivery(before: Date, limit = 20): Promise<AgentMessage[]> {
   const rows = await db
     .select()
     .from(agentMessages)
-    .where(and(eq(agentMessages.status, 'queued'), eq(agentMessages.crossProject, true)))
+    .where(
+      and(
+        eq(agentMessages.status, 'queued'),
+        eq(agentMessages.toRole, 'manager'),
+        ne(agentMessages.fromSessionId, agentMessages.toSessionId),
+      ),
+    )
     .orderBy(asc(agentMessages.createdAt))
     .limit(limit);
   return rows.map(toAgentMessage).filter((message) => message.createdAt <= before.getTime());

@@ -20,7 +20,7 @@ export function isBareKeyChord(keys: string[]): boolean {
 
 const STORAGE_KEY = 'koryphaios-shortcuts';
 
-const VOICE_DESCRIPTION = 'Press to record, press again to transcribe';
+const VOICE_DESCRIPTION = 'Hold to talk, release to transcribe';
 
 /** Voice mode keeps a literal Control on every platform: `Mod` would mean
  *  Command on macOS, and Command+Space is Spotlight, so the chord would never
@@ -39,7 +39,10 @@ function isVoiceDefaultCandidate(keys: string[], description?: string): boolean 
   // toggle: that wording is what a release shipped, so an fn the user picked
   // themselves stays theirs.
   const onLegacyFn =
-    tokens.length === 1 && lowered[0] === 'fn' && !/press to record/i.test(description ?? '');
+    tokens.length === 1 &&
+    lowered[0] === 'fn' &&
+    !/press to record/i.test(description ?? '') &&
+    !/hold to talk/i.test(description ?? '');
   // Mod+Space is what an older build produced when it rewrote every stored
   // 'Ctrl' to 'Mod'. Nothing records that chord on its own, so it is damage
   // from that rewrite rather than a binding anyone picked.
@@ -67,6 +70,12 @@ const defaultShortcuts: Shortcut[] = [
     keys: ['Mod', 'Shift', 'Z'],
     action: 'Toggle Zen mode',
     description: 'Focus',
+  },
+  {
+    id: 'toggle_thinking',
+    keys: ['Mod', 'T'],
+    action: 'Toggle reasoning panels',
+    description: 'Expand or collapse thinking',
   },
   {
     id: 'voice_mode',

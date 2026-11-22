@@ -1,15 +1,22 @@
 {
   "schemaVersion": 1,
   "name": "language-runtime-security",
-  "version": "5.1.5",
+  "version": "5.1.6",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
-  "domains": ["security", "runtime"],
-  "targetMedia": ["any"],
+  "domains": [
+    "security",
+    "runtime"
+  ],
+  "targetMedia": [
+    "any"
+  ],
   "pathScopes": [],
   "contextBudget": 6500,
-  "broader": ["security-review"],
+  "broader": [
+    "security-review"
+  ],
   "facets": [],
   "requires": [],
   "conflicts": [],
@@ -81,8 +88,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["security-review"],
-        "tags": ["ambiguous", "neighbor-boundary"]
+        "adjacentSkills": [
+          "security-review"
+        ],
+        "tags": [
+          "ambiguous",
+          "neighbor-boundary"
+        ]
       },
       {
         "id": "language-runtime-security-ambiguous-2",
@@ -90,8 +102,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["application-security"],
-        "tags": ["ambiguous", "scope-control"]
+        "adjacentSkills": [
+          "application-security"
+        ],
+        "tags": [
+          "ambiguous",
+          "scope-control"
+        ]
       },
       {
         "id": "language-runtime-security-ambiguous-3",
@@ -99,8 +116,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["applied-cryptography"],
-        "tags": ["ambiguous", "scope-control"]
+        "adjacentSkills": [
+          "applied-cryptography"
+        ],
+        "tags": [
+          "ambiguous",
+          "scope-control"
+        ]
       }
     ],
     "adversarial": [
@@ -110,8 +132,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["security-review"],
-        "tags": ["adversarial", "neighbor-boundary"]
+        "adjacentSkills": [
+          "security-review"
+        ],
+        "tags": [
+          "adversarial",
+          "neighbor-boundary"
+        ]
       },
       {
         "id": "language-runtime-security-adversarial-2",
@@ -119,8 +146,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["application-security"],
-        "tags": ["adversarial", "scope-control"]
+        "adjacentSkills": [
+          "application-security"
+        ],
+        "tags": [
+          "adversarial",
+          "scope-control"
+        ]
       },
       {
         "id": "language-runtime-security-adversarial-3",
@@ -128,8 +160,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["applied-cryptography"],
-        "tags": ["adversarial", "scope-control"]
+        "adjacentSkills": [
+          "applied-cryptography"
+        ],
+        "tags": [
+          "adversarial",
+          "scope-control"
+        ]
       }
     ]
   },

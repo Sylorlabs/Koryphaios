@@ -45,23 +45,32 @@ function loadChats(): Set<string> {
 
 let pinnedChats = $state<Set<string>>(loadChats());
 
+function persistChatPins(next: Set<string>) {
+  pinnedChats = next;
+  try {
+    globalThis.localStorage?.setItem(PINNED_CHATS_KEY, JSON.stringify([...next]));
+  } catch {
+    // A blocked storage backend must not break the sidebar.
+  }
+}
+
+/** Set a chat's pin to an exact state. Idempotent, so an undo can restore a prior state. */
+function setChatPinned(sessionId: string, pinned: boolean): boolean {
+  const next = new Set(pinnedChats);
+  if (pinned) next.add(sessionId);
+  else next.delete(sessionId);
+  persistChatPins(next);
+  return pinned;
+}
+
 export const chatSidebarPrefs = {
   isPinned(sessionId: string): boolean {
     return pinnedChats.has(sessionId);
   },
   togglePin(sessionId: string): boolean {
-    const next = new Set(pinnedChats);
-    const nowPinned = !next.has(sessionId);
-    if (nowPinned) next.add(sessionId);
-    else next.delete(sessionId);
-    pinnedChats = next;
-    try {
-      globalThis.localStorage?.setItem(PINNED_CHATS_KEY, JSON.stringify([...next]));
-    } catch {
-      // A blocked storage backend must not break the sidebar.
-    }
-    return nowPinned;
+    return setChatPinned(sessionId, !pinnedChats.has(sessionId));
   },
+  setPinned: setChatPinned,
 };
 
 export const projectSidebarPrefs = {

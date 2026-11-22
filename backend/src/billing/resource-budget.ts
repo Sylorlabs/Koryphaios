@@ -1,5 +1,7 @@
-import { getSubscriptionStatuses, type SubscriptionStatus } from '../credit-accountant';
+import { getSubscriptionStatuses, getUsageCostBreakdown, type SubscriptionStatus } from '../credit-accountant';
+import type { ProviderRateLimitSnapshot } from '@koryphaios/shared';
 import { getCliUsageReports, type CliUsageReport } from './cli-usage';
+import { getProviderRateLimitSnapshots } from './rate-limits';
 import { getProviderBalances, type ProviderBalance } from './provider-balances';
 
 export type ResourceBudgetState = 'available' | 'low' | 'exhausted' | 'rate_limited' | 'unknown';
@@ -24,6 +26,10 @@ export interface ResourceBudgetEntry {
 export interface ResourceBudgetSnapshot {
   generatedAt: number;
   entries: ResourceBudgetEntry[];
+  /** Real quota windows observed on provider inference responses. */
+  rateLimits: ProviderRateLimitSnapshot[];
+  /** Spend recorded for this chat, including whether every row had pricing. */
+  sessionCost?: { sessionId: string; totalUsd: number; known: boolean; unpricedRows: number };
   limitations: string[];
   decisionPolicy: string;
 }
@@ -32,6 +38,7 @@ export interface ResourceBudgetDependencies {
   getBalances?: (keys: Record<string, string | undefined>) => Promise<ProviderBalance[]>;
   getCliUsage?: (options: { githubToken?: string }) => Promise<CliUsageReport[]>;
   getSubscriptions?: () => SubscriptionStatus[];
+  getRateLimits?: () => ProviderRateLimitSnapshot[];
   timeoutMs?: number;
 }
 
@@ -56,6 +63,7 @@ const withDeadline = async <T>(work: Promise<T>, timeoutMs: number): Promise<T |
 export async function collectResourceBudgetSnapshot(
   configs: Record<string, { apiKey?: string; authToken?: string }>,
   dependencies: ResourceBudgetDependencies = {},
+  sessionId?: string,
 ): Promise<ResourceBudgetSnapshot> {
   const timeoutMs = dependencies.timeoutMs ?? 2_200;
   const keys = Object.fromEntries(
@@ -123,13 +131,30 @@ export async function collectResourceBudgetSnapshot(
     });
   }
 
+  const rateLimits = (dependencies.getRateLimits ?? getProviderRateLimitSnapshots)();
+  let sessionCost: ResourceBudgetSnapshot['sessionCost'];
+  if (sessionId) {
+    const rows = getUsageCostBreakdown(sessionId);
+    const totalUsd = rows.reduce((sum, row) => sum + row.knownCostUsd, 0);
+    const unpricedRows = rows.reduce((sum, row) => sum + row.unknownRows, 0);
+    sessionCost = {
+      sessionId,
+      totalUsd,
+      known: unpricedRows === 0,
+      unpricedRows,
+    };
+  }
+
   limitations.push(
     'Only provider-reported API balances and quota windows are shown. Missing providers are unknown, not zero.',
     'Subscription dollar balances are not inferred from token usage or API-equivalent value.',
+    'Rate-limit windows are captured from real inference responses; a provider with no captured window has unknown limits, not unlimited capacity.',
   );
   return {
     generatedAt: Date.now(),
     entries: entries.sort((left, right) => right.observedAt - left.observedAt),
+    rateLimits,
+    ...(sessionCost ? { sessionCost } : {}),
     limitations,
     decisionPolicy: 'Treat only exhausted or rate_limited authoritative entries as unavailable. Treat missing or unknown data as unknown and preserve explicit user provider choices.',
   };

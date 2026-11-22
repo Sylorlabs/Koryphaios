@@ -53,6 +53,19 @@ describe('File Tools', () => {
       expect(existsSync(join(TEST_DIR, 'test.txt'))).toBe(true);
     });
 
+    test('does not write after the turn is stopped', async () => {
+      const controller = new AbortController();
+      controller.abort(new DOMException('Stopped by user', 'AbortError'));
+
+      const result = await tool.run(createMockContext({ signal: controller.signal }), {
+        id: 'test-stopped',
+        input: { path: 'stopped.txt', content: 'must not land' },
+      });
+
+      expect(result.isError).toBe(true);
+      expect(existsSync(join(TEST_DIR, 'stopped.txt'))).toBe(false);
+    });
+
     test('creates parent directories', async () => {
       const result = await tool.run(createMockContext(), {
         id: 'test-2',

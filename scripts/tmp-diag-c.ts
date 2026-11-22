@@ -1,9 +1,9 @@
 import { resolve } from 'node:path';
 import { listOpenSkillRegressionSources } from '../backend/src/kory/skill-evaluations';
 import { loadV5SkillPackages } from '../backend/src/kory/skill-packages';
-import { BUILTIN_SKILL_EVAL_MATERIALIZERS, BUILTIN_SKILL_EVAL_SCORERS } from '../backend/src/kory/skill-eval-fixtures';
+import { BUILTIN_SKILL_EVAL_MATERIALIZERS, BUILTIN_SKILL_EVAL_SCORERS } from '../backend/src/eval/skills/skill-eval-fixtures';
 import { listSkills } from '../backend/src/kory/skills';
-import { skillEvaluationV5ContractHash } from '../backend/src/kory/skill-eval-contract-hash';
+import { skillEvaluationV5ContractHash } from '../backend/src/eval/skills/skill-eval-contract-hash';
 import { CURRENT_SKILL_EVAL_CONTRACT_VERSION } from '../backend/src/kory/skill-evaluations';
 
 const projectRoot = resolve(import.meta.dir, '..');

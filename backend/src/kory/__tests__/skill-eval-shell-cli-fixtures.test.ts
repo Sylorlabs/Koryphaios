@@ -2,12 +2,12 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
+import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
 import { loadV5SkillPackages } from '../skill-packages';
 import {
   SHELL_CLI_SKILL_EVAL_MATERIALIZERS,
   SHELL_CLI_SKILL_EVAL_SCORERS,
-} from '../skill-eval-shell-cli-fixtures';
+} from '../../eval/skills/skill-eval-shell-cli-fixtures';
 
 const roots: string[] = [];
 afterEach(() => {

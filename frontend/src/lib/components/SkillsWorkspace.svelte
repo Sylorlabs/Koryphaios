@@ -22,7 +22,6 @@
   import Save from 'lucide-svelte/icons/save';
   import Search from 'lucide-svelte/icons/search';
   import X from 'lucide-svelte/icons/x';
-  import Layers from 'lucide-svelte/icons/layers';
 
   let { active = true }: { active?: boolean } = $props();
 
@@ -565,9 +564,14 @@
 
 <div class="skills-shell">
   <header class="skills-header">
-    <div class="min-w-0">
-      <h2 class="workspace-title"><Layers size={20} />Skills</h2>
+    <div class="skills-heading min-w-0">
+      <h2 class="workspace-title">Skills</h2>
       <p>Reusable playbooks for how your agents work.</p>
+      <div class="skills-scope">
+        <KnowledgeScope
+          scope={selectedScope === 'project' ? 'Project' : 'Personal'}
+          description="Personal skills are available to this user across projects. Project skills live with the selected project. Active skills provide instructions when selected for a relevant task; drafts do not run. Keep project facts in Memory and reports or reference documents in Notes." />
+      </div>
     </div>
     <div class="header-actions">
       <button class="secondary-action" type="button" onclick={openRoutingTool}
@@ -583,10 +587,6 @@
       >
     </div>
   </header>
-
-  <KnowledgeScope
-    scope={selectedScope === 'project' ? 'Project' : 'Personal'}
-    description="Personal skills are available to this user across projects. Project skills live with the selected project. Active skills provide instructions when selected for a relevant task; drafts do not run. Keep project facts in Memory and reports or reference documents in Notes." />
 
   {#if agentSettingsStore.skillHealth && detailTab === 'health'}
     <div class="health-summary" aria-label="Skill library health">
@@ -2187,8 +2187,6 @@
     }
   }
   .skills-shell { container: skills / inline-size; }
-  .workspace-title { display: flex; align-items: center; gap: 10px; }
-  .workspace-title :global(svg) { color: var(--color-accent); }
   .library-caption { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 11px; color: var(--color-text-muted); }
   .library-caption > span:first-child { color: var(--color-text-secondary); font-weight: 600; }
   .skill-display-name { text-transform: capitalize; }
@@ -2204,13 +2202,21 @@
   .source-details summary { cursor: pointer; }
   .source-details p { margin-top: 8px; line-height: 1.7; }
   .form-label { margin-bottom: 10px; font-size: 13px; font-weight: 600; }
-  .skills-header { border-bottom: 0; padding-bottom: 10px; }
+  /* Page header matches the shared SettingsPage shell metrics. */
+  .skills-header { flex-wrap: wrap; align-items: flex-start; gap: 12px 24px; border-bottom: 0; padding: 28px 32px 16px; }
+  .skills-heading { flex: 1 1 320px; }
+  .skills-header h2 { margin: 0; line-height: 1.3; font-weight: 600; color: var(--color-text-primary); }
+  .skills-header p { margin: 4px 0 0; max-width: 64ch; line-height: 1.55; }
+  .skills-scope { margin-top: 12px; }
+  .skills-scope :global(.knowledge-scope-row) { justify-content: flex-start; padding: 0; }
   .detail-heading, .detail-tabs { border-color: var(--color-border); }
   .secondary-action { border-color: transparent; border-radius: 7px; background: var(--color-surface-2); }
   .primary-action { border-color: transparent; }
   .detail-actions button:disabled { border-color: transparent; background: transparent; opacity: 0.55; }
+  /* A disabled solid action turns into a neutral surface instead of a faded accent. */
+  .detail-actions .primary-action:disabled { background: var(--color-surface-3); color: var(--color-text-muted); box-shadow: none; opacity: 1; cursor: not-allowed; }
   .filter-grid :global(button[aria-haspopup='listbox']) { border-color: var(--color-border); border-radius: 7px; background: var(--color-surface-1); }
-  .health-summary { border-bottom: 0; background: transparent; padding-inline: 0; }
+  .health-summary { border-bottom: 0; background: transparent; padding: 0 32px 12px; }
 
   /* The supporting tabs use rhythm and typography to group content. Keep the
      main Instructions editor as the visual anchor instead of stacking cards
@@ -2258,6 +2264,7 @@
     .detail-actions { margin-left: auto; }
   }
   @container skills (max-width: 560px) {
+    .skills-header { padding: 20px 16px 12px; }
     .detail-heading { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 16px; }
     .detail-title { width: 100%; }
     .detail-actions { margin-left: 0; width: 100%; }

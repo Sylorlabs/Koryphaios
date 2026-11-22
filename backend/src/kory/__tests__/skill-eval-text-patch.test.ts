@@ -15,7 +15,7 @@ import {
   applySkillEvalTextPatch,
   parseSkillEvalTextPatch,
   snapshotSkillEvalWorkspace,
-} from '../skill-eval-text-patch';
+} from '../../eval/skills/skill-eval-text-patch';
 
 const roots: string[] = [];
 

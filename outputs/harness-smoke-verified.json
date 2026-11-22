@@ -1,0 +1,1184 @@
+{
+  "completed": true,
+  "startedAt": "2026-10-22T04:53:15.433Z",
+  "revision": "5e0f43e47e6681e5cb6e75cde4b1585c319cf683",
+  "dirtyWorktree": true,
+  "frontendEntrySha256": "fe7a26168faa29f0030160e3c3603c1297f6981ba3d4c69e6085cb60e66e96bf",
+  "bun": "1.3.14",
+  "platform": "darwin",
+  "arch": "arm64",
+  "host": {
+    "cpu": "Apple M5",
+    "cores": 10,
+    "loadAverage": [
+      50.04833984375,
+      59.81689453125,
+      67.4111328125
+    ],
+    "freeMiB": 175.671875,
+    "totalMiB": 24576
+  },
+  "workload": {
+    "sessions": 8,
+    "messagesPerSession": 120,
+    "rounds": 1,
+    "streamBatches": 30,
+    "deadlineMs": 180000,
+    "syntheticProvider": true,
+    "profiling": false,
+    "backendMode": "source, NODE_ENV=test"
+  },
+  "budgets": {
+    "apiP95Ms": 100,
+    "switchP95Ms": 250,
+    "inputP95Ms": 100,
+    "backendPeakMiB": 512,
+    "rendererHeapPeakMiB": 512
+  },
+  "startupMs": 2436.930708,
+  "apiLatencyMs": [
+    {
+      "count": 240,
+      "p50": 20.569166000000223,
+      "p95": 115.49837499999921,
+      "max": 152.7842500000006
+    }
+  ],
+  "browserVersion": "151.0.7922.34",
+  "pageErrors": [],
+  "browserCheckpoints": [
+    {
+      "name": "idle",
+      "heapMiB": 13.855026245117188,
+      "browserRssMiB": 380.3125,
+      "backendRssMiB": 266.578125,
+      "nodes": 3171,
+      "documents": 5,
+      "layoutCount": 18,
+      "hostLoadAverage": [
+        46.03466796875,
+        58.45263671875,
+        66.7919921875
+      ]
+    },
+    {
+      "name": "switch-round-1",
+      "heapMiB": 42.90348815917969,
+      "browserRssMiB": 511.828125,
+      "backendRssMiB": 284.28125,
+      "nodes": 15178,
+      "documents": 16,
+      "layoutCount": 186,
+      "hostLoadAverage": [
+        46.03466796875,
+        58.45263671875,
+        66.7919921875
+      ]
+    },
+    {
+      "name": "stream-complete",
+      "heapMiB": 24.647750854492188,
+      "browserRssMiB": 575.09375,
+      "backendRssMiB": 283.125,
+      "nodes": 6879,
+      "documents": 2,
+      "layoutCount": 545,
+      "hostLoadAverage": [
+        45.39111328125,
+        58.11279296875,
+        66.623046875
+      ]
+    },
+    {
+      "name": "deleted-idle-10s",
+      "heapMiB": 26.581039428710938,
+      "browserRssMiB": 522.984375,
+      "backendRssMiB": 97.53125,
+      "nodes": 7199,
+      "documents": 2,
+      "layoutCount": 562,
+      "hostLoadAverage": [
+        41.04150390625,
+        56.7724609375,
+        66.04833984375
+      ]
+    },
+    {
+      "name": "deleted-after-forced-gc-diagnostic-only",
+      "heapMiB": 14.872180938720703,
+      "browserRssMiB": 408.328125,
+      "backendRssMiB": 97.53125,
+      "nodes": 6029,
+      "documents": 2,
+      "layoutCount": 562,
+      "hostLoadAverage": [
+        41.04150390625,
+        56.7724609375,
+        66.04833984375
+      ]
+    }
+  ],
+  "browserReadyMs": 893.7961670000004,
+  "switchLatencyMs": [
+    {
+      "count": 8,
+      "p50": 290.0803330000017,
+      "p95": 367.2220409999991,
+      "max": 367.2220409999991
+    }
+  ],
+  "streaming": {
+    "lanes": 32,
+    "events": 1024,
+    "elapsedMs": 3867.4705410000024,
+    "inputToPaintMs": {
+      "count": 30,
+      "p50": 17.325207999998383,
+      "p95": 64.5100420000017,
+      "max": 146.1854999999996
+    }
+  },
+  "streamingFramesMs": {
+    "count": 462,
+    "p50": 8.199999999998909,
+    "p95": 9.099999999998545,
+    "max": 40.69999999999891
+  },
+  "streamingLongTasksMs": {
+    "count": 0,
+    "p50": 0,
+    "p95": 0,
+    "max": 0
+  },
+  "budgetFailures": [
+    "API round 1 p95 exceeds 100 ms",
+    "Switch round 1 p95 exceeds 250 ms"
+  ],
+  "budgetsPassed": false,
+  "backend": {
+    "startup": {
+      "rssMiB": {
+        "count": 2,
+        "p50": 194.625,
+        "p95": 336.421875,
+        "max": 336.421875
+      },
+      "heapUsedMiB": {
+        "count": 2,
+        "p50": 0.1672801971435547,
+        "p95": 52.25221061706543,
+        "max": 52.25221061706543
+      },
+      "timerDelayMs": {
+        "count": 2,
+        "p50": 942.4285,
+        "p95": 951.9976660000002,
+        "max": 951.9976660000002
+      }
+    },
+    "idle": {
+      "rssMiB": {
+        "count": 19,
+        "p50": 337.8125,
+        "p95": 337.8125,
+        "max": 337.8125
+      },
+      "heapUsedMiB": {
+        "count": 19,
+        "p50": 53.28957271575928,
+        "p95": 53.28957271575928,
+        "max": 53.28957271575928
+      },
+      "timerDelayMs": {
+        "count": 19,
+        "p50": 2.186666999999943,
+        "p95": 21.66604099999995,
+        "max": 21.66604099999995
+      }
+    },
+    "api": {
+      "rssMiB": {
+        "count": 4,
+        "p50": 374.0625,
+        "p95": 374.921875,
+        "max": 374.921875
+      },
+      "heapUsedMiB": {
+        "count": 4,
+        "p50": 54.217599868774414,
+        "p95": 54.3786735534668,
+        "max": 54.3786735534668
+      },
+      "timerDelayMs": {
+        "count": 4,
+        "p50": 2.1488749999998618,
+        "p95": 39.53904199999943,
+        "max": 39.53904199999943
+      }
+    },
+    "browser-launch": {
+      "rssMiB": {
+        "count": 3,
+        "p50": 375.375,
+        "p95": 375.375,
+        "max": 375.375
+      },
+      "heapUsedMiB": {
+        "count": 3,
+        "p50": 54.5261287689209,
+        "p95": 54.5261287689209,
+        "max": 54.5261287689209
+      },
+      "timerDelayMs": {
+        "count": 3,
+        "p50": 4.05895799999962,
+        "p95": 25.28137500000048,
+        "max": 25.28137500000048
+      }
+    },
+    "browser-startup": {
+      "rssMiB": {
+        "count": 3,
+        "p50": 327.53125,
+        "p95": 375.5625,
+        "max": 375.5625
+      },
+      "heapUsedMiB": {
+        "count": 3,
+        "p50": 54.53862380981445,
+        "p95": 55.023664474487305,
+        "max": 55.023664474487305
+      },
+      "timerDelayMs": {
+        "count": 3,
+        "p50": 10.079499999999825,
+        "p95": 25.84954199999993,
+        "max": 25.84954199999993
+      }
+    },
+    "browser-idle": {
+      "rssMiB": {
+        "count": 19,
+        "p50": 266.578125,
+        "p95": 287.1875,
+        "max": 287.1875
+      },
+      "heapUsedMiB": {
+        "count": 19,
+        "p50": 56.24701690673828,
+        "p95": 56.25664520263672,
+        "max": 56.25664520263672
+      },
+      "timerDelayMs": {
+        "count": 19,
+        "p50": 2.719875000000684,
+        "p95": 31.309290999999575,
+        "max": 31.309290999999575
+      }
+    },
+    "switching": {
+      "rssMiB": {
+        "count": 11,
+        "p50": 278.859375,
+        "p95": 284.28125,
+        "max": 284.28125
+      },
+      "heapUsedMiB": {
+        "count": 11,
+        "p50": 62.46185874938965,
+        "p95": 68.23584842681885,
+        "max": 68.23584842681885
+      },
+      "timerDelayMs": {
+        "count": 11,
+        "p50": 7.275707999999213,
+        "p95": 42.55254199999945,
+        "max": 42.55254199999945
+      }
+    },
+    "streaming": {
+      "rssMiB": {
+        "count": 16,
+        "p50": 285.40625,
+        "p95": 285.40625,
+        "max": 285.40625
+      },
+      "heapUsedMiB": {
+        "count": 16,
+        "p50": 69.80236339569092,
+        "p95": 69.80590057373047,
+        "max": 69.80590057373047
+      },
+      "timerDelayMs": {
+        "count": 16,
+        "p50": 1.7657910000016273,
+        "p95": 54.25149999999849,
+        "max": 54.25149999999849
+      }
+    },
+    "recovery": {
+      "rssMiB": {
+        "count": 43,
+        "p50": 272.515625,
+        "p95": 284.28125,
+        "max": 287.890625
+      },
+      "heapUsedMiB": {
+        "count": 43,
+        "p50": 70.33975601196289,
+        "p95": 70.34556102752686,
+        "max": 70.37540340423584
+      },
+      "timerDelayMs": {
+        "count": 43,
+        "p50": 1.7787500000013097,
+        "p95": 10.012625000003027,
+        "max": 18.35558300000048
+      }
+    }
+  },
+  "backendSamples": [
+    {
+      "phase": "startup",
+      "kind": "sample",
+      "rss": 204079104,
+      "heapUsed": 175406,
+      "timerDelayMs": 942.4285
+    },
+    {
+      "phase": "startup",
+      "kind": "sample",
+      "rss": 352763904,
+      "heapUsed": 54790414,
+      "timerDelayMs": 951.9976660000002
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 354222080,
+      "heapUsed": 55872702,
+      "timerDelayMs": 3.5335839999997916
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 354222080,
+      "heapUsed": 55872702,
+      "timerDelayMs": 21.66604099999995
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 354222080,
+      "heapUsed": 55872702,
+      "timerDelayMs": 9.557291999999961
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 354222080,
+      "heapUsed": 55872702,
+      "timerDelayMs": 0.7866670000003069
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 354222080,
+      "heapUsed": 55872702,
+      "timerDelayMs": 1.0225409999998192
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 354222080,
+      "heapUsed": 55872702,
+      "timerDelayMs": 0.15691700000024866
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 354222080,
+      "heapUsed": 55872702,
+      "timerDelayMs": 3.092957999999726
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 354222080,
+      "heapUsed": 55878167,
+      "timerDelayMs": 4.939916999999696
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 354222080,
+      "heapUsed": 55878167,
+      "timerDelayMs": 1.4413750000003347
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 354222080,
+      "heapUsed": 55878167,
+      "timerDelayMs": 1.0162499999996726
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 354222080,
+      "heapUsed": 55878167,
+      "timerDelayMs": 2.9001670000006925
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 354222080,
+      "heapUsed": 55878167,
+      "timerDelayMs": 6.030291000000034
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 353075200,
+      "heapUsed": 55878167,
+      "timerDelayMs": 1.0892499999999927
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 353075200,
+      "heapUsed": 55878167,
+      "timerDelayMs": 1.300083999999515
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 353075200,
+      "heapUsed": 55878167,
+      "timerDelayMs": 4.762875000000349
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 353337344,
+      "heapUsed": 55878167,
+      "timerDelayMs": 0.9385409999995318
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 353337344,
+      "heapUsed": 55878167,
+      "timerDelayMs": 0.1415420000002996
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 353337344,
+      "heapUsed": 55878167,
+      "timerDelayMs": 2.186666999999943
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 353337344,
+      "heapUsed": 55878167,
+      "timerDelayMs": 5.893000000000029
+    },
+    {
+      "phase": "api",
+      "kind": "sample",
+      "rss": 354320384,
+      "heapUsed": 56349225,
+      "timerDelayMs": 1.9559159999998883
+    },
+    {
+      "phase": "api",
+      "kind": "sample",
+      "rss": 392232960,
+      "heapUsed": 56851274,
+      "timerDelayMs": 2.1488749999998618
+    },
+    {
+      "phase": "api",
+      "kind": "sample",
+      "rss": 393101312,
+      "heapUsed": 56972754,
+      "timerDelayMs": 11.314792000000125
+    },
+    {
+      "phase": "api",
+      "kind": "sample",
+      "rss": 393134080,
+      "heapUsed": 57020172,
+      "timerDelayMs": 39.53904199999943
+    },
+    {
+      "phase": "browser-launch",
+      "kind": "sample",
+      "rss": 393609216,
+      "heapUsed": 57174790,
+      "timerDelayMs": 25.28137500000048
+    },
+    {
+      "phase": "browser-launch",
+      "kind": "sample",
+      "rss": 393609216,
+      "heapUsed": 57174790,
+      "timerDelayMs": 4.05895799999962
+    },
+    {
+      "phase": "browser-launch",
+      "kind": "sample",
+      "rss": 393609216,
+      "heapUsed": 57174790,
+      "timerDelayMs": 2.0386250000010477
+    },
+    {
+      "phase": "browser-startup",
+      "kind": "sample",
+      "rss": 393805824,
+      "heapUsed": 57184098,
+      "timerDelayMs": 10.079499999999825
+    },
+    {
+      "phase": "browser-startup",
+      "kind": "sample",
+      "rss": 343441408,
+      "heapUsed": 57187892,
+      "timerDelayMs": 3.672500000000582
+    },
+    {
+      "phase": "browser-startup",
+      "kind": "sample",
+      "rss": 312573952,
+      "heapUsed": 57696494,
+      "timerDelayMs": 25.84954199999993
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 301137920,
+      "heapUsed": 58752130,
+      "timerDelayMs": 29.53162499999962
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 279527424,
+      "heapUsed": 58969456,
+      "timerDelayMs": 31.309290999999575
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 279543808,
+      "heapUsed": 58973774,
+      "timerDelayMs": 7.672249999999622
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 279543808,
+      "heapUsed": 58973774,
+      "timerDelayMs": 2.719875000000684
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 279543808,
+      "heapUsed": 58979080,
+      "timerDelayMs": 2.7831249999999272
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 279543808,
+      "heapUsed": 58979080,
+      "timerDelayMs": 0.9894169999988662
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 279543808,
+      "heapUsed": 58979080,
+      "timerDelayMs": 0.8449170000003505
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 279543808,
+      "heapUsed": 58979080,
+      "timerDelayMs": 1.019166000000041
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 279543808,
+      "heapUsed": 58979272,
+      "timerDelayMs": 4.631542000000991
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 279527424,
+      "heapUsed": 58979272,
+      "timerDelayMs": 1.996791999999914
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 279527424,
+      "heapUsed": 58979272,
+      "timerDelayMs": 1.0148329999992711
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 279527424,
+      "heapUsed": 58979272,
+      "timerDelayMs": 2.5643749999999272
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 279527424,
+      "heapUsed": 58988925,
+      "timerDelayMs": 20.869167000000743
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 279527424,
+      "heapUsed": 58988925,
+      "timerDelayMs": 4.603750000000218
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 279527424,
+      "heapUsed": 58988925,
+      "timerDelayMs": 1.0162079999990965
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 279527424,
+      "heapUsed": 58988925,
+      "timerDelayMs": 4.078125
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 279527424,
+      "heapUsed": 58988925,
+      "timerDelayMs": 2.9500829999997222
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 279527424,
+      "heapUsed": 58988925,
+      "timerDelayMs": 1.6090000000003783
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 279527424,
+      "heapUsed": 58989368,
+      "timerDelayMs": 0.5515420000010636
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 279527424,
+      "heapUsed": 58989368,
+      "timerDelayMs": 2.7738749999989523
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 285523968,
+      "heapUsed": 60272821,
+      "timerDelayMs": 42.55254199999945
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 287506432,
+      "heapUsed": 62153460,
+      "timerDelayMs": 1.696125000000393
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 287981568,
+      "heapUsed": 62162684,
+      "timerDelayMs": 2.4642080000012356
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 290586624,
+      "heapUsed": 63823443,
+      "timerDelayMs": 7.275707999999213
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 292405248,
+      "heapUsed": 65496006,
+      "timerDelayMs": 1.615125000000262
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 293945344,
+      "heapUsed": 66610453,
+      "timerDelayMs": 7.745041999998648
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 295862272,
+      "heapUsed": 67739441,
+      "timerDelayMs": 36.29608300000109
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 296976384,
+      "heapUsed": 68838479,
+      "timerDelayMs": 14.56275000000096
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 298090496,
+      "heapUsed": 71542056,
+      "timerDelayMs": 1.1384999999972933
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 298090496,
+      "heapUsed": 71550473,
+      "timerDelayMs": 8.848959000002651
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 299270144,
+      "heapUsed": 73183587,
+      "timerDelayMs": 54.25149999999849
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 299270144,
+      "heapUsed": 73192640,
+      "timerDelayMs": 2.4670829999995476
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 299270144,
+      "heapUsed": 73192640,
+      "timerDelayMs": 1.01129199999923
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 299270144,
+      "heapUsed": 73192640,
+      "timerDelayMs": 3.5237080000006245
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 299270144,
+      "heapUsed": 73192640,
+      "timerDelayMs": 0.996833000001061
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 299270144,
+      "heapUsed": 73192640,
+      "timerDelayMs": 9.323124999998981
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 299270144,
+      "heapUsed": 73192640,
+      "timerDelayMs": 2.2133340000000317
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 299270144,
+      "heapUsed": 73193083,
+      "timerDelayMs": 1.0182500000009895
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 299270144,
+      "heapUsed": 73196792,
+      "timerDelayMs": 0.4937500000014552
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 299171840,
+      "heapUsed": 73196792,
+      "timerDelayMs": 0.4864579999994021
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 299171840,
+      "heapUsed": 73196792,
+      "timerDelayMs": 0.38520799999969313
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 299171840,
+      "heapUsed": 73196792,
+      "timerDelayMs": 1.0148339999977907
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 299171840,
+      "heapUsed": 73196792,
+      "timerDelayMs": 1.7657910000016273
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 297189376,
+      "heapUsed": 73196792,
+      "timerDelayMs": 2.210624999999709
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 297156608,
+      "heapUsed": 73196792,
+      "timerDelayMs": 2.4590840000018943
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 296878080,
+      "heapUsed": 73196792,
+      "timerDelayMs": 3.2692499999975553
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 296878080,
+      "heapUsed": 73196792,
+      "timerDelayMs": 2.64929100000154
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 300646400,
+      "heapUsed": 73196792,
+      "timerDelayMs": 0.44520899999770336
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 301875200,
+      "heapUsed": 73733492,
+      "timerDelayMs": 18.35558300000048
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 298090496,
+      "heapUsed": 73741856,
+      "timerDelayMs": 1.997417000002315
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 298090496,
+      "heapUsed": 73741856,
+      "timerDelayMs": 7.258499999999913
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 297467904,
+      "heapUsed": 73741856,
+      "timerDelayMs": 5.972374999997555
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 293175296,
+      "heapUsed": 73741856,
+      "timerDelayMs": 1.0095410000030824
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 289685504,
+      "heapUsed": 73741856,
+      "timerDelayMs": 2.934124999999767
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 289554432,
+      "heapUsed": 73741856,
+      "timerDelayMs": 0.5521249999983411
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 289554432,
+      "heapUsed": 73741856,
+      "timerDelayMs": 7.059417000000394
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 289554432,
+      "heapUsed": 73741856,
+      "timerDelayMs": 1.0146249999997963
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 289554432,
+      "heapUsed": 73742299,
+      "timerDelayMs": 0.08587500000066939
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 289554432,
+      "heapUsed": 73756580,
+      "timerDelayMs": 3.3161250000011933
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 289554432,
+      "heapUsed": 73756580,
+      "timerDelayMs": 10.196957999996812
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 289554432,
+      "heapUsed": 73756580,
+      "timerDelayMs": 1.5650840000016615
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 289554432,
+      "heapUsed": 73756580,
+      "timerDelayMs": 1.0166250000002037
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 289554432,
+      "heapUsed": 73756580,
+      "timerDelayMs": 0.5855830000000424
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 286392320,
+      "heapUsed": 73756580,
+      "timerDelayMs": 4.696583000000828
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 286048256,
+      "heapUsed": 73756580,
+      "timerDelayMs": 1.014999999999418
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 285753344,
+      "heapUsed": 73756580,
+      "timerDelayMs": 1.9152089999988675
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 285753344,
+      "heapUsed": 73756580,
+      "timerDelayMs": 4.8116250000020955
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 285753344,
+      "heapUsed": 73756580,
+      "timerDelayMs": 0.41037499999947613
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 285753344,
+      "heapUsed": 73756580,
+      "timerDelayMs": 1.434332999997423
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 285491200,
+      "heapUsed": 73756580,
+      "timerDelayMs": 1.5013330000001588
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 285491200,
+      "heapUsed": 73756580,
+      "timerDelayMs": 10.012625000003027
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 285491200,
+      "heapUsed": 73756580,
+      "timerDelayMs": 0.1537499999976717
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 284950528,
+      "heapUsed": 73756580,
+      "timerDelayMs": 0.2034590000002936
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 284950528,
+      "heapUsed": 73756580,
+      "timerDelayMs": 0.5981659999997646
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 284950528,
+      "heapUsed": 73756580,
+      "timerDelayMs": 4.051834000001691
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 284950528,
+      "heapUsed": 73756580,
+      "timerDelayMs": 1.0182499999973516
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 284950528,
+      "heapUsed": 73757023,
+      "timerDelayMs": 5.492666000001918
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 284950528,
+      "heapUsed": 73762667,
+      "timerDelayMs": 2.59375
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 248528896,
+      "heapUsed": 73762667,
+      "timerDelayMs": 1.223333999998431
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 245956608,
+      "heapUsed": 73762667,
+      "timerDelayMs": 1.0351660000014817
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 208928768,
+      "heapUsed": 73762667,
+      "timerDelayMs": 0.614000000001397
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 175079424,
+      "heapUsed": 73762667,
+      "timerDelayMs": 1.015916999996989
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 165232640,
+      "heapUsed": 73762667,
+      "timerDelayMs": 1.7787500000013097
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 125812736,
+      "heapUsed": 73762667,
+      "timerDelayMs": 1.0190829999992275
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 102121472,
+      "heapUsed": 73762667,
+      "timerDelayMs": 3.504917000002024
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 102121472,
+      "heapUsed": 73762667,
+      "timerDelayMs": 3.71587499999805
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 102121472,
+      "heapUsed": 73762667,
+      "timerDelayMs": 6.004667000001064
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 102268928,
+      "heapUsed": 73762667,
+      "timerDelayMs": 6.111832999999024
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 156139520,
+      "heapUsed": 73793959,
+      "timerDelayMs": 9.218917000001966
+    }
+  ],
+  "deadlineExceeded": false,
+  "finishedAt": "2026-10-22T04:53:48.269Z"
+}

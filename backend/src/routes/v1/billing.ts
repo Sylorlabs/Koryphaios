@@ -12,6 +12,8 @@ import {
   summarizeSessionCosts,
   summarizeUsageAnalytics,
 } from '../../billing/cost-summary';
+import type { SessionCostSummary } from '../../billing/cost-summary';
+import type { UsageCostBreakdownRow } from '../../credit-accountant/db';
 import { getCliUsageReports } from '../../billing/cli-usage';
 import type { CliUsageReport } from '../../billing/cli-usage';
 import { getProviderBalances } from '../../billing/provider-balances';
@@ -289,6 +291,200 @@ function refreshPricingCatalogInBackground(): void {
   }
 }
 
+/**
+ * Builds the `sessions` map of `/session-costs`.
+ *
+ * Exported so a test can prove this payload is the complete, single source of
+ * a session price: it must carry the provider breakdown, otherwise the sidebar
+ * card has to fetch its own snapshot from another endpoint and can contradict
+ * the row it belongs to.
+ */
+export function sessionCostsPayload(
+  rows: UsageCostBreakdownRow[],
+): Record<string, SessionCostSummary> {
+  return summarizeSessionCosts(rows);
+}
+
+/**
+ * Local ledger reads for the billing panel: spend summaries, usage analytics,
+ * subscriptions, detected/configured accounts, and reconciliation. No live
+ * provider probes, so this stays fast even when a CLI scan or balance check
+ * is slow.
+ */
+async function buildBillingSummary(request: Request) {
+  const excluded = excludedProviders(request);
+
+  // Use the last known catalog synchronously, then refresh it for a later
+  // pass. Unknown historical rows are retried in bounded local batches.
+  const repricing = await safeBillingResult('repricing', () => repriceUnknownUsage(1_000), {
+    scanned: 0,
+    repriced: 0,
+  });
+  refreshPricingCatalogInBackground();
+
+  const reconciliation = await safeBillingResult('reconciliation', () => getReconciliation(), {
+    localEstimate: { totalCostUsd: 0, tokensIn: 0, tokensOut: 0, byModel: [] },
+    cloudReality: [],
+    driftPercent: null,
+    highlightDrift: false,
+  });
+  const allUsageRows = await safeBillingResult(
+    'usage-cost-breakdown',
+    () => getUsageCostBreakdown(),
+    [],
+  );
+  const visibleUsageRows = allUsageRows.filter((row) => providerAllowed(row.provider, excluded));
+  const spend = summarizeBillingSpend(visibleUsageRows);
+
+  const now = Date.now();
+  const ninetyOneDaysAgo = now - 91 * 24 * 60 * 60 * 1_000;
+  const rawUsageEvents = await safeBillingResult(
+    'usage-events-since',
+    () => getUsageEventsSince(ninetyOneDaysAgo),
+    [],
+  );
+  const visibleUsageEvents = rawUsageEvents.filter((row) =>
+    providerAllowed(row.provider, excluded),
+  );
+  const analytics = summarizeUsageAnalytics(visibleUsageEvents, now);
+
+  const configs = await safeBillingResult(
+    'providerConfig',
+    () => getContext().providers.getConfigs(),
+    {},
+  );
+
+  const providerStates = new Map(
+    getContext()
+      .providers.getStatus()
+      .map((provider) => [provider.name, provider] as const),
+  );
+  const detectedCliAccounts = discoverCliAccounts().map((account) => {
+    const providerState = providerStates.get(account.provider);
+    return {
+      ...account,
+      connectionState:
+        providerState?.connectionState === 'verified'
+          ? ('connected' as const)
+          : providerState?.connectionState === 'failed'
+            ? ('failed' as const)
+            : ('detected' as const),
+    };
+  });
+
+  const savedCredentials = await safeBillingResult(
+    'savedCredentials',
+    () => credentialsService.list(LOCAL_USER_ID, { isActive: true }),
+    [],
+  );
+
+  const subscriptions = getSubscriptionStatuses()
+    .filter((status) => providerAllowed(status.provider, excluded))
+    .map((status) => ({
+      provider: status.provider,
+      status: status.status,
+      rateLimitType: status.rateLimitType,
+      resetsAt: status.resetsAt,
+      resetsAtMs: status.resetsAt != null ? status.resetsAt * 1000 : undefined,
+      updatedAt: status.updatedAt,
+    }));
+
+  const availableBillingProviders = [
+    ...new Set([
+      ...allUsageRows.map((row) => row.provider),
+      ...Object.keys(configs),
+      ...detectedCliAccounts.map((entry) => entry.provider),
+    ]),
+  ]
+    .filter((provider) => provider && provider !== 'gemini')
+    .sort((a, b) => a.localeCompare(b));
+
+  return {
+    ok: true,
+    totalSpendUsd: spend.totalSpendUsd,
+    totalSpendCents: spend.totalSpendCents,
+    hasKnownSpend: spend.hasKnownSpend,
+    pricingIncomplete: spend.pricingIncomplete,
+    byProvider: spend.byProvider,
+    byModel: spend.byModel,
+    analytics,
+    subscriptions,
+    accounts: withDetectedCliAccounts(configuredAccounts(savedCredentials), detectedCliAccounts),
+    detectedCliAccounts,
+    reconciliation,
+    availableBillingProviders,
+    repricing,
+  };
+}
+
+/** Live provider probes for the billing panel: CLI quota reports and account
+ *  balances, which can be slow and are budgeted/cached separately. */
+async function buildBillingLive(request: Request, forceRefresh: boolean) {
+  const excluded = excludedProviders(request);
+  const configs = await safeBillingResult(
+    'providerConfig',
+    () => getContext().providers.getConfigs(),
+    {},
+  );
+  const keys: Record<string, string | undefined> = {};
+  for (const [name, cfg] of Object.entries(configs)) {
+    if (providerAllowed(name, excluded)) keys[name] = (cfg as { apiKey?: string }).apiKey;
+  }
+
+  const cliUsageResultPromise = readLiveSource(
+    'cliUsage',
+    cliUsageState,
+    () =>
+      getCliUsageReports({
+        githubToken: (configs as Record<string, { authToken?: string }>).copilot?.authToken,
+        forceRefresh,
+      }),
+    forceRefresh,
+  );
+  const balancesResultPromise = readLiveSource(
+    'providerBalances',
+    balanceState,
+    () => getProviderBalances(keys, { forceRefresh }),
+    forceRefresh,
+  );
+
+  const [cliUsageResult, balancesResult, koryAccountUsage] = await Promise.all([
+    cliUsageResultPromise,
+    balancesResultPromise,
+    safeBillingResult('koryAccountUsage', () => getKoryAccountUsage(), []),
+  ]);
+
+  const rawCliUsage = cliUsageResult.value;
+  const rawBalances = balancesResult.value;
+  const cliUsage = rawCliUsage.filter((entry) => providerAllowed(entry.provider, excluded));
+  const balances = rawBalances.filter((entry) => providerAllowed(entry.provider, excluded));
+  const providerBalance = summarizeProviderBalances(balances);
+
+  const availableBillingProviders = [
+    ...new Set([
+      ...rawCliUsage.map((entry) => entry.provider),
+      ...rawBalances.map((entry) => entry.provider),
+    ]),
+  ]
+    .filter((provider) => provider && provider !== 'gemini')
+    .sort((a, b) => a.localeCompare(b));
+
+  return {
+    ok: true,
+    remainingCents: providerBalance.availableCents,
+    balanceProviders: providerBalance.providers,
+    cliUsage,
+    balances,
+    koryAccountUsage,
+    availableBillingProviders,
+    sourceHealth: {
+      cliUsage: cliUsageResult.health,
+      providerBalances: balancesResult.health,
+    },
+    refreshing: cliUsageResult.refreshing || balancesResult.refreshing,
+  };
+}
+
 export const billingRoutes = new Elysia({ prefix: '/api/billing' })
   .get('/session-costs', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
@@ -301,21 +497,12 @@ export const billingRoutes = new Elysia({ prefix: '/api/billing' })
     const rows = (
       await safeBillingResult('session-costs', () => getUsageCostBreakdown(), [])
     ).filter((row) => providerAllowed(row.provider, excluded));
-    const detailed = summarizeSessionCosts(rows);
-    const sessions = Object.fromEntries(
-      Object.entries(detailed).map(([sessionId, summary]) => [
-        sessionId,
-        {
-          spendUsd: summary.spendUsd,
-          spendCents: summary.spendCents,
-          hasKnownCost: summary.hasKnownCost,
-          pricingIncomplete: summary.pricingIncomplete,
-          hasMeteredUsage: summary.hasMeteredUsage,
-          hasSubscriptionUsage: summary.hasSubscriptionUsage,
-        },
-      ]),
-    );
-    return { ok: true, sessions };
+    // This single projection is the only source of a session price. The row
+    // label and its tracked-spend card both read it, so they cannot disagree
+    // about which turns were billed or at which prices. Carrying the provider
+    // breakdown is cheap (one row per session/provider/model) and removes the
+    // second, independently-timed read that used to feed the card.
+    return { ok: true, sessions: sessionCostsPayload(rows) };
   })
   .get('/session/:sessionId', async ({ params, request, set }) => {
     if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
@@ -335,154 +522,28 @@ export const billingRoutes = new Elysia({ prefix: '/api/billing' })
     const summary = summarizeSessionCosts(rows)[params.sessionId] ?? null;
     return { ok: true, summary };
   })
+  .get('/summary', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
+    return buildBillingSummary(request);
+  })
+  .get('/live', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
+    const forceRefresh = new URL(request.url).searchParams.get('refresh') === '1';
+    return buildBillingLive(request, forceRefresh);
+  })
   .get('/credits', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
     const requestUrl = new URL(request.url);
     const forceRefresh = requestUrl.searchParams.get('refresh') === '1';
-    const excluded = excludedProviders(request);
-
-    // Use the last known catalog synchronously, then refresh it for a later
-    // pass. Unknown historical rows are retried in bounded local batches.
-    const repricing = await safeBillingResult('repricing', () => repriceUnknownUsage(1_000), {
-      scanned: 0,
-      repriced: 0,
-    });
-    refreshPricingCatalogInBackground();
-
-    const reconciliation = await safeBillingResult('reconciliation', () => getReconciliation(), {
-      localEstimate: { totalCostUsd: 0, tokensIn: 0, tokensOut: 0, byModel: [] },
-      cloudReality: [],
-      driftPercent: null,
-      highlightDrift: false,
-    });
-    const allUsageRows = await safeBillingResult(
-      'usage-cost-breakdown',
-      () => getUsageCostBreakdown(),
-      [],
-    );
-    const visibleUsageRows = allUsageRows.filter((row) => providerAllowed(row.provider, excluded));
-    const spend = summarizeBillingSpend(visibleUsageRows);
-
-    const now = Date.now();
-    const ninetyOneDaysAgo = now - 91 * 24 * 60 * 60 * 1_000;
-    const rawUsageEvents = await safeBillingResult(
-      'usage-events-since',
-      () => getUsageEventsSince(ninetyOneDaysAgo),
-      [],
-    );
-    const visibleUsageEvents = rawUsageEvents.filter((row) =>
-      providerAllowed(row.provider, excluded),
-    );
-    const analytics = summarizeUsageAnalytics(visibleUsageEvents, now);
-
-    const configs = await safeBillingResult(
-      'providerConfig',
-      () => getContext().providers.getConfigs(),
-      {},
-    );
-    const keys: Record<string, string | undefined> = {};
-    for (const [name, cfg] of Object.entries(configs)) {
-      if (providerAllowed(name, excluded)) keys[name] = (cfg as { apiKey?: string }).apiKey;
-    }
-
-    const cliUsageResultPromise = readLiveSource(
-      'cliUsage',
-      cliUsageState,
-      () =>
-        getCliUsageReports({
-          githubToken: (configs as Record<string, { authToken?: string }>).copilot?.authToken,
-          forceRefresh,
-        }),
-      forceRefresh,
-    );
-    const balancesResultPromise = readLiveSource(
-      'providerBalances',
-      balanceState,
-      () => getProviderBalances(keys, { forceRefresh }),
-      forceRefresh,
-    );
-
-    const providerStates = new Map(
-      getContext()
-        .providers.getStatus()
-        .map((provider) => [provider.name, provider] as const),
-    );
-    const detectedCliAccounts = discoverCliAccounts().map((account) => {
-      const providerState = providerStates.get(account.provider);
-      return {
-        ...account,
-        connectionState:
-          providerState?.connectionState === 'verified'
-            ? ('connected' as const)
-            : providerState?.connectionState === 'failed'
-              ? ('failed' as const)
-              : ('detected' as const),
-      };
-    });
-
-    const [cliUsageResult, balancesResult, savedCredentials, koryAccountUsage] = await Promise.all([
-      cliUsageResultPromise,
-      balancesResultPromise,
-      safeBillingResult(
-        'savedCredentials',
-        () => credentialsService.list(LOCAL_USER_ID, { isActive: true }),
-        [],
-      ),
-      safeBillingResult('koryAccountUsage', () => getKoryAccountUsage(), []),
+    const [summary, live] = await Promise.all([
+      buildBillingSummary(request),
+      buildBillingLive(request, forceRefresh),
     ]);
-
-    const rawCliUsage = cliUsageResult.value;
-    const rawBalances = balancesResult.value;
-    const cliUsage = rawCliUsage.filter((entry) => providerAllowed(entry.provider, excluded));
-    const balances = rawBalances.filter((entry) => providerAllowed(entry.provider, excluded));
-    const providerBalance = summarizeProviderBalances(balances);
-    const subscriptions = getSubscriptionStatuses()
-      .filter((status) => providerAllowed(status.provider, excluded))
-      .map((status) => ({
-        provider: status.provider,
-        status: status.status,
-        rateLimitType: status.rateLimitType,
-        resetsAt: status.resetsAt,
-        resetsAtMs: status.resetsAt != null ? status.resetsAt * 1000 : undefined,
-        updatedAt: status.updatedAt,
-      }));
-
-    const availableBillingProviders = [
-      ...new Set([
-        ...allUsageRows.map((row) => row.provider),
-        ...Object.keys(configs),
-        ...rawCliUsage.map((entry) => entry.provider),
-        ...rawBalances.map((entry) => entry.provider),
-        ...detectedCliAccounts.map((entry) => entry.provider),
-      ]),
-    ]
-      .filter((provider) => provider && provider !== 'gemini')
-      .sort((a, b) => a.localeCompare(b));
-
     return {
-      ok: true,
-      totalSpendUsd: spend.totalSpendUsd,
-      totalSpendCents: spend.totalSpendCents,
-      hasKnownSpend: spend.hasKnownSpend,
-      pricingIncomplete: spend.pricingIncomplete,
-      remainingCents: providerBalance.availableCents,
-      balanceProviders: providerBalance.providers,
-      byProvider: spend.byProvider,
-      byModel: spend.byModel,
-      analytics,
-      subscriptions,
-      cliUsage,
-      balances,
-      koryAccountUsage,
-      accounts: withDetectedCliAccounts(configuredAccounts(savedCredentials), detectedCliAccounts),
-      detectedCliAccounts,
-      reconciliation,
-      availableBillingProviders,
-      repricing,
-      sourceHealth: {
-        cliUsage: cliUsageResult.health,
-        providerBalances: balancesResult.health,
-      },
-      refreshing: cliUsageResult.refreshing || balancesResult.refreshing,
+      ...summary,
+      ...live,
+      availableBillingProviders: [
+        ...new Set([...summary.availableBillingProviders, ...live.availableBillingProviders]),
+      ].sort((a, b) => a.localeCompare(b)),
     };
   });

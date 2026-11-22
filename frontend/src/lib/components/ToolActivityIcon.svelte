@@ -37,7 +37,9 @@
   const running = $derived(grouped
     ? steps.some((step) => step.type === 'tool_call')
     : entry.type === 'tool_call');
-  const icon = $derived(grouped ? 'folder' : tool.icon);
+  // A skill row is emitted by the turn's own skill selection, not by a tool
+  // call, so it carries no tool metadata to derive its icon from.
+  const icon = $derived(entry.type === 'skill' ? 'skill' : grouped ? 'folder' : tool.icon);
   const glyph = $derived(activityGlyphs[icon].svg);
   const isTerminal = $derived(icon === 'command');
   // Every icon keeps its own hue so the rail reads as a colourful set, not a
@@ -49,7 +51,7 @@
     'checklist': '#86efac', 'note': '#fcd34d', 'base': '#818cf8', 'network': '#c084fc',
     'canvas': '#5eead4', 'properties': '#f472b6', 'history': '#fb923c', 'draft': '#a3e635',
     'attachment': '#94a3b8', 'critic': '#34d399', 'agent': '#e879f9', 'session': '#93c5fd',
-    'git': '#f87171', 'context': '#67e8f9', 'tool': '#f97316',
+    'git': '#f87171', 'context': '#67e8f9', 'skill': '#a78bfa', 'tool': '#f97316',
   };
   const glyphColor = $derived(glyphColors[icon]);
   const Badge = $derived(failed ? AlertTriangle : tool.workspace ? badges[tool.intent] : undefined);

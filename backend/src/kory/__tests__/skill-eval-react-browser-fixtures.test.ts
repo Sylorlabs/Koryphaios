@@ -5,13 +5,13 @@ import { join } from 'node:path';
 import { chromium } from 'playwright';
 import { browserControlTest } from './browser-runtime-test-policy';
 import { isWindows } from '../../runtime/platform';
-import { auditSkillEvalExecutionReadiness } from '../skill-eval-execution';
+import { auditSkillEvalExecutionReadiness } from '../../eval/skills/skill-eval-execution';
 import {
   BUILTIN_SKILL_EVAL_MATERIALIZERS,
   BUILTIN_SKILL_EVAL_SCORERS,
-} from '../skill-eval-fixtures';
-import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
-import { writeFixtureFile } from '../skill-eval-fixture-helpers';
+} from '../../eval/skills/skill-eval-fixtures';
+import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
+import { writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
 import { loadV5SkillPackages } from '../skill-packages';
 import {
   REACT_BROWSER_EVAL_CONSTANTS,
@@ -19,7 +19,7 @@ import {
   REACT_BROWSER_SKILL_EVAL_SCORERS,
   reactBrowserReadiness,
   writeReactBrowserFixtureContract,
-} from '../skill-eval-react-browser-fixtures';
+} from '../../eval/skills/skill-eval-react-browser-fixtures';
 
 const SEARCH = 'react-engineering-full-task-1-individual';
 const LIST = 'react-engineering-full-task-2-individual';
@@ -253,13 +253,17 @@ test('registered real-browser evaluators supersede both external React environme
     BUILTIN_SKILL_EVAL_MATERIALIZERS,
     BUILTIN_SKILL_EVAL_SCORERS,
   );
-  for (const id of [SEARCH, LIST]) {
+  for (const id of [SEARCH, LIST] as const) {
     const row = readiness.find((item) => item.scenarioId === id);
     expect(row).toBeDefined();
     expect(row?.ready).toBe(reactBrowserReadiness().length === 0);
     expect(row?.reasons).toEqual(reactBrowserReadiness());
-    expect(row?.materializerId).toContain('real-react-chromium@2');
-    expect(row?.deterministicScorerId).toContain('real-react-chromium-scorer@1');
+    expect(row?.materializerId).toContain(
+      id === SEARCH ? 'search-real-react-chromium@3' : 'keyed-window-real-react-chromium@3',
+    );
+    expect(row?.deterministicScorerId).toContain(
+      id === SEARCH ? 'search-real-react-chromium-scorer@2' : 'keyed-window-real-react-chromium-scorer@2',
+    );
   }
 }, 90_000);
 

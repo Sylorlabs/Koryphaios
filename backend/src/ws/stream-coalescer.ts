@@ -21,7 +21,7 @@ function coalesceKey(message: WSMessage): string | null {
   return `${message.sessionId}:${message.type}:${payload.agentId}`;
 }
 
-function mergePayload(
+export function mergePayload(
   existing: WSMessage['payload'],
   incoming: WSMessage['payload'],
 ): WSMessage['payload'] {

@@ -7,7 +7,7 @@ import {
   mongodbRuntimeReadiness,
   runMongoAtomicUpdateRuntime,
   runMongoIndexRuntime,
-} from '../skill-eval-mongodb-runtime';
+} from '../../eval/skills/skill-eval-mongodb-runtime';
 
 const roots: string[] = [];
 

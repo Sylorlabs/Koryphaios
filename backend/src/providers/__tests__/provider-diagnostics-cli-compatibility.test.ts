@@ -102,7 +102,7 @@ describe('runtime diagnostics CLI compatibility context', () => {
     expect(context.supportedVersions).toBe('unknown');
     expect(context.liveVerification).toBe('not-established');
     expect(context.versionBoundary.kind).toBe('source-reference');
-    expect(context.versionBoundary.detail).toContain('0.2.16');
+    expect(context.versionBoundary.detail).toContain('0.2.36');
     expect(context.versionBoundary.detail).toContain('synthetic');
     expect(JSON.stringify(context)).not.toContain('run untrusted command');
     expect(JSON.stringify(diagnostic)).not.toContain('synthetic-private-token');

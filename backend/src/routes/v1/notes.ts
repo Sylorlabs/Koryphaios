@@ -343,9 +343,19 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
     };
   })
 
-  .post('/sync-project', async ({ request }) => {
+  .post('/sync-project', async ({ request, body }) => {
+    const projectRoot = getRequestProjectRoot(request);
+    const settings = loadNotesSettings(projectRoot);
+    const continueBeyondLimit =
+      !!body &&
+      typeof body === 'object' &&
+      (body as { continueBeyondLimit?: unknown }).continueBeyondLimit === true;
+    // 0 means no soft limit: either the user asked to continue past it for this
+    // pass, or they disabled it for the project.
+    const maxFiles =
+      continueBeyondLimit || !settings.indexScanLimitEnabled ? 0 : settings.indexScanLimit;
     const result = await traceBlockingOp('syncProjectDocuments', () =>
-      notesService.syncProjectDocuments(getRequestProjectRoot(request)),
+      notesService.syncProjectDocuments(projectRoot, { maxFiles }),
     );
     broadcastNotesNetworkUpdate('update', undefined, undefined, mutationOrigin(request));
     return { ok: true, data: result };
@@ -469,6 +479,9 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
         attachmentSizeLimitEnabled: t.Optional(t.Boolean()),
         maxAttachmentBytes: t.Optional(t.Number()),
         maxAttachmentsPerNote: t.Optional(t.Number()),
+        indexScanLimitEnabled: t.Optional(t.Boolean()),
+        indexScanLimit: t.Optional(t.Number()),
+        hideIndexLimitNotice: t.Optional(t.Boolean()),
         defaultFolderPath: t.Optional(t.String()),
         graphPhysics: t.Optional(
           t.Object({

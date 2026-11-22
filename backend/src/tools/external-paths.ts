@@ -27,6 +27,19 @@ export const FILE_MUTATING_TOOLS = new Set([
   'move_file',
 ]);
 
+/** Anything that can write into the workspace, files or not: the file tools
+ *  plus shell and Git mutation. While a chat's workspace binding changed
+ *  mid-turn (isolate_chat/merge_chat_back) the pipeline denies these — the
+ *  turn's ToolContext still points at the pre-change directory. */
+export const WORKSPACE_MUTATING_TOOLS = new Set([
+  ...FILE_MUTATING_TOOLS,
+  'bash',
+  'shell_manage',
+  'git_switch',
+  'commit_and_create_pr',
+  'ghost_commit',
+]);
+
 /** Resolve missing leaves via the nearest existing ancestor. A dangling link
  * is an error, never authority to create a file beyond that link. */
 function canonicalTarget(path: string): string {
@@ -134,7 +147,8 @@ export class FilePathScope {
           .filter(
             (target) =>
               !isContainedBy(this.cwd, target.canonical) ||
-              !isContainedBy(this.literalCwd, target.literal),
+              (!isContainedBy(this.literalCwd, target.literal) &&
+                !isContainedBy(this.cwd, target.literal)),
           )
           .map((target) => target.canonical),
       ),

@@ -1265,7 +1265,7 @@ const BASE_SKILL_DEFINITIONS: SkillDefinition[] = [
       'security-infra',
     ],
     instructions:
-      'As manager in Critic Auto mode, decide whether this proposed response needs an independent review. Call request_critic_review with a concrete reason when another model could catch a material error, omission, unsupported claim, or risk. Do not call it for a trivial readiness check, a brief acknowledgement, or merely because the user says test. If the answer is straightforward and low risk, do not call it. Always and Off modes are separate user choices. After your turn finishes, the host asks whether you want a Critic. Declining skips review, including changes and delegated work. Accepting requires you to choose an enabled Critic model, preferring one different from the manager and builders. A request during work records a concern but does not replace this final decision.',
+      'As manager in Critic Auto mode, you alone decide whether this proposed response needs an independent review. Call request_critic_review with a concrete reason when another model could catch a material error, omission, unsupported claim, or risk. A bare readiness check or a brief acknowledgement is not by itself a reason to review, and a straightforward low-risk answer usually needs none — but the final call is always yours. Always and Off modes are separate user choices. After your turn finishes, the host asks whether you want a Critic and your answer is final: declining skips review, including changes and delegated work. Accepting requires you to choose an enabled Critic model, preferring one different from the manager and builders. If a Critic you chose fails to run, you will be asked to choose another or decline. A request during work records a concern but does not replace this final decision.',
     should: ['decide whether an answer needs independent review'],
     shouldNot: ['ask for review of a simple readiness check'],
     evidence: ['Reasoned review choice with a specific concern when requesting review'],
@@ -1667,10 +1667,9 @@ export const LEGACY_BUNDLED_SKILL_DEFINITIONS: readonly SkillDefinition[] =
 
 export const V5_SKILL_PACKAGE_CATALOG = loadV5SkillPackages();
 const V5_SKILL_PACKAGES_BY_NAME = new Map<string, V5CompiledSkillPackage>(
-  V5_SKILL_PACKAGE_CATALOG.packages.map((skillPackage) => [
-    skillPackage.sidecar.name,
-    skillPackage,
-  ]),
+  [...V5_SKILL_PACKAGE_CATALOG.packages, ...V5_SKILL_PACKAGE_CATALOG.runtimeControls].map(
+    (skillPackage) => [skillPackage.sidecar.name, skillPackage],
+  ),
 );
 
 /**
@@ -1757,7 +1756,10 @@ export interface BundledSkillDefinitionAudit {
  */
 export function auditBundledSkillDefinitions(): BundledSkillDefinitionAudit {
   const errors: string[] = [...V5_SKILL_PACKAGE_CATALOG.errors];
-  for (const skillPackage of V5_SKILL_PACKAGE_CATALOG.packages) {
+  for (const skillPackage of [
+    ...V5_SKILL_PACKAGE_CATALOG.packages,
+    ...V5_SKILL_PACKAGE_CATALOG.runtimeControls,
+  ]) {
     if (
       !GENERATED_BUNDLED_SKILL_DEFINITIONS.some((item) => item.name === skillPackage.sidecar.name)
     ) {
@@ -2366,6 +2368,30 @@ export function seedDefaultSkills(): void {
   // Record the seeded version only when the library is actually complete, so a
   // partial (read-only FS, crash) seed retries instead of being skipped.
   if (seedLibraryComplete(root)) writeSeedStateMarker(root);
+}
+
+/**
+ * Rewrite one bundled skill into the personal library, whatever the seed marker says.
+ *
+ * `seedDefaultSkills` only refreshes a seeded copy whose `baseHash` still matches its own body, which
+ * deliberately protects edited copies. That rule also protects a copy the seeder itself left behind at
+ * an older bundled version, and those are indistinguishable from an edit by metadata alone. This is the
+ * explicit repair path: it drops the local copy back to the bundled definition and reports the revision
+ * it produced, so a caller can verify the hash it expects instead of assuming the write took.
+ */
+export function reinstallBundledSkill(name: string): SkillRevision {
+  const definition = BUNDLED_SKILL_DEFINITIONS.find((candidate) => candidate.name === name);
+  if (!definition) throw new Error(`Unknown bundled skill ${JSON.stringify(name)}`);
+  const directory = join(personalRoot(), name);
+  const path = join(directory, 'SKILL.md');
+  mkdirSync(directory, { recursive: true });
+  const content = template(definition);
+  const temporary = `${path}.${process.pid}.tmp`;
+  writeFileSync(temporary, content);
+  renameSync(temporary, path);
+  const revision = readRevision(path, 'personal', 'active');
+  if (!revision) throw new Error(`Reinstalled ${name} but it could not be read back`);
+  return revision;
 }
 
 /**
@@ -4167,6 +4193,18 @@ export function resolveSkills(
     warnOnAuthoredBudgetOverflow?: boolean;
     skillRevisions?: readonly SkillRevision[];
     activePaths?: string[];
+    /** Skills the agent explicitly blocked for this session via
+     * manage_skill_feeding. A blocked skill is never selected for its own
+     * trigger, pin, or required-core status — the agent's refusal wins and a
+     * warning records the override. When a blocked skill is a hierarchy
+     * dependency of a selected skill it still appears, but only as a minimal
+     * stub, so the selected manifest remains hierarchy closed. */
+    agentBlocked?: readonly string[];
+    /** Skills whose full instructions the agent already holds in its live
+     * context (a load_skill_detail result that compaction, pruning, or a
+     * context shrink has not removed). They are fed as minimal pointers only,
+     * so the feeder does not re-stuff text the agent already ate. */
+    detailAlreadyInContext?: readonly string[];
   } = {},
 ): SkillResolverResult {
   const evidence = collectSkillEvidence(
@@ -4212,6 +4250,8 @@ export function resolveSkills(
   }
   const byName = new Map(candidates.map((skill) => [skill.name, skill]));
   const removed = new Set(options.remove ?? []);
+  const agentBlocked = new Set(options.agentBlocked ?? []);
+  const detailInContext = new Set(options.detailAlreadyInContext ?? []);
   const pins = new Set([
     ...(options.pins ?? []),
     ...explicitSkillPinsFromPrompt(prompt, byName.keys()),
@@ -4225,6 +4265,13 @@ export function resolveSkills(
   for (const skill of candidates) {
     if (removed.has(skill.name)) {
       candidateRejections.set(skill.name, 'Rejected: removed explicitly for this task');
+      continue;
+    }
+    if (agentBlocked.has(skill.name)) {
+      candidateRejections.set(
+        skill.name,
+        'Rejected: blocked by the agent for this session (manage_skill_feeding)',
+      );
       continue;
     }
     if (pins.has(skill.name)) {
@@ -4251,9 +4298,16 @@ export function resolveSkills(
   }
 
   const requiredCore = requiredCoreSkillNames(contract);
+  const agentBlockWarnings: string[] = [];
   for (const name of requiredCore) {
     if (removed.has(name)) {
       hierarchyErrors.push(`Required core skill ${name} was explicitly removed`);
+      continue;
+    }
+    if (agentBlocked.has(name)) {
+      agentBlockWarnings.push(
+        `Skill ${name} is blocked by the agent for this session; required-core guidance for this task was not injected`,
+      );
       continue;
     }
     if (!byName.has(name)) {
@@ -4270,6 +4324,10 @@ export function resolveSkills(
   }
   for (const name of pins) {
     if (removed.has(name)) hierarchyErrors.push(`Skill ${name} cannot be both pinned and removed`);
+    else if (agentBlocked.has(name))
+      agentBlockWarnings.push(
+        `Skill ${name} is blocked by the agent for this session; its pin was ignored`,
+      );
     else if (!byName.has(name))
       hierarchyErrors.push(`Pinned skill ${name} is unavailable or invalid`);
   }
@@ -4308,9 +4366,14 @@ export function resolveSkills(
   const recordRelationReason = (name: string, reason: string): void => {
     relationReasons.set(name, unique([...(relationReasons.get(name) ?? []), reason]));
   };
+  // A blocked skill can still enter as a hierarchy dependency of a selected
+  // skill: dropping it would leave the manifest unclosed. It renders minimal
+  // only (enforced below), so a block never re-feeds full guidance.
+  const blockedDependencyStubs = new Set<string>();
   const includeWithAncestors = (skill: SkillRevision, relationReason?: string): void => {
     if (relationReason) recordRelationReason(skill.name, relationReason);
     if (expanded.has(skill.name) || expanding.has(skill.name) || removed.has(skill.name)) return;
+    if (agentBlocked.has(skill.name)) blockedDependencyStubs.add(skill.name);
     expanding.add(skill.name);
     for (const broaderName of skill.metadata.broader) {
       const broader = byName.get(broaderName);
@@ -4494,7 +4557,21 @@ export function resolveSkills(
     }
   }
 
-  for (const skill of ordered) {
+  // The optional race admits skills in routing-priority order, then by the
+  // contextBudget each skill declares for itself: when the window is scarce,
+  // guidance whose author declared it cheaper packs more distinct skills into
+  // the same budget, and a skill that asked for more space accepts being cut
+  // first. Rendering order below stays `ordered`; only admission competes.
+  const raceOrder = [...ordered].sort((left, right) => {
+    const priority = routingPriority(right) - routingPriority(left);
+    if (priority) return priority;
+    const declaredBudget =
+      (left.metadata.contextBudget ?? Number.POSITIVE_INFINITY) -
+      (right.metadata.contextBudget ?? Number.POSITIVE_INFINITY);
+    if (declaredBudget) return declaredBudget;
+    return right.metadata.depth - left.metadata.depth || left.name.localeCompare(right.name);
+  });
+  for (const skill of raceOrder) {
     if (mandatory.has(skill.name)) continue;
     const dependencies = [...skill.metadata.broader, ...skill.metadata.requires].filter((name) =>
       expanded.has(name),
@@ -4525,8 +4602,16 @@ export function resolveSkills(
     // compact/full upgrades. Auto-included parents/requires/facets default to
     // minimal and stay there — full detail is one load_skill_detail call away —
     // so closure expansion costs ~minimal per ancestor instead of 8–20k chars
-    // of full text per turn per role.
-    .filter((skill) => directlySelectedNames.has(skill.name))
+    // of full text per turn per role. Skills whose full text the agent already
+    // holds in context (a live load_skill_detail result) and skills the agent
+    // blocked (admitted only as dependency stubs) stay minimal too: the feeder
+    // must not re-stuff guidance the agent already ate or refused.
+    .filter(
+      (skill) =>
+        directlySelectedNames.has(skill.name) &&
+        !detailInContext.has(skill.name) &&
+        !agentBlocked.has(skill.name),
+    )
     .sort((left, right) => {
       const priority = routingPriority(right) - routingPriority(left);
       return (
@@ -4633,8 +4718,9 @@ export function resolveSkills(
       reason.includes('incompatible') ||
       reason.includes('exclusion phrase') ||
       reason.includes('unavailable or invalid') ||
-      reason.includes('requires explicit user invocation')
-    )
+      reason.includes('requires explicit user invocation') ||
+      reason.includes('blocked by the agent')
+ )
       return 3;
     if (reason.includes('removed explicitly')) return 2;
     return 1;
@@ -4669,6 +4755,22 @@ export function resolveSkills(
       `Lazy hierarchy pruned ${omittedLazyAncestors.length} ancestor${omittedLazyAncestors.length === 1 ? '' : 's'} whose dependents all rendered minimal (${omittedLazyAncestors.slice(0, 8).join(', ')}${omittedLazyAncestors.length > 8 ? ', …' : ''}); load full detail on demand with load_skill_detail`,
     );
   }
+  if (detailInContext.size > 0) {
+    const stillSelected = selected
+      .filter((item) => detailInContext.has(item.skill.name))
+      .map((item) => item.skill.name);
+    if (stillSelected.length > 0) {
+      warnings.push(
+        `Fed as minimal pointers only; full guidance is already in this agent's context from load_skill_detail: ${stillSelected.join(', ')}`,
+      );
+    }
+  }
+  if (blockedDependencyStubs.size > 0) {
+    warnings.push(
+      `Agent-blocked skills appear only as minimal hierarchy dependency stubs: ${[...blockedDependencyStubs].sort().join(', ')}`,
+    );
+  }
+  warnings.push(...agentBlockWarnings);
   return {
     selected,
     collisions: effectiveCollisions,

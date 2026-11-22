@@ -274,25 +274,33 @@ describe('Git Workflow Integration Tests', () => {
       expect(existsSync(join(TEST_DIR, 'cleanup-test.txt'))).toBe(false);
     });
 
-    test('should enforce worktree limit', async () => {
-      // Create max number of worktrees
+    test('queues work beyond an explicit worktree limit and admits it when a slot frees', async () => {
+      // Earlier tests leave worktrees behind in this shared fixture. Reclaim
+      // them so the explicit cap is measured from zero.
+      for (const active of workspace.getStatus().active) {
+        await workspace.cleanup(active.id);
+      }
+      const limit = workspace.getStatus().maxAllowed ?? 4;
       const worktrees = [];
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < limit; i++) {
         const wt = await workspace.spawn(`limit-test-${i}`, `Limit test ${i}`, `agent-${i}`);
         if (wt) worktrees.push(wt);
       }
+      expect(worktrees).toHaveLength(limit);
 
-      // Try to create one more (should fail or return null)
-      const extra = await workspace.spawn('limit-test-extra', 'Should fail', 'agent-extra');
+      // One more waits in the queue instead of failing.
+      const extraPromise = workspace.spawn('limit-test-extra', 'Should queue', 'agent-extra');
+      // spawn() yields once before it reaches the FIFO queue.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(workspace.getStatus().availableSlots).toBe(0);
+      expect(workspace.getStatus().queued).toBe(1);
 
-      // Should either be null or we should be at capacity
-      const status = workspace.getStatus();
-      expect(status.availableSlots).toBeLessThanOrEqual(0);
-
-      // Cleanup
-      for (const wt of worktrees) {
-        await workspace.cleanup(wt.id);
-      }
+      // Releasing one slot admits the queued task.
+      await workspace.cleanup(worktrees[0]!.id);
+      const extra = await extraPromise;
+      expect(extra).not.toBeNull();
+      for (const wt of worktrees.slice(1)) await workspace.cleanup(wt.id);
+      await workspace.cleanup(extra!.id);
     });
   });
 

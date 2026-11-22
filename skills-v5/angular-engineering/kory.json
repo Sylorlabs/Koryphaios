@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "angular-engineering",
-  "version": "5.2.2",
+  "version": "5.2.3",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",

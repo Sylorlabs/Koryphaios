@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { OpenAIProvider } from '../openai';
+import type { ModelDef } from '@koryphaios/shared';
 import type { ProviderEvent, StreamRequest } from '../types';
 
 /**
@@ -412,5 +413,57 @@ describe('OpenAI stream usage and completion framing', () => {
     );
     expect(calls).toBe(1);
     expect(events.some((event) => event.type === 'error')).toBe(true);
+  });
+});
+
+describe('speed tiers in the request body', () => {
+  const provider = () => new OpenAIProvider({ name: 'openai', apiKey: 'k', disabled: false });
+  const done = ['{"id":"1","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}', '[DONE]'];
+
+  it('sends service_tier="priority" when speedTier is priority', async () => {
+    const bodies = installFetch(done);
+    await collect(provider(), request({ speedTier: 'priority' }));
+    expect(bodies[0].service_tier).toBe('priority');
+    expect(bodies[0].model).toBe('synthetic-model');
+  });
+
+  it('sends no service_tier for a non-priority or absent tier', async () => {
+    for (const speedTier of ['fast', undefined] as const) {
+      const bodies = installFetch(done);
+      await collect(provider(), request({ speedTier }));
+      expect('service_tier' in bodies[0]).toBe(false);
+    }
+  });
+
+  it('sends the folded variant slug for a slug-encoded speed tier', async () => {
+    const mimo: ModelDef = {
+      id: 'mimo-v2.6-pro',
+      apiModelId: 'mimo-v2.6-pro',
+      name: 'MiMo V2.6 Pro',
+      provider: 'openai',
+      contextWindow: 0,
+      contextVerified: false,
+      maxOutputTokens: 0,
+      costPerMInputTokens: 0,
+      costPerMOutputTokens: 0,
+      canReason: false,
+      supportsAttachments: false,
+      supportsStreaming: true,
+      speedTiers: [{ id: 'ultraspeed', label: 'UltraSpeed', description: 'faster' }],
+      speedVariants: { ultraspeed: { default: 'mimo-v2.6-pro-ultraspeed' } },
+    };
+    const instance = provider();
+    (instance as unknown as { cachedModels: ModelDef[] }).cachedModels = [mimo];
+    const bodies = installFetch(done);
+    await collect(instance, request({ model: 'mimo-v2.6-pro', speedTier: 'ultraspeed' }));
+    expect(bodies[0].model).toBe('mimo-v2.6-pro-ultraspeed');
+    // The variant slug is not an OpenAI service tier.
+    expect('service_tier' in bodies[0]).toBe(false);
+  });
+
+  it('keeps the base slug when the tier is off', async () => {
+    const bodies = installFetch(done);
+    await collect(provider(), request({ model: 'synthetic-model' }));
+    expect(bodies[0].model).toBe('synthetic-model');
   });
 });

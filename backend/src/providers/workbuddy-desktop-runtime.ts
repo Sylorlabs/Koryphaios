@@ -380,6 +380,18 @@ export function sidecarRuntimeDir(configDir: string): string {
   return join(tmpdir(), uidHash, instanceToken);
 }
 
+/**
+ * Control-socket names the desktop sidecar has used. Older builds write
+ * `sidecar-<uuid>.sock`; WorkBuddy AI 5.9.4 writes `s-<hash>.sock`
+ * (`pidFilePath()`'s sibling in the app's own sidecar module). Matching only
+ * the older name made `findRunningDesktopSidecar` return null on 5.9.4, which
+ * silently downgraded every turn to an unauthenticated direct spawn — the
+ * runtime then refused with "Authentication required".
+ */
+export function isSidecarControlSocketName(name: string): boolean {
+  return /^sidecar-[0-9a-f-]+\.sock$/i.test(name) || /^s-[0-9a-f]+\.sock$/i.test(name);
+}
+
 export interface RunningSidecar {
   pid: number;
   controlSocketPath: string;
@@ -422,7 +434,7 @@ export function findRunningDesktopSidecar(configDir: string): RunningSidecar | n
     }
     if (!controlSocketPath) {
       for (const entry of readdirSafe(runtimeDir)) {
-        if (/^sidecar-([a-f0-9]+)\.sock$/.test(entry)) {
+        if (isSidecarControlSocketName(entry)) {
           controlSocketPath = join(runtimeDir, entry);
           break;
         }

@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "pairId": "ios-swiftui-full-task-1-individual:b8e6b43e-49ae-45ef-965e-66396277a312",
+  "skill": "ios-swiftui",
+  "scenarioId": "ios-swiftui-full-task-1-individual",
+  "revisionHash": "b90c0182d09fd8dcee5f892599f2bf5aef3a98362b1ade06eb16c8ae2c99b0ca",
+  "packageVersion": "5.1.1",
+  "suiteId": "ios-swiftui:v5.1.1:held-out",
+  "evaluationContractHash": "c1b8b8cdabf7e8f2",
+  "evaluationContractVersion": 3,
+  "taskPrompt": "Fix a SwiftUI detail view that starts an async load in `onAppear`; rapidly navigating between two ids lets the first request finish late and overwrite the second view. Preserve NavigationStack behavior, bind task lifetime to view/id identity, handle cancellation and retry, and verify rapid navigation, background/foreground, offline error, Dynamic Type, and VoiceOver labels. Do not import Android/React state patterns.",
+  "arms": {
+    "with-skill": {
+      "workingDirectory": "outputs/skill-library-finish-plan/E-native-mobile-and-devices/paired/ios-t1/with-skill",
+      "baseFiles": [
+        ".kory-eval/ios-swiftui-native-contract.json",
+        "README.md",
+        "Sources/DetailFeature.swift",
+        "Sources/DocumentFeature.swift",
+        "Sources/DocumentSupport.swift",
+        "Sources/KoryApp.swift",
+        "Sources/NavigationSupport.swift"
+      ],
+      "skillContextInjected": true
+    },
+    "without-skill": {
+      "workingDirectory": "outputs/skill-library-finish-plan/E-native-mobile-and-devices/paired/ios-t1/without-skill",
+      "baseFiles": [
+        ".kory-eval/ios-swiftui-native-contract.json",
+        "README.md",
+        "Sources/DetailFeature.swift",
+        "Sources/DocumentFeature.swift",
+        "Sources/DocumentSupport.swift",
+        "Sources/KoryApp.swift",
+        "Sources/NavigationSupport.swift"
+      ],
+      "skillContextInjected": false
+    }
+  }
+}

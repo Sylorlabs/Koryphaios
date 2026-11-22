@@ -31,6 +31,10 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { whichBinary } from './cli-detection';
 import { getCliBridge, getKoryphaiosCodeBuddyHome } from './cli-bridges';
+import {
+  koryBridgeUnavailableError,
+  resolveKoryBridgeScript,
+} from './kory-cli-mcp-config';
 import type { Provider, ProviderEvent, ProviderMessage, StreamRequest, CliCommand } from './types';
 import { wrapCommand, inferenceSandboxPolicy } from '../collaboration/sandbox-runner';
 import { providerLog } from '../logger';
@@ -442,6 +446,15 @@ export function codeBuddySystemPromptArgs(systemPromptPath: string): string[] {
   return ['--system-prompt-file', systemPromptPath];
 }
 
+/**
+ * Pass the kory MCP server explicitly, and keep every other MCP source out of
+ * a Koryphaios turn. Verified against codebuddy 2.168.2: with these flags the
+ * init frame reports the server as `connected` and its tools in the tool list.
+ */
+export function codeBuddyMcpArgs(configPath: string): string[] {
+  return ['--mcp-config', configPath, '--strict-mcp-config'];
+}
+
 // ── Stream envelope types (identical shapes to claude-code.ts) ──────────────
 
 interface BuddyStreamEnvelope {
@@ -688,7 +701,10 @@ export class CodeBuddyProvider implements Provider {
     const disallowed = researchOnly
       ? ['Bash', 'Read', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Task', 'Agent']
       : ['Task', 'Agent'];
-    const allowedTools = researchOnly ? 'WebSearch,WebFetch' : ALLOWED_TOOLS;
+    // Headless `-p` cannot answer a permission prompt, so the kory MCP server
+    // must be pre-approved alongside the native toolset. Claude Code's tool
+    // allowlist form for a whole MCP server is the bare `mcp__<server>` prefix.
+    const allowedTools = researchOnly ? 'WebSearch,WebFetch' : `${ALLOWED_TOOLS},mcp__kory`;
 
     const researchRoot = researchOnly
       ? mkdtempSync(join(tmpdir(), 'kory-web-research-codebuddy-'))
@@ -701,8 +717,12 @@ export class CodeBuddyProvider implements Provider {
       '--verbose',
       '--model',
       cliModel,
+      // Kory is the permission authority: bypass the CLI's approval layer
+      // (CodeBuddy shares Claude Code's mode enum). --disallowedTools still
+      // hides native tools and --allowedTools pre-approves the kory set; a
+      // residual prompt would hang a headless turn.
       '--permission-mode',
-      request.harnessRole === 'critic' ? 'plan' : 'acceptEdits',
+      'bypassPermissions',
       '--allowedTools',
       allowedTools,
       '--disallowedTools',
@@ -752,26 +772,40 @@ export class CodeBuddyProvider implements Provider {
     );
     args.push(...codeBuddySystemPromptArgs(systemPromptArtifact.path));
 
+    // The kory MCP server is passed per turn rather than written into the
+    // managed home. CodeBuddy is a Claude Code fork whose user-scope MCP file
+    // is `$HOME/.codebuddy/.mcp.json` (verified with `codebuddy mcp add
+    // --scope user`), not `$HOME/.codebuddy/.codebuddy.json` as this adapter
+    // used to write — which is why kory__ tools were never discovered.
+    // `--mcp-config` is explicit, and `--strict-mcp-config` keeps the user's
+    // other MCP servers out of a Koryphaios turn: Kory owns the tool surface.
+    let mcpArtifact: ReturnType<typeof createPrivateCliTextArtifact> | undefined;
     if (!researchOnly) {
-      // Wire the kory MCP server into the isolated home's user-scope MCP file
-      // (~/.codebuddy/.codebuddy.json) so the CLI discovers kory__ tools.
       const mcpConfigs = buddyBridge?.buildMcpConfig(bridgeCtx);
+      if (
+        bridgeCtx.sessionId &&
+        (!mcpConfigs || mcpConfigs.length === 0) &&
+        !resolveKoryBridgeScript()
+      ) {
+        yield { type: 'error', error: koryBridgeUnavailableError('codebuddy') };
+        return;
+      }
       if (mcpConfigs && mcpConfigs.length > 0) {
         try {
-          const mcpConfigPath = join(codeBuddyHome, '.codebuddy.json');
-          if (existsSync(mcpConfigPath)) healManagedCliFile(mcpConfigPath);
-          const existing = existsSync(mcpConfigPath)
-            ? JSON.parse(readFileSync(mcpConfigPath, 'utf-8'))
-            : {};
-          existing.mcpServers = existing.mcpServers ?? {};
+          const servers: Record<string, unknown> = {};
           for (const srv of mcpConfigs) {
-            existing.mcpServers[srv.name] = {
+            servers[srv.name] = {
               command: srv.command,
               args: srv.args,
               env: srv.env,
+              type: 'stdio',
             };
           }
-          writeManagedCliFile(mcpConfigPath, JSON.stringify(existing, null, 2));
+          mcpArtifact = createPrivateCliTextArtifact(
+            'codebuddy-mcp',
+            JSON.stringify({ mcpServers: servers, disabledMcpServers: [] }, null, 2),
+          );
+          args.push(...codeBuddyMcpArgs(mcpArtifact.path));
         } catch (mcpErr) {
           providerLog.warn(
             safeProviderDiagnostic('codebuddy', 'configuration', mcpErr),
@@ -791,6 +825,7 @@ export class CodeBuddyProvider implements Provider {
             ...cliEnvironment.configDirs,
             ...(bridgeGrantDirectory ? [bridgeGrantDirectory] : []),
             systemPromptArtifact.directory,
+            ...(mcpArtifact ? [mcpArtifact.directory] : []),
             ...attachmentScope.artifacts.map((a) => a.directory),
           ],
           readonlyConfigDirs: cliEnvironment.readonlyConfigDirs,
@@ -801,7 +836,7 @@ export class CodeBuddyProvider implements Provider {
     assertPrivateValuesAbsentFromArgv(spawnArgs, [prompt, systemPrompt, request.systemPrompt]);
     const child = spawnWithPrivateArtifactCleanup(
       () => spawn(spawnBin, spawnArgs, { cwd, stdio: ['pipe', 'pipe', 'pipe'], env }),
-      [systemPromptArtifact, ...attachmentScope.artifacts],
+      [systemPromptArtifact, ...(mcpArtifact ? [mcpArtifact] : []), ...attachmentScope.artifacts],
       () => bridgeGrantLease?.cleanup(),
     );
     bridgeGrantLease?.bindToChild(child);

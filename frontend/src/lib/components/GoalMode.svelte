@@ -506,7 +506,7 @@
                 {/if}
                 <span class="sr-only">{meta.label}</span>
                 {#if item.evidence.length}
-                  <span class="mt-0.5 block break-words text-[10px] text-[var(--color-text-muted)]">
+                  <span class="mt-0.5 block break-words text-[11px] text-[var(--color-text-muted)]">
                     {item.evidence[item.evidence.length - 1]?.value}
                   </span>
                 {/if}
@@ -661,10 +661,10 @@
 
         {#if steered.linkedSessionIds.length}
           <div class="pt-2">
-            <div class="mb-1 flex items-center gap-1.5 text-[10px] font-medium text-[var(--color-text-muted)]">
+            <div class="mb-1 flex items-center gap-1.5 text-[11px] font-medium text-[var(--color-text-muted)]">
               <Link2 size={11} /> Chats used by this goal
             </div>
-            <p class="break-words text-[10px] text-[var(--color-text-muted)]">
+            <p class="break-words text-[11px] text-[var(--color-text-muted)]">
               {linkedChatNames(steered).join(', ')}
             </p>
           </div>
@@ -672,12 +672,12 @@
 
         {#if activity.length}
           <div class="mt-2 pt-2">
-            <div class="mb-1 text-[10px] font-medium text-[var(--color-text-muted)]">
+            <div class="mb-1 text-[11px] font-medium text-[var(--color-text-muted)]">
               Recent activity
             </div>
             <ul class="space-y-0.5">
               {#each activity as event (event.id)}
-                <li class="text-[10px] text-[var(--color-text-muted)]">
+                <li class="text-[11px] text-[var(--color-text-muted)]">
                   {activityMessage(event.message)}
                 </li>
               {/each}
@@ -722,7 +722,7 @@
                 <span class="min-w-0 flex-1 truncate text-[var(--color-text-secondary)]"
                   >{goal.objective}</span
                 >
-                <span class="shrink-0 tabular-nums text-[10px] text-[var(--color-text-muted)]"
+                <span class="shrink-0 tabular-nums text-[11px] text-[var(--color-text-muted)]"
                   >{formatGoalRuntimeLong(goal, now)}</span
                 >
                 {#if goalChatId(goal) !== sessionStore.activeSessionId}<ArrowUpRight
@@ -798,7 +798,7 @@
           {/if}
           {#if others.length}
             <span
-              class="shrink-0 rounded-full px-1.5 py-px text-[10px] font-medium tabular-nums text-[var(--color-text-muted)]"
+              class="shrink-0 rounded-full px-1.5 py-px text-[11px] font-medium tabular-nums text-[var(--color-text-muted)]"
               style="background: var(--color-surface-3);"
               >+{others.length} more</span
             >
@@ -823,7 +823,7 @@
                 : 'var(--color-accent)'};"
             ></span>
           </span>
-          <span class="tabular-nums text-[10px] text-[var(--color-text-muted)]">{progress}%</span>
+          <span class="tabular-nums text-[11px] text-[var(--color-text-muted)]">{progress}%</span>
         </span>
 
         <span

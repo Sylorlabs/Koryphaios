@@ -43,6 +43,9 @@ import {
   type VaultRestoreCommitCounts,
 } from './vault-archive';
 import { NOTES_HARD_MAX_ATTACHMENT_BYTES, NOTES_HARD_MAX_BYTES } from './notes-settings';
+import { noteContentFields, storedNoteContent } from './note-document';
+import { setNoteSearchText } from './note-search-index';
+import { writeRevisionBlob } from './note-revision-store';
 
 const PROJECT_DOCUMENT_PREFIX = 'project-document:';
 const INTERNAL_ROOT = '.koryphaios';
@@ -1324,18 +1327,24 @@ function insertRestoreRows(
     const userExists = note.userId
       ? !!database.query(`SELECT 1 FROM users WHERE id = ?`).get(note.userId)
       : false;
+    const contentFields = noteContentFields(note.content);
     database
       .query(
         `INSERT INTO notes (
-          id, title, content, folder_path, tags, pinned, include_in_context,
+          id, title, content, content_hash, content_bytes, aliases, has_refs,
+          folder_path, tags, pinned, include_in_context,
           format, project_root, revision, trashed_at, trash_reason, user_id,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         note.id,
         note.title,
-        note.content,
+        storedNoteContent(note.id, note.content),
+        contentFields.contentHash,
+        contentFields.contentBytes,
+        contentFields.aliases,
+        contentFields.hasRefs,
         note.folderPath,
         note.tagsJson,
         note.pinned,
@@ -1349,14 +1358,16 @@ function insertRestoreRows(
         note.createdAt,
         note.updatedAt,
       );
+    setNoteSearchText(note.id, note.title, note.content, note.tagsJson, database);
   }
   for (const revision of model.revisions) {
     database
       .query(
         `INSERT INTO note_revisions (
-          note_id, revision, project_root, operation, title, content, content_bytes,
-          folder_path, tags, pinned, include_in_context, format, source_path,
-          trashed_at, trash_reason, note_created_at, note_updated_at, created_at
+          note_id, revision, project_root, operation, title, content_blob_id,
+          content_bytes, folder_path, tags, pinned, include_in_context, format,
+          source_path, trashed_at, trash_reason, note_created_at,
+          note_updated_at, created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
@@ -1365,7 +1376,7 @@ function insertRestoreRows(
         plan.projectRoot,
         revision.operation,
         revision.title,
-        revision.content,
+        writeRevisionBlob(revision.content, database),
         revision.contentBytes,
         revision.folderPath,
         revision.tagsJson,

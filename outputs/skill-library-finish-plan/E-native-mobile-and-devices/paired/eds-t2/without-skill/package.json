@@ -1,0 +1,11 @@
+{
+  "name": "kory-eval-device-lifecycle",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "build:evidence": "bun run scripts/build-lifecycle-evidence.ts",
+    "build:analysis": "bun run scripts/build-threat-model.ts",
+    "build": "bun run build:evidence && bun run build:analysis"
+  }
+}

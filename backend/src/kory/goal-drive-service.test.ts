@@ -20,6 +20,7 @@ type Verdict = {
   feedback?: string;
   provider?: string;
   model?: string;
+  criticUnavailable?: boolean;
 };
 
 interface HarnessOptions {
@@ -408,6 +409,26 @@ describe('durable Goal Mode driver', () => {
         verified: false,
       }),
     ]);
+  });
+
+  test('pauses with a could-not-run blocker when the Critic infrastructure fails', async () => {
+    const state = harness({
+      critic: {
+        passed: false,
+        skipped: true,
+        criticUnavailable: true,
+        feedback: 'Critic could not run after 3 attempt(s)',
+      },
+    });
+    await state.driver.start('goal', {
+      sessionId: 'session',
+      provider: 'openai',
+      model: 'openai:test',
+    });
+    await waitFor(() => state.goal.status === 'paused');
+    expect(state.goal.blocker).toContain('Independent verification could not run');
+    expect(state.goal.blocker).toContain('Resume to retry verification');
+    expect(state.goal.blocker).not.toContain('disabled');
   });
 
   test('does not treat a skipped blocker verdict as critic-confirmed', async () => {

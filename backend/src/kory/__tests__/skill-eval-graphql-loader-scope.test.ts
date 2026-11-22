@@ -6,8 +6,8 @@ import {
   GRAPHQL_ENGINEERING_SKILL_EVAL_MATERIALIZERS,
   GRAPHQL_ENGINEERING_SKILL_EVAL_SCORERS,
   GRAPHQL_LOADER_REFERENCE_SOURCE,
-} from '../skill-eval-graphql-engineering-fixtures';
-import { readFixtureText, writeFixtureFile } from '../skill-eval-fixture-helpers';
+} from '../../eval/skills/skill-eval-graphql-engineering-fixtures';
+import { readFixtureText, writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
 
 const roots: string[] = [];
 const scenario = { id: 'graphql-engineering-full-task-2-individual' } as never;

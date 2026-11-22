@@ -494,15 +494,16 @@ export class CollaborationManager {
             commandBlocklist: pending.commandBlocklist || [],
           },
         });
-        if (!submission.accepted) {
-          if (submission.result.status === 'completed') {
+        if (submission.accepted !== true) {
+          if (submission.accepted !== 'queued' && submission.result.status === 'completed') {
             await this.resolveGuestPrompt(promptId, true);
           } else {
             log.warn(
               {
                 promptId,
-                status: submission.result.status,
-                reason: submission.result.reason,
+                status: submission.accepted === 'queued' ? 'queued' : submission.result.status,
+                reason:
+                  submission.accepted === 'queued' ? 'steer_queued' : submission.result.reason,
               },
               'Auto-executed guest prompt was not admitted; retaining approval',
             );
@@ -511,7 +512,7 @@ export class CollaborationManager {
           return;
         }
         await this.resolveGuestPrompt(promptId, true);
-        void submission.completion.catch((error) =>
+        void submission.completion.catch((error: unknown) =>
           log.error({ error, promptId }, 'Auto-executed guest prompt failed'),
         );
       } catch (error) {
@@ -652,7 +653,9 @@ export class CollaborationManager {
           // from the bundle); an unhandled rejection terminates Bun.
           const hostRelay = relayClient;
           void import('./remote-provider-host')
-            .then(({ startProviderHost }) => startProviderHost(hostRelay, hostName?.trim() || 'Host'))
+            .then(({ startProviderHost }) =>
+              startProviderHost(hostRelay, hostName?.trim() || 'Host'),
+            )
             .catch((err: unknown) => {
               log.error(
                 { err: err instanceof Error ? err.message : String(err) },

@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import {
   CORE_EXECUTION_SKILL_EVAL_MATERIALIZERS,
   CORE_EXECUTION_SKILL_EVAL_SCORERS,
-} from '../skill-eval-core-execution-fixtures';
-import { writeFixtureFile } from '../skill-eval-fixture-helpers';
+} from '../../eval/skills/skill-eval-core-execution-fixtures';
+import { writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
 
 const roots: string[] = [];
 const materializer = CORE_EXECUTION_SKILL_EVAL_MATERIALIZERS.find(

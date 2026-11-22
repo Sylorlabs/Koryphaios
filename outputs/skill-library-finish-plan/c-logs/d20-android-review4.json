@@ -1,0 +1,11 @@
+150 |   (!Number.isInteger(maxAssignments) || maxAssignments < 1)
+151 | ) {
+152 |   throw new Error(`Invalid --max-assignments=${String(maxArgument)}`);
+153 | }
+154 | if (!Number.isInteger(maxPerSkill) || maxPerSkill < 1 || maxPerSkill > 2) {
+155 |   throw new Error(`Invalid --max-per-skill=${String(maxPerSkillArgument)}; expected 1-2`);
+                  ^
+error: Invalid --max-per-skill=4; expected 1-2
+      at /Users/Shared/micah/Documents/koryphaios/scripts/run-skill-v5-blind-review-campaign.ts:155:13
+
+Bun v1.3.14 (macOS arm64)

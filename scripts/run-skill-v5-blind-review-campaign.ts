@@ -20,7 +20,17 @@ import { archiveNativeStageEvidence, verifyNativeStageEvidence, type NativeStage
 import { NATIVE_MAC_STAGE_MODE } from './native-reviewer-sandbox';
 import { strictJson, validateAdjudication } from './reviewer-json';
 
+import { assertPackagedEvalBackend } from './eval-backend-guard';
+
 const projectRoot = resolve(import.meta.dir, '..');
+// A reviewer turn reads a sealed packet through the same backend; a watcher restart
+// during it produces a reviewer failure that is not the reviewer's fault.
+if (
+  !process.argv.includes('--allow-watcher-backend') &&
+  !process.env.KORY_SKILL_EVAL_ALLOW_WATCHER_BACKEND?.trim()
+) {
+  await assertPackagedEvalBackend();
+}
 const reviewerAdapter =
   process.argv
     .find((argument) => argument.startsWith('--reviewer-adapter='))

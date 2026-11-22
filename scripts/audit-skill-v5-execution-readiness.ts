@@ -1,9 +1,9 @@
 import { resolve } from 'node:path';
-import { auditSkillEvalExecutionReadiness } from '../backend/src/kory/skill-eval-execution';
+import { auditSkillEvalExecutionReadiness } from '../backend/src/eval/skills/skill-eval-execution';
 import {
   BUILTIN_SKILL_EVAL_MATERIALIZERS,
   BUILTIN_SKILL_EVAL_SCORERS,
-} from '../backend/src/kory/skill-eval-fixtures';
+} from '../backend/src/eval/skills/skill-eval-fixtures';
 import { loadV5SkillPackages } from '../backend/src/kory/skill-packages';
 
 const projectRoot = resolve(import.meta.dir, '..');

@@ -1,5 +1,6 @@
 import { recordProviderModelPricing } from '../pricing';
 import type { ModelDef, ProviderName } from '@koryphaios/shared';
+import { buildModelParameters } from '@koryphaios/shared';
 import { createGenericModel } from './models';
 
 export const MODEL_LIST_CACHE_TTL_MS = 5 * 60_000;
@@ -172,6 +173,22 @@ export function enrichFromRemoteMetadata(raw: unknown, def: ModelDef): ModelDef 
     caps.supported_reasoning_efforts,
     Array.isArray(effortValues) ? effortValues : undefined,
   );
+  // OpenRouter-style parameter reporting: `supported_parameters` names the
+  // request keys the gateway forwards and `default_parameters` carries the
+  // model's own default values (null = unknown). Filtered to the keys
+  // Koryphaios actually sends.
+  const supportedParameters = firstStringArray(r.supported_parameters);
+  const defaultParameters =
+    r.default_parameters && typeof r.default_parameters === 'object'
+      ? (r.default_parameters as Record<string, unknown>)
+      : undefined;
+  const parameters = supportedParameters
+    ? buildModelParameters(
+        supportedParameters,
+        defaultParameters,
+        firstPositive(topProvider.max_completion_tokens) ?? maxOut ?? def.maxOutputTokens,
+      )
+    : undefined;
 
   if (
     ctx === undefined &&
@@ -180,7 +197,8 @@ export function enrichFromRemoteMetadata(raw: unknown, def: ModelDef): ModelDef 
     vision === undefined &&
     reasoning === undefined &&
     reasoningLevels === undefined &&
-    outputModalities === undefined
+    outputModalities === undefined &&
+    parameters === undefined
   ) {
     return def;
   }
@@ -199,6 +217,7 @@ export function enrichFromRemoteMetadata(raw: unknown, def: ModelDef): ModelDef 
       ? { vision, supportsAttachments: def.supportsAttachments || vision }
       : {}),
     ...(outputModalities !== undefined ? { outputModalities } : {}),
+    ...(parameters !== undefined && parameters.length > 0 ? { parameters } : {}),
   };
 }
 

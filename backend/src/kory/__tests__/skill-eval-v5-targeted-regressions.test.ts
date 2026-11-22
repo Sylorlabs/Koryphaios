@@ -5,18 +5,18 @@ import { join } from 'node:path';
 import {
   CONTRACT_CONCURRENCY_SKILL_EVAL_MATERIALIZERS,
   CONTRACT_CONCURRENCY_SKILL_EVAL_SCORERS,
-} from '../skill-eval-contract-concurrency-fixtures';
+} from '../../eval/skills/skill-eval-contract-concurrency-fixtures';
 import {
   FRONTEND_ENGINEERING_SKILL_EVAL_MATERIALIZERS,
   FRONTEND_ENGINEERING_SKILL_EVAL_SCORERS,
-} from '../skill-eval-frontend-engineering-fixtures';
-import { MODEL_DATA_CONCEPTS } from '../skill-eval-model-data-concept-fixtures';
+} from '../../eval/skills/skill-eval-frontend-engineering-fixtures';
+import { MODEL_DATA_CONCEPTS } from '../../eval/skills/skill-eval-model-data-concept-fixtures';
 import {
   REPOSITORY_COMMUNICATION_SKILL_EVAL_MATERIALIZERS,
   REPOSITORY_COMMUNICATION_SKILL_EVAL_SCORERS,
-} from '../skill-eval-repository-communication-fixtures';
-import { SYSTEMS_PROTOCOL_CONCEPTS } from '../skill-eval-systems-protocol-concept-fixtures';
-import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
+} from '../../eval/skills/skill-eval-repository-communication-fixtures';
+import { SYSTEMS_PROTOCOL_CONCEPTS } from '../../eval/skills/skill-eval-systems-protocol-concept-fixtures';
+import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
 import { loadV5SkillPackages } from '../skill-packages';
 
 const roots: string[] = [];
@@ -373,7 +373,9 @@ test('Queued Running Cancelled idempotent',()=>{ expect(reduceJob('Queued','star
     const segmentation = MODEL_DATA_CONCEPTS.find(
       (item) => item.id === 'computer-vision-full-task-2-individual',
     )!;
-    expect(detector.generation).toBe(2);
+    // 3: the contract now states that TP/FP/FN are intermediate counts excluded
+    // from the exact result shape.
+    expect(detector.generation).toBe(3);
     expect(detector.contract).toContain("eligible samples' boolean truth and predicted fields");
     expect(segmentation.generation).toBe(2);
     expect(segmentation.contract).toContain('Return eligibleIds and leakageIds in input order');

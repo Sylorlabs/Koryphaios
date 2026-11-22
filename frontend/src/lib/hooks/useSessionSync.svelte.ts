@@ -1,6 +1,8 @@
 import { wsStore } from '$lib/stores/websocket.svelte';
+import { feedStore } from '$lib/stores/feed.svelte';
 import { sessionStore } from '$lib/stores/sessions.svelte';
 import { toastStore } from '$lib/stores/toast.svelte';
+import { getTranscriptScrollState, resumeMessageLimit } from '$lib/utils/transcript-scroll';
 
 export interface SessionSyncOptions {
   onActiveSessionChange?: () => void;
@@ -77,7 +79,21 @@ export function useSessionSync(options: SessionSyncOptions = {}) {
       // and worker activity survive a refresh or app relaunch.
       wsStore.subscribeToSession(activeId);
       try {
-        const messages = await sessionStore.fetchMessages(activeId, controller.signal);
+        // A parked reader needs the rows from their anchor through the newest
+        // message, not just the newest page. Sizing the first read to that span
+        // lets VirtualList restore the exact row; a following reader keeps the
+        // small default page.
+        const resumeLimit = resumeMessageLimit(getTranscriptScrollState(activeId));
+        // Feed persistence (deletions, visibility, client errors) is awaited
+        // inside the history merge. Starting it here overlaps it with the
+        // messages fetch instead of adding a second round trip to the
+        // critical path.
+        void feedStore.loadFeedPersistence(activeId, controller.signal);
+        const messages = await sessionStore.fetchMessages(
+          activeId,
+          controller.signal,
+          resumeLimit === undefined ? undefined : { limit: resumeLimit },
+        );
         // A newer switch has happened — drop this stale result.
         if (controller.signal.aborted || myGen !== loadGeneration) return;
         await wsStore.loadSessionMessages(activeId, messages, {

@@ -26,6 +26,33 @@ vi.mock('$lib/stores/sessions.svelte', () => ({
 
 import { feedStore } from './feed.svelte';
 
+describe('replay bursts', () => {
+  it('covers only the replayed chat and ends after a quiet beat', () => {
+    vi.useFakeTimers();
+    try {
+      feedStore.noteReplayBurst('session-a');
+      expect(feedStore.isReplayingSession('session-a')).toBe(true);
+      expect(feedStore.isReplayingSession('session-b')).toBe(false);
+      expect(feedStore.isReplayingSession('')).toBe(false);
+
+      // Continuously arriving events keep the burst alive.
+      vi.advanceTimersByTime(179);
+      feedStore.noteReplayBurst('session-a');
+      vi.advanceTimersByTime(179);
+      expect(feedStore.isReplayingSession('session-a')).toBe(true);
+
+      vi.advanceTimersByTime(1);
+      expect(feedStore.isReplayingSession('session-a')).toBe(false);
+
+      feedStore.noteReplayBurst('session-a');
+      feedStore.endReplayBurst();
+      expect(feedStore.isReplayingSession('session-a')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 function json(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200 });
 }
@@ -89,7 +116,7 @@ describe('chat loading surface', () => {
     feedStore.clearFeed(feedStore.sessionId);
   });
 
-  it('stays up until the archived tool rows have joined the text page', async () => {
+  it('reveals the text page without waiting for archived tool rows', async () => {
     const sessionId = 'loading-gate-full';
     state.activeSessionId = sessionId;
     const pending = lane();
@@ -100,9 +127,10 @@ describe('chat loading surface', () => {
     const loading = feedStore.loadSessionMessages(sessionId, MESSAGES);
     await waitForTextPage();
 
-    // The text page is committed, but revealing it here is the bug: the tool
-    // rows land a moment later and grow the transcript in front of the reader.
-    expect(feedStore.isLoadingSession).toBe(true);
+    // Opening a chat is a text read, not an enrichment read. The surface must be
+    // gone as soon as the text page is committed; archived tool rows merge
+    // afterwards without holding the reader behind a spinner.
+    expect(feedStore.isLoadingSession).toBe(false);
     expect(feedStore.feed.some((entry) => entry.id === 'arch-tool-1')).toBe(false);
 
     pending.timeline.resolve(json({ ok: true, data: { timeline: [] } }));
@@ -150,15 +178,19 @@ describe('chat loading surface', () => {
       expect(state.apiFetch.mock.calls.filter(([path]) => path.includes('/timetravel'))).toHaveLength(2);
     });
 
+    // The newer load reveals at its own text commit; that is the instant-open
+    // contract, not a leak. What must not happen is the superseded load
+    // releasing or re-owning the surface afterwards.
+    await newer;
+    const afterNewer = feedStore.isLoadingSession;
+
     first.timeline.resolve(json({ ok: true, data: { timeline: [] } }));
     first.context.resolve(json({ ok: true, lastUsage: null, data: [] }));
     await older;
-    expect(feedStore.isLoadingSession).toBe(true);
 
-    second.timeline.resolve(json({ ok: true, data: { timeline: [] } }));
-    second.context.resolve(json({ ok: true, lastUsage: null, data: [] }));
-    await newer;
-    expect(feedStore.isLoadingSession).toBe(false);
+    // A superseded load cannot change the surface the newest load settled.
+    expect(feedStore.isLoadingSession).toBe(afterNewer);
+    expect(feedStore.feed.some((entry) => entry.id === 'hist-m2')).toBe(true);
   });
 
   it('bounds the wait when an enrichment lane never answers', async () => {

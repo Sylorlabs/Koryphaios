@@ -1,0 +1,27 @@
+{"type":"progress","complete":1,"failed":0,"totalQueued":1,"skill":"database-performance","scenarioId":"database-performance-full-task-1-individual","pairId":"database-performance-full-task-1-individual:c0a03fac-ac65-43e5-ba2d-ff2a5d4d7b9b","withSkill":true,"withoutSkill":true,"withSkillInfrastructureFailure":false,"withoutSkillInfrastructureFailure":false,"infrastructureFailure":false,"integrityFailure":false}
+{
+  "schemaVersion": 1,
+  "executor": {
+    "mode": "codex",
+    "id": "codex-cli-isolated:codex-cli 0.167.0:reasoning=none:multi-turn",
+    "subject": "codex",
+    "provider": "codex",
+    "model": "gpt-6-luna",
+    "runtimeIdentity": "codex-cli 0.167.0:reasoning=none:multi-turn",
+    "executionMode": "multi-turn",
+    "reasoningEffort": "none",
+    "concurrency": 1,
+    "wallClockMs": 420000
+  },
+  "selectedSkills": 1,
+  "readyScenarios": 2,
+  "environmentBlockedScenarios": 0,
+  "skippedComplete": 0,
+  "queued": 1,
+  "completed": 1,
+  "failed": 0,
+  "failedScenarios": [],
+  "stoppedReason": null,
+  "notStarted": 0
+}
+

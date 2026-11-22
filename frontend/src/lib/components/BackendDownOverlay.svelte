@@ -15,7 +15,10 @@
   const status = $derived(backendHealth.status);
   // Demo builds intentionally run without a backend — the overlay must never
   // trap a demo visitor behind a "backend unavailable" wall.
-  const visible = $derived(!isDemoMode && (status === 'unhealthy' || status === 'mismatch'));
+  const visible = $derived(
+    !isDemoMode &&
+      (status === 'unhealthy' || status === 'mismatch' || status === 'starting'),
+  );
   const reason = $derived(backendHealth.reason);
 
   // Advanced diagnostics disclosure — collapsed by default so the casual user
@@ -87,6 +90,58 @@
       ? backendHealth.supervisorReason
       : (reason ?? 'unknown'),
   );
+
+  // ─── Starting state (slow but alive boot) ─────────────────────────────────
+  // While the desktop reports a live startup marker, the overlay shows
+  // progress instead of an error. The elapsed clock ticks every second from
+  // the last backend-reported value, so it moves smoothly between supervisor
+  // events rather than jumping in ~5s steps.
+  const STARTING_PHASE_LABELS: Record<string, string> = {
+    configuration: 'Loading configuration',
+    'database-and-erasure-recovery': 'Opening and migrating the database',
+    'database-migrations': 'Applying database migrations',
+    'database-vacuum': 'Compacting the database (one-time)',
+    encryption: 'Initializing encryption',
+    providers: 'Connecting providers',
+    tools: 'Preparing tools',
+    'mcp-connections': 'Connecting MCP servers',
+    'session-runtime': 'Restoring sessions',
+    'process-and-goal-recovery': 'Recovering background work',
+    'background-services': 'Starting background services',
+  };
+
+  const startingLabel = $derived(
+    backendHealth.startupDetail ??
+      STARTING_PHASE_LABELS[backendHealth.startupPhase ?? ''] ??
+      'Starting up',
+  );
+
+  let elapsedAnchor = $state<{ ms: number; at: number } | null>(null);
+  let elapsedTick = $state(Date.now());
+
+  $effect(() => {
+    const ms = backendHealth.startupElapsedMs;
+    if (status !== 'starting' || ms === null) {
+      elapsedAnchor = null;
+      return;
+    }
+    elapsedAnchor = { ms, at: Date.now() };
+  });
+
+  $effect(() => {
+    if (status !== 'starting') return;
+    const timer = setInterval(() => {
+      elapsedTick = Date.now();
+    }, 1_000);
+    return () => clearInterval(timer);
+  });
+
+  const startingElapsed = $derived.by(() => {
+    if (!elapsedAnchor) return null;
+    const total = elapsedAnchor.ms + Math.max(0, elapsedTick - elapsedAnchor.at);
+    const seconds = Math.floor(total / 1000);
+    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  });
 
   function retry() {
     recheckBackendHealth();
@@ -286,6 +341,30 @@
     data-testid="backend-down-overlay"
   >
     <div class="card" data-tauri-drag-region="false">
+      {#if status === 'starting'}
+        <div class="icon starting" aria-hidden="true">
+          <svg
+            viewBox="0 0 24 24"
+            width="32"
+            height="32"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+          </svg>
+        </div>
+        <h1 id="bdo-title">Starting Koryphaios backend…</h1>
+        <p id="bdo-sub">{startingLabel}</p>
+        <p class="starting-meta">
+          {#if startingElapsed}Elapsed {startingElapsed}{:else}Starting up{/if}
+        </p>
+        <p class="starting-note">
+          Large databases can take a few minutes after an update. Don't quit the app.
+        </p>
+      {:else}
       <div class="icon" aria-hidden="true">
         {#if status === 'mismatch'}
           <svg
@@ -539,6 +618,7 @@
           <p class="console-hint">The same details are printed to the developer console (F12).</p>
         </div>
       {/if}
+      {/if}
     </div>
   </div>
 {/if}
@@ -573,6 +653,27 @@
     justify-content: center;
     color: var(--color-warning, var(--color-accent));
     margin-bottom: var(--space-xs);
+  }
+  .icon.starting {
+    color: var(--color-accent);
+    animation: bdo-spin 1.4s linear infinite;
+  }
+  @keyframes bdo-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  .starting-meta {
+    color: var(--color-text-muted);
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+  }
+  .starting-note {
+    color: var(--color-text-secondary);
+    font-size: var(--text-xs);
+    background: var(--color-surface-2);
+    border-radius: var(--radius-md);
+    padding: var(--space-2) var(--space-md);
   }
   h1 {
     font-size: var(--text-lg, 1.125rem);
@@ -672,7 +773,7 @@
     border-radius: var(--radius-md);
     border: 1px solid var(--color-accent);
     background: var(--color-accent);
-    color: var(--color-surface-0);
+    color: var(--color-on-accent);
     font-weight: var(--font-medium, 500);
     font-size: var(--text-sm);
     cursor: pointer;
@@ -786,7 +887,7 @@
   }
   .copy-btn:hover {
     background: var(--color-accent);
-    color: var(--color-surface-0);
+    color: var(--color-on-accent);
     border-color: var(--color-accent);
   }
   .console-hint {

@@ -213,7 +213,7 @@
                     {permission.agentName ?? 'Backend agent'}
                   </span>
                   <ArrowRight size={11} class="shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" />
-                  <code class="text-[10px] text-[var(--color-text-secondary)]">{permission.toolName}</code>
+                  <code class="text-[11px] text-[var(--color-text-secondary)]">{permission.toolName}</code>
                 </div>
                 <span
                   id={`permission-request-${index}`}
@@ -253,7 +253,7 @@
                 onclick={() => respond(permission.id, true)}
                 aria-label={`Approve ${permission.toolName}`}
                 class="rounded-lg px-3 py-1.5 text-xs font-semibold transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-                style="background: var(--color-accent); color: var(--color-surface-0);"
+                style="background: var(--color-accent); color: var(--color-on-accent);"
               >
                 Approve
               </button>
@@ -268,7 +268,7 @@
             type="button"
             onclick={approveAll}
             class="rounded-lg px-4 py-1.5 text-xs font-semibold transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-            style="background: var(--color-accent); color: var(--color-surface-0);"
+            style="background: var(--color-accent); color: var(--color-on-accent);"
           >
             Approve all ({pendingPermissions.length})
           </button>

@@ -15,7 +15,9 @@ class ResizeObserverStub {
     this.record = { callback, elements: [] };
     observers.push(this.record);
   }
-  observe(element: Element) { this.record.elements.push(element); }
+  observe(element: Element) {
+    this.record.elements.push(element);
+  }
   unobserve() {}
   disconnect() {}
 }
@@ -28,7 +30,9 @@ function observerFor(element: Element): ObserverRecord {
 
 function measure(element: Element, height: number) {
   observerFor(element).callback(
-    [{ target: element, borderBoxSize: [{ blockSize: height }], contentRect: { height } }] as unknown as ResizeObserverEntry[],
+    [
+      { target: element, borderBoxSize: [{ blockSize: height }], contentRect: { height } },
+    ] as unknown as ResizeObserverEntry[],
     {} as ResizeObserver,
   );
 }
@@ -134,7 +138,12 @@ describe('VirtualList opening behavior', () => {
   });
 
   it('opens at the bottom when the reader had been following', () => {
-    const props = { items: rows(), estimateHeight: () => 100, follow: true, resetKey: 'followed-1' };
+    const props = {
+      items: rows(),
+      estimateHeight: () => 100,
+      follow: true,
+      resetKey: 'followed-1',
+    };
     const first = render(VirtualList, { props });
     const scroller = first.container.querySelector('.virtual-list') as HTMLDivElement;
     scroller.scrollTop = 900;
@@ -148,7 +157,13 @@ describe('VirtualList opening behavior', () => {
   it('reports the landing after the opening frames settle, exactly once', async () => {
     const onLanded = vi.fn();
     render(VirtualList, {
-      props: { items: rows(), estimateHeight: () => 100, follow: true, resetKey: 'landed-1', onLanded },
+      props: {
+        items: rows(),
+        estimateHeight: () => 100,
+        follow: true,
+        resetKey: 'landed-1',
+        onLanded,
+      },
     });
     // The caller must not drop its cover on the same tick as the mount: rows
     // are still laid out from estimates at this point.
@@ -167,6 +182,44 @@ describe('VirtualList opening behavior', () => {
     frames.clear();
     for (const callback of pending) callback(performance.now());
     await tick();
+    expect(onLanded).toHaveBeenCalledTimes(1);
+  });
+
+  it('lands promptly when the DOM scroll extent overflows the layout extent', async () => {
+    const onLanded = vi.fn();
+    const { container } = render(VirtualList, {
+      props: {
+        items: rows(),
+        estimateHeight: () => 100,
+        follow: true,
+        resetKey: 'landing-overflow',
+        onLanded,
+      },
+    });
+    const scroller = container.querySelector('.virtual-list') as HTMLDivElement;
+    // The rendered window can briefly extend past contentHeight while a row is
+    // measured, so the DOM's scrollHeight (4200) is larger than the list's own
+    // totalHeight (4000). The browser clamps the offset to the layout bottom.
+    let top = 3400;
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, get: () => 600 });
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, get: () => 4200 });
+    Object.defineProperty(scroller, 'scrollTop', {
+      configurable: true,
+      get: () => top,
+      set: (value: number) => {
+        top = Math.max(0, Math.min(value, 3400));
+      },
+    });
+
+    for (let i = 0; i < 4 && onLanded.mock.calls.length === 0; i++) {
+      const pending = [...frames.values()];
+      frames.clear();
+      for (const callback of pending) callback(performance.now());
+      await tick();
+    }
+    // The view is at the layout bottom. Measuring the landing against the
+    // transient DOM extent left a 200px "gap" and held the caller's cover up
+    // for all 24 frames.
     expect(onLanded).toHaveBeenCalledTimes(1);
   });
 
@@ -193,5 +246,60 @@ describe('VirtualList opening behavior', () => {
     // Three 100px rows were inserted above the anchor. Without the correction
     // the DOM keeps scrollTop at 1200 and the reader is thrown three rows back.
     expect(scroller.scrollTop).toBe(1500);
+  });
+
+  it('waits for authoritative history before placing the transcript', async () => {
+    const { container, rerender } = render(VirtualList, {
+      props: {
+        items: rows(),
+        estimateHeight: () => 100,
+        follow: true,
+        resetKey: 'ready-1',
+        ready: false,
+      },
+    });
+    const scroller = container.querySelector('.virtual-list') as HTMLDivElement;
+    expect(scroller.scrollTop).toBe(0);
+
+    await rerender({
+      items: rows(),
+      estimateHeight: () => 100,
+      follow: true,
+      resetKey: 'ready-1',
+      ready: true,
+    });
+    await tick();
+
+    expect(scroller.scrollTop).toBe(4000);
+  });
+
+  it('restores the saved row even when its height changed', async () => {
+    const first = render(VirtualList, {
+      props: {
+        items: rows(),
+        estimateHeight: () => 100,
+        follow: false,
+        resetKey: 'anchor-height-1',
+      },
+    });
+    const scroller = first.container.querySelector('.virtual-list') as HTMLDivElement;
+    scroller.scrollTop = 1200;
+    scroller.dispatchEvent(new Event('scroll'));
+    first.unmount();
+
+    const second = render(VirtualList, {
+      props: {
+        items: rows(),
+        estimateHeight: () => 150,
+        follow: true,
+        resetKey: 'anchor-height-1',
+      },
+    });
+    const restored = second.container.querySelector('.virtual-list') as HTMLDivElement;
+    await tick();
+
+    // The saved row (row-12) is now 1800px from the top. A raw pixel restore
+    // would put the reader at 1200 and lose the row they were reading.
+    expect(restored.scrollTop).toBe(1800);
   });
 });

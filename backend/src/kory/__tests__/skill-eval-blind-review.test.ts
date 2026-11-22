@@ -5,9 +5,10 @@ import {
   buildBlindReviewJudgePrompt,
   findBlindJudgeArtifactMismatch,
   findBlindJudgeRubricViolation,
+  selectBlindReviewQueue,
   verifyBlindReviewPublicContractSnapshot,
-} from '../skill-eval-blind-review';
-import type { SkillEvalPublicContractSnapshot } from '../skill-eval-execution';
+} from '../../eval/skills/skill-eval-blind-review';
+import type { SkillEvalPublicContractSnapshot } from '../../eval/skills/skill-eval-execution';
 import type { V5FullTaskFixture } from '../skill-packages';
 
 describe('blind review prompt', () => {
@@ -498,5 +499,46 @@ describe('blind review prompt', () => {
         literal,
       ),
     ).toBeNull();
+  });
+});
+
+describe('blind review queue', () => {
+  const pair = (scenarioId: string, comparisonId: string, pairRecordedAt = '2026-10-02T00:00:00Z') => ({
+    skill: 'android-compose', scenarioId, comparisonId, pairRecordedAt,
+  });
+
+  test('a replaced pair gets a fresh adjudication even when the case was judged before', () => {
+    const queue = selectBlindReviewQueue(
+      [pair('case-2', 'pair-new')],
+      [
+        { skill: 'android-compose', scenarioId: 'case-1', comparisonId: 'pair-a', recordedAt: '2026-10-01T00:00:00Z' },
+        { skill: 'android-compose', scenarioId: 'case-1', comparisonId: 'pair-b', recordedAt: '2026-10-01T00:00:00Z' },
+        { skill: 'android-compose', scenarioId: 'case-2', comparisonId: 'pair-old', recordedAt: '2026-10-01T00:00:00Z' },
+      ],
+      2,
+    );
+    expect(queue.map((item) => item.comparisonId)).toEqual(['pair-new']);
+  });
+
+  test('a pair already judged at its own identity is never re-reviewed', () => {
+    const queue = selectBlindReviewQueue(
+      [pair('case-2', 'pair-old')],
+      [{ skill: 'android-compose', scenarioId: 'case-2', comparisonId: 'pair-old', recordedAt: '2026-10-01T00:00:00Z' }],
+      2,
+    );
+    expect(queue).toEqual([]);
+  });
+
+  test('the per-skill cap bounds this invocation, not the skill history', () => {
+    const history = Array.from({ length: 4 }, (_, index) => ({
+      skill: 'android-compose', scenarioId: 'case-1', comparisonId: `pair-${index}`,
+      recordedAt: '2026-10-01T00:00:00Z',
+    }));
+    const queue = selectBlindReviewQueue(
+      [pair('case-2', 'pair-x'), pair('case-3', 'pair-y'), pair('case-4', 'pair-z')],
+      history,
+      2,
+    );
+    expect(queue.map((item) => item.comparisonId)).toEqual(['pair-x', 'pair-y']);
   });
 });

@@ -3,8 +3,8 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isUnix, terminateProviderProcessGroup } from '../../runtime/platform';
-import { createOpenCodeTextOnlyPatchSkillEvalExecutor } from '../skill-eval-opencode';
-import type { SkillEvalExperimentV3, SkillEvalScenarioV3 } from '../skill-eval-harness';
+import { createOpenCodeTextOnlyPatchSkillEvalExecutor } from '../../eval/skills/skill-eval-opencode';
+import type { SkillEvalExperimentV3, SkillEvalScenarioV3 } from '../../eval/skills/skill-eval-harness';
 
 const roots: string[] = [];
 const environmentKeys = ['KORY_SKILL_EVAL_OPENCODE_BINARY', 'KORY_TEST_OPENCODE_MODE'] as const;
@@ -288,7 +288,7 @@ describe('OpenCode text-patch evaluator boundary', () => {
         [
           process.execPath,
           '--eval',
-          `import { createOpenCodeTextOnlyPatchSkillEvalExecutor } from ${JSON.stringify(join(import.meta.dir, '../skill-eval-opencode.ts'))};
+          `import { createOpenCodeTextOnlyPatchSkillEvalExecutor } from ${JSON.stringify(join(import.meta.dir, '../../eval/skills/skill-eval-opencode.ts'))};
         const result = await createOpenCodeTextOnlyPatchSkillEvalExecutor({ model: 'stub', wallClockMs: 500 }).execute(${JSON.stringify(input(root))});
         console.log(JSON.stringify(result));`,
         ],

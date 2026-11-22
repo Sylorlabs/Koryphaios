@@ -1,0 +1,247 @@
+SNAPSHOT HASH DOMAINS: beforeSha256/afterSha256 identify complete workspace entries, using SHA256("file\0" + original file bytes), or SHA256("symlink\0" + link target). Scorer artifactSHA and durable artifact hashes use SHA256(raw bytes), without that tag. These different hash domains must not be compared as if identical. Visible beforeText/afterText may be bounded or privacy-scrubbed; they are not the original complete bytes to hash.
+
+You are an independent blind semantic evaluator.
+Two anonymous agents attempted the same task. You are not told which agent received any extra guidance, and you must not infer or speculate about that hidden condition.
+Judge each artifact independently against the task contract. Do not reward matching wording, verbosity, or references to a skill. Focus on behavioral correctness, scope discipline, evidence quality, preservation of required facts, negative paths, recovery behavior, and whether completion claims are actually supported.
+The artifact bundle may include harness captured execution evidence and before and after file snapshots. Treat that as observed evidence, not as an agent claim.
+PUBLIC CANDIDATE CONTRACT SNAPSHOT is the exact task prompt and allowlisted README.md/contract.json bytes visible to the candidate before execution. Hashes are verified by the harness. If an entry says UNAVAILABLE, do not reconstruct it from the current repository or treat current files as historical proof.
+executionEvidence is supplied by the host after the agent attempt, including deterministic scorer observations. An agent can truthfully report that it could not run a check even when the host subsequently runs that check successfully. Those observations have different owners and times; that difference alone is not an integrity failure.
+Attribute a completion claim to its actual source. Penalize an agent for fabricated or overstated verification only when its finalOutput or authored file content makes that unsupported claim. Do not attribute a host scorer statement to the agent, require the agent to predict later host results, or treat an honest statement of limited access as contradicting later host verification.
+Host evidence is not infallible. If a scorer result conflicts with concrete artifact behavior, identify the disputed check and evidence as a possible verifier defect. Keep instrument uncertainty separate from an agent integrity finding; a score label alone does not prove the task succeeded.
+Treat afterText JSON strings as literal source bytes. Before claiming a URL or origin is malformed or Markdown-formatted, inspect and quote the exact JSON value. Do not transform plain URL strings into Markdown hyperlinks and then mistake that display formatting for the original value.
+The PAIR EXECUTION EVIDENCE section is evaluator owned evidence. It certifies that Artifact A and Artifact B are the two randomized arms of one matched same model comparison for this exact scenario and evaluation contract.
+When REQUIRED EVIDENCE or REQUIRED ARTIFACTS asks for paired skill and no skill run artifacts, paired evaluation evidence, or an equivalent pair label, the anonymous A and B bundle plus PAIR EXECUTION EVIDENCE satisfies the existence and provenance of that pair. Do not require either agent output to claim, create, or narrate evaluator owned pair evidence.
+The REQUIRED ARTIFACTS entries below are evaluation evidence labels for the overall harness. They are not literal filenames the agent was instructed to create unless the task itself says so. Judge whether the bundle substantively supplies the required evidence; do not require those exact label strings to appear.
+Routing and hierarchy selection are evaluated independently by the harness. Do not require the agent to narrate which skill was selected or provide meta level specialist selection rationale when the artifact itself respects the requested scope and neighboring responsibility boundaries.
+Never lower passed, quality, verification, or integrity because an artifact omits hierarchy narration, specialist selection rationale, skill names, or evaluator owned paired A/B evidence. If a draft criticism relies on one of those omissions, remove that criticism and score only the concrete task behavior and evidence.
+If a REQUIRED EVIDENCE or REQUIRED ARTIFACTS label describes routing, hierarchy selection, specialist selection, or paired skill versus no skill provenance, treat that meta level requirement as evaluator owned. The harness evidence in this prompt is authoritative for those concerns.
+When choosing preference A, B, or tie, compare concrete task behavior and evidence only. Evaluator-owned hierarchy or specialist narration, skill-guidance scope, filenames, and paired-run provenance must not affect the preference comparison.
+Treat genuinely missing task evidence as missing. Do not assume unshown commands or tests passed.
+Return JSON only, with this exact shape:
+{"artifactA":{"passed":true,"quality":0.0,"verification":0.0,"integrityFailure":false,"evidence":["..."]},"artifactB":{"passed":true,"quality":0.0,"verification":0.0,"integrityFailure":false,"evidence":["..."]},"preference":"A","rationale":["..."]}
+
+TASK
+The evaluation repository asks the agent to "Apply next.js expertise to this task". The fixture has a convincing happy-path interface but also loading, empty, error, keyboard/focus, and narrow-viewport states that expose ownership and accessibility mistakes. The acceptance boundary is nextjs-engineering: Confirm router generation and deployment target. The adjacent android-compose discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.
+
+FALSIFIABLE CHECKS
+[
+  {
+    "id": "scope-and-hierarchy",
+    "assertion": "The result must establish the actual nextjs-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=web-interface; near-neighbor=android-compose), and not absorb the near-neighbor responsibility merely because it is adjacent."
+  },
+  {
+    "id": "operating-contract",
+    "assertion": "Confirm router generation and deployment target."
+  },
+  {
+    "id": "execution-invariant",
+    "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+  },
+  {
+    "id": "verification-discipline",
+    "assertion": "Exercise direct navigation, refresh, deep links, server/client transitions, cache invalidation, auth state, deployment build, and representative production runtime behavior."
+  },
+  {
+    "id": "anti-pattern-resistance",
+    "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not add use client broadly, fetch the same authoritative data redundantly across boundaries, rely on development cache behavior, or leak secrets into client bundles."
+  },
+  {
+    "id": "evidence-and-uncertainty",
+    "assertion": "Every material completion claim must map to observable evidence (nextjs-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+  }
+]
+
+REQUIRED EVIDENCE
+[
+  "nextjs-engineering decision and boundary evidence",
+  "Representative verification results or explicit unavailable checks",
+  "Hierarchy boundary and selected specialist rationale",
+  "Representative success, negative-path, and recovery verification",
+  "hierarchy boundary and selected specialist rationale",
+  "representative success plus negative/recovery evidence",
+  "paired skill/no-skill run artifacts",
+  "explicit unavailable, simulated, inferred, or stale evidence labels"
+]
+
+REQUIRED ARTIFACTS
+[
+  "nextjs-engineering-individual-scenario-1-result",
+  "nextjs-engineering-individual-scenario-1-verification",
+  "nextjs-engineering-individual-scenario-1-paired-evaluation"
+]
+
+PUBLIC CANDIDATE CONTRACT SNAPSHOT
+{
+  "taskPrompt": {
+    "available": true,
+    "sha256": "6acf3cd11d40da8afcf212ff13bace5a3b0dc3c5e68c8c325e49e9994d45f3ad",
+    "byteLength": 675,
+    "text": "The evaluation repository asks the agent to \"Apply next.js expertise to this task\". The fixture has a convincing happy-path interface but also loading, empty, error, keyboard/focus, and narrow-viewport states that expose ownership and accessibility mistakes. The acceptance boundary is nextjs-engineering: Confirm router generation and deployment target. The adjacent android-compose discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient."
+  },
+  "fixtureFiles": {
+    "README.md": {
+      "available": true,
+      "sha256": "7ad574641d74912cfdfb919b83440dbe460526a8a1b7f3ad4edd1a9d630215fc",
+      "byteLength": 1115,
+      "text": "# Next.js 15.5.12 App Router real production fixture\n\nEdit app/PriceView.jsx. Public catalog is cached through a fixed Next unstable_cache with revalidateTag; user-specific prices must derive from server cookies on each dynamic server render. Test two users and anonymous users, production SSR, client Link transitions, refresh/back, catalog invalidation and price changes.\nRun `bun install --offline --ignore-scripts` and `bun run build`, then `bun run start` using the pinned Next/React versions. Fixed files and API controls are immutable. Supply verification/result.json as a JSON object with these required top-level fields: status (\"verified\" only after successful verification), nextVersion (the pinned Next.js version string), router (\"app\"), deployment (\"production\"), broaderSkill (\"web-interface\"), nearNeighbor (the adjacent discipline identified in the scenario), and recovery (a descriptive string longer than 20 characters). Record real negative/recovery evidence; do not mark an unavailable check as performed. The scorer builds a fresh production server and exercises independent Chromium clients.\n"
+    },
+    "contract.json": {
+      "available": false,
+      "sha256": null,
+      "byteLength": 0,
+      "text": null,
+      "reason": "not-present"
+    }
+  }
+}
+
+PAIR EXECUTION EVIDENCE
+{
+  "matchedPair": true,
+  "sameScenario": true,
+  "sameProviderModel": true,
+  "sameHarness": true,
+  "sameEvaluationContract": true,
+  "sameMaterializer": true,
+  "sameDeterministicScorer": true,
+  "randomizedArmIdentity": true,
+  "evidenceOwner": "evaluation-harness"
+}
+
+ARTIFACT A
+{
+  "finalOutput": "Updated [PriceView.jsx](<redacted-path>) to read the validated viewer cookie during the server render and display that viewer’s price. The shared catalog fetch is unchanged.\n\nRecorded the environment and verification evidence in [result.json](<redacted-path>): Next.js 15.5.12, App Router, production deployment; `android-compose` is the routing decoy.\n\n**Production verification remains unverified.** `bun install --offline --ignore-scripts` failed before dependency resolution because Bun reported `unable to write files to tempdir: PermissionDenied`, including with writable temp paths. Without installed dependencies, I could not run the build or production runtime checks. JSON parsing and available Node syntax checks passed.",
+  "executionEvidence": [
+    "Codex CLI completed successfully in 69133ms",
+    "immutable Next service/routes and safe candidate source: pass — fixed=true; safe=true",
+    "App Router, production target and recovery evidence: fail — Next 15.5.12; App Router; real production",
+    "actual Next production compiler builds App Router and Server Actions: pass — s (2/5) \r\n   Generating static pages (3/5) \r\n ✓ Generating static pages (5/5)\n   Finalizing page optimization ...\n   Collecting build traces ...\n\nRoute (app)                                 Size  First Load JS\n┌ ƒ /                                      416 B         106 kB\n├ ○ /_not-found                            992 B         103 kB\n├ ƒ /api/control                           124 B         102 kB\n└ ƒ /details                               416 B         106 kB\n+ First Load JS shared by all             102 kB\n  ├ chunks/255-ebd51be49873d76c.js         46 kB\n  ├ chunks/4bd1b696-c023c6e3521b1417.js  54.2 kB\n  └ other shared chunks (total)           1.9 kB\n\n\n○  (Static)   prerendered as static content\nƒ  (Dynamic)  server-rendered on demand\n\n\n",
+    "real Next App Router SSR isolates two cookies and anonymous requests: pass — [{\"price\":\"17\",\"viewer\":\"alice\",\"htmlPrice\":\"17\",\"htmlViewer\":\"alice\"},{\"price\":\"27\",\"viewer\":\"bob\",\"htmlPrice\":\"27\",\"htmlViewer\":\"bob\"},{\"price\":\"99\",\"viewer\":\"anonymous\",\"htmlPrice\":\"99\",\"htmlViewer\":\"anonymous\"}]",
+    "public data uses the real Next server cache across users: pass — initial loads=0; warm SSR=0->0",
+    "real hydrated client Link navigation and browser back: pass — client navigation + browser history: http://127.0.0.1:59058/",
+    "catalog mutation triggers genuine Next tag invalidation: pass — loads=0->1; revision=2",
+    "server update and client refresh cannot leak private price across users: pass — private client prices=19,27,99",
+    "direct refresh/deep link SSR retains isolation after revalidation: pass — SSR deep link=19; bob reload=27; server markup=true",
+    "hydrated Next client renders at narrow viewport without overflow: pass — scrollWidth=390 viewport=390",
+    "Chromium rendered client runtimes without uncaught JS errors: pass —  ||  || "
+  ],
+  "publicContract": {
+    "taskPrompt": {
+      "available": true,
+      "sha256": "6acf3cd11d40da8afcf212ff13bace5a3b0dc3c5e68c8c325e49e9994d45f3ad",
+      "byteLength": 675,
+      "text": "The evaluation repository asks the agent to \"Apply next.js expertise to this task\". The fixture has a convincing happy-path interface but also loading, empty, error, keyboard/focus, and narrow-viewport states that expose ownership and accessibility mistakes. The acceptance boundary is nextjs-engineering: Confirm router generation and deployment target. The adjacent android-compose discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient."
+    },
+    "fixtureFiles": {
+      "README.md": {
+        "available": true,
+        "sha256": "7ad574641d74912cfdfb919b83440dbe460526a8a1b7f3ad4edd1a9d630215fc",
+        "byteLength": 1115,
+        "text": "# Next.js 15.5.12 App Router real production fixture\n\nEdit app/PriceView.jsx. Public catalog is cached through a fixed Next unstable_cache with revalidateTag; user-specific prices must derive from server cookies on each dynamic server render. Test two users and anonymous users, production SSR, client Link transitions, refresh/back, catalog invalidation and price changes.\nRun `bun install --offline --ignore-scripts` and `bun run build`, then `bun run start` using the pinned Next/React versions. Fixed files and API controls are immutable. Supply verification/result.json as a JSON object with these required top-level fields: status (\"verified\" only after successful verification), nextVersion (the pinned Next.js version string), router (\"app\"), deployment (\"production\"), broaderSkill (\"web-interface\"), nearNeighbor (the adjacent discipline identified in the scenario), and recovery (a descriptive string longer than 20 characters). Record real negative/recovery evidence; do not mark an unavailable check as performed. The scorer builds a fresh production server and exercises independent Chromium clients.\n"
+      },
+      "contract.json": {
+        "available": false,
+        "sha256": null,
+        "byteLength": 0,
+        "text": null,
+        "reason": "not-present"
+      }
+    }
+  },
+  "changes": [
+    {
+      "path": ".tmp/.5afdffebffcfeef7-00000000.hm",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "665b9b46b49bbf8a926dd2b17751fa203125e3efaf20830f005b29e5cc268ee5"
+    },
+    {
+      "path": ".tmp/check",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "665b9b46b49bbf8a926dd2b17751fa203125e3efaf20830f005b29e5cc268ee5"
+    },
+    {
+      "path": "app/PriceView.jsx",
+      "change": "modified",
+      "beforeSha256": "3eae30c1ab734e888b6cf0a0cf61ced0abe6117d315e1252c97b49c8de7b10d4",
+      "afterSha256": "cfac9db599642d50c2e78f6166896f95f2faa9b06e7ea48172306182d7b8f705",
+      "beforeText": "import React from 'react';\nimport { getCatalog, getPrice } from '../lib/store.js';\n// BUG: shared anonymous price is shown for every authenticated viewer.\nexport default async function PriceView({ page }) {\n  const catalog = await getCatalog();\n  const price = await getPrice('anonymous');\n  return <main data-page={page} data-viewer=\"anonymous\" data-price={price} data-revision={catalog.revision}>\n    <h1>{catalog.name}</h1><p data-personal-price>Price: {price}</p>\n    <p data-revision-label>Catalog revision {catalog.revision}</p>\n  </main>;\n}\n",
+      "afterText": "import React from 'react';\nimport { getCatalog, getPrice, getViewer } from '../lib/store.js';\nexport default async function PriceView({ page }) {\n  const catalog = await getCatalog();\n  const viewer = await getViewer();\n  const price = await getPrice(viewer);\n  return <main data-page={page} data-viewer={viewer} data-price={price} data-revision={catalog.revision}>\n    <h1>{catalog.name}</h1><p data-personal-price>Price: {price}</p>\n    <p data-revision-label>Catalog revision {catalog.revision}</p>\n  </main>;\n}\n"
+    },
+    {
+      "path": "verification/result.json",
+      "change": "modified",
+      "beforeSha256": "2d4594dfa3f5a5545fb2d851ad786c39a84c7b0d77b6157389af37bc2cefcad3",
+      "afterSha256": "5342ce62c3c84b9c9252b00cd5638a106a10ce05bcda4c59ad5e8766759da11d",
+      "beforeText": "{\"status\":\"TODO\"}\n",
+      "afterText": "{\n  \"status\": \"unverified\",\n  \"nextVersion\": \"15.5.12\",\n  \"router\": \"app\",\n  \"deployment\": \"production\",\n  \"broaderSkill\": \"web-interface\",\n  \"nearNeighbor\": \"android-compose\",\n  \"recovery\": \"The invalid-change API path returns HTTP 400 without changing fixture state, allowing callers to retry with a valid catalog or price update; production verification could not be run because Bun rejected all temp directories as unwritable before installation.\",\n  \"checks\": {\n    \"offlineInstall\": {\n      \"status\": \"failed\",\n      \"evidence\": \"bun install --offline --ignore-scripts exited before resolving packages with: bun is unable to write files to tempdir: PermissionDenied, including when TMPDIR points to /private/tmp and a writable workspace directory.\"\n    },\n    \"productionBuild\": {\n      \"status\": \"unverified\",\n      \"reason\": \"Dependencies could not be installed, so bun run build was unavailable.\"\n    },\n    \"productionRuntime\": {\n      \"status\": \"unverified\",\n      \"reason\": \"No production server or Chromium checks could run without installed dependencies.\"\n    },\n    \"negativeRecovery\": {\n      \"status\": \"unverified\",\n      \"reason\": \"The fixed API control was inspected and its HTTP 400 invalid-change branch confirmed in source, but it could not be exercised against a running server.\"\n    }\n  }\n}\n"
+    }
+  ]
+}
+
+ARTIFACT B
+{
+  "finalOutput": "Fixed [PriceView.jsx](<redacted-path>) to read the viewer cookie on each server render and use that viewer’s price, while keeping the public catalog cached.\n\nConfirmed the project uses Next.js 15.5.12, the App Router, and a production server target; `android-compose` is the routing decoy. Recorded the environment blocker and recovery steps in [result.json](<redacted-path>).\n\n**Production verification remains incomplete:** offline Bun install failed with `PermissionDenied` writing to its temp directory; consequently, `bun run build` failed with `next: command not found`. The result status remains `blocked`, not `verified`.",
+  "executionEvidence": [
+    "Codex CLI completed successfully in 53887ms",
+    "immutable Next service/routes and safe candidate source: pass — fixed=true; safe=true",
+    "App Router, production target and recovery evidence: fail — Next 15.5.12; App Router; real production",
+    "actual Next production compiler builds App Router and Server Actions: pass — s (2/5) \r\n   Generating static pages (3/5) \r\n ✓ Generating static pages (5/5)\n   Finalizing page optimization ...\n   Collecting build traces ...\n\nRoute (app)                                 Size  First Load JS\n┌ ƒ /                                      416 B         106 kB\n├ ○ /_not-found                            993 B         103 kB\n├ ƒ /api/control                           124 B         102 kB\n└ ƒ /details                               416 B         106 kB\n+ First Load JS shared by all             102 kB\n  ├ chunks/255-ebd51be49873d76c.js         46 kB\n  ├ chunks/4bd1b696-c023c6e3521b1417.js  54.2 kB\n  └ other shared chunks (total)           1.9 kB\n\n\n○  (Static)   prerendered as static content\nƒ  (Dynamic)  server-rendered on demand\n\n\n",
+    "real Next App Router SSR isolates two cookies and anonymous requests: pass — [{\"price\":\"17\",\"viewer\":\"alice\",\"htmlPrice\":\"17\",\"htmlViewer\":\"alice\"},{\"price\":\"27\",\"viewer\":\"bob\",\"htmlPrice\":\"27\",\"htmlViewer\":\"bob\"},{\"price\":\"99\",\"viewer\":\"anonymous\",\"htmlPrice\":\"99\",\"htmlViewer\":\"anonymous\"}]",
+    "public data uses the real Next server cache across users: pass — initial loads=0; warm SSR=0->0",
+    "real hydrated client Link navigation and browser back: pass — client navigation + browser history: http://127.0.0.1:58613/",
+    "catalog mutation triggers genuine Next tag invalidation: pass — loads=0->1; revision=2",
+    "server update and client refresh cannot leak private price across users: pass — private client prices=19,27,99",
+    "direct refresh/deep link SSR retains isolation after revalidation: pass — SSR deep link=19; bob reload=27; server markup=true",
+    "hydrated Next client renders at narrow viewport without overflow: pass — scrollWidth=390 viewport=390",
+    "Chromium rendered client runtimes without uncaught JS errors: pass —  ||  || "
+  ],
+  "publicContract": {
+    "taskPrompt": {
+      "available": true,
+      "sha256": "6acf3cd11d40da8afcf212ff13bace5a3b0dc3c5e68c8c325e49e9994d45f3ad",
+      "byteLength": 675,
+      "text": "The evaluation repository asks the agent to \"Apply next.js expertise to this task\". The fixture has a convincing happy-path interface but also loading, empty, error, keyboard/focus, and narrow-viewport states that expose ownership and accessibility mistakes. The acceptance boundary is nextjs-engineering: Confirm router generation and deployment target. The adjacent android-compose discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient."
+    },
+    "fixtureFiles": {
+      "README.md": {
+        "available": true,
+        "sha256": "7ad574641d74912cfdfb919b83440dbe460526a8a1b7f3ad4edd1a9d630215fc",
+        "byteLength": 1115,
+        "text": "# Next.js 15.5.12 App Router real production fixture\n\nEdit app/PriceView.jsx. Public catalog is cached through a fixed Next unstable_cache with revalidateTag; user-specific prices must derive from server cookies on each dynamic server render. Test two users and anonymous users, production SSR, client Link transitions, refresh/back, catalog invalidation and price changes.\nRun `bun install --offline --ignore-scripts` and `bun run build`, then `bun run start` using the pinned Next/React versions. Fixed files and API controls are immutable. Supply verification/result.json as a JSON object with these required top-level fields: status (\"verified\" only after successful verification), nextVersion (the pinned Next.js version string), router (\"app\"), deployment (\"production\"), broaderSkill (\"web-interface\"), nearNeighbor (the adjacent discipline identified in the scenario), and recovery (a descriptive string longer than 20 characters). Record real negative/recovery evidence; do not mark an unavailable check as performed. The scorer builds a fresh production server and exercises independent Chromium clients.\n"
+      },
+      "contract.json": {
+        "available": false,
+        "sha256": null,
+        "byteLength": 0,
+        "text": null,
+        "reason": "not-present"
+      }
+    }
+  },
+  "changes": [
+    {
+      "path": ".tmp-bun/.f8fdf7f93f7ffdc0-00000000.hm",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "665b9b46b49bbf8a926dd2b17751fa203125e3efaf20830f005b29e5cc268ee5"
+    },
+    {
+      "path": "app/PriceView.jsx",
+      "change": "modified",
+      "beforeSha256": "3eae30c1ab734e888b6cf0a0cf61ced0abe6117d315e1252c97b49c8de7b10d4",
+      "afterSha256": "3d11b5dac7d1d74076230c3c53690cec986cef102da7447679b3e82796651f0c",
+      "beforeText": "import React from 'react';\nimport { getCatalog, getPrice } from '../lib/store.js';\n// BUG: shared anonymous price is shown for every authenticated viewer.\nexport default async function PriceView({ page }) {\n  const catalog = await getCatalog();\n  const price = await getPrice('anonymous');\n  return <main data-page={page} data-viewer=\"anonymous\" data-price={price} data-revision={catalog.revision}>\n    <h1>{catalog.name}</h1><p data-personal-price>Price: {price}</p>\n    <p data-revision-label>Catalog revision {catalog.revision}</p>\n  </main>;\n}\n",
+      "afterText": "import React from 'react';\nimport { getCatalog, getPrice, getViewer } from '../lib/store.js';\nexport default async function PriceView({ page }) {\n  const catalog = await getCatalog();\n  // Viewer identity comes from request cookies, so resolve it during each\n  // server render and never put a personalized price in the shared catalog cache.\n  const viewer = await getViewer();\n  const price = await getPrice(viewer);\n  return <main data-page={page} data-viewer={viewer} data-price={price} data-revision={catalog.revision}>\n    <h1>{catalog.name}</h1><p data-personal-price>Price: {price}</p>\n    <p data-revision-label>Catalog revision {catalog.revision}</p>\n  </main>;\n}\n"
+    },
+    {
+      "path": "verification/result.json",
+      "change": "modified",
+      "beforeSha256": "2d4594dfa3f5a5545fb2d851ad786c39a84c7b0d77b6157389af37bc2cefcad3",
+      "afterSha256": "b972e625bf13d94b445e8edd0621f979c10426c8a73cbb009bfabcb844b8a177",
+      "beforeText": "{\"status\":\"TODO\"}\n",
+      "afterText": "{\n  \"status\": \"blocked\",\n  \"nextVersion\": \"15.5.12\",\n  \"router\": \"app\",\n  \"deployment\": \"production\",\n  \"broaderSkill\": \"web-interface\",\n  \"nearNeighbor\": \"android-compose\",\n  \"recovery\": \"The viewer cookie now selects the server-rendered price while the public catalog remains shared and tagged. Production verification could not run: offline Bun install failed with a tempdir PermissionDenied error, and bun run build then reported next: command not found. Retry the documented offline install in a writable Bun temp environment, then build and run the production server before marking verified.\"\n}\n"
+    }
+  ]
+}

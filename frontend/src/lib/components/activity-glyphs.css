@@ -45,7 +45,6 @@
    without them, so they start invisible. */
 .activity-icon .agi-scrap,
 .activity-icon .agi-context-sheet,
-.activity-icon .agi-impact,
 .activity-icon .agi-bot-wave,
 .activity-icon .agi-git-flow {
   opacity: 0;
@@ -66,8 +65,8 @@
 .activity-icon .agi-meridian,
 .activity-icon .agi-clip,
 .activity-icon .agi-clock-hand,
-.activity-icon .agi-wrench,
 .activity-icon .agi-scrap,
+.activity-icon .agi-cog-group,
 .activity-icon .agi-create-plus,
 .activity-icon .agi-create-fold {
   transform-box: view-box;
@@ -78,6 +77,7 @@
 .activity-icon .agi-note-page { transform-box: view-box; transform-origin: 8.8px 12px; }
 .activity-icon .agi-create-fold { transform-origin: 13.5px 3px; }
 .activity-icon .agi-clip { transform-origin: 11px 11px; }
+.activity-icon .agi-tassel { transform-box: view-box; transform-origin: 19.6px 10.4px; }
 
 /* ── Read: pupil glides smoothly across a line, line scans in ───────── */
 .activity-icon.running .agi-pupil {
@@ -459,28 +459,22 @@
   92%, 100% { opacity: 0; transform: translateX(4.5px); }
 }
 
-/* ── Tool: a wrench turns smoothly against a surface ───────────────── */
-.activity-icon.running .agi-wrench {
-  animation: agi-wrench-tap 1.6s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+/* ── Skill: the cap's tassel swings and settles ─────────────────────── */
+.activity-icon.running .agi-tassel {
+  animation: agi-tassel-swing 2.6s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
 }
-@keyframes agi-wrench-tap {
-  0%, 16%, 62%, 100% { transform: rotate(0deg); }
-  34% { transform: rotate(-15deg) translate(-0.8px, 0.8px); }
-  48% { transform: rotate(6deg) translate(0.8px, -0.8px); }
+@keyframes agi-tassel-swing {
+  0%, 100% { transform: rotate(-10deg); }
+  50% { transform: rotate(12deg); }
 }
-.activity-icon.running .agi-impact {
-  animation: agi-impact-strike 1.6s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+
+/* ── Tool: a cog turns steadily while an unknown tool runs ─────────── */
+.activity-icon.running .agi-cog-group {
+  animation: agi-cog-turn 3.2s linear infinite;
 }
-@keyframes agi-impact-strike {
-  0%, 38%, 66%, 100% { opacity: 0; }
-  48% { opacity: 0.85; }
-}
-.activity-icon.running .agi-wall {
-  animation: agi-wall-flex 1.6s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
-}
-@keyframes agi-wall-flex {
-  0%, 40%, 64%, 100% { transform: translateX(0); }
-  48% { transform: translateX(0.9px); }
+@keyframes agi-cog-turn {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(45deg); }
 }
 
 /* Reduced motion: drop every animation; the base state above is already a

@@ -980,7 +980,7 @@ const readinessBlockers = [
 
 export const SVELTE_BROWSER_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMaterializer[] = [
   {
-    id: 'svelte-engineering/derived-state-real-browser@1',
+    id: 'svelte-engineering/derived-state-real-browser@2',
     readinessBlockers: readinessBlockers.length ? readinessBlockers : undefined,
     matches: (scenario) => scenario.id === SCENARIO_STATE,
     materialize: (root) => {
@@ -993,12 +993,12 @@ export const SVELTE_BROWSER_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureM
       writeFixtureFile(
         root,
         'README.md',
-        `# Svelte 5 derived-state fixture\n\nFix only the candidate component and its verification artifacts. The harness and shared KorySelect are fixed repository contracts. Preserve user-owned selection across prop updates, recover when the selected item disappears, and verify loading, empty, error, keyboard/focus, 390px, and destruction behavior in the real browser.\n${svelteEvidenceInstructions(1)}`,
+        `# Svelte 5 derived-state fixture\n\nFix only the candidate component and its verification artifacts. The harness and shared KorySelect are fixed repository contracts. Preserve user-owned selection across prop updates and recover when the selected item disappears.\n\nThis workspace has no build toolchain, no test runner, and no installed package dependencies, and none are expected: the evaluator bundles your component itself and drives real Chromium against it. Do not install packages, edit the package manifest, or write your own build, server, or browser harness. The checks below are the ones the evaluator will run, so use them to decide what correct behaviour means; record a check you could not run yourself as unverified with the reason, and never claim a browser observation you did not make.\n${svelteEvidenceInstructions(1)}`,
       );
     },
   },
   {
-    id: 'svelte-engineering/route-race-real-browser@1',
+    id: 'svelte-engineering/route-race-real-browser@2',
     readinessBlockers: readinessBlockers.length ? readinessBlockers : undefined,
     matches: (scenario) => scenario.id === SCENARIO_ROUTE,
     materialize: (root) => {
@@ -1011,7 +1011,7 @@ export const SVELTE_BROWSER_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureM
       writeFixtureFile(
         root,
         'README.md',
-        `# Svelte 5 route-race fixture\n\nFix the candidate component without changing the route harness or detail source. The active route owns its subscription: superseded routes and component destruction must tear down immediately, late responses must not overwrite current state, and the existing error/retry/focus behavior plus browser history must remain intact. Record current-version browser evidence under verification/.\n${svelteEvidenceInstructions(2)}`,
+        `# Svelte 5 route-race fixture\n\nFix the candidate component without changing the route harness or detail source. The active route owns its subscription: superseded routes and component destruction must tear down immediately, late responses must not overwrite current state, and the existing error/retry/focus behavior plus browser history must remain intact.\n\nThis workspace has no build toolchain, no test runner, and no installed package dependencies, and none are expected: the evaluator bundles your component itself and drives real Chromium against it. Do not install packages, edit the package manifest, or write your own build, server, or browser harness. Record under verification/ what you could observe, and mark a check you could not run as unverified with the reason.\n${svelteEvidenceInstructions(2)}`,
       );
     },
   },

@@ -34,11 +34,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+export interface TurnTranscriptRecorderOptions {
+  /** Called when a manager turn starts, before its first event is stamped. */
+  onTurnBegin?: (sessionId: string) => void;
+  /** Called when a session's transcript state is disposed. */
+  onDispose?: (sessionId: string) => void;
+}
+
 export class TurnTranscriptRecorder {
   private readonly turns = new Map<string, ActiveTurn>();
 
+  constructor(private readonly options: TurnTranscriptRecorderOptions = {}) {}
+
   beginTurn(sessionId: string, messageId: string): void {
     this.turns.set(sessionId, { messageId, parts: [] });
+    this.options.onTurnBegin?.(sessionId);
   }
 
   currentMessageId(sessionId: string): string | undefined {
@@ -60,6 +70,7 @@ export class TurnTranscriptRecorder {
 
   dispose(sessionId: string): void {
     this.turns.delete(sessionId);
+    this.options.onDispose?.(sessionId);
   }
 
   /**
@@ -99,9 +110,23 @@ export function finalizeParts(
   const closed = parts.map((part) =>
     part.kind === 'reasoning' && part.endedAt === undefined ? { ...part, endedAt: createdAt } : part,
   );
-  const nonText = closed.filter((part) => part.kind !== 'text');
-  if (toPersist === '') return nonText;
-  const textOf = closed.map((part) => (part.kind === 'text' ? part.text : '')).join('');
-  if (textOf === toPersist) return closed;
-  return [...nonText, { kind: 'text', text: toPersist, startedAt: createdAt }];
+  const textOf = (list: readonly TranscriptPart[]) =>
+    list.map((part) => (part.kind === 'text' ? part.text : '')).join('');
+  if (toPersist !== '' && textOf(closed) === toPersist) return closed;
+
+  // Only the final answer — the text after the last reasoning or tool part —
+  // is reconciled with the persisted content. Text the model wrote earlier in
+  // the turn (narration before a tool call) is part of the transcript and is
+  // never dropped: the reader saw it stream, and it must survive the swap to
+  // persisted rows and every reload.
+  let lastNonText = -1;
+  closed.forEach((part, index) => {
+    if (part.kind !== 'text') lastNonText = index;
+  });
+  const head = closed.slice(0, lastNonText + 1);
+  const tail = closed.slice(lastNonText + 1);
+  if (textOf(tail) === toPersist) return closed;
+  if (toPersist === '') return head;
+  const startedAt = tail[0]?.startedAt ?? createdAt;
+  return [...head, { kind: 'text', text: toPersist, startedAt }];
 }

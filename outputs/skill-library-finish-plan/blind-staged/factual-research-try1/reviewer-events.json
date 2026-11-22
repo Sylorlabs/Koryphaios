@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "reviewerId": "logfare-stateless-f7dab79a-3da4-495b-bd47-4312a0c8e66e",
+  "completed": true,
+  "output": "{\"artifactA\":{\"passed\":true,\"quality\":0.82,\"verification\":0.8,\"integrityFailure\":false,\"evidence\":[\"research.json has required schemaVersion, scenarioId, checkedAt, and boundary with selectedSkill/broaderSkill/adjacentSkill, one-sentence scope, and nonempty exclusions array naming literature-research and other excluded claims.\",\"Sources include state-department (403, unverified) and usagov (200) with id, url, status, retrievedAt, lowercase sha256, lastModified, and verbatim excerpts; usagov excerpts are contiguous substrings of the saved body.\",\"Finding adult-renewal-conditional=conditional with effectiveDate, sourceIds, and explanation; correctly distinguishes renewal from in-person new application (DS-11).\",\"result.md cites the same records, states the conditional verdict, and explicitly labels the State Department source unverified rather than converting the 403 into certainty.\",\"verification.md documents performed positive path (USA.gov 200), negative path (invalid path 403 and State 403), and performed recovery (two retries with browser-like headers, all 403), clearly distinguishing measurements from hypotheticals.\",\"Evidence files retain raw bodies/headers/statuses for negative, retries, and usagov, supporting reproducibility.\",\"Minor: research.json records state-department sha256 7da46... while the saved evidence/state-department.body hashes to 0ddba...; the recorded hash does not match the retained raw body, weakening the provenance claim for that row.\",\"Minor: finalOutput claims 'Verification passed for ... raw-body SHA-256 hashes' which is not fully supported for the state-department row.\"]},\"artifactB\":{\"passed\":true,\"quality\":0.85,\"verification\":0.82,\"integrityFailure\":false,\"evidence\":[\"research.json has required schemaVersion, scenarioId, checkedAt, and boundary with selectedSkill/broaderSkill/adjacentSkill, one-sentence scope, and nonempty exclusions array naming literature-research and other excluded claims.\",\"Sources include state-department (unverified-http-403) and usagov (verified-http-200) with id, url, status, retrievedAt, lowercase sha256, lastModified, and verbatim excerpts; usagov excerpts are contiguous substrings of the saved body.\",\"Finding adult-renewal-conditional=conditional with effectiveDate, sourceIds, and explanation; correctly distinguishes renewal from in-person new application (DS-11) and lists the four disqualifying conditions.\",\"result.md cites the same records, states the conditional verdict, and explicitly labels the State Department source unverified and not evidence for the substantive finding; notes triangulation limitation and moderate confidence.\",\"verification.md documents performed positive path (USA.gov 200), negative/blocked path (State 403 and invalid path 403), and multiple performed recovery attempts (older URL, online URL, www host, alternate UA), all 403, with saved evidence files.\",\"Evidence files retain raw bodies/headers/statuses for negative, state-department, state-online, state-recovery, state-www, and usagov, supporting reproducibility.\",\"Minor: research.json records state-department sha256 39c61a... while the saved evidence/state-department.body hashes to 1e650b...; the recorded hash does not match the retained raw body, weakening the provenance claim for that row.\",\"Minor: finalOutput claims 'All recorded SHA-256 hashes matched saved raw responses' which is not fully supported for the state-department row.\"]},\"preference\":\"B\",\"rationale\":[\"Both artifacts satisfy the core factual-research contract: conditional verdict, correct finding id/value, boundary with exclusions, source rows with hashes/excerpts, and performed positive/negative/recovery evidence.\",\"Artifact B provides broader and more explicit recovery evidence (older URL, online URL, alternate host, alternate UA) and more clearly labels the State Department source as unverified and not evidence, with an explicit triangulation limitation and moderate-confidence statement.\",\"Artifact B's result.md and verification.md more thoroughly document the negative/blocked path and recovery attempts, and its research.json status strings ('unverified-http-403', 'verified-http-200') make the evidence state explicit.\",\"Both share a minor provenance defect: the recorded state-department sha256 does not match the retained raw body, and both finalOutputs overstate hash verification for that row; this is a shared weakness, not a differentiator.\",\"Artifact B's slightly stronger uncertainty labeling and richer recovery documentation give it a small edge in evidence quality and verification discipline.\"]}",
+  "events": [
+    {
+      "type": "review.started",
+      "reviewerId": "logfare-stateless-f7dab79a-3da4-495b-bd47-4312a0c8e66e"
+    },
+    {
+      "type": "review.completed",
+      "reviewerId": "logfare-stateless-f7dab79a-3da4-495b-bd47-4312a0c8e66e",
+      "outputSha256": "6e70e3de032f2f234c81e78ca1888b4e5ff94f6ecfeff93ad87e6dfbafa64a95"
+    }
+  ],
+  "hostReceipt": {
+    "schemaVersion": 1,
+    "stageOnly": true,
+    "identitySource": "host-invocation-uuid",
+    "upstreamSessionObserved": true,
+    "requestedModel": "deepseek-v4.1-flash-1017",
+    "responseModel": "deepseek-v4.1-flash-1017",
+    "promptSha256": "8e99aa763a1c8704579d9b17635b0f9d47ee17c4bd623d7c518fd733ce3e77ff",
+    "requestBytes": 152005,
+    "responseSha256": "2deed0bbf601a7b9804465437aa6cb897162ada213ead23d9e2bfc9fb46077c8",
+    "outputSha256": "6e70e3de032f2f234c81e78ca1888b4e5ff94f6ecfeff93ad87e6dfbafa64a95",
+    "elapsedMs": 4531,
+    "osIsolationVerified": false,
+    "upstreamIdentityVerified": false,
+    "signed": false
+  }
+}

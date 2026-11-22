@@ -15,12 +15,13 @@ import { dirname, join, resolve } from 'node:path';
 import { serverLog } from '../logger';
 import type { SkillRevision } from './skills';
 import { loadV5SkillPackages, validateV5SkillPackage, type V5EvalEnvironment, type V5EvalScorer } from './skill-packages';
-import { currentV5SkillEvaluationContracts, type CurrentV5SkillEvaluationContract } from './skill-eval-current-contract';
-import { buildSkillStewardDisplayLabel, getSkillSteward } from './skill-stewards';
+import { currentV5SkillEvaluationContracts, type CurrentV5SkillEvaluationContract } from '../eval/skills/skill-eval-current-contract';
+import { externalEnvironmentBlockerFor } from '../eval/skills/skill-eval-external-environment-boundaries';
+import { getSkillSteward, isEligibleBlindReviewerProvenance } from './skill-stewards';
 import {
   selectEligibleSkillEvaluationEvidence,
   type SkillEvaluationEvidenceExclusion,
-} from './skill-eval-eligibility';
+} from '../eval/skills/skill-eval-eligibility';
 
 export type SkillEvaluationCaseCategory =
   'positive' | 'negative' | 'ambiguous' | 'adversarial' | 'full-task' | 'regression';
@@ -110,6 +111,13 @@ export interface SkillEvaluationRun {
   quality: number;
   verification: number;
   integrityFailure: boolean;
+  /**
+   * The subject never produced an artifact because the harness budget ran out.
+   * Such a run is audit history and a regression source, but it carries no
+   * measurement of the artifact's quality, so it is excluded from the outcome
+   * window instead of entering it as a zero.
+   */
+  executionAborted?: boolean;
   evidence: string[];
   notes?: string;
   recordedAt: string;
@@ -221,7 +229,10 @@ const BLIND_DIMENSIONS: SkillBlindDimension[] = [
 ];
 
 const V5_PACKAGES_BY_NAME = new Map(
-  loadV5SkillPackages().packages.map((skillPackage) => [skillPackage.sidecar.name, skillPackage]),
+  (() => {
+    const catalog = loadV5SkillPackages();
+    return [...catalog.packages, ...catalog.runtimeControls];
+  })().map((skillPackage) => [skillPackage.sidecar.name, skillPackage]),
 );
 
 const ledgerPath = (projectRoot: string) =>
@@ -429,10 +440,10 @@ function validateSkillEvaluationRunForRecording(run: SkillEvaluationRun): void {
         const provenance = run.evaluatorProvenance;
         if (
           !provenance.agentId ||
-          provenance.displayLabel !== buildSkillStewardDisplayLabel(run.skill)
+          (provenance.displayLabel && !provenance.displayLabel.includes(run.skill))
         ) {
           throw new Error(
-            'V5 blind-review evidence requires an independent reviewer agent id and exact skill display label; provider and model are recorded metadata, not eligibility gates',
+            'V5 blind-review evidence requires an independent reviewer agent id; provider, model and display label are recorded metadata, not eligibility gates',
           );
         }
       }
@@ -759,6 +770,11 @@ function isCandidateRegressionSource(
   runs: readonly SkillEvaluationRun[],
 ): boolean {
   if (run.integrityFailure) return true;
+  // An arm the harness aborted left no artifact to judge: the CLI died, the budget ran out or the
+  // provider refused, and none of those describe how the skill behaves. Pair completeness already
+  // refuses such an arm, so the regression list refuses it for the same reason instead of turning a
+  // runtime failure into a candidate finding.
+  if (run.executionAborted === true) return false;
   const baseline = pairedNoSkillBaseline(run, runs);
   return baseline ? regressesAgainstPairedBaseline(run, baseline) : !run.passed;
 }
@@ -846,14 +862,18 @@ function compareWithSkillToWithoutSkill(
   // reviews are supplemental judgments over those artifacts, not another arm
   // of the deterministic experiment. Mixing a critic score into one side of
   // the pair makes unlike evaluator scales look like a behavioral regression.
+  // An aborted arm carries no artifact, so it cannot be one side of an uplift comparison: a run the
+  // harness gave up on would otherwise read as the skill performing worse than doing nothing.
   for (const run of candidateRuns.filter(
-    (item) => item.evaluator === 'deterministic' && inferredCategory(item, skill) !== 'regression',
+    (item) => item.evaluator === 'deterministic' && item.executionAborted !== true &&
+      inferredCategory(item, skill) !== 'regression',
   )) {
     const key = comparisonKey(run);
     candidateGroups.set(key, [...(candidateGroups.get(key) ?? []), run]);
   }
   for (const run of baselineRuns.filter(
-    (item) => item.evaluator === 'deterministic' && inferredCategory(item, skill) !== 'regression',
+    (item) => item.evaluator === 'deterministic' && item.executionAborted !== true &&
+      inferredCategory(item, skill) !== 'regression',
   )) {
     const key = comparisonKey(run);
     baselineGroups.set(key, [...(baselineGroups.get(key) ?? []), run]);
@@ -870,18 +890,25 @@ function compareWithSkillToWithoutSkill(
   for (const [key, candidates] of candidateGroups) {
     const baselines = baselineGroups.get(key);
     if (!baselines?.length || !candidates.length) continue;
-    const seriesKey = comparisonSeriesKey(candidates[0]!);
+    // The arms of one pair must share an execution identity, which is why pairs are
+    // grouped by comparisonKey above. Which pair *describes current behaviour* is a
+    // different question: keep the newest complete pair per case, exactly as pass
+    // rate and quality already keep the newest runs per case. Grouping the series by
+    // executor identity as well anchored the uplift to a retired executor family that
+    // can never be re-run, so one historical bad pair kept a skill blocked no matter
+    // how many clean pairs a newer executor produced.
+    const caseId = candidates[0]!.caseId;
     const recordedAt = [...candidates, ...baselines].reduce(
       (latest, run) => (run.recordedAt > latest ? run.recordedAt : latest),
       '',
     );
-    const current = latestCompletePairs.get(seriesKey);
+    const current = latestCompletePairs.get(caseId);
     if (
       !current ||
       recordedAt > current.recordedAt ||
       (recordedAt === current.recordedAt && key > current.key)
     ) {
-      latestCompletePairs.set(seriesKey, { key, candidates, baselines, recordedAt });
+      latestCompletePairs.set(caseId, { key, candidates, baselines, recordedAt });
     }
   }
   const passDeltas: number[] = [];
@@ -923,8 +950,17 @@ function compareWithSkillToWithoutSkill(
   };
 }
 
-function routingSignals(candidateRuns: SkillEvaluationRun[]) {
-  const observations = candidateRuns.flatMap((run) => (run.routing ? [run.routing] : []));
+function routingSignals(candidateRuns: SkillEvaluationRun[], currentCaseIds?: ReadonlySet<string>) {
+  // A routing observation is evidence about the router only while its case still
+  // exists in the package. When routing fixtures are regenerated, the retired case
+  // ids must stop averaging into precision and recall, otherwise a corrected
+  // fixture generation can never be measured against the current one.
+  const observations = candidateRuns
+    .flatMap((run) => (run.routing ? [{ caseId: run.caseId, routing: run.routing }] : []))
+    .filter(
+      (item) => !currentCaseIds || !item.caseId || currentCaseIds.has(item.caseId),
+    )
+    .map((item) => item.routing);
   let truePositives = 0;
   let falsePositives = 0;
   let falseNegatives = 0;
@@ -1082,6 +1118,23 @@ function regressionSignals(
   const openSourceIds: string[] = [];
   for (const sourceId of sourceIds) {
     const source = historicalById.get(sourceId);
+    const sourceGeneration = source
+      ? {
+          contract: source.evaluationContractVersion ?? 2,
+          materializer: contractGeneration(source.materializerId),
+          scorer: contractGeneration(source.deterministicScorerId),
+        }
+      : null;
+    const runDominatesSource = (run: SkillEvaluationRun) =>
+      !!sourceGeneration &&
+      dominatesContractGeneration(
+        {
+          contract: run.evaluationContractVersion ?? 2,
+          materializer: contractGeneration(run.materializerId),
+          scorer: contractGeneration(run.deterministicScorerId),
+        },
+        sourceGeneration,
+      );
     const compatibleV3Reruns = source
       ? deterministicCandidateRuns.filter(
           (run) =>
@@ -1093,9 +1146,19 @@ function regressionSignals(
             Boolean(source.scenarioId) &&
             run.scenarioId === source.scenarioId &&
             run.evaluationContractVersion === source.evaluationContractVersion &&
-            run.materializerId === source.materializerId &&
-            run.deterministicScorerId === source.deterministicScorerId &&
-            (run.evaluationContractHash === source.evaluationContractHash ||
+            // A retired materializer or scorer generation can never be re-run, so a
+            // source recorded under one could otherwise stay open forever regardless
+            // of what the current evaluator measures. A newer generation dominates the
+            // retired one (same scenario, same contract version, both generations equal
+            // or higher, at least one strictly higher); identity still matches exactly
+            // inside one generation.
+            (run.materializerId === source.materializerId &&
+              run.deterministicScorerId === source.deterministicScorerId ||
+              runDominatesSource(run)) &&
+            // A dominating evaluator generation is itself proof that the attempt is a
+            // newer observation, even when the package revision never changed.
+            (runDominatesSource(run) ||
+              run.evaluationContractHash === source.evaluationContractHash ||
               run.revisionHash !== source.revisionHash) &&
             run.role === source.role &&
             (run.medium ?? '') === (source.medium ?? '') &&
@@ -1407,6 +1470,7 @@ function selectQualificationContractRuns(
     if (!matchesGeneration) {
       currentContractExclusions.push({
         runId: run.id,
+        scenarioId: run.scenarioId,
         reason: `V5 full-task evidence does not match the exact current source task/materializer/scorer contract for ${run.scenarioId}; fresh qualification is required.`,
       });
     }
@@ -1440,6 +1504,7 @@ function selectQualificationContractRuns(
       if (!matchesCurrent) {
         currentContractExclusions.push({
           runId: run.id,
+          ...(current ? {} : {}),
           reason: current
             ? `V5 full-task evidence does not match the exact current source task/materializer/scorer contract for ${taskId}; fresh qualification is required.`
             : `Current V5 full-task contract authority is unavailable for ${taskId}; evidence cannot earn promotion credit.`,
@@ -1534,9 +1599,38 @@ export function evaluateSkillPromotion(
   const relevantRunIds = new Set(allRuns
     .filter((run) => relevantRevisionHashes.has(run.revisionHash))
     .map((run) => run.id));
-  const excludedEvidence = qualificationContracts.excludedEvidence.filter((item) =>
-    relevantRunIds.has(item.runId),
+  // An exclusion only removes an observation from the average. Once the same case
+  // has a fresh eligible run under the current contract, the older observation is
+  // historical noise rather than a reason to withhold promotion. Blocking on it
+  // would make a repaired evaluator generation permanently unpromotable, because
+  // the superseded rows can never be re-run under the identity they were recorded
+  // with.
+  const coveredScenarios = new Set(
+    qualificationContracts.runs.map((run) => `${run.skill}\0${run.scenarioId ?? run.caseId}`),
   );
+  // Coverage is keyed on the excluded run's own case family. A superseded row can
+  // carry its case id rather than a scenario id (a paired half of a blind review does),
+  // and reading only `scenarioId` would let that row block promotion forever even though
+  // the same case has fresh eligible evidence. Only an *older* row is forgiven: an excluded
+  // newer generation still has to be reported, because it may be hiding a regression.
+  const caseKeyByRunId = new Map(
+    allRuns.map((run) => [run.id, run.scenarioId ?? run.caseId] as const),
+  );
+  const recordedAtByRunId = new Map(allRuns.map((run) => [run.id, run.recordedAt] as const));
+  const newestEligibleAtByCase = new Map<string, string>();
+  for (const run of qualificationContracts.runs) {
+    const caseKey = run.scenarioId ?? run.caseId;
+    const previous = newestEligibleAtByCase.get(caseKey);
+    if (!previous || run.recordedAt > previous) newestEligibleAtByCase.set(caseKey, run.recordedAt);
+  }
+  const excludedEvidence = qualificationContracts.excludedEvidence.filter((item) => {
+    if (!relevantRunIds.has(item.runId)) return false;
+    const caseKey = item.scenarioId ?? caseKeyByRunId.get(item.runId);
+    if (!caseKey || !coveredScenarios.has(`${skill}\0${caseKey}`)) return true;
+    const newest = newestEligibleAtByCase.get(caseKey);
+    const recordedAt = recordedAtByRunId.get(item.runId);
+    return Boolean(newest && recordedAt && recordedAt >= newest);
+  });
   const exclusionReasons = excludedEvidence.length
     ? [`Excluded execution evidence (${excludedEvidence.length} run(s)): ${[...new Set(excludedEvidence.map((item) => item.reason))].join(' ')}`]
     : [];
@@ -1607,6 +1701,70 @@ export function evaluateSkillPromotion(
   const modernProtocol = revisionRuns.some(usesModernEvidenceProtocol);
   const v5Package = V5_PACKAGES_BY_NAME.get(skill);
   const isV5Package = Boolean(v5Package);
+  // A skill whose every full-task scenario is a registered evaluator environment
+  // boundary cannot produce full-task pairs or a blind review of one on any host.
+  // The checklist below would then demand evidence that can never exist, which
+  // reads as a candidate failure. Name the boundary instead.
+  const fullTaskRequirement = (() => {
+    if (!v5Package) return { boundary: null as string[] | null, executableCases: null as number | null };
+    const currentPackage = validateV5SkillPackage(v5Package.directory).package;
+    if (!currentPackage?.evaluation.tasks.length) {
+      return { boundary: null, executableCases: null };
+    }
+    // Ask dispatch which evaluator would actually run, not the gate inventory: a
+    // registered real-runtime materializer outranks the fail-closed gate.
+    const contracts = currentV5SkillEvaluationContracts(
+      currentPackage,
+      CURRENT_SKILL_EVAL_CONTRACT_VERSION,
+    );
+    // A declaration is about an environment that could not run the scenario. When
+    // the scenario has current, eligible evidence, the environment plainly did run
+    // it, so the declaration (a live availability probe on many fixtures) must not
+    // erase a measured result.
+    const executedHere = new Set(
+      qualificationContracts.runs
+        .filter((run) =>
+          run.skill === skill && run.evaluator === 'deterministic' && run.variant !== 'without-skill')
+        .map((run) => run.scenarioId ?? run.caseId),
+    );
+    const blockers: string[] = [];
+    let executableCases = 0;
+    let blockedCases = 0;
+    for (const task of currentPackage.evaluation.tasks) {
+      const contract = contracts.get(task.id);
+      if (!contract?.materializerIds.length) return { boundary: null, executableCases: null };
+      // The evaluator itself can declare what it needs, which is how a fixture
+      // whose materializer really exists but cannot run here reports the same
+      // boundary the campaign would hit. The campaign reads this declaration to
+      // decide a scenario is environment blocked, so the gate must read it too,
+      // otherwise an unrunnable scenario is reported as missing candidate work.
+      const declared = executedHere.has(task.id)
+        ? []
+        : (contract.readinessBlockers ?? []).filter((entry) => !blockers.includes(entry));
+      if (declared.length) {
+        blockers.push(...declared);
+        blockedCases += 1;
+        continue;
+      }
+      if (!contract.materializerIds.every((id) => id.includes('/external-environment-gate/'))) {
+        executableCases += 1;
+        continue;
+      }
+      blockedCases += 1;
+      const blocker = externalEnvironmentBlockerFor(task.id);
+      // A gate with no explanation must fall back to the ordinary checklist
+      // instead of telling the user a boundary nobody can name.
+      if (!blocker) return { boundary: null, executableCases: null };
+      if (!blockers.includes(blocker)) blockers.push(blocker);
+    }
+    return {
+      // Several cases can name the same blocker text, so the decision counts blocked
+      // cases rather than distinct messages.
+      boundary: blockedCases === currentPackage.evaluation.tasks.length ? blockers : null,
+      executableCases,
+    };
+  })();
+  const fullTaskBoundary = fullTaskRequirement.boundary;
   // Outcome quality describes current behaviour, so it is measured over the most
   // recent runs per case rather than the whole revision history. An unbounded mean
   // anchors a skill to its own past: a fixed skill could not recover without a
@@ -1614,7 +1772,17 @@ export function evaluateSkillPromotion(
   // keeps the anti cherry-picking property, since every run inside it counts and
   // the window cannot shrink. The full history stays in the ledger for audit, and
   // regression and integrity signals keep reading the latest run per case.
-  const recentDeterministicCandidateRuns = recentRunsPerCase(deterministicCandidateRuns);
+  // A run that never produced an artifact because the budget ran out measures the
+  // clock, not the artifact. It stays in the ledger and stays a regression source,
+  // but it is not a zero in the quality window. The exception keeps that honest:
+  // when aborted runs are half the window or more, they are the current behaviour
+  // and they count, so a skill cannot pass by timing out.
+  const recentWindowAll = recentRunsPerCase(deterministicCandidateRuns);
+  const recentAborted = recentWindowAll.filter((run) => run.executionAborted === true);
+  const abortedExecutionsDominate = recentAborted.length * 2 >= recentWindowAll.length;
+  const recentDeterministicCandidateRuns = abortedExecutionsDominate
+    ? recentWindowAll
+    : recentWindowAll.filter((run) => run.executionAborted !== true);
   const recentCandidateRuns = recentRunsPerCase(candidateRuns);
   const passRate = recentDeterministicCandidateRuns.length
     ? recentDeterministicCandidateRuns.filter((run) => run.passed).length /
@@ -1630,6 +1798,28 @@ export function evaluateSkillPromotion(
     (run) => run.evaluator === 'human-blind-review',
   ).length;
   const skillSteward = isV5Package ? getSkillSteward(projectRoot, skill) : undefined;
+  // A blind review is a judgement of one observed pair. If that pair is not complete
+  // eligible evidence, the judgement is about an artifact that no longer exists (an arm
+  // that never applied its patch, a superseded contract) and cannot describe current
+  // behaviour. Reviews without a pair id predate pairing and keep their weight.
+  const liveComparisonIds = (() => {
+    const variantsByPair = new Map<string, Set<string>>();
+    for (const run of observedRuns) {
+      if (run.evaluator !== 'deterministic') continue;
+      if (run.executionAborted === true || run.integrityFailure || run.infrastructureFailure) continue;
+      const comparisonId: string | undefined = run.comparisonId;
+      if (comparisonId === undefined) continue;
+      const variant = run.variant;
+      if (!variant) continue;
+      const variants = variantsByPair.get(comparisonId) ?? new Set<string>();
+      variants.add(variant);
+      variantsByPair.set(comparisonId, variants);
+    }
+    const live = [...variantsByPair]
+      .filter(([, variants]) => variants.has('with-skill') && variants.has('without-skill'))
+      .map(([id]) => id);
+    return new Set<string>(live);
+  })();
   const provenancedBlindReviewRuns = candidateRuns.filter((run) => {
     if (
       !isBlindReview(run) ||
@@ -1638,17 +1828,28 @@ export function evaluateSkillPromotion(
     ) {
       return false;
     }
+    if (run.comparisonId && !liveComparisonIds.has(run.comparisonId)) return false;
     if (!isV5Package) return true;
-    const provenance = run.evaluatorProvenance;
-    return Boolean(
-      skillSteward &&
-      provenance.agentId &&
-      provenance.agentId !== skillSteward.agentId &&
-      provenance.displayLabel === buildSkillStewardDisplayLabel(skill),
-    );
+    return isEligibleBlindReviewerProvenance(skill, run.evaluatorProvenance, skillSteward);
   });
+  // Blind judging describes current behaviour like every other measurement, so it
+  // is read from the newest review per case instead of every review the revision
+  // ever produced. An early failure that a later review supersedes is history; a
+  // failure that is still the newest verdict blocks.
+  const latestProvenancedBlindByCase = new Map<string, (typeof provenancedBlindReviewRuns)[number]>();
+  for (const run of provenancedBlindReviewRuns) {
+    const key = run.scenarioId ?? run.caseId;
+    const current = latestProvenancedBlindByCase.get(key);
+    if (
+      !current ||
+      run.recordedAt > current.recordedAt ||
+      (run.recordedAt === current.recordedAt && run.id > current.id)
+    ) {
+      latestProvenancedBlindByCase.set(key, run);
+    }
+  }
   const provenancedBlindReviews = provenancedBlindReviewRuns.length;
-  const failedProvenancedBlindReviews = provenancedBlindReviewRuns.filter(
+  const failedProvenancedBlindReviews = [...latestProvenancedBlindByCase.values()].filter(
     (run) => !run.passed,
   ).length;
   const distinctHarnesses = new Set(
@@ -1671,7 +1872,11 @@ export function evaluateSkillPromotion(
   const baselineDelta =
     baselineScore === null || candidateScore === null ? null : candidateScore - baselineScore;
   const withWithout = compareWithSkillToWithoutSkill(skill, candidateRuns, noSkillRuns);
-  const routing = routingSignals(deterministicCandidateRuns);
+  const routingPackage = V5_PACKAGES_BY_NAME.get(skill);
+  const routingCaseIds = routingPackage
+    ? new Set(routingPackage.evaluation.routing.map((item) => item.id))
+    : undefined;
+  const routing = routingSignals(deterministicCandidateRuns, routingCaseIds);
   const categoryCoverage = Object.fromEntries(
     CASE_CATEGORIES.map((category) => [
       category,
@@ -1705,7 +1910,7 @@ export function evaluateSkillPromotion(
   if (deterministicCandidateRuns.length < 3)
     reasons.push('At least three observed candidate runs are required.');
   if (modernProtocol) {
-    if (!provenancedBlindReviews) {
+    if (!provenancedBlindReviews && !fullTaskBoundary) {
       reasons.push('At least one blind review with persisted evaluator provenance is required.');
     } else if (failedProvenancedBlindReviews) {
       reasons.push(
@@ -1714,6 +1919,11 @@ export function evaluateSkillPromotion(
     }
   } else if (!humanBlindReviews) {
     reasons.push('At least one blinded human review is required.');
+  }
+  if (abortedExecutionsDominate && recentAborted.length > 0) {
+    reasons.push(
+      `Recent executions were aborted before producing an artifact (${recentAborted.length} of ${recentWindowAll.length}); the skill cannot be judged while the subject runs out of budget.`,
+    );
   }
   if (passRate === null || passRate < 0.8) reasons.push('Observed pass rate is below 80%.');
   if (verification === null || verification < 0.8) {
@@ -1727,8 +1937,16 @@ export function evaluateSkillPromotion(
     const missingCategories = REQUIRED_BENCHMARK_CATEGORIES.filter(
       (category) => categoryCoverage[category] === 0,
     );
-    if (missingCategories.length) {
-      reasons.push(`Benchmark coverage is missing: ${missingCategories.join(', ')}.`);
+    const reportedMissingCategories = fullTaskBoundary
+      ? missingCategories.filter((category) => category !== 'full-task')
+      : missingCategories;
+    if (fullTaskBoundary) {
+      reasons.push(
+        `Every full-task scenario is a registered evaluator environment boundary, so it cannot be executed here: ${fullTaskBoundary.join(' ')}`,
+      );
+    }
+    if (reportedMissingCategories.length) {
+      reasons.push(`Benchmark coverage is missing: ${reportedMissingCategories.join(', ')}.`);
     }
     if (routing.precision === null || routing.recall === null) {
       reasons.push(
@@ -1744,18 +1962,29 @@ export function evaluateSkillPromotion(
         reasons.push(`Observed routing recall is below ${routingPercent}%.`);
       }
     }
-    if (isV5Package && categoryCoverage['full-task'] < 2) {
+    // Two full-task evaluations are the bar when two can be run. A package whose other full-task
+    // scenario is a registered environment boundary can never produce that second observation, so
+    // asking for it holds a correct skill forever on a case this host cannot execute. The bar follows
+    // what is executable, and the boundary itself is still reported above.
+    const requiredFullTaskEvaluations = fullTaskRequirement.executableCases
+      ? Math.max(1, Math.min(2, fullTaskRequirement.executableCases))
+      : 2;
+    if (isV5Package && categoryCoverage['full-task'] < requiredFullTaskEvaluations && !fullTaskBoundary) {
       reasons.push('V5 promotion requires at least two observed full-task candidate evaluations.');
     }
     const missingBaselineCategories = REQUIRED_BENCHMARK_CATEGORIES.filter(
-      (category) => !withWithout.pairedCategories.includes(category),
+      (category) =>
+        !withWithout.pairedCategories.includes(category) &&
+        !(fullTaskBoundary && category === 'full-task'),
     );
     if (missingBaselineCategories.length) {
       reasons.push(
         `Skill-vs-no-skill baselines are missing for: ${missingBaselineCategories.join(', ')}.`,
       );
     } else {
-      if (isV5Package && withWithout.pairedCategoryCounts['full-task'] < 2) {
+      // The paired-baseline bar follows the same rule as the candidate bar: blocking pairs that
+      // this host cannot execute would make a correct skill permanently ineligible.
+      if (isV5Package && withWithout.pairedCategoryCounts['full-task'] < requiredFullTaskEvaluations && !fullTaskBoundary) {
         reasons.push('V5 promotion requires two paired full-task skill-vs-no-skill baselines.');
       }
       const deltas = [

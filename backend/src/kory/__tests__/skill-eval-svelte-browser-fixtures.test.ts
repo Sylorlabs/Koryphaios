@@ -2,14 +2,14 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
-import { writeFixtureFile } from '../skill-eval-fixture-helpers';
+import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
+import { writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
 import { loadV5SkillPackages } from '../skill-packages';
 import {
   SVELTE_BROWSER_EVAL_CONSTANTS,
   SVELTE_BROWSER_SKILL_EVAL_MATERIALIZERS,
   SVELTE_BROWSER_SKILL_EVAL_SCORERS,
-} from '../skill-eval-svelte-browser-fixtures';
+} from '../../eval/skills/skill-eval-svelte-browser-fixtures';
 import { browserControlTest } from './browser-runtime-test-policy';
 
 const roots: string[] = [];

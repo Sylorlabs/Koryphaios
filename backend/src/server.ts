@@ -10,15 +10,22 @@ import { join, resolve } from 'node:path';
 import type { Server } from 'bun';
 
 import { bootstrap } from './bootstrap';
+import { killOwnerDisplayProcesses } from './security/owner-display-guard';
 import { setContext } from './context';
 import { serverLog } from './logger';
 import { VERSION, ID, RATE_LIMIT, COMPAT, SECURITY } from './constants';
 import { RateLimiter } from './security/rate-limit';
 import { addCorsOrigins } from './security';
 import { PROJECT_ROOT } from './runtime/paths';
+import {
+  clearStartupStatus,
+  markStartupReady,
+  reportStartupPhase,
+} from './runtime/startup-status';
 import { resolveBundleHash, isBundleHashEnforced } from './config/compat';
 import { createWebSocketHandlers } from './server/websocket-handler';
 import { stopCatalogRefresh } from './providers/catalog-refresh';
+import { disposeMonitors } from './kory/services/monitor-service';
 import type { WSClientData } from './ws/ws-manager';
 import { validateLocalBearerToken } from './auth/local-route-auth';
 import { serveMcp } from './mcp/koryphaios-mcp-endpoint';
@@ -185,6 +192,23 @@ async function main() {
   serverLog.info(`       KORYPHAIOS v${VERSION}`);
   serverLog.info('  AI Agent Orchestration Dashboard');
   serverLog.info('═══════════════════════════════════════');
+
+  // A window that announces Koryphaios operations work belongs on the isolated evaluation machine.
+  // Anything of that shape already running on this Mac is stopped, and the reason is recorded so the
+  // stop is never mistaken for a crash.
+  const stoppedOwnerDisplay = killOwnerDisplayProcesses();
+  if (stoppedOwnerDisplay.length) {
+    serverLog.warn({ stopped: stoppedOwnerDisplay }, 'Stopped Kory operations processes on the owner desktop');
+  }
+  // A window can also appear after startup, from a helper or an older build, so the rule is enforced
+  // for as long as this server runs rather than only once at boot.
+  const ownerDisplaySweep = setInterval(() => {
+    const stopped = killOwnerDisplayProcesses();
+    if (stopped.length) {
+      serverLog.warn({ stopped }, 'Stopped Kory operations processes on the owner desktop');
+    }
+  }, 5_000);
+  ownerDisplaySweep.unref();
 
   // Bootstrap dependencies
   const ctx = await bootstrap();
@@ -423,7 +447,7 @@ async function main() {
       port,
       hostname: serverConfig.host,
       idleTimeout: REQUEST_IDLE_TIMEOUT_S,
-      websocket: createWebSocketHandlers({ wsManager, sessions, kory, providers, runs }),
+      websocket: createWebSocketHandlers({ wsManager, sessions, kory, providers, runs, messages }),
       async fetch(req, srv) {
         return fetchHandler(req, srv);
       },
@@ -446,6 +470,11 @@ async function main() {
       throw err;
     }
   }
+
+  // Keep the env in sync with the bound port: CLI bridges and hooks build
+  // their backend URL from KORYPHAIOS_PORT, so a fallback bind must publish
+  // the port it actually took.
+  process.env.KORYPHAIOS_PORT = String(actualPort);
 
   const clientHost = serverConfig.host === '0.0.0.0' ? '127.0.0.1' : serverConfig.host;
   const activePortPath = join(PROJECT_ROOT, '.koryphaios', '.active-port.json');
@@ -470,9 +499,19 @@ async function main() {
     serverLog.warn({ err }, 'Failed to write active port file');
   }
 
+  // The port is bound: health checks take over from the startup marker.
+  markStartupReady();
+
   serverLog.info(
     { host: serverConfig.host, port: actualPort, startupMs: Math.round(process.uptime() * 1000) },
     'Server running',
+  );
+
+  // File-backed notes compaction (migration 0059): background, resumable, and
+  // a no-op on databases that predate the schema. Started only after the port
+  // is bound so its batches can never block /api/health.
+  void import('./notes/notes-compaction').then(({ startNotesCompaction }) =>
+    startNotesCompaction(),
   );
 
   function clearActivePortFile() {
@@ -486,6 +525,7 @@ async function main() {
         'Failed to clear active port file on shutdown',
       );
     }
+    clearStartupStatus();
   }
 
   // ─── Graceful Shutdown ──────────────────────────────────────────────
@@ -499,6 +539,9 @@ async function main() {
       // Stop the adaptive catalog poller so a shutdown never leaves a timer or
       // a half-finished provider refresh behind.
       stopCatalogRefresh();
+      // Stop monitor timers before sessions are frozen; definitions persist for
+      // the next startup to re-arm.
+      disposeMonitors();
       // Freeze local lifecycle writers first. Durable user/process waits survive
       // restart; only provider/compaction work that cannot survive is failed.
       await kory.shutdown();
@@ -532,6 +575,9 @@ async function main() {
 
 main().catch((err) => {
   serverLog.fatal(err, 'Server startup failed');
+  // The desktop reads this marker to surface the real failure instead of a
+  // generic readiness timeout.
+  reportStartupPhase('failed', err instanceof Error ? err.message : String(err));
   // Bootstrap may have started timers before Bun attempts its socket bind. A
   // failed bind must still terminate the process so the desktop launcher can
   // tear down the frontend instead of waiting for a backend that can never

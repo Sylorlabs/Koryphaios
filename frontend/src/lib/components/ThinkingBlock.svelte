@@ -20,9 +20,12 @@
     thinkingTokens?: number;
     /** Start with the reasoning panel open (user setting). */
     defaultExpanded?: boolean;
+    /** The source never recorded how long this took (imported / legacy rows).
+     *  Render "time unknown" — never a stopwatch, never 0.0s. */
+    timeUnknown?: boolean;
   }
 
-  let { text, durationMs, thinkingStartedAt, agentName: _agentName, finalized = false, defaultExpanded = false, thinkingTokens }: Props = $props();
+  let { text, durationMs, thinkingStartedAt, agentName: _agentName, finalized = false, defaultExpanded = false, thinkingTokens, timeUnknown = false }: Props = $props();
 
   // Providers often terminate thoughts with several newlines. With pre-wrap,
   // those become empty line boxes even after the thought has finished.
@@ -51,7 +54,8 @@
     const t = setTimeout(() => (staleAt = Date.now()), 15_000);
     return () => clearTimeout(t);
   });
-  let isLive = $derived(!finalized && staleAt === 0);
+  // An unknown duration comes from a recorded source, never a live stream.
+  let isLive = $derived(!timeUnknown && !finalized && staleAt === 0);
 
   // Snapshot of the stopwatch taken the moment the block goes stale, so the
   // display freezes at the last live value instead of collapsing to 0.0s
@@ -123,6 +127,13 @@
     expanded = !expanded;
   }
 
+  // Mod+T expands or collapses every reasoning panel in the transcript at once.
+  $effect(() => {
+    const onToggle = () => (expanded = !expanded);
+    window.addEventListener('kory:toggle-thinking', onToggle);
+    return () => window.removeEventListener('kory:toggle-thinking', onToggle);
+  });
+
   // Auto-follow the reasoning stream when peeking live.
   $effect(() => {
     void text.length;
@@ -143,10 +154,16 @@
 >
   {#if isLive}
     <span class="label shimmer">Thinking…</span>
+  {:else if timeUnknown}
+    <span class="label done">Thought</span>
   {:else}
     <span class="label done">Thought for</span>
   {/if}
-  <span class="stopwatch tabular-nums" class:live={isLive}>{formatDuration(displayMs)}</span>
+  {#if timeUnknown}
+    <span class="stopwatch time-unknown">· time unknown</span>
+  {:else}
+    <span class="stopwatch tabular-nums" class:live={isLive}>{formatDuration(displayMs)}</span>
+  {/if}
   {#if thinkingTokens && thinkingTokens > 0}
     <span class="thinking-tokens tabular-nums">{formatCompactTokens(thinkingTokens)} tokens</span>
   {/if}

@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { AgentIdentity, AgentStatus } from '@koryphaios/shared';
-  import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
+  import type { FeedEntryLocal } from '$lib/types';
+  import ToolActivityIcon from './ToolActivityIcon.svelte';
   import X from 'lucide-svelte/icons/x';
   import { agentStore } from '$lib/stores/agents.svelte';
 
@@ -24,24 +25,17 @@
     onSelect,
     onClose,
     closing = false,
+    tabindex = -1,
   }: {
     agent: WorkerCardAgent;
-    /**
-     * The agent's status, passed separately from `agent` on purpose.
-     *
-     * AgentState objects held in the agent store's Map are not reactive
-     * proxies, so `agentStore.updateAgentStatus()` mutates `.status` in place
-     * and republishes the Map. A keyed #each then hands this component the
-     * *same* object reference, which Svelte treats as an unchanged prop — so
-     * any $derived reading `agent.status` never re-evaluates and the tile keeps
-     * rendering a stale status icon and a stale "Stop and close" label.
-     * A primitive prop compares by value, so this does invalidate.
-     */
+    /** Separate primitive prop: AgentState objects are mutated in place, so
+     *  `agent.status` never invalidates a $derived. */
     status: AgentStatus;
     selected?: boolean;
     onSelect?: () => void;
     onClose?: () => void;
     closing?: boolean;
+    tabindex?: number;
   } = $props();
 
   function providerLabel(provider: string): string {
@@ -54,6 +48,12 @@
     if (provider === 'xai') return 'xAI';
     if (provider === 'openrouter') return 'OpenRouter';
     if (provider === 'unorouter') return 'UnoRouter';
+    if (provider === 'hundredmillionseek') return '100MillionSeek';
+    if (provider === 'numes') return 'Numes';
+    if (provider === 'coarena') return 'Coarena';
+    if (provider === 'crowllm') return 'CrowLLM';
+    if (provider === 'radeon') return 'AMD Radeon Cloud';
+    if (provider === 'runcrate') return 'Runcrate';
     if (provider === 'tokenharbor') return 'Token Harbor';
     if (provider === 'logfare') return 'Logfare';
     if (provider === 'apinex') return 'APInex';
@@ -63,15 +63,9 @@
     if (provider === 'copilot') return 'Copilot';
     if (provider === 'kimicode') return 'Kimi Code';
     if (provider === 'opencode') return 'OpenCode';
+    if (provider === 'beam') return 'Reflection AI';
     return provider.charAt(0).toUpperCase() + provider.slice(1);
   }
-
-  let glowClass = $derived(
-    agent.identity.domain === 'ui' ? 'glow-codex' :
-    agent.identity.domain === 'backend' ? 'glow-google' :
-    agent.identity.domain === 'test' ? 'glow-test' :
-    'glow-claude'
-  );
 
   let isActive = $derived(!['idle', 'done', 'error'].includes(status));
 
@@ -84,11 +78,27 @@
     ? agentStore.getAgentSteeringQueue(agent.sessionId, agent.identity.id).filter((item) => item.status === 'queued').length
     : 0);
 
-  // The tile is name + status glyph only. The hover card is deliberately
-  // short: which provider/model the agent is burning and how much of its
-  // context window is left. Status, task text and the "click to steer" hint
-  // all restate what the chip and the header already show, and they turned the
-  // tooltip into a paragraph the reader had to parse on every pass of the rail.
+  // Live tool icon: the exact glyph+colour the transcript uses for the same
+  // tool row, driven by the agent's latest in-flight call. With nothing in
+  // flight the strip falls back to the green Command glyph, which animates
+  // while the agent is still working and sits static once it isn't.
+  let currentTool = $derived(agentStore.getAgentCurrentTool(agent.sessionId, agent.identity.id));
+  let iconEntry = $derived<FeedEntryLocal>({
+    id: 'seg-icon',
+    timestamp: 0,
+    // 'tool_call' is the running state (animated); 'tool_result' is complete.
+    type: isActive ? 'tool_call' : 'tool_result',
+    agentId: agent.identity.id,
+    agentName: agent.identity.name ?? agent.identity.id,
+    glowClass: '',
+    text: '',
+    metadata: {
+      toolCall: currentTool ?? { name: 'bash', input: {} },
+    },
+  });
+
+  // The hover card stays deliberately short: which provider/model the agent
+  // is burning and how much of its context window is left.
   let details = $derived(
     [
       `${providerLabel(agent.identity.provider)} ${agent.identity.model}`,
@@ -101,12 +111,15 @@
 </script>
 
 <div
-  class="agent-card inline-flex shrink-0 items-center gap-1.5 rounded-lg border text-left transition-all duration-300
-            {selected ? `ring-1 ring-[var(--color-accent)] shadow-[0_0_0_1px_rgba(var(--color-accent-rgb), 0.2)]` : ''}
-            {isActive ? `active ${glowClass} glow-active` : 'opacity-70'}"
-  style="max-width: 220px; height: 24px; padding: 0 5px 0 7px; background: var(--color-surface-2); border-color: {selected
-    ? 'rgba(var(--color-accent-rgb), 0.42)'
-    : 'var(--color-border)'}; color: var(--color-text-primary);"
+  class="agent-seg"
+  class:selected
+  data-seg-id={agent.identity.id}
+  data-testid="agent-seg"
+  role="tab"
+  aria-selected={selected}
+  aria-label={details}
+  {tabindex}
+  title={details}
   onclick={() => onSelect?.()}
   onkeydown={(event) => {
     if (event.key === 'Enter' || event.key === ' ') {
@@ -114,26 +127,25 @@
       onSelect?.();
     }
   }}
-  role="button"
-  tabindex="0"
-  title={details}
-  aria-label={details}
 >
   <span
-    class="shrink-0"
-    style="color: {status === 'error' ? 'var(--color-error)' : status === 'done' ? 'var(--color-success)' : 'var(--color-accent)'}"
+    class="seg-icon"
+    class:seg-done={status === 'done' || status === 'idle'}
+    aria-hidden="true"
   >
-    <AnimatedStatusIcon {status} size={13} {isManager} isStatic={!isActive} />
+    <ToolActivityIcon entry={iconEntry} size={13} />
+    {#if status === 'error'}<span class="seg-err-dot"></span>{/if}
   </span>
-  <span class="text-[11px] font-medium truncate">{agent.identity.name}</span>
+  <span class="seg-name">{agent.identity.name}</span>
   {#if steeringCount > 0}<span class="queue-badge" aria-label={`${steeringCount} queued steering messages`}>{steeringCount}</span>{/if}
   <button
     type="button"
-    class="shrink-0 rounded p-0.5 transition-colors hover:bg-[var(--color-surface-3)] disabled:cursor-default disabled:opacity-40"
-    style="color: var(--color-text-muted);"
+    class="seg-close"
+    class:seg-close-pinned={selected}
     title={isActive ? `Stop and close ${agent.identity.name}` : `Close ${agent.identity.name}`}
     aria-label={isActive ? `Stop and close ${agent.identity.name}` : `Close ${agent.identity.name}`}
     disabled={closing}
+    tabindex="-1"
     onclick={(event) => {
       event.stopPropagation();
       onClose?.();
@@ -144,5 +156,86 @@
 </div>
 
 <style>
-  .queue-badge { min-width: 15px; height: 15px; display: grid; place-items: center; border-radius: 999px; background: var(--color-accent); color: var(--color-surface-0); font-size: 9px; font-weight: 700; }
+  .agent-seg {
+    position: relative;
+    z-index: 1;
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 5px;
+    height: 100%;
+    padding: 0 6px 0 7px;
+    color: var(--color-text-primary);
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .agent-seg.selected {
+    color: var(--color-accent);
+  }
+  .agent-seg:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: -2px;
+    border-radius: 6px;
+  }
+  .seg-icon {
+    position: relative;
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+  }
+  .seg-done {
+    opacity: 0.6;
+  }
+  .seg-err-dot {
+    position: absolute;
+    top: -1px;
+    right: -2px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-error);
+    border: 1px solid var(--color-surface-2);
+  }
+  .seg-name {
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .queue-badge {
+    min-width: 15px;
+    height: 15px;
+    display: grid;
+    place-items: center;
+    border-radius: 999px;
+    background: var(--color-accent);
+    color: var(--color-on-accent);
+    font-size: 10px;
+    font-weight: 700;
+  }
+  .seg-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    border-radius: 4px;
+    padding: 2px;
+    color: var(--color-text-muted);
+    opacity: 0;
+    transition: opacity 0.12s;
+  }
+  .seg-close:hover {
+    background: var(--color-surface-3);
+  }
+  .seg-close:disabled {
+    cursor: default;
+    opacity: 0.3;
+  }
+  .agent-seg:hover .seg-close,
+  .agent-seg:focus-within .seg-close,
+  .seg-close.seg-close-pinned {
+    opacity: 1;
+  }
 </style>

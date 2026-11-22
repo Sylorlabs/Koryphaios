@@ -141,29 +141,29 @@
           <span class="text-xs font-mono truncate" style="color: var(--color-text-primary);">
             {getFileName(edit.path)}
           </span>
-          <span class="text-[10px] font-mono truncate" style="color: var(--color-text-muted);">
+          <span class="text-[11px] font-mono truncate" style="color: var(--color-text-muted);">
             {getRelativePath(edit.path)}
           </span>
           {#if !edit.done}
-            <span class="text-[10px] shrink-0" style="color: var(--color-accent);">
+            <span class="text-[11px] shrink-0" style="color: var(--color-accent);">
               {edit.operation === 'create' ? 'Writing' : 'Editing'}
             </span>
           {/if}
-          <span class="text-[10px] tabular-nums shrink-0 ml-auto font-mono">
-            <span class="text-emerald-400">+{stats.added}</span>
+          <span class="text-[11px] tabular-nums shrink-0 ml-auto font-mono">
+            <span class="text-[var(--color-success)]">+{stats.added}</span>
             {#if stats.removed > 0}
-              <span class="text-red-400">−{stats.removed}</span>
+              <span class="text-[var(--color-error)]">−{stats.removed}</span>
             {/if}
           </span>
           <span
-            class="text-[10px] px-1.5 py-0.5 rounded shrink-0 {edit.operation === 'create' ? 'text-emerald-400' : 'text-amber-400'}"
+            class="text-[11px] px-1.5 py-0.5 rounded shrink-0 {edit.operation === 'create' ? 'text-[var(--color-success)]' : 'text-[var(--color-warning)]'}"
             style="background: var(--color-surface-3);"
           >
             {edit.operation === 'create' ? 'NEW' : 'EDIT'}
           </span>
           <!-- Cursor-style status: spinning circle while writing, ✓ when done -->
           {#if edit.done}
-            <Check size={15} class="text-emerald-400 shrink-0" />
+            <Check size={15} class="text-[var(--color-success)] shrink-0" />
           {:else}
             <span class="pulse-dot shrink-0" aria-hidden="true"></span>
           {/if}
@@ -211,14 +211,14 @@
   }
   /* Live diff colors for edits */
   :global(.df-ins) {
-    background: rgba(34, 197, 94, 0.22);
-    color: #86efac;
+    background: color-mix(in srgb, var(--color-success) 22%, transparent);
+    color: var(--color-success);
   }
   :global(.df-del) {
-    background: rgba(239, 68, 68, 0.18);
-    color: #fca5a5;
+    background: color-mix(in srgb, var(--color-error) 18%, transparent);
+    color: var(--color-error);
     text-decoration: line-through;
-    text-decoration-color: rgba(239, 68, 68, 0.5);
+    text-decoration-color: color-mix(in srgb, var(--color-error) 50%, transparent);
   }
   /* Quiet pulsing dot: the single header affordance while writing */
   .pulse-dot {

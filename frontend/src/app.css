@@ -43,11 +43,6 @@
     --color-text-muted: rgba(214, 206, 192, 0.66);
     --color-switch-thumb: var(--color-surface-0);
 
-    --color-glow-codex: rgba(0, 255, 255, 0.5);
-    --color-glow-google: rgba(66, 133, 244, 0.5);
-    --color-glow-claude: rgba(255, 165, 0, 0.5);
-    --color-glow-kory: rgba(255, 215, 0, 0.6);
-    --color-glow-test: rgba(0, 255, 128, 0.5);
 
     --color-accent: #d5b261;
     --color-accent-hover: #f1dbab;
@@ -83,11 +78,6 @@
     --color-text-secondary: #495057;
     --color-text-muted: #868e96;
 
-    --color-glow-codex: rgba(0, 150, 200, 0.3);
-    --color-glow-google: rgba(66, 133, 244, 0.2);
-    --color-glow-claude: rgba(255, 165, 0, 0.3);
-    --color-glow-kory: rgba(255, 215, 0, 0.4);
-    --color-glow-test: rgba(0, 180, 100, 0.3);
   }
 
   html {
@@ -107,33 +97,6 @@
   }
 }
 
-@layer components {
-  /* Light theme glow overrides */
-  [data-theme='light'] .glow-codex {
-    box-shadow: 0 0 10px var(--color-glow-codex);
-    border-color: rgba(0, 150, 200, 0.3);
-  }
-
-  [data-theme='light'] .glow-google {
-    box-shadow: 0 0 10px var(--color-glow-google);
-    border-color: rgba(66, 133, 244, 0.2);
-  }
-
-  [data-theme='light'] .glow-claude {
-    box-shadow: 0 0 10px var(--color-glow-claude);
-    border-color: rgba(255, 165, 0, 0.3);
-  }
-
-  [data-theme='light'] .glow-kory {
-    box-shadow: 0 0 10px var(--color-glow-kory);
-    border-color: rgba(255, 215, 0, 0.4);
-  }
-
-  [data-theme='light'] .glow-test {
-    box-shadow: 0 0 10px var(--color-glow-test);
-    border-color: rgba(0, 180, 100, 0.3);
-  }
-}
 
 /* Global focus management: Only show outlines when navigating via keyboard (tab) */
 :focus {
@@ -249,66 +212,6 @@ textarea:focus-visible,
   overflow: auto;
 }
 
-/* Glow Effects - Only active agents glow */
-.glow-codex {
-  box-shadow:
-    0 0 8px var(--color-glow-codex),
-    0 0 16px rgba(0, 255, 255, 0.1);
-  border-color: rgba(0, 255, 255, 0.3);
-}
-
-.glow-google {
-  box-shadow:
-    0 0 8px var(--color-glow-google),
-    0 0 16px rgba(66, 133, 244, 0.1);
-  border-color: rgba(66, 133, 244, 0.3);
-}
-
-.glow-claude {
-  box-shadow:
-    0 0 8px var(--color-glow-claude),
-    0 0 16px rgba(255, 165, 0, 0.1);
-  border-color: rgba(255, 165, 0, 0.3);
-}
-
-.glow-kory {
-  box-shadow:
-    0 0 8px var(--color-glow-kory),
-    0 0 16px rgba(255, 215, 0, 0.1),
-    inset 0 0 6px rgba(255, 215, 0, 0.04);
-  border-color: rgba(255, 215, 0, 0.4);
-}
-
-.glow-test {
-  box-shadow:
-    0 0 8px var(--color-glow-test),
-    0 0 16px rgba(0, 255, 128, 0.1);
-  border-color: rgba(0, 255, 128, 0.3);
-}
-
-/* Active glow pulse - only applied when actually active */
-.glow-active {
-  animation: glow-pulse 3.5s ease-in-out infinite;
-}
-
-@keyframes glow-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.85;
-  }
-}
-
-/* Inactive agents should not have glow */
-.agent-card:not(.active) {
-  opacity: 0.7;
-}
-
-.agent-card.active {
-  opacity: 1;
-}
 
 /* Scrollbar */
 ::-webkit-scrollbar {
@@ -553,6 +456,16 @@ pre code.hljs,
   background: var(--color-accent);
   color: var(--color-on-accent);
   box-shadow: 0 8px 24px rgba(var(--color-accent-rgb), 0.18);
+}
+
+/* A faded accent reads as a muddy brown/peach in every theme. A disabled
+   primary action drops to a neutral surface so it is clearly unavailable and
+   its label stays legible. */
+.btn-primary:disabled {
+  background: var(--color-surface-3);
+  color: var(--color-text-muted);
+  box-shadow: none;
+  opacity: 1;
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -936,6 +849,27 @@ a.wikilink:hover {
    the physical display (split panes and restored desktop windows can be narrow). */
 .context-bar {
   container: context-bar / inline-size;
+  /* The bar is a flex sibling of the transcript, so any height change here
+     resizes the chat viewport. While a chat opens, the usage text moves through
+     several states (awaiting report → window unknown → used/max), and each one
+     is a different length. Letting that reflow the bar made the transcript
+     resize mid-load, which re-pinned the scroll and read as the chat scrolling
+     itself into place. Reserve the summary line's height so no usage state can
+     change it. */
+  min-height: calc(var(--text-xs) * 1.5 + var(--space-2) * 2 + 1px);
+}
+
+.context-bar-summary {
+  /* One line, always. The value truncates instead of wrapping to a second row. */
+  flex-wrap: nowrap;
+  height: calc(var(--text-xs) * 1.5);
+}
+
+.context-bar-value {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 @container context-bar (max-width: 520px) {
@@ -959,8 +893,9 @@ a.wikilink:hover {
     grid-column: 1 / -1;
     grid-row: 2;
     max-width: 100%;
-    overflow-wrap: anywhere;
-    white-space: normal;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-size: 10px !important;
   }
 }

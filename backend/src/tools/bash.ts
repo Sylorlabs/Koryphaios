@@ -197,6 +197,9 @@ function spawnSandboxedCommand(
       cwd,
       blockNetwork,
       blockSubprocesses: false,
+      allowWindowCapture:
+      process.env.KORY_COMPUTER_USE_WINDOW_CAPTURE === '1' ||
+      process.env.KORY_SKILL_EVAL_COMPUTER_USE === '1',
     });
     return wrapChildProcess(proc, cleanup);
   }
@@ -217,6 +220,11 @@ function spawnSandboxedCommand(
     cwd,
     blockNetwork,
     blockSubprocesses: false,
+    // The computer use tool marks the capture it deliberately ran, so a guarded session can still
+    // look at a window while everything else in the same session keeps the strict profile.
+    allowWindowCapture:
+      process.env.KORY_COMPUTER_USE_WINDOW_CAPTURE === '1' ||
+      process.env.KORY_SKILL_EVAL_COMPUTER_USE === '1',
   });
   return wrapChildProcess(proc, cleanup);
 }
@@ -446,8 +454,9 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
     // The host-owned grant is separate from the requested cwd. Resolve the
     // actual directory, not just its spelling, before checking containment.
     // A manager's checkout is the normal workspace, not a non-bypassable
-    // worker grant. Worker/Critic contexts retain their mandatory root even in
-    // YOLO; the manager may explicitly use the outside-path policy below.
+    // worker grant. Worker/Critic contexts keep a mandatory root only while
+    // the chat's preset confines them — a YOLO chat's workers carry no pin and
+    // fall through to the manager's own cwd policy below.
     const mandatoryWorkspaceRoot =
       ctx.requiredWorkspaceRoot && ctx.callerRole !== 'manager'
         ? ctx.requiredWorkspaceRoot
@@ -755,8 +764,20 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
       }
     }
 
+    if (ctx.signal?.aborted) {
+      return {
+        callId: call.id,
+        name: this.name,
+        output: 'Command was cancelled before it started.',
+        isError: true,
+        durationMs: 0,
+      };
+    }
+
     let proc: SpawnedProc | undefined;
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    let abortedForStop = false;
+    let abortHandler: (() => void) | undefined;
     let timedOut = false;
     let toolResult: ToolCallOutput;
     try {
@@ -784,6 +805,22 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
             reject(new Error(`Command timed out after ${timeout ?? 120}s`));
           }, timeoutMs)),
       );
+
+      // A stop cuts off the turn immediately, but a command that is already
+      // running is not the turn. Leave the child alive and return control; a
+      // command the user started should finish on its own.
+      const abortPromise = new Promise<never>((_, reject) => {
+        const onAbort = () => {
+          abortedForStop = true;
+          reject(new DOMException('Tool call stopped by user', 'AbortError'));
+        };
+        abortHandler = onAbort;
+        if (ctx.signal?.aborted) {
+          onAbort();
+          return;
+        }
+        ctx.signal?.addEventListener('abort', onAbort, { once: true });
+      });
 
       const outputPromise = (async () => {
         const stdoutChunks: Uint8Array[] = [];
@@ -836,30 +873,42 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
         };
       })();
 
-      toolResult = await Promise.race([outputPromise, timeoutPromise]);
+      toolResult = await Promise.race([outputPromise, timeoutPromise, abortPromise]);
     } catch (err: unknown) {
-      const errorAudit = summarizeToolErrorForAudit(err);
-      toolLog.debug(
-        {
-          ...errorAudit,
-          decision: timedOut ? 'timed_out' : 'execution_failed',
-          toolCallId: call.id,
-          sessionId: ctx.sessionId,
-        },
-        'bash: command execution error',
-      );
-      toolResult = {
-        callId: call.id,
-        name: this.name,
-        output: timedOut
-          ? `Command timed out after ${timeout ?? 120}s.`
-          : `Command execution failed safely (code: ${errorAudit.errorCode}; reference: ${errorAudit.errorFingerprint}).`,
-        isError: true,
-        durationMs: 0,
-      };
+      if (abortedForStop) {
+        toolResult = {
+          callId: call.id,
+          name: this.name,
+          output:
+            'Stopped by user. The command was left running so it can finish independently.',
+          isError: false,
+          durationMs: 0,
+        };
+      } else {
+        const errorAudit = summarizeToolErrorForAudit(err);
+        toolLog.debug(
+          {
+            ...errorAudit,
+            decision: timedOut ? 'timed_out' : 'execution_failed',
+            toolCallId: call.id,
+            sessionId: ctx.sessionId,
+          },
+          'bash: command execution error',
+        );
+        toolResult = {
+          callId: call.id,
+          name: this.name,
+          output: timedOut
+            ? `Command timed out after ${timeout ?? 120}s.`
+            : `Command execution failed safely (code: ${errorAudit.errorCode}; reference: ${errorAudit.errorFingerprint}).`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
     } finally {
+      if (abortHandler) ctx.signal?.removeEventListener('abort', abortHandler);
       if (timeoutHandle) clearTimeout(timeoutHandle);
-      if (proc) {
+      if (proc && !abortedForStop) {
         if (timedOut) {
           // Foreground Bun commands own a dedicated process group. Give TERM a
           // short grace period, then kill descendants that could otherwise keep
@@ -908,6 +957,15 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
           );
         }
       }
+    }
+
+    // `degraded` means confinement was requested but no OS engine exists, so
+    // this process ran unconfined. Saying so in the result is the difference
+    // between an honest unverified turn and a sandbox that only looks real.
+    if (ctx.sandboxOptions?.degraded && !effectiveSandboxed) {
+      const notice =
+        '[no OS sandbox engine is installed: this command ran without kernel confinement]';
+      toolResult = { ...toolResult, output: `${notice}\n${toolResult.output}` };
     }
 
     return toolResult;

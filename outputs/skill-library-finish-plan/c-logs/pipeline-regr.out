@@ -1,0 +1,29 @@
+[10:37:07] warn  [server] Multiple koryphaios.json files found in parent directories; using the innermost. The outer file(s) are ignored. {"chosen":"/Users/Shared/micah/Documents/koryphaios","shadowed":["/Users/Shared/micah/Documents","/Users/Shared/micah"]}
+{"type":"progress","complete":1,"failed":0,"totalQueued":3,"skill":"data-pipeline-engineering","scenarioId":"data-pipeline-engineering-full-task-1-individual","pairId":"data-pipeline-engineering-full-task-1-individual:8ee95b34-9d6d-4e6b-8589-780f185b5f39","withSkill":false,"withoutSkill":false,"withSkillInfrastructureFailure":false,"withoutSkillInfrastructureFailure":false,"infrastructureFailure":false,"integrityFailure":false}
+{"type":"progress","complete":2,"failed":0,"totalQueued":3,"skill":"data-pipeline-engineering","scenarioId":"data-pipeline-engineering-full-task-1-individual","pairId":"data-pipeline-engineering-full-task-1-individual:cec0f00f-e015-466a-93df-ceb61713938b","withSkill":true,"withoutSkill":true,"withSkillInfrastructureFailure":false,"withoutSkillInfrastructureFailure":false,"infrastructureFailure":false,"integrityFailure":false}
+{"type":"progress","complete":3,"failed":0,"totalQueued":3,"skill":"data-pipeline-engineering","scenarioId":"data-pipeline-engineering-full-task-2-individual","pairId":"data-pipeline-engineering-full-task-2-individual:3061c153-ef81-41b4-a12c-b92d760bc877","withSkill":false,"withoutSkill":false,"withSkillInfrastructureFailure":false,"withoutSkillInfrastructureFailure":false,"infrastructureFailure":false,"integrityFailure":false}
+{
+  "schemaVersion": 1,
+  "executor": {
+    "mode": "codex",
+    "id": "codex-cli-isolated:codex-cli 0.167.0:reasoning=none:multi-turn",
+    "subject": "codex",
+    "provider": "codex",
+    "model": "gpt-6-luna",
+    "runtimeIdentity": "codex-cli 0.167.0:reasoning=none:multi-turn",
+    "executionMode": "multi-turn",
+    "reasoningEffort": "none",
+    "concurrency": 1,
+    "wallClockMs": 900000
+  },
+  "selectedSkills": 1,
+  "readyScenarios": 2,
+  "environmentBlockedScenarios": 0,
+  "skippedComplete": 0,
+  "queued": 3,
+  "completed": 3,
+  "failed": 0,
+  "failedScenarios": [],
+  "stoppedReason": null,
+  "notStarted": 0
+}

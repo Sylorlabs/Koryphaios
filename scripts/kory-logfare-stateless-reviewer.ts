@@ -2,14 +2,19 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { strictJson, validateAdjudication } from './reviewer-json';
+import { normalizeDuplicateKeys, strictJson, validateAdjudication } from './reviewer-json';
 
 // Stage-only independent reviewer adapter for an OpenAI-compatible endpoint.
 // It forwards the sealed prompt unchanged and returns only the adjudication
 // envelope the campaign expects. It asserts no OS isolation and no upstream
 // identity; those remain coordinator responsibilities before ledger ingestion.
-export const REVIEWER_MODEL = 'deepseek-v4.1-flash-1017';
-export const REVIEWER_PROVIDER = 'logfare';
+// The reviewer must not be the candidate. Candidate arms run on the pinned deepseek
+// model, so adjudication runs on glm-5.3: a reviewer sharing the candidate's weights
+// can reward its own characteristic style instead of the behaviour under test.
+export const REVIEWER_MODEL = process.env.KORY_LOGFARE_REVIEWER_MODEL?.trim() || 'glm-5.3';
+// Provider-neutral: the adapter speaks the OpenAI shape, so the operator's endpoint and
+// label are configuration, never a hardcoded channel name.
+export const REVIEWER_PROVIDER = process.env.KORY_REVIEWER_PROVIDER?.trim() || 'logfare';
 // The cap is a runaway guard, not a model limit. A native-runtime scenario carries its whole
 // artifact diff, and angular-engineering's sealed prompt measures 282-285 KB, so a 256 KB cap
 // refused dispatch with "exceeds the byte limit" and the skill could never earn a blind review.
@@ -18,16 +23,34 @@ export const REVIEWER_PROVIDER = 'logfare';
 // completion budget (see the note below).
 const MAX_REQUEST_BYTES = 512_000;
 const MAX_RESPONSE_BYTES = 1_048_576;
-const DEFAULT_BASE_URL = 'https://logfare.ai/v1';
-const DEADLINE_MS = 150_000;
+const DEFAULT_BASE_URL = process.env.KORY_REVIEWER_BASE_URL?.trim() || 'https://logfare.ai/v1';
+// A sealed assignment can be a full source tree, and a free or slower endpoint needs longer
+// than the metered default to answer one. Operators raise it per run; the shape is unchanged.
+const DEADLINE_MS =
+  Number(process.env.KORY_REVIEWER_DEADLINE_MS ?? process.env.KORY_LOGFARE_DEADLINE_MS ?? '') ||
+  420_000;
 // Sealed assignments above roughly 20 KB make this model spend the whole
 // completion budget on hidden reasoning and return finish_reason=length with an
 // empty content field, so no adjudication is ever emitted. Measured on a 29 KB
 // prompt at max_tokens 4096: default effort -> completion_tokens 4096,
 // reasoning_tokens 4096, content empty. The same prompt at reasoning effort
 // "none" -> finish_reason=stop, reasoning_tokens 0, complete JSON adjudication.
+// Some endpoints bill a reasoning hint as a separate, paid classification and answer
+// `402 insufficient credits` for a free model. `omit` drops the field entirely; a provider
+// that accepts the hint keeps the measured default.
 const REVIEWER_REASONING_EFFORT =
-  process.env.KORY_LOGFARE_REASONING_EFFORT?.trim() || 'none';
+  process.env.KORY_REVIEWER_REASONING_EFFORT?.trim() ||
+  process.env.KORY_LOGFARE_REASONING_EFFORT?.trim() ||
+  'none';
+// No artificial completion cap. A sealed assignment carries both candidate
+// artifacts, so a fixed ceiling truncated real adjudications as
+// finish_reason=length with empty content: the reviewer spent the whole budget
+// and returned nothing. An operator may still pin a value, but the default is to
+// send no max_tokens at all and let the provider apply its own model limit.
+const REVIEWER_MAX_TOKENS = (() => {
+  const raw = Number(process.env.KORY_LOGFARE_REVIEWER_MAX_TOKENS ?? '');
+  return Number.isFinite(raw) && raw > 0 ? raw : null;
+})();
 
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 let stage = 'startup';
@@ -49,6 +72,8 @@ function trace(detail: string): void {
 }
 
 function resolveApiKey(): string {
+  const explicit = process.env.KORY_REVIEWER_API_KEY?.trim();
+  if (explicit) return explicit;
   const fromEnvironment = process.env.KORY_LOGFARE_API_KEY?.trim();
   if (fromEnvironment) return fromEnvironment;
   const configPath =
@@ -65,13 +90,13 @@ function resolveApiKey(): string {
   } catch {
     // Fall through to the explicit failure below.
   }
-  return fail('Logfare reviewer has no credential; refusing to dispatch.');
+  return fail(`${REVIEWER_PROVIDER} reviewer has no credential; refusing to dispatch.`);
 }
 
 function resolveBaseUrl(): string {
   const value = process.env.KORY_LOGFARE_BASE_URL?.trim() || DEFAULT_BASE_URL;
   const url = new URL(value);
-  if (url.protocol !== 'https:') fail('Logfare reviewer requires an https endpoint.');
+  if (url.protocol !== 'https:') fail(`${REVIEWER_PROVIDER} reviewer requires an https endpoint.`);
   return url.href.replace(/\/$/u, '');
 }
 
@@ -125,8 +150,10 @@ async function requestCompletion(
         body: JSON.stringify({
           model,
           temperature: 0,
-          max_tokens: 4096,
-          reasoning_effort: REVIEWER_REASONING_EFFORT,
+          ...(REVIEWER_MAX_TOKENS === null ? {} : { max_tokens: REVIEWER_MAX_TOKENS }),
+          ...(REVIEWER_REASONING_EFFORT === 'omit'
+            ? {}
+            : { reasoning_effort: REVIEWER_REASONING_EFFORT }),
           messages: [{ role: 'user', content: prompt }],
         }),
       });
@@ -176,98 +203,6 @@ async function requestCompletion(
   );
 }
 
-// This route's model emits an adjudication that repeats keys inside an artifact
-// object: a second "evidence" array, or a trailing "quality"/"verification" pair
-// after the evidence array. Measured on four captured samples, the repeated
-// scalar values are identical and the repeated arrays differ only in being a
-// shorter restatement, so the first occurrence is the substantive one. Keep the
-// first occurrence, reject any duplicate whose scalar value disagrees, and hand
-// the rebuilt JSON to the strict grammar so nothing else is relaxed.
-function normalizeDuplicateKeys(text: string): string {
-  let index = 0;
-  const whitespace = () => {
-    while (/[\x20\t\r\n]/u.test(text[index] ?? '\0')) index += 1;
-  };
-  const readString = (): string => {
-    const match = /^"(?:[^"\\\u0000-\u001f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"/u.exec(
-      text.slice(index),
-    );
-    if (!match) throw new Error('Invalid reviewer JSON (details redacted).');
-    index += match[0].length;
-    return JSON.parse(match[0]) as string;
-  };
-  const readValue = (depth: number): string => {
-    if (depth > 20) throw new Error('Invalid reviewer JSON (details redacted).');
-    whitespace();
-    const token = text[index];
-    const start = index;
-    if (token === '"') {
-      readString();
-      return text.slice(start, index);
-    }
-    if (token === '{') {
-      index += 1;
-      const seen = new Map<string, string>();
-      const fields: string[] = [];
-      whitespace();
-      if (text[index] === '}') {
-        index += 1;
-        return '{}';
-      }
-      while (true) {
-        whitespace();
-        const key = readString();
-        whitespace();
-        if (text[index++] !== ':') throw new Error('Invalid reviewer JSON (details redacted).');
-        const value = readValue(depth + 1);
-        const previous = seen.get(key);
-        if (previous === undefined) {
-          seen.set(key, value);
-          fields.push(`${JSON.stringify(key)}:${value}`);
-        } else if (previous !== value && !(previous.startsWith('[') && value.startsWith('['))) {
-          throw new Error('Invalid reviewer JSON (details redacted).');
-        }
-        whitespace();
-        const separator = text[index++];
-        if (separator === '}') return `{${fields.join(',')}}`;
-        if (separator !== ',') throw new Error('Invalid reviewer JSON (details redacted).');
-      }
-    }
-    if (token === '[') {
-      index += 1;
-      const items: string[] = [];
-      whitespace();
-      if (text[index] === ']') {
-        index += 1;
-        return '[]';
-      }
-      while (true) {
-        items.push(readValue(depth + 1));
-        whitespace();
-        const separator = text[index++];
-        if (separator === ']') return `[${items.join(',')}]`;
-        if (separator !== ',') throw new Error('Invalid reviewer JSON (details redacted).');
-      }
-    }
-    const literal = /^(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)/u.exec(
-      text.slice(index),
-    );
-    if (!literal) throw new Error('Invalid reviewer JSON (details redacted).');
-    index += literal[0].length;
-    return literal[0];
-  };
-  const candidateStart = text.indexOf('{');
-  const candidateEnd = text.lastIndexOf('}');
-  if (candidateStart < 0 || candidateEnd <= candidateStart) {
-    throw new Error('Invalid reviewer JSON (details redacted).');
-  }
-  index = candidateStart;
-  const normalized = readValue(0);
-  whitespace();
-  if (index !== candidateEnd + 1) throw new Error('Invalid reviewer JSON (details redacted).');
-  return normalized;
-}
-
 async function main(): Promise<void> {
   const prompt = await readStdin();
   const apiKey = resolveApiKey();
@@ -275,18 +210,35 @@ async function main(): Promise<void> {
   const model = process.env.KORY_LOGFARE_REVIEWER_MODEL?.trim() || REVIEWER_MODEL;
   const reviewerId = `logfare-stateless-${randomUUID()}`;
 
-  const { body, content, responseModel } = await requestCompletion(baseUrl, apiKey, model, prompt);
-
-  stage = 'parse-adjudication';
-  let output = stripWrappingFence(content);
-  try {
-    output = normalizeDuplicateKeys(output);
-    strictJson(output);
-    validateAdjudication(output);
-  } catch (error) {
-    trace(`outputChars=${output.length} ${error instanceof Error ? error.message : 'invalid'}`);
-    throw error;
+  // A gateway roll occasionally emits an adjudication that is not the strict
+  // grammar: prose wrapped around the JSON, a repeated key with a contradicting
+  // value, a truncated object. Retrying a malformed answer is a retry of the
+  // measurement, never an acceptance: an answer that still fails the strict
+  // grammar after the bounded attempts is a reviewer failure.
+  let body = '';
+  let output = '';
+  let responseModel: string | null = null;
+  let lastError: Error | null = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    if (DEADLINE_MS - (Date.now() - processStart) <= 1000) break;
+    const completion = await requestCompletion(baseUrl, apiKey, model, prompt);
+    body = completion.body;
+    responseModel = completion.responseModel;
+    stage = 'parse-adjudication';
+    const candidate = stripWrappingFence(completion.content);
+    try {
+      const normalized = normalizeDuplicateKeys(candidate);
+      strictJson(normalized);
+      validateAdjudication(normalized);
+      output = normalized;
+      break;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error('Invalid reviewer JSON');
+      trace(`outputChars=${candidate.length} attempt=${String(attempt)} ${lastError.message}`);
+      if (attempt === 3) throw lastError;
+    }
   }
+  if (!output) throw lastError ?? new Error('Reviewer produced no adjudication.');
 
   process.stdout.write(
     `${JSON.stringify(

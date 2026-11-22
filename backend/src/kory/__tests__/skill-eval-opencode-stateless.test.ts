@@ -20,10 +20,10 @@ import {
 import {
   createOpenCodeStatelessTextPatchSkillEvalExecutor,
   MAX_SERIALIZED_REQUEST_BYTES,
-} from '../skill-eval-opencode-stateless';
-import { snapshotSkillEvalWorkspace, textPatchPrompt } from '../skill-eval-text-patch';
-import type { SkillEvalExperimentV3, SkillEvalScenarioV3 } from '../skill-eval-harness';
-import type { SkillEvalExecutionObservation } from '../skill-eval-execution';
+} from '../../eval/skills/skill-eval-opencode-stateless';
+import { snapshotSkillEvalWorkspace, textPatchPrompt } from '../../eval/skills/skill-eval-text-patch';
+import type { SkillEvalExperimentV3, SkillEvalScenarioV3 } from '../../eval/skills/skill-eval-harness';
+import type { SkillEvalExecutionObservation } from '../../eval/skills/skill-eval-execution';
 import { createExecutor } from '../../../../scripts/skill-v5-qualification-executor';
 
 const roots: string[] = [];
@@ -542,7 +542,7 @@ describe.skipIf(!isUnix())('OpenCode stateless text-patch executor (fake CLI onl
           process.execPath,
           '--eval',
           `
-      import { createOpenCodeStatelessTextPatchSkillEvalExecutor } from ${JSON.stringify(join(import.meta.dir, '../skill-eval-opencode-stateless.ts'))};
+      import { createOpenCodeStatelessTextPatchSkillEvalExecutor } from ${JSON.stringify(join(import.meta.dir, '../../eval/skills/skill-eval-opencode-stateless.ts'))};
       const result = await createOpenCodeStatelessTextPatchSkillEvalExecutor({ wallClockMs: 700 }).execute(${JSON.stringify(input(f.workspace))});
       console.log(JSON.stringify(result));
     `,

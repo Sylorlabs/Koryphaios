@@ -8,7 +8,7 @@ import {
   createPairedSkillExperimentsV3,
   validateBlindSemanticJudgeAssignment,
   validatePairedSkillExperimentsV3,
-} from '../skill-eval-harness';
+} from '../../eval/skills/skill-eval-harness';
 import {
   buildPairwiseRoutingConfusionMatrix,
   buildSkillEvaluationCard,
@@ -18,10 +18,10 @@ import {
   type SkillEvaluationRun,
 } from '../skill-evaluations';
 import { loadV5SkillPackages } from '../skill-packages';
-import { currentV5SkillEvaluationContracts } from '../skill-eval-current-contract';
+import { currentV5SkillEvaluationContracts } from '../../eval/skills/skill-eval-current-contract';
 import { isDirectSkillSelection, listSkills, resolveSkills } from '../skills';
-import { createTaskContract } from '../prompts';
-import { buildSkillStewardDisplayLabel, ensureSkillSteward } from '../skill-stewards';
+import { createTaskContract } from '../prompts/index';
+import { ensureSkillSteward } from '../skill-stewards';
 
 let root = '';
 let skillsHome = '';
@@ -436,7 +436,6 @@ describe('V5 evaluation harness', () => {
                   evaluatorId: 'blind-evaluator',
                   // Synthetic independent reviewer identity for this isolated fixture.
                   agentId: 'test-blind-reviewer',
-                  displayLabel: buildSkillStewardDisplayLabel(skill.name),
                   kind: 'model',
                   provider: 'independent-reviewer',
                   model: 'reviewer-model-v1',
@@ -573,7 +572,6 @@ describe('V5 evaluation harness', () => {
         provider: 'independent-reviewer',
         model: 'reviewer-model-v1',
         agentId: 'blind-regression-boundary-agent',
-        displayLabel: buildSkillStewardDisplayLabel(skill.name),
         assignmentId: 'blind-regression-boundary-assignment',
         blindTo: ['skill-variant', 'expected-outcome'],
         evidence: ['blind assignment'],
@@ -637,7 +635,6 @@ describe('V5 evaluation harness', () => {
         provider: 'chatgpt-web',
         model: 'chatgpt-web/pro',
         agentId: `${steward.agentId}:independent`,
-        displayLabel: buildSkillStewardDisplayLabel(skill.name),
         assignmentId: 'blind-semantic-failure-assignment',
         blindTo: ['skill-variant', 'expected-outcome'],
         evidence: ['blind assignment'],
@@ -902,7 +899,6 @@ describe('V5 evaluation harness', () => {
             evaluatorId: `blind-evaluator-${generation}`,
             // Synthetic reviewer, distinct from the registered skill author.
             agentId: `test-blind-reviewer-${generation}`,
-            displayLabel: buildSkillStewardDisplayLabel(skill.name),
             kind: 'model',
             provider: 'independent-reviewer',
             model: 'reviewer-model-v1',
@@ -1041,7 +1037,6 @@ describe('V5 evaluation harness', () => {
         evaluatorProvenance: {
           evaluatorId: input.id,
           agentId: input.reviewer,
-          displayLabel: buildSkillStewardDisplayLabel(skill.name),
           kind: 'model',
           provider: 'chatgpt-web',
           model: 'chatgpt-web/high',
@@ -1153,7 +1148,6 @@ describe('V5 evaluation harness', () => {
         evaluatorProvenance: {
           evaluatorId: input.id,
           agentId: `reviewer-${input.id}`,
-          displayLabel: buildSkillStewardDisplayLabel(skill.name),
           kind: 'model',
           provider: 'chatgpt-web',
           model: 'chatgpt-web/high',

@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-11-13T10:33:45.810Z",
+  "recordedBy": "scripts/record-accessibility-verification-android-session.ts",
+  "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 37,
+    "release": "17"
+  },
+  "assistiveTechnology": {
+    "talkBack": "TalkBack 17.0.0.889642762",
+    "talkBackPackage": "com.google.android.marvin.talkback",
+    "switchAccess": "Switch Access 1.17.0.892789133",
+    "switchAccessPackage": "com.google.android.accessibility.switchaccess",
+    "talkBackEnabled": true,
+    "talkBackBound": true,
+    "switchAccessBound": false
+  },
+  "screen": {
+    "package": "com.android.settings",
+    "activity": "android.settings.APP_NOTIFICATION_SETTINGS",
+    "locale": "en-US"
+  },
+  "nodeCount": 45,
+  "toggles": [
+    {
+      "label": "switch_widget",
+      "checked": true,
+      "role": "switch"
+    },
+    {
+      "label": "switchWidget",
+      "checked": true,
+      "role": "switch"
+    }
+  ],
+  "actionable": [
+    "Navigate up",
+    "Settings",
+    "All Settings notifications Notification categories This app has not posted any notifications",
+    "All Settings notifications Notification categories This app has not posted any notifications",
+    "switch_widget",
+    "This app has not posted any notifications App settings Allow full-screen notifications",
+    "Allow full-screen notifications Allow notifications to take up the full screen when the device is locked",
+    "switchWidget"
+  ],
+  "focusTraversal": [
+    {
+      "step": 1,
+      "key": "TAB",
+      "label": "Settings",
+      "role": "LinearLayout"
+    },
+    {
+      "step": 2,
+      "key": "TAB",
+      "label": "This app has not posted any notifications App settings Allow full-screen notifications",
+      "role": "LinearLayout"
+    },
+    {
+      "step": 3,
+      "key": "TAB",
+      "label": "Allow full-screen notifications Allow notifications to take up the full screen when the device is locked",
+      "role": "LinearLayout"
+    },
+    {
+      "step": 4,
+      "key": "DPAD_DOWN",
+      "label": "Allow full-screen notifications Allow notifications to take up the full screen when the device is locked",
+      "role": "LinearLayout"
+    },
+    {
+      "step": 5,
+      "key": "DPAD_DOWN",
+      "label": "Allow full-screen notifications Allow notifications to take up the full screen when the device is locked",
+      "role": "LinearLayout"
+    },
+    {
+      "step": 6,
+      "key": "DPAD_UP",
+      "label": "This app has not posted any notifications App settings Allow full-screen notifications",
+      "role": "LinearLayout"
+    }
+  ],
+  "textScale": {
+    "defaultScale": "1.0",
+    "largeScale": "1.5",
+    "defaultRowHeight": 65,
+    "largeRowHeight": 92,
+    "grew": true,
+    "captures": [
+      "outputs/skill-library-finish-plan/android-live-captures/notifications-default.png",
+      "outputs/skill-library-finish-plan/android-live-captures/notifications-large-text.png"
+    ]
+  }
+}

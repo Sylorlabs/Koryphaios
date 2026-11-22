@@ -425,8 +425,39 @@ export function syncProviderConfigsToConfig(
   try {
     const config = existsSync(configPath) ? JSON.parse(readFileSync(configPath, 'utf-8')) : {};
 
+    // Auto-detected connection material is runtime-only: keep user preferences
+    // (model selections, context window, fallbacks) but never persist the
+    // discovered credential, endpoint, enabled state, or probe verdict — next
+    // launch the provider is default-disabled and the autodetect pass
+    // re-verifies whatever the machine still offers.
+    const autoDetectedNames = new Set<string>();
+    const sanitized: Record<string, unknown> = {};
+    for (const [name, cfg] of Object.entries(providers)) {
+      if (!cfg || typeof cfg !== 'object') {
+        sanitized[name] = cfg;
+        continue;
+      }
+      const copy = { ...(cfg as Record<string, unknown>) };
+      if (copy.autoDetected === true) autoDetectedNames.add(name);
+      delete copy.autoDetected;
+      if (autoDetectedNames.has(name)) {
+        for (const field of [
+          'apiKey',
+          'authToken',
+          'baseUrl',
+          'headers',
+          'disabled',
+          'lastVerifiedAt',
+          'lastVerificationScope',
+          'lastVerificationState',
+        ])
+          delete copy[field];
+      }
+      sanitized[name] = copy;
+    }
+
     // Secrets go to the 0600 store; koryphaios.json gets everything else.
-    const { clean, secrets } = stripProviderSecrets(providers);
+    const { clean, secrets } = stripProviderSecrets(sanitized);
     for (const [name, vals] of Object.entries(secrets)) {
       upsertProviderSecrets(projectRoot, name, vals);
     }
@@ -438,6 +469,25 @@ export function syncProviderConfigsToConfig(
       };
       for (const field of ['apiKey', 'authToken', 'headers'])
         delete (merged[name] as Record<string, unknown>)[field];
+      if (autoDetectedNames.has(name)) {
+        // The merge keeps fields the sanitized copy omits; drop any stale
+        // persisted material or enabled state the runtime copy no longer has,
+        // and make sure the secret store holds nothing for it either.
+        for (const field of [
+          'baseUrl',
+          'disabled',
+          'lastVerifiedAt',
+          'lastVerificationScope',
+          'lastVerificationState',
+          'autoDetected',
+        ])
+          delete (merged[name] as Record<string, unknown>)[field];
+        try {
+          removeProviderSecrets(projectRoot, name);
+        } catch {
+          /* keep the store; the next sync reconciles it */
+        }
+      }
     }
     config.providers = merged;
 

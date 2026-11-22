@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "status": "unimported",
+  "assignmentId": "blind-v5-4163e830fe39bb63091c",
+  "skill": "react-engineering",
+  "scenarioId": "react-engineering-full-task-1-individual",
+  "pairId": "react-engineering-full-task-1-individual:ccde779c-efdb-438f-9e10-83ca391188bc",
+  "reviewerThread": "logfare-stateless-aa9f6107-cca4-4b9d-ab41-6a3e22d0b8f7",
+  "reviewerIdentitySource": "external-reviewer-adapter-output",
+  "reviewerAdapter": "scripts/kory-logfare-stateless-reviewer",
+  "reviewerModel": "deepseek-v4.1-flash-1017",
+  "reviewerModelSource": "configured-provider-model-metadata",
+  "reviewerBaseUrl": "http://127.0.0.1:17841/v1",
+  "promptSha256": "6f407977dc3426a47421451770b58253605cbc86d18aa28e3ad53703367630c7",
+  "privateAssignmentSha256": "a2b0824278235414234a6b0971bc97a5ce106dfe207719c90161652c4562778d",
+  "reviewerEventsSha256": "36cde5d64e38a3df88a6020c9c933bc134752cea3f7198974e9625eb51e976f4",
+  "judgeOutputSha256": "ce6ac3235f6f89c79adc7755d5df52f27bc253332b249b16bf42b6988343ffcd",
+  "envelopeSha256": "3a9bbdbc6d025a8bf3a6d5232677c12f7d36cdeca987daf718b506414ca31185",
+  "importValidation": {
+    "mode": "validate",
+    "validatedReviews": 1,
+    "persistedReviews": 0
+  },
+  "promptSnapshotPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-qBxyXP/review-task.prompt.txt",
+  "reviewerEventsPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-qBxyXP/reviewer-events.json",
+  "envelopePath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-qBxyXP/import.json"
+}

@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "reviewer": {
+    "agentId": "logfare-stateless-7c3474f2-9f67-48ca-bdcd-7985ef7172ba",
+    "provider": "logfare",
+    "model": "deepseek-v4.1-flash-1017"
+  },
+  "reviews": [
+    {
+      "assignmentId": "blind-v5-721d4d457ed9f5ea71e2",
+      "output": {
+        "artifactA": {
+          "passed": true,
+          "quality": 0.85,
+          "verification": 0.75,
+          "integrityFailure": false,
+          "evidence": [
+            "app/main.cjs registers a single shared settings:save handler only while at least one settings window owns it, then detaches when the last owner closes.",
+            "Ownership is keyed by webContents id, released on closed/destroyed, and replies are sent through event.sender with liveness checks rather than a captured destroyed BrowserWindow.",
+            "closeAllSettingsWindows and will-quit teardown clear owners and remove the shared handler; contextIsolation, sandbox, webSecurity, and preload path are preserved.",
+            "Host evidence: no-stale-window-listeners pass with listeners after all closes: 0; first/second/third-save-once pass; renderer-reload-save-once pass; simultaneous-windows-save-once pass; unexposed-ipc-denied pass; app-quit pass.",
+            "Authored test weakness: the foreign-sender denial check uses foreign.webContents.send(...), which is main-to-renderer and does not exercise a renderer-originated IPC attempt; host scorer separately verifies unexposed IPC denial."
+          ]
+        },
+        "artifactB": {
+          "passed": false,
+          "quality": 0.6,
+          "verification": 0.45,
+          "integrityFailure": false,
+          "evidence": [
+            "app/main.cjs fixes duplicate writes and stale-window sends by registering one process-wide settings:save handler and validating senders through an owners map; it preserves contextIsolation, sandbox, and the preload API.",
+            "The process-wide settings:save listener is not detached when all settings windows close; it is removed only on will-quit, leaving one ipcMain listener installed after close.",
+            "Host evidence: no-stale-window-listeners fail \u2014 IPC listeners after all closes: 1; native process errors recorded leaked IPC save listeners for window 1, window 2, and window 3.",
+            "Authored e2e test checks owners.size after close but does not assert ipcMain listenerCount, so its 20/20 pass claim does not cover the required close-time listener cleanup.",
+            "Other host evidence passes: saves once per cycle, renderer reload save once, simultaneous windows, unexposed-ipc-denied, and app-quit."
+          ]
+        },
+        "preference": "A",
+        "rationale": [
+          "A satisfies the listener/window lifecycle requirement: the shared handler exists only while owned windows need it and is removed after the last close, with no stale window references.",
+          "B fixes duplicate writes and stale-window callbacks for current flows, but it leaves a process-wide IPC listener installed after all windows close, which the task cleanup requirement and host scorer reject.",
+          "B's own verification misses the listener-count cleanup that the host detects, so its 20/20 claim is weaker than A's host-verified full pass."
+        ]
+      },
+      "events": [
+        {
+          "type": "review.started",
+          "reviewerId": "logfare-stateless-7c3474f2-9f67-48ca-bdcd-7985ef7172ba"
+        },
+        {
+          "type": "review.completed",
+          "reviewerId": "logfare-stateless-7c3474f2-9f67-48ca-bdcd-7985ef7172ba",
+          "outputSha256": "04617e32a6db8fd75ccc67b3f2a4b9aefff2e9f0a9054f1ae0062c594e655ae2"
+        }
+      ],
+      "hostReceipt": {
+        "schemaVersion": 1,
+        "stageOnly": true,
+        "identitySource": "host-invocation-uuid",
+        "upstreamSessionObserved": true,
+        "requestedModel": "deepseek-v4.1-flash-1017",
+        "responseModel": "deepseek-v4.1-flash-1017",
+        "promptSha256": "6cd7690bc79e091961b9a18997d62b5ded1f8a142853aaef97dfb254ef4895ac",
+        "requestBytes": 98524,
+        "responseSha256": "d839944a4649bf8bdaa15d807519c181fa48f7322894b47dda12b59d84c83a24",
+        "outputSha256": "04617e32a6db8fd75ccc67b3f2a4b9aefff2e9f0a9054f1ae0062c594e655ae2",
+        "elapsedMs": 124867,
+        "osIsolationVerified": false,
+        "upstreamIdentityVerified": false,
+        "signed": false
+      }
+    }
+  ]
+}

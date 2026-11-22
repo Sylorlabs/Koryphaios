@@ -72,12 +72,14 @@ describe('managed CLI native tool boundary', () => {
       ['search_web', 'kory__web_search'],
       ['read_url_content', 'kory__web_fetch'],
     ] as const) {
-      expect(managedNativeToolDecision(tool)).toMatchObject({
+      expect(managedNativeToolDecision(tool, {}, 'antigravity')).toMatchObject({
         decision: 'block',
         koryEquivalent: equivalent,
       });
-      expect(managedNativeToolDecision(tool).reason).toContain('call_mcp_tool');
-      expect(managedNativeToolDecision(tool).reason).toContain(`ToolName="${equivalent}"`);
+      expect(managedNativeToolDecision(tool, {}, 'antigravity').reason).toContain('call_mcp_tool');
+      expect(managedNativeToolDecision(tool, {}, 'antigravity').reason).toContain(
+        `ToolName="${equivalent}"`,
+      );
     }
   });
 
@@ -117,5 +119,111 @@ describe('managed CLI native tool boundary', () => {
         AbsolutePath: '/workspace/project/README.md',
       }).decision,
     ).toBe('block');
+  });
+});
+
+describe('devin managed native tool boundary', () => {
+  test('approves namespaced kory MCP calls — the signed bridge authorizes them', () => {
+    expect(managedNativeToolDecision('mcp__kory__kory__read_file').decision).toBe('approve');
+    expect(managedNativeToolDecision('mcp__kory__kory__delegate_to_worker').decision).toBe(
+      'approve',
+    );
+    expect(managedNativeToolDecision('MCP__KORY__KORY__BASH').decision).toBe('approve');
+  });
+
+  test('blocks namespaced calls to any other MCP server', () => {
+    expect(managedNativeToolDecision('mcp__github__list_issues').decision).toBe('block');
+    expect(managedNativeToolDecision('mcp__evil__kory__bash').decision).toBe('block');
+  });
+
+  test("gates devin's own MCP dispatcher the same way as agy's", () => {
+    expect(
+      managedNativeToolDecision('mcp_call_tool', {
+        server_name: 'kory',
+        tool_name: 'kory__bash',
+      }).decision,
+    ).toBe('approve');
+    expect(
+      managedNativeToolDecision('mcp_call_tool', {
+        server_name: 'other',
+        tool_name: 'kory__bash',
+      }).decision,
+    ).toBe('block');
+    expect(managedNativeToolDecision('mcp_call_tool', {}).decision).toBe('block');
+  });
+
+  test('redirects lowercase devin native tools to their kory equivalents', () => {
+    for (const [tool, equivalent] of [
+      ['exec', 'kory__bash'],
+      ['read', 'kory__read_file'],
+      ['glob', 'kory__glob'],
+      ['grep', 'kory__grep'],
+      ['find_file_by_name', 'kory__glob'],
+      ['webfetch', 'kory__web_fetch'],
+      ['web_search', 'kory__web_search'],
+      ['apply_patch', 'kory__edit_file'],
+    ] as const) {
+      expect(managedNativeToolDecision(tool)).toMatchObject({
+        decision: 'block',
+        koryEquivalent: equivalent,
+      });
+    }
+  });
+
+  test('blocks devin scope escalation and native subagents', () => {
+    expect(managedNativeToolDecision('request_scope').decision).toBe('block');
+    for (const tool of ['run_subagent', 'read_subagent', 'task', 'spawn']) {
+      expect(managedNativeToolDecision(tool).decision).toBe('block');
+      expect(managedNativeToolDecision(tool).reason).toContain('kory__delegate_to_worker');
+    }
+  });
+
+  test('approves devin bookkeeping tools that carry no host authority', () => {
+    for (const tool of ['mcp_list_tools', 'mcp_list_servers', 'exit_plan_mode', 'todo_write']) {
+      expect(managedNativeToolDecision(tool).decision).toBe('approve');
+    }
+  });
+});
+
+describe('managed native tool denial redirect text', () => {
+  test('phrases the redirect in each provider harness vocabulary', () => {
+    // Devin hook names are lowercase and it dispatches via mcp_call_tool.
+    expect(managedNativeToolDecision('exec', {}, 'devin')).toMatchObject({
+      decision: 'block',
+      koryEquivalent: 'kory__bash',
+      reason:
+        'Native tool "exec" is denied and must not be retried. Call mcp_call_tool with ' +
+        'server_name="kory", tool_name="kory__bash", and arguments containing the equivalent ' +
+        'operation. Koryphaios owns host tool execution and permission checks.',
+    });
+    // Claude Code sees the bridge server as mcp__kory__<tool>.
+    expect(managedNativeToolDecision('Bash', {}, 'claude')).toMatchObject({
+      decision: 'block',
+      koryEquivalent: 'kory__bash',
+      reason:
+        'Native tool "Bash" is disabled and must not be retried. Call the kory MCP tool ' +
+        '"kory__bash" (exposed to you as mcp__kory__kory__bash) with the equivalent arguments. ' +
+        'Koryphaios owns host tool execution and permission checks.',
+    });
+    // Antigravity keeps its call_mcp_tool dispatcher phrasing.
+    expect(managedNativeToolDecision('run_command', {}, 'antigravity')).toMatchObject({
+      decision: 'block',
+      koryEquivalent: 'kory__bash',
+      reason:
+        'Native agy tool "run_command" is denied and must not be retried. Call call_mcp_tool ' +
+        'with ServerName="kory", ToolName="kory__bash", and Arguments containing the equivalent ' +
+        'operation. Koryphaios owns host tool execution and permission checks.',
+    });
+    // Missing or unknown providers get the generic phrasing.
+    for (const provider of [undefined, 'cursor']) {
+      expect(managedNativeToolDecision('Bash', {}, provider)).toMatchObject({
+        decision: 'block',
+        koryEquivalent: 'kory__bash',
+        reason:
+          'Native tool "Bash" is denied and must not be retried. Call the "kory__bash" tool on ' +
+          'the kory MCP server with the equivalent arguments. Koryphaios owns host tool ' +
+          'execution and permission checks.',
+      });
+    }
   });
 });

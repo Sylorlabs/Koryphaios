@@ -6,14 +6,14 @@ import {
   auditSkillEvalExecutionReadiness,
   type SkillEvalDeterministicScorer,
   type SkillEvalFixtureMaterializer,
-} from '../skill-eval-execution';
+} from '../../eval/skills/skill-eval-execution';
 import {
   BUILTIN_SKILL_EVAL_MATERIALIZERS,
   BUILTIN_SKILL_EVAL_SCORERS,
-} from '../skill-eval-fixtures';
-import { buildSkillEvalSuiteV3, type SkillEvalScenarioV3 } from '../skill-eval-harness';
+} from '../../eval/skills/skill-eval-fixtures';
+import { buildSkillEvalSuiteV3, type SkillEvalScenarioV3 } from '../../eval/skills/skill-eval-harness';
 import { loadV5SkillPackages } from '../skill-packages';
-import { hasRegressionText } from '../skill-eval-fixture-helpers';
+import { hasRegressionText } from '../../eval/skills/skill-eval-fixture-helpers';
 
 const packages = loadV5SkillPackages().packages;
 const roots: string[] = [];

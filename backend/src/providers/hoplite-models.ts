@@ -18,6 +18,7 @@
 // explicit cap" — every consumer guards with `> 0`.
 
 import type { ModelDef } from '@koryphaios/shared';
+import { SPEED_TIER_FAST_HOPLITE } from './speed-tiers';
 
 /** Hoplite ships one model list; there are no separate vendor copies. */
 export const HOPLITE_MODELS: ModelDef[] = [
@@ -115,6 +116,7 @@ export const HOPLITE_MODELS: ModelDef[] = [
     canReason: true,
     reasoningLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
     supportsFastMode: true,
+    speedTiers: [SPEED_TIER_FAST_HOPLITE],
     supportsAttachments: true,
     costPerMInputTokens: 10,
     costPerMOutputTokens: 50,
@@ -130,6 +132,7 @@ export const HOPLITE_MODELS: ModelDef[] = [
     canReason: true,
     reasoningLevels: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
     supportsFastMode: true,
+    speedTiers: [SPEED_TIER_FAST_HOPLITE],
     supportsAttachments: true,
     costPerMInputTokens: 5,
     costPerMOutputTokens: 30,
@@ -145,6 +148,7 @@ export const HOPLITE_MODELS: ModelDef[] = [
     canReason: true,
     reasoningLevels: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
     supportsFastMode: true,
+    speedTiers: [SPEED_TIER_FAST_HOPLITE],
     supportsAttachments: true,
     costPerMInputTokens: 2,
     costPerMOutputTokens: 12,
@@ -161,6 +165,7 @@ export const HOPLITE_MODELS: ModelDef[] = [
     canReason: true,
     reasoningLevels: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
     supportsFastMode: true,
+    speedTiers: [SPEED_TIER_FAST_HOPLITE],
     supportsAttachments: true,
     costPerMInputTokens: 0.2,
     costPerMOutputTokens: 1.2,
@@ -176,6 +181,7 @@ export const HOPLITE_MODELS: ModelDef[] = [
     canReason: true,
     reasoningLevels: ['none', 'low', 'medium', 'high', 'xhigh'],
     supportsFastMode: true,
+    speedTiers: [SPEED_TIER_FAST_HOPLITE],
     supportsAttachments: true,
     costPerMInputTokens: 5,
     costPerMOutputTokens: 30,

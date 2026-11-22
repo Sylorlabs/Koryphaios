@@ -12,6 +12,10 @@
     displayValue?: string;
     valueText?: string;
     disabled?: boolean;
+    /** 'accent' for a user-set value; 'muted' when showing the fallback. */
+    valueTone?: 'accent' | 'muted';
+    /** Tighter vertical rhythm for dense panels. */
+    compact?: boolean;
   }
 
   let {
@@ -27,6 +31,8 @@
     displayValue,
     valueText,
     disabled = false,
+    valueTone = 'accent',
+    compact = false,
   }: Props = $props();
 
   let slider = $state<HTMLDivElement>();
@@ -113,17 +119,24 @@
   }
 </script>
 
-<div class="space-y-2">
+<div class={compact ? 'space-y-1' : 'space-y-2'}>
   <div class="flex items-baseline justify-between gap-4">
     <span id={`${id}-label`} class="text-xs font-medium text-[var(--color-text-primary)]"
       >{label}</span
     >
-    <output class="font-mono text-xs tabular-nums text-[var(--color-accent)]"
-      >{renderedValue}</output
+    <output
+      class="font-mono text-xs tabular-nums {valueTone === 'muted'
+        ? 'text-[var(--color-text-muted)]'
+        : 'text-[var(--color-accent)]'}">{renderedValue}</output
     >
   </div>
   {#if description}
-    <p id={`${id}-description`} class="text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+    <p
+      id={`${id}-description`}
+      class="text-[11px] text-[var(--color-text-muted)] {compact
+        ? 'leading-snug line-clamp-2'
+        : 'leading-relaxed'}"
+    >
       {description}
     </p>
   {/if}
@@ -140,7 +153,9 @@
     aria-valuetext={accessibleValue}
     aria-orientation="horizontal"
     aria-disabled={disabled}
-    class="relative flex h-8 w-full touch-none items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-1)] {disabled
+    class="relative flex {compact
+      ? 'h-6'
+      : 'h-8'} w-full touch-none items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-1)] {disabled
       ? 'cursor-not-allowed opacity-50'
       : 'cursor-pointer'}"
     onkeydown={handleKeydown}
@@ -162,7 +177,7 @@
     ></span>
   </div>
   <div
-    class="flex justify-between font-mono text-[10px] text-[var(--color-text-muted)]"
+    class="flex justify-between font-mono text-[11px] text-[var(--color-text-muted)]"
     aria-hidden="true"
   >
     <span>{min}{unit}</span>

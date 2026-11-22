@@ -21,10 +21,10 @@ function json(body: unknown, status = 200): Response {
 
 // Backend-owned metadata: exercise the generic settings contract without
 // registering a provider or duplicating its endpoint configuration in the UI.
-function beamStatus(verified = false) {
+function reflectionStatus(verified = false) {
   return {
     name: 'beam',
-    label: 'Beam (Reflection AI)',
+    label: 'Reflection AI',
     authMode: 'api_key',
     supportsApiKey: true,
     supportsAuthToken: false,
@@ -42,7 +42,7 @@ function beamStatus(verified = false) {
   };
 }
 
-describe('Beam generic API-key settings flow', () => {
+describe('Reflection AI generic API-key settings flow', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
@@ -74,12 +74,12 @@ describe('Beam generic API-key settings flow', () => {
   });
 
   it('loads the backend label, official key-page link, and icon for settings', async () => {
-    apiFetch.mockImplementation(() => Promise.resolve(json({ ok: true, data: [beamStatus()] })));
+    apiFetch.mockImplementation(() => Promise.resolve(json({ ok: true, data: [reflectionStatus()] })));
     const { providersStore } = await import('./providers.svelte');
     await providersStore.loadProvidersFromApi();
 
     expect(providersStore.getProviderStatus('beam')).toMatchObject({
-      label: 'Beam (Reflection AI)',
+      label: 'Reflection AI',
       credentialUrl: 'https://platform.reflection.ai/api-keys',
       iconPath: '/provider-icons/reflection.svg',
     });
@@ -99,7 +99,7 @@ describe('Beam generic API-key settings flow', () => {
 
   it('submits the trimmed key through generic connect and clears it after verification', async () => {
     apiFetch.mockImplementation((_url: string, init?: RequestInit) => Promise.resolve(
-      json(init?.method === 'PUT' ? { ok: true } : { ok: true, data: [beamStatus(true)] }),
+      json(init?.method === 'PUT' ? { ok: true } : { ok: true, data: [reflectionStatus(true)] }),
     ));
     const { providersStore } = await import('./providers.svelte');
     providersStore.keyInputs = { beam: '  test-reflection-key  ' };
@@ -113,7 +113,7 @@ describe('Beam generic API-key settings flow', () => {
       undefined,
     );
     expect(providersStore.keyInputs.beam).toBe('');
-    expect(toastStore.success).toHaveBeenCalledWith('Beam (Reflection AI) credential verified');
+    expect(toastStore.success).toHaveBeenCalledWith('Reflection AI credential verified');
     expect(localStorage.length).toBe(0);
     expect(sessionStorage.length).toBe(0);
   });
@@ -133,7 +133,7 @@ describe('Beam generic API-key settings flow', () => {
 
   it('submits an endpoint override alongside the key using the existing URL input', async () => {
     apiFetch.mockImplementation((_url: string, init?: RequestInit) => Promise.resolve(
-      json(init?.method === 'PUT' ? { ok: true } : { ok: true, data: [beamStatus(true)] }),
+      json(init?.method === 'PUT' ? { ok: true } : { ok: true, data: [reflectionStatus(true)] }),
     ));
     const { providersStore } = await import('./providers.svelte');
     await providersStore.loadProvidersFromApi();

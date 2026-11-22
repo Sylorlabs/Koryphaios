@@ -152,6 +152,27 @@ const specs = [
     required: ['appId', 'windowId', 'delta'],
   },
   {
+    name: 'computer_place_window',
+    description:
+      'Move an authorized window off screen so a task can run out of the person\'s way, or put it back where it was. Input is still directed to the window and observations still work; the window is simply not visible to the person.',
+    capability: 'manageWindows',
+    properties: { ...targetProperties, hidden: { type: 'boolean' } },
+    required: ['appId', 'windowId', 'hidden'],
+  },
+  {
+    name: 'computer_sequence',
+    description:
+      'Run 1 to 64 actions in one native round trip. Each step names its own window, so one queue can span several windows. Pass observationId from computer_observe to reuse one look at the window instead of re-observing between steps; the queue stops at the first failing step and reports every step outcome.',
+    capability: 'interact',
+    properties: {
+      ...targetProperties,
+      steps: { type: 'array', minItems: 1, maxItems: 64 },
+      observationId: { type: 'string', minLength: 1, maxLength: 128 },
+      background: { type: 'boolean' },
+    },
+    required: ['appId', 'windowId', 'steps'],
+  },
+  {
     name: 'computer_focus',
     description: 'Focus an explicitly authorized application window.',
     capability: 'manageWindows',
@@ -435,6 +456,17 @@ export function createComputerUseTools(deps: ComputerUseToolDependencies = {}): 
                   break;
                 case 'computer_focus':
                   action = { kind: 'focus', target: resolved };
+                  break;
+                case 'computer_place_window':
+                  action = { kind: 'place', target: resolved, hidden: input.hidden as boolean };
+                  break;
+                case 'computer_sequence':
+                  action = {
+                    kind: 'sequence',
+                    steps: input.steps as import('@koryphaios/shared').ComputerStep[],
+                    ...(input.observationId ? { observationId: input.observationId as string } : {}),
+                    ...(input.background ? { background: true } : {}),
+                  };
                   break;
                 default:
                   throw new Error('Unsupported computer action');

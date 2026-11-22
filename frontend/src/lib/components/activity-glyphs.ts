@@ -321,13 +321,27 @@ export const activityGlyphs: Record<ToolIcon, ActivityGlyph> = {
     `),
   },
 
+  skill: {
+    label: 'Skill',
+    motion: 'The tassel swings from the corner of the cap, then settles',
+    svg: glyph(`
+      <path d="M12 5.4 3.4 9.6 12 13.8l8.6-4.2z"/>
+      <path d="M7.2 11.6v3.1c0 1.7 2.1 2.9 4.8 2.9s4.8-1.2 4.8-2.9v-3.1"/>
+      <g class="agi-tassel">
+        <path d="M19.6 10.4v4.2"/>
+        <circle cx="19.6" cy="15.4" r="1.05" fill="currentColor" stroke="none"/>
+      </g>
+    `),
+  },
+
   tool: {
     label: 'Tool / generic',
-    motion: 'A wrench turns smoothly against a bolt',
+    motion: 'A cog turns steadily while an unknown tool runs',
     svg: glyph(`
-      <path class="agi-wall agi-dim" d="M21 4.5v15"/>
-      <path class="agi-wrench" d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
-      <path class="agi-impact" d="M18.4 8.4l1.5-1.5M18.2 13.6l1.5 1.5M19.8 11h1.6"/>
+      <g class="agi-cog-group">
+        <path d="M10.9 3.5L12 3.4L13.1 3.5L13.8 5.9L15.1 6.4L17.3 5.2L18.1 5.9L18.8 6.7L17.6 8.9L18.1 10.2L20.5 10.9L20.6 12L20.5 13.1L18.1 13.8L17.6 15.1L18.8 17.3L18.1 18.1L17.3 18.8L15.1 17.6L13.8 18.1L13.1 20.5L12 20.6L10.9 20.5L10.2 18.1L8.9 17.6L6.7 18.8L5.9 18.1L5.2 17.3L6.4 15.1L5.9 13.8L3.5 13.1L3.4 12L3.5 10.9L5.9 10.2L6.4 8.9L5.2 6.7L5.9 5.9L6.7 5.2L8.9 6.4L10.2 5.9Z"/>
+        <circle cx="12" cy="12" r="2.6"/>
+      </g>
     `),
   },
 };

@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "pairId": "android-compose-full-task-1-individual:a1bba539-7de9-40ce-ae40-dc17f30d4135",
+  "skill": "android-compose",
+  "scenarioId": "android-compose-full-task-1-individual",
+  "revisionHash": "c09fd8f3532b5065bbdc45e755635f2b8caaf4e0da09d1052bf850435ea233c5",
+  "packageVersion": "5.0.0",
+  "suiteId": "android-compose:v5.0.0:held-out",
+  "evaluationContractHash": "18ec1f44e7a41374",
+  "evaluationContractVersion": 3,
+  "taskPrompt": "Fix a Jetpack Compose edit screen whose text field is restored after rotation but whose selected account and pending-save state reset, causing an offline retry to write the note to the wrong account after process recreation. Establish which state is durable, saveable, and ephemeral; collect the repository flow with lifecycle awareness; keep navigation/back semantics native; and add tests for rotation, process recreation, offline failure, retry, and TalkBack labels. Do not introduce desktop or web UI abstractions.",
+  "arms": {
+    "with-skill": {
+      "workingDirectory": "outputs/skill-library-finish-plan/E-native-mobile-and-devices/paired/android-t1/with-skill",
+      "baseFiles": [
+        ".kory-eval/android-native-contract.json",
+        "app/build.gradle.kts",
+        "app/src/main/AndroidManifest.xml",
+        "app/src/main/java/com/kory/eval/EditFeature.kt",
+        "app/src/main/java/com/kory/eval/EvaluationState.kt",
+        "app/src/main/java/com/kory/eval/FeedFeature.kt",
+        "app/src/main/java/com/kory/eval/MainActivity.kt",
+        "build.gradle.kts",
+        "gradle.properties",
+        "README.md",
+        "settings.gradle.kts"
+      ],
+      "skillContextInjected": true
+    },
+    "without-skill": {
+      "workingDirectory": "outputs/skill-library-finish-plan/E-native-mobile-and-devices/paired/android-t1/without-skill",
+      "baseFiles": [
+        ".kory-eval/android-native-contract.json",
+        "app/build.gradle.kts",
+        "app/src/main/AndroidManifest.xml",
+        "app/src/main/java/com/kory/eval/EditFeature.kt",
+        "app/src/main/java/com/kory/eval/EvaluationState.kt",
+        "app/src/main/java/com/kory/eval/FeedFeature.kt",
+        "app/src/main/java/com/kory/eval/MainActivity.kt",
+        "build.gradle.kts",
+        "gradle.properties",
+        "README.md",
+        "settings.gradle.kts"
+      ],
+      "skillContextInjected": false
+    }
+  }
+}

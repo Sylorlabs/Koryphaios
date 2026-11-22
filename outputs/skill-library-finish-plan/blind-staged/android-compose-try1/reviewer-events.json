@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "reviewerId": "logfare-stateless-4d664955-1b41-459c-be95-48818208eae0",
+  "completed": true,
+  "output": "{\"artifactA\":{\"passed\":true,\"quality\":0.72,\"verification\":0.35,\"integrityFailure\":false,\"evidence\":[\"EditFeature.kt rewritten to move selected account, draft, and pending save into NoteJournal (durable), with EditModel as AndroidViewModel reading journal state and publishing via StateFlow.\",\"Uses collectAsStateWithLifecycle for accounts and state flows; back handled via LocalOnBackPressedDispatcherOwner's dispatcher (native).\",\"save() enqueues durable pending record before commit; retry() reads pending from journal and commits stored target, preventing wrong-account write after process recreation.\",\"Draft is write-through to journal while also cached in rememberSaveable; pending status surfaced with liveRegion semantics.\",\"No desktop/web UI abstractions introduced; scope limited to EditFeature.kt.\",\"Verification: real Gradle build failed (plugin resolution), so no native instrumentation evidence; agent did not claim tests passed. No authored tests for rotation/process recreation/offline/retry/TalkBack were added (evaluator supplies instrumentation per README, but task asked to add tests).\",\"No explicit unavailable/simulated labels authored by agent in finalOutput; only harness execution evidence records the build failure.\"]},\"artifactB\":{\"passed\":true,\"quality\":0.78,\"verification\":0.35,\"integrityFailure\":false,\"evidence\":[\"EditFeature.kt rewritten: durable selected account, draft, and pending save in NoteJournal; ViewModel mirrors journal via StateFlows; pending derived from durable queue rather than a ViewModel flag.\",\"retryPending reads stored pending target from journal, so changing selection before retry cannot redirect the write; idempotency token noted.\",\"Uses collectAsStateWithLifecycle for accounts, selected, draft, pending; back via OnBackPressedDispatcher (native).\",\"Adds stateDescription on selected account button and pending-status semantics for TalkBack.\",\"FeedFeature.kt also fixed: stable message.id keys, LaunchedEffect tied to composition lifecycle with cancellation rethrow, BackHandler for native back, rememberSaveable for view state.\",\"No desktop/web UI abstractions introduced.\",\"Verification: real Gradle build failed (network resolution), no native instrumentation evidence; agent did not claim tests passed. No authored tests for rotation/process recreation/offline/retry/TalkBack added.\",\"No explicit unavailable/simulated labels authored by agent; harness records build failure.\"]},\"preference\":\"B\",\"rationale\":[\"Both artifacts correctly move durable state (selected account, draft, pending save) into NoteJournal and use lifecycle-aware collection, native back dispatch, and idempotent retry from stored pending target.\",\"Artifact B additionally fixes FeedFeature.kt (stable keys, lifecycle-tied avatar work, BackHandler, rememberSaveable), which the fixture README describes as part of the scenario set; Artifact A left FeedFeature.kt untouched.\",\"Artifact B adds richer TalkBack semantics (stateDescription on selected account, pending-status contentDescription) and derives pending state from the durable queue rather than a ViewModel flag, more directly satisfying the execution invariant.\",\"Neither artifact authored tests for rotation/process recreation/offline/retry/TalkBack, and both had native builds blocked by environment/network failures; neither overstated verification.\",\"B's broader correct scope and stronger state-ownership modeling give it a modest edge.\"]}",
+  "events": [
+    {
+      "type": "review.started",
+      "reviewerId": "logfare-stateless-4d664955-1b41-459c-be95-48818208eae0"
+    },
+    {
+      "type": "review.completed",
+      "reviewerId": "logfare-stateless-4d664955-1b41-459c-be95-48818208eae0",
+      "outputSha256": "e7dd5509c495f874554d8d6c13f666b65a57959924632f9e5ff243135fc057d9"
+    }
+  ],
+  "hostReceipt": {
+    "schemaVersion": 1,
+    "stageOnly": true,
+    "identitySource": "host-invocation-uuid",
+    "upstreamSessionObserved": true,
+    "requestedModel": "deepseek-v4.1-flash-1017",
+    "responseModel": "deepseek-v4.1-flash-1017",
+    "promptSha256": "ae290efdc7d3b8d97e3e54eb4d7092309177fb1ef6eff442f1276480684a3def",
+    "requestBytes": 51841,
+    "responseSha256": "0adb52629d1a57dc1ae3bbbd840c6f6035d7a46f21f26a26ba1dfeec982e96a2",
+    "outputSha256": "e7dd5509c495f874554d8d6c13f666b65a57959924632f9e5ff243135fc057d9",
+    "elapsedMs": 4370,
+    "osIsolationVerified": false,
+    "upstreamIdentityVerified": false,
+    "signed": false
+  }
+}

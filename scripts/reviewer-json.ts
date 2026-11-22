@@ -78,3 +78,95 @@ export function validateAdjudication(output: string): void {
   }
   if (!['A', 'B', 'tie'].includes(result.preference as string) || !strings(result.rationale)) invalid();
 }
+
+// This route's model emits an adjudication that repeats keys inside an artifact
+// object: a second "evidence" array, or a trailing "quality"/"verification" pair
+// after the evidence array. Measured on four captured samples, the repeated
+// scalar values are identical and the repeated arrays differ only in being a
+// shorter restatement, so the first occurrence is the substantive one. Keep the
+// first occurrence, reject any duplicate whose scalar value disagrees, and hand
+// the rebuilt JSON to the strict grammar so nothing else is relaxed.
+export function normalizeDuplicateKeys(text: string): string {
+  let index = 0;
+  const whitespace = () => {
+    while (/[\x20\t\r\n]/u.test(text[index] ?? '\0')) index += 1;
+  };
+  const readString = (): string => {
+    const match = /^"(?:[^"\\\u0000-\u001f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"/u.exec(
+      text.slice(index),
+    );
+    if (!match) throw new Error('Invalid reviewer JSON (details redacted).');
+    index += match[0].length;
+    return JSON.parse(match[0]) as string;
+  };
+  const readValue = (depth: number): string => {
+    if (depth > 20) throw new Error('Invalid reviewer JSON (details redacted).');
+    whitespace();
+    const token = text[index];
+    const start = index;
+    if (token === '"') {
+      readString();
+      return text.slice(start, index);
+    }
+    if (token === '{') {
+      index += 1;
+      const seen = new Map<string, string>();
+      const fields: string[] = [];
+      whitespace();
+      if (text[index] === '}') {
+        index += 1;
+        return '{}';
+      }
+      while (true) {
+        whitespace();
+        const key = readString();
+        whitespace();
+        if (text[index++] !== ':') throw new Error('Invalid reviewer JSON (details redacted).');
+        const value = readValue(depth + 1);
+        const previous = seen.get(key);
+        if (previous === undefined) {
+          seen.set(key, value);
+          fields.push(`${JSON.stringify(key)}:${value}`);
+        } else if (previous !== value && !(previous.startsWith('[') && value.startsWith('['))) {
+          throw new Error('Invalid reviewer JSON (details redacted).');
+        }
+        whitespace();
+        const separator = text[index++];
+        if (separator === '}') return `{${fields.join(',')}}`;
+        if (separator !== ',') throw new Error('Invalid reviewer JSON (details redacted).');
+      }
+    }
+    if (token === '[') {
+      index += 1;
+      const items: string[] = [];
+      whitespace();
+      if (text[index] === ']') {
+        index += 1;
+        return '[]';
+      }
+      while (true) {
+        items.push(readValue(depth + 1));
+        whitespace();
+        const separator = text[index++];
+        if (separator === ']') return `[${items.join(',')}]`;
+        if (separator !== ',') throw new Error('Invalid reviewer JSON (details redacted).');
+      }
+    }
+    const literal = /^(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)/u.exec(
+      text.slice(index),
+    );
+    if (!literal) throw new Error('Invalid reviewer JSON (details redacted).');
+    index += literal[0].length;
+    return literal[0];
+  };
+  const candidateStart = text.indexOf('{');
+  const candidateEnd = text.lastIndexOf('}');
+  if (candidateStart < 0 || candidateEnd <= candidateStart) {
+    throw new Error('Invalid reviewer JSON (details redacted).');
+  }
+  index = candidateStart;
+  const normalized = readValue(0);
+  whitespace();
+  if (index !== candidateEnd + 1) throw new Error('Invalid reviewer JSON (details redacted).');
+  return normalized;
+}

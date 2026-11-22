@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "reviewerId": "logfare-stateless-f0aaf4c1-41b0-48d3-9815-aa627797e883",
+  "completed": true,
+  "output": "{\"artifactA\":{\"passed\":false,\"quality\":0.7,\"verification\":0.5,\"integrityFailure\":false,\"evidence\":[\"Artifact A's own authored test asserts `mutationTrace?.control` contains the literal string \\\"rejects missing or invalid tokens\\\", but the actual JSON control text reads \\\"rejects missing or invalid tokens\\\" — wait, the JSON says \\\"rejects missing or invalid tokens\\\"? Let me check: JSON control is 'server-side CSRF validation against the session rejects missing or invalid tokens' — actually the JSON text is 'server-side CSRF validation against the session rejects missing or invalid tokens'. The test expects 'rejects missing or invalid tokens' — the JSON has 'rejects missing or invalid tokens'. Hmm, the JSON says 'rejects missing or invalid tokens'? The JSON control: 'server-side CSRF validation against the session rejects missing or invalid tokens'. The test expects 'rejects missing or invalid tokens'. These match. But the host hidden test failed: 'cookie-authenticated mutation source/sink: missing' and 'browser source/sink/postMessage vectors: fail'.\",\"Host execution evidence for A: hidden test 'source/sink and sink-specific rendering policy are concrete' FAILED; 'cookie-authenticated mutation source/sink: missing'; 'browser source/sink/postMessage vectors: fail'. A's own public tests passed (5/5) but the hidden contract check failed.\",\"A's JSON does contain a CSRF source-sink row with server-side validation and rejection language, and exact postMessage origins, strict nonce CSP, host-only cookie, tenant authorization separation — most contract elements present.\",\"A's finalOutput claims 'bun test: 5 passed' which is true for its own tests, but does not claim hidden pass; it honestly notes tsc skipped. No integrity failure.\",\"A's hidden failure indicates the source/sink rendering policy was judged insufficiently concrete by the deterministic scorer despite appearing present — possible verifier strictness, but concrete artifact behavior (e.g., sanitizer policy present) suggests partial compliance.\"]},\"artifactB\":{\"passed\":true,\"quality\":0.9,\"verification\":0.9,\"integrityFailure\":false,\"evidence\":[\"Host execution evidence for B: all three hidden tests PASS (source/sink rendering policy, CSP/CSRF, postMessage/return/cookie), 49 expect() calls, 0 fail.\",\"B's JSON includes six source-sink rows including a detailed cookie-authenticated mutation row naming server-side CSRF validation against the session and rejection of missing/invalid tokens, plus exact postMessage origins, strict nonce CSP with Report-Only rollout, host-only Secure/HttpOnly SameSite=Lax cookie, safe return navigation, and tenant authorization separation.\",\"B's finalOutput claims verification passed for message cases, return-URL cases, exact origins, CSP directives, and mutation trace — consistent with host hidden test pass. Honest note that tsc unavailable.\",\"B additionally covers outgoing postMessage target origin exactness and sandbox/allow attributes, and explicitly states CSP is defense in depth not primary XSS fix.\"]},\"preference\":\"B\",\"rationale\":[\"Both artifacts are substantively similar in content, but the host deterministic scorer passed all hidden checks for B and failed the source/sink rendering-policy check for A.\",\"B's source-sink inventory is more concrete and complete (six rows, explicit outgoing postMessage row, sandbox/allow attributes, X-Frame-Options note), aligning with the hidden pass.\",\"A's own tests passed but the hidden contract check for concrete source/sink rendering policy failed, indicating a real gap or insufficient concreteness relative to the contract.\",\"Neither shows integrity failure; both honestly report tsc unavailability. B has stronger verified evidence.\"]}",
+  "events": [
+    {
+      "type": "review.started",
+      "reviewerId": "logfare-stateless-f0aaf4c1-41b0-48d3-9815-aa627797e883"
+    },
+    {
+      "type": "review.completed",
+      "reviewerId": "logfare-stateless-f0aaf4c1-41b0-48d3-9815-aa627797e883",
+      "outputSha256": "b84fb9d452a094d61f2978a9f2b6a06b96709e7c7eb9fce5223f7cc1cb593c84"
+    }
+  ],
+  "hostReceipt": {
+    "schemaVersion": 1,
+    "stageOnly": true,
+    "identitySource": "host-invocation-uuid",
+    "upstreamSessionObserved": true,
+    "requestedModel": "deepseek-v4.1-flash-1017",
+    "responseModel": "deepseek-v4.1-flash-1017",
+    "promptSha256": "9a873008df9acc67b22ca269b44be88c89247eb2fbc98606958f18583cf3fae7",
+    "requestBytes": 48510,
+    "responseSha256": "eb75dac7c7a5ffdcf31c4864cb6ff257ce5f652d9ed1fbb918c4fe23f82dc647",
+    "outputSha256": "b84fb9d452a094d61f2978a9f2b6a06b96709e7c7eb9fce5223f7cc1cb593c84",
+    "elapsedMs": 3876,
+    "osIsolationVerified": false,
+    "upstreamIdentityVerified": false,
+    "signed": false
+  }
+}

@@ -2,11 +2,11 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { writeFixtureFile } from '../skill-eval-fixture-helpers';
+import { writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
 import {
   SECURITY_REVIEW_RUNTIME_SKILL_EVAL_MATERIALIZERS,
   SECURITY_REVIEW_RUNTIME_SKILL_EVAL_SCORERS,
-} from '../skill-eval-security-review-runtime-fixtures';
+} from '../../eval/skills/skill-eval-security-review-runtime-fixtures';
 
 const SCENARIO_ID = 'security-review-full-task-2-individual';
 const roots: string[] = [];

@@ -1,9 +1,9 @@
 import { resolve } from 'node:path';
-import { auditSkillEvalExecutionReadiness } from '../backend/src/kory/skill-eval-execution';
+import { auditSkillEvalExecutionReadiness } from '../backend/src/eval/skills/skill-eval-execution';
 import {
   BUILTIN_SKILL_EVAL_MATERIALIZERS,
   BUILTIN_SKILL_EVAL_SCORERS,
-} from '../backend/src/kory/skill-eval-fixtures';
+} from '../backend/src/eval/skills/skill-eval-fixtures';
 import { evaluateSkillPromotion } from '../backend/src/kory/skill-evaluations';
 import { loadV5SkillPackages } from '../backend/src/kory/skill-packages';
 import { auditV5SkillLibraryQuality } from '../backend/src/kory/skill-v5-quality';

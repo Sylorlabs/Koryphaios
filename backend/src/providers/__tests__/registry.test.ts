@@ -75,88 +75,16 @@ describe('ProviderRegistry auth modes', () => {
     expect(result.error).toContain('apiKey is required');
   });
 
-  test('AgentRouter verification sends only its own key to its catalog endpoint', async () => {
-    const previousFetch = globalThis.fetch;
-    const requests: Request[] = [];
-    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-      requests.push(new Request(input, init));
-      return new Response('{"data":[{"id":"claude-sonnet-4.6"}]}', {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
-    }) as typeof fetch;
-    try {
-      const registry = new ProviderRegistry(minimalConfig());
-      // Check the verification request separately from the SDK's asynchronous
-      // catalog refresh: their User-Agent values intentionally differ.
-      expect(
-        (await registry.verifyConnection('agentrouter', { apiKey: 'ar-synthetic-key' })).success,
-      ).toBe(true);
-      expect(requests).toHaveLength(1);
-      expect(requests[0]!.headers.get('user-agent')).toBe('Koryphaios/1.0');
-      const result = await registry.setCredentials('agentrouter', {
-        apiKey: 'ar-synthetic-key',
-      });
-
-      expect(result.success).toBe(true);
-      const catalogRequests = requests.filter(
-        (request) => request.url === 'https://agentrouter.org/v1/models',
-      );
-      expect(catalogRequests.length).toBeGreaterThan(0);
-      for (const request of catalogRequests) {
-        expect(request.headers.get('authorization')).toBe('Bearer ar-synthetic-key');
-      }
-      // Public metadata enrichment may run before catalog discovery. It must
-      // never receive the credential intended for AgentRouter.
-      for (const request of requests.filter(
-        (request) => new URL(request.url).origin !== 'https://agentrouter.org',
-      )) {
-        expect(request.headers.get('authorization')).toBeNull();
-        expect(request.headers.get('x-api-key')).toBeNull();
-      }
-    } finally {
-      globalThis.fetch = previousFetch;
-    }
-  });
-
-  test('retains a rejected AgentRouter key so retry does not require pasting it again', async () => {
-    const previousFetch = globalThis.fetch;
-    globalThis.fetch = (async () =>
-      new Response(JSON.stringify({ message: 'unauthorized client detected' }), {
-        status: 401,
-        headers: { 'content-type': 'application/json' },
-      })) as typeof fetch;
-    try {
-      const registry = new ProviderRegistry(minimalConfig());
-      const result = await registry.setCredentials('agentrouter', {
-        apiKey: 'ar-persist-after-failure',
-      });
-
-      expect(result.success).toBe(false);
-      expect(registry.getConfigs().agentrouter?.apiKey).toBe('ar-persist-after-failure');
-      expect(registry.getConfigs().agentrouter?.disabled).toBe(true);
-      expect(result.credentialsRetained).toBe(true);
-      expect(registry.getStatus().find((p) => p.name === 'agentrouter')?.credentialDetected).toBe(
-        true,
-      );
-      const retry = await registry.setCredentials('agentrouter', {});
-      expect(retry.success).toBe(false);
-      expect(registry.getConfigs().agentrouter?.disabled).toBe(true);
-    } finally {
-      globalThis.fetch = previousFetch;
-    }
-  });
-
   test('a failed rotation preserves the active provider and all other provider keys', async () => {
     const registry = new ProviderRegistry(minimalConfig());
     expect(
-      (await registry.setCredentials('agentrouter', { apiKey: 'synthetic-agentrouter-good' }))
+      (await registry.setCredentials('unorouter', { apiKey: 'synthetic-unorouter-good' }))
         .success,
     ).toBe(true);
     expect(
       (await registry.setCredentials('openai', { apiKey: 'synthetic-openai-good' })).success,
     ).toBe(true);
-    const active = registry.get('agentrouter');
+    const active = registry.get('unorouter');
     const previousFetch = globalThis.fetch;
     const requests: Request[] = [];
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -164,18 +92,18 @@ describe('ProviderRegistry auth modes', () => {
       return Response.json({ error: { message: 'Invalid key' } }, { status: 401 });
     }) as typeof fetch;
     try {
-      const result = await registry.setCredentials('agentrouter', {
-        apiKey: 'synthetic-agentrouter-bad',
+      const result = await registry.setCredentials('unorouter', {
+        apiKey: 'synthetic-unorouter-bad',
       });
       expect(result.success).toBe(false);
       expect(result.credentialsRetained).toBeUndefined();
-      expect(registry.getConfigs().agentrouter?.apiKey).toBe('synthetic-agentrouter-good');
+      expect(registry.getConfigs().unorouter?.apiKey).toBe('synthetic-unorouter-good');
       expect(registry.getConfigs().openai?.apiKey).toBe('synthetic-openai-good');
-      expect(registry.get('agentrouter')).toBe(active);
-      const catalog = requests.filter((r) => r.url.includes('agentrouter.org'));
+      expect(registry.get('unorouter')).toBe(active);
+      const catalog = requests.filter((r) => r.url.includes('api.unorouter.com'));
       expect(catalog.length).toBeGreaterThan(0);
       for (const r of catalog)
-        expect(r.headers.get('authorization')).toBe('Bearer synthetic-agentrouter-bad');
+        expect(r.headers.get('authorization')).toBe('Bearer synthetic-unorouter-bad');
     } finally {
       globalThis.fetch = previousFetch;
     }

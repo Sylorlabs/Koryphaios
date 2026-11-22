@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { THEME_PRESETS } from './theme-palette';
+import { THEME_PRESETS, THEME_PRESET_OPTIONS } from './theme-palette';
 
 type Rgb = [number, number, number];
 
@@ -37,11 +37,15 @@ function contrastRatio(foreground: Rgb, background: Rgb): number {
 
 describe('theme palette accessibility contracts', () => {
   it('keeps light-mode checkbox outlines visible on content surfaces', () => {
-    const palette = THEME_PRESETS.light;
-    for (const token of ['--color-surface-0', '--color-surface-1', '--color-surface-2']) {
-      expect(
-        contrastRatio(parseHex(palette['--color-border-bright']), parseHex(palette[token])),
-      ).toBeGreaterThanOrEqual(3);
+    for (const option of THEME_PRESET_OPTIONS.filter((entry) => entry.scheme === 'light')) {
+      const palette = THEME_PRESETS[option.id];
+      for (const token of ['--color-surface-0', '--color-surface-1', '--color-surface-2']) {
+        const background = parseHex(palette[token]);
+        expect(
+          contrastRatio(parseColor(palette['--color-border-bright'], background), background),
+          `${option.id} border-bright on ${token}`,
+        ).toBeGreaterThanOrEqual(3);
+      }
     }
   });
 

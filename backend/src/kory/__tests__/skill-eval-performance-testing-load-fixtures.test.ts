@@ -3,14 +3,14 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
-import { readJsonArtifact, writeFixtureFile } from '../skill-eval-fixture-helpers';
+import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
+import { readJsonArtifact, writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
 import {
   PERFORMANCE_TESTING_LOAD_FAULTY_PLAN,
   PERFORMANCE_TESTING_LOAD_SKILL_EVAL_MATERIALIZERS,
   PERFORMANCE_TESTING_LOAD_SKILL_EVAL_SCORERS,
   PERFORMANCE_TESTING_LOAD_VALID_PLAN,
-} from '../skill-eval-performance-testing-load-fixtures';
+} from '../../eval/skills/skill-eval-performance-testing-load-fixtures';
 import { loadV5SkillPackages } from '../skill-packages';
 
 const SCENARIO = 'performance-testing-full-task-1';

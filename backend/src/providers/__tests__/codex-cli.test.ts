@@ -5,6 +5,7 @@ import {
   codexImageArgs,
   codexJsonEvents,
   codexReasoningArgs,
+  codexSpeedTierArgs,
   codexTransientExhaustedMessage,
   codexTransientFailureMessage,
   extractKoryToolEnvelope,
@@ -390,5 +391,13 @@ describe('Codex stale turn-token binding classification', () => {
     expect(events.some((e) => e.type === 'tool_executed')).toBe(false);
     const err = events.find((e) => e.type === 'error');
     expect(err?.error).toContain('transient ChatGPT disconnect');
+  });
+});
+
+describe('codexSpeedTierArgs', () => {
+  it('emits service_tier="fast" only for the fast speed tier', () => {
+    expect(codexSpeedTierArgs('fast')).toEqual(['--config', 'service_tier="fast"']);
+    expect(codexSpeedTierArgs('priority')).toEqual([]);
+    expect(codexSpeedTierArgs(undefined)).toEqual([]);
   });
 });

@@ -1,9 +1,11 @@
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { canonicalizePath } from '../runtime/platform';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   accessSync,
   closeSync,
   constants,
+  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -16,7 +18,8 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { findExecutableOnPath } from '../runtime/platform';
+import { killOwnerDisplayProcesses } from '../security/owner-display-guard';
+import { findExecutableOnPath, isMac } from '../runtime/platform';
 import type {
   SkillEvalDeterministicScore,
   SkillEvalDeterministicScorer,
@@ -70,8 +73,42 @@ const ELECTRON_EVENTS = [
   'open:cycle-3', 'close:cycle-3', 'open:concurrent-a', 'open:concurrent-b',
   'close:concurrent-a', 'close:concurrent-b', 'before-quit', 'will-quit',
 ];
+/**
+ * A driver reports the canonical path it resolved, which on macOS is `/private/var/...` for a
+ * fixture staged under `/var/...`. Comparing it against a plain `resolve(root)` rejects a bundle
+ * that really is inside the fixture, so both sides are canonicalised first. A bundle outside the
+ * root, or one whose bytes changed after the driver hashed it, is still refused.
+ */
+export function packagedArtifactIdentity(
+  root: string,
+  artifact: unknown,
+  declaredSha256: unknown,
+): { ok: true } | { ok: false; reason: string } {
+  const candidate = typeof artifact === 'string' ? artifact : '';
+  if (!isAbsolute(candidate)) {
+    return { ok: false, reason: 'Packaged native Tauri executable identity mismatch' };
+  }
+  let canonicalRoot: string;
+  let canonicalCandidate: string;
+  try {
+    canonicalRoot = canonicalizePath(root);
+    canonicalCandidate = canonicalizePath(candidate);
+  } catch {
+    // A path that does not exist cannot be the bundle the driver measured.
+    return { ok: false, reason: 'Packaged native Tauri executable identity mismatch' };
+  }
+  if (!canonicalCandidate.startsWith(canonicalRoot + sep)) {
+    return { ok: false, reason: 'Packaged native Tauri executable identity mismatch' };
+  }
+  const bytes = readFileSync(regularFile(canonicalRoot, relative(canonicalRoot, canonicalCandidate), 250_000_000));
+  if (declaredSha256 !== sha256(bytes)) {
+    return { ok: false, reason: 'Packaged native Tauri executable identity mismatch' };
+  }
+  return { ok: true };
+}
+
 const TAURI_EVENTS = [
-  'window:created', 'window:closed', 'window:reopened',
+  'window:created', 'window:closed',
   'dialog:opened', 'dialog:cancelled', 'dialog:accepted',
   'fs:symlink-retargeted', 'app:quit', 'app:restarted', 'renderer:capture',
 ];
@@ -347,8 +384,70 @@ setTimeout(() => { errors.push('probe watchdog timeout'); app.quit(); }, 30000).
 `;
 
 const TAURI_RUST = String.raw`
+use std::fs;
 use std::path::PathBuf;
+use std::time::Duration;
+use tauri::Emitter;
 use tauri_plugin_dialog::DialogExt;
+
+// A verification channel the harness reads from outside the webview. It exists so the native
+// driver can observe the same state the person sees, and ask the app to open its own dialog,
+// without requiring Apple Events or Accessibility from inside a sandboxed run.
+#[tauri::command]
+fn kory_status(text: String) {
+    if let Ok(root) = std::env::var("KORY_FIXTURE_ROOT") {
+        let _ = fs::write(PathBuf::from(root).join(".kory-status"), text);
+    }
+}
+
+// The harness may evaluate on a display with no physical output, so the window is placed where it
+// is asked to go. A window on the operator's screen is not acceptable for an automated pass: the
+// placement travels with the launch, which keeps the first frame off that screen too.
+fn fixture_position() -> (i32, i32) {
+    if let Ok(raw) = std::env::var("KORY_FIXTURE_POSITION") {
+        let parts: Vec<i32> = raw.split(',').filter_map(|part| part.trim().parse().ok()).collect();
+        if parts.len() == 2 {
+            return (parts[0], parts[1]);
+        }
+    }
+    (160, 160)
+}
+
+#[tauri::command]
+fn kory_place_window(window: tauri::WebviewWindow) {
+    let (x, y) = fixture_position();
+    let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
+// The picker opens where the harness asks it to, so a person-shaped Return is enough to choose
+// that folder. The dialog is still the system one and still returns its own answer.
+#[tauri::command]
+fn kory_picker_directory(state: tauri::State<'_, PickerDirectory>, path: String) {
+    if let Ok(mut current) = state.0.lock() {
+        *current = Some(path);
+    }
+}
+
+struct PickerDirectory(std::sync::Mutex<Option<String>>);
+
+fn spawn_control(app: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        let Ok(root) = std::env::var("KORY_FIXTURE_ROOT") else { return };
+        let path = PathBuf::from(root).join(".kory-control.json");
+        let mut last = String::new();
+        loop {
+            std::thread::sleep(Duration::from_millis(120));
+            if let Ok(text) = fs::read_to_string(&path) {
+                if text != last {
+                    last = text.clone();
+                    let _ = app.emit("kory-control", text);
+                }
+            }
+        }
+    });
+}
 
 // Intentional defect: the command trusts a path chosen earlier by the webview.
 #[tauri::command]
@@ -361,16 +460,42 @@ fn read_workspace(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn choose_workspace(app: tauri::AppHandle) -> Result<String, String> {
+async fn choose_workspace(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, PickerDirectory>,
+) -> Result<String, String> {
     // This is a REAL native folder picker; it must return a typed cancellation.
-    Ok(app.dialog().file().blocking_pick_folder()
+    let mut dialog = app.dialog().file();
+    if let Some(directory) = state.0.lock().ok().and_then(|current| current.clone()) {
+        dialog = dialog.set_directory(&directory);
+    }
+    Ok(dialog.blocking_pick_folder()
         .map(|selection| selection.to_string()).unwrap_or_default())
 }
 
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![read_workspace, choose_workspace])
+        .manage(PickerDirectory(std::sync::Mutex::new(None)))
+        .setup(|app| {
+            spawn_control(app.handle().clone());
+            // The driver needs a window that is on screen and capturable. A restored position
+            // from an earlier session can leave it off the only display, so place it here.
+            if let Some(window) = tauri::Manager::get_webview_window(app, "main") {
+                let (x, y) = fixture_position();
+                let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            read_workspace,
+            choose_workspace,
+            kory_status,
+            kory_picker_directory,
+            kory_place_window
+        ])
         .run(tauri::generate_context!())
         .expect("Tauri native runtime failed");
 }
@@ -383,22 +508,48 @@ button{padding:12px;margin:8px;background:#b1dfd0;color:#101b19;border:0;border-
 </style></head><body><main><h1>Native workspace</h1>
 <button id="choose" type="button">Choose folder</button>
 <button id="read" type="button">Read workspace</button>
+<button id="probe" type="button">Probe capability</button>
 <p id="status" role="status">No folder selected</p>
 </main><script src="renderer.js"></script></body></html>`;
 
 const TAURI_RENDERER = String.raw`
 const invoke = window.__TAURI__.core.invoke;
 const status = document.querySelector('#status');
+const listen = window.__TAURI__.event.listen;
+// Mirror every status line to the fixture root so the native driver reads the same text the
+// person sees, without asking the accessibility server for it.
+const setStatus = (text) => { status.textContent = text; invoke('kory_status', { text }).catch(() => {}); };
+listen('kory-control', (event) => {
+  let command = {};
+  try { command = JSON.parse(event.payload); } catch { return; }
+  if (command.action === 'open') {
+    const start = typeof command.directory === 'string' ? invoke('kory_picker_directory', { path: command.directory }) : Promise.resolve();
+    start.catch(() => {}).then(() => document.querySelector('#choose').click());
+  }
+  if (command.action === 'read') document.querySelector('#read').click();
+  if (command.action === 'probe') document.querySelector('#probe').click();
+  if (command.action === 'place') invoke('kory_place_window').catch(() => {});
+});
 let chosenPath = localStorage.getItem('workspace') || '';
 document.querySelector('#choose').addEventListener('click', async () => {
   const selected = await invoke('choose_workspace');
   chosenPath = selected || ''; // BUG: a cancel loses the difference between none and empty.
   localStorage.setItem('workspace', chosenPath);
-  status.textContent = chosenPath || 'No folder selected';
+  setStatus(chosenPath || 'No folder selected');
 });
 document.querySelector('#read').addEventListener('click', async () => {
-  try { status.textContent = await invoke('read_workspace', { path: chosenPath }); }
-  catch (error) { status.textContent = String(error); }
+  try { setStatus(await invoke('read_workspace', { path: chosenPath })); }
+  catch (error) { setStatus(String(error)); }
+});
+// A capability probe the native driver can trigger from outside the webview. The command is
+// deliberately not registered, so a correct app keeps it unreachable and reports the refusal
+// instead of answering it. Registering a catch-all handler would make this succeed and fail
+// the check, which is exactly the boundary being measured.
+document.querySelector('#probe').addEventListener('click', async () => {
+  try {
+    const answer = await invoke('kory_unregistered_probe');
+    setStatus('unexpectedly allowed: ' + String(answer));
+  } catch (error) { setStatus('denied: ' + String(error)); }
 });
 `;
 
@@ -415,8 +566,19 @@ const TAURI_MANIFEST = JSON.stringify({
       csp: "default-src 'self'; connect-src ipc: http://ipc.localhost; script-src 'self'; style-src 'self' 'unsafe-inline'",
     },
   },
-  bundle: { active: true, targets: 'all' },
+  // A v2 bundle needs a declared icon that exists on disk, and a universal target builds a
+  // dmg plus an updater archive the fixture never launches. `app` is the artifact the native
+  // driver starts.
+  bundle: { active: true, targets: ['app'], icon: ['icons/icon.png'] },
 }, null, 2) + '\n';
+
+// Tauri v2 reads an icon during `generate_context!`, so a fixture without one cannot compile
+// at all: the build panics with "failed to open icon". This is a real 32x32 RGBA PNG, not a
+// placeholder path, because the macro decodes the bytes.
+const TAURI_ICON = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAMElEQVR42u3OIQEAAAgDMOIQgBr0jwMxbibmVz17SSUgICAgICAgICAgICAgIJAOPPUpoFuI67F7AAAAAElFTkSuQmCC',
+  'base64',
+);
 
 const TAURI_CARGO = `[package]
 name = "kory-desktop-native-fixture"
@@ -466,8 +628,8 @@ function electronBinary(): string {
   const override = process.env.KORY_SKILL_EVAL_ELECTRON_BINARY?.trim();
   if (override) return override;
   const localBins = [
-    resolve(import.meta.dir, '../../../node_modules/.bin'),
-    resolve(import.meta.dir, '../../../desktop/node_modules/.bin'),
+    resolve(import.meta.dir, '../../../../node_modules/.bin'),
+    resolve(import.meta.dir, '../../../../desktop/node_modules/.bin'),
   ];
   return (
     findExecutableOnPath('electron', [...localBins, process.env.PATH ?? ''].join(delimiter)) ??
@@ -479,7 +641,7 @@ function electronBinary(): string {
 function tauriCliBinary(): string {
   const override = process.env.KORY_SKILL_EVAL_TAURI_CLI?.trim();
   if (override) return override;
-  const bundledBin = resolve(import.meta.dir, '../../../desktop/node_modules/.bin');
+  const bundledBin = resolve(import.meta.dir, '../../../../desktop/node_modules/.bin');
   return (
     findExecutableOnPath('tauri', [bundledBin, process.env.PATH ?? ''].join(delimiter)) ?? 'tauri'
   );
@@ -518,9 +680,50 @@ function hasNativeExecutableHeader(path: string): boolean {
 }
 
 /** An installed product app is not a toolchain that can launch an arbitrary fixture. */
+/**
+ * A window on the person's own display is not an observation, it is an interruption. A desktop
+ * scenario therefore runs only where the evaluation owns the display: a separate login session that
+ * does not hold the console, or a virtual machine. Everywhere else it is refused before a window
+ * exists, so a campaign can never cover the screen someone is typing on.
+ */
+export function desktopVmMode(): boolean {
+  return process.env.KORY_SKILL_EVAL_DESKTOP_VM === '1';
+}
+
+export function desktopIsolationBlocker(): string | null {
+  if (process.env.KORY_SKILL_EVAL_DESKTOP_VM === '1') return null;
+  if (!isMac()) {
+    return 'Desktop evaluation requires an isolated desktop session or a virtual machine target: ' +
+      'set KORY_SKILL_EVAL_DESKTOP_VM=1 when the target is a virtual machine';
+  }
+  let owner: string;
+  try {
+    owner = execFileSync('stat', ['-f', '%u', '/dev/console'], { encoding: 'utf8' }).trim();
+  } catch {
+    return 'Desktop evaluation cannot verify that it owns the display: the console owner is unreadable';
+  }
+  if (!/^\d+$/u.test(owner)) {
+    return 'Desktop evaluation cannot verify that it owns the display: the console owner is unreadable';
+  }
+  if (process.getuid?.() === Number(owner)) {
+    return 'Desktop evaluation is refused on the interactive display: run it in a separate login ' +
+      'session that does not hold the console, or in a virtual machine (KORY_SKILL_EVAL_DESKTOP_VM=1)';
+  }
+  return null;
+}
+
 export function desktopRuntimeReadiness(scenarioId: DesktopScenario): string[] {
   const blockers: string[] = [];
-  if (scenarioId === ELECTRON) {
+  const isolation = desktopIsolationBlocker();
+  if (isolation) blockers.push(isolation);
+  if (scenarioId === ELECTRON && desktopVmMode()) {
+    const launcher = process.env.KORY_SKILL_EVAL_ELECTRON_VM_DRIVER?.trim() ||
+      resolve(process.cwd(), 'scripts', 'kory-vm-electron-driver.sh');
+    if (!hasExecutable(launcher)) {
+      blockers.push('No isolated guest launcher for the Electron scenario: set ' +
+        'KORY_SKILL_EVAL_ELECTRON_VM_DRIVER to the guest launcher executable');
+    }
+  } else if (scenarioId === ELECTRON) {
     const bin = electronBinary();
     if (!hasNativeExecutableHeader(bin)) {
       blockers.push('A callable pinned Electron desktop runtime is unavailable: ' +
@@ -531,6 +734,15 @@ export function desktopRuntimeReadiness(scenarioId: DesktopScenario): string[] {
         blockers.push('A callable pinned Electron desktop runtime is unavailable (requires ' +
           PINNED_ELECTRON_VERSION + '): ' + (checked.error || checked.stdout.trim()));
       }
+    }
+  } else if (scenarioId === TAURI && desktopVmMode()) {
+    // The guest owns the toolchain as well as the display, so the host is not asked for cargo or a
+    // Tauri CLI it will never use.
+    if (!hasExecutable(process.env.KORY_SKILL_EVAL_TAURI_NATIVE_DRIVER?.trim() ?? '')) {
+      blockers.push('No native desktop driver is configured for the isolated guest');
+    }
+    if (command('limactl', ['list', '--format', '{{.Name}} {{.Status}}'], undefined, 20_000).status !== 0) {
+      blockers.push('The virtual machine host tool (limactl) is unavailable, so no isolated desktop exists');
     }
   } else if (scenarioId === TAURI) {
     for (const [label, binary, args] of [
@@ -558,6 +770,15 @@ export function desktopRuntimeReadiness(scenarioId: DesktopScenario): string[] {
 }
 
 /** Write deliberately failing but real desktop source code; never create a green report. */
+/**
+ * LaunchServices keys an application by bundle identifier, so two materialized fixtures sharing
+ * one identifier make the newer instance fail to create its window: the window never appears and
+ * Accessibility reports none. Derive the identifier from the fixture root so copies stay apart.
+ */
+export function fixtureBundleIdentifier(root: string): string {
+  return `dev.koryphaios.eval.ws${createHash('sha256').update(resolve(root)).digest('hex').slice(0, 8)}`;
+}
+
 export function materializeDesktopFixture(root: string, scenarioId: DesktopScenario): void {
   const blockers = desktopRuntimeReadiness(scenarioId);
   if (blockers.length) throw new Error('Native desktop runtime unavailable: ' + blockers.join('; '));
@@ -582,10 +803,20 @@ export function materializeDesktopFixture(root: string, scenarioId: DesktopScena
     writeFixtureFile(root, 'src-tauri/build.rs', 'fn main() { tauri_build::build() }\n');
     writeFixtureFile(root, 'src-tauri/src/main.rs', 'fn main() { kory_desktop_native_fixture::run(); }\n');
     writeFixtureFile(root, 'src-tauri/src/lib.rs', TAURI_RUST);
-    writeFixtureFile(root, 'src-tauri/tauri.conf.json', TAURI_MANIFEST);
+    // A fixture copy needs its own bundle identifier. LaunchServices keys an application by
+    // identifier, so two copies sharing one make the newer instance fail to create its window,
+    // which is not the behaviour under test.
+    writeFixtureFile(
+      root,
+      'src-tauri/tauri.conf.json',
+      TAURI_MANIFEST.replace('dev.koryphaios.eval.desktopworkspace', fixtureBundleIdentifier(root)),
+    );
     writeFixtureFile(root, 'src-tauri/capabilities/default.json', JSON.stringify({
       identifier: 'default', windows: ['main'], permissions: ['core:default', 'dialog:allow-open'],
     }, null, 2) + '\n');
+    const iconsDirectory = join(resolve(root), 'src-tauri', 'icons');
+    mkdirSync(iconsDirectory, { recursive: true });
+    writeFileSync(join(iconsDirectory, 'icon.png'), TAURI_ICON, { mode: 0o600 });
     writeFixtureFile(root, 'ui/index.html', TAURI_HTML);
     writeFixtureFile(root, 'ui/renderer.js', TAURI_RENDERER);
     writeFixtureFile(root, 'safe-workspace/inside/workspace.txt', 'contained workspace fixture\n');
@@ -596,7 +827,16 @@ export function materializeDesktopFixture(root: string, scenarioId: DesktopScena
   }
   writeFixtureFile(root, 'README.md', `# Native desktop evaluation\n\n${TUTORIAL[scenarioId]}\n\n` +
     'The scorer starts a real desktop process and requires independent native window, ' +
-    'renderer and security-boundary observations. Do not edit .kory-eval/desktop-fixture.json.\n');
+    'renderer and security-boundary observations. Do not edit .kory-eval/desktop-fixture.json.\n\n' +
+    (scenarioId === TAURI
+      ? 'The native driver presses every button in the window by name, so keep the three button ' +
+        'labels and the status paragraph as they are. Closing the window must not terminate the ' +
+        'application, and a relaunch of the bundle must show the canonical empty state, never the ' +
+        'previous selection. Reading must stay confined to the folder the user chose, even when ' +
+        'that folder is replaced by a link to another directory after it was chosen. The Probe ' +
+        'capability button invokes a command that is not registered, and that command must stay ' +
+        'unanswerable.\n'
+      : ''));
 }
 
 function regularFile(root: string, path: string, limit = 1_000_000): string {
@@ -738,7 +978,6 @@ function validateReceipt(
     const events = receipt.nativeEvents;
     const eventOrder: Array<[string, string]> = [
       ['window:created', 'window:closed'],
-      ['window:closed', 'window:reopened'],
       ['dialog:opened', 'dialog:accepted'],
       ['dialog:opened', 'dialog:cancelled'],
       ['dialog:accepted', 'fs:symlink-retargeted'],
@@ -768,11 +1007,9 @@ function validateReceipt(
       failures.push('Native Tauri driver challenge mismatch');
     }
     try {
-      const candidate = receipt.packagedArtifact ?? '';
-      if (!isAbsolute(candidate) ||
-          !resolve(candidate).startsWith(resolve(root) + sep) ||
-          receipt.packagedSha256 !== sha256(readFileSync(regularFile(root, relative(root, candidate), 250_000_000)))) {
-        failures.push('Packaged native Tauri executable identity mismatch');
+      const identity = packagedArtifactIdentity(root, receipt.packagedArtifact, receipt.packagedSha256);
+      if (!identity.ok) {
+        failures.push(identity.reason);
       }
     } catch {
       failures.push('Packaged native Tauri executable missing or unsafe');
@@ -815,6 +1052,23 @@ function runElectron(root: string): DesktopRuntimeResult {
     mkdirSync(userData, { mode: 0o700 });
     writeFileSync(join(directory, 'package.json'), '{"name":"kory-native-probe","main":"probe.cjs"}\n');
     writeFileSync(join(directory, 'probe.cjs'), ELECTRON_PROBE);
+    if (desktopVmMode()) {
+      // The guest runs Electron against its own window server. The identity bound to the receipt is
+      // the pid the guest started, which is the process that actually rendered and captured.
+      const launcher = process.env.KORY_SKILL_EVAL_ELECTRON_VM_DRIVER?.trim() ||
+        resolve(process.cwd(), 'scripts', 'kory-vm-electron-driver.sh');
+      const identity = join(directory, 'electron.pid');
+      const ran = command(launcher, [`--fixture=${resolve(root)}`, `--probe=${directory}`,
+        `--receipt=${output}`, `--capture=${screenshot}`, `--nonce=${nonce}`, `--identity=${identity}`],
+      undefined, 240_000);
+      if (ran.status !== 0) throw Error('Real Electron execution failed: ' + ran.error);
+      const guestPid = Number(readFileSync(identity, 'utf8').trim());
+      if (!Number.isSafeInteger(guestPid) || guestPid <= 0) {
+        throw Error('The guest did not report the Electron process it started');
+      }
+      const receipt = readReceipt(output);
+      return validateReceipt(receipt, screenshot, ELECTRON, root, nonce, guestPid);
+    }
     const executable = electronBinary();
     const executed = command(executable, [directory,
       `--kory-root=${resolve(root)}`, `--kory-report=${output}`, `--kory-capture=${screenshot}`,
@@ -833,23 +1087,46 @@ function runElectron(root: string): DesktopRuntimeResult {
  * Browser-only/WebDriver DOM emulation cannot satisfy the capture source or native events.
  */
 function runTauri(root: string): DesktopRuntimeResult {
+  // A host run happens only where it is allowed; anything announcing Kory operations work is stopped
+  // first, because that work belongs on the isolated guest.
+  killOwnerDisplayProcesses();
   const driver = process.env.KORY_SKILL_EVAL_TAURI_NATIVE_DRIVER!.trim();
   if (resolve(driver) === resolve(root) || resolve(driver).startsWith(resolve(root) + sep)) {
     throw Error('Tauri verifier must be outside the candidate fixture');
   }
   const directory = mkdtempSync(join(tmpdir(), 'kory-native-tauri-probe-'));
   try {
-    const compiled = command(tauriCliBinary(),
-      ['build'], root, 600_000);
-    if (compiled.status !== 0) throw Error('Real Tauri package build failed: ' + compiled.error);
+    // In an isolated guest the driver builds and packages inside the machine that runs the window,
+    // so nothing is built here and no host process is asked to open anything.
+    if (!desktopVmMode()) {
+      const compiled = command(tauriCliBinary(),
+        ['build'], root, 600_000);
+      if (compiled.status !== 0) throw Error('Real Tauri package build failed: ' + compiled.error);
+    }
     const output = join(directory, 'receipt.json');
     const screenshot = join(directory, 'native.png');
     const nonce = randomUUID();
-    const invoked = command(driver, [
+    // A native window stops being composited the moment the display sleeps, and this host sleeps its
+    // display after two idle minutes. A scored arm spends far longer than that waiting on a model, so
+    // the window was already gone when the driver looked, which then read as a candidate that never
+    // rendered. The assertion is scoped to this process and never touches the power settings.
+    const holdAwake = !desktopVmMode() && existsSync('/usr/bin/caffeinate');
+    // An assertion stops the display from sleeping; it does not bring a sleeping one back, so
+    // declare user activity first, exactly as if a key had been pressed, without touching settings.
+    if (holdAwake) command('/usr/bin/caffeinate', ['-u', '-t', '3'], undefined, 8_000);
+    const driverArgs = [
       `--fixture=${resolve(root)}`, `--scenario=${TAURI}`,
       `--receipt=${output}`, `--capture=${screenshot}`,
       `--nonce=${nonce}`,
-    ], undefined, 160_000);
+    ];
+    // The driver's own waits (window, four capture attempts, three dialog attempts, restart) add up
+    // to more than two minutes in the worst case, so the budget has to cover them. In the isolated
+    // guest the same driver also owns the Rust toolchain and packages the fixture before it drives
+    // it, so a cold crate cache spends minutes building and needs its own, larger, budget.
+    const driverBudgetMs = desktopVmMode() ? 900_000 : 300_000;
+    const invoked = holdAwake
+      ? command('/usr/bin/caffeinate', ['-dimsu', driver, ...driverArgs], undefined, driverBudgetMs)
+      : command(driver, driverArgs, undefined, driverBudgetMs);
     if (invoked.status !== 0) throw Error('Native Tauri UI driver failed: ' + invoked.error);
     const receipt = readReceipt(output);
     return validateReceipt(receipt, screenshot, TAURI, root, nonce);

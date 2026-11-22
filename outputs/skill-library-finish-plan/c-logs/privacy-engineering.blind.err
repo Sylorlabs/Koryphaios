@@ -1,0 +1,26 @@
+697 |   ...(retryFailed ? ['--retry-failed'] : []),
+698 |   ...requestedSkills.map((skill) => `--skill=${skill}`),
+699 | ];
+700 | const preparedProcess = await runCommand({ command: 'bun', args: prepareArgs, cwd: projectRoot });
+701 | if (preparedProcess.code !== 0) {
+702 |   throw new Error(
+                  ^
+error: Failed to prepare blind assignments
+[21:41:22] warn  [server] Multiple koryphaios.json files found in parent directories; using the innermost. The outer file(s) are ignored. {"chosen":"/Users/Shared/micah/Documents/koryphaios","shadowed":["/Users/Shared/micah/Documents","/Users/Shared/micah"]}
+147 | 
+148 | export function verifyPreparedArtifactHashes(prepared: { artifactASha256: string; artifactBSha256: string },
+149 |   artifactA: BlindReviewArtifact, artifactB: BlindReviewArtifact): void {
+150 |   if (blindImportSha256(JSON.stringify(artifactA)) !== prepared.artifactASha256 ||
+151 |     blindImportSha256(JSON.stringify(artifactB)) !== prepared.artifactBSha256) {
+152 |     throw new Error('Prepared blind assignment artifact hash mismatch; current anonymous snapshots differ from the sealed assignment');
+                    ^
+error: Prepared blind assignment artifact hash mismatch; current anonymous snapshots differ from the sealed assignment
+      at verifyPreparedArtifactHashes (/Users/Shared/micah/Documents/koryphaios/scripts/blind-review-import-validation.ts:152:15)
+      at prepareAssignment (/Users/Shared/micah/Documents/koryphaios/scripts/run-skill-v5-blind-review.ts:452:5)
+      at /Users/Shared/micah/Documents/koryphaios/scripts/run-skill-v5-blind-review.ts:705:54
+
+Bun v1.3.14 (macOS arm64)
+
+      at /Users/Shared/micah/Documents/koryphaios/scripts/run-skill-v5-blind-review-campaign.ts:702:13
+
+Bun v1.3.14 (macOS arm64)

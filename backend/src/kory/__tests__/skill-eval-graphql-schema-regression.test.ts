@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import {
   GRAPHQL_ENGINEERING_SKILL_EVAL_MATERIALIZERS,
   GRAPHQL_ENGINEERING_SKILL_EVAL_SCORERS,
-} from '../skill-eval-graphql-engineering-fixtures';
-import { readFixtureText, writeFixtureFile } from '../skill-eval-fixture-helpers';
+} from '../../eval/skills/skill-eval-graphql-engineering-fixtures';
+import { readFixtureText, writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
 
 const roots: string[] = [];
 

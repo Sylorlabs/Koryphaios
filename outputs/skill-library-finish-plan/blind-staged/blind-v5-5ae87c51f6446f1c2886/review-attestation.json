@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "status": "unimported",
+  "assignmentId": "blind-v5-5ae87c51f6446f1c2886",
+  "skill": "ios-swiftui",
+  "scenarioId": "ios-swiftui-full-task-2-individual",
+  "pairId": "ios-swiftui-full-task-2-individual:f51be030-61e1-418d-b858-cc283cccc730",
+  "reviewerThread": "logfare-stateless-a08d93b7-4ed8-4fe8-bb98-8d199701ae46",
+  "reviewerIdentitySource": "external-reviewer-adapter-output",
+  "reviewerAdapter": "scripts/kory-logfare-stateless-reviewer",
+  "reviewerModel": "deepseek-v4.1-flash-1017",
+  "reviewerModelSource": "configured-provider-model-metadata",
+  "reviewerBaseUrl": "http://127.0.0.1:17841/v1",
+  "promptSha256": "1b57f09d960331f727fb3925c9d64f7638f8a73411d93c3c306292b7dc24f340",
+  "privateAssignmentSha256": "d18ab19dd9ca004631c1c8cdb8967219be74f0e1e99bf02097dce9c680ffc56c",
+  "reviewerEventsSha256": "870217c7c711b2bea91203dc14e64cb4d4c1e198ea7d84f820f44833d02dff6a",
+  "judgeOutputSha256": "aca5d39170b3ed222b2b32d164f5fc78a09d13b194e31bc2fe5c05dae7d0539c",
+  "envelopeSha256": "7660596c60539b14b6451745de242f681ac23058853a7d4babb560a68f4ebfdb",
+  "importValidation": {
+    "mode": "validate",
+    "validatedReviews": 1,
+    "persistedReviews": 0
+  },
+  "promptSnapshotPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-uH5qqV/review-task.prompt.txt",
+  "reviewerEventsPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-uH5qqV/reviewer-events.json",
+  "envelopePath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-uH5qqV/import.json"
+}

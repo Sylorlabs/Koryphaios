@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   apiFetch: vi.fn(),
-  unsubscribeFromSession: vi.fn(),
+  notifySessionUnsubscribed: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
 }));
@@ -16,8 +16,8 @@ vi.mock('./toast.svelte', () => ({
     error: mocks.error,
   },
 }));
-vi.mock('./websocket.svelte', () => ({
-  wsStore: { unsubscribeFromSession: mocks.unsubscribeFromSession },
+vi.mock('./session-subscriptions', () => ({
+  notifySessionUnsubscribed: mocks.notifySessionUnsubscribed,
 }));
 vi.mock('./project.svelte', () => ({
   projectStore: {
@@ -74,7 +74,7 @@ describe('session archive lifecycle', () => {
     expect(sessionStore.sessions.map((item) => item.id)).toEqual(['two']);
     expect(sessionStore.archivedSessions.map((item) => item.id)).toEqual(['one']);
     expect(sessionStore.activeSessionId).toBe('two');
-    expect(mocks.unsubscribeFromSession).toHaveBeenCalledWith('one');
+    expect(mocks.notifySessionUnsubscribed).toHaveBeenCalledWith('one');
 
     sessionStore.handleSessionUpdate(session('one', { title: 'Stale title', version: 1 }));
     expect(sessionStore.sessions.map((item) => item.id)).toEqual(['two']);

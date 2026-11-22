@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import {
   EDGE_OBSERVABILITY_SKILL_EVAL_MATERIALIZERS,
   EDGE_OBSERVABILITY_SKILL_EVAL_SCORERS,
-} from '../skill-eval-edge-observability-fixtures';
-import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
+} from '../../eval/skills/skill-eval-edge-observability-fixtures';
+import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
 import { loadV5SkillPackages } from '../skill-packages';
 
 test('observability sampling fixture declares its simulator and replay corpus as fixed inputs', async () => {

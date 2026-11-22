@@ -5,18 +5,18 @@ import { join } from 'node:path';
 import {
   AUTH_SECRETS_SECURITY_SKILL_EVAL_MATERIALIZERS,
   AUTH_SECRETS_SECURITY_SKILL_EVAL_SCORERS,
-} from '../skill-eval-auth-secrets-security-fixtures';
-import { runHiddenBunTest, writeFixtureFile } from '../skill-eval-fixture-helpers';
+} from '../../eval/skills/skill-eval-auth-secrets-security-fixtures';
+import { runHiddenBunTest, writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
 import {
   hasCookieMutationInventory,
   PRIVACY_WEB_DEVICE_SKILL_EVAL_MATERIALIZERS,
   PRIVACY_WEB_DEVICE_SKILL_EVAL_SCORERS,
-} from '../skill-eval-privacy-web-device-fixtures';
-import { SECURITY_REVIEW_RUNTIME_SKILL_EVAL_SCORERS } from '../skill-eval-security-review-runtime-fixtures';
+} from '../../eval/skills/skill-eval-privacy-web-device-fixtures';
+import { SECURITY_REVIEW_RUNTIME_SKILL_EVAL_SCORERS } from '../../eval/skills/skill-eval-security-review-runtime-fixtures';
 import {
   SUPPLY_CHAIN_INCIDENT_SKILL_EVAL_MATERIALIZERS,
   SUPPLY_CHAIN_INCIDENT_SKILL_EVAL_SCORERS,
-} from '../skill-eval-supply-chain-incident-fixtures';
+} from '../../eval/skills/skill-eval-supply-chain-incident-fixtures';
 
 const roots: string[] = [];
 

@@ -37,7 +37,7 @@
   import Italic from 'lucide-svelte/icons/italic';
   import Heading2 from 'lucide-svelte/icons/heading-2';
   import List from 'lucide-svelte/icons/list';
-  import KnowledgeScope from './KnowledgeScope.svelte';
+  import SettingsScopeBar from './settings/SettingsScopeBar.svelte';
   import '$lib/styles/document.css';
   import { notesStore } from '$lib/stores/notes.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
@@ -1711,11 +1711,6 @@
       class="flex flex-col gap-3 px-3 py-3 border-b shrink-0"
       style="border-color: var(--color-border);"
     >
-      <div class="flex items-center gap-2 px-1">
-        <StickyNote size={15} style="color: var(--color-accent);" />
-        <span class="text-sm font-semibold" style="color: var(--color-text-primary);">Notes</span>
-        <span class="ml-auto truncate text-xs text-[var(--color-text-muted)]" title={projectStore.currentPath ?? ''}>{projectDisplayName(projectStore.currentPath) || 'No project'}</span>
-      </div>
       <button type="button" class="new-note-action" onclick={() => void createNewNote()} aria-label="New note">
         <Plus size={15} />New note
       </button>
@@ -1847,7 +1842,7 @@
         />
       </div>
       {#if searchQuery && notesStore.searchResultsTruncated}
-        <p class="mt-1.5 px-1 text-[10px]" style="color: var(--color-warning);" role="status">
+        <p class="mt-1.5 px-1 text-[11px]" style="color: var(--color-warning);" role="status">
           Showing the top {notesStore.searchResultLimit} full-text matches. Refine the query to narrow
           the vault.
         </p>
@@ -1890,7 +1885,7 @@
               {/if}
               <span class="truncate">{node.name}</span>
               {#if node.noteCount > 0}
-                <span class="ml-auto text-[10px] opacity-50">{node.noteCount}</span>
+                <span class="ml-auto text-[11px] opacity-50">{node.noteCount}</span>
               {/if}
             </button>
             {#if expandedFolders.has(node.path) && node.children.length > 0}
@@ -1912,7 +1907,7 @@
         >
           <Folder size={11} />
           <span>All Notes</span>
-          <span class="ml-auto text-[10px] opacity-50">{notesStore.notes.length}</span>
+          <span class="ml-auto text-[11px] opacity-50">{notesStore.notes.length}</span>
         </button>
         {#each notesStore.folderTree as node (node.path)}
           {@render folderNode(node, 1)}
@@ -1934,9 +1929,9 @@
           {#each allTags as tag (tag)}
             <button
               type="button"
-              class="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] transition-colors hover:bg-[var(--color-surface-4)]"
+              class="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] transition-colors hover:bg-[var(--color-surface-4)]"
               style={searchQuery === tag
-                ? 'background: var(--color-accent); color: white;'
+                ? 'background: var(--color-accent); color: var(--color-on-accent);'
                 : 'background: var(--color-surface-3); color: var(--color-text-secondary);'}
               aria-pressed={searchQuery === tag}
               onclick={() => {
@@ -2027,7 +2022,7 @@
                   </div>
                   {#if note.content}
                     <div
-                      class="truncate text-[10px] mt-0.5"
+                      class="truncate text-[11px] mt-0.5"
                       style="color: var(--color-text-muted);"
                     >
                       {note.content.slice(0, 60).replace(/\n/g, ' ')}
@@ -2037,7 +2032,7 @@
                     <div class="flex flex-wrap gap-0.5 mt-1">
                       {#each note.tags.slice(0, 3) as tag (tag)}
                         <span
-                          class="rounded px-1 py-0 text-[9px]"
+                          class="rounded px-1 py-0 text-[11px]"
                           style="background: var(--color-surface-3); color: var(--color-text-muted);"
                           >{tag}</span
                         >
@@ -2055,10 +2050,9 @@
 
   <!-- ── Main area ───────────────────────────────────────────────────────────── -->
   <div class="flex-1 min-h-0 min-w-0 flex flex-col">
-    <KnowledgeScope
-      scope="Project"
-      description="This collection belongs to the selected project folder. Markdown and HTML documents beneath it can appear as live project files. Notes folders organize the collection; sibling projects have separate collections. Pinning only changes order. In context is a separate choice. Memory and skill packages have their own libraries."
-    />
+    <div class="flex shrink-0 items-center px-4 pt-3 pb-2">
+      <SettingsScopeBar projectLabel="Project" showProjectName />
+    </div>
     <!-- Tab bar -->
     <div
       class="flex flex-wrap items-center gap-1 px-4 py-2 border-b shrink-0"
@@ -2204,7 +2198,7 @@
           Review
           {#if reviewCount > 0}
             <span
-              class="rounded-full px-1.5 text-[10px] tabular-nums"
+              class="rounded-full px-1.5 text-[11px] tabular-nums"
               style="background: rgba(var(--color-accent-rgb), 0.18); color: var(--color-accent);"
               >{reviewCount}</span
             >
@@ -2255,7 +2249,7 @@
               : 'Convert to HTML note (renders HTML+CSS)'}
           >
             <Code2 size={12} />
-            <span class="text-[10px]">{currentNote.format === 'html' ? 'HTML' : 'MD'}</span>
+            <span class="text-[11px]">{currentNote.format === 'html' ? 'HTML' : 'MD'}</span>
           </button>
 
           {#if currentNote.format === 'html'}
@@ -2278,7 +2272,7 @@
             title="Saved revision history"
           >
             <History size={12} />
-            <span class="text-[10px]">History</span>
+            <span class="text-[11px]">History</span>
           </button>
 
           <button
@@ -2289,7 +2283,7 @@
             title="Export this note"
           >
             <Download size={12} />
-            <span class="text-[10px]">Export</span>
+            <span class="text-[11px]">Export</span>
           </button>
 
           <!-- Tag picker: quick selection of tags already used in this workspace. -->
@@ -2304,7 +2298,7 @@
               title="Choose tags"
             >
               <Tag size={12} />
-              <span class="text-[10px]">{tags.length ? `Tags (${tags.length})` : 'Tags'}</span>
+              <span class="text-[11px]">{tags.length ? `Tags (${tags.length})` : 'Tags'}</span>
             </button>
             {#if showTagMenu}
               <div
@@ -2349,7 +2343,7 @@
             aria-pressed={pinned}
           >
             {#if pinned}<Pin size={12} />{:else}<PinOff size={12} />{/if}
-            <span class="text-[10px]">{pinned ? 'Pinned' : 'Pin'}</span>
+            <span class="text-[11px]">{pinned ? 'Pinned' : 'Pin'}</span>
           </button>
 
           <!-- Include in context toggle -->
@@ -2365,7 +2359,7 @@
             aria-pressed={includeInContext}
           >
             <BookOpen size={12} />
-            <span class="text-[10px]">{includeInContext ? 'In context' : 'Add to context'}</span>
+            <span class="text-[11px]">{includeInContext ? 'In context' : 'Add to context'}</span>
           </button>
 
           <!-- Save -->
@@ -2374,7 +2368,7 @@
             class="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors"
             style="
               background: {isDirty ? 'var(--color-accent)' : 'var(--color-surface-3)'};
-              color: {isDirty ? 'var(--color-surface-0)' : 'var(--color-text-muted)'};
+              color: {isDirty ? 'var(--color-on-accent)' : 'var(--color-text-muted)'};
             "
             onclick={() => void saveCurrentNote()}
             title="Save ({formatShortcut('Mod+S')})"
@@ -2534,7 +2528,7 @@
       </div>
     {/if}
 
-    {#if notesStore.indexWarning && !notesStore.error && !notesStore.conflict && activeView !== 'canvas'}
+    {#if notesStore.indexLimitNotice && !notesStore.error && !notesStore.conflict && activeView !== 'canvas'}
       <div
         class="shrink-0 border-b px-4 py-2"
         style="border-color: color-mix(in srgb, var(--color-warning) 25%, var(--color-border)); background: var(--color-warning-bg);"
@@ -2543,27 +2537,18 @@
         <div class="flex items-center gap-3">
           <AlertTriangle size={14} class="shrink-0 text-[var(--color-warning)]" />
           <p class="min-w-0 flex-1 text-xs leading-5 text-[var(--color-text-primary)]">
-            {notesStore.indexWarning}
+            {notesStore.indexLimitNotice}
           </p>
           <button
             type="button"
             class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-[var(--color-warning)] hover:bg-[var(--color-surface-2)]"
-            onclick={() => void notesStore.syncProjectDocuments()}
-            ><RefreshCw size={12} /> Retry indexing</button
+            onclick={() => void notesStore.continueIndexing()}>Continue anyway</button
           >
-        </div>
-      </div>
-    {/if}
-
-    {#if notesStore.isIndexing && !notesStore.error && !notesStore.conflict && activeView !== 'canvas'}
-      <div
-        class="shrink-0 border-b px-4 py-2"
-        style="border-color: var(--color-border); background: var(--color-info-bg);"
-        role="status"
-      >
-        <div class="flex items-center gap-2 text-xs text-[var(--color-text-secondary)]">
-          <RefreshCw size={12} class="shrink-0 animate-spin text-[var(--color-info)]" />
-          Indexing project notes in the background. Existing notes stay available.
+          <button
+            type="button"
+            class="rounded-lg px-2.5 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)]"
+            onclick={() => notesStore.dismissIndexLimitNotice()}>Keep limit</button
+          >
         </div>
       </div>
     {/if}
@@ -2831,7 +2816,7 @@
                 <Tag size={11} style="color: var(--color-text-muted);" />
                 {#each tags as tag (tag)}
                   <span
-                    class="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px]"
+                    class="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px]"
                     style="background: var(--color-surface-3); color: var(--color-text-secondary);"
                   >
                     {tag}
@@ -2992,7 +2977,7 @@
                   Attachments
                 </div>
                 <label
-                  class="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] cursor-pointer transition-colors hover:bg-[var(--color-surface-3)]"
+                  class="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] cursor-pointer transition-colors hover:bg-[var(--color-surface-3)]"
                   style="color: var(--color-text-muted);"
                   title="Upload file"
                 >
@@ -3035,7 +3020,7 @@
                           {#if attachmentLoadErrors.has(att.id)}
                             <button
                               type="button"
-                              class="mt-2 rounded-md px-2 py-1 text-[10px] font-medium"
+                              class="mt-2 rounded-md px-2 py-1 text-[11px] font-medium"
                               style="background: var(--color-error-bg); color: var(--color-error);"
                               onclick={() => void loadAttachmentUrls()}
                               aria-label={`Retry loading ${att.filename}`}>Retry load</button
@@ -3045,7 +3030,7 @@
                       {/if}
                       <div class="p-1.5">
                         <div
-                          class="text-[10px] truncate"
+                          class="text-[11px] truncate"
                           style="color: var(--color-text-secondary);"
                         >
                           {att.filename}

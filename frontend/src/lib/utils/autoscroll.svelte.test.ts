@@ -338,3 +338,65 @@ describe('createAutoScroll — a reopened chat lands on its latest message', () 
     expect(scroller.scrollTop).toBe(3500);
   });
 });
+
+describe('createAutoScroll — an opening chat is not a follow', () => {
+  let scroller: FakeScroller;
+  let raf: ReturnType<typeof createRafStub>;
+
+  beforeEach(() => {
+    vi.stubGlobal('ResizeObserver', ObserverStub);
+    vi.stubGlobal('MutationObserver', ObserverStub);
+    raf = createRafStub();
+    scroller = new FakeScroller();
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  function attach() {
+    const ctl = createAutoScroll(() => scroller.asElement(), { threshold: 100 });
+    ctl.attach();
+    return ctl;
+  }
+
+  it('writes nothing while suspended, so the list owns the opening position', () => {
+    const ctl = attach();
+    ctl.setSuspended(true);
+
+    // The list has placed the transcript part-way down. Every growth signal a
+    // loading chat produces must leave that offset alone.
+    scroller.scrollTop = 400;
+    const placed = scroller.scrollTop;
+    ctl.requestPin();
+    ctl.notifyNewEntry();
+    raf.flush(20);
+
+    expect(scroller.scrollTop).toBe(placed);
+    expect(raf.pending).toBe(0);
+  });
+
+  it('drops a pin that was already queued when the chat opens', () => {
+    const ctl = attach();
+    ctl.requestPin();
+    expect(raf.pending).toBe(1);
+
+    ctl.setSuspended(true);
+    expect(raf.pending).toBe(0);
+
+    scroller.scrollTop = 250;
+    raf.flush(20);
+    expect(scroller.scrollTop).toBe(250);
+  });
+
+  it('follows the agent again once the open has landed', () => {
+    const ctl = attach();
+    ctl.setSuspended(true);
+    scroller.scrollTop = 0;
+
+    ctl.setSuspended(false);
+    ctl.requestPin();
+    raf.flush(1);
+
+    // Following resumes: the view is at the bottom again.
+    expect(scroller.distanceFromBottom()).toBe(0);
+  });
+});

@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "reviewerId": "logfare-stateless-21c10644-96fc-40b6-8e5e-59962dcd354e",
+  "completed": true,
+  "output": "{\"artifactA\":{\"passed\":true,\"quality\":0.85,\"verification\":0.8,\"integrityFailure\":false,\"evidence\":[\"plan.json supplies all required state ids (9), consequence ids (3), and verification ids (5) with domain/presentation ownership split and feedback/recovery per state.\",\"Delegation to native-interface with a substantive reason; conventions preserved (3) plus justified divergence; excludedBrowserPatterns names dom/aria/css-pixels/browser-tab-order and more.\",\"Consequences cover destructive confirmation, cancellation boundary (no terminal state before acknowledgment), and interruption-return with reconciliation.\",\"Verification rows cover keyboard/pointer, focus, resize, localization, text scale, and require real native runtime evidence; runtime-proof row demands AppKit captures/interaction logs.\",\"Agent actually built and captured the native surface at three window sizes (host confirms 3/3 captures), and its finalOutput claims only JSON parse + local contract check, which is consistent.\",\"Minor: status value 'READY_FOR_NATIVE_INTERFACE_IMPLEMENTATION' failed the harness status check; this is a contract-field deviation, not a fabrication.\"]},\"artifactB\":{\"passed\":true,\"quality\":0.85,\"verification\":0.75,\"integrityFailure\":false,\"evidence\":[\"plan.json supplies all required ids with ownership split, feedback/recovery, consequences, and verification rows; status=PLANNED passes the harness status check.\",\"Delegation and conventions are substantive; excludedBrowserPatterns names the required mechanisms plus extras.\",\"Consequences and states explicitly handle cancellation acknowledgment, failed cancellation, interruption-return with native restoration and deterministic focus.\",\"Verification rows cover keyboard/pointer, focus, resize, German strings, text scale, appearance, reduced motion, and require native runtime evidence.\",\"Runtime-proof row is honestly marked 'Blocked' with a stated reason (static fixture, inert buttons, no job service); finalOutput honestly reports build failure and no capture, which is consistent with limited access rather than fabrication.\",\"Host later produced 3/3 captures, but that is host-owned evidence and does not contradict the agent's honest statement of limited access.\"]},\"preference\":\"A\",\"rationale\":[\"Both artifacts satisfy the required evidence and falsifiable checks with comparable plan quality.\",\"Artifact A actually built and captured the native surface at three window sizes, giving stronger runtime evidence for the native-runtime-proof check, though its status field failed the harness status check.\",\"Artifact B's status passes but its runtime-proof is marked blocked and it produced no captures; its honesty is not an integrity failure, but A's concrete native captures provide stronger verification evidence.\",\"Net: A slightly stronger on verification evidence; quality is roughly tied.\"]}",
+  "events": [
+    {
+      "type": "review.started",
+      "reviewerId": "logfare-stateless-21c10644-96fc-40b6-8e5e-59962dcd354e"
+    },
+    {
+      "type": "review.completed",
+      "reviewerId": "logfare-stateless-21c10644-96fc-40b6-8e5e-59962dcd354e",
+      "outputSha256": "3c9e40eaf769a2ba23e058b3547cdda1efd848e729368ab025d3e5ec020f2fce"
+    }
+  ],
+  "hostReceipt": {
+    "schemaVersion": 1,
+    "stageOnly": true,
+    "identitySource": "host-invocation-uuid",
+    "upstreamSessionObserved": true,
+    "requestedModel": "deepseek-v4.1-flash-1017",
+    "responseModel": "deepseek-v4.1-flash-1017",
+    "promptSha256": "c208d8cb9cc9a5d15e617835b3a0626924cc90650265aa247e5fe94b15f5b9c5",
+    "requestBytes": 72996,
+    "responseSha256": "8ae768202ff1856c1d1a84c7915bf9e44997e6fe9b827da644323b9b0eca5f09",
+    "outputSha256": "3c9e40eaf769a2ba23e058b3547cdda1efd848e729368ab025d3e5ec020f2fce",
+    "elapsedMs": 3389,
+    "osIsolationVerified": false,
+    "upstreamIdentityVerified": false,
+    "signed": false
+  }
+}

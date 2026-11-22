@@ -157,6 +157,8 @@ describe('MCP bridge role authority', () => {
         requestToolApproval: async () => 'Allow',
         hasActiveSessionExecution: () => true,
         tryAcquireSessionMutationBarrier: () => null,
+        isWorkspaceRebindPending: () => false,
+        markWorkspaceMutatedThisTurn: () => undefined,
       },
     } as never);
 
@@ -301,6 +303,8 @@ describe('MCP bridge role authority', () => {
           requestToolApproval: async () => 'Allow',
           hasActiveSessionExecution: () => true,
           tryAcquireSessionMutationBarrier: () => null,
+        isWorkspaceRebindPending: () => false,
+        markWorkspaceMutatedThisTurn: () => undefined,
         },
       } as never);
       const app = new Elysia()
@@ -394,6 +398,8 @@ describe('MCP bridge role authority', () => {
           requestToolApproval: async () => 'Allow',
           hasActiveSessionExecution: () => true,
           tryAcquireSessionMutationBarrier: () => null,
+        isWorkspaceRebindPending: () => false,
+        markWorkspaceMutatedThisTurn: () => undefined,
         },
       } as never);
       const app = new Elysia()

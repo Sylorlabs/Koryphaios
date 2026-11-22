@@ -1,0 +1,177 @@
+SNAPSHOT HASH DOMAINS: beforeSha256/afterSha256 identify complete workspace entries, using SHA256("file\0" + original file bytes), or SHA256("symlink\0" + link target). Scorer artifactSHA and durable artifact hashes use SHA256(raw bytes), without that tag. These different hash domains must not be compared as if identical. Visible beforeText/afterText may be bounded or privacy-scrubbed; they are not the original complete bytes to hash.
+
+You are an independent blind semantic evaluator.
+Two anonymous agents attempted the same task. You are not told which agent received any extra guidance, and you must not infer or speculate about that hidden condition.
+Judge each artifact independently against the task contract. Do not reward matching wording, verbosity, or references to a skill. Focus on behavioral correctness, scope discipline, evidence quality, preservation of required facts, negative paths, recovery behavior, and whether completion claims are actually supported.
+The artifact bundle may include harness captured execution evidence and before and after file snapshots. Treat that as observed evidence, not as an agent claim.
+PUBLIC CANDIDATE CONTRACT SNAPSHOT is the exact task prompt and allowlisted README.md/contract.json bytes visible to the candidate before execution. Hashes are verified by the harness. If an entry says UNAVAILABLE, do not reconstruct it from the current repository or treat current files as historical proof.
+executionEvidence is supplied by the host after the agent attempt, including deterministic scorer observations. An agent can truthfully report that it could not run a check even when the host subsequently runs that check successfully. Those observations have different owners and times; that difference alone is not an integrity failure.
+Attribute a completion claim to its actual source. Penalize an agent for fabricated or overstated verification only when its finalOutput or authored file content makes that unsupported claim. Do not attribute a host scorer statement to the agent, require the agent to predict later host results, or treat an honest statement of limited access as contradicting later host verification.
+Host evidence is not infallible. If a scorer result conflicts with concrete artifact behavior, identify the disputed check and evidence as a possible verifier defect. Keep instrument uncertainty separate from an agent integrity finding; a score label alone does not prove the task succeeded.
+Treat afterText JSON strings as literal source bytes. Before claiming a URL or origin is malformed or Markdown-formatted, inspect and quote the exact JSON value. Do not transform plain URL strings into Markdown hyperlinks and then mistake that display formatting for the original value.
+The PAIR EXECUTION EVIDENCE section is evaluator owned evidence. It certifies that Artifact A and Artifact B are the two randomized arms of one matched same model comparison for this exact scenario and evaluation contract.
+When REQUIRED EVIDENCE or REQUIRED ARTIFACTS asks for paired skill and no skill run artifacts, paired evaluation evidence, or an equivalent pair label, the anonymous A and B bundle plus PAIR EXECUTION EVIDENCE satisfies the existence and provenance of that pair. Do not require either agent output to claim, create, or narrate evaluator owned pair evidence.
+The REQUIRED ARTIFACTS entries below are evaluation evidence labels for the overall harness. They are not literal filenames the agent was instructed to create unless the task itself says so. Judge whether the bundle substantively supplies the required evidence; do not require those exact label strings to appear.
+Routing and hierarchy selection are evaluated independently by the harness. Do not require the agent to narrate which skill was selected or provide meta level specialist selection rationale when the artifact itself respects the requested scope and neighboring responsibility boundaries.
+Never lower passed, quality, verification, or integrity because an artifact omits hierarchy narration, specialist selection rationale, skill names, or evaluator owned paired A/B evidence. If a draft criticism relies on one of those omissions, remove that criticism and score only the concrete task behavior and evidence.
+If a REQUIRED EVIDENCE or REQUIRED ARTIFACTS label describes routing, hierarchy selection, specialist selection, or paired skill versus no skill provenance, treat that meta level requirement as evaluator owned. The harness evidence in this prompt is authoritative for those concerns.
+When choosing preference A, B, or tie, compare concrete task behavior and evidence only. Evaluator-owned hierarchy or specialist narration, skill-guidance scope, filenames, and paired-run provenance must not affect the preference comparison.
+Treat genuinely missing task evidence as missing. Do not assume unshown commands or tests passed.
+Return JSON only, with this exact shape:
+{"artifactA":{"passed":true,"quality":0.0,"verification":0.0,"integrityFailure":false,"evidence":["..."]},"artifactB":{"passed":true,"quality":0.0,"verification":0.0,"integrityFailure":false,"evidence":["..."]},"preference":"A","rationale":["..."]}
+
+TASK
+Repair a CDC ingestion job for one Kafka partition (p0) where replay after checkpoint loss duplicates warehouse rows and a historical backfill can arrive after newer updates. Define event identity and partition-local ordering, make writes idempotent, preserve checkpoint/replay semantics, and verify duplicate delivery, late records, poison messages, bounded backfill, and the failure/replay behavior the fixture can actually observe without changing downstream analytics model ownership. The synthetic fixture is in-memory and has no persistent checkpoint or deduplication store, so do not claim a real process-durable restart unless you implement and verify one. Schema-evolution behavior is exercised separately by scenario 2.
+
+FALSIFIABLE CHECKS
+[
+  {
+    "id": "scope-and-hierarchy",
+    "assertion": "The result must establish the actual data-pipeline-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=data-analysis; near-neighbor=analytics-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+  },
+  {
+    "id": "operating-contract",
+    "assertion": "Define source authority, event and record identity, the single partition p0 ordering and checkpoint boundary, transformation lineage, retry semantics, and destination guarantees. State that schema evolution is outside this fixture and is exercised by scenario 2 rather than inventing schema evidence here.",
+    "source": "https://airflow.apache.org/docs/apache-airflow/stable/best-practices.html"
+  },
+  {
+    "id": "execution-invariant",
+    "assertion": "Replay and backfill are safe because source event identity/order and sink mutation semantics are explicit; duplicate delivery cannot create additional logical records within the verified fixture boundary. The fixture proves in-memory replay behavior only unless a durable state mechanism is added and exercised."
+  },
+  {
+    "id": "verification-discipline",
+    "assertion": "Test reruns, partial-failure/replay behavior, late and out-of-order data, malformed and poison records, backfills, reconciliation totals, and lineage from output rows to source inputs. Distinguish the in-memory replay simulation from unavailable process-durable restart evidence.",
+    "source": "https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/backfill.html"
+  },
+  {
+    "id": "anti-pattern-resistance",
+    "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not use processing time when event time matters, assume exactly once from retries alone, discard bad rows without accounting, or let a backfill bypass normal quality gates."
+  },
+  {
+    "id": "evidence-and-uncertainty",
+    "assertion": "Every material completion claim must map to observable evidence (data-pipeline-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+  }
+]
+
+REQUIRED EVIDENCE
+[
+  "idempotent-cdc-backfill scenario evidence",
+  "data-pipeline-engineering decision and boundary evidence",
+  "Hierarchy boundary and selected specialist rationale",
+  "hierarchy boundary and selected specialist rationale",
+  "paired skill/no-skill run artifacts",
+  "explicit unavailable, simulated, inferred, or stale evidence labels"
+]
+
+REQUIRED ARTIFACTS
+[
+  "data-pipeline-engineering-individual-scenario-1-result",
+  "data-pipeline-engineering-individual-scenario-1-verification",
+  "data-pipeline-engineering-individual-scenario-1-paired-evaluation"
+]
+
+PUBLIC CANDIDATE CONTRACT SNAPSHOT
+{
+  "taskPrompt": {
+    "available": true,
+    "sha256": "811c1cea087ac7760f7ed21405f0dcc4fd5995a2e847bf75035495c93bb7fb74",
+    "byteLength": 729,
+    "text": "Repair a CDC ingestion job for one Kafka partition (p0) where replay after checkpoint loss duplicates warehouse rows and a historical backfill can arrive after newer updates. Define event identity and partition-local ordering, make writes idempotent, preserve checkpoint/replay semantics, and verify duplicate delivery, late records, poison messages, bounded backfill, and the failure/replay behavior the fixture can actually observe without changing downstream analytics model ownership. The synthetic fixture is in-memory and has no persistent checkpoint or deduplication store, so do not claim a real process-durable restart unless you implement and verify one. Schema-evolution behavior is exercised separately by scenario 2."
+  },
+  "fixtureFiles": {
+    "README.md": {
+      "available": true,
+      "sha256": "aa3341f975a4b1334714b0c7a1ac069f25e750f524f85565dac60616a33a33f9",
+      "byteLength": 1705,
+      "text": "# Data pipeline engineering — CDC replay/backfill\n\nRepair the existing `CdcPipeline` without changing its public methods. This fixture represents exactly one Kafka partition, `p0`; `sourceLsn` is authoritative only within that partition and the scalar checkpoint is therefore partition-local. Logical event identity is `eventId` across accepted and quarantined dispositions. Sink latest-state must never regress to an older LSN merely because a backfill arrives later. Replayed event IDs are idempotent at sink/audit semantics. Poison records are accounted for in quarantine with raw event provenance and stable reason `INVALID_RECORD`.\n\nAdd deterministic tests for initial load, checkpoint rollback + duplicate replay, older backfill after newer state, poison record, bounded rerun, and a representative partial-failure/replay boundary. The fixture's checkpoint, sink state, and deduplication state are in memory: rollback reproduces replay but does not prove persistence across process reconstruction. Label process-durable restart verification unavailable unless you add and test an actual durable state mechanism. Schema evolution is not present in this fixture; it is exercised independently by the schema-drift scenario. Do not redefine analytics marts/metrics.\n\nWrite `.kory-eval/pipeline-cdc.json` with partition-local event identity/order, checkpoint/replay semantics, sink guarantees, quarantine/provenance, lineage/reconciliation, the observed partial-failure/replay + late/backfill evidence, the durable-restart limitation, the separate schema-evolution boundary, and hierarchy boundary: broader `data-analysis`; `analytics-engineering` remains a downstream neighbor rather than owned here.\n"
+    },
+    "contract.json": {
+      "available": false,
+      "sha256": null,
+      "byteLength": 0,
+      "text": null,
+      "reason": "not-present"
+    }
+  }
+}
+
+PAIR EXECUTION EVIDENCE
+{
+  "matchedPair": true,
+  "sameScenario": true,
+  "sameProviderModel": true,
+  "sameHarness": true,
+  "sameEvaluationContract": true,
+  "sameMaterializer": true,
+  "sameDeterministicScorer": true,
+  "randomizedArmIdentity": true,
+  "evidenceOwner": "evaluation-harness"
+}
+
+ARTIFACT A
+{
+  "finalOutput": "",
+  "executionEvidence": [
+    "Codex CLI exit=1 signal=none",
+    "2026-11-03T20:28:03.669234Z ERROR codex_models_manager::manager: failed to refresh available models: Connection failed: error sending request\n2026-11-03T20:28:03.993289Z ERROR codex_models_manager::manager: failed to refresh available models: Connection failed: error sending request\n2026-11-03T20:28:06.575309Z ERROR codex_models_manager::manager: failed to refresh available models: Connection failed: error sending request",
+    "Model did not complete its output contract (exit 1)"
+  ],
+  "publicContract": {
+    "taskPrompt": {
+      "available": true,
+      "sha256": "811c1cea087ac7760f7ed21405f0dcc4fd5995a2e847bf75035495c93bb7fb74",
+      "byteLength": 729,
+      "text": "Repair a CDC ingestion job for one Kafka partition (p0) where replay after checkpoint loss duplicates warehouse rows and a historical backfill can arrive after newer updates. Define event identity and partition-local ordering, make writes idempotent, preserve checkpoint/replay semantics, and verify duplicate delivery, late records, poison messages, bounded backfill, and the failure/replay behavior the fixture can actually observe without changing downstream analytics model ownership. The synthetic fixture is in-memory and has no persistent checkpoint or deduplication store, so do not claim a real process-durable restart unless you implement and verify one. Schema-evolution behavior is exercised separately by scenario 2."
+    },
+    "fixtureFiles": {
+      "README.md": {
+        "available": true,
+        "sha256": "aa3341f975a4b1334714b0c7a1ac069f25e750f524f85565dac60616a33a33f9",
+        "byteLength": 1705,
+        "text": "# Data pipeline engineering — CDC replay/backfill\n\nRepair the existing `CdcPipeline` without changing its public methods. This fixture represents exactly one Kafka partition, `p0`; `sourceLsn` is authoritative only within that partition and the scalar checkpoint is therefore partition-local. Logical event identity is `eventId` across accepted and quarantined dispositions. Sink latest-state must never regress to an older LSN merely because a backfill arrives later. Replayed event IDs are idempotent at sink/audit semantics. Poison records are accounted for in quarantine with raw event provenance and stable reason `INVALID_RECORD`.\n\nAdd deterministic tests for initial load, checkpoint rollback + duplicate replay, older backfill after newer state, poison record, bounded rerun, and a representative partial-failure/replay boundary. The fixture's checkpoint, sink state, and deduplication state are in memory: rollback reproduces replay but does not prove persistence across process reconstruction. Label process-durable restart verification unavailable unless you add and test an actual durable state mechanism. Schema evolution is not present in this fixture; it is exercised independently by the schema-drift scenario. Do not redefine analytics marts/metrics.\n\nWrite `.kory-eval/pipeline-cdc.json` with partition-local event identity/order, checkpoint/replay semantics, sink guarantees, quarantine/provenance, lineage/reconciliation, the observed partial-failure/replay + late/backfill evidence, the durable-restart limitation, the separate schema-evolution boundary, and hierarchy boundary: broader `data-analysis`; `analytics-engineering` remains a downstream neighbor rather than owned here.\n"
+      },
+      "contract.json": {
+        "available": false,
+        "sha256": null,
+        "byteLength": 0,
+        "text": null,
+        "reason": "not-present"
+      }
+    }
+  },
+  "changes": []
+}
+
+ARTIFACT B
+{
+  "finalOutput": "",
+  "executionEvidence": [
+    "Codex CLI exit=1 signal=none",
+    "2026-11-03T20:27:44.433490Z ERROR codex_models_manager::manager: failed to refresh available models: Connection failed: error sending request\n2026-11-03T20:27:44.444154Z ERROR codex_models_manager::manager: failed to refresh available models: Connection failed: error sending request\n2026-11-03T20:27:47.303879Z ERROR codex_models_manager::manager: failed to refresh available models: Connection failed: error sending request",
+    "Model did not complete its output contract (exit 1)"
+  ],
+  "publicContract": {
+    "taskPrompt": {
+      "available": true,
+      "sha256": "811c1cea087ac7760f7ed21405f0dcc4fd5995a2e847bf75035495c93bb7fb74",
+      "byteLength": 729,
+      "text": "Repair a CDC ingestion job for one Kafka partition (p0) where replay after checkpoint loss duplicates warehouse rows and a historical backfill can arrive after newer updates. Define event identity and partition-local ordering, make writes idempotent, preserve checkpoint/replay semantics, and verify duplicate delivery, late records, poison messages, bounded backfill, and the failure/replay behavior the fixture can actually observe without changing downstream analytics model ownership. The synthetic fixture is in-memory and has no persistent checkpoint or deduplication store, so do not claim a real process-durable restart unless you implement and verify one. Schema-evolution behavior is exercised separately by scenario 2."
+    },
+    "fixtureFiles": {
+      "README.md": {
+        "available": true,
+        "sha256": "aa3341f975a4b1334714b0c7a1ac069f25e750f524f85565dac60616a33a33f9",
+        "byteLength": 1705,
+        "text": "# Data pipeline engineering — CDC replay/backfill\n\nRepair the existing `CdcPipeline` without changing its public methods. This fixture represents exactly one Kafka partition, `p0`; `sourceLsn` is authoritative only within that partition and the scalar checkpoint is therefore partition-local. Logical event identity is `eventId` across accepted and quarantined dispositions. Sink latest-state must never regress to an older LSN merely because a backfill arrives later. Replayed event IDs are idempotent at sink/audit semantics. Poison records are accounted for in quarantine with raw event provenance and stable reason `INVALID_RECORD`.\n\nAdd deterministic tests for initial load, checkpoint rollback + duplicate replay, older backfill after newer state, poison record, bounded rerun, and a representative partial-failure/replay boundary. The fixture's checkpoint, sink state, and deduplication state are in memory: rollback reproduces replay but does not prove persistence across process reconstruction. Label process-durable restart verification unavailable unless you add and test an actual durable state mechanism. Schema evolution is not present in this fixture; it is exercised independently by the schema-drift scenario. Do not redefine analytics marts/metrics.\n\nWrite `.kory-eval/pipeline-cdc.json` with partition-local event identity/order, checkpoint/replay semantics, sink guarantees, quarantine/provenance, lineage/reconciliation, the observed partial-failure/replay + late/backfill evidence, the durable-restart limitation, the separate schema-evolution boundary, and hierarchy boundary: broader `data-analysis`; `analytics-engineering` remains a downstream neighbor rather than owned here.\n"
+      },
+      "contract.json": {
+        "available": false,
+        "sha256": null,
+        "byteLength": 0,
+        "text": null,
+        "reason": "not-present"
+      }
+    }
+  },
+  "changes": []
+}

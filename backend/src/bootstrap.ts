@@ -3,7 +3,7 @@
  * Handles initialization of databases, tools, supervisors, bots, and configs.
  */
 
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { existsSync } from 'node:fs';
 import { ProviderRegistry } from './providers';
 import { ToolRegistry } from './tools';
@@ -50,6 +50,10 @@ import {
   SendAgentMessageTool,
   RequestManagerRelayTool,
   ListAgentMessagesTool,
+  ListSessionsTool,
+  ReadSessionTool,
+  IsolateChatTool,
+  MergeChatBackTool,
   MCPDetectErrorsTool,
   MCPAnalyzeErrorTool,
   MCPSuggestFixesTool,
@@ -58,12 +62,15 @@ import {
   InvokeMcpTool,
   FetchContextTool,
   PruneContextTool,
+  ManageContextTool,
   LoadSkillDetailTool,
+  ManageSkillFeedingTool,
   ListWorkflowsTool,
   StartWorkflowTool,
   UpdateWorkflowTool,
   CreateWorkflowDraftTool,
   GetResourceBudgetTool,
+  ScheduleMonitorTool,
 } from './tools';
 import { initMCP } from './mcp/client';
 import { serverLog } from './logger';
@@ -83,14 +90,21 @@ import { initEnforcedSpendCapsTable } from './security/spend-caps-enforced';
 import { recoverInterruptedSessionErasures } from './services/session-erasure-service';
 import { SessionRunStore } from './runs/session-run-store';
 import { SessionRunCoordinator } from './runs/session-run-coordinator';
+import { applyBridgeEnvironment } from './runtime/standalone';
+import { reportStartupPhase } from './runtime/startup-status';
 
 export async function bootstrap(): Promise<AppContext> {
+  reportStartupPhase('configuration');
   const startedAt = performance.now();
   let phaseStartedAt = startedAt;
   const finishPhase = (phase: string) => {
     const now = performance.now();
     serverLog.info(
-      { phase, durationMs: Math.round(now - phaseStartedAt), elapsedMs: Math.round(now - startedAt) },
+      {
+        phase,
+        durationMs: Math.round(now - phaseStartedAt),
+        elapsedMs: Math.round(now - startedAt),
+      },
       'Backend startup phase completed',
     );
     phaseStartedAt = now;
@@ -100,39 +114,13 @@ export async function bootstrap(): Promise<AppContext> {
   validateEnvironment();
 
   // ── Wire CLI deep-integration bridge scripts ────────────────────────────
-  // The CLI bridges (cli-bridges.ts, devin-bridge.ts) read these env vars to
-  // spawn the kory MCP server + hook bridge as subprocesses of each native CLI
-  // (claude, codex, devin, grok, cursor, antigravity). Without them,
-  // MCP/hooks wiring silently no-ops and CLIs lose access to kory__ tools.
-  // Resolve the bundled scripts relative to this module so they work in both
-  // dev (ts) and packaged (compiled) layouts.
-  if (!process.env.KORY_MCP_BRIDGE_SCRIPT) {
-    const devScript = join(import.meta.dir, 'providers', 'kory-mcp-bridge.ts');
-    const builtScript = join(import.meta.dir, 'providers', 'kory-mcp-bridge.js');
-    process.env.KORY_MCP_BRIDGE_SCRIPT = existsSync(devScript)
-      ? devScript
-      : existsSync(builtScript)
-        ? builtScript
-        : '';
-  }
-  if (!process.env.KORY_HOOK_BRIDGE_SCRIPT) {
-    const devScript = join(import.meta.dir, 'providers', 'kory-hook-bridge.ts');
-    const builtScript = join(import.meta.dir, 'providers', 'kory-hook-bridge.js');
-    process.env.KORY_HOOK_BRIDGE_SCRIPT = existsSync(devScript)
-      ? devScript
-      : existsSync(builtScript)
-        ? builtScript
-        : '';
-  }
-  // The MCP bridge spawns via `node <script>`; ensure the command is set.
-  if (!process.env.KORY_MCP_BRIDGE_COMMAND) {
-    process.env.KORY_MCP_BRIDGE_COMMAND = process.execPath;
-  }
+  applyBridgeEnvironment();
 
   const config = loadConfig(PROJECT_ROOT);
 
   finishPhase('configuration');
 
+  reportStartupPhase('database-and-erasure-recovery', 'Opening and migrating the database');
   // Initialize DB, Supervisor, and CreditAccountant
   await initDb();
   await initEnforcedSpendCapsTable();
@@ -146,24 +134,39 @@ export async function bootstrap(): Promise<AppContext> {
   await recoverInterruptedSessionErasures();
   finishPhase('database-and-erasure-recovery');
 
+  // The 0059 compaction defers its one-time VACUUM to the next startup so a
+  // multi-minute rebuild never freezes /api/health on a live server. It runs
+  // here — synchronous, before the port binds — with the startup-phase marker
+  // telling the desktop the process is alive and working.
+  {
+    const { runPendingStartupVacuum } = await import('./notes/notes-compaction');
+    reportStartupPhase('database-vacuum', 'Compacting the database (one-time)');
+    if (runPendingStartupVacuum()) finishPhase('database-vacuum');
+  }
+
+  reportStartupPhase('encryption');
   // Initialize Encryption
   await initEncryption();
   finishPhase('encryption');
 
+  reportStartupPhase('providers');
   // Providers & Tools
   const providers = new ProviderRegistry(config);
   await providers.initializeEncryptedCredentials();
   finishPhase('providers');
 
+  reportStartupPhase('tools');
   const tools = await initTools(providers);
   finishPhase('tools');
 
+  reportStartupPhase('mcp-connections');
   // MCP Connections
   // Scope MCP clients — and their OAuth grants — to the same project root the
   // settings API resolves, so a token stored via the UI is found at connect time.
   const mcpManager = await initMCP(config, tools, PROJECT_ROOT);
   finishPhase('mcp-connections');
 
+  reportStartupPhase('session-runtime');
   // Stores & Core
   const sessions = new SessionStore();
   const messages = new MessageStore();
@@ -206,6 +209,20 @@ export async function bootstrap(): Promise<AppContext> {
     runs,
   );
 
+  // Steering commands parked behind a run outlive the process that queued
+  // them. Requeue any claim interrupted mid-dispatch, then resume the drains
+  // for sessions holding live queue rows so a parked send is not stranded.
+  {
+    const { agentSteeringStore } = await import('./stores/agent-steering-store');
+    const reclaimed = await agentSteeringStore.resetInterruptedClaims();
+    if (reclaimed > 0) {
+      serverLog.info({ count: reclaimed }, 'Requeued interrupted steering claims');
+    }
+    for (const steeringSessionId of await agentSteeringStore.listSessionIdsWithActive()) {
+      kory.resumeSessionSteering(steeringSessionId);
+    }
+  }
+
   const goalDriver = new GoalDriveService(goals, sessions, kory, wsManager);
 
   const context: AppContext = {
@@ -227,7 +244,10 @@ export async function bootstrap(): Promise<AppContext> {
 
   setContext(context);
   configureAgentMail({ kory, sessions });
+  configureSessionsDirectory({ kory, sessions, messages });
+  configureChatIsolation({ kory, sessions });
   finishPhase('session-runtime');
+  reportStartupPhase('process-and-goal-recovery');
   // Kory subscribed during construction; initialize only after the WebSocket
   // broker and AppContext exist so restart-recovery terminal events can be
   // surfaced and drained without racing bootstrap dependencies.
@@ -246,8 +266,19 @@ export async function bootstrap(): Promise<AppContext> {
     serverLog.info(recoveredQuestionHandoffs, 'Reconciled durable answered-question handoffs');
   }
   await goalDriver.recover();
+  // Arm persisted monitors only after recovery has settled, so a due monitor
+  // cannot race startup recovery with a new session turn.
+  await configureMonitors({
+    kory,
+    sessions,
+    storagePath: resolve(PROJECT_ROOT, config.dataDirectory, 'monitors.json'),
+  });
   finishPhase('process-and-goal-recovery');
+  reportStartupPhase('background-services');
   startBackgroundCleanup(kory, wsManager);
+  // File-backed notes compaction (migration 0059) is deliberately NOT started
+  // here: its first batch must never run before the HTTP server is listening.
+  // server.ts kicks it off after Bun.serve binds the port.
   // Keep enabled providers' model catalogs warm in the background. Cadence is
   // per-provider by discovery cost and stretches when the user is idle, so new
   // models appear without burning requests or spawning CLIs for a session that
@@ -298,6 +329,9 @@ import { noteTools } from './tools/notes';
 import { createComputerUseTools } from './computer-use/tools';
 import { checklistTools } from './tools/checklists';
 import { configureAgentMail } from './kory/services/agent-mail-service';
+import { configureSessionsDirectory } from './tools/sessions-directory';
+import { configureChatIsolation } from './tools/chat-isolation';
+import { configureMonitors } from './kory/services/monitor-service';
 
 /** Build the authoritative runtime tool registry without starting the backend. */
 export async function initTools(providers: ProviderRegistry) {
@@ -412,6 +446,10 @@ export async function initTools(providers: ProviderRegistry) {
     new SendAgentMessageTool(),
     new RequestManagerRelayTool(),
     new ListAgentMessagesTool(),
+    new ListSessionsTool(),
+    new ReadSessionTool(),
+    new IsolateChatTool(),
+    new MergeChatBackTool(),
     new MCPDetectErrorsTool(),
     new MCPAnalyzeErrorTool(),
     new MCPSuggestFixesTool(),
@@ -420,15 +458,18 @@ export async function initTools(providers: ProviderRegistry) {
     new InvokeMcpTool(tools),
     new FetchContextTool(),
     new PruneContextTool(),
+    new ManageContextTool(),
     new CreateGoalTool(),
     new UpdateGoalTool(),
     new EditGoalChecklistTool(),
     new LoadSkillDetailTool(),
+    new ManageSkillFeedingTool(),
     new ListWorkflowsTool(),
     new StartWorkflowTool(),
     new UpdateWorkflowTool(),
     new CreateWorkflowDraftTool(),
     new GetResourceBudgetTool(providers),
+    new ScheduleMonitorTool(),
   ];
 
   for (const tool of defaultTools) {

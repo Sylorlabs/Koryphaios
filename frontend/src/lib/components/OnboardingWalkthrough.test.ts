@@ -39,6 +39,10 @@ const mocks = vi.hoisted(() => ({
   setSecondaryAccent: vi.fn(),
   setCustomAccent: vi.fn(),
   setCustomSecondaryAccent: vi.fn(),
+  setMode: vi.fn(),
+  setModePreset: vi.fn(),
+  setModeAccent: vi.fn(),
+  setModeCustomAccent: vi.fn(),
   settings: {
     intentInterview: 'adaptive',
     planApproval: 'material',
@@ -81,8 +85,8 @@ vi.mock('$lib/stores/providers.svelte', () => ({
   },
 }));
 
-vi.mock('$lib/stores/theme.svelte', () => ({
-  THEME_PRESETS: {
+vi.mock('$lib/stores/theme.svelte', () => {
+  const palettes: Record<string, Record<string, string>> = {
     kintsugi: {
       '--color-surface-1': '#141210',
       '--color-surface-3': '#262220',
@@ -98,35 +102,59 @@ vi.mock('$lib/stores/theme.svelte', () => ({
       '--color-surface-3': '#eee',
       '--color-text-primary': '#111',
     },
-  },
-  theme: {
-    preset: 'kintsugi',
-    accent: 'gold',
-    secondaryAccent: 'gold',
-    customAccent: undefined,
-    customSecondaryAccent: undefined,
-    presets: [
-      { id: 'kintsugi', label: 'Kintsugi' },
-      { id: 'midnight', label: 'Midnight' },
-      { id: 'light', label: 'Light' },
-      { id: 'system', label: 'System' },
-    ],
-    accents: [
-      { id: 'gold', label: 'Kintsugi Gold', color: '#D5B261' },
-      { id: 'cyan', label: 'Cyan', color: '#06b6d4' },
-    ],
-    currentAccent: { main: '#D5B261', hover: '#D5B261' },
-    currentSecondaryAccent: { main: '#D5B261', hover: '#D5B261' },
-    setPreset: mocks.setPreset,
-    setAccent: mocks.setAccent,
-    setSecondaryAccent: mocks.setSecondaryAccent,
-    setCustomAccent: mocks.setCustomAccent,
-    setCustomSecondaryAccent: mocks.setCustomSecondaryAccent,
-  },
-}));
+    'nord-light': {
+      '--color-surface-1': '#E5E9F0',
+      '--color-surface-3': '#CCD4E4',
+      '--color-text-primary': '#2E3440',
+    },
+  };
+  const darkSlot = { preset: 'kintsugi', accent: 'gold', secondaryAccent: 'gold' };
+  const lightSlot = { preset: 'light', accent: 'gold', secondaryAccent: 'gold' };
+  const presetOptions = [
+    { id: 'kintsugi', label: 'Kintsugi', scheme: 'dark' },
+    { id: 'midnight', label: 'Midnight', scheme: 'dark' },
+    { id: 'light', label: 'Light', scheme: 'light' },
+    { id: 'nord-light', label: 'Nord Snow', scheme: 'light' },
+  ];
+  return {
+    THEME_PRESETS: palettes,
+    theme: {
+      mode: 'dark',
+      activeScheme: 'dark',
+      preset: 'kintsugi',
+      accent: 'gold',
+      secondaryAccent: 'gold',
+      customAccent: undefined,
+      customSecondaryAccent: undefined,
+      dark: darkSlot,
+      light: lightSlot,
+      presets: presetOptions,
+      accents: [
+        { id: 'gold', label: 'Kintsugi Gold', color: '#D5B261' },
+        { id: 'cyan', label: 'Cyan', color: '#06b6d4' },
+      ],
+      currentAccent: { main: '#D5B261', hover: '#D5B261' },
+      currentSecondaryAccent: { main: '#D5B261', hover: '#D5B261' },
+      modeAppearance: (scheme: string) => (scheme === 'dark' ? darkSlot : lightSlot),
+      accentFor: () => ({ main: '#D5B261', hover: '#F3DDB0' }),
+      paletteFor: (id: string) => palettes[id],
+      presetsFor: (scheme: string) => presetOptions.filter((p) => p.scheme === scheme),
+      setPreset: mocks.setPreset,
+      setAccent: mocks.setAccent,
+      setSecondaryAccent: mocks.setSecondaryAccent,
+      setCustomAccent: mocks.setCustomAccent,
+      setCustomSecondaryAccent: mocks.setCustomSecondaryAccent,
+      setMode: mocks.setMode,
+      setModePreset: mocks.setModePreset,
+      setModeAccent: mocks.setModeAccent,
+      setModeCustomAccent: mocks.setModeCustomAccent,
+    },
+  };
+});
 
 import OnboardingWalkthrough from './OnboardingWalkthrough.svelte';
 import { onboardingStore } from '$lib/stores/onboarding.svelte';
+import { cliChatImportStore } from '$lib/stores/cli-chat-import.svelte';
 
 const mockDiscoveryData = {
   providers: [
@@ -267,6 +295,7 @@ describe('OnboardingWalkthrough', () => {
     vi.clearAllMocks();
     localStorage.clear();
     onboardingStore.reset();
+    cliChatImportStore.reset();
     mocks.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
       if (String(url).includes('/api/cli-chat-import/discover')) {
         return new Response(JSON.stringify({ ok: true, data: mockDiscoveryData }), {
@@ -315,15 +344,19 @@ describe('OnboardingWalkthrough', () => {
     await fireEvent.click(screen.getByRole('button', { name: /Set up in a minute/ }));
     expect(screen.getByRole('heading', { name: 'Make it look like yours' })).toBeVisible();
 
-    await fireEvent.click(screen.getByRole('button', { name: /Midnight/ }));
-    expect(mocks.setPreset).toHaveBeenCalledWith('midnight');
-    expect(screen.getByRole('button', { name: /Light/ })).toBeVisible();
-    expect(screen.getByRole('button', { name: /System/ })).toBeVisible();
-    expect(screen.queryByRole('button', { name: /Prefer light mode/ })).toBeNull();
+    await fireEvent.click(screen.getByRole('button', { name: 'Midnight' }));
+    expect(mocks.setModePreset).toHaveBeenCalledWith('dark', 'midnight');
+    expect(screen.getByRole('button', { name: 'Light' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Nord Snow' })).toBeVisible();
+    expect(screen.getByRole('radio', { name: /Adaptive/ })).toBeVisible();
     await fireEvent.click(screen.getByRole('button', { name: 'Light' }));
-    expect(mocks.setPreset).toHaveBeenCalledWith('light');
-    expect(screen.getByRole('button', { name: 'Open primary accent picker' })).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Open secondary accent picker' })).toBeVisible();
+    expect(mocks.setModePreset).toHaveBeenCalledWith('light', 'light');
+    expect(
+      screen.getByRole('button', { name: 'Edit dark mode primary accent' }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Edit dark mode secondary accent' }),
+    ).toBeVisible();
 
     await fireEvent.click(screen.getByRole('button', { name: /^Continue/ }));
     expect(screen.getByRole('heading', { name: 'How should Kory work with you?' })).toBeVisible();
@@ -376,6 +409,27 @@ describe('OnboardingWalkthrough', () => {
     await fireEvent.click(screen.getByRole('button', { name: /Connect a provider now/ }));
     expect(onOpenProviders).toHaveBeenCalledTimes(1);
     expect(onboardingStore.record).toBeNull();
+  });
+
+  it('starts CLI chat discovery on open so the Port chats step is ready on arrival', async () => {
+    renderWalkthrough();
+
+    // Still on the welcome step: the scan is already running in the background.
+    await waitFor(() => {
+      expect(mocks.apiFetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/cli-chat-import/discover'),
+      );
+    });
+    await waitFor(() => expect(cliChatImportStore.hasLoaded).toBe(true));
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Port chats' }));
+    // Data renders immediately, with no scanning state and no second scan.
+    expect(screen.getByText(/Checked all 4 CLI providers/)).toBeVisible();
+    expect(screen.queryByText(/Scanning CLI chat histories/)).toBeNull();
+    const discoverCalls = mocks.apiFetch.mock.calls.filter(([url]) =>
+      String(url).includes('/api/cli-chat-import/discover'),
+    );
+    expect(discoverCalls).toHaveLength(1);
   });
 
   it('shows providers first, allows expanding provider then project, category selection and cherry-picking', async () => {

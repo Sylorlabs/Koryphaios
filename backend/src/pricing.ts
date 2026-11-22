@@ -68,16 +68,13 @@ export function resolvePricing(provider: string, model: string): ResolvedPricing
   return equivalent ? { ...equivalent, source: 'openrouter-equivalent' } : null;
 }
 
-/** Cost in USD; null when the model has no verified price. */
-export function computeCostUsd(
-  provider: string,
-  model: string,
+/** Cost in USD from an already-resolved price. */
+export function costFromPricing(
+  p: ResolvedPricing,
   tokensIn: number,
   tokensOut: number,
   cacheUsage?: { cacheReadTokens?: number; cacheWriteTokens?: number },
-): { costUsd: number; source: ResolvedPricing['source'] } | null {
-  const p = resolvePricing(provider, model);
-  if (!p) return null;
+): { costUsd: number; source: ResolvedPricing['source'] } {
   const cacheReadTokens = Math.max(0, cacheUsage?.cacheReadTokens ?? 0);
   const cacheWriteTokens = Math.max(0, cacheUsage?.cacheWriteTokens ?? 0);
   const freshInputTokens = Math.max(0, tokensIn - cacheReadTokens - cacheWriteTokens);
@@ -89,4 +86,17 @@ export function computeCostUsd(
       (tokensOut / 1_000_000) * p.outPerM,
     source: p.source,
   };
+}
+
+/** Cost in USD; null when the model has no verified price. */
+export function computeCostUsd(
+  provider: string,
+  model: string,
+  tokensIn: number,
+  tokensOut: number,
+  cacheUsage?: { cacheReadTokens?: number; cacheWriteTokens?: number },
+): { costUsd: number; source: ResolvedPricing['source'] } | null {
+  const p = resolvePricing(provider, model);
+  if (!p) return null;
+  return costFromPricing(p, tokensIn, tokensOut, cacheUsage);
 }

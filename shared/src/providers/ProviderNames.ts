@@ -11,10 +11,15 @@ export const ProviderName = {
 
   // Aggregators (OpenAI-compatible APIs with implementations)
   OpenRouter: 'openrouter',
-  AgentRouter: 'agentrouter',
   UnoRouter: 'unorouter',
   TokenRouter: 'tokenrouter',
   ExperientialLabs: 'experientiallabs',
+  HundredMillionSeek: 'hundredmillionseek',
+  Numes: 'numes',
+  Coarena: 'coarena',
+  CrowLLM: 'crowllm',
+  RadeonCloud: 'radeon',
+  Runcrate: 'runcrate',
   TokenHarbor: 'tokenharbor',
   Logfare: 'logfare',
   APInex: 'apinex',

@@ -108,6 +108,7 @@ export class ManagerRoutingService {
     qualificationRole: QualificationRole = 'worker',
     workingDirectory = this.deps.workingDirectory,
     preferredModel?: string,
+    hardExclude?: ReadonlyArray<string>,
   ): RoutingDecision | null {
     const settings = loadAgentSettings(workingDirectory);
     const access = settings.managerModelAccess ?? {};
@@ -131,6 +132,12 @@ export class ManagerRoutingService {
     // An explicit manager choice is matched here so it is never silently
     // replaced by the ranked pick.
     const reachable: RoutingDecision[] = [];
+    // Hard exclusions (route keys `${provider}:${model}` or bare models) remove
+    // routes even from `reachable`, so no fallback can resurrect them.
+    const hardExcluded = (route: RoutingDecision) =>
+      hardExclude?.some(
+        (key) => key === `${route.provider ?? 'unknown'}:${route.model}` || key === route.model,
+      ) ?? false;
     for (const candidate of candidates) {
       try {
         const route = this.routing.resolveActiveRouting(candidate, domain);
@@ -140,8 +147,8 @@ export class ManagerRoutingService {
           additionalAvoid.some(
             (identity) => route.model === identity.model && route.provider === identity.provider,
           );
-        if (provider) reachable.push(route);
-        if (provider && !excluded) resolved.push(route);
+        if (provider && !hardExcluded(route)) reachable.push(route);
+        if (provider && !excluded && !hardExcluded(route)) resolved.push(route);
       } catch (err: unknown) {
         serverLog.debug(
           { err: err instanceof Error ? err.message : String(err) },

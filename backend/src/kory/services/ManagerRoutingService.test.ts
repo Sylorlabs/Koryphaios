@@ -224,3 +224,52 @@ test('prefers a different model over the same model on another provider for crit
   expect(service.resolveIndependentRouting('producer', 'openai', 'critic'))
     .toEqual({ model: 'sibling', provider: 'openai' });
 });
+
+test('hardExclude removes a route even when it is the only reachable one', () => {
+  setAccess({ critic: ['openai:sibling'] });
+  const { service } = fixture();
+  expect(
+    service.resolveIndependentRouting(
+      'producer',
+      'openai',
+      'critic',
+      [],
+      undefined,
+      'critic',
+      root,
+      undefined,
+      ['openai:sibling'],
+    ),
+  ).toBeNull();
+});
+
+test('a hard-excluded preferred model throws instead of silently rerouting', () => {
+  setAccess({ critic: ['openai:critic-a', 'openai:critic-b'] });
+  const { service } = fixture();
+  expect(() =>
+    service.resolveIndependentRouting(
+      'producer',
+      'openai',
+      'critic',
+      [],
+      undefined,
+      'critic',
+      root,
+      'openai:critic-a',
+      ['openai:critic-a'],
+    ),
+  ).toThrow(/not available/);
+  // Without the exclusion the same pick resolves normally.
+  expect(
+    service.resolveIndependentRouting(
+      'producer',
+      'openai',
+      'critic',
+      [],
+      undefined,
+      'critic',
+      root,
+      'openai:critic-a',
+    ),
+  ).toEqual({ model: 'critic-a', provider: 'openai' });
+});

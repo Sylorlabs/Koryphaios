@@ -8,8 +8,10 @@
   import Download from 'lucide-svelte/icons/download';
   import QrCode from 'lucide-svelte/icons/qr-code';
   import LoaderCircle from 'lucide-svelte/icons/loader-circle';
+  import TriangleAlert from 'lucide-svelte/icons/triangle-alert';
   import { deviceStore } from '$lib/stores/devices.svelte';
   import SettingsSwitch from './SettingsSwitch.svelte';
+  import SettingsPage from './settings/SettingsPage.svelte';
   import { copyText } from '$lib/utils/clipboard';
   let name = $state('');
   let code = $state('');
@@ -105,14 +107,15 @@
   });
 </script>
 
-<section class="link-device" aria-labelledby="link-device-title">
-  <header>
-    <span class="eyebrow">YOUR DEVICE NETWORK</span>
-    <h2 id="link-device-title">Link device</h2>
-    <p>
-      Start here to connect your phone or another desktop. Your work stays on the device you choose.
-    </p>
-  </header>
+<SettingsPage
+  title="Link device"
+  description="Start here to connect your phone or another desktop. Your work stays on the device you choose."
+  width="narrow"
+>
+<div class="link-device">
+  {#if status?.error && !status.connected}<p class="notice" role="status">
+      <TriangleAlert size={15} />{status.error}
+    </p>{/if}
   <div class="local-device">
     <div class="device-heading">
       <Monitor size={22} />
@@ -136,6 +139,7 @@
         )}
     />
     <form
+      class="field"
       onsubmit={(event) => {
         event.preventDefault();
         void act(() => deviceStore.rename(name));
@@ -342,6 +346,7 @@
           >{/if}
       </div>{/if}
   </div>
+  {#if error}<p class="error" role="alert">{error}</p>{/if}
   {#each status?.requests ?? [] as request (request.id)}
     <div class="verification">
       <h3>{request.identity.name} wants to link</h3>
@@ -409,84 +414,99 @@
       </article>
     {/each}
   </section>
-  {#if error}<p class="error" role="alert">{error}</p>{/if}
-  {#if status?.error && !status.connected}<p class="error" role="status">{status.error}</p>{/if}
-</section>
+</div>
+</SettingsPage>
 
 <style>
   .link-device {
-    max-width: 760px;
-    margin: 0 auto;
-    padding: 28px;
     display: grid;
-    gap: 24px;
+    gap: 32px;
+    min-width: 0;
     color: var(--color-text-primary);
-  }
-  .eyebrow {
-    font-size: 10px;
-    letter-spacing: 0.14em;
-    color: var(--color-accent);
-    font-weight: 700;
-  }
-  h2 {
-    font-size: 25px;
-    font-weight: 650;
-    margin: 8px 0;
   }
   h3 {
     font-size: 14px;
     font-weight: 600;
-    margin: 0 0 8px;
+    margin: 0;
   }
   p {
     font-size: 13px;
-    line-height: 1.6;
+    line-height: 1.55;
     color: var(--color-text-muted);
-    margin: 6px 0 16px;
+    margin: 0;
   }
   .local-device,
   .pairing-card,
-  .peer {
-    padding: 20px;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
+  .relay-setup,
+  .manual-link,
+  .linked {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
   }
-  .pairing-card {
-    border-top: 1px solid color-mix(in srgb, var(--color-text-muted) 14%, transparent);
+  .local-device {
+    gap: 18px;
+  }
+  .pairing-card,
+  .linked {
+    padding-top: 28px;
+    border-top: 1px solid var(--color-border);
+  }
+  .pairing-card > h3 {
+    margin-top: 6px;
+  }
+  .pairing-card > p {
+    margin-top: -6px;
+  }
+  .relay-setup,
+  .manual-link {
+    margin-top: 10px;
+    padding-top: 22px;
+    border-top: 1px solid var(--color-border);
+  }
+  .relay-setup p {
+    margin-top: -6px;
   }
   .device-heading {
     display: flex;
     align-items: center;
     gap: 12px;
-    margin-bottom: 18px;
     min-width: 0;
+    color: var(--color-text-secondary);
   }
   .device-heading > div {
     display: grid;
-    gap: 4px;
+    gap: 3px;
     flex: 1;
     min-width: 0;
   }
   .device-heading strong {
     font-size: 14px;
+    color: var(--color-text-primary);
     overflow-wrap: anywhere;
   }
   .device-heading span {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--color-text-muted);
   }
   .badge {
-    padding: 5px 8px;
-    border-radius: 8px;
+    padding: 4px 9px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--color-text-secondary);
     background: var(--color-surface-3);
     white-space: nowrap;
   }
+  .field {
+    display: grid;
+    gap: 8px;
+  }
   label {
     display: block;
-    font-size: 11px;
+    font-size: 12px;
+    font-weight: 500;
     color: var(--color-text-secondary);
-    margin-bottom: 7px;
   }
   .input-row {
     display: flex;
@@ -497,70 +517,101 @@
     min-width: 0;
     flex: 1;
     width: 100%;
+    height: 38px;
     background: var(--color-surface-1);
     border: 1px solid var(--color-border);
     border-radius: 9px;
-    padding: 10px 12px;
+    padding: 0 12px;
     color: var(--color-text-primary);
     font-size: 13px;
+    transition: border-color 0.15s;
+  }
+  input::placeholder {
+    color: var(--color-text-muted);
   }
   input:focus {
-    outline: 2px solid var(--color-accent);
-    outline-offset: 2px;
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 18%, transparent);
   }
   button {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 7px;
-    font-size: 12px;
+    min-height: 38px;
+    font-size: 13px;
     font-weight: 600;
     border-radius: 9px;
-    padding: 10px 13px;
+    padding: 0 14px;
     cursor: pointer;
     white-space: nowrap;
+    transition:
+      background-color 0.15s,
+      border-color 0.15s,
+      color 0.15s;
   }
   button:disabled {
-    opacity: 0.5;
+    opacity: 0.45;
     cursor: not-allowed;
+  }
+  .primary:disabled {
+    background: var(--color-surface-3);
+    color: var(--color-text-muted);
+    box-shadow: none;
+    opacity: 1;
   }
   button:focus-visible {
     outline: 2px solid var(--color-accent);
-    outline-offset: 3px;
+    outline-offset: 2px;
   }
   .primary {
     background: var(--color-accent);
-    color: var(--color-text-on-accent);
+    color: var(--color-on-accent);
     border: 1px solid transparent;
+  }
+  .primary:hover:not(:disabled) {
+    background: var(--color-accent-hover);
   }
   .secondary {
     background: var(--color-surface-3);
     color: var(--color-text-primary);
     border: 1px solid var(--color-border);
   }
+  .secondary:hover:not(:disabled) {
+    border-color: var(--color-border-bright);
+  }
   .text-button {
+    min-height: 32px;
     color: var(--color-text-muted);
     background: transparent;
-    padding: 6px;
+    padding: 0 8px;
     border: 0;
   }
+  .text-button:hover:not(:disabled) {
+    color: var(--color-text-primary);
+  }
   .hint {
-    font-size: 11px;
-    margin: 8px 0 0;
+    font-size: 12px;
   }
   .tabs {
     display: flex;
-    gap: 6px;
-    margin-bottom: 20px;
+    gap: 4px;
     padding: 4px;
     background: var(--color-surface-1);
-    border-radius: 10px;
+    border: 1px solid var(--color-border);
+    border-radius: 11px;
   }
   .tabs button {
     flex: 1;
+    min-height: 34px;
     background: transparent;
     color: var(--color-text-muted);
     border: 0;
+    border-radius: 8px;
+  }
+  .tabs button:hover {
+    color: var(--color-text-primary);
   }
   .tabs button[aria-selected='true'] {
     background: var(--color-surface-3);
@@ -570,11 +621,13 @@
     display: flex;
     gap: 24px;
     align-items: center;
-    margin: 24px 0 0;
+    margin-top: 8px;
   }
   .qr {
     border-radius: 12px;
     flex-shrink: 0;
+    max-width: 100%;
+    height: auto;
   }
   .code-block {
     display: grid;
@@ -583,34 +636,19 @@
     min-width: 0;
   }
   .code-block code {
-    font-size: 17px;
+    font-size: 18px;
     letter-spacing: 0.04em;
     overflow-wrap: anywhere;
   }
   .code-block span {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--color-text-muted);
-  }
-  .manual-link {
-    border-top: 1px solid var(--color-border);
-    padding-top: 26px;
-    margin-top: 30px;
-  }
-  .relay-setup {
-    margin-top: 24px;
-    padding: 16px;
-    border-top: 1px solid color-mix(in srgb, var(--color-text-muted) 12%, transparent);
-    border-radius: 0;
-    background: transparent;
-  }
-  .manual-link h3 {
-    margin-bottom: 14px;
   }
   .copy-row,
   .actions {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
   }
   .copy-row {
     justify-content: space-between;
@@ -618,10 +656,10 @@
   }
   .actions {
     flex-wrap: wrap;
-    margin-top: 4px;
   }
   .icon-button {
-    padding: 8px;
+    min-height: 34px;
+    padding: 0 9px;
     border: 1px solid var(--color-border);
     background: var(--color-surface-3);
     color: var(--color-text-primary);
@@ -633,37 +671,28 @@
     flex-wrap: wrap;
     gap: 16px;
     padding: 16px;
-    margin-top: 24px;
-    border: 0;
-    border-radius: 0;
+    border-radius: 12px;
     background: var(--color-surface-1);
   }
   .qr-option strong {
-    font-size: 12px;
+    font-size: 13px;
   }
   .qr-option p {
-    font-size: 11px;
-    margin: 6px 0 0;
+    font-size: 12px;
+    margin-top: 4px;
   }
   .qr-panel {
     display: grid;
     justify-items: center;
     gap: 16px;
     padding: 22px;
-    margin-top: 16px;
     background: var(--color-surface-1);
-    border: 0;
     border-radius: 12px;
   }
   .qr-panel p {
-    margin: 0;
     text-align: center;
     max-width: 320px;
     font-size: 12px;
-  }
-  .qr {
-    max-width: 100%;
-    height: auto;
   }
   .qr-heading {
     display: flex;
@@ -673,74 +702,99 @@
   }
   .qr-heading div {
     display: grid;
-    gap: 4px;
+    gap: 3px;
   }
   .qr-heading strong {
-    font-size: 12px;
+    font-size: 13px;
+    color: var(--color-text-primary);
   }
   .qr-heading span {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--color-text-muted);
   }
   .qr-panel .actions {
     justify-content: center;
   }
+  .verification {
+    display: grid;
+    gap: 10px;
+    padding: 22px;
+    border: 1px solid color-mix(in srgb, var(--color-accent) 55%, var(--color-border));
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--color-accent) 6%, var(--color-surface-2));
+  }
   .verification code {
     display: block;
     font-size: 28px;
     letter-spacing: 0.15em;
-    margin: 14px 0;
-  }
-  .verification {
-    padding: 24px;
-    border: 1px solid var(--color-accent);
-    border-radius: 12px;
-    background: color-mix(in srgb, var(--color-accent) 5%, var(--color-surface-2));
-  }
-  .pairing-card > .verification {
-    margin-top: 24px;
-  }
-  .verification p:last-child {
-    margin-bottom: 0;
-  }
-  .verification > .input-row {
-    margin-top: 18px;
-  }
-  .verification .copy-row {
     margin: 6px 0;
   }
-  .verification .copy-row code {
-    margin: 12px 0;
+  .verification > span {
+    font-size: 12px;
+    color: var(--color-text-muted);
   }
-  .linked {
-    display: grid;
-    gap: 12px;
+  .verification > .input-row {
+    margin-top: 6px;
+  }
+  .pairing-card > .verification {
+    margin-top: 8px;
   }
   .count {
-    font-size: 11px;
-    color: var(--color-text-muted);
+    display: inline-flex;
+    min-width: 20px;
+    justify-content: center;
+    padding: 1px 6px;
     margin-left: 6px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--color-text-secondary);
+    background: var(--color-surface-3);
   }
   .empty {
-    padding: 18px;
-    margin: 0;
+    padding: 16px 18px;
     border: 1px dashed var(--color-border);
     border-radius: 12px;
   }
-  .peer .device-heading {
-    margin-bottom: 4px;
+  .peer {
+    display: grid;
+    gap: 4px;
+    padding: 14px 16px;
+    border-radius: 12px;
+    background: var(--color-surface-1);
   }
   .success {
     color: var(--color-success);
+    font-size: 13px;
+  }
+  .notice,
+  .error {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .notice {
+    color: var(--color-text-secondary);
+    background: var(--color-warning-bg);
+    border: 1px solid color-mix(in srgb, var(--color-warning) 35%, transparent);
+  }
+  .notice :global(svg) {
+    flex-shrink: 0;
+    margin-top: 2px;
+    color: var(--color-warning);
   }
   .error {
     color: var(--color-error);
-    font-size: 12px;
+    background: var(--color-error-bg);
+    border: 1px solid color-mix(in srgb, var(--color-error) 35%, transparent);
   }
   @media (max-width: 600px) {
     .link-device {
-      padding: 18px;
-      gap: 18px;
+      gap: 24px;
     }
     .invite-layout {
       flex-direction: column;
@@ -753,8 +807,7 @@
       flex-basis: 100%;
     }
     .tabs button {
-      padding: 9px 6px;
-      font-size: 11px;
+      font-size: 12px;
     }
     .badge {
       display: none;

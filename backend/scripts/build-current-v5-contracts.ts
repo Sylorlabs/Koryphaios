@@ -1,12 +1,12 @@
 import { resolve } from 'node:path';
 import type { BunPlugin } from 'bun';
-import { currentV5SkillEvaluationContracts } from '../src/kory/skill-eval-current-contract';
-import type { EmbeddedCurrentV5SkillEvaluationContracts } from '../src/kory/skill-eval-embedded-contracts';
+import { currentV5SkillEvaluationContracts } from '../src/eval/skills/skill-eval-current-contract';
+import type { EmbeddedCurrentV5SkillEvaluationContracts } from '../src/eval/skills/skill-eval-embedded-contracts';
 import { CURRENT_SKILL_EVAL_CONTRACT_VERSION } from '../src/kory/skill-evaluations';
 import { loadV5SkillPackages } from '../src/kory/skill-packages';
 
 const SOURCE_PACKAGE_ROOT = resolve(import.meta.dir, '../../skills-v5');
-const EMBEDDED_STUB_PATH = resolve(import.meta.dir, '../src/kory/skill-eval-embedded-contracts.ts');
+const EMBEDDED_STUB_PATH = resolve(import.meta.dir, '../src/eval/skills/skill-eval-embedded-contracts.ts');
 
 /** Collect at build time from source, never from a ledger, manifest, or override. */
 export function collectCurrentV5SkillEvaluationContracts(): EmbeddedCurrentV5SkillEvaluationContracts {

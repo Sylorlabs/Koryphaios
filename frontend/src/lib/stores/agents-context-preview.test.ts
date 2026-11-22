@@ -102,7 +102,7 @@ describe('manager context preview provider transitions', () => {
     expect(getContextUsage().cacheSavingsUsd).toBeUndefined();
   });
 
-  it('clears CLI-only usage immediately when the same session switches to an API provider', () => {
+  it('carries the conversation but drops CLI-only overhead and cache when switching to an API provider', () => {
     const sessionId = sessionState.activeSessionId;
     beginManagerContextPreview(sessionId, 'codex', 'gpt-5.6-codex', 1_000_000);
     expect(
@@ -127,20 +127,25 @@ describe('manager context preview provider transitions', () => {
 
     beginManagerContextPreview(sessionId, 'openai', 'minimax-m3', 262_144);
 
+    // Kory's own categories (13.4k input + 0.7k output) carry over at once; the
+    // 197.6k Codex runtime overhead and the Codex cache do not.
     expect(manager()).toMatchObject({
       sessionId,
-      tokensUsed: 0,
+      tokensUsed: 14_100,
       contextMax: 262_144,
       contextKnown: true,
-      hasUsageData: false,
+      hasUsageData: true,
+      usageEstimated: true,
     });
-    expect(manager().contextBreakdown).toBeUndefined();
+    expect(manager().contextBreakdown?.cliHarness).toBeUndefined();
     expect(manager().cachedInputTokens).toBeUndefined();
     expect(getContextUsage()).toMatchObject({
-      used: 0,
+      used: 14_100,
       max: 262_144,
-      isReliable: false,
-      reason: 'usage_unknown',
+      isReliable: true,
+      estimated: true,
+      carried: true,
+      provider: 'openai',
     });
   });
 
@@ -260,18 +265,21 @@ describe('manager context preview provider transitions', () => {
         breakdown: CLI_BREAKDOWN,
       });
 
-    // The meter must never render 860.3k / 285.0k.
+    // The meter must never render 860.3k / 285.0k, nor a 100% bar that is all
+    // "CLI runtime overhead": the cumulative remainder is bounded by what Kory
+    // measured (13.4k of categories → at most 13.4k of CLI overhead).
     expect(manager()).toMatchObject({
       tokensUsed: 285_000,
       contextMax: 285_000,
       usageEstimated: true,
     });
     expect(getContextUsage()).toMatchObject({
-      used: 285_000,
+      used: 13_400 + 13_400 + 700,
       max: 285_000,
-      percent: 100,
       isReliable: true,
       estimated: true,
+      harnessCapped: true,
+      harnessCap: 13_400,
     });
   });
 
@@ -309,14 +317,18 @@ describe('manager context preview provider transitions', () => {
         breakdown: API_BREAKDOWN,
       }),
     ).toBe(false);
+    // The Codex snapshot is not exact for the selected OpenAI route, so it is
+    // never adopted as a measurement; its route-independent categories render
+    // as an estimate instead of an empty bar. No Codex cache or overhead.
     expect(manager()).toMatchObject({
       sessionId,
       identity: { provider: 'openai', model: 'minimax-m3' },
-      tokensUsed: 0,
+      tokensUsed: 14_100,
       contextMax: 262_144,
-      hasUsageData: false,
+      hasUsageData: true,
+      usageEstimated: true,
     });
-    expect(manager().contextBreakdown).toBeUndefined();
+    expect(manager().contextBreakdown?.cliHarness).toBeUndefined();
     expect(manager().cachedInputTokens).toBeUndefined();
 
     updateUsage(sessionId, 'kory-manager', {
@@ -334,11 +346,10 @@ describe('manager context preview provider transitions', () => {
       });
     expect(manager()).toMatchObject({
       identity: { provider: 'openai', model: 'minimax-m3' },
-      tokensUsed: 0,
+      tokensUsed: 14_100,
       contextMax: 262_144,
-      hasUsageData: false,
+      usageEstimated: true,
     });
-    expect(manager().contextBreakdown).toBeUndefined();
     expect(manager().cachedInputTokens).toBeUndefined();
 
     expect(
@@ -353,9 +364,8 @@ describe('manager context preview provider transitions', () => {
     ).toBe(false);
     expect(manager()).toMatchObject({
       identity: { provider: 'openai', model: 'minimax-m3' },
-      tokensUsed: 0,
+      tokensUsed: 14_100,
       contextMax: 262_144,
-      hasUsageData: false,
     });
 
     expect(
@@ -365,7 +375,7 @@ describe('manager context preview provider transitions', () => {
         usageKnown: false,
       }),
     ).toBe(true);
-    expect(manager().contextBreakdown).toBeUndefined();
+    expect(manager().contextBreakdown?.cliHarness).toBeUndefined();
     expect(manager().cachedInputTokens).toBeUndefined();
 
     expect(
@@ -413,7 +423,8 @@ describe('manager context preview provider transitions', () => {
     expect(manager().cachedInputTokens).toBe(0);
 
     beginManagerContextPreview(sessionId, 'codex', 'gpt-5.6-codex', 1_000_000);
-    expect(manager().contextBreakdown).toBeUndefined();
+    // Switching back carries the OpenAI reading as an estimate (no cache).
+    expect(manager()).toMatchObject({ tokensUsed: 20_000, usageEstimated: true });
     expect(manager().cachedInputTokens).toBeUndefined();
     expect(
       applyManagerContextPreview(sessionId, 'codex', 'gpt-5.6-codex', {

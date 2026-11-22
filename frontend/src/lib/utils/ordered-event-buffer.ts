@@ -54,6 +54,26 @@ export class OrderedEventBuffer<T extends SequencedEvent> {
     return this.drain();
   }
 
+  /** The server pruned history through `throughSequence` (it can never be
+   * replayed). Advance past it as if those events had been applied, drop any
+   * pending copies at or below it, and release what is now contiguous. */
+  skipTo(epoch: number, throughSequence: number): T[] {
+    if (!Number.isSafeInteger(throughSequence) || throughSequence < 0) return [];
+    if (this.epoch !== epoch) {
+      if (epoch < this.epoch) return [];
+      this.epoch = epoch;
+      this.lastApplied = throughSequence;
+      this.pending.clear();
+    } else if (throughSequence > this.lastApplied) {
+      this.lastApplied = throughSequence;
+      for (const sequence of [...this.pending.keys()]) {
+        if (sequence <= throughSequence) this.pending.delete(sequence);
+      }
+    }
+    this.initialized = true;
+    return this.drain();
+  }
+
   ingest(event: T): OrderedIngestResult<T> {
     if (event.epoch !== this.epoch) return { kind: 'epoch_mismatch', events: [] };
     if (event.sequence <= this.lastApplied || this.pending.has(event.sequence)) {

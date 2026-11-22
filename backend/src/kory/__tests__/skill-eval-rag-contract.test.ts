@@ -6,7 +6,7 @@ import {
   AI_PROTOCOL_CONCEPTS,
   AI_PROTOCOL_SKILL_EVAL_MATERIALIZERS,
   AI_PROTOCOL_SKILL_EVAL_SCORERS,
-} from '../skill-eval-ai-protocol-concept-fixtures';
+} from '../../eval/skills/skill-eval-ai-protocol-concept-fixtures';
 
 const aclScenario = 'rag-retrieval-systems-full-task-1-individual';
 const fusionScenario = 'rag-retrieval-systems-full-task-2-individual';

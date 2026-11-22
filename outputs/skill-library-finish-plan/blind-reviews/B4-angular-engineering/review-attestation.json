@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "status": "unimported",
+  "assignmentId": "blind-v5-4cd11d7f9f50a33029b6",
+  "skill": "angular-engineering",
+  "scenarioId": "angular-engineering-full-task-1-individual",
+  "pairId": "angular-engineering-full-task-1-individual:9695bfc4-78af-4e25-97bf-7fb6916421a2",
+  "reviewerThread": "logfare-stateless-4c57199a-d0e7-47b5-b3bb-4f2979e1077d",
+  "reviewerIdentitySource": "external-reviewer-adapter-output",
+  "reviewerAdapter": "scripts/kory-logfare-stateless-reviewer",
+  "reviewerModel": "deepseek-v4.1-flash-1017",
+  "reviewerModelSource": "configured-provider-model-metadata",
+  "reviewerBaseUrl": "http://127.0.0.1:17841/v1",
+  "promptSha256": "fb05eb6d491e98838938067c0e161e2e159d0f747aa2212652d913e57973ad8a",
+  "privateAssignmentSha256": "f82d15c1d7eacef08a3931fa7a9f3450492596c093f53d24e1ed8130ad981c00",
+  "reviewerEventsSha256": "fccbffa62c8b344289f6241d9b7e5f814914111020a198703cc569de4ba01320",
+  "judgeOutputSha256": "6f8032f87d935a429f1fedf71ddd07dfaea3c0b4b15168713bd0997829a85193",
+  "envelopeSha256": "dc2a0d65e9ea5cb04dc204a00e488064e84fc88d94795fe2c019d89dc8a641b1",
+  "importValidation": {
+    "mode": "validate",
+    "validatedReviews": 1,
+    "persistedReviews": 0
+  },
+  "promptSnapshotPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-m4A020/review-task.prompt.txt",
+  "reviewerEventsPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-m4A020/reviewer-events.json",
+  "envelopePath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-m4A020/import.json"
+}

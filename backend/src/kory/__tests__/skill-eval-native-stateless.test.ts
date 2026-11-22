@@ -16,17 +16,17 @@ import { canonicalizePath, isContainedBy, isUnix } from '../../runtime/platform'
 import {
   createNativeStatelessTextPatchSkillEvalExecutor,
   MAX_NATIVE_SERIALIZED_REQUEST_BYTES,
-} from '../skill-eval-native-stateless';
-import type { SkillEvalExperimentV3, SkillEvalScenarioV3 } from '../skill-eval-harness';
+} from '../../eval/skills/skill-eval-native-stateless';
+import type { SkillEvalExperimentV3, SkillEvalScenarioV3 } from '../../eval/skills/skill-eval-harness';
 import {
   runPairedSkillEvaluationV3,
   type SkillEvalExecutionObservation,
-} from '../skill-eval-execution';
+} from '../../eval/skills/skill-eval-execution';
 import { loadV5SkillPackages } from '../skill-packages';
 import { CURRENT_SKILL_EVAL_CONTRACT_VERSION, listSkillEvaluationRuns } from '../skill-evaluations';
-import { selectEligibleSkillEvaluationEvidence } from '../skill-eval-eligibility';
+import { selectEligibleSkillEvaluationEvidence } from '../../eval/skills/skill-eval-eligibility';
 import { skillEvalCampaignHarnessVersion } from '../../../../scripts/skill-v5-qualification-executor';
-import { snapshotSkillEvalWorkspace, textPatchPrompt } from '../skill-eval-text-patch';
+import { snapshotSkillEvalWorkspace, textPatchPrompt } from '../../eval/skills/skill-eval-text-patch';
 import { createExecutor } from '../../../../scripts/skill-v5-qualification-executor';
 
 const roots: string[] = [];

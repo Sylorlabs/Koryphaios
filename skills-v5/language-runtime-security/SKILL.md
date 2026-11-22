@@ -33,6 +33,21 @@ Before changing or approving a runtime, record these as separate contract fields
 12. **Prove security invariants with adversarial programs.** Use minimized reproducers, optimization-level comparisons, differential/interpreter-vs-JIT tests, malformed module corpora, capability-denial cases, and resource-exhaustion cases. Preserve the smallest cross layer trace that explains the failure instead of stopping at a crash symptom.
 13. **Bind evidence to ownership and supplied contracts.** Record the exact runtime/compiler/toolchain identity, target/ABI, flags or modes, feature set, module/corpus identity, and custom runtime/compiler ownership boundary. When a task provides a schema, fixed simulator, corpus, lifecycle command, or named layers, preserve it exactly. Put required facts inside the structured artifact using the supplied field names; do not replace them with synonyms or a final-message summary. Keep staged privileged work distinct from durable committed effects.
 
+## Supplied fixtures are inputs, not workspace
+
+A task that ships a corpus, a fixed simulator, candidate modules, or test fixtures under
+`tests/fixtures/` hands you sealed inputs. Read them, run them, and add your own files beside
+them. Do not rewrite, delete, or "fix" a supplied fixture or corpus file, and do not change a
+supplied test to make a new implementation agree with it: that erases the thing the task
+measures, and an evaluator that compares supplied inputs sees it as fixture tampering rather
+than as work. New coverage goes in new files with names the task did not reserve.
+
+## Name the toolchain and the scope
+
+A language-runtime security finding is only meaningful with the exact runtime it was measured against and the limit of what was inspected. The report must carry the version string it ran (for a V8 finding, the `22.0.0` line and which tier executed, interpreter or optimizing), the pipeline stages inspected (`lower`, `ir`, `optimizer` where those exist), and an explicit statement that the evidence covers that runtime build rather than the language in general. It must not claim a specification or memory-safety vulnerability the corpus did not demonstrate.
+
+When the task asks for a compiler audit artifact, write it as the named JSON file and spell the scope inside it: the toolchain version literal (`22.0.0`), the stage names `lower`, `ir` and `optimizer` as the trace waypoints, and the phrase `custom compiler` naming whose guarantee is at stake. A report that describes the same audit in prose, or that omits the version literal or one of the stage names, is read as unbounded scoping evidence even when the trace itself is correct. Never turn the finding into a claim about LLVM or the host toolchain in general: the guarantee belongs to the compiler under review, and a generic vulnerability claim makes the whole audit read as unsupported.
+
 ## Evidence and claims
 
 Produce a guarantee model, representation/cross layer trace, isolation and escape boundary map, host capability map, resource limit enforcement matrix, structured observability/audit record, recovery record, and adversarial reproducer or verification corpus. Include runtime/compiler version, enabled feature set, optimization/JIT mode, target/ABI, module or corpus identity, exact bytes/digest where relevant, and the boundary between custom runtime-owned behavior and third-party toolchain/host behavior. Distinguish desired configuration from observed execution, and live from simulated, inferred, stale, unavailable, or unverified evidence.

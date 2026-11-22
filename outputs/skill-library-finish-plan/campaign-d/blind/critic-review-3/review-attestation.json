@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "status": "unimported",
+  "assignmentId": "blind-v5-bc5054dc7949ee8beb68",
+  "skill": "critic-review",
+  "scenarioId": "critic-review-full-task-2",
+  "pairId": "critic-review-full-task-2:d547902f-6b51-490a-a0fd-bba734121878",
+  "reviewerThread": "kory-cli-stateless-656c5343-9a3f-4d71-acd8-d4daad5d7144",
+  "reviewerIdentitySource": "external-reviewer-adapter-output",
+  "reviewerAdapter": "scripts/kory-cli-stateless-reviewer",
+  "reviewerModel": "logfare/deepseek-v4.1-flash-1017",
+  "reviewerModelSource": "configured-provider-model-metadata",
+  "reviewerBaseUrl": "http://127.0.0.1:17841/v1",
+  "promptSha256": "e11625d1f5d2e82b21c022c92fde9a8f7d41b1b937400ca97aae423944ec50c8",
+  "privateAssignmentSha256": "84f4112c928a421019523e736fab5b9626feca97750fdfa388c7ad377ba94223",
+  "reviewerEventsSha256": "cf83e8908d9710df0835b31397df755b6275f48bd4de4b622f96972c930f828b",
+  "judgeOutputSha256": "2cf3dcae405abd79e8aea578d798fec1732058eb0da149785385ae580bdb189c",
+  "envelopeSha256": "d60e9b16d0c3282b3d282b72d86d457ff5e1183ba8854fb14b1bc6f3cead0288",
+  "importValidation": {
+    "mode": "validate",
+    "validatedReviews": 1,
+    "persistedReviews": 0
+  },
+  "promptSnapshotPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-YKOlll/review-task.prompt.txt",
+  "reviewerEventsPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-YKOlll/reviewer-events.json",
+  "envelopePath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-YKOlll/import.json"
+}

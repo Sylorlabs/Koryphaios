@@ -54,13 +54,15 @@ export { RenameSessionTool } from './session';
 export { ManageReviewAgentsTool } from './review-agents';
 export { ManageAgentsTool } from './manage-agents';
 export { SendAgentMessageTool, RequestManagerRelayTool, ListAgentMessagesTool } from './messaging';
+export { ListSessionsTool, ReadSessionTool } from './sessions-directory';
+export { IsolateChatTool, MergeChatBackTool } from './chat-isolation';
 export { MCPDetectErrorsTool, MCPAnalyzeErrorTool, MCPSuggestFixesTool } from './mcp';
 export { ManageMcpServerTool } from './manage-mcp';
 export { ListMcpToolsTool, InvokeMcpTool } from './external-mcp';
-export { FetchContextTool, PruneContextTool } from './context';
+export { FetchContextTool, PruneContextTool, ManageContextTool } from './context';
+export { LoadSkillDetailTool, ManageSkillFeedingTool } from './skills';
 export { CreateGoalTool, UpdateGoalTool, EditGoalChecklistTool } from './goals';
 export { checklistTools } from './checklists';
-export { LoadSkillDetailTool } from './skills';
 export {
   ListWorkflowsTool,
   StartWorkflowTool,
@@ -68,5 +70,6 @@ export {
   CreateWorkflowDraftTool,
 } from './workflows';
 export { GetResourceBudgetTool } from './resource-budget';
+export { ScheduleMonitorTool } from './monitors';
 export { registerGitTools } from './git';
 export { GhostCommitTool, registerCheckpointTools } from './checkpoint';

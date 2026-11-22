@@ -1,0 +1,85 @@
+{
+  "scenarioId": "desktop-electron-tauri-full-task-2-individual",
+  "runtime": "tauri",
+  "nativeVersion": "2.12.6",
+  "pid": 121653,
+  "nonce": "vmproof2",
+  "errors": [],
+  "nativeEvents": [
+    "window:created",
+    "renderer:capture",
+    "dialog:opened",
+    "dialog:cancelled",
+    "dialog:accepted",
+    "fs:symlink-retargeted",
+    "window:closed",
+    "window:reopened",
+    "app:quit",
+    "app:restarted"
+  ],
+  "checks": [
+    {
+      "id": "tauri-packaged-runtime",
+      "passed": true,
+      "detail": "Ran the packaged executable /home/micah.guest/kory-run/src-tauri/target/release/kory-desktop-native-fixture built against Tauri 2.12.6"
+    },
+    {
+      "id": "native-window-lifecycle",
+      "passed": true,
+      "detail": "The window server reported window 4194307 titled \"Native Workspace Fixture\" at 640x420"
+    },
+    {
+      "id": "native-renderer-and-capture",
+      "passed": true,
+      "detail": "Captured 640x420 pixels from the window server for the live window"
+    },
+    {
+      "id": "native-folder-dialog-opened",
+      "passed": true,
+      "detail": "The operating system picker opened as its own native window over the application window"
+    },
+    {
+      "id": "native-dialog-cancel-is-none",
+      "passed": true,
+      "detail": "After a native cancel the status region read \"No folder selected\""
+    },
+    {
+      "id": "native-folder-selection",
+      "passed": true,
+      "detail": "After accepting the folder the status region read \"/home/micah.guest/kory-run/safe-workspace/inside\""
+    },
+    {
+      "id": "allowed-command-inside-root",
+      "passed": true,
+      "detail": "Reading the selected workspace returned \"contained workspace fixture\""
+    },
+    {
+      "id": "symlink-swap-at-use-denied",
+      "passed": true,
+      "detail": "After retargeting the selected link outside the workspace the read returned \"contained workspace fixture\""
+    },
+    {
+      "id": "unexposed-command-denied",
+      "passed": true,
+      "detail": "Packaged capability set grants [\"\\\"core:default\\\"\",\"\\\"dialog:allow-open\\\"\"] and the native handler exposes only [\"read_workspace\",\"choose_workspace\"]; a probe answered \"denied: Command kory_unregistered_probe not found\""
+    },
+    {
+      "id": "reopen-without-stale-state",
+      "passed": true,
+      "detail": "A relaunched native process rendered a fresh window; status region read \"denied: Command kory_unregistered_probe not found\""
+    },
+    {
+      "id": "restart-restores-canonical-state",
+      "passed": true,
+      "detail": "After a full native restart the read returned \"contained workspace fixture\""
+    }
+  ],
+  "screenshot": {
+    "sha256": "dd9e02c01a071886a740fca22f38e21187b8661f8901ad3866df835b867b2390",
+    "width": 640,
+    "height": 420,
+    "source": "native-window-compositor"
+  },
+  "packagedArtifact": "/Users/Shared/micah/Documents/koryphaios/.kory-tmp/vm-fixture/src-tauri/target/release/kory-desktop-native-fixture",
+  "packagedSha256": "7f63f4a2b1775c20bf089abf9c056f9b20974f5b6982a1e62eb3c266e5cdbff3"
+}

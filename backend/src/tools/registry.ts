@@ -75,6 +75,13 @@ export interface ToolContext {
   /** Host-owned approval policy. Every Kory tool execution, including worker
    *  tools, passes through this policy before the tool can run. */
   permissionPolicy?: ToolPermissionPolicy;
+  /** Host-set: this chat's workspace binding changed earlier this turn
+   *  (isolate_chat/merge_chat_back). While true, workspace-mutating tools are
+   *  denied — the context's workingDirectory still names the pre-change root. */
+  workspaceRebindPending?: boolean;
+  /** Host callback: marks that a workspace-mutating tool ran successfully this
+   *  turn. Only installed for contexts whose turn can isolate mid-turn. */
+  noteWorkspaceMutation?: () => void;
   /** Independent, invocation-bound UI queue for concurrent tool approvals. */
   waitForToolApproval?: (
     ctx: ToolContext, call: ToolCallInput, question: string, options: string[], signal?: AbortSignal,
@@ -86,6 +93,16 @@ export interface ToolContext {
   manageAgents?: (input: Record<string, unknown>) => Promise<string>;
   /** Let the current worker/critic reclaim its own prior tool-output context. */
   pruneOwnContext?: (keepRecent?: number) => Promise<string>;
+  /** Report that the agent now holds a skill's full instructions in its live
+   * context (a load_skill_detail result). The host tracks this so the skill
+   * feeder stops re-stuffing the same text on later turns. */
+  onSkillDetailLoaded?: (skill: string) => void;
+  /** Agent control over the skill feeder for this chat: report, block, or
+   * unblock skills. Host-owned so the block list lives in per-session state. */
+  manageSkillFeeding?: (input: Record<string, unknown>) => Promise<string>;
+  /** Control over what tool output stays in this agent's context: this chat's
+   *  for a Manager, only the private prompt history for a Worker or Critic. */
+  manageContext?: (input: Record<string, unknown>) => Promise<string>;
   requestManagerInput?: (question: string) => Promise<string>;
   /** Calls approved by the host policy do not prompt a second time inside a
    *  tool-specific risk check such as catastrophic bash detection. */
@@ -99,6 +116,8 @@ export interface ToolContext {
     skills?: import('../kory/skill-assignment').SkillAssignment,
     preferredModel?: string,
     reasoningLevel?: string,
+    worktree?: boolean,
+    fallbacks?: import('@koryphaios/shared').AgentFallbackStep[],
   ) => Promise<string>;
   /** Manager-only metadata callback scoped to this session by the host. */
   renameSession?: (title: string) => Promise<string>;

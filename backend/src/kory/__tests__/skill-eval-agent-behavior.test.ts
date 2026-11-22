@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { agentBehaviorBoundariesPass } from '../skill-eval-skill-authoring-evaluation-fixtures';
+import { agentBehaviorBoundariesPass } from '../../eval/skills/skill-eval-skill-authoring-evaluation-fixtures';
 
 const cleanBehavior = {
   scopeExpansion: false,

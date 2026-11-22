@@ -13,7 +13,6 @@
   import Keyboard from 'lucide-svelte/icons/keyboard';
   import Check from 'lucide-svelte/icons/check';
   import Copy from 'lucide-svelte/icons/copy';
-  import Zap from 'lucide-svelte/icons/zap';
   import Server from 'lucide-svelte/icons/server';
   import Cpu from 'lucide-svelte/icons/cpu';
   import X from 'lucide-svelte/icons/x';
@@ -79,6 +78,7 @@
   import McpServersSettings from './McpServersSettings.svelte';
   import ArchivedChatsSettings from './ArchivedChatsSettings.svelte';
   import CustomProviderIconEditor from './settings/CustomProviderIconEditor.svelte';
+  import SettingsPage from './settings/SettingsPage.svelte';
   import type {
     CustomProviderIconSelection,
     CustomProviderIconShape,
@@ -169,6 +169,8 @@
   }
 
   const filteredSettingsCatalog = $derived(filterSettingsCatalog(SETTINGS_CATALOG, settingsSearch));
+  const settingsEntryDescription = (id: SettingsTab): string | undefined =>
+    SETTINGS_CATALOG.find((entry) => entry.id === id)?.description;
 
   function readSavedSettingsTab(): string | null {
     if (typeof localStorage === 'undefined') return null;
@@ -194,6 +196,7 @@
   let selectorTarget = $state<any>(null);
   let showColorPicker = $state(false);
   let colorPickerTarget = $state<'primary' | 'secondary'>('primary');
+  let colorPickerScheme = $state<'dark' | 'light'>('dark');
   let showRotateDialog = $state(false);
   let rotateProvider = $state<{ name: string; keyType: 'apiKey' | 'authToken' } | null>(null);
   let showAccountManageDialog = $state(false);
@@ -1249,13 +1252,15 @@
   }
 
   // ─── Billing ─────────────────────────────────────────────────────────
-  let billingLoading = $state(false);
+  let billingSummaryLoading = $state(false);
+  let billingLiveLoading = $state(false);
   let billingCredits = $state<any>(null);
   // Environment scope belongs to the billing dashboard, where it filters real
   // usage data. It is intentionally not a global Settings-header control.
   let settingsEnvironmentScope = $state('all');
   let billingViewMode = $state<UsageViewMode>('cost');
   let billingError = $state<string | null>(null);
+  let billingLiveError = $state<string | null>(null);
   let billingRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   let expandedSubscriptionTrends = $state<Record<string, boolean>>({});
   let subscriptionTrendRanges = $state<Record<string, number>>({});
@@ -1403,6 +1408,13 @@
       .join(' ');
   }
 
+  function formatBalanceReset(ms: number | undefined): string {
+    if (ms == null || !Number.isFinite(ms)) return '';
+    return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(
+      new Date(ms),
+    );
+  }
+
   function formatUsageTrendDate(date: string | undefined): string {
     if (!date) return '';
     return new Intl.DateTimeFormat(undefined, {
@@ -1426,57 +1438,116 @@
     activeSubscriptionTrendPoints[key] = nextIndex;
   }
 
-  async function loadBillingCredits(forceRefresh = false) {
-    if (billingRefreshTimer) {
-      clearTimeout(billingRefreshTimer);
-      billingRefreshTimer = null;
-    }
-    billingLoading = true;
-    billingError = null;
+  // The billing panel reads two endpoints: /summary carries the local ledger
+  // data (spend, analytics, accounts) and /live the slower CLI/balance probes.
+  // Each merges into billingCredits as it arrives so the fast part is never
+  // held back by the slow one.
+  function mergeBillingPayload(data: any) {
+    const providers = new Set<string>([
+      ...((billingCredits?.availableBillingProviders as string[] | undefined) ?? []),
+      ...((data?.availableBillingProviders as string[] | undefined) ?? []),
+    ]);
+    billingCredits = {
+      ...(billingCredits ?? {}),
+      ...data,
+      availableBillingProviders: [...providers].sort((a, b) => a.localeCompare(b)),
+    };
+  }
+
+  async function fetchBillingSummary(forceRefresh: boolean) {
+    billingSummaryLoading = true;
     try {
-      const requestUrl = billingApiPath('/api/billing/credits', forceRefresh);
-      let res = await apiFetch(apiUrl(requestUrl), {}, 3_000);
+      const res = await apiFetch(
+        apiUrl(billingApiPath('/api/billing/summary', forceRefresh)),
+        {},
+        15_000,
+      );
       if (!res.ok) {
-        if ((res.status === 500 || res.status === 408) && forceRefresh) {
-          // Some environments stall during refresh work (provider APIs, heavy log
-          // scans); drop to cached mode and keep the UI usable.
-          res = await apiFetch(apiUrl(billingApiPath('/api/billing/credits')), {}, 3_000);
-        }
-        if (!res.ok) {
-          const text = await res.text().catch(() => '');
-          billingError =
-            text && text.trim()
-              ? `Billing API not available (${res.status})`
-              : 'Billing API not available';
-          return;
-        }
+        const text = await res.text().catch(() => '');
+        billingError =
+          text && text.trim()
+            ? `Billing API not available (${res.status})`
+            : 'Billing API not available';
+        return;
       }
       const data = await parseJsonResponse(res);
       if (data?.ok === false) {
         billingError = data.error || 'Billing API returned an error';
         return;
       }
-      billingCredits = data;
-      // Slow CLI scans and provider balances complete in the background. Keep
-      // the drawer interactive, then replace the provisional snapshot once.
-      if (data?.refreshing) {
-        billingRefreshTimer = setTimeout(() => {
-          billingRefreshTimer = null;
-          if (open && activeTab === 'billing') void loadBillingCredits();
-        }, 1_500);
-      }
+      mergeBillingPayload(data);
     } catch (e: unknown) {
       billingError = e instanceof Error ? e.message : String(e);
     } finally {
-      billingLoading = false;
+      billingSummaryLoading = false;
     }
+  }
+
+  async function fetchBillingLive(forceRefresh: boolean) {
+    billingLiveLoading = true;
+    try {
+      let res = await apiFetch(
+        apiUrl(billingApiPath('/api/billing/live', forceRefresh)),
+        {},
+        15_000,
+      );
+      if (!res.ok && (res.status === 500 || res.status === 408) && forceRefresh) {
+        // Some environments stall during refresh work (provider APIs, heavy log
+        // scans); drop to cached mode and keep the UI usable.
+        res = await apiFetch(apiUrl(billingApiPath('/api/billing/live')), {}, 15_000);
+      }
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        billingLiveError =
+          text && text.trim()
+            ? `Billing live data not available (${res.status})`
+            : 'Billing live data not available';
+        return;
+      }
+      const data = await parseJsonResponse(res);
+      if (data?.ok === false) {
+        billingLiveError = data.error || 'Billing API returned an error';
+        return;
+      }
+      mergeBillingPayload(data);
+      // Slow CLI scans and provider balances complete in the background. Keep
+      // the drawer interactive, then refresh just the live part once.
+      if (data?.refreshing) {
+        billingRefreshTimer = setTimeout(() => {
+          billingRefreshTimer = null;
+          if (open && activeTab === 'billing') void fetchBillingLive(false);
+        }, 1_500);
+      }
+    } catch (e: unknown) {
+      billingLiveError = e instanceof Error ? e.message : String(e);
+    } finally {
+      billingLiveLoading = false;
+    }
+  }
+
+  async function loadBillingCredits(forceRefresh = false) {
+    if (billingRefreshTimer) {
+      clearTimeout(billingRefreshTimer);
+      billingRefreshTimer = null;
+    }
+    billingError = null;
+    billingLiveError = null;
+    await Promise.allSettled([fetchBillingSummary(forceRefresh), fetchBillingLive(forceRefresh)]);
   }
 
   // The drawer can be opened directly on Billing (for example from a shortcut),
   // which bypasses the sidebar click handler. Load once in that case too; the
   // explicit Refresh button remains the only forced network refresh.
   $effect(() => {
-    if (open && activeTab === 'billing' && !billingCredits && !billingLoading) {
+    if (
+      open &&
+      activeTab === 'billing' &&
+      !billingCredits &&
+      !billingSummaryLoading &&
+      !billingLiveLoading &&
+      !billingError &&
+      !billingLiveError
+    ) {
       void loadBillingCredits();
     }
   });
@@ -1653,6 +1724,7 @@
                         : ''}"
                       aria-current={activeTab === entry.id ? 'page' : undefined}
                       title={entry.description}
+                      data-tooltip-placement="right"
                       onclick={() => selectSettingsTab(entry.id)}
                     >
                       <span
@@ -1676,12 +1748,12 @@
               <p class="text-xs font-medium text-[var(--color-text-secondary)]">
                 No settings found
               </p>
-              <p class="mt-1 text-[10px] leading-relaxed text-[var(--color-text-muted)]">
+              <p class="mt-1 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
                 Try a feature, outcome, or scope.
               </p>
               <button
                 type="button"
-                class="mt-3 min-h-9 rounded-lg px-3 text-[10px] font-medium text-[var(--color-accent)] hover:bg-[var(--color-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+                class="mt-3 min-h-9 rounded-lg px-3 text-[11px] font-medium text-[var(--color-accent)] hover:bg-[var(--color-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
                 onclick={() => (settingsSearch = '')}>Clear search</button
               >
             </div>
@@ -1699,1609 +1771,1663 @@
         <!-- Providers Tab -->
         <div
           class={activeTab === 'providers'
-            ? 'flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 py-4 sm:px-6 space-y-4'
+            ? 'flex-1 min-h-0 overflow-y-auto overflow-x-hidden'
             : 'hidden'}
         >
-          <div class="flex items-center gap-2">
-            <div class="relative flex-1">
-              <Search
-                size={14}
-                class="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
-                style="color: var(--color-text-muted);"
-              />
-              <input
-                type="text"
-                aria-label="Search providers"
-                placeholder="Search providers…"
-                bind:value={providerSearchQuery}
-                class="input w-full py-2 text-sm"
-                style="padding-left: 2.75rem;"
-              />
-            </div>
-            <button
-              type="button"
-              class="inline-flex shrink-0 items-center gap-1 rounded-md border border-[var(--color-border)] px-2.5 py-2 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]"
-              title="Refresh providers and detected CLIs"
-              aria-label="Refresh providers and detected CLIs"
-              onclick={refreshProviderSection}
-            >
-              <RefreshCw size={12} />
-              Refresh
-            </button>
-          </div>
-
-          <div class="flex flex-wrap gap-2" role="group" aria-label="Provider category">
-            {#each PROVIDER_CATEGORIES as category (category.id)}
+          <SettingsPage
+            width="wide"
+            title="Providers & models"
+            description={settingsEntryDescription('providers')}
+          >
+            {#snippet actions()}
               <button
                 type="button"
-                class="rounded-full border px-3 py-1.5 text-xs font-medium transition-colors {providerCategory ===
-                category.id
-                  ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/12 text-[var(--color-text-primary)]'
-                  : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-secondary)]'}"
-                aria-pressed={providerCategory === category.id}
-                onclick={() => (providerCategory = category.id)}
+                class="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-[var(--color-border)] px-2.5 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]"
+                title="Refresh providers and detected CLIs"
+                aria-label="Refresh providers and detected CLIs"
+                onclick={refreshProviderSection}
               >
-                {category.label}
+                <RefreshCw size={12} />
+                Refresh
               </button>
-            {/each}
-          </div>
-
-          <!-- Detected on your system — presence is not an authentication verdict. -->
-          {#if showDetectedCliSummary}
-            <div class="border-y border-[var(--color-border)] py-3">
-              <div class="flex items-center justify-between mb-3">
-                <span class="text-sm font-semibold text-[var(--color-text-primary)]"
-                  >Detected on your system</span
-                >
-                <div class="flex items-center gap-2">
-                  <span class="text-[10px] text-[var(--color-text-muted)]"
-                    >Local files and executables only</span
-                  >
-                  <button
-                    type="button"
-                    class="p-1 rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
-                    style="color: var(--color-text-muted);"
-                    title="Re-check providers and installed CLIs"
-                    aria-label="Re-check providers and installed CLIs"
-                    onclick={refreshProviderSection}
-                  >
-                    <RefreshCw size={12} />
-                  </button>
-                </div>
-              </div>
-              <div class="space-y-2.5">
-                {#each installedClis as cli (cli.id)}
-                  {@const cliProviderStatus = cli.provider
-                    ? getProviderStatus(cli.provider)
-                    : undefined}
-                  <div class="flex items-start gap-3">
-                    <span
-                      class="mt-1.5 h-2 w-2 rounded-full flex-shrink-0"
-                      style="background: {cliProviderStatus?.connectionState === 'verified'
-                        ? 'var(--color-success)'
-                        : (cli.loginDetected ?? cli.loggedIn)
-                          ? 'var(--color-warning)'
-                          : 'var(--color-text-muted)'};"
-                    ></span>
-                    <div class="min-w-0 flex-1">
-                      <div class="flex items-center gap-2 flex-wrap">
-                        <span class="text-sm font-medium text-[var(--color-text-primary)]"
-                          >{cli.displayName}</span
-                        >
-                        {#if cliProviderStatus?.connectionState === 'verified'}
-                          <span
-                            class="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
-                            style="background: var(--color-success-bg); color: var(--color-success);"
-                            >Connected · CLI verified</span
-                          >
-                        {:else if cli.autoEnabled}
-                          <span
-                            class="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
-                            style="background: var(--color-warning-bg); color: var(--color-warning);"
-                            >Login detected · connection pending</span
-                          >
-                        {:else if cli.loginDetected ?? cli.loggedIn}
-                          <span
-                            class="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
-                            style="background: var(--color-warning-bg); color: var(--color-warning);"
-                            >Login material detected · check below</span
-                          >
-                        {:else}
-                          <span class="text-[10px] text-[var(--color-text-muted)]"
-                            >Installed · no login material detected</span
-                          >
-                        {/if}
-                        {#if cli.nativeResearch}
-                          <span
-                            class="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
-                            style="background: {cli.nativeResearch.eligible
-                              ? 'var(--color-success-bg)'
-                              : 'var(--color-surface-3)'}; color: {cli.nativeResearch.eligible
-                              ? 'var(--color-success)'
-                              : 'var(--color-text-muted)'};"
-                            title={cli.nativeResearch.reason}
-                          >
-                            {cli.nativeResearch.eligible
-                              ? 'Native research ready'
-                              : 'Native research blocked'}
-                          </span>
-                        {/if}
-                      </div>
-                      <p class="text-[10px] text-[var(--color-text-muted)] leading-relaxed mt-0.5">
-                        {cli.note}
-                        {#if cli.nativeResearch}
-                          <span class="block mt-0.5">Research: {cli.nativeResearch.reason}.</span>
-                        {/if}
-                        {#if cli.docsUrl && !cli.autoEnabled}
-                          <a
-                            href={cli.docsUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            class="underline hover:text-[var(--color-accent)]">Setup guide</a
-                          >
-                        {/if}
-                      </p>
-                    </div>
-                  </div>
-                {/each}
-              </div>
-            </div>
-          {/if}
-
-          <!-- Add a custom (bring-your-own) provider -->
-          {#if !showAddCustom}
-            <button
-              type="button"
-              onclick={() => (showAddCustom = true)}
-              class="group flex w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-md px-2 py-2 text-left transition-colors hover:bg-[var(--color-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/50"
-            >
-              <div class="flex items-center gap-2">
-                <span
-                  class="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--color-accent)]/10 transition-colors duration-150 group-hover:bg-[var(--color-accent)]/20"
-                >
-                  <Plus size={15} style="color: var(--color-accent);" />
-                </span>
-                <span
-                  class="text-sm font-semibold text-[var(--color-text-primary)] transition-colors duration-150 group-hover:text-[var(--color-accent)]"
-                  >Add a custom provider</span
-                >
-              </div>
-              <span
-                class="text-[10px] text-[var(--color-text-muted)] transition-colors duration-150 group-hover:text-[var(--color-text-secondary)]"
-                >OpenAI compatible &amp; more</span
-              >
-            </button>
-          {:else}
-            <section class="border-y border-[var(--color-border)] py-4">
-              <button
-                type="button"
-                onclick={() => {
-                  resetCustomProviderForm();
-                  showAddCustom = false;
-                }}
-                class="group flex w-full items-center justify-between text-left"
-              >
-                <div class="flex items-center gap-2">
-                  <span
-                    class="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--color-accent)]/10"
-                    ><Plus size={15} style="color: var(--color-accent);" /></span
-                  >
-                  <span class="text-sm font-semibold text-[var(--color-text-primary)]"
-                    >Add a custom provider</span
-                  >
-                </div>
-                <span class="text-[10px] text-[var(--color-text-muted)]">Close</span>
-              </button>
-              <div class="mt-4 space-y-3 border-t border-[var(--color-border)] pt-4">
-                <p class="text-[10px] text-[var(--color-text-muted)] leading-relaxed">
-                  Connect an OpenAI-, Anthropic-, or Gemini-compatible endpoint. Koryphaios detects
-                  the format and checks <code>/models</code> before saving. Catalog access does not verify
-                  inference, entitlement, or quota; those are checked on first use. If discovery is unsupported,
-                  you can save with manual model IDs.
-                </p>
-                <div class="space-y-1">
-                  <label class="settings-field-label" for="custom-label">Display name</label>
-                  <input
-                    id="custom-label"
-                    type="text"
-                    placeholder="My LLM"
-                    bind:value={customForm.label}
-                    class="input w-full text-xs"
-                  />
-                </div>
-                <div class="space-y-1">
-                  <label class="settings-field-label" for="custom-url">Base URL</label>
-                  <input
-                    id="custom-url"
-                    type="text"
-                    placeholder="https://api.example.com/v1"
-                    bind:value={customForm.baseUrl}
-                    class="input w-full text-xs"
-                  />
-                </div>
-                <div class="space-y-1">
-                  <label class="settings-field-label" for="custom-key"
-                    >API key <span class="opacity-60 normal-case"
-                      >(optional. Leave blank if not required)</span
-                    ></label
-                  >
-                  <div class="relative">
-                    <input
-                      id="custom-key"
-                      type={secretInputType('custom-key')}
-                      placeholder="sk-..."
-                      bind:value={customForm.apiKey}
-                      class="input w-full text-xs"
-                      style="padding-right: 2.75rem;"
-                    />
-                    <button
-                      type="button"
-                      class="secret-visibility absolute inset-y-0 right-1 my-auto z-10"
-                      onclick={() => toggleSecretVisibility('custom-key')}
-                      aria-label={visibleSecrets['custom-key'] ? 'Hide API key' : 'Show API key'}
-                      title={visibleSecrets['custom-key'] ? 'Hide API key' : 'Show API key'}
-                    >
-                      {#if visibleSecrets['custom-key']}<EyeOff size={15} />{:else}<Eye
-                          size={15}
-                        />{/if}
-                    </button>
-                  </div>
-                </div>
-                <div class="space-y-1">
-                  <label class="settings-field-label" for="custom-models"
-                    >Models <span class="opacity-60 normal-case">(optional, comma-separated)</span
-                    ></label
-                  >
-                  <input
-                    id="custom-models"
-                    type="text"
-                    placeholder="my model a, my model b. Or leave blank to fetch automatically"
-                    bind:value={customForm.models}
-                    class="input w-full text-xs"
-                  />
-                </div>
-                <div
-                  class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)]"
-                >
-                  <button
-                    type="button"
-                    onclick={() => (showCustomAdvanced = !showCustomAdvanced)}
-                    aria-expanded={showCustomAdvanced}
-                    aria-controls="custom-advanced-section"
-                    class="flex w-full items-center justify-between px-3 py-2.5 text-left transition-colors hover:bg-[var(--color-surface-3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/50 rounded-xl"
-                  >
-                    <span
-                      class="flex items-center gap-2 text-xs font-medium text-[var(--color-text-primary)]"
-                    >
-                      <Terminal size={14} /> Advanced
-                    </span>
-                    <ChevronDown
-                      size={15}
-                      class="text-[var(--color-text-muted)] transition-transform duration-200 ease-out"
-                      style={showCustomAdvanced
-                        ? 'transform: rotate(180deg);'
-                        : 'transform: rotate(0deg);'}
-                    />
-                  </button>
-                  <div
-                    id="custom-advanced-section"
-                    class="grid transition-[grid-template-rows] duration-200 ease-out"
-                    style={showCustomAdvanced
-                      ? 'grid-template-rows: 1fr;'
-                      : 'grid-template-rows: 0fr;'}
-                  >
-                    <div class="overflow-hidden" inert={!showCustomAdvanced}>
-                      <div class="space-y-1 px-3 pb-3">
-                        <KorySelect
-                          value={customForm.adapter}
-                          label="Wire adapter"
-                          description="Overrides auto-detection for endpoints outside the standard OpenAI/Anthropic/Gemini formats."
-                          options={[
-                            {
-                              value: '',
-                              label: 'Auto-detect (recommended)',
-                              description: 'Probe the endpoint and pick the best match',
-                            },
-                            {
-                              value: 'ollama',
-                              label: 'Ollama (native)',
-                              description: '/api/chat protocol with native tool calls',
-                            },
-                            {
-                              value: 'cohere',
-                              label: 'Cohere (v2 native)',
-                              description: '/v2/chat protocol with SSE events',
-                            },
-                          ]}
-                          onchange={(value) => (customForm.adapter = value)}
-                        />
-                        <label class="settings-field-label" for="custom-headers"
-                          >Custom headers <span class="opacity-60 normal-case">(optional)</span
-                          ></label
-                        >
-                        <textarea
-                          id="custom-headers"
-                          rows="3"
-                          placeholder="x-openclaw-model: my-model"
-                          bind:value={customForm.headers}
-                          class="input w-full text-xs"
-                        ></textarea>
-                        <p class="text-[10px] text-[var(--color-text-muted)] leading-relaxed">
-                          One per line, Name: Value. Sent with every request to this endpoint.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                {#if showNewCustomIconEditor}
-                  <CustomProviderIconEditor
-                    id="new-custom-provider-icon"
-                    onchange={(selection) => (newCustomIconSelection = selection)}
-                    onerror={(message) => (customAddError = message)}
-                  />
-                {:else}
-                  <button
-                    type="button"
-                    onclick={() => (showNewCustomIconEditor = true)}
-                    class="flex w-full items-center justify-between rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2.5 text-left transition-colors hover:border-[var(--color-accent)]/50 hover:bg-[var(--color-surface-3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/50"
-                  >
-                    <span
-                      class="flex items-center gap-2 text-xs font-medium text-[var(--color-text-primary)]"
-                    >
-                      <ImageIcon size={14} /> Add a custom icon
-                    </span>
-                    <span class="text-[10px] text-[var(--color-text-muted)]">Optional</span>
-                  </button>
-                {/if}
-
-                {#if customAddError}
-                  <div
-                    role="alert"
-                    class="flex items-start gap-2 rounded-xl border border-[var(--color-error)]/40 bg-[var(--color-error-bg)] px-3 py-2.5 text-xs leading-relaxed text-[var(--color-error)]"
-                  >
-                    <AlertTriangle size={14} class="mt-0.5 shrink-0" />
-                    <div class="space-y-1">
-                      <p>{customAddError}</p>
-                      {#if customRequiresManualModels}
-                        <p class="text-[10px] opacity-85">
-                          Add at least one model ID above to enable the explicit unverified path.
-                        </p>
-                      {/if}
-                    </div>
-                  </div>
-                {/if}
-
-                <div class="space-y-2">
-                  <button
-                    type="button"
-                    onclick={() => addCustomProvider(false)}
-                    disabled={providersStore.addingCustom}
-                    class="btn btn-primary w-full text-xs py-2"
-                    >{providersStore.addingCustom
-                      ? 'Checking endpoint…'
-                      : 'Check catalog & add provider'}</button
-                  >
-                  {#if customCanSaveUnverified && customForm.models.trim()}
-                    <button
-                      type="button"
-                      onclick={() => addCustomProvider(true)}
-                      disabled={providersStore.addingCustom}
-                      class="btn btn-secondary w-full text-xs py-2"
-                      >Save unverified with manual models</button
-                    >
-                    <p
-                      class="text-center text-[10px] leading-relaxed text-[var(--color-text-muted)]"
-                    >
-                      Authentication failures cannot be bypassed. This option is only for endpoints
-                      that do not expose a model catalog.
-                    </p>
-                  {/if}
-                </div>
-              </div>
-            </section>
-          {/if}
-
-          {#if providerSearchQuery.trim()}
-            <div class="text-xs text-[var(--color-text-muted)]">
-              {filteredProviderList.length} provider{filteredProviderList.length === 1 ? '' : 's'} matching
-              "{providerSearchQuery.trim()}"
-            </div>
-          {/if}
-
-          {#if filteredProviderList.length === 0}
-            {#if providersLoading}
-              <!-- Placeholders hold the pane's shape while the catalog loads so
-                   the list does not appear as a sudden content jump. -->
-              <div
-                class="divide-y divide-[var(--color-border)] border-y border-[var(--color-border)]"
-                aria-hidden="true"
-              >
-                {#each PROVIDER_SKELETON_ROWS as index (index)}
-                  <div class="flex min-h-12 items-center gap-3 px-2 py-2">
-                    <div
-                      class="h-8 w-8 shrink-0 animate-pulse rounded-lg bg-[var(--color-surface-3)]"
-                    ></div>
-                    <div class="min-w-0 flex-1">
-                      <div
-                        class="h-3 animate-pulse rounded bg-[var(--color-surface-3)]"
-                        style="width: {140 + ((index * 37) % 90)}px;"
-                      ></div>
-                      <div
-                        class="mt-2 h-2 animate-pulse rounded bg-[var(--color-surface-3)] opacity-70"
-                        style="width: {200 + ((index * 53) % 120)}px;"
-                      ></div>
-                    </div>
-                    <div
-                      class="h-6 w-16 shrink-0 animate-pulse rounded-full bg-[var(--color-surface-3)]"
-                    ></div>
-                  </div>
-                {/each}
-              </div>
-              <p class="pt-3 text-xs text-[var(--color-text-muted)]">Loading providers…</p>
-            {:else}
-              <div
-                class="rounded-xl border border-[var(--color-border)] p-8 text-center bg-[var(--color-surface-1)]"
-              >
+            {/snippet}
+            <div class="space-y-4">
+              <div class="relative">
                 <Search
-                  size={24}
-                  class="mx-auto mb-3 opacity-40"
+                  size={14}
+                  class="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
                   style="color: var(--color-text-muted);"
                 />
-                <p class="text-sm text-[var(--color-text-secondary)] mb-1">No providers found</p>
-                <p class="text-xs text-[var(--color-text-muted)]">
-                  {#if providerSearchQuery.trim()}
-                    Try a different search term or clear the filter.
-                  {:else}
-                    No providers in the "{PROVIDER_CATEGORIES.find((c) => c.id === providerCategory)
-                      ?.label ?? providerCategory}" category. Try switching to "All" or add a custom
-                    provider.
-                  {/if}
-                </p>
+                <input
+                  type="text"
+                  aria-label="Search providers"
+                  placeholder="Search providers…"
+                  bind:value={providerSearchQuery}
+                  class="input w-full py-2 text-sm"
+                  style="padding-left: 2.75rem;"
+                />
               </div>
-            {/if}
-          {:else}
-            <div
-              class="divide-y divide-[var(--color-border)] border-y border-[var(--color-border)]"
-            >
-              {#each filteredProviderList as prov (prov.key)}
-                {@const status = getProviderStatus(prov.key)}
-                {@const caps = getProviderCaps(prov.key)}
-                {@const installedCli = installedCliFor(prov.key)}
-                {@const deployment = deploymentDescription(status?.deployment, prov.key)}
-                {@const badge = deploymentLabel(status?.deployment, prov.key)}
-                <div class="flex flex-col">
-                  <div class="provider-row-header">
-                    <button
-                      type="button"
-                      onclick={() =>
-                        (expandedProvider = expandedProvider === prov.key ? null : prov.key)}
-                      oncontextmenu={prov.key.startsWith('custom:')
-                        ? (event) =>
-                            openProviderIconContextMenu(
-                              event,
-                              prov.key,
-                              status?.label ?? prov.label,
-                              event.currentTarget as HTMLElement,
-                            )
-                        : undefined}
-                      onkeydown={prov.key.startsWith('custom:')
-                        ? (event) =>
-                            openProviderIconContextMenuFromKeyboard(
-                              event,
-                              prov.key,
-                              status?.label ?? prov.label,
-                            )
-                        : undefined}
-                      class="provider-row-toggle group flex min-h-12 min-w-0 flex-1 items-center justify-between gap-3 rounded-md px-2 py-2 text-left transition-colors hover:bg-[var(--color-surface-2)]"
-                      aria-expanded={expandedProvider === prov.key}
-                      aria-controls={`provider-details-${prov.key}`}
+
+              <div class="flex flex-wrap gap-2" role="group" aria-label="Provider category">
+                {#each PROVIDER_CATEGORIES as category (category.id)}
+                  <button
+                    type="button"
+                    class="rounded-full border px-3 py-1.5 text-xs font-medium transition-colors {providerCategory ===
+                    category.id
+                      ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/12 text-[var(--color-text-primary)]'
+                      : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-secondary)]'}"
+                    aria-pressed={providerCategory === category.id}
+                    onclick={() => (providerCategory = category.id)}
+                  >
+                    {category.label}
+                  </button>
+                {/each}
+              </div>
+
+              <!-- Detected on your system — presence is not an authentication verdict. -->
+              {#if showDetectedCliSummary}
+                <div class="border-y border-[var(--color-border)] py-3">
+                  <div class="flex items-center justify-between mb-3">
+                    <span class="text-sm font-semibold text-[var(--color-text-primary)]"
+                      >Detected on your system</span
                     >
-                      <div class="flex min-w-0 items-center gap-3">
-                        <div
-                          class="w-8 h-8 rounded-lg bg-[var(--color-surface-3)] flex items-center justify-center p-1.5 shrink-0 overflow-hidden"
-                        >
-                          <ProviderIcon
-                            provider={prov.key}
-                            size={20}
-                            class="w-full h-full"
-                            oncontextmenu={prov.key.startsWith('custom:')
-                              ? (event) =>
-                                  openProviderIconContextMenu(
-                                    event,
-                                    prov.key,
-                                    status?.label ?? prov.label,
-                                    event.currentTarget as HTMLElement,
-                                  )
-                              : undefined}
-                          />
-                        </div>
-                        <div class="min-w-0">
-                          <div class="flex min-w-0 items-center gap-2">
-                            <span
-                              class="block truncate text-sm font-semibold text-[var(--color-text-primary)]"
-                              title={status?.label ?? prov.label}
-                              >{status?.label ?? prov.label}</span
+                    <div class="flex items-center gap-2">
+                      <span class="text-[11px] text-[var(--color-text-muted)]"
+                        >Local files and executables only</span
+                      >
+                      <button
+                        type="button"
+                        class="p-1 rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
+                        style="color: var(--color-text-muted);"
+                        title="Re-check providers and installed CLIs"
+                        aria-label="Re-check providers and installed CLIs"
+                        onclick={refreshProviderSection}
+                      >
+                        <RefreshCw size={12} />
+                      </button>
+                    </div>
+                  </div>
+                  <div class="space-y-2.5">
+                    {#each installedClis as cli (cli.id)}
+                      {@const cliProviderStatus = cli.provider
+                        ? getProviderStatus(cli.provider)
+                        : undefined}
+                      <div class="flex items-start gap-3">
+                        <span
+                          class="mt-1.5 h-2 w-2 rounded-full flex-shrink-0"
+                          style="background: {cliProviderStatus?.connectionState === 'verified'
+                            ? 'var(--color-success)'
+                            : (cli.loginDetected ?? cli.loggedIn)
+                              ? 'var(--color-warning)'
+                              : 'var(--color-text-muted)'};"
+                        ></span>
+                        <div class="min-w-0 flex-1">
+                          <div class="flex items-center gap-2 flex-wrap">
+                            <span class="text-sm font-medium text-[var(--color-text-primary)]"
+                              >{cli.displayName}</span
                             >
-                            {#if isCliExecutionProvider(prov.key) && badge}
+                            {#if cliProviderStatus?.connectionState === 'verified'}
                               <span
-                                class="inline-flex shrink-0 items-center gap-1 rounded-full bg-[var(--color-success-bg)] px-1.5 py-px text-[10px] font-medium text-[var(--color-success)]"
-                                >{badge}</span
+                                class="text-[11px] px-1.5 py-0.5 rounded-full font-medium"
+                                style="background: var(--color-success-bg); color: var(--color-success);"
+                                >Connected · CLI verified</span
                               >
+                            {:else if cli.autoEnabled}
+                              <span
+                                class="text-[11px] px-1.5 py-0.5 rounded-full font-medium"
+                                style="background: var(--color-warning-bg); color: var(--color-warning);"
+                                >Login detected · connection pending</span
+                              >
+                            {:else if cli.loginDetected ?? cli.loggedIn}
+                              <span
+                                class="text-[11px] px-1.5 py-0.5 rounded-full font-medium"
+                                style="background: var(--color-warning-bg); color: var(--color-warning);"
+                                >Login material detected · check below</span
+                              >
+                            {:else}
+                              <span class="text-[11px] text-[var(--color-text-muted)]"
+                                >Installed · no login material detected</span
+                              >
+                            {/if}
+                            {#if cli.nativeResearch}
+                              <span
+                                class="text-[11px] px-1.5 py-0.5 rounded-full font-medium"
+                                style="background: {cli.nativeResearch.eligible
+                                  ? 'var(--color-success-bg)'
+                                  : 'var(--color-surface-3)'}; color: {cli.nativeResearch.eligible
+                                  ? 'var(--color-success)'
+                                  : 'var(--color-text-muted)'};"
+                                title={cli.nativeResearch.reason}
+                              >
+                                {cli.nativeResearch.eligible
+                                  ? 'Native research ready'
+                                  : 'Native research blocked'}
+                              </span>
                             {/if}
                           </div>
                           <p
-                            class="line-clamp-2 text-xs leading-5 text-[var(--color-text-muted)] group-hover:text-[var(--color-text-secondary)]"
+                            class="text-[11px] text-[var(--color-text-muted)] leading-relaxed mt-0.5"
                           >
-                            {#if status?.configurationBlocked}
-                              Unavailable in this build
-                            {:else if status?.connectionState === 'verified'}
-                              {@const selectedCount = status.models?.length ?? 0}
-                              {@const availableCount = status.allAvailableModels?.length ?? 0}
-                              Connected{availableCount > 0 && selectedCount > 0
-                                ? ` · ${selectedCount}/${availableCount} models enabled`
-                                : ''}
-                            {:else if status?.connectionState === 'failed'}
-                              Connection failed
-                            {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog' && prov.key.startsWith('custom:')}
-                              {@const selectedCount = status.models?.length ?? 0}
-                              {@const availableCount = status.allAvailableModels?.length ?? 0}
-                              Connected{availableCount > 0 && selectedCount > 0
-                                ? ` · ${selectedCount}/${availableCount} models enabled`
-                                : ''}
-                            {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog'}
-                              Catalog access detected · inference unverified
-                            {:else if installedCli}
-                              Found on system · not connected
-                            {:else if status?.credentialDetected ?? status?.authenticated}
-                              Configuration saved · not connected
-                            {:else if deployment}
-                              {deployment}
-                            {:else}
-                              Not configured
+                            {cli.note}
+                            {#if cli.nativeResearch}
+                              <span class="block mt-0.5"
+                                >Research: {cli.nativeResearch.reason}.</span
+                              >
+                            {/if}
+                            {#if cli.docsUrl && !cli.autoEnabled}
+                              <a
+                                href={cli.docsUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                class="underline hover:text-[var(--color-accent)]">Setup guide</a
+                              >
                             {/if}
                           </p>
-                          {#if capabilityKinds(prov.key).length > 0}
-                            <div class="mt-1 flex flex-wrap items-center gap-1">
-                              {#each capabilityKinds(prov.key) as kind (kind)}
-                                <span
-                                  class="rounded-full bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]"
-                                >
-                                  {CAPABILITY_SURFACE_LABELS[kind] ?? kind}
-                                </span>
-                              {/each}
-                              <span
-                                class="text-[10px] text-[var(--color-text-muted)]"
-                                title="This provider has no chat-completions endpoint. Its key powers the surfaces above, and it is deliberately absent from the chat model list."
-                              >
-                                · no chat models
-                              </span>
-                            </div>
+                        </div>
+                      </div>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+
+              <!-- Add a custom (bring-your-own) provider -->
+              {#if !showAddCustom}
+                <button
+                  type="button"
+                  onclick={() => (showAddCustom = true)}
+                  class="group flex w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-md px-2 py-2 text-left transition-colors hover:bg-[var(--color-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/50"
+                >
+                  <div class="flex items-center gap-2">
+                    <Plus size={16} class="shrink-0" style="color: var(--color-accent);" />
+                    <span
+                      class="text-sm font-semibold text-[var(--color-text-primary)] transition-colors duration-150 group-hover:text-[var(--color-accent)]"
+                      >Add a custom provider</span
+                    >
+                  </div>
+                  <span
+                    class="text-[11px] text-[var(--color-text-muted)] transition-colors duration-150 group-hover:text-[var(--color-text-secondary)]"
+                    >OpenAI compatible &amp; more</span
+                  >
+                </button>
+              {:else}
+                <section class="border-y border-[var(--color-border)] py-4">
+                  <button
+                    type="button"
+                    onclick={() => {
+                      resetCustomProviderForm();
+                      showAddCustom = false;
+                    }}
+                    class="group flex w-full items-center justify-between text-left"
+                  >
+                    <div class="flex items-center gap-2">
+                      <Plus size={16} class="shrink-0" style="color: var(--color-accent);" />
+                      <span class="text-sm font-semibold text-[var(--color-text-primary)]"
+                        >Add a custom provider</span
+                      >
+                    </div>
+                    <span class="text-[11px] text-[var(--color-text-muted)]">Close</span>
+                  </button>
+                  <div class="mt-4 space-y-3 border-t border-[var(--color-border)] pt-4">
+                    <p class="text-[11px] text-[var(--color-text-muted)] leading-relaxed">
+                      Connect an OpenAI-, Anthropic-, or Gemini-compatible endpoint. Koryphaios
+                      detects the format and checks <code>/models</code> before saving. Catalog access
+                      does not verify inference, entitlement, or quota; those are checked on first use.
+                      If discovery is unsupported, you can save with manual model IDs.
+                    </p>
+                    <div class="space-y-1">
+                      <label class="settings-field-label" for="custom-label">Display name</label>
+                      <input
+                        id="custom-label"
+                        type="text"
+                        placeholder="My LLM"
+                        bind:value={customForm.label}
+                        class="input w-full text-xs"
+                      />
+                    </div>
+                    <div class="space-y-1">
+                      <label class="settings-field-label" for="custom-url">Base URL</label>
+                      <input
+                        id="custom-url"
+                        type="text"
+                        placeholder="https://api.example.com/v1"
+                        bind:value={customForm.baseUrl}
+                        class="input w-full text-xs"
+                      />
+                    </div>
+                    <div class="space-y-1">
+                      <label class="settings-field-label" for="custom-key"
+                        >API key <span class="opacity-60 normal-case"
+                          >(optional. Leave blank if not required)</span
+                        ></label
+                      >
+                      <div class="relative">
+                        <input
+                          id="custom-key"
+                          type={secretInputType('custom-key')}
+                          placeholder="sk-..."
+                          bind:value={customForm.apiKey}
+                          class="input w-full text-xs"
+                          style="padding-right: 2.75rem;"
+                        />
+                        <button
+                          type="button"
+                          class="secret-visibility absolute inset-y-0 right-1 my-auto z-10"
+                          onclick={() => toggleSecretVisibility('custom-key')}
+                          aria-label={visibleSecrets['custom-key']
+                            ? 'Hide API key'
+                            : 'Show API key'}
+                          title={visibleSecrets['custom-key'] ? 'Hide API key' : 'Show API key'}
+                        >
+                          {#if visibleSecrets['custom-key']}<EyeOff size={15} />{:else}<Eye
+                              size={15}
+                            />{/if}
+                        </button>
+                      </div>
+                    </div>
+                    <div class="space-y-1">
+                      <label class="settings-field-label" for="custom-models"
+                        >Models <span class="opacity-60 normal-case"
+                          >(optional, comma-separated)</span
+                        ></label
+                      >
+                      <input
+                        id="custom-models"
+                        type="text"
+                        placeholder="my model a, my model b. Or leave blank to fetch automatically"
+                        bind:value={customForm.models}
+                        class="input w-full text-xs"
+                      />
+                    </div>
+                    <div
+                      class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)]"
+                    >
+                      <button
+                        type="button"
+                        onclick={() => (showCustomAdvanced = !showCustomAdvanced)}
+                        aria-expanded={showCustomAdvanced}
+                        aria-controls="custom-advanced-section"
+                        class="flex w-full items-center justify-between px-3 py-2.5 text-left transition-colors hover:bg-[var(--color-surface-3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/50 rounded-xl"
+                      >
+                        <span
+                          class="flex items-center gap-2 text-xs font-medium text-[var(--color-text-primary)]"
+                        >
+                          <Terminal size={14} /> Advanced
+                        </span>
+                        <ChevronDown
+                          size={15}
+                          class="text-[var(--color-text-muted)] transition-transform duration-200 ease-out"
+                          style={showCustomAdvanced
+                            ? 'transform: rotate(180deg);'
+                            : 'transform: rotate(0deg);'}
+                        />
+                      </button>
+                      <div
+                        id="custom-advanced-section"
+                        class="grid transition-[grid-template-rows] duration-200 ease-out"
+                        style={showCustomAdvanced
+                          ? 'grid-template-rows: 1fr;'
+                          : 'grid-template-rows: 0fr;'}
+                      >
+                        <div class="overflow-hidden" inert={!showCustomAdvanced}>
+                          <div class="space-y-1 px-3 pb-3">
+                            <KorySelect
+                              value={customForm.adapter}
+                              label="Wire adapter"
+                              description="Overrides auto-detection for endpoints outside the standard OpenAI/Anthropic/Gemini formats."
+                              options={[
+                                {
+                                  value: '',
+                                  label: 'Auto-detect (recommended)',
+                                  description: 'Probe the endpoint and pick the best match',
+                                },
+                                {
+                                  value: 'ollama',
+                                  label: 'Ollama (native)',
+                                  description: '/api/chat protocol with native tool calls',
+                                },
+                                {
+                                  value: 'cohere',
+                                  label: 'Cohere (v2 native)',
+                                  description: '/v2/chat protocol with SSE events',
+                                },
+                              ]}
+                              onchange={(value) => (customForm.adapter = value)}
+                            />
+                            <label class="settings-field-label" for="custom-headers"
+                              >Custom headers <span class="opacity-60 normal-case">(optional)</span
+                              ></label
+                            >
+                            <textarea
+                              id="custom-headers"
+                              rows="3"
+                              placeholder="x-openclaw-model: my-model"
+                              bind:value={customForm.headers}
+                              class="input w-full text-xs"
+                            ></textarea>
+                            <p class="text-[11px] text-[var(--color-text-muted)] leading-relaxed">
+                              One per line, Name: Value. Sent with every request to this endpoint.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    {#if showNewCustomIconEditor}
+                      <CustomProviderIconEditor
+                        id="new-custom-provider-icon"
+                        onchange={(selection) => (newCustomIconSelection = selection)}
+                        onerror={(message) => (customAddError = message)}
+                      />
+                    {:else}
+                      <button
+                        type="button"
+                        onclick={() => (showNewCustomIconEditor = true)}
+                        class="flex w-full items-center justify-between rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2.5 text-left transition-colors hover:border-[var(--color-accent)]/50 hover:bg-[var(--color-surface-3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/50"
+                      >
+                        <span
+                          class="flex items-center gap-2 text-xs font-medium text-[var(--color-text-primary)]"
+                        >
+                          <ImageIcon size={14} /> Add a custom icon
+                        </span>
+                        <span class="text-[11px] text-[var(--color-text-muted)]">Optional</span>
+                      </button>
+                    {/if}
+
+                    {#if customAddError}
+                      <div
+                        role="alert"
+                        class="flex items-start gap-2 rounded-xl border border-[var(--color-error)]/40 bg-[var(--color-error-bg)] px-3 py-2.5 text-xs leading-relaxed text-[var(--color-error)]"
+                      >
+                        <AlertTriangle size={14} class="mt-0.5 shrink-0" />
+                        <div class="space-y-1">
+                          <p>{customAddError}</p>
+                          {#if customRequiresManualModels}
+                            <p class="text-[11px] opacity-85">
+                              Add at least one model ID above to enable the explicit unverified
+                              path.
+                            </p>
                           {/if}
                         </div>
                       </div>
-                      <div class="flex shrink-0 items-center gap-2">
-                        {#if status?.connectionState === 'verified'}
-                          <div
-                            class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-success-bg)] text-[var(--color-success)] text-xs font-medium"
-                            title="Connected"
-                          >
-                            <span class="w-1 h-1 rounded-full bg-[var(--color-success)]"></span>
-                            Connected
-                          </div>
-                        {:else if status?.connectionState === 'failed'}
-                          <div
-                            class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-error-bg)] text-[var(--color-error)] text-xs font-medium"
-                            title={status.verificationError ?? 'The last connection attempt failed'}
-                          >
-                            <span class="w-1 h-1 rounded-full bg-[var(--color-error)]"></span>
-                            Failed
-                          </div>
-                        {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog' && prov.key.startsWith('custom:')}
-                          <div
-                            class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-success-bg)] text-[var(--color-success)] text-xs font-medium"
-                            title="Endpoint added and model catalog confirmed. Inference verifies on first use"
-                          >
-                            <span class="w-1 h-1 rounded-full bg-[var(--color-success)]"></span>
-                            Connected
-                          </div>
-                        {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog'}
-                          <div
-                            class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-info-bg)] text-[var(--color-info)] text-xs font-medium"
-                            title="Model catalog access succeeded. Inference is checked on first use"
-                          >
-                            <span class="w-1 h-1 rounded-full bg-[var(--color-info)]"></span>
-                            Catalog
-                          </div>
-                        {:else if installedCli}
-                          <div
-                            class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-warning-bg)] text-[var(--color-warning)] text-xs font-medium"
-                            title="CLI found on this system but not connected"
-                          >
-                            <span class="w-1 h-1 rounded-full bg-[var(--color-warning)]"></span>
-                            Detected
-                          </div>
-                        {:else if status?.credentialDetected ?? status?.authenticated}
-                          <div
-                            class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-surface-3)] text-[var(--color-text-secondary)] text-xs font-medium"
-                            title="Configuration is saved but has not been verified"
-                          >
-                            <span class="w-1 h-1 rounded-full bg-[var(--color-text-muted)]"></span>
-                            Configured
-                          </div>
-                        {:else}
-                          <div
-                            class="w-2 h-2 rounded-full bg-[var(--color-text-muted)] opacity-50"
-                          ></div>
-                        {/if}
-                        <ChevronDown
-                          size={15}
-                          class="text-[var(--color-text-muted)] transition-transform {expandedProvider ===
-                          prov.key
-                            ? 'rotate-180'
-                            : ''}"
-                        />
-                     </div>
-                    </button>
-                    {#if prov.key.startsWith('custom:')}
+                    {/if}
+
+                    <div class="space-y-2">
                       <button
                         type="button"
-                        class="provider-row-refresh inline-flex shrink-0 items-center justify-center rounded-md px-2 py-1.5 text-xs text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/70"
-                        aria-label={`Provider logo actions for ${status?.label ?? prov.label}`}
-                        aria-haspopup="menu"
-                        aria-expanded={providerIconContextMenu?.providerKey === prov.key}
-                        aria-controls={providerIconContextMenu?.providerKey === prov.key
-                          ? providerIconContextMenu.id
-                          : undefined}
-                        title="Provider logo actions"
-                        onclick={(event) => {
-                          event.stopPropagation();
-                          const trigger = event.currentTarget as HTMLElement;
-                          const rect = trigger.getBoundingClientRect();
-                          providerIconContextMenu = {
-                            id: providerIconMenuId(prov.key),
-                            providerKey: prov.key,
-                            providerLabel: status?.label ?? prov.label,
-                            hasCustomIcon: Boolean(providersStore.getCustomProviderIcon(prov.key)),
-                            x: rect.left,
-                            y: rect.bottom + 4,
-                            returnFocus: trigger,
-                          };
-                        }}
-                        oncontextmenu={(event) =>
-                          openProviderIconContextMenu(
-                            event,
-                            prov.key,
-                            status?.label ?? prov.label,
-                            event.currentTarget as HTMLElement,
-                          )}
-                        onkeydown={(event) =>
-                          openProviderIconContextMenuFromKeyboard(
-                            event,
-                            prov.key,
-                            status?.label ?? prov.label,
-                          )}
+                        onclick={() => addCustomProvider(false)}
+                        disabled={providersStore.addingCustom}
+                        class="btn btn-primary w-full text-xs py-2"
+                        >{providersStore.addingCustom
+                          ? 'Checking endpoint…'
+                          : 'Check catalog & add provider'}</button
                       >
-                        <ImagePlus size={13} />
-                      </button>
-                    {/if}
-                    <!-- Sits outside the row's toggle button: a button nested in a
-                       button is invalid HTML and unreachable by keyboard. -->
-                    <button
-                      type="button"
-                      class="provider-row-refresh inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1.5 text-xs text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)] disabled:opacity-50"
-                      disabled={providersStore.refreshingProviders[prov.key] === true}
-                      aria-busy={providersStore.refreshingProviders[prov.key] === true}
-                      onclick={() => providersStore.refreshProvider(prov.key)}
-                      title="Re-check this provider and reload its model list"
-                      aria-label="Re-check {status?.label ?? prov.label} and reload its model list"
-                    >
-                      <RefreshCw
-                        size={12}
-                        class={providersStore.refreshingProviders[prov.key] === true
-                          ? 'animate-spin'
-                          : ''}
-                      />
-                      <span
-                        class="provider-action-label"
-                        class:busy={providersStore.refreshingProviders[prov.key] === true}
-                      >
-                        <span class="provider-action-idle">Refresh</span>
-                        <span
-                          class="provider-action-busy"
-                          aria-hidden={providersStore.refreshingProviders[prov.key] !== true}
-                          >Checking…</span
+                      {#if customCanSaveUnverified && customForm.models.trim()}
+                        <button
+                          type="button"
+                          onclick={() => addCustomProvider(true)}
+                          disabled={providersStore.addingCustom}
+                          class="btn btn-secondary w-full text-xs py-2"
+                          >Save unverified with manual models</button
                         >
-                      </span>
-                    </button>
+                        <p
+                          class="text-center text-[11px] leading-relaxed text-[var(--color-text-muted)]"
+                        >
+                          Authentication failures cannot be bypassed. This option is only for
+                          endpoints that do not expose a model catalog.
+                        </p>
+                      {/if}
+                    </div>
                   </div>
-                  {#if expandedProvider === prov.key}
+                </section>
+              {/if}
+
+              {#if providerSearchQuery.trim()}
+                <div class="text-xs text-[var(--color-text-muted)]">
+                  {filteredProviderList.length} provider{filteredProviderList.length === 1
+                    ? ''
+                    : 's'} matching "{providerSearchQuery.trim()}"
+                </div>
+              {/if}
+
+              {#if filteredProviderList.length === 0}
+                {#if providersLoading}
+                  <!-- Placeholders hold the pane's shape while the catalog loads so
+                   the list does not appear as a sudden content jump. -->
+                  <div
+                    class="divide-y divide-[var(--color-border)] border-y border-[var(--color-border)]"
+                    aria-hidden="true"
+                  >
+                    {#each PROVIDER_SKELETON_ROWS as index (index)}
+                      <div class="flex min-h-12 items-center gap-3 px-2 py-2">
+                        <div
+                          class="h-5 w-5 shrink-0 animate-pulse rounded-md bg-[var(--color-surface-3)]"
+                        ></div>
+                        <div class="min-w-0 flex-1">
+                          <div
+                            class="h-3 animate-pulse rounded bg-[var(--color-surface-3)]"
+                            style="width: {140 + ((index * 37) % 90)}px;"
+                          ></div>
+                          <div
+                            class="mt-2 h-2 animate-pulse rounded bg-[var(--color-surface-3)] opacity-70"
+                            style="width: {200 + ((index * 53) % 120)}px;"
+                          ></div>
+                        </div>
+                        <div
+                          class="h-6 w-16 shrink-0 animate-pulse rounded-full bg-[var(--color-surface-3)]"
+                        ></div>
+                      </div>
+                    {/each}
+                  </div>
+                  <p class="pt-3 text-xs text-[var(--color-text-muted)]">Loading providers…</p>
+                {:else}
+                  <div
+                    class="rounded-xl border border-[var(--color-border)] p-8 text-center bg-[var(--color-surface-1)]"
+                  >
+                    <Search
+                      size={24}
+                      class="mx-auto mb-3 opacity-40"
+                      style="color: var(--color-text-muted);"
+                    />
+                    <p class="text-sm text-[var(--color-text-secondary)] mb-1">
+                      No providers found
+                    </p>
+                    <p class="text-xs text-[var(--color-text-muted)]">
+                      {#if providerSearchQuery.trim()}
+                        Try a different search term or clear the filter.
+                      {:else}
+                        No providers in the "{PROVIDER_CATEGORIES.find(
+                          (c) => c.id === providerCategory,
+                        )?.label ?? providerCategory}" category. Try switching to "All" or add a
+                        custom provider.
+                      {/if}
+                    </p>
+                  </div>
+                {/if}
+              {:else}
+                <div
+                  class="divide-y divide-[var(--color-border)] border-y border-[var(--color-border)]"
+                >
+                  {#each filteredProviderList as prov (prov.key)}
+                    {@const status = getProviderStatus(prov.key)}
                     {@const caps = getProviderCaps(prov.key)}
-                    {@const configurationBlocked = status?.configurationBlocked === true}
-                    {@const isCustomProvider = prov.key.startsWith('custom:')}
-                    {@const currentCustomIcon = isCustomProvider
-                      ? providersStore.getCustomProviderIcon(prov.key)
-                      : undefined}
-                    <div
-                      id={`provider-details-${prov.key}`}
-                      class="provider-details space-y-2 px-2 pb-4 pt-2 sm:pl-13"
-                    >
-                      {#if badge && !isCliExecutionProvider(prov.key)}
-                        <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-                          <span
-                            class={`inline-flex items-center gap-1 px-1.5 py-px rounded-full text-[10px] font-medium ${
-                              status?.deployment === 'cloud'
-                                ? 'bg-[var(--color-info-bg)] text-[var(--color-info)]'
-                                : status?.deployment === 'hybrid'
-                                  ? 'bg-[var(--color-warning-bg)] text-[var(--color-warning)]'
-                                  : status?.deployment === 'local'
-                                    ? 'bg-[var(--color-success-bg)] text-[var(--color-success)]'
-                                    : 'bg-[var(--color-surface-3)] text-[var(--color-text-secondary)]'
-                            }`}
+                    {@const installedCli = installedCliFor(prov.key)}
+                    {@const deployment = deploymentDescription(status?.deployment, prov.key)}
+                    {@const badge = deploymentLabel(status?.deployment, prov.key)}
+                    <div class="flex flex-col">
+                      <div class="provider-row-header">
+                        <button
+                          type="button"
+                          onclick={() =>
+                            (expandedProvider = expandedProvider === prov.key ? null : prov.key)}
+                          oncontextmenu={prov.key.startsWith('custom:')
+                            ? (event) =>
+                                openProviderIconContextMenu(
+                                  event,
+                                  prov.key,
+                                  status?.label ?? prov.label,
+                                  event.currentTarget as HTMLElement,
+                                )
+                            : undefined}
+                          onkeydown={prov.key.startsWith('custom:')
+                            ? (event) =>
+                                openProviderIconContextMenuFromKeyboard(
+                                  event,
+                                  prov.key,
+                                  status?.label ?? prov.label,
+                                )
+                            : undefined}
+                          class="provider-row-toggle group flex min-h-12 min-w-0 flex-1 items-center justify-between gap-3 rounded-md px-2 py-2 text-left transition-colors hover:bg-[var(--color-surface-2)]"
+                          aria-expanded={expandedProvider === prov.key}
+                          aria-controls={`provider-details-${prov.key}`}
+                        >
+                          <div class="flex min-w-0 items-center gap-3">
+                            <div
+                              class="flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden"
+                            >
+                              <ProviderIcon
+                                provider={prov.key}
+                                size={20}
+                                class="w-full h-full"
+                                oncontextmenu={prov.key.startsWith('custom:')
+                                  ? (event) =>
+                                      openProviderIconContextMenu(
+                                        event,
+                                        prov.key,
+                                        status?.label ?? prov.label,
+                                        event.currentTarget as HTMLElement,
+                                      )
+                                  : undefined}
+                              />
+                            </div>
+                            <div class="min-w-0">
+                              <div class="flex min-w-0 items-center gap-2">
+                                <span
+                                  class="block truncate text-sm font-semibold text-[var(--color-text-primary)]"
+                                  title={status?.label ?? prov.label}
+                                  >{status?.label ?? prov.label}</span
+                                >
+                                {#if isCliExecutionProvider(prov.key) && badge}
+                                  <span
+                                    class="inline-flex shrink-0 items-center gap-1 rounded-full bg-[var(--color-success-bg)] px-1.5 py-px text-[11px] font-medium text-[var(--color-success)]"
+                                    >{badge}</span
+                                  >
+                                {/if}
+                              </div>
+                              <p
+                                class="line-clamp-2 text-xs leading-5 text-[var(--color-text-muted)] group-hover:text-[var(--color-text-secondary)]"
+                              >
+                                {#if status?.configurationBlocked}
+                                  Unavailable in this build
+                                {:else if status?.connectionState === 'verified'}
+                                  {@const selectedCount = status.models?.length ?? 0}
+                                  {@const availableCount = status.allAvailableModels?.length ?? 0}
+                                  Connected{availableCount > 0 && selectedCount > 0
+                                    ? ` · ${selectedCount}/${availableCount} models enabled`
+                                    : ''}{status.autoDetectedSource
+                                    ? ` · auto-detected (${status.autoDetectedSource})`
+                                    : ''}
+                                {:else if status?.connectionState === 'failed'}
+                                  Connection failed
+                                {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog' && prov.key.startsWith('custom:')}
+                                  {@const selectedCount = status.models?.length ?? 0}
+                                  {@const availableCount = status.allAvailableModels?.length ?? 0}
+                                  Connected{availableCount > 0 && selectedCount > 0
+                                    ? ` · ${selectedCount}/${availableCount} models enabled`
+                                    : ''}
+                                {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog'}
+                                  Catalog access detected · inference unverified
+                                {:else if installedCli}
+                                  Found on system · not connected
+                                {:else if status?.credentialDetected ?? status?.authenticated}
+                                  Configuration saved · not connected
+                                {:else if deployment}
+                                  {deployment}
+                                {:else}
+                                  Not configured
+                                {/if}
+                              </p>
+                              {#if capabilityKinds(prov.key).length > 0}
+                                <div class="mt-1 flex flex-wrap items-center gap-1">
+                                  {#each capabilityKinds(prov.key) as kind (kind)}
+                                    <span
+                                      class="rounded-full bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]"
+                                    >
+                                      {CAPABILITY_SURFACE_LABELS[kind] ?? kind}
+                                    </span>
+                                  {/each}
+                                  <span
+                                    class="text-[11px] text-[var(--color-text-muted)]"
+                                    title="This provider has no chat-completions endpoint. Its key powers the surfaces above, and it is deliberately absent from the chat model list."
+                                  >
+                                    · no chat models
+                                  </span>
+                                </div>
+                              {/if}
+                            </div>
+                          </div>
+                          <div class="flex shrink-0 items-center gap-2">
+                            {#if status?.connectionState === 'verified'}
+                              <div
+                                class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-success-bg)] text-[var(--color-success)] text-xs font-medium"
+                                title="Connected"
+                              >
+                                <span class="w-1 h-1 rounded-full bg-[var(--color-success)]"></span>
+                                Connected
+                              </div>
+                            {:else if status?.connectionState === 'failed'}
+                              <div
+                                class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-error-bg)] text-[var(--color-error)] text-xs font-medium"
+                                title={status.verificationError ??
+                                  'The last connection attempt failed'}
+                              >
+                                <span class="w-1 h-1 rounded-full bg-[var(--color-error)]"></span>
+                                Failed
+                              </div>
+                            {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog' && prov.key.startsWith('custom:')}
+                              <div
+                                class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-success-bg)] text-[var(--color-success)] text-xs font-medium"
+                                title="Endpoint added and model catalog confirmed. Inference verifies on first use"
+                              >
+                                <span class="w-1 h-1 rounded-full bg-[var(--color-success)]"></span>
+                                Connected
+                              </div>
+                            {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog'}
+                              <div
+                                class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-info-bg)] text-[var(--color-info)] text-xs font-medium"
+                                title="Model catalog access succeeded. Inference is checked on first use"
+                              >
+                                <span class="w-1 h-1 rounded-full bg-[var(--color-info)]"></span>
+                                Catalog
+                              </div>
+                            {:else if installedCli}
+                              <div
+                                class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-warning-bg)] text-[var(--color-warning)] text-xs font-medium"
+                                title="CLI found on this system but not connected"
+                              >
+                                <span class="w-1 h-1 rounded-full bg-[var(--color-warning)]"></span>
+                                Detected
+                              </div>
+                            {:else if status?.credentialDetected ?? status?.authenticated}
+                              <div
+                                class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-surface-3)] text-[var(--color-text-secondary)] text-xs font-medium"
+                                title="Configuration is saved but has not been verified"
+                              >
+                                <span class="w-1 h-1 rounded-full bg-[var(--color-text-muted)]"
+                                ></span>
+                                Configured
+                              </div>
+                            {:else}
+                              <div
+                                class="w-2 h-2 rounded-full bg-[var(--color-text-muted)] opacity-50"
+                              ></div>
+                            {/if}
+                            <ChevronDown
+                              size={15}
+                              class="text-[var(--color-text-muted)] transition-transform {expandedProvider ===
+                              prov.key
+                                ? 'rotate-180'
+                                : ''}"
+                            />
+                          </div>
+                        </button>
+                        {#if prov.key.startsWith('custom:')}
+                          <button
+                            type="button"
+                            class="provider-row-refresh inline-flex shrink-0 items-center justify-center rounded-md px-2 py-1.5 text-xs text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/70"
+                            aria-label={`Provider logo actions for ${status?.label ?? prov.label}`}
+                            aria-haspopup="menu"
+                            aria-expanded={providerIconContextMenu?.providerKey === prov.key}
+                            aria-controls={providerIconContextMenu?.providerKey === prov.key
+                              ? providerIconContextMenu.id
+                              : undefined}
+                            title="Provider logo actions"
+                            onclick={(event) => {
+                              event.stopPropagation();
+                              const trigger = event.currentTarget as HTMLElement;
+                              const rect = trigger.getBoundingClientRect();
+                              providerIconContextMenu = {
+                                id: providerIconMenuId(prov.key),
+                                providerKey: prov.key,
+                                providerLabel: status?.label ?? prov.label,
+                                hasCustomIcon: Boolean(
+                                  providersStore.getCustomProviderIcon(prov.key),
+                                ),
+                                x: rect.left,
+                                y: rect.bottom + 4,
+                                returnFocus: trigger,
+                              };
+                            }}
+                            oncontextmenu={(event) =>
+                              openProviderIconContextMenu(
+                                event,
+                                prov.key,
+                                status?.label ?? prov.label,
+                                event.currentTarget as HTMLElement,
+                              )}
+                            onkeydown={(event) =>
+                              openProviderIconContextMenuFromKeyboard(
+                                event,
+                                prov.key,
+                                status?.label ?? prov.label,
+                              )}
                           >
-                            {badge}
-                          </span>
-                        </div>
-                      {/if}
-                      <ProviderExecutionModes capabilities={status?.execution} />
-                      {#if contextWindowOptionsFor(status).length >= 2}
-                        <div class="px-1 pt-1">
-                          <KorySelect
-                            value={contextWindowValueFor(status)}
-                            label="Context window"
-                            description="Real context tiers reported by this provider's models. Maximum is the default; a smaller tier reduces the session budget."
-                            options={contextWindowSelectOptions(status)}
-                            onchange={(value) => handleContextWindowChange(prov.key, value)}
+                            <ImagePlus size={13} />
+                          </button>
+                        {/if}
+                        <!-- Sits outside the row's toggle button: a button nested in a
+                       button is invalid HTML and unreachable by keyboard. -->
+                        <button
+                          type="button"
+                          class="provider-row-refresh inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1.5 text-xs text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)] disabled:opacity-50"
+                          disabled={providersStore.refreshingProviders[prov.key] === true}
+                          aria-busy={providersStore.refreshingProviders[prov.key] === true}
+                          onclick={() => providersStore.refreshProvider(prov.key)}
+                          title="Re-check this provider and reload its model list"
+                          aria-label="Re-check {status?.label ??
+                            prov.label} and reload its model list"
+                        >
+                          <RefreshCw
+                            size={12}
+                            class={providersStore.refreshingProviders[prov.key] === true
+                              ? 'animate-spin'
+                              : ''}
                           />
-                        </div>
-                      {/if}
-                      {#if status?.credentialDetected ?? status?.authenticated}
-                        <!-- The action buttons lead the block, on one horizontal
+                          <span
+                            class="provider-action-label"
+                            class:busy={providersStore.refreshingProviders[prov.key] === true}
+                          >
+                            <span class="provider-action-idle">Refresh</span>
+                            <span
+                              class="provider-action-busy"
+                              aria-hidden={providersStore.refreshingProviders[prov.key] !== true}
+                              >Checking…</span
+                            >
+                          </span>
+                        </button>
+                      </div>
+                      {#if expandedProvider === prov.key}
+                        {@const caps = getProviderCaps(prov.key)}
+                        {@const configurationBlocked = status?.configurationBlocked === true}
+                        {@const isCustomProvider = prov.key.startsWith('custom:')}
+                        {@const currentCustomIcon = isCustomProvider
+                          ? providersStore.getCustomProviderIcon(prov.key)
+                          : undefined}
+                        <div
+                          id={`provider-details-${prov.key}`}
+                          class="provider-details space-y-2 px-2 pb-4 pt-2 sm:pl-13"
+                        >
+                          {#if badge && !isCliExecutionProvider(prov.key)}
+                            <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                              <span
+                                class={`inline-flex items-center gap-1 px-1.5 py-px rounded-full text-[11px] font-medium ${
+                                  status?.deployment === 'cloud'
+                                    ? 'bg-[var(--color-info-bg)] text-[var(--color-info)]'
+                                    : status?.deployment === 'hybrid'
+                                      ? 'bg-[var(--color-warning-bg)] text-[var(--color-warning)]'
+                                      : status?.deployment === 'local'
+                                        ? 'bg-[var(--color-success-bg)] text-[var(--color-success)]'
+                                        : 'bg-[var(--color-surface-3)] text-[var(--color-text-secondary)]'
+                                }`}
+                              >
+                                {badge}
+                              </span>
+                            </div>
+                          {/if}
+                          <ProviderExecutionModes capabilities={status?.execution} />
+                          {#if contextWindowOptionsFor(status).length >= 2}
+                            <div class="px-1 pt-1">
+                              <KorySelect
+                                value={contextWindowValueFor(status)}
+                                label="Context window"
+                                description="Real context tiers reported by this provider's models. Maximum is the default; a smaller tier reduces the session budget."
+                                options={contextWindowSelectOptions(status)}
+                                onchange={(value) => handleContextWindowChange(prov.key, value)}
+                              />
+                            </div>
+                          {/if}
+                          {#if status?.credentialDetected ?? status?.authenticated}
+                            <!-- The action buttons lead the block, on one horizontal
                              row: "Run safe check" sits beside "Manage Models". The
                              grey text below explains the state they act on, so it
                              must never render above the controls. -->
-                        <div class="provider-actions">
-                          {#if usesLocalCliConnection(prov.key)}
-                            <button
-                              type="button"
-                              onclick={() => handleConnectProvider(prov.key)}
-                              disabled={providersStore.saving === prov.key}
-                              aria-busy={providersStore.saving === prov.key}
-                              class="btn btn-secondary"
-                              ><span
-                                class="provider-action-label"
-                                class:busy={providersStore.saving === prov.key}
-                              >
-                                <span class="provider-action-idle"
-                                  >{getLocalCliConnectLabel(prov.key)}</span
+                            <div class="provider-actions">
+                              {#if usesLocalCliConnection(prov.key)}
+                                <button
+                                  type="button"
+                                  onclick={() => handleConnectProvider(prov.key)}
+                                  disabled={providersStore.saving === prov.key}
+                                  aria-busy={providersStore.saving === prov.key}
+                                  class="btn btn-secondary"
+                                  ><span
+                                    class="provider-action-label"
+                                    class:busy={providersStore.saving === prov.key}
+                                  >
+                                    <span class="provider-action-idle"
+                                      >{getLocalCliConnectLabel(prov.key)}</span
+                                    >
+                                    <span
+                                      class="provider-action-busy"
+                                      aria-hidden={providersStore.saving !== prov.key}
+                                      >Checking…</span
+                                    >
+                                  </span></button
                                 >
-                                <span
-                                  class="provider-action-busy"
-                                  aria-hidden={providersStore.saving !== prov.key}>Checking…</span
-                                >
-                              </span></button
-                            >
-                          {:else if status.connectionState !== 'verified'}
-                            <button
-                              type="button"
-                              onclick={() => handleConnectProvider(prov.key)}
-                              disabled={providersStore.saving === prov.key}
-                              aria-busy={providersStore.saving === prov.key}
-                              class="btn btn-secondary"
-                              ><span
-                                class="provider-action-label"
-                                class:busy={providersStore.saving === prov.key}
-                              >
-                                <span class="provider-action-idle">Run safe check</span>
-                                <span
-                                  class="provider-action-busy"
-                                  aria-hidden={providersStore.saving !== prov.key}>Checking…</span
-                                >
-                              </span></button
-                            >
-                          {/if}
-                          {#if (status.connectionState === 'verified' || (status.connectionState === 'detected' && status.verificationScope === 'catalog' && (status.allAvailableModels?.length ?? 0) > 0)) && !status.hideModelSelector}
-                            <button
-                              type="button"
-                              onclick={() => openModelSelector(status)}
-                              class="btn btn-secondary">Manage Models</button
-                            >
-                          {/if}
-                          {#if isCustomProvider}
-                            <button
-                              type="button"
-                              onclick={() =>
-                                openCustomIconEditor(prov.key, status?.label ?? prov.label)}
-                              class="btn btn-secondary provider-icon-button"
-                              title={currentCustomIcon ? 'Edit provider icon' : 'Add provider icon'}
-                              aria-label={currentCustomIcon
-                                ? 'Edit provider icon'
-                                : 'Add provider icon'}
-                            >
-                              <ImagePlus size={14} />
-                            </button>
-                          {/if}
-                          {#if caps.supportsApiKey && !usesBrowserAuth(prov.key)}
-                            <button
-                              type="button"
-                              onclick={() => {
-                                rotateProvider = { name: prov.key, keyType: 'apiKey' };
-                                showRotateDialog = true;
-                              }}
-                              class="inline-flex items-center gap-1 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] font-medium transition-colors"
-                              title="Replace the stored API key without disconnecting"
-                            >
-                              <RotateCcw size={10} /> Rotate key
-                            </button>
-                          {/if}
-                          <button
-                            type="button"
-                            onclick={() => disconnectProvider(prov.key)}
-                            class="text-[var(--color-error)] hover:opacity-80 font-medium transition-opacity"
-                            >Disconnect</button
-                          >
-                        </div>
-                        {#if status?.connectionState === 'failed'}
-                          <div class="text-xs leading-relaxed text-[var(--color-text-muted)]">
-                            Connection failed{status.verificationError
-                              ? `: ${status.verificationError}`
-                              : '.'}
-                          </div>
-                        {:else if status?.error}
-                          <div
-                            class="mt-2 flex items-start gap-2 rounded-lg border border-[var(--color-error)] bg-[var(--color-error-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--color-error)]"
-                          >
-                            <AlertTriangle size={14} class="mt-0.5 shrink-0" />
-                            <span>
-                              {status.error}
-                              {#if status.modelCatalogUrl}
-                                <span class="mt-1 block text-[10px] opacity-80"
-                                  >Model catalog: {status.modelCatalogUrl}</span
+                              {:else if status.connectionState !== 'verified'}
+                                <button
+                                  type="button"
+                                  onclick={() => handleConnectProvider(prov.key)}
+                                  disabled={providersStore.saving === prov.key}
+                                  aria-busy={providersStore.saving === prov.key}
+                                  class="btn btn-secondary"
+                                  ><span
+                                    class="provider-action-label"
+                                    class:busy={providersStore.saving === prov.key}
+                                  >
+                                    <span class="provider-action-idle">Run safe check</span>
+                                    <span
+                                      class="provider-action-busy"
+                                      aria-hidden={providersStore.saving !== prov.key}
+                                      >Checking…</span
+                                    >
+                                  </span></button
                                 >
                               {/if}
-                            </span>
-                          </div>
-                        {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog'}
-                          <div class="text-xs leading-relaxed text-[var(--color-text-muted)]">
-                            Catalog verified · inference checks on first use.
-                          </div>
-                        {:else if status?.connectionState !== 'verified'}
-                          <div class="text-xs leading-relaxed text-[var(--color-text-muted)]">
-                            Not connected.
-                          </div>
-                        {/if}
-                      {:else if configurationBlocked}
-                        <div
-                          class="flex items-start gap-2 rounded-lg border border-[var(--color-warning)] bg-[var(--color-warning-bg)] px-3 py-2 text-xs text-[var(--color-warning)]"
-                        >
-                          <AlertTriangle size={14} class="mt-0.5 shrink-0" /><span
-                            >{status?.error}</span
-                          >
-                        </div>
-                        {#if providersStore.accountsLoading[prov.key]}
-                          <p class="text-[11px] text-[var(--color-text-muted)]">
-                            Checking for preserved credentials…
-                          </p>
-                        {:else if getProviderAccounts(prov.key).some((account) => account.source !== 'cli-autodetect')}
-                          <div
-                            class="flex items-center justify-between gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)]/70 p-3"
-                          >
-                            <p class="text-[11px] leading-relaxed text-[var(--color-text-muted)]">
-                              Credential present · unverified. It is preserved but cannot activate
-                              this unavailable adapter.
-                            </p>
-                            <button
-                              type="button"
-                              onclick={() => disconnectProvider(prov.key)}
-                              class="shrink-0 text-[10px] font-medium text-[var(--color-error)] transition-opacity hover:opacity-80"
-                              >Remove saved credentials</button
-                            >
-                          </div>
-                        {/if}
-                      {:else}
-                        <div class="space-y-2">
-                          {#if bedrocksInputsVisible(prov.key)}
-                            {@const awsScan = providersStore.awsCredentialScans[prov.key]}
-                            {#if awsScan?.detected && !awsBannerDismissed(prov.key)}
+                              {#if (status.connectionState === 'verified' || (status.connectionState === 'detected' && status.verificationScope === 'catalog' && (status.allAvailableModels?.length ?? 0) > 0)) && !status.hideModelSelector}
+                                <button
+                                  type="button"
+                                  onclick={() => openModelSelector(status)}
+                                  class="btn btn-secondary">Manage Models</button
+                                >
+                              {/if}
+                              {#if isCustomProvider}
+                                <button
+                                  type="button"
+                                  onclick={() =>
+                                    openCustomIconEditor(prov.key, status?.label ?? prov.label)}
+                                  class="btn btn-secondary provider-icon-button"
+                                  title={currentCustomIcon
+                                    ? 'Edit provider icon'
+                                    : 'Add provider icon'}
+                                  aria-label={currentCustomIcon
+                                    ? 'Edit provider icon'
+                                    : 'Add provider icon'}
+                                >
+                                  <ImagePlus size={14} />
+                                </button>
+                              {/if}
+                              {#if caps.supportsApiKey && !usesBrowserAuth(prov.key)}
+                                <button
+                                  type="button"
+                                  onclick={() => {
+                                    rotateProvider = { name: prov.key, keyType: 'apiKey' };
+                                    showRotateDialog = true;
+                                  }}
+                                  class="inline-flex items-center gap-1 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] font-medium transition-colors"
+                                  title="Replace the stored API key without disconnecting"
+                                >
+                                  <RotateCcw size={10} /> Rotate key
+                                </button>
+                              {/if}
+                              <button
+                                type="button"
+                                onclick={() => disconnectProvider(prov.key)}
+                                class="text-[var(--color-error)] hover:opacity-80 font-medium transition-opacity"
+                                >Disconnect</button
+                              >
+                            </div>
+                            {#if status?.connectionState === 'failed'}
+                              <div class="text-xs leading-relaxed text-[var(--color-text-muted)]">
+                                Connection failed{status.verificationError
+                                  ? `: ${status.verificationError}`
+                                  : '.'}
+                              </div>
+                            {:else if status?.error}
                               <div
-                                class="rounded-lg border border-[var(--color-info)]/30 bg-[var(--color-info-bg)]/40 px-3 py-2.5"
+                                class="mt-2 flex items-start gap-2 rounded-lg border border-[var(--color-error)] bg-[var(--color-error-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--color-error)]"
                               >
-                                <div
-                                  class="flex items-center gap-1.5 text-[11px] font-semibold text-[var(--color-info)]"
-                                >
-                                  <Key size={12} />
-                                  AWS credentials detected on the system
-                                </div>
-                                <p
-                                  class="mt-1 text-[10px] leading-relaxed text-[var(--color-text-secondary)]"
-                                >
-                                  Found via {awsScan.description}. Connect to use the machine's AWS
-                                  login for Bedrock, or enter credentials below to override it.
-                                </p>
-                                <div class="mt-2 flex items-center gap-2">
-                                  <button
-                                    type="button"
-                                    onclick={() => connectUsingSystemCredentials(prov.key)}
-                                    disabled={providersStore.saving === prov.key}
-                                    class="btn btn-primary flex-1 text-[10px] py-1.5"
-                                    >{providersStore.saving === prov.key
-                                      ? 'Checking…'
-                                      : 'Connect'}</button
-                                  >
-                                  <button
-                                    type="button"
-                                    onclick={() => ignoreSystemCredentials(prov.key)}
-                                    disabled={providersStore.saving === prov.key}
-                                    class="btn btn-secondary flex-1 text-[10px] py-1.5"
-                                    >Ignore</button
-                                  >
-                                </div>
+                                <AlertTriangle size={14} class="mt-0.5 shrink-0" />
+                                <span>
+                                  {status.error}
+                                  {#if status.modelCatalogUrl}
+                                    <span class="mt-1 block text-[11px] opacity-80"
+                                      >Model catalog: {status.modelCatalogUrl}</span
+                                    >
+                                  {/if}
+                                </span>
+                              </div>
+                            {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog'}
+                              <div class="text-xs leading-relaxed text-[var(--color-text-muted)]">
+                                Catalog verified · inference checks on first use.
+                              </div>
+                            {:else if status?.connectionState !== 'verified'}
+                              <div class="text-xs leading-relaxed text-[var(--color-text-muted)]">
+                                Not connected.
                               </div>
                             {/if}
-                          {/if}
-                          {#if caps.supportsApiKey}
-                            <div class="relative">
-                              <label class="sr-only" for={`provider-key-${prov.key}`}
-                                >{isBedrock(prov.key)
-                                  ? 'AWS Access Key ID'
-                                  : isNotion(prov.key)
-                                    ? 'Personal Access Token'
-                                    : 'API Key'}</label
-                              >
-                              <input
-                                id={`provider-key-${prov.key}`}
-                                type={secretInputType(`provider-key-${prov.key}`)}
-                                placeholder={providerCredentialPlaceholder(
-                                  prov.key,
-                                  prov.label,
-                                  'apiKey',
-                                )}
-                                bind:value={providersStore.keyInputs[prov.key]}
-                                class="input w-full text-xs"
-                                style="padding-right: 2.75rem;"
-                                onkeydown={(e) =>
-                                  e.key === 'Enter' && handleConnectProvider(prov.key)}
-                              />
-                              <button
-                                type="button"
-                                class="secret-visibility absolute inset-y-0 right-1 my-auto z-10"
-                                onclick={() => toggleSecretVisibility(`provider-key-${prov.key}`)}
-                                aria-label={visibleSecrets[`provider-key-${prov.key}`]
-                                  ? isNotion(prov.key)
-                                    ? 'Hide token'
-                                    : 'Hide API key'
-                                  : isNotion(prov.key)
-                                    ? 'Show token'
-                                    : 'Show API key'}
-                                title={visibleSecrets[`provider-key-${prov.key}`]
-                                  ? isNotion(prov.key)
-                                    ? 'Hide token'
-                                    : 'Hide API key'
-                                  : isNotion(prov.key)
-                                    ? 'Show token'
-                                    : 'Show API key'}
-                              >
-                                {#if visibleSecrets[`provider-key-${prov.key}`]}<EyeOff
-                                    size={15}
-                                  />{:else}<Eye size={15} />{/if}
-                              </button>
-                            </div>
-                            {#if status?.credentialUrl}
-                              <div class="text-right">
-                                <a
-                                  href={status.credentialUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  class="text-[10px] text-[var(--color-accent)] hover:underline"
-                                  >{isNotion(prov.key) ? 'Get PAT' : 'Get API key'}</a
-                                >
-                              </div>
-                            {/if}
-                          {/if}
-                          {#if showTokenInput(prov.key, caps)}
-                            <div class="relative">
-                              <label class="sr-only" for={`provider-token-${prov.key}`}
-                                >{isBedrock(prov.key) ? 'Secret Access Key' : 'Auth Token'}</label
-                              >
-                              <input
-                                id={`provider-token-${prov.key}`}
-                                type={secretInputType(`provider-token-${prov.key}`)}
-                                placeholder={providerCredentialPlaceholder(
-                                  prov.key,
-                                  prov.label,
-                                  'authToken',
-                                )}
-                                bind:value={providersStore.tokenInputs[prov.key]}
-                                class="input w-full pr-11 text-xs"
-                                onkeydown={(e) =>
-                                  e.key === 'Enter' && handleConnectProvider(prov.key)}
-                              />
-                              <button
-                                type="button"
-                                class="secret-visibility absolute inset-y-0 right-1 my-auto z-10"
-                                onclick={() => toggleSecretVisibility(`provider-token-${prov.key}`)}
-                                aria-label={visibleSecrets[`provider-token-${prov.key}`]
-                                  ? 'Hide auth token'
-                                  : 'Show auth token'}
-                              >
-                                {#if visibleSecrets[`provider-token-${prov.key}`]}<EyeOff
-                                    size={15}
-                                  />{:else}<Eye size={15} />{/if}
-                              </button>
-                            </div>
-                          {/if}
-                          {#if isBedrock(prov.key)}
-                            <label
-                              class="settings-field-label"
-                              for={`provider-aws-region-${prov.key}`}>AWS Region</label
-                            >
-                            <input
-                              id={`provider-aws-region-${prov.key}`}
-                              type="text"
-                              placeholder="e.g. us-east-1 (default)"
-                              bind:value={providersStore.awsRegionInputs[prov.key]}
-                              class="input w-full text-xs"
-                              onkeydown={(e) =>
-                                e.key === 'Enter' && handleConnectProvider(prov.key)}
-                            />
-                            <label
-                              class="settings-field-label"
-                              for={`provider-aws-session-${prov.key}`}
-                              >Session Token
-                              <span class="normal-case opacity-70"
-                                >(optional, for temporary keys)</span
-                              ></label
-                            >
-                            <div class="relative">
-                              <input
-                                id={`provider-aws-session-${prov.key}`}
-                                type={secretInputType(`provider-aws-session-${prov.key}`)}
-                                placeholder="AWS session token"
-                                bind:value={providersStore.awsSessionTokenInputs[prov.key]}
-                                class="input w-full pr-11 text-xs"
-                                onkeydown={(e) =>
-                                  e.key === 'Enter' && handleConnectProvider(prov.key)}
-                              />
-                              <button
-                                type="button"
-                                class="secret-visibility absolute inset-y-0 right-1 my-auto z-10"
-                                onclick={() =>
-                                  toggleSecretVisibility(`provider-aws-session-${prov.key}`)}
-                                aria-label={visibleSecrets[`provider-aws-session-${prov.key}`]
-                                  ? 'Hide session token'
-                                  : 'Show session token'}
-                              >
-                                {#if visibleSecrets[`provider-aws-session-${prov.key}`]}<EyeOff
-                                    size={15}
-                                  />{:else}<Eye size={15} />{/if}
-                              </button>
-                            </div>
-                          {/if}
-                          {#if caps.requiresBaseUrl}
-                            <label class="settings-field-label" for={`provider-url-${prov.key}`}
-                              >Endpoint URL</label
-                            >
-                            <input
-                              id={`provider-url-${prov.key}`}
-                              type="text"
-                              placeholder={caps.baseUrlPlaceholder ?? 'https://...'}
-                              bind:value={providersStore.urlInputs[prov.key]}
-                              class="input w-full text-xs"
-                              onkeydown={(e) =>
-                                e.key === 'Enter' && handleConnectProvider(prov.key)}
-                            />
-                          {/if}
-                          {#if caps.requiresDeployment}
-                            <label
-                              class="settings-field-label"
-                              for={`provider-deployment-${prov.key}`}
-                              >{prov.key === 'sapai' ? 'Deployment ID' : 'Deployment name'}</label
-                            >
-                            <input
-                              id={`provider-deployment-${prov.key}`}
-                              type="text"
-                              placeholder={prov.key === 'sapai'
-                                ? 'SAP AI Core deployment ID'
-                                : 'Azure OpenAI deployment name'}
-                              bind:value={providersStore.deploymentInputs[prov.key]}
-                              class="input w-full text-xs"
-                              onkeydown={(e) =>
-                                e.key === 'Enter' && handleConnectProvider(prov.key)}
-                            />
-                            <p class="text-[10px] leading-relaxed text-[var(--color-text-muted)]">
-                              {prov.key === 'sapai'
-                                ? 'Use the deployed AI Core resource ID, not a foundation-model catalog ID.'
-                                : 'Use the deployment name from Azure OpenAI, not the base model ID shown in the model catalog.'}
-                            </p>
-                          {/if}
-                          {#if usesBrowserAuth(prov.key)}
+                          {:else if configurationBlocked}
                             <div
-                              class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)]/80 p-3 space-y-2"
+                              class="flex items-start gap-2 rounded-lg border border-[var(--color-warning)] bg-[var(--color-warning-bg)] px-3 py-2 text-xs text-[var(--color-warning)]"
                             >
-                              {#if providersStore.browserAuthMessages[prov.key]}
-                                <p class="text-[10px] text-[var(--color-text-muted)]">
-                                  {providersStore.browserAuthMessages[prov.key]}
+                              <AlertTriangle size={14} class="mt-0.5 shrink-0" /><span
+                                >{status?.error}</span
+                              >
+                            </div>
+                            {#if providersStore.accountsLoading[prov.key]}
+                              <p class="text-[11px] text-[var(--color-text-muted)]">
+                                Checking for preserved credentials…
+                              </p>
+                            {:else if getProviderAccounts(prov.key).some((account) => account.source !== 'cli-autodetect')}
+                              <div
+                                class="flex items-center justify-between gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)]/70 p-3"
+                              >
+                                <p
+                                  class="text-[11px] leading-relaxed text-[var(--color-text-muted)]"
+                                >
+                                  Credential present · unverified. It is preserved but cannot
+                                  activate this unavailable adapter.
                                 </p>
-                              {/if}
-                              <!-- One shared device-code panel for every device-code
-                               provider — identical copy, code, copy-button, and
-                               waiting line, so no provider gets a lesser flow. -->
-                              {#if prov.key === 'copilot' || prov.key === 'kimicode' || prov.key === 'codex-auth'}
-                                {@const deviceAuth =
-                                  prov.key === 'copilot'
-                                    ? providersStore.copilotDeviceAuth
-                                    : prov.key === 'kimicode'
-                                      ? providersStore.kimicodeDeviceAuth
-                                      : providersStore.codexDeviceAuth}
-                                {#if deviceAuth}
-                                  {@const userCode = deviceAuth.userCode}
+                                <button
+                                  type="button"
+                                  onclick={() => disconnectProvider(prov.key)}
+                                  class="shrink-0 text-[11px] font-medium text-[var(--color-error)] transition-opacity hover:opacity-80"
+                                  >Remove saved credentials</button
+                                >
+                              </div>
+                            {/if}
+                          {:else}
+                            <div class="space-y-2">
+                              {#if bedrocksInputsVisible(prov.key)}
+                                {@const awsScan = providersStore.awsCredentialScans[prov.key]}
+                                {#if awsScan?.detected && !awsBannerDismissed(prov.key)}
                                   <div
-                                    class="rounded-md bg-[var(--color-surface-2)] px-2.5 py-2 text-[10px] text-[var(--color-text-secondary)]"
+                                    class="rounded-lg border border-[var(--color-info)]/30 bg-[var(--color-info-bg)]/40 px-3 py-2.5"
                                   >
-                                    <div class="font-medium text-[var(--color-text-primary)]">
-                                      {getProviderDisplayLabel(prov.key)} sign-in needs approval.
+                                    <div
+                                      class="flex items-center gap-1.5 text-[11px] font-semibold text-[var(--color-info)]"
+                                    >
+                                      <Key size={12} />
+                                      AWS credentials detected on the system
                                     </div>
-                                    <div class="mt-1">The browser was opened automatically.</div>
-                                    <div>Paste this code if you're asked for it.</div>
+                                    <p
+                                      class="mt-1 text-[11px] leading-relaxed text-[var(--color-text-secondary)]"
+                                    >
+                                      Found via {awsScan.description}. Connect to use the machine's
+                                      AWS login for Bedrock, or enter credentials below to override
+                                      it.
+                                    </p>
                                     <div class="mt-2 flex items-center gap-2">
-                                      <span>Code:</span>
-                                      <span
-                                        class="font-semibold tracking-[0.18em] text-[var(--color-text-primary)]"
-                                        >{userCode}</span
+                                      <button
+                                        type="button"
+                                        onclick={() => connectUsingSystemCredentials(prov.key)}
+                                        disabled={providersStore.saving === prov.key}
+                                        class="btn btn-primary flex-1 text-[11px] py-1.5"
+                                        >{providersStore.saving === prov.key
+                                          ? 'Checking…'
+                                          : 'Connect'}</button
                                       >
                                       <button
                                         type="button"
-                                        class="inline-flex items-center gap-1 rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[10px] hover:bg-[var(--color-surface-3)]"
-                                        onclick={() => copyToClipboard(userCode, 'deviceCode')}
+                                        onclick={() => ignoreSystemCredentials(prov.key)}
+                                        disabled={providersStore.saving === prov.key}
+                                        class="btn btn-secondary flex-1 text-[11px] py-1.5"
+                                        >Ignore</button
                                       >
-                                        <Copy size={10} />
-                                        {providersStore.copiedDeviceCode === userCode
-                                          ? 'Copied'
-                                          : 'Copy code'}
-                                      </button>
-                                    </div>
-                                    {#if deviceAuth.verificationUri}
-                                      <div class="mt-1 break-all">{deviceAuth.verificationUri}</div>
-                                    {/if}
-                                    <div class="mt-2 text-[10px] text-[var(--color-text-muted)]">
-                                      Waiting for {getProviderDisplayLabel(prov.key)} approval to complete…
                                     </div>
                                   </div>
                                 {/if}
                               {/if}
-                              <div class="flex gap-2">
-                                <button
-                                  type="button"
-                                  onclick={() => handleStartBrowserAuth(prov.key)}
-                                  disabled={providersStore.browserAuthBusy === prov.key}
-                                  class="btn btn-secondary flex-1 text-[10px] py-2"
-                                >
-                                  {providersStore.browserAuthBusy === prov.key &&
-                                  !providersStore.browserAuthPending[prov.key]
-                                    ? 'Opening sign-in…'
-                                    : 'Sign in'}
-                                </button>
-                                {#if providersStore.browserAuthPending[prov.key] && prov.key !== 'copilot' && prov.key !== 'kimicode' && prov.key !== 'codex-auth'}
-                                  <button
-                                    type="button"
-                                    onclick={() => handleFinishBrowserAuth(prov.key)}
-                                    disabled={providersStore.browserAuthBusy === prov.key}
-                                    class="btn btn-primary flex-1 text-[10px] py-2 shadow-lg shadow-[var(--color-accent)]/10"
-                                  >
-                                    {providersStore.browserAuthBusy === prov.key &&
-                                    providersStore.browserAuthPending[prov.key]
-                                      ? 'Checking...'
-                                      : 'I Finished Sign-In'}
-                                  </button>
-                                {/if}
-                              </div>
-                            </div>
-                          {/if}
-                          {#if usesLocalCliConnection(prov.key) && prov.key === 'freebuff'}
-                            <p class="text-[10px] leading-relaxed text-[var(--color-text-muted)]">
-                              First-time Freebuff setup can take a few minutes while its isolated
-                              runtime is prepared.
-                            </p>
-                          {/if}
-                          {#if usesBrowserAuth(prov.key) && caps.supportsApiKey}
-                            <div class="flex items-center gap-3 py-1">
-                              <div class="flex-1 border-t border-[var(--color-border)]"></div>
-                              <span class="text-xs font-medium text-[var(--color-text-secondary)]"
-                                >Alternative sign-in</span
-                              >
-                              <div class="flex-1 border-t border-[var(--color-border)]"></div>
-                            </div>
-                            <button
-                              type="button"
-                              onclick={() => handleConnectProvider(prov.key)}
-                              disabled={providersStore.saving === prov.key}
-                              class="btn btn-primary w-full text-xs py-2 shadow-lg shadow-[var(--color-accent)]/10"
-                              >{providersStore.saving === prov.key
-                                ? 'Testing...'
-                                : 'Connect'}</button
-                            >
-                          {:else if !usesBrowserAuth(prov.key)}
-                            <button
-                              type="button"
-                              onclick={() => handleConnectProvider(prov.key)}
-                              disabled={providersStore.saving === prov.key}
-                              class="btn btn-primary w-full text-xs py-2 shadow-lg shadow-[var(--color-accent)]/10"
-                              >{providersStore.saving === prov.key
-                                ? usesLocalCliConnection(prov.key)
-                                  ? prov.key === 'freebuff'
-                                    ? 'Preparing Freebuff…'
-                                    : 'Checking CLI…'
-                                  : 'Connecting…'
-                                : usesLocalCliConnection(prov.key)
-                                  ? getLocalCliConnectLabel(prov.key)
-                                  : 'Connect'}</button
-                            >
-                          {/if}
-                          {#if prov.key.startsWith('custom:')}
-                            <button
-                              type="button"
-                              onclick={() => deleteCustomProvider(prov.key)}
-                              class="btn btn-ghost w-full text-[10px] py-1.5 mt-1 text-[var(--color-error)] hover:bg-[var(--color-error-bg)] flex items-center justify-center gap-1.5"
-                            >
-                              <Trash2 size={12} /> Remove this custom provider
-                            </button>
-                          {/if}
-                          {#if providersStore.connectErrors[prov.key]}
-                            <div
-                              class="flex items-start gap-2 rounded-lg border border-[var(--color-error)] bg-[var(--color-error-bg)] px-3 py-2 text-xs text-[var(--color-error)]"
-                            >
-                              <AlertTriangle size={14} class="shrink-0 mt-0.5" />
-                              <span class="flex-1">{providersStore.connectErrors[prov.key]}</span>
-                            </div>
-                          {/if}
-                        </div>
-                      {/if}
-                      {#if !configurationBlocked && getProviderAccounts(prov.key).length > 1}
-                        <div class="space-y-3 border-t border-[var(--color-border)] pt-3">
-                          <div class="flex items-center justify-between gap-3">
-                            <div>
-                              <p class="text-xs font-medium text-[var(--color-text-secondary)]">
-                                Saved accounts
-                              </p>
-                              <p class="text-[11px] text-[var(--color-text-muted)]">
-                                Keep multiple keys or account logins per provider and switch between
-                                them.
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              onclick={() => loadProviderAccounts(prov.key, true)}
-                              class="text-[10px] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-                              >Refresh</button
-                            >
-                          </div>
-
-                          {#if providersStore.accountsLoading[prov.key]}
-                            <p class="text-[11px] text-[var(--color-text-muted)]">
-                              Loading saved accounts...
-                            </p>
-                          {:else if getProviderAccounts(prov.key).length === 0}
-                            <p class="text-[11px] text-[var(--color-text-muted)]">
-                              No saved accounts yet.
-                            </p>
-                          {:else}
-                            <div class="space-y-2">
-                              {#each getProviderAccounts(prov.key) as account (account.id)}
-                                <div
-                                  class="border-b border-[var(--color-border)] py-2.5 last:border-b-0"
-                                >
-                                  {#if account.source === 'cli-autodetect' && hasMultipleCliProfiles(prov.key)}
-                                    <SettingsSwitch
-                                      compact
-                                      checked={isAccountSelected(prov.key, account.id)}
-                                      label={account.label}
-                                      description={[
-                                        'Local profile detected',
-                                        'Authentication and plan unverified',
-                                        account.profileDir,
-                                      ]
-                                        .filter(Boolean)
-                                        .join(' · ')}
-                                      onchange={() =>
-                                        toggleCliAccount(
-                                          prov.key,
-                                          account.id,
-                                          !isAccountSelected(prov.key, account.id),
-                                        )}
-                                    />
-                                  {:else if account.source === 'cli-autodetect'}
-                                    <div>
-                                      <div
-                                        class="text-xs font-semibold text-[var(--color-text-primary)]"
-                                      >
-                                        {account.label}
-                                      </div>
-                                      <div class="mt-1 text-[10px] text-[var(--color-text-muted)]">
-                                        Local profile detected · authentication and plan unverified
-                                      </div>
-                                    </div>
-                                  {:else}
-                                    <div class="flex items-start justify-between gap-3">
-                                      <div>
-                                        <div
-                                          class="text-xs font-semibold text-[var(--color-text-primary)]"
-                                        >
-                                          {account.label}
-                                        </div>
-                                        <div
-                                          class="mt-1 text-[10px] text-[var(--color-text-muted)]"
-                                        >
-                                          {[
-                                            account.hasApiKey ? 'API key' : null,
-                                            account.hasAuthToken ? 'Auth token' : null,
-                                            account.hasBaseUrl ? 'Endpoint URL' : null,
-                                          ]
-                                            .filter(Boolean)
-                                            .join(' • ')}
-                                        </div>
-                                      </div>
-                                      <div class="flex items-center gap-2">
-                                        <button
-                                          type="button"
-                                          onclick={() =>
-                                            activateProviderAccount(prov.key, account.id)}
-                                          disabled={providersStore.accountBusy ===
-                                            `${prov.key}:activate:${account.id}`}
-                                          class="btn btn-secondary text-[10px] px-2.5 py-1"
-                                        >
-                                          {providersStore.accountBusy ===
-                                          `${prov.key}:activate:${account.id}`
-                                            ? 'Activating...'
-                                            : 'Activate'}
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onclick={() => openAccountManager(prov.key, account)}
-                                          class="btn btn-secondary text-[10px] px-2.5 py-1"
-                                        >
-                                          Manage
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onclick={() =>
-                                            deleteProviderAccount(prov.key, account.id)}
-                                          disabled={providersStore.accountBusy ===
-                                            `${prov.key}:delete:${account.id}`}
-                                          class="text-[10px] text-[var(--color-error)] hover:opacity-80 font-medium transition-opacity"
-                                        >
-                                          {providersStore.accountBusy ===
-                                          `${prov.key}:delete:${account.id}`
-                                            ? 'Removing...'
-                                            : 'Delete'}
-                                        </button>
-                                      </div>
-                                    </div>
-                                  {/if}
-                                </div>
-                              {/each}
-                            </div>
-                          {/if}
-
-                          <div class="space-y-2 pt-2 border-t border-[var(--color-border)]">
-                            {#if usesLocalCliConnection(prov.key)}
-                              <p class="text-[11px] leading-relaxed text-[var(--color-text-muted)]">
-                                This provider's accounts are managed by its CLI. Sign in there, then
-                                use the check-login button above.
-                              </p>
-                            {:else}
-                              <input
-                                type="text"
-                                placeholder="Label this saved account"
-                                bind:value={providersStore.accountLabelInputs[prov.key]}
-                                class="input w-full text-xs"
-                              />
                               {#if caps.supportsApiKey}
                                 <div class="relative">
-                                  <input
-                                    type={secretInputType(`account-key-${prov.key}`)}
-                                    placeholder={isBedrock(prov.key)
-                                      ? 'AKIA… (access key ID)'
+                                  <label class="sr-only" for={`provider-key-${prov.key}`}
+                                    >{isBedrock(prov.key)
+                                      ? 'AWS Access Key ID'
                                       : isNotion(prov.key)
-                                        ? 'ntn_… (personal access token)'
-                                        : providerCredentialPlaceholder(
-                                            prov.key,
-                                            prov.label,
-                                            'apiKey',
-                                          )}
-                                    bind:value={providersStore.accountKeyInputs[prov.key]}
-                                    class="input w-full pr-11 text-xs"
+                                        ? 'Personal Access Token'
+                                        : 'API Key'}</label
+                                  >
+                                  <input
+                                    id={`provider-key-${prov.key}`}
+                                    type={secretInputType(`provider-key-${prov.key}`)}
+                                    placeholder={providerCredentialPlaceholder(
+                                      prov.key,
+                                      prov.label,
+                                      'apiKey',
+                                    )}
+                                    bind:value={providersStore.keyInputs[prov.key]}
+                                    class="input w-full text-xs"
+                                    style="padding-right: 2.75rem;"
+                                    onkeydown={(e) =>
+                                      e.key === 'Enter' && handleConnectProvider(prov.key)}
                                   />
                                   <button
                                     type="button"
                                     class="secret-visibility absolute inset-y-0 right-1 my-auto z-10"
                                     onclick={() =>
-                                      toggleSecretVisibility(`account-key-${prov.key}`)}
-                                    aria-label={visibleSecrets[`account-key-${prov.key}`]
-                                      ? 'Hide account API key'
-                                      : 'Show account API key'}
+                                      toggleSecretVisibility(`provider-key-${prov.key}`)}
+                                    aria-label={visibleSecrets[`provider-key-${prov.key}`]
+                                      ? isNotion(prov.key)
+                                        ? 'Hide token'
+                                        : 'Hide API key'
+                                      : isNotion(prov.key)
+                                        ? 'Show token'
+                                        : 'Show API key'}
+                                    title={visibleSecrets[`provider-key-${prov.key}`]
+                                      ? isNotion(prov.key)
+                                        ? 'Hide token'
+                                        : 'Hide API key'
+                                      : isNotion(prov.key)
+                                        ? 'Show token'
+                                        : 'Show API key'}
                                   >
-                                    {#if visibleSecrets[`account-key-${prov.key}`]}<EyeOff
+                                    {#if visibleSecrets[`provider-key-${prov.key}`]}<EyeOff
                                         size={15}
                                       />{:else}<Eye size={15} />{/if}
                                   </button>
                                 </div>
+                                {#if status?.credentialUrl}
+                                  <div class="text-right">
+                                    <a
+                                      href={status.credentialUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      class="text-[11px] text-[var(--color-accent)] hover:underline"
+                                      >{isNotion(prov.key) ? 'Get PAT' : 'Get API key'}</a
+                                    >
+                                  </div>
+                                {/if}
                               {/if}
                               {#if showTokenInput(prov.key, caps)}
                                 <div class="relative">
+                                  <label class="sr-only" for={`provider-token-${prov.key}`}
+                                    >{isBedrock(prov.key)
+                                      ? 'Secret Access Key'
+                                      : 'Auth Token'}</label
+                                  >
                                   <input
-                                    type={secretInputType(`account-token-${prov.key}`)}
+                                    id={`provider-token-${prov.key}`}
+                                    type={secretInputType(`provider-token-${prov.key}`)}
                                     placeholder={providerCredentialPlaceholder(
                                       prov.key,
                                       prov.label,
                                       'authToken',
                                     )}
-                                    bind:value={providersStore.accountTokenInputs[prov.key]}
+                                    bind:value={providersStore.tokenInputs[prov.key]}
                                     class="input w-full pr-11 text-xs"
+                                    onkeydown={(e) =>
+                                      e.key === 'Enter' && handleConnectProvider(prov.key)}
                                   />
                                   <button
                                     type="button"
                                     class="secret-visibility absolute inset-y-0 right-1 my-auto z-10"
                                     onclick={() =>
-                                      toggleSecretVisibility(`account-token-${prov.key}`)}
-                                    aria-label={visibleSecrets[`account-token-${prov.key}`]
-                                      ? 'Hide account auth token'
-                                      : 'Show account auth token'}
+                                      toggleSecretVisibility(`provider-token-${prov.key}`)}
+                                    aria-label={visibleSecrets[`provider-token-${prov.key}`]
+                                      ? 'Hide auth token'
+                                      : 'Show auth token'}
                                   >
-                                    {#if visibleSecrets[`account-token-${prov.key}`]}<EyeOff
+                                    {#if visibleSecrets[`provider-token-${prov.key}`]}<EyeOff
+                                        size={15}
+                                      />{:else}<Eye size={15} />{/if}
+                                  </button>
+                                </div>
+                              {/if}
+                              {#if isBedrock(prov.key)}
+                                <label
+                                  class="settings-field-label"
+                                  for={`provider-aws-region-${prov.key}`}>AWS Region</label
+                                >
+                                <input
+                                  id={`provider-aws-region-${prov.key}`}
+                                  type="text"
+                                  placeholder="e.g. us-east-1 (default)"
+                                  bind:value={providersStore.awsRegionInputs[prov.key]}
+                                  class="input w-full text-xs"
+                                  onkeydown={(e) =>
+                                    e.key === 'Enter' && handleConnectProvider(prov.key)}
+                                />
+                                <label
+                                  class="settings-field-label"
+                                  for={`provider-aws-session-${prov.key}`}
+                                  >Session Token
+                                  <span class="normal-case opacity-70"
+                                    >(optional, for temporary keys)</span
+                                  ></label
+                                >
+                                <div class="relative">
+                                  <input
+                                    id={`provider-aws-session-${prov.key}`}
+                                    type={secretInputType(`provider-aws-session-${prov.key}`)}
+                                    placeholder="AWS session token"
+                                    bind:value={providersStore.awsSessionTokenInputs[prov.key]}
+                                    class="input w-full pr-11 text-xs"
+                                    onkeydown={(e) =>
+                                      e.key === 'Enter' && handleConnectProvider(prov.key)}
+                                  />
+                                  <button
+                                    type="button"
+                                    class="secret-visibility absolute inset-y-0 right-1 my-auto z-10"
+                                    onclick={() =>
+                                      toggleSecretVisibility(`provider-aws-session-${prov.key}`)}
+                                    aria-label={visibleSecrets[`provider-aws-session-${prov.key}`]
+                                      ? 'Hide session token'
+                                      : 'Show session token'}
+                                  >
+                                    {#if visibleSecrets[`provider-aws-session-${prov.key}`]}<EyeOff
                                         size={15}
                                       />{:else}<Eye size={15} />{/if}
                                   </button>
                                 </div>
                               {/if}
                               {#if caps.requiresBaseUrl}
+                                <label class="settings-field-label" for={`provider-url-${prov.key}`}
+                                  >Endpoint URL</label
+                                >
                                 <input
+                                  id={`provider-url-${prov.key}`}
                                   type="text"
                                   placeholder={caps.baseUrlPlaceholder ?? 'https://...'}
-                                  bind:value={providersStore.accountUrlInputs[prov.key]}
+                                  bind:value={providersStore.urlInputs[prov.key]}
                                   class="input w-full text-xs"
+                                  onkeydown={(e) =>
+                                    e.key === 'Enter' && handleConnectProvider(prov.key)}
                                 />
+                              {/if}
+                              {#if caps.requiresDeployment}
+                                <label
+                                  class="settings-field-label"
+                                  for={`provider-deployment-${prov.key}`}
+                                  >{prov.key === 'sapai'
+                                    ? 'Deployment ID'
+                                    : 'Deployment name'}</label
+                                >
+                                <input
+                                  id={`provider-deployment-${prov.key}`}
+                                  type="text"
+                                  placeholder={prov.key === 'sapai'
+                                    ? 'SAP AI Core deployment ID'
+                                    : 'Azure OpenAI deployment name'}
+                                  bind:value={providersStore.deploymentInputs[prov.key]}
+                                  class="input w-full text-xs"
+                                  onkeydown={(e) =>
+                                    e.key === 'Enter' && handleConnectProvider(prov.key)}
+                                />
+                                <p
+                                  class="text-[11px] leading-relaxed text-[var(--color-text-muted)]"
+                                >
+                                  {prov.key === 'sapai'
+                                    ? 'Use the deployed AI Core resource ID, not a foundation-model catalog ID.'
+                                    : 'Use the deployment name from Azure OpenAI, not the base model ID shown in the model catalog.'}
+                                </p>
                               {/if}
                               {#if usesBrowserAuth(prov.key)}
-                                <p class="text-[11px] text-[var(--color-text-muted)]">
-                                  This provider connects through browser sign-in instead of manual
-                                  saved credentials.
-                                </p>
-                                <button
-                                  type="button"
-                                  onclick={() => handleStartBrowserAuth(prov.key)}
-                                  disabled={providersStore.browserAuthBusy === prov.key}
-                                  class="btn btn-primary w-full text-[10px] py-2 shadow-lg shadow-[var(--color-accent)]/10"
+                                <div
+                                  class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)]/80 p-3 space-y-2"
                                 >
-                                  {providersStore.browserAuthBusy === prov.key
-                                    ? isCliExecutionProvider(prov.key)
-                                      ? 'Checking CLI Login…'
-                                      : 'Opening sign-in…'
-                                    : isCliExecutionProvider(prov.key)
-                                      ? providersStore.getCliLoginLabel(prov.key)
-                                      : 'Sign in'}
-                                </button>
-                              {:else}
-                                <div class="flex gap-2">
-                                  <button
-                                    type="button"
-                                    onclick={() => saveProviderAccount(prov.key, false)}
-                                    disabled={providersStore.accountBusy === `${prov.key}:save`}
-                                    class="btn btn-secondary flex-1 text-[10px] py-2"
-                                  >
-                                    {providersStore.accountBusy === `${prov.key}:save`
-                                      ? 'Saving...'
-                                      : 'Save Account'}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onclick={() => saveProviderAccount(prov.key, true)}
-                                    disabled={providersStore.accountBusy === `${prov.key}:save`}
-                                    class="btn btn-primary flex-1 text-[10px] py-2 shadow-lg shadow-[var(--color-accent)]/10"
-                                  >
-                                    {providersStore.accountBusy === `${prov.key}:save`
-                                      ? 'Saving...'
-                                      : 'Save + Activate'}
-                                  </button>
+                                  {#if providersStore.browserAuthMessages[prov.key]}
+                                    <p class="text-[11px] text-[var(--color-text-muted)]">
+                                      {providersStore.browserAuthMessages[prov.key]}
+                                    </p>
+                                  {/if}
+                                  <!-- One shared device-code panel for every device-code
+                               provider — identical copy, code, copy-button, and
+                               waiting line, so no provider gets a lesser flow. -->
+                                  {#if prov.key === 'copilot' || prov.key === 'kimicode' || prov.key === 'codex-auth'}
+                                    {@const deviceAuth =
+                                      prov.key === 'copilot'
+                                        ? providersStore.copilotDeviceAuth
+                                        : prov.key === 'kimicode'
+                                          ? providersStore.kimicodeDeviceAuth
+                                          : providersStore.codexDeviceAuth}
+                                    {#if deviceAuth}
+                                      {@const userCode = deviceAuth.userCode}
+                                      <div
+                                        class="rounded-md bg-[var(--color-surface-2)] px-2.5 py-2 text-[11px] text-[var(--color-text-secondary)]"
+                                      >
+                                        <div class="font-medium text-[var(--color-text-primary)]">
+                                          {getProviderDisplayLabel(prov.key)} sign-in needs approval.
+                                        </div>
+                                        <div class="mt-1">
+                                          The browser was opened automatically.
+                                        </div>
+                                        <div>Paste this code if you're asked for it.</div>
+                                        <div class="mt-2 flex items-center gap-2">
+                                          <span>Code:</span>
+                                          <span
+                                            class="font-semibold tracking-[0.18em] text-[var(--color-text-primary)]"
+                                            >{userCode}</span
+                                          >
+                                          <button
+                                            type="button"
+                                            class="inline-flex items-center gap-1 rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[11px] hover:bg-[var(--color-surface-3)]"
+                                            onclick={() => copyToClipboard(userCode, 'deviceCode')}
+                                          >
+                                            <Copy size={10} />
+                                            {providersStore.copiedDeviceCode === userCode
+                                              ? 'Copied'
+                                              : 'Copy code'}
+                                          </button>
+                                        </div>
+                                        {#if deviceAuth.verificationUri}
+                                          <div class="mt-1 break-all">
+                                            {deviceAuth.verificationUri}
+                                          </div>
+                                        {/if}
+                                        <div
+                                          class="mt-2 text-[11px] text-[var(--color-text-muted)]"
+                                        >
+                                          Waiting for {getProviderDisplayLabel(prov.key)} approval to
+                                          complete…
+                                        </div>
+                                      </div>
+                                    {/if}
+                                  {/if}
+                                  <div class="flex gap-2">
+                                    <button
+                                      type="button"
+                                      onclick={() => handleStartBrowserAuth(prov.key)}
+                                      disabled={providersStore.browserAuthBusy === prov.key}
+                                      class="btn btn-secondary flex-1 text-[11px] py-2"
+                                    >
+                                      {providersStore.browserAuthBusy === prov.key &&
+                                      !providersStore.browserAuthPending[prov.key]
+                                        ? 'Opening sign-in…'
+                                        : 'Sign in'}
+                                    </button>
+                                    {#if providersStore.browserAuthPending[prov.key] && prov.key !== 'copilot' && prov.key !== 'kimicode' && prov.key !== 'codex-auth'}
+                                      <button
+                                        type="button"
+                                        onclick={() => handleFinishBrowserAuth(prov.key)}
+                                        disabled={providersStore.browserAuthBusy === prov.key}
+                                        class="btn btn-primary flex-1 text-[11px] py-2 shadow-lg shadow-[var(--color-accent)]/10"
+                                      >
+                                        {providersStore.browserAuthBusy === prov.key &&
+                                        providersStore.browserAuthPending[prov.key]
+                                          ? 'Checking...'
+                                          : 'I Finished Sign-In'}
+                                      </button>
+                                    {/if}
+                                  </div>
                                 </div>
                               {/if}
-                            {/if}
-                          </div>
-                        </div>
-                      {/if}
-                      {#if hasMultipleCliProfiles(prov.key)}
-                        {@const orderedAccounts = getOrderedFallbackAccounts(prov.key)}
-                        <div class="space-y-3 border-t border-[var(--color-border)] pt-3">
-                          <div class="flex items-center justify-between gap-3">
-                            <div>
-                              <p class="text-xs font-medium text-[var(--color-text-secondary)]">
-                                Fallback order
-                              </p>
-                              <p class="text-[11px] text-[var(--color-text-muted)]">
-                                Choose the CLI profiles Koryphaios may use, then drag to set their
-                                priority.
-                              </p>
-                            </div>
-                            <SettingsSwitch
-                              compact
-                              checked={providersStore.fallbackEnabled[prov.key] === true}
-                              label="Enable fallback"
-                              description="Try the next selected CLI profile when the first one cannot run."
-                              onchange={() =>
-                                setFallbackEnabled(
-                                  prov.key,
-                                  providersStore.fallbackEnabled[prov.key] !== true,
-                                )}
-                            />
-                            <span
-                              class="text-[10px] text-[var(--color-text-muted)] transition-opacity duration-150 shrink-0 w-16 text-right"
-                              class:opacity-0={providersStore.fallbackSaving !== prov.key}
-                              class:opacity-100={providersStore.fallbackSaving === prov.key}
-                              aria-hidden={providersStore.fallbackSaving !== prov.key}
-                            >
-                              {providersStore.fallbackSaving === prov.key ? 'Saving...' : ''}
-                            </span>
-                          </div>
-                          <div
-                            class="space-y-2"
-                            use:dndzone={{
-                              items: orderedAccounts,
-                              flipDurationMs: 250,
-                              dragDisabled: providersStore.fallbackEnabled[prov.key] !== true,
-                              type: `fallback-order:${prov.key}`,
-                            }}
-                            onconsider={(e) => handleFallbackDndConsider(prov.key, e.detail.items)}
-                            onfinalize={(e) => handleFallbackDndFinalize(prov.key, e.detail.items)}
-                          >
-                            {#each orderedAccounts as account, i (account.id)}
-                              <div
-                                class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] p-2.5 flex items-center gap-2.5 {providersStore
-                                  .fallbackEnabled[prov.key] === true
-                                  ? 'cursor-grab active:cursor-grabbing'
-                                  : 'opacity-60'}"
-                              >
-                                <GripVertical
-                                  size={14}
-                                  class="text-[var(--color-text-muted)] shrink-0"
-                                />
-                                <span
-                                  class="text-[10px] font-bold text-[var(--color-accent)] shrink-0 w-5 text-center"
-                                  >{i + 1}</span
+                              {#if usesLocalCliConnection(prov.key) && prov.key === 'freebuff'}
+                                <p
+                                  class="text-[11px] leading-relaxed text-[var(--color-text-muted)]"
                                 >
-                                <div class="flex-1 min-w-0">
-                                  <div
-                                    class="text-xs font-semibold text-[var(--color-text-primary)] truncate"
+                                  First-time Freebuff setup can take a few minutes while its
+                                  isolated runtime is prepared.
+                                </p>
+                              {/if}
+                              {#if usesBrowserAuth(prov.key) && caps.supportsApiKey}
+                                <div class="flex items-center gap-3 py-1">
+                                  <div class="flex-1 border-t border-[var(--color-border)]"></div>
+                                  <span
+                                    class="text-xs font-medium text-[var(--color-text-secondary)]"
+                                    >Alternative sign-in</span
                                   >
-                                    {account.label}
-                                  </div>
-                                  <div class="text-[10px] text-[var(--color-text-muted)]">
-                                    {[
-                                      account.hasApiKey ? 'API key' : null,
-                                      account.hasAuthToken ? 'Auth token' : null,
-                                      account.hasBaseUrl ? 'Endpoint URL' : null,
-                                    ]
-                                      .filter(Boolean)
-                                      .join(' · ')}
-                                  </div>
+                                  <div class="flex-1 border-t border-[var(--color-border)]"></div>
                                 </div>
-                                <span class="text-xs text-[var(--color-text-muted)] shrink-0"
-                                  >{i === 0
-                                    ? '1st'
-                                    : i === 1
-                                      ? '2nd'
-                                      : i === 2
-                                        ? '3rd'
-                                        : `${i + 1}th`}</span
+                                <button
+                                  type="button"
+                                  onclick={() => handleConnectProvider(prov.key)}
+                                  disabled={providersStore.saving === prov.key}
+                                  class="btn btn-primary w-full text-xs py-2 shadow-lg shadow-[var(--color-accent)]/10"
+                                  >{providersStore.saving === prov.key
+                                    ? 'Testing...'
+                                    : 'Connect'}</button
+                                >
+                              {:else if !usesBrowserAuth(prov.key)}
+                                <button
+                                  type="button"
+                                  onclick={() => handleConnectProvider(prov.key)}
+                                  disabled={providersStore.saving === prov.key}
+                                  class="btn btn-primary w-full text-xs py-2 shadow-lg shadow-[var(--color-accent)]/10"
+                                  >{providersStore.saving === prov.key
+                                    ? usesLocalCliConnection(prov.key)
+                                      ? prov.key === 'freebuff'
+                                        ? 'Preparing Freebuff…'
+                                        : 'Checking CLI…'
+                                      : 'Connecting…'
+                                    : usesLocalCliConnection(prov.key)
+                                      ? getLocalCliConnectLabel(prov.key)
+                                      : 'Connect'}</button
+                                >
+                              {/if}
+                              {#if prov.key.startsWith('custom:')}
+                                <button
+                                  type="button"
+                                  onclick={() => deleteCustomProvider(prov.key)}
+                                  class="btn btn-ghost w-full text-[11px] py-1.5 mt-1 text-[var(--color-error)] hover:bg-[var(--color-error-bg)] flex items-center justify-center gap-1.5"
+                                >
+                                  <Trash2 size={12} /> Remove this custom provider
+                                </button>
+                              {/if}
+                              {#if providersStore.connectErrors[prov.key]}
+                                <div
+                                  class="flex items-start gap-2 rounded-lg border border-[var(--color-error)] bg-[var(--color-error-bg)] px-3 py-2 text-xs text-[var(--color-error)]"
+                                >
+                                  <AlertTriangle size={14} class="shrink-0 mt-0.5" />
+                                  <span class="flex-1"
+                                    >{providersStore.connectErrors[prov.key]}</span
+                                  >
+                                </div>
+                              {/if}
+                            </div>
+                          {/if}
+                          {#if !configurationBlocked && getProviderAccounts(prov.key).length > 1}
+                            <div class="space-y-3 border-t border-[var(--color-border)] pt-3">
+                              <div class="flex items-center justify-between gap-3">
+                                <div>
+                                  <p class="text-xs font-medium text-[var(--color-text-secondary)]">
+                                    Saved accounts
+                                  </p>
+                                  <p class="text-[11px] text-[var(--color-text-muted)]">
+                                    Keep multiple keys or account logins per provider and switch
+                                    between them.
+                                  </p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onclick={() => loadProviderAccounts(prov.key, true)}
+                                  class="text-[11px] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+                                  >Refresh</button
                                 >
                               </div>
-                            {/each}
-                          </div>
+
+                              {#if providersStore.accountsLoading[prov.key]}
+                                <p class="text-[11px] text-[var(--color-text-muted)]">
+                                  Loading saved accounts...
+                                </p>
+                              {:else if getProviderAccounts(prov.key).length === 0}
+                                <p class="text-[11px] text-[var(--color-text-muted)]">
+                                  No saved accounts yet.
+                                </p>
+                              {:else}
+                                <div class="space-y-2">
+                                  {#each getProviderAccounts(prov.key) as account (account.id)}
+                                    <div
+                                      class="border-b border-[var(--color-border)] py-2.5 last:border-b-0"
+                                    >
+                                      {#if account.source === 'cli-autodetect' && hasMultipleCliProfiles(prov.key)}
+                                        <SettingsSwitch
+                                          compact
+                                          checked={isAccountSelected(prov.key, account.id)}
+                                          label={account.label}
+                                          description={[
+                                            'Local profile detected',
+                                            'Authentication and plan unverified',
+                                            account.profileDir,
+                                          ]
+                                            .filter(Boolean)
+                                            .join(' · ')}
+                                          onchange={() =>
+                                            toggleCliAccount(
+                                              prov.key,
+                                              account.id,
+                                              !isAccountSelected(prov.key, account.id),
+                                            )}
+                                        />
+                                      {:else if account.source === 'cli-autodetect'}
+                                        <div>
+                                          <div
+                                            class="text-xs font-semibold text-[var(--color-text-primary)]"
+                                          >
+                                            {account.label}
+                                          </div>
+                                          <div
+                                            class="mt-1 text-[11px] text-[var(--color-text-muted)]"
+                                          >
+                                            Local profile detected · authentication and plan
+                                            unverified
+                                          </div>
+                                        </div>
+                                      {:else}
+                                        <div class="flex items-start justify-between gap-3">
+                                          <div>
+                                            <div
+                                              class="text-xs font-semibold text-[var(--color-text-primary)]"
+                                            >
+                                              {account.label}
+                                            </div>
+                                            <div
+                                              class="mt-1 text-[11px] text-[var(--color-text-muted)]"
+                                            >
+                                              {[
+                                                account.hasApiKey ? 'API key' : null,
+                                                account.hasAuthToken ? 'Auth token' : null,
+                                                account.hasBaseUrl ? 'Endpoint URL' : null,
+                                              ]
+                                                .filter(Boolean)
+                                                .join(' • ')}
+                                            </div>
+                                          </div>
+                                          <div class="flex items-center gap-2">
+                                            <button
+                                              type="button"
+                                              onclick={() =>
+                                                activateProviderAccount(prov.key, account.id)}
+                                              disabled={providersStore.accountBusy ===
+                                                `${prov.key}:activate:${account.id}`}
+                                              class="btn btn-secondary text-[11px] px-2.5 py-1"
+                                            >
+                                              {providersStore.accountBusy ===
+                                              `${prov.key}:activate:${account.id}`
+                                                ? 'Activating...'
+                                                : 'Activate'}
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onclick={() => openAccountManager(prov.key, account)}
+                                              class="btn btn-secondary text-[11px] px-2.5 py-1"
+                                            >
+                                              Manage
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onclick={() =>
+                                                deleteProviderAccount(prov.key, account.id)}
+                                              disabled={providersStore.accountBusy ===
+                                                `${prov.key}:delete:${account.id}`}
+                                              class="text-[11px] text-[var(--color-error)] hover:opacity-80 font-medium transition-opacity"
+                                            >
+                                              {providersStore.accountBusy ===
+                                              `${prov.key}:delete:${account.id}`
+                                                ? 'Removing...'
+                                                : 'Delete'}
+                                            </button>
+                                          </div>
+                                        </div>
+                                      {/if}
+                                    </div>
+                                  {/each}
+                                </div>
+                              {/if}
+
+                              <div class="space-y-2 pt-2 border-t border-[var(--color-border)]">
+                                {#if usesLocalCliConnection(prov.key)}
+                                  <p
+                                    class="text-[11px] leading-relaxed text-[var(--color-text-muted)]"
+                                  >
+                                    This provider's accounts are managed by its CLI. Sign in there,
+                                    then use the check-login button above.
+                                  </p>
+                                {:else}
+                                  <input
+                                    type="text"
+                                    placeholder="Label this saved account"
+                                    bind:value={providersStore.accountLabelInputs[prov.key]}
+                                    class="input w-full text-xs"
+                                  />
+                                  {#if caps.supportsApiKey}
+                                    <div class="relative">
+                                      <input
+                                        type={secretInputType(`account-key-${prov.key}`)}
+                                        placeholder={isBedrock(prov.key)
+                                          ? 'AKIA… (access key ID)'
+                                          : isNotion(prov.key)
+                                            ? 'ntn_… (personal access token)'
+                                            : providerCredentialPlaceholder(
+                                                prov.key,
+                                                prov.label,
+                                                'apiKey',
+                                              )}
+                                        bind:value={providersStore.accountKeyInputs[prov.key]}
+                                        class="input w-full pr-11 text-xs"
+                                      />
+                                      <button
+                                        type="button"
+                                        class="secret-visibility absolute inset-y-0 right-1 my-auto z-10"
+                                        onclick={() =>
+                                          toggleSecretVisibility(`account-key-${prov.key}`)}
+                                        aria-label={visibleSecrets[`account-key-${prov.key}`]
+                                          ? 'Hide account API key'
+                                          : 'Show account API key'}
+                                      >
+                                        {#if visibleSecrets[`account-key-${prov.key}`]}<EyeOff
+                                            size={15}
+                                          />{:else}<Eye size={15} />{/if}
+                                      </button>
+                                    </div>
+                                  {/if}
+                                  {#if showTokenInput(prov.key, caps)}
+                                    <div class="relative">
+                                      <input
+                                        type={secretInputType(`account-token-${prov.key}`)}
+                                        placeholder={providerCredentialPlaceholder(
+                                          prov.key,
+                                          prov.label,
+                                          'authToken',
+                                        )}
+                                        bind:value={providersStore.accountTokenInputs[prov.key]}
+                                        class="input w-full pr-11 text-xs"
+                                      />
+                                      <button
+                                        type="button"
+                                        class="secret-visibility absolute inset-y-0 right-1 my-auto z-10"
+                                        onclick={() =>
+                                          toggleSecretVisibility(`account-token-${prov.key}`)}
+                                        aria-label={visibleSecrets[`account-token-${prov.key}`]
+                                          ? 'Hide account auth token'
+                                          : 'Show account auth token'}
+                                      >
+                                        {#if visibleSecrets[`account-token-${prov.key}`]}<EyeOff
+                                            size={15}
+                                          />{:else}<Eye size={15} />{/if}
+                                      </button>
+                                    </div>
+                                  {/if}
+                                  {#if caps.requiresBaseUrl}
+                                    <input
+                                      type="text"
+                                      placeholder={caps.baseUrlPlaceholder ?? 'https://...'}
+                                      bind:value={providersStore.accountUrlInputs[prov.key]}
+                                      class="input w-full text-xs"
+                                    />
+                                  {/if}
+                                  {#if usesBrowserAuth(prov.key)}
+                                    <p class="text-[11px] text-[var(--color-text-muted)]">
+                                      This provider connects through browser sign-in instead of
+                                      manual saved credentials.
+                                    </p>
+                                    <button
+                                      type="button"
+                                      onclick={() => handleStartBrowserAuth(prov.key)}
+                                      disabled={providersStore.browserAuthBusy === prov.key}
+                                      class="btn btn-primary w-full text-[11px] py-2 shadow-lg shadow-[var(--color-accent)]/10"
+                                    >
+                                      {providersStore.browserAuthBusy === prov.key
+                                        ? isCliExecutionProvider(prov.key)
+                                          ? 'Checking CLI Login…'
+                                          : 'Opening sign-in…'
+                                        : isCliExecutionProvider(prov.key)
+                                          ? providersStore.getCliLoginLabel(prov.key)
+                                          : 'Sign in'}
+                                    </button>
+                                  {:else}
+                                    <div class="flex gap-2">
+                                      <button
+                                        type="button"
+                                        onclick={() => saveProviderAccount(prov.key, false)}
+                                        disabled={providersStore.accountBusy === `${prov.key}:save`}
+                                        class="btn btn-secondary flex-1 text-[11px] py-2"
+                                      >
+                                        {providersStore.accountBusy === `${prov.key}:save`
+                                          ? 'Saving...'
+                                          : 'Save Account'}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onclick={() => saveProviderAccount(prov.key, true)}
+                                        disabled={providersStore.accountBusy === `${prov.key}:save`}
+                                        class="btn btn-primary flex-1 text-[11px] py-2 shadow-lg shadow-[var(--color-accent)]/10"
+                                      >
+                                        {providersStore.accountBusy === `${prov.key}:save`
+                                          ? 'Saving...'
+                                          : 'Save + Activate'}
+                                      </button>
+                                    </div>
+                                  {/if}
+                                {/if}
+                              </div>
+                            </div>
+                          {/if}
+                          {#if hasMultipleCliProfiles(prov.key)}
+                            {@const orderedAccounts = getOrderedFallbackAccounts(prov.key)}
+                            <div class="space-y-3 border-t border-[var(--color-border)] pt-3">
+                              <div class="flex items-center justify-between gap-3">
+                                <div>
+                                  <p class="text-xs font-medium text-[var(--color-text-secondary)]">
+                                    Fallback order
+                                  </p>
+                                  <p class="text-[11px] text-[var(--color-text-muted)]">
+                                    Choose the CLI profiles Koryphaios may use, then drag to set
+                                    their priority.
+                                  </p>
+                                </div>
+                                <SettingsSwitch
+                                  compact
+                                  checked={providersStore.fallbackEnabled[prov.key] === true}
+                                  label="Enable fallback"
+                                  description="Try the next selected CLI profile when the first one cannot run."
+                                  onchange={() =>
+                                    setFallbackEnabled(
+                                      prov.key,
+                                      providersStore.fallbackEnabled[prov.key] !== true,
+                                    )}
+                                />
+                                <span
+                                  class="text-[11px] text-[var(--color-text-muted)] transition-opacity duration-150 shrink-0 w-16 text-right"
+                                  class:opacity-0={providersStore.fallbackSaving !== prov.key}
+                                  class:opacity-100={providersStore.fallbackSaving === prov.key}
+                                  aria-hidden={providersStore.fallbackSaving !== prov.key}
+                                >
+                                  {providersStore.fallbackSaving === prov.key ? 'Saving...' : ''}
+                                </span>
+                              </div>
+                              <div
+                                class="space-y-2"
+                                use:dndzone={{
+                                  items: orderedAccounts,
+                                  flipDurationMs: 250,
+                                  dragDisabled: providersStore.fallbackEnabled[prov.key] !== true,
+                                  type: `fallback-order:${prov.key}`,
+                                }}
+                                onconsider={(e) =>
+                                  handleFallbackDndConsider(prov.key, e.detail.items)}
+                                onfinalize={(e) =>
+                                  handleFallbackDndFinalize(prov.key, e.detail.items)}
+                              >
+                                {#each orderedAccounts as account, i (account.id)}
+                                  <div
+                                    class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] p-2.5 flex items-center gap-2.5 {providersStore
+                                      .fallbackEnabled[prov.key] === true
+                                      ? 'cursor-grab active:cursor-grabbing'
+                                      : 'opacity-60'}"
+                                  >
+                                    <GripVertical
+                                      size={14}
+                                      class="text-[var(--color-text-muted)] shrink-0"
+                                    />
+                                    <span
+                                      class="text-[11px] font-bold text-[var(--color-accent)] shrink-0 w-5 text-center"
+                                      >{i + 1}</span
+                                    >
+                                    <div class="flex-1 min-w-0">
+                                      <div
+                                        class="text-xs font-semibold text-[var(--color-text-primary)] truncate"
+                                      >
+                                        {account.label}
+                                      </div>
+                                      <div class="text-[11px] text-[var(--color-text-muted)]">
+                                        {[
+                                          account.hasApiKey ? 'API key' : null,
+                                          account.hasAuthToken ? 'Auth token' : null,
+                                          account.hasBaseUrl ? 'Endpoint URL' : null,
+                                        ]
+                                          .filter(Boolean)
+                                          .join(' · ')}
+                                      </div>
+                                    </div>
+                                    <span class="text-xs text-[var(--color-text-muted)] shrink-0"
+                                      >{i === 0
+                                        ? '1st'
+                                        : i === 1
+                                          ? '2nd'
+                                          : i === 2
+                                            ? '3rd'
+                                            : `${i + 1}th`}</span
+                                    >
+                                  </div>
+                                {/each}
+                              </div>
+                            </div>
+                          {/if}
                         </div>
                       {/if}
                     </div>
-                  {/if}
+                  {/each}
                 </div>
-              {/each}
+              {/if}
             </div>
-          {/if}
+          </SettingsPage>
         </div>
 
         <!-- Panes below mount on first visit. Speech, images, video, MCP and
@@ -3330,7 +3456,11 @@
 
         {#if open && visitedSettingsTabs.has('appearance')}
           <div class={activeTab === 'appearance' ? 'flex-1 min-h-0 overflow-y-auto' : 'hidden'}>
-            <AppearanceSettings bind:showColorPicker bind:colorPickerTarget />
+            <AppearanceSettings
+              bind:showColorPicker
+              bind:colorPickerTarget
+              bind:colorPickerScheme
+            />
           </div>
         {/if}
 
@@ -3343,58 +3473,58 @@
         <!-- Shortcuts Tab -->
         <div
           class={activeTab === 'shortcuts'
-            ? 'flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-6 py-5 space-y-6 w-full max-w-7xl mx-auto'
+            ? 'flex-1 min-h-0 overflow-y-auto overflow-x-hidden'
             : 'hidden'}
         >
-          <div class="flex items-center justify-between mb-4">
-            <div>
-              <h3 class="text-base font-bold text-[var(--color-text-primary)]">
-                Keyboard Shortcuts
-              </h3>
-              <p class="text-xs text-[var(--color-text-muted)]">Customizable global key bindings</p>
-            </div>
-            <button
-              type="button"
-              onclick={resetShortcuts}
-              class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--color-error-bg)] text-[var(--color-error)] text-xs font-medium hover:opacity-80 transition-opacity"
-            >
-              <RotateCcw size={12} /> Reset to Defaults
-            </button>
-          </div>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {#each shortcutStore.list as shortcut (shortcut.id)}
-              <div
-                class="settings-panel group flex items-center justify-between gap-3 p-4 bg-[var(--color-surface-2)] rounded-xl border border-[var(--color-border)] transition-colors hover:border-[var(--color-text-muted)]"
-                data-testid="shortcut-row"
-                data-shortcut-id={shortcut.id}
+          <SettingsPage
+            width="wide"
+            title="Keyboard Shortcuts"
+            description="Customizable global key bindings"
+          >
+            {#snippet actions()}
+              <button
+                type="button"
+                onclick={resetShortcuts}
+                class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--color-border)] text-[var(--color-text-secondary)] text-xs font-medium hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)] transition-colors"
               >
-                <div class="min-w-0">
-                  <div class="text-sm font-semibold text-[var(--color-text-primary)]">
-                    {shortcut.action}
-                  </div>
-                  <div class="text-xs text-[var(--color-text-muted)]">{shortcut.description}</div>
-                </div>
-                <button
-                  type="button"
-                  onclick={() => startEditShortcut(shortcut.id)}
-                  class="flex shrink-0 items-center gap-1 px-3 py-2 rounded-lg border bg-[var(--color-surface-1)] text-sm font-mono transition-all
-                       {editingShortcutId === shortcut.id
-                    ? 'ring-2 ring-[var(--color-accent)] border-[var(--color-accent)] text-[var(--color-accent)]'
-                    : 'group-hover:border-[var(--color-text-secondary)] shadow-sm'}"
+                <RotateCcw size={12} /> Reset to defaults
+              </button>
+            {/snippet}
+            <div class="grid grid-cols-1 gap-x-6 gap-y-1 md:grid-cols-2">
+              {#each shortcutStore.list as shortcut (shortcut.id)}
+                <div
+                  class="group flex items-center justify-between gap-4 rounded-lg px-3 py-2.5 transition-colors hover:bg-[var(--color-surface-2)]"
+                  data-testid="shortcut-row"
+                  data-shortcut-id={shortcut.id}
                 >
-                  {#if editingShortcutId === shortcut.id}
-                    <span class="animate-pulse">Waiting for keys...</span>
-                  {:else}
-                    {#each shortcut.keys as key, i (i)}
-                      <span>{formatKey(key)}</span>
-                      {#if i < shortcut.keys.length - 1}<span class="opacity-30 mx-0.5">+</span
-                        >{/if}
-                    {/each}
-                  {/if}
-                </button>
-              </div>
-            {/each}
-          </div>
+                  <div class="min-w-0">
+                    <div class="text-[13px] font-medium text-[var(--color-text-primary)]">
+                      {shortcut.action}
+                    </div>
+                    <div class="text-xs text-[var(--color-text-muted)]">{shortcut.description}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onclick={() => startEditShortcut(shortcut.id)}
+                    class="flex shrink-0 items-center gap-1 px-2.5 py-1.5 rounded-md border bg-[var(--color-surface-1)] text-xs font-mono transition-colors
+                         {editingShortcutId === shortcut.id
+                      ? 'ring-2 ring-[var(--color-accent)] border-[var(--color-accent)] text-[var(--color-accent)]'
+                      : 'border-[var(--color-border)] text-[var(--color-text-secondary)] group-hover:border-[var(--color-border-bright)] group-hover:text-[var(--color-text-primary)]'}"
+                  >
+                    {#if editingShortcutId === shortcut.id}
+                      <span class="animate-pulse">Waiting for keys...</span>
+                    {:else}
+                      {#each shortcut.keys as key, i (i)}
+                        <span>{formatKey(key)}</span>
+                        {#if i < shortcut.keys.length - 1}<span class="opacity-30 mx-0.5">+</span
+                          >{/if}
+                      {/each}
+                    {/if}
+                  </button>
+                </div>
+              {/each}
+            </div>
+          </SettingsPage>
         </div>
 
         <!-- Billing Tab -->
@@ -3405,7 +3535,7 @@
         >
           <UsageAnalyticsDashboard
             {billingCredits}
-            {billingLoading}
+            billingLoading={billingSummaryLoading}
             {showSubscriptionApiEquivalent}
             bind:selectedEnvironment={settingsEnvironmentScope}
             bind:viewMode={billingViewMode}
@@ -3416,7 +3546,7 @@
             }}
           />
 
-          <div class="mx-auto w-full max-w-5xl space-y-8 px-6 pb-10 pt-5">
+          <div class="mx-auto w-full max-w-[1144px] space-y-8 px-8 pb-10 pt-5">
             {#if billingError}
               <div
                 class="p-4 rounded-xl border text-xs"
@@ -3439,7 +3569,7 @@
                     <h4 class="text-xs font-medium text-[var(--color-text-secondary)]">
                       Image &amp; voice API usage
                     </h4>
-                    <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">
+                    <p class="mt-1 text-[11px] text-[var(--color-text-muted)]">
                       Estimated cost from this app's image and voice calls. Estimates only. This is
                       not a bill. Entries older than 90 days are pruned.
                     </p>
@@ -3447,7 +3577,7 @@
                   <div class="flex gap-2">
                     <button
                       type="button"
-                      class="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-2.5 py-1.5 text-[10px] font-semibold text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)]"
+                      class="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)]"
                       onclick={() => void loadApiUsage()}
                     >
                       <RefreshCw size={12} class={apiUsageLoading ? 'animate-spin' : ''} />
@@ -3455,7 +3585,7 @@
                     </button>
                     <button
                       type="button"
-                      class="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-2.5 py-1.5 text-[10px] font-semibold text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)]"
+                      class="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)]"
                       onclick={() => void exportUsageCsv()}
                     >
                       <Download size={12} /> CSV
@@ -3555,6 +3685,19 @@
                 remains available while this finishes.
               </div>
             {/if}
+            {#if billingLiveError && !billingLiveLoading}
+              <div
+                class="p-4 rounded-xl border text-xs"
+                style="border-color: var(--color-error); color: var(--color-error); background: var(--color-error-bg);"
+              >
+                Live billing data unavailable: {billingLiveError}
+                <button
+                  type="button"
+                  class="ml-2 underline"
+                  onclick={() => loadBillingCredits(true)}>Retry</button
+                >
+              </div>
+            {/if}
             <!-- CLI subscriptions: account-separated local usage + quota burn -->
             {#if billingCredits?.cliUsage?.length}
               <div class="space-y-4">
@@ -3563,7 +3706,7 @@
                     <h3 class="text-sm font-bold text-[var(--color-text-primary)]">
                       CLI subscriptions
                     </h3>
-                    <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">
+                    <p class="mt-1 text-[11px] text-[var(--color-text-muted)]">
                       Each detected profile is shown separately, with usage, quota, and provider
                       credits when reported by the account.
                     </p>
@@ -3588,7 +3731,7 @@
                                 : ''}
                             </div>
                             {#if cli.accountEmail || cli.accountLabel}
-                              <div class="text-[10px] text-[var(--color-text-muted)]">
+                              <div class="text-[11px] text-[var(--color-text-muted)]">
                                 {cli.accountEmail || 'CLI profile'}
                               </div>
                             {/if}
@@ -3608,7 +3751,7 @@
                           {/if}
                         </div>
                         <div
-                          class="flex flex-col items-end gap-0.5 text-[10px] text-[var(--color-text-muted)]"
+                          class="flex flex-col items-end gap-0.5 text-[11px] text-[var(--color-text-muted)]"
                         >
                           {#if cli.usageSource}
                             <span
@@ -3626,8 +3769,10 @@
                           {#if cli.quotaSource === 'live-cli-account'}
                             <span
                               class="font-medium text-[var(--color-success)]"
-                              title="Current account quota from agy /usage. It is not estimated from local token history"
-                              >Limits: live Antigravity account</span
+                              title="Current account quota reported by the provider's own account API. It is not estimated from local token history"
+                              >Limits: live {providersStore.getProviderDisplayLabel(
+                                cli.provider,
+                              )} account</span
                             >
                           {/if}
                         </div>
@@ -3683,7 +3828,7 @@
                                 ${cli.apiValueMinUsd.toFixed(4)} to ${cli.apiValueMaxUsd.toFixed(4)}
                               </div>
                               {#if (cli.apiValueCoverage === 'full' ? cli.apiFreshValueUsd : cli.apiFreshInputValueUsd) !== undefined}
-                                <div class="text-[9px] text-[var(--color-text-muted)]">
+                                <div class="text-[11px] text-[var(--color-text-muted)]">
                                   fresh-rate value ${(cli.apiValueCoverage === 'full'
                                     ? cli.apiFreshValueUsd
                                     : cli.apiFreshInputValueUsd
@@ -3691,13 +3836,13 @@
                                 </div>
                               {/if}
                               {#if cli.apiCacheAdjustedValueUsd !== undefined}
-                                <div class="text-[9px] text-[var(--color-accent)]">
+                                <div class="text-[11px] text-[var(--color-accent)]">
                                   observed cache reads ${cli.apiCacheAdjustedValueUsd.toFixed(4)}
                                 </div>
                               {/if}
                             </div>
                           </div>
-                          <div class="px-1 text-[9px] text-[var(--color-text-muted)]">
+                          <div class="px-1 text-[11px] text-[var(--color-text-muted)]">
                             Comparison value from OpenRouter’s official catalog, not the CLI’s
                             actual subscription charge. The range includes published cache-read,
                             fresh-input, and cache-write scenarios when available.{#if cli.cacheAccounting === 'provider-reported'}
@@ -3767,7 +3912,7 @@
                               >
                                 {formatTokens(w.tokensIn + w.tokensOut)}
                               </div>
-                              <div class="text-[9px] text-[var(--color-text-muted)]">tokens</div>
+                              <div class="text-[11px] text-[var(--color-text-muted)]">tokens</div>
                             </div>
                           {/each}
                         </div>
@@ -3782,7 +3927,7 @@
                           <div
                             class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-3"
                           >
-                            <div class="flex items-center justify-between gap-3 text-[10px]">
+                            <div class="flex items-center justify-between gap-3 text-[11px]">
                               <span class="font-semibold text-[var(--color-text-secondary)]"
                                 >Usage trend</span
                               >
@@ -3826,7 +3971,7 @@
                             <div class="mt-2 h-6">
                               {#if activeTrendPoint}
                                 <div
-                                  class="flex items-center justify-between rounded-md bg-[var(--color-surface-2)] px-2 py-1 text-[10px]"
+                                  class="flex items-center justify-between rounded-md bg-[var(--color-surface-2)] px-2 py-1 text-[11px]"
                                 >
                                   <span class="text-[var(--color-text-secondary)]"
                                     >{formatUsageTrendDate(activeTrendPoint.date)}</span
@@ -3867,7 +4012,7 @@
                               />
                             </svg>
                             <div
-                              class="mt-1 flex justify-between text-[9px] text-[var(--color-text-muted)]"
+                              class="mt-1 flex justify-between text-[11px] text-[var(--color-text-muted)]"
                             >
                               <span>{formatUsageTrendDate(trend[0]?.date)}</span>
                               <span>{formatUsageTrendDate(trend[trend.length - 1]?.date)}</span>
@@ -3892,7 +4037,7 @@
                                 </div>
                                 {#if showSubscriptionApiEquivalent && (m.apiEquivalent || m.apiProvider)}
                                   <div
-                                    class="mt-0.5 flex items-center gap-1 text-[9px] text-[var(--color-text-muted)]"
+                                    class="mt-0.5 flex items-center gap-1 text-[11px] text-[var(--color-text-muted)]"
                                   >
                                     <span class="font-medium">API equivalent</span>
                                     <span
@@ -3916,7 +4061,7 @@
                                     m.apiValueMinUsd !== undefined ||
                                     m.apiCacheAdjustedValueUsd !== undefined)}
                                   <div
-                                    class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[9px] text-[var(--color-text-muted)]"
+                                    class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-[var(--color-text-muted)]"
                                   >
                                     {#if showSubscriptionApiEquivalent && m.apiValueMinUsd !== undefined && m.apiValueMaxUsd !== undefined}
                                       <span
@@ -3949,7 +4094,7 @@
                                 {/if}
                                 {#if showSubscriptionApiEquivalent && m.promptUsdPerMillion !== undefined}
                                   <div
-                                    class="mt-0.5 text-[9px] text-[var(--color-text-muted)]"
+                                    class="mt-0.5 text-[11px] text-[var(--color-text-muted)]"
                                     title={m.pricingHasThresholds
                                       ? 'OpenRouter publishes prompt size pricing thresholds. Koryphaios applies them to each recorded request.'
                                       : 'Official OpenRouter per-token pricing'}
@@ -3987,7 +4132,7 @@
                   <h3 class="text-sm font-bold text-[var(--color-text-primary)]">
                     CLI subscriptions
                   </h3>
-                  <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">
+                  <p class="mt-1 text-[11px] text-[var(--color-text-muted)]">
                     CLI profiles are being checked while usage history is indexed. Connected means a
                     provider probe succeeded; a detected profile has not been connected in
                     Koryphaios yet.
@@ -4009,7 +4154,7 @@
                         >
                           {account.email || account.label}
                         </div>
-                        <div class="text-[10px] text-[var(--color-text-muted)]">
+                        <div class="text-[11px] text-[var(--color-text-muted)]">
                           {account.plan
                             ? `${account.plan.toUpperCase()} plan · `
                             : ''}{account.connectionState === 'connected'
@@ -4023,6 +4168,14 @@
                     </div>
                   {/each}
                 </div>
+              </div>
+            {:else if billingLiveLoading && billingCredits}
+              <div
+                class="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-xs text-[var(--color-text-secondary)]"
+                role="status"
+              >
+                <RefreshCw size={13} class="animate-spin text-[var(--color-accent)]" />
+                Loading subscription usage…
               </div>
             {/if}
 
@@ -4044,14 +4197,36 @@
                       <div class="text-lg font-black font-mono text-[var(--color-success)]">
                         {bal.availableUsd != null
                           ? `$${bal.availableUsd.toFixed(2)}`
-                          : 'Not available'}
+                          : bal.allowanceUsedPercent != null
+                            ? `${Math.round(bal.allowanceUsedPercent)}% used`
+                            : 'Not available'}
                       </div>
                       <div class="text-xs font-medium text-[var(--color-text-muted)] mt-1">
                         {getProviderDisplayLabel(bal.provider)}
                       </div>
+                      {#if bal.availableUsd == null && (bal.plan || bal.allowanceResetsAt)}
+                        <div class="mt-1 text-[11px] text-[var(--color-text-muted)]">
+                          {[
+                            bal.plan ? `${bal.plan} plan` : '',
+                            bal.allowanceResetsAt
+                              ? `resets ${formatBalanceReset(bal.allowanceResetsAt)}`
+                              : '',
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </div>
+                      {/if}
                     </div>
                   {/each}
                 </div>
+              </div>
+            {:else if billingLiveLoading && billingCredits}
+              <div
+                class="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-xs text-[var(--color-text-secondary)]"
+                role="status"
+              >
+                <RefreshCw size={13} class="animate-spin text-[var(--color-accent)]" />
+                Loading provider balances…
               </div>
             {/if}
 
@@ -4060,7 +4235,7 @@
                 <h3 class="text-sm font-bold text-[var(--color-text-primary)]">
                   Tracked API spend by provider
                 </h3>
-                <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">
+                <p class="mt-1 text-[11px] text-[var(--color-text-muted)]">
                   Expand a provider for exact model-level tracked spend. Unknown pricing stays
                   unknown.
                 </p>
@@ -4081,7 +4256,7 @@
                           ))}
                       >
                         <span
-                          class="w-4 shrink-0 text-[10px] text-[var(--color-text-muted)]"
+                          class="w-4 shrink-0 text-[11px] text-[var(--color-text-muted)]"
                           aria-hidden="true"
                         >
                           {expandedBillingProviders[prov.name] ? '▼' : '▶'}
@@ -4096,7 +4271,7 @@
                             class="block truncate text-xs font-semibold text-[var(--color-text-primary)]"
                             >{getProviderDisplayLabel(prov.name)}</span
                           >
-                          <span class="text-[10px] font-mono text-[var(--color-text-muted)]"
+                          <span class="text-[11px] font-mono text-[var(--color-text-muted)]"
                             >{formatTokens((prov.tokensIn ?? 0) + (prov.tokensOut ?? 0))} tokens</span
                           >
                         </span>
@@ -4109,7 +4284,7 @@
                               : formatBillingUsd(prov.spendUsd ?? (prov.spendCents ?? 0) / 100)}
                           </span>
                           {#if prov.pricingIncomplete}<span
-                              class="text-[9px] text-[var(--color-warning)]"
+                              class="text-[11px] text-[var(--color-warning)]"
                               >pricing incomplete</span
                             >{/if}
                         </span>
@@ -4124,7 +4299,7 @@
                                 <div class="truncate font-mono text-[var(--color-text-secondary)]">
                                   {model.model}
                                 </div>
-                                <div class="text-[9px] text-[var(--color-text-muted)]">
+                                <div class="text-[11px] text-[var(--color-text-muted)]">
                                   {formatTokens((model.tokensIn ?? 0) + (model.tokensOut ?? 0))} tokens
                                 </div>
                               </div>
@@ -4137,7 +4312,7 @@
                                       model.spendUsd ?? (model.spendCents ?? 0) / 100,
                                     )}
                                 {#if model.pricingIncomplete}<div
-                                    class="text-[9px] font-sans font-normal text-[var(--color-warning)]"
+                                    class="text-[11px] font-sans font-normal text-[var(--color-warning)]"
                                   >
                                     incomplete
                                   </div>{/if}
@@ -4174,7 +4349,7 @@
                   <span class="block text-sm font-bold text-[var(--color-text-primary)]"
                     >Billing controls</span
                   >
-                  <span class="mt-1 block text-[10px] text-[var(--color-text-muted)]">
+                  <span class="mt-1 block text-[11px] text-[var(--color-text-muted)]">
                     Choose which providers contribute to Billing totals and live balance probes.
                     {#if billingCredits?.availableBillingProviders?.length}
                       {billingCredits.availableBillingProviders.filter((provider: string) =>
@@ -4184,7 +4359,7 @@
                   </span>
                 </span>
                 <span
-                  class="shrink-0 text-[10px] font-semibold text-[var(--color-text-muted)]"
+                  class="shrink-0 text-[11px] font-semibold text-[var(--color-text-muted)]"
                   aria-hidden="true"
                 >
                   {billingControlsExpanded ? 'Hide' : 'Show'}
@@ -4265,7 +4440,7 @@
                         </p>
                         <button
                           type="button"
-                          class="mt-2 min-h-9 rounded-lg px-3 text-[10px] font-medium text-[var(--color-accent)] hover:bg-[var(--color-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+                          class="mt-2 min-h-9 rounded-lg px-3 text-[11px] font-medium text-[var(--color-accent)] hover:bg-[var(--color-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
                           onclick={() => (billingControlsSearch = '')}>Clear search</button
                         >
                       </div>
@@ -4334,23 +4509,15 @@
         <!-- Teams Tab -->
         <div
           class={activeTab === 'teams'
-            ? 'flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-6 py-5 sm:px-8 flex flex-col'
+            ? 'flex-1 min-h-0 overflow-y-auto overflow-x-hidden'
             : 'hidden'}
         >
-          <div class="mx-auto flex w-full max-w-5xl flex-1 flex-col pb-8">
-            <div class="mb-5">
-              <h3
-                class="flex items-center gap-2 text-base font-semibold text-[var(--color-text-primary)]"
-              >
-                <Users size={18} class="text-[var(--color-accent)]" />
-                Team Collaboration
-              </h3>
-              <p class="text-xs leading-5 text-[var(--color-text-muted)] mt-1">
-                The host controls what guests can see, submit, and which models are available
-              </p>
-            </div>
-
-            <div class="mb-5 w-full border-b border-[var(--color-border)] pb-3">
+          <SettingsPage
+            width="wide"
+            title="Team access"
+            description="The host controls what guests can see, submit, and which models are available"
+          >
+            <div class="w-full">
               <SettingsSwitch
                 checked={showTeamSidebarShortcut}
                 label="Show Teams shortcut in sidebar"
@@ -4362,11 +4529,9 @@
 
             {#if collaborationStore.activeCollab}
               <!-- ── ACTIVE SESSION ── -->
-              <div class="w-full space-y-5">
+              <div class="w-full space-y-8">
                 <!-- Invite links -->
-                <div
-                  class="rounded-lg border border-transparent p-5 transition-colors hover:border-[var(--color-border-bright)] focus-within:border-[var(--color-border-bright)]"
-                >
+                <div>
                   <div
                     class="mb-4 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-accent)]"
                   >
@@ -4380,7 +4545,7 @@
                   </div>
 
                   {#if collaborationStore.activeCollab.relayEnabled}
-                    <h4 class="text-sm font-bold text-[var(--color-text-primary)] mb-5">
+                    <h4 class="text-sm font-semibold text-[var(--color-text-primary)] mb-3">
                       Browser invites
                     </h4>
                     <div class="space-y-3">
@@ -4448,26 +4613,24 @@
                 <!-- Pending approvals -->
                 {#if collaborationStore.pendingPrompts.length > 0}
                   <div
-                    class="rounded-3xl border border-[var(--color-warning)] bg-[var(--color-warning-bg)] p-6"
+                    class="rounded-xl border border-[var(--color-warning)] bg-[var(--color-warning-bg)] p-5"
                   >
                     <h4
-                      class="text-sm font-bold text-[var(--color-warning)] mb-4 flex items-center gap-2"
+                      class="text-sm font-semibold text-[var(--color-warning)] mb-3 flex items-center gap-2"
                     >
                       <Clock3 size={15} /> Pending Guest Prompts ({collaborationStore.pendingPrompts
                         .length})
                     </h4>
                     <div class="space-y-3">
                       {#each collaborationStore.pendingPrompts as p (p.promptId)}
-                        <div
-                          class="rounded-2xl bg-[var(--color-surface-1)] border border-[var(--color-border)] p-4"
-                        >
+                        <div class="rounded-lg bg-[var(--color-surface-1)] p-4">
                           <div class="flex items-start justify-between gap-4">
                             <div class="flex-1 min-w-0">
                               <div class="flex items-center gap-2 mb-1">
                                 <span class="text-xs font-medium text-[var(--color-warning)]"
                                   >{p.name}</span
                                 >
-                                <span class="text-[10px] text-[var(--color-text-muted)]"
+                                <span class="text-[11px] text-[var(--color-text-muted)]"
                                   >· {p.role}</span
                                 >
                               </div>
@@ -4475,7 +4638,7 @@
                                 {p.content}
                               </p>
                               {#if p.model}<p
-                                  class="mt-2 text-[10px] text-[var(--color-text-muted)]"
+                                  class="mt-2 text-[11px] text-[var(--color-text-muted)]"
                                 >
                                   Model: {p.model}{p.reasoningLevel
                                     ? ` · Reasoning: ${p.reasoningLevel}`
@@ -4517,25 +4680,25 @@
             {:else}
               <!-- ── NOT HOSTING ── -->
               {#if collaborationStore.joinedSessions.length}
-                <div class="mb-5 w-full border-b border-[var(--color-border)] pb-5">
-                  <div class="mb-5">
-                    <h4 class="text-sm font-bold text-[var(--color-text-primary)]">
+                <div class="w-full">
+                  <div class="mb-3">
+                    <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
                       Team sessions
                     </h4>
-                    <p class="mt-1 text-[11px] text-[var(--color-text-muted)]">
+                    <p class="mt-1 text-xs text-[var(--color-text-muted)]">
                       These are separate from your personal session history. Joining never replaces
                       or merges your local sessions.
                     </p>
                   </div>
                   <div class="space-y-3">
                     {#each collaborationStore.joinedSessions as team (team.sessionId)}<div
-                        class="flex items-center gap-3 rounded-md border border-transparent p-3 transition-colors hover:border-[var(--color-border-bright)] focus-within:border-[var(--color-border-bright)]"
+                        class="flex items-center gap-3 rounded-md p-3 transition-colors hover:bg-[var(--color-surface-2)]"
                       >
                         <div class="min-w-0 flex-1">
                           <div class="truncate text-xs font-bold text-[var(--color-text-primary)]">
                             {team.sessionName}
                           </div>
-                          <div class="mt-1 text-[10px] text-[var(--color-text-muted)]">
+                          <div class="mt-1 text-[11px] text-[var(--color-text-muted)]">
                             Access: {team.tierId} · Team workspace
                           </div>
                         </div>
@@ -4554,14 +4717,11 @@
                   </div>
                 </div>
               {/if}
-              <div class="grid w-full grid-cols-1 gap-5 md:grid-cols-2">
-                <div
-                  class="flex flex-col rounded-lg border border-transparent p-5 transition-colors hover:border-[var(--color-border-bright)] focus-within:border-[var(--color-border-bright)]"
-                >
-                  <div class="mb-3 text-[var(--color-success)]">
-                    <Zap size={20} />
-                  </div>
-                  <h4 class="mb-1 text-sm font-semibold">Team session</h4>
+              <div class="grid w-full grid-cols-1 items-start gap-x-10 gap-y-8 md:grid-cols-2">
+                <div class="flex flex-col">
+                  <h4 class="mb-1 text-sm font-semibold text-[var(--color-text-primary)]">
+                    Team session
+                  </h4>
                   <p class="mb-4 text-xs leading-5 text-[var(--color-text-muted)]">
                     Generate invite links for teammates to watch or co-pilot your active AI session
                     in real time.
@@ -4576,27 +4736,27 @@
                     />
                   </label>
 
-                  <div class="mb-4 flex-1 border-t border-[var(--color-border)] pt-4">
-                    <div class="mb-4 flex items-start justify-between gap-4">
+                  <div class="mb-4 border-t border-[var(--color-border)] pt-4">
+                    <div class="mb-3 flex items-start justify-between gap-4">
                       <div>
-                        <div class="text-xs font-bold text-[var(--color-text-primary)]">
+                        <div class="text-xs font-semibold text-[var(--color-text-primary)]">
                           Working in
                         </div>
-                        <div class="mt-0.5 text-[10px] text-[var(--color-text-muted)]">
+                        <div class="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
                           Workspace roots available to this hosted session.
                         </div>
                       </div>
                       <button
                         type="button"
                         onclick={addHostWorkspacePath}
-                        class="flex shrink-0 items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1.5 text-[10px] font-bold text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)]"
+                        class="flex shrink-0 items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1.5 text-[11px] font-bold text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)]"
                       >
                         <FolderOpen size={13} /> Add folder
                       </button>
                     </div>
 
                     {#if hostWorkspacePaths.length}
-                      <div class="space-y-3">
+                      <div class="space-y-2">
                         {#each hostWorkspacePaths as path, index (index)}
                           <div
                             class="group flex min-h-11 items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-0)] p-2.5 transition-colors focus-within:border-[var(--color-accent)]/60"
@@ -4628,10 +4788,10 @@
                       <button
                         type="button"
                         onclick={addHostWorkspacePath}
-                        class="flex min-h-24 w-full flex-col items-center justify-center rounded-xl border border-dashed border-[var(--color-border)] text-[var(--color-text-muted)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-secondary)]"
+                        class="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--color-border)] py-4 text-[var(--color-text-muted)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-secondary)]"
                       >
-                        <Plus size={18} />
-                        <span class="mt-2 text-[10px] font-medium">Add a workspace folder</span>
+                        <Plus size={16} />
+                        <span class="text-xs font-medium">Add a workspace folder</span>
                       </button>
                     {/if}
                   </div>
@@ -4640,25 +4800,22 @@
                     onclick={startHosting}
                     disabled={collaborationStore.loading ||
                       !hostWorkspacePaths.some((path) => path.trim())}
-                    class="btn btn-primary w-full py-3 mt-auto font-bold rounded-xl disabled:opacity-50"
+                    class="btn btn-primary w-full py-2.5 font-semibold rounded-lg"
                   >
                     {collaborationStore.loading ? 'Sharing…' : 'Share session'}
                   </button>
                 </div>
 
-                <div
-                  class="flex flex-col rounded-lg border border-transparent p-5 transition-colors hover:border-[var(--color-border-bright)] focus-within:border-[var(--color-border-bright)]"
-                >
-                  <div class="mb-3 text-[var(--color-info)]">
-                    <Keyboard size={20} />
-                  </div>
-                  <h4 class="mb-1 text-sm font-semibold">Connect to a team</h4>
+                <div class="flex flex-col">
+                  <h4 class="mb-1 text-sm font-semibold text-[var(--color-text-primary)]">
+                    Connect to a team
+                  </h4>
                   <p class="mb-4 text-xs leading-5 text-[var(--color-text-muted)]">
                     Enter the host's eight-character code. The host's join policy decides whether
                     you are admitted automatically and which access profile you receive.
                   </p>
                   <form
-                    class="mt-auto space-y-3"
+                    class="space-y-3"
                     onsubmit={(event) => {
                       event.preventDefault();
                       if (!collaborationStore.loading)
@@ -4697,10 +4854,10 @@
                     <button
                       type="submit"
                       disabled={!teamJoinCode.trim() || collaborationStore.loading}
-                      class="btn btn-primary w-full rounded-lg py-2.5 font-semibold disabled:opacity-40"
+                      class="btn btn-primary w-full rounded-lg py-2.5 font-semibold"
                       >{collaborationStore.loading ? 'Joining…' : 'Request to join'}</button
                     >
-                    <p class="text-center text-[10px] text-[var(--color-text-muted)]">
+                    <p class="text-center text-[11px] text-[var(--color-text-muted)]">
                       Browser guests can still use either signed invite link without installing
                       Koryphaios.
                     </p>
@@ -4711,14 +4868,14 @@
 
             <!-- ── SECOND SECTION: Share Models ── separate from collaboration;
                its own models-only invite link so it never grants session access. -->
-            <div class="mt-6 w-full border-t border-[var(--color-border)] pt-6">
+            <div class="w-full border-t border-[var(--color-border)] pt-8">
               <ModelSharingPanel
                 hostName={collaborationStore.activeCollab?.policy.hostName ||
                   teamHostName.trim() ||
                   'Host'}
               />
             </div>
-          </div>
+          </SettingsPage>
         </div>
 
         <!-- Notes Tab -->
@@ -4727,17 +4884,19 @@
             ? 'notes-settings-scroll flex-1 min-h-0 overflow-y-auto overflow-x-hidden'
             : 'hidden'}
         >
-          <div class="notes-settings-page">
-            <header class="notes-page-header">
-              <div>
-                <h3>Notes</h3>
-                <p>Your project’s documents, research, and saved findings.</p>
-                <KnowledgeScope
-                  compact
-                  scope="Project"
-                  description="Notes belong to the selected project folder. Subfolders organize its collection. Markdown and HTML files can appear as live documents. Pinning changes list order; inclusion in agent context is a separate choice."
-                />
-              </div>
+          <SettingsPage
+            width="narrow"
+            title="Notes"
+            description="Your project’s documents, research, and saved findings."
+          >
+            {#snippet meta()}
+              <KnowledgeScope
+                compact
+                scope="Project"
+                description="Notes belong to the selected project folder. Subfolders organize its collection. Markdown and HTML files can appear as live documents. Pinning changes list order; inclusion in agent context is a separate choice."
+              />
+            {/snippet}
+            {#snippet actions()}
               <button
                 type="button"
                 class="notes-open-action"
@@ -4747,7 +4906,7 @@
                     window.dispatchEvent(new CustomEvent('open-project-notes'));
                   })}>Open project notes<ArrowUpRight size={15} /></button
               >
-            </header>
+            {/snippet}
 
             <section class="notes-section" aria-labelledby="notes-collection-title">
               <div class="notes-section-heading">
@@ -4784,6 +4943,69 @@
                   value={notesStore.settings.defaultFolderPath}
                   onchange={(e) =>
                     notesStore.updateSettings({ defaultFolderPath: e.currentTarget.value || '/' })}
+                />
+              </div>
+            </section>
+
+            <section class="notes-section" aria-labelledby="notes-indexing-title">
+              <div class="notes-section-heading">
+                <h4 id="notes-indexing-title">Project indexing</h4>
+                <p>How far one pass indexes a large repository.</p>
+              </div>
+              <div class="notes-setting-row">
+                <div>
+                  <span class="notes-row-label">Soft index limit</span>
+                  <p>
+                    {(notesStore.settings.indexScanLimitEnabled ?? true)
+                      ? `Stop after ${(notesStore.settings.indexScanLimit ?? 50000).toLocaleString()} documents and offer to continue.`
+                      : 'No soft limit: each pass indexes the whole project.'}
+                  </p>
+                </div>
+                <div class="notes-row-controls">
+                  {#if notesStore.settings.indexScanLimitEnabled ?? true}
+                    <div class="notes-budget-control">
+                      <NumberStepper
+                        compact
+                        quiet
+                        value={notesStore.settings.indexScanLimit ?? 50000}
+                        min={1000}
+                        max={1000000}
+                        step={1000}
+                        label="Soft project index limit"
+                        onchange={(value) => notesStore.updateSettings({ indexScanLimit: value })}
+                      />
+                    </div>
+                  {/if}
+                  <SettingsSwitch
+                    checked={notesStore.settings.indexScanLimitEnabled ?? true}
+                    label="Soft index limit"
+                    description=""
+                    onchange={() =>
+                      void notesStore.updateSettings({
+                        indexScanLimitEnabled: !(notesStore.settings.indexScanLimitEnabled ?? true),
+                      })}
+                    minimal
+                    flat
+                    quiet
+                  />
+                </div>
+              </div>
+              <div class="notes-setting-row">
+                <div>
+                  <span class="notes-row-label">Limit notice</span>
+                  <p>Hide the notice shown when a pass reaches the soft limit.</p>
+                </div>
+                <SettingsSwitch
+                  checked={notesStore.settings.hideIndexLimitNotice ?? false}
+                  label="Hide index limit notice"
+                  description=""
+                  onchange={() =>
+                    void notesStore.updateSettings({
+                      hideIndexLimitNotice: !(notesStore.settings.hideIndexLimitNotice ?? false),
+                    })}
+                  minimal
+                  flat
+                  quiet
                 />
               </div>
             </section>
@@ -4923,7 +5145,7 @@
                 >Import memory as reference notes</button
               >
             </footer>
-          </div>
+          </SettingsPage>
         </div>
       </div>
     </div>
@@ -5004,6 +5226,7 @@
   <ColorPickerModal
     open={showColorPicker}
     target={colorPickerTarget}
+    scheme={colorPickerScheme}
     onClose={() => {
       showColorPicker = false;
     }}
@@ -5278,7 +5501,7 @@
       gap: 4px;
     }
     .provider-row-toggle > div:last-child {
-      margin-left: 44px;
+      margin-left: 32px;
     }
     .provider-row-refresh {
       padding-inline: 6px;
@@ -5287,39 +5510,13 @@
   .notes-settings-scroll {
     container: notes-settings / inline-size;
   }
-  .notes-settings-page {
-    width: min(100% - 80px, 880px);
-    margin: 0 auto;
-    padding: 36px 0;
-    color: var(--color-text-primary);
-  }
-  .notes-page-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 24px;
-    margin-bottom: 26px;
-  }
-  .notes-page-header h3 {
-    font-size: 26px;
-    font-weight: 600;
-    letter-spacing: -0.035em;
-    line-height: 1.2;
-  }
-  .notes-page-header p {
-    margin: 8px 0;
-    font-size: 14px;
-    line-height: 1.6;
-    color: var(--color-text-secondary);
-  }
   .notes-open-action {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
     flex-shrink: 0;
-    min-height: 36px;
-    margin-top: 2px;
+    min-height: 32px;
     padding: 0 12px;
     border-radius: 7px;
     background: var(--color-surface-3);
@@ -5331,22 +5528,15 @@
     background: var(--color-surface-4);
   }
   .notes-section {
-    margin-top: 20px;
-    padding-top: 20px;
-    border-top: 1px solid color-mix(in srgb, var(--color-text-muted) 14%, transparent);
-  }
-  .notes-page-header + .notes-section {
-    margin-top: 0;
-    padding-top: 0;
-    border-top: 0;
+    color: var(--color-text-primary);
   }
   .notes-section-heading {
-    margin-bottom: 12px;
+    margin-bottom: 8px;
   }
   .notes-section h4 {
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 600;
-    letter-spacing: -0.01em;
+    color: var(--color-text-primary);
   }
   .notes-section-heading p,
   .notes-disclosure summary p {
@@ -5470,9 +5660,8 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 24px;
-    margin-top: 24px;
   }
-  .notes-settings-page button:disabled {
+  .notes-settings-scroll button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }
@@ -5500,10 +5689,6 @@
       opacity: 1;
       transform: none;
     }
-  }
-  .settings-content > div:not(.hidden):not(.notes-settings-scroll):not(.skills-settings-workspace) {
-    width: min(100%, 1120px);
-    margin-inline: auto;
   }
   .settings-content :global(.input),
   .settings-content :global(input),
@@ -5550,15 +5735,6 @@
     outline-offset: 3px;
   }
   @container notes-settings (max-width: 600px) {
-    .notes-settings-page {
-      width: calc(100% - 40px);
-      padding-top: 26px;
-    }
-    .notes-page-header {
-      flex-direction: column;
-      gap: 14px;
-      margin-bottom: 28px;
-    }
     .notes-setting-row {
       gap: 16px;
     }

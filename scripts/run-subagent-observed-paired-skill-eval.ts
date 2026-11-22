@@ -37,9 +37,9 @@ import { listSkills } from '../backend/src/kory/skills';
 import {
   BUILTIN_SKILL_EVAL_MATERIALIZERS,
   BUILTIN_SKILL_EVAL_SCORERS,
-} from '../backend/src/kory/skill-eval-fixtures';
-import { runPairedSkillEvaluationV3 } from '../backend/src/kory/skill-eval-execution';
-import { skillEvaluationV5ContractHash } from '../backend/src/kory/skill-eval-contract-hash';
+} from '../backend/src/eval/skills/skill-eval-fixtures';
+import { runPairedSkillEvaluationV3 } from '../backend/src/eval/skills/skill-eval-execution';
+import { skillEvaluationV5ContractHash } from '../backend/src/eval/skills/skill-eval-contract-hash';
 import { skillEvalCampaignHarnessVersion } from './skill-v5-qualification-executor';
 
 const projectRoot = resolve(import.meta.dir, '..');

@@ -1,0 +1,32 @@
+[09:02:46] warn  [server] Multiple koryphaios.json files found in parent directories; using the innermost. The outer file(s) are ignored. {"chosen":"/Users/Shared/micah/Documents/koryphaios","shadowed":["/Users/Shared/micah/Documents","/Users/Shared/micah"]}
+{"type":"progress","complete":1,"failed":0,"totalQueued":6,"skill":"data-visualization","scenarioId":"data-visualization-full-task-1-individual","pairId":"data-visualization-full-task-1-individual:c6e38ab8-0777-48b6-bcef-9c4aa416e584","withSkill":false,"withoutSkill":true,"withSkillInfrastructureFailure":false,"withoutSkillInfrastructureFailure":false,"infrastructureFailure":false,"integrityFailure":false}
+{"type":"progress","complete":2,"failed":0,"totalQueued":6,"skill":"data-visualization","scenarioId":"data-visualization-full-task-1-individual","pairId":"data-visualization-full-task-1-individual:1ca858df-2bb7-41fe-b3e0-b1213a573c7f","withSkill":false,"withoutSkill":true,"withSkillInfrastructureFailure":false,"withoutSkillInfrastructureFailure":false,"infrastructureFailure":false,"integrityFailure":false}
+{"type":"progress","complete":3,"failed":0,"totalQueued":6,"skill":"data-visualization","scenarioId":"data-visualization-full-task-1-individual","pairId":"data-visualization-full-task-1-individual:a85e650a-3c7c-4f82-948b-2e717fbc27ef","withSkill":true,"withoutSkill":true,"withSkillInfrastructureFailure":false,"withoutSkillInfrastructureFailure":false,"infrastructureFailure":false,"integrityFailure":false}
+{"type":"progress","complete":4,"failed":0,"totalQueued":6,"skill":"data-visualization","scenarioId":"data-visualization-full-task-1-individual","pairId":"data-visualization-full-task-1-individual:f6b01fdb-d3ea-4388-81ed-8a9e96c09173","withSkill":true,"withoutSkill":false,"withSkillInfrastructureFailure":false,"withoutSkillInfrastructureFailure":false,"infrastructureFailure":false,"integrityFailure":false}
+{"type":"progress","complete":5,"failed":0,"totalQueued":6,"skill":"data-visualization","scenarioId":"data-visualization-full-task-1-individual","pairId":"data-visualization-full-task-1-individual:91d1f9e7-c789-4e56-b0bf-99ee6005ed4c","withSkill":true,"withoutSkill":true,"withSkillInfrastructureFailure":false,"withoutSkillInfrastructureFailure":false,"infrastructureFailure":false,"integrityFailure":false}
+{"type":"progress","complete":6,"failed":0,"totalQueued":6,"skill":"data-visualization","scenarioId":"data-visualization-full-task-1-individual","pairId":"data-visualization-full-task-1-individual:906c7d66-a442-418b-bb31-767ef682967e","withSkill":false,"withoutSkill":true,"withSkillInfrastructureFailure":false,"withoutSkillInfrastructureFailure":false,"infrastructureFailure":false,"integrityFailure":false}
+{
+  "schemaVersion": 1,
+  "executor": {
+    "mode": "codex",
+    "id": "codex-cli-isolated:codex-cli 0.167.0:reasoning=none:multi-turn",
+    "subject": "codex",
+    "provider": "codex",
+    "model": "gpt-6-luna",
+    "runtimeIdentity": "codex-cli 0.167.0:reasoning=none:multi-turn",
+    "executionMode": "multi-turn",
+    "reasoningEffort": "none",
+    "concurrency": 1,
+    "wallClockMs": 900000
+  },
+  "selectedSkills": 1,
+  "readyScenarios": 2,
+  "environmentBlockedScenarios": 0,
+  "skippedComplete": 0,
+  "queued": 6,
+  "completed": 6,
+  "failed": 0,
+  "failedScenarios": [],
+  "stoppedReason": null,
+  "notStarted": 0
+}

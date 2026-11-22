@@ -12,11 +12,28 @@ export type AppearanceThemePreset =
   | 'gruvbox'
   | 'tokyo'
   | 'solarized'
+  | 'kintsugi-light'
   | 'light'
-  | 'system';
+  | 'nord-light'
+  | 'tokyo-day'
+  | 'lagoon'
+  | 'everforest-light'
+  | 'gruvbox-light'
+  | 'rose-pine-dawn'
+  | 'catppuccin-latte';
+
+/** v1-only preset sentinel: adaptive mode is `mode: 'system'` in v2. */
+export type AppearanceThemePresetV1 = AppearanceThemePreset | 'system';
 
 export type AppearanceAccent =
-  'gold' | 'indigo' | 'cyan' | 'emerald' | 'amber' | 'rose' | 'violet' | 'custom';
+  | 'gold'
+  | 'indigo'
+  | 'cyan'
+  | 'emerald'
+  | 'amber'
+  | 'rose'
+  | 'violet'
+  | 'custom';
 
 export type AppearanceFont =
   | 'inter'
@@ -39,8 +56,27 @@ export interface AppearanceAccentValue {
   hover: string;
 }
 
-export interface AppearanceSettings {
+export interface AppearanceModeSettings {
   preset: AppearanceThemePreset;
+  accent: AppearanceAccent;
+  secondaryAccent: AppearanceAccent;
+  customAccent?: AppearanceAccentValue;
+  customSecondaryAccent?: AppearanceAccentValue;
+}
+
+/** v2: separate light/dark appearances plus an explicit mode. */
+export interface AppearanceSettingsV2 {
+  version: 2;
+  mode: 'dark' | 'light' | 'system';
+  font: AppearanceFont;
+  dark: AppearanceModeSettings;
+  light: AppearanceModeSettings;
+  updatedAt?: number;
+}
+
+/** Legacy v1 persisted shape; still accepted so an older frontend can write. */
+export interface AppearanceSettingsV1 {
+  preset: AppearanceThemePresetV1;
   accent: AppearanceAccent;
   secondaryAccent: AppearanceAccent;
   font: AppearanceFont;
@@ -48,6 +84,8 @@ export interface AppearanceSettings {
   customSecondaryAccent?: AppearanceAccentValue;
   updatedAt?: number;
 }
+
+export type AppearanceSettings = AppearanceSettingsV1 | AppearanceSettingsV2;
 
 function settingsPath(): string {
   const override = process.env.KORYPHAIOS_APPEARANCE_SETTINGS_PATH?.trim();

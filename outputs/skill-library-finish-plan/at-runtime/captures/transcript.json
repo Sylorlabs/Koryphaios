@@ -1,0 +1,156 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-11-15T21:42:26.859Z",
+  "recordedBy": "scripts/record-accessibility-verification-orca-session.ts",
+  "screenReader": "43.1 with Speech Dispatcher 0.11.4 on Debian bookworm (aarch64), Xvfb 1280x800",
+  "browser": "Chromium 156.0.8078.79 built on Debian GNU/Linux 12 (bookworm)",
+  "locale": "de-DE",
+  "page": "delete-confirmation-dialog",
+  "spoken": {
+    "page-ready": [],
+    "tab-to-help": [
+      "Tab Hilfe Druckknopf."
+    ],
+    "tab-to-open": [
+      "Tab Ordner löschen... Druckknopf."
+    ],
+    "activate-open": [
+      "Enter"
+    ],
+    "dialog-opened": [],
+    "dialog-tab-1": [
+      "Tab Endgültig löschen Druckknopf."
+    ],
+    "dialog-tab-2": [
+      "Tab German Seitenreiter."
+    ],
+    "dialog-tab-3": [
+      "Tab Translate options Druckknopf."
+    ],
+    "dialog-escape": [
+      "Escape"
+    ],
+    "reopen-dialog": [
+      "Enter"
+    ],
+    "confirm-reach": [
+      "Tab Abbrechen Druckknopf. Tab Endgültig löschen Druckknopf."
+    ],
+    "confirm-activate": [
+      "Enter Löschen fehlgeschlagen. Erneut versuchen."
+    ]
+  },
+  "utterances": [
+    {
+      "step": "tab-to-help",
+      "utterance": "Tab Hilfe Druckknopf."
+    },
+    {
+      "step": "tab-to-open",
+      "utterance": "Tab Ordner löschen... Druckknopf."
+    },
+    {
+      "step": "activate-open",
+      "utterance": "Enter"
+    },
+    {
+      "step": "dialog-tab-1",
+      "utterance": "Tab Endgültig löschen Druckknopf."
+    },
+    {
+      "step": "dialog-tab-2",
+      "utterance": "Tab German Seitenreiter."
+    },
+    {
+      "step": "dialog-tab-3",
+      "utterance": "Tab Translate options Druckknopf."
+    },
+    {
+      "step": "dialog-escape",
+      "utterance": "Escape"
+    },
+    {
+      "step": "reopen-dialog",
+      "utterance": "Enter"
+    },
+    {
+      "step": "confirm-reach",
+      "utterance": "Tab Abbrechen Druckknopf. Tab Endgültig löschen Druckknopf."
+    },
+    {
+      "step": "confirm-activate",
+      "utterance": "Enter Löschen fehlgeschlagen. Erneut versuchen."
+    }
+  ],
+  "steps": [
+    {
+      "name": "page-ready",
+      "keys": []
+    },
+    {
+      "name": "tab-to-help",
+      "keys": [
+        "Tab"
+      ]
+    },
+    {
+      "name": "tab-to-open",
+      "keys": [
+        "Tab"
+      ]
+    },
+    {
+      "name": "activate-open",
+      "keys": [
+        "Return"
+      ]
+    },
+    {
+      "name": "dialog-opened",
+      "keys": []
+    },
+    {
+      "name": "dialog-tab-1",
+      "keys": [
+        "Tab"
+      ]
+    },
+    {
+      "name": "dialog-tab-2",
+      "keys": [
+        "Tab"
+      ]
+    },
+    {
+      "name": "dialog-tab-3",
+      "keys": [
+        "Tab"
+      ]
+    },
+    {
+      "name": "dialog-escape",
+      "keys": [
+        "Escape"
+      ]
+    },
+    {
+      "name": "reopen-dialog",
+      "keys": [
+        "Return"
+      ]
+    },
+    {
+      "name": "confirm-reach",
+      "keys": [
+        "Tab",
+        "Tab"
+      ]
+    },
+    {
+      "name": "confirm-activate",
+      "keys": [
+        "Return"
+      ]
+    }
+  ]
+}

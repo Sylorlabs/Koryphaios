@@ -28,7 +28,6 @@ import {
   loadRepositoryInstructions,
   requiresMultiAgentDelegation,
 } from '../prompts';
-import { buildIntentDiscoveryBatch } from '../clarification-gate';
 import {
   buildEvalRunPlan,
   CORE_WORKFLOW_EVALS,
@@ -98,12 +97,15 @@ mock.module('../../pubsub', () => ({
 
 describe('KoryManager Orchestration', () => {
   let manager: KoryManager;
+  let sessionRows: Map<string, any>;
 
   beforeEach(() => {
     resetSessionAgentOverridesCache();
+    (mockProviderRegistry.resolveProvider as any).mockReset();
     // Chat execution resolves (and persists) that chat's own isolated
     // checkout, so the session stub has to round-trip the stored workspace.
     const rows = new Map<string, any>();
+    sessionRows = rows;
     const sessions = {
       get: async (id: string) => {
         const existing = rows.get(id);
@@ -183,6 +185,19 @@ describe('KoryManager Orchestration', () => {
     expect(compiled.systemPrompt).toContain('Suggest Goal Mode for long-running');
     expect(compiled.systemPrompt).toContain('Never create a goal or workflow without');
     expect(compiled.systemPrompt).toContain('ordinary questions, one-off fixes, or small edits');
+  });
+
+  test('manager prompt keeps one task on one machine and gives remote fan-out to the target', () => {
+    const compiled = compilePrompt({
+      role: 'manager',
+      provider: 'openai',
+      workingDirectory: testWorkDir,
+      taskContract: createTaskContract('Run this build on the linked server'),
+    });
+    expect(compiled.systemPrompt).toContain('Default to one computer per task');
+    expect(compiled.systemPrompt).toContain("target chat's manager owns that work");
+    expect(compiled.systemPrompt).toContain('continues if this app quits');
+    expect(compiled.systemPrompt).toContain('Do not mirror the same workstream');
   });
 
   test('critic role gets read tools plus approved verification commands and delegation', () => {
@@ -285,8 +300,11 @@ describe('KoryManager Orchestration', () => {
 
   test('material delegation reuses the manager when it is the only user-enabled model', async () => {
     manager['resolveIndependentRouting'] = mock(() => null);
-    manager['workerPipeline']['runWorkerPipeline'] = mock(
-      async (...args: any[]) => `worker:${args[2]}`,
+    // The manager branches on the structured outcome rather than the summary
+    // text, so the stub must target the method it actually calls. The expected
+    // routed model is unchanged.
+    manager['workerPipeline']['runWorkerPipelineDetailed'] = mock(
+      async (...args: any[]) => ({ success: true, text: `worker:${args[2]}` }),
     );
     const result = await manager.runWorkerPipeline(
       'session-independent',
@@ -322,10 +340,148 @@ describe('KoryManager Orchestration', () => {
     afterReply?.release();
   });
 
+  test('manager controls persist per session and apply to the manager snapshot', async () => {
+    const managerId = manager.agentControlSnapshots('session-controls')[0]!.agentId;
+    (mockProviderRegistry.resolveProvider as any).mockImplementation(async (model: string) =>
+      model === 'controlled-manager' || model === 'fallback-manager'
+        ? { name: 'openai' }
+        : undefined,
+    );
+
+    const updated = await manager.updateAgentControls('session-controls', managerId, {
+      model: 'openai:controlled-manager',
+      reasoningLevel: 'high',
+      fallbacks: [{ model: 'openai:fallback-manager', reasoningLevel: 'low' }],
+    });
+
+    expect(updated).toMatchObject({
+      model: 'controlled-manager',
+      provider: 'openai',
+      reasoningLevel: 'high',
+      fallbacks: [{ model: 'openai:fallback-manager', reasoningLevel: 'low' }],
+    });
+    expect(
+      manager['runtimes'].peek('session-controls')?.managerControls.get(managerId),
+    ).toMatchObject({
+      model: 'controlled-manager',
+      reasoningLevel: 'high',
+    });
+    expect(sessionRows.get('session-controls')?.agentOverrides?.managerControls?.[managerId]).toMatchObject({
+      model: 'controlled-manager',
+      provider: 'openai',
+      reasoningLevel: 'high',
+      fallbacks: [{ model: 'openai:fallback-manager', reasoningLevel: 'low' }],
+    });
+    expect(manager.agentControlSnapshots('session-controls')[0]).toMatchObject({
+      agentId: managerId,
+      controllable: true,
+      model: 'controlled-manager',
+      reasoningLevel: 'high',
+      fallbacks: [{ model: 'openai:fallback-manager', reasoningLevel: 'low' }],
+    });
+  });
+
+  test('manager controls survive a new manager instance and empty runtime cache', async () => {
+    const managerId = manager.agentControlSnapshots('session-controls-restart')[0]!.agentId;
+    (mockProviderRegistry.resolveProvider as any).mockImplementation(async (model: string) =>
+      model === 'restart-manager' ? { name: 'openai' } : undefined,
+    );
+    await manager.updateAgentControls('session-controls-restart', managerId, {
+      model: 'openai:restart-manager',
+      reasoningLevel: 'medium',
+    });
+
+    resetSessionAgentOverridesCache();
+    const restarted = new KoryManager(
+      mockProviderRegistry,
+      mockToolRegistry,
+      testWorkDir,
+      mockConfig as any,
+      { get: async (id: string) => sessionRows.get(id), update: async () => undefined } as any,
+      { getRecent: () => [], add: () => {}, getContextMessages: () => [] } as any,
+    );
+
+    const listed = JSON.parse(
+      await restarted.manageAgentsForSession('session-controls-restart', { action: 'list' }),
+    ) as Array<{ agentId: string; model: string; reasoningLevel?: string }>;
+    expect(listed[0]).toMatchObject({
+      agentId: managerId,
+      model: 'restart-manager',
+      reasoningLevel: 'medium',
+    });
+    expect(restarted.agentControlSnapshots('session-controls-restart')[0]).toMatchObject({
+      model: 'restart-manager',
+      reasoningLevel: 'medium',
+    });
+  });
+
+  test('worker follow-up advances to its fallback after a provider failure', async () => {
+    (mockProviderRegistry.resolveProvider as any).mockImplementation(async (model: string) =>
+      model === 'fallback-worker' ? { name: 'openai' } : { name: 'openai' },
+    );
+    const thread = {
+      sessionId: 'session-followup-fallback',
+      identity: {
+        id: 'worker-followup',
+        name: 'Worker',
+        role: 'coder',
+        model: 'primary-worker',
+        provider: 'openai',
+        domain: 'general',
+        glowColor: '',
+      },
+      kind: 'worker',
+      status: 'thinking',
+      providerName: 'openai',
+      modelId: 'primary-worker',
+      systemPrompt: 'system',
+      promptManifestHash: 'hash',
+      taskContractHash: 'task',
+      promptCache: undefined,
+      toolRole: 'worker',
+      reasoningLevel: 'medium',
+      fallbacks: [{ model: 'openai:fallback-worker', reasoningLevel: 'high' }],
+      maxTurns: 2,
+      maxTokens: 1000,
+      messages: [{ role: 'user', content: 'Continue' }],
+      threadEntries: [],
+      ctx: { sessionId: 'session-followup-fallback', workingDirectory: testWorkDir },
+      busy: false,
+      updatedAt: 0,
+    } as any;
+    manager['agentThreads'].set('worker-followup', thread);
+    manager['recordAgentThreadRunMembership'] = mock(async () => {});
+    manager['installAgentContextControls'] = mock(() => {});
+    manager['pruneAgentThreadContext'] = mock(() => 0);
+    manager['emitWSMessage'] = mock(() => {});
+    const used: string[] = [];
+    manager['processProviderTurn'] = mock(async (...args: any[]) => {
+      used.push(args[2]);
+      if (used.length === 1) throw new Error('429 rate limited');
+      return false;
+    });
+
+    await manager['runAgentThread']('worker-followup', undefined, false);
+
+    expect(used).toEqual(['primary-worker', 'fallback-worker']);
+    expect(thread.providerName).toBe('openai');
+    expect(thread.reasoningLevel).toBe('high');
+    expect(manager.agentControlSnapshots('session-followup-fallback')).toContainEqual(
+      expect.objectContaining({
+        agentId: 'worker-followup',
+        model: 'fallback-worker',
+        reasoningLevel: 'high',
+      }),
+    );
+  });
+
   test('critic gate never lets a producer verify its own work when no distinct model exists', async () => {
     manager['runHardChecks'] = mock(async () => ({ passed: true, output: 'checks passed' }));
     manager['resolveActiveRouting'] = mock(() => ({ model: 'producer-model', provider: 'openai' }));
     manager['resolveIndependentRouting'] = mock(() => null);
+    // Forced review mode: the Critic Auto decider path needs a live adapter,
+    // which no test env has; 'always' drives the same routing failure directly.
+    manager['settingsForSession'] = mock(() => ({ criticMode: 'always' }) as never);
 
     const result = await manager.runCriticGate(
       'session-critic-truth',
@@ -350,6 +506,9 @@ describe('KoryManager Orchestration', () => {
       model: 'producer-model',
       provider: 'openai',
     }));
+    // Forced review mode: the resolver rejection lives past the Critic Auto
+    // decider, which needs a live adapter no test env has.
+    manager['settingsForSession'] = mock(() => ({ criticMode: 'always' }) as never);
 
     const result = await manager.runCriticGate(
       'session-critic-self-route',
@@ -471,31 +630,6 @@ describe('KoryManager Orchestration', () => {
     ).toBe(true);
   });
 
-  test('adaptive discovery is conservative and always exposes an immediate stop', () => {
-    expect(
-      buildIntentDiscoveryBatch(
-        'Implement the fully specified parser contract with the existing AST and acceptance tests.',
-        'feature',
-        'adaptive',
-      ),
-    ).toEqual([]);
-    const questions = buildIntentDiscoveryBatch('make it better', 'ui', 'adaptive');
-    expect(questions.length).toBeGreaterThan(0);
-    expect(questions.length).toBeLessThanOrEqual(3);
-    expect(
-      questions.every((question) => question.options.at(-1) === 'Stop asking and implement now'),
-    ).toBe(true);
-    expect(questions[0]!.options[0]).toContain('(Recommended)');
-  });
-
-  test('adaptive discovery bypasses bare continuation intents instead of parking', () => {
-    for (const intent of ['continue', 'go', 'retry']) {
-      expect(buildIntentDiscoveryBatch(intent, 'feature', 'adaptive')).toEqual([]);
-      expect(buildIntentDiscoveryBatch(intent, 'ui', 'deep')).toEqual([]);
-      expect(buildIntentDiscoveryBatch(intent, 'question', 'adaptive')).toEqual([]);
-    }
-  });
-
   test('core workflow suite contains six scenarios for all eight task classes', () => {
     expect(CORE_WORKFLOW_EVALS).toHaveLength(48);
     const counts = CORE_WORKFLOW_EVALS.reduce<Record<string, number>>((all, scenario) => {
@@ -596,5 +730,45 @@ describe('KoryManager Orchestration', () => {
     expect(result.isError).toBe(true);
     expect(result.output).toContain('blocked by the user');
     expect(questions).toHaveLength(1);
+  });
+});
+
+describe('worktree guidance in the delegation prompt', () => {
+  const base = {
+    role: 'manager' as const,
+    provider: 'openai',
+    workingDirectory: testWorkDir,
+    taskContract: createTaskContract('Explain the architecture'),
+  };
+  const delegation = {
+    available: true,
+    pools: [{ domain: 'general' as const, models: ['openai:gpt-5'], unrestricted: false }],
+  };
+
+  test('auto tells the manager to decide and documents the HEAD-only worktree', () => {
+    const compiled = compilePrompt({
+      ...base,
+      delegation: { ...delegation, worktreeMode: 'auto' },
+    });
+    expect(compiled.systemPrompt).toContain(
+      'You decide worktree isolation for every delegation and must pass worktree explicitly',
+    );
+    expect(compiled.systemPrompt).toContain('a new worktree starts from the last commit');
+    expect(compiled.systemPrompt).toContain('uncommitted changes in the chat checkout');
+  });
+
+  test('always/never replace the per-task choice with the fixed user setting', () => {
+    const always = compilePrompt({
+      ...base,
+      delegation: { ...delegation, worktreeMode: 'always' },
+    });
+    expect(always.systemPrompt).toContain(
+      'The user set Worktree to Always for this chat',
+    );
+    const never = compilePrompt({
+      ...base,
+      delegation: { ...delegation, worktreeMode: 'never' },
+    });
+    expect(never.systemPrompt).toContain('The user set Worktree to Never for this chat');
   });
 });

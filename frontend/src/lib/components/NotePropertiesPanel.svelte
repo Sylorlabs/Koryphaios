@@ -103,9 +103,9 @@
   >
     <SlidersHorizontal size={13} class="text-[var(--color-accent)]" aria-hidden="true" />
     <span class="font-medium text-[var(--color-text-primary)]">Properties</span>
-    <span class="text-[10px] text-[var(--color-text-muted)]">{parsed.properties.length}</span>
+    <span class="text-[11px] text-[var(--color-text-muted)]">{parsed.properties.length}</span>
     {#if parsed.warnings.length > 0}
-      <span class="ml-1 inline-flex items-center gap-1 text-[10px] text-[var(--color-warning)]">
+      <span class="ml-1 inline-flex items-center gap-1 text-[11px] text-[var(--color-warning)]">
         <AlertTriangle size={10} aria-hidden="true" /> Needs source repair
       </span>
     {/if}
@@ -150,7 +150,7 @@
                 <div class="truncate text-xs font-medium text-[var(--color-text-primary)]">
                   {property.key}
                 </div>
-                <div class="text-[9px] uppercase tracking-wider text-[var(--color-text-muted)]">
+                <div class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
                   {property.type}
                 </div>
               </div>
@@ -218,7 +218,7 @@
           <div
             class="mt-3 grid grid-cols-[minmax(0,1fr)_150px_auto] items-end gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] p-2"
           >
-            <label class="min-w-0 text-[10px] text-[var(--color-text-muted)]">
+            <label class="min-w-0 text-[11px] text-[var(--color-text-muted)]">
               Name
               <input
                 type="text"
@@ -243,7 +243,7 @@
             />
             <button
               type="button"
-              class="inline-flex h-9 items-center gap-1 rounded-lg bg-[var(--color-accent)] px-3 text-xs font-medium text-[var(--color-accent-foreground)] disabled:opacity-40"
+              class="inline-flex h-9 items-center gap-1 rounded-lg bg-[var(--color-accent)] px-3 text-xs font-medium text-[var(--color-on-accent)] disabled:opacity-40"
               disabled={!newKey.trim() || readOnly}
               onclick={addProperty}
             >
@@ -261,7 +261,7 @@
         {/if}
 
         {#if parsed.properties.length === 0 && !adding}
-          <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
+          <p class="mt-2 text-[11px] text-[var(--color-text-muted)]">
             Properties stay in portable YAML frontmatter and can be queried by saved Bases.
           </p>
         {/if}

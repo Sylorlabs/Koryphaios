@@ -6,7 +6,7 @@ import {
   hasCookieMutationInventory,
   PRIVACY_WEB_DEVICE_SKILL_EVAL_MATERIALIZERS,
   PRIVACY_WEB_DEVICE_SKILL_EVAL_SCORERS,
-} from '../skill-eval-privacy-web-device-fixtures';
+} from '../../eval/skills/skill-eval-privacy-web-device-fixtures';
 
 const roots: string[] = [];
 const paymentOrigin = 'https://payments.example.test';

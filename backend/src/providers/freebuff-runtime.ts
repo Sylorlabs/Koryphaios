@@ -12,7 +12,7 @@ import {
 } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import seccompProfile from '../../../docker/freebuff-runtime/seccomp.json';
 import dockerfile from '../../../docker/freebuff-runtime/Dockerfile' with { type: 'text' };
 import {
@@ -26,15 +26,59 @@ import {
 } from '../runtime/platform';
 import { FREEBUFF_DYNAMIC_CATALOG_PROBE, parseFreebuffBundledCatalog, type FreebuffBundledCatalog } from './freebuff-bundled-catalog';
 import { discoverFreebuffAccounts, freebuffConfigDir } from './auth-utils';
+import {
+  FREEBUFF_MIN_RUNTIME_VERSION,
+  KNOWN_FREEBUFF_ARCHIVE_SHA256,
+  compareFreebuffVersions,
+  isValidFreebuffVersion,
+  resolveLatestFreebuffVersion,
+} from './freebuff-runtime-version';
 
-export const FREEBUFF_RUNTIME_VERSION = '0.2.16';
-export const FREEBUFF_RUNTIME_IMAGE = 'koryphaios/freebuff-runtime:0.2.16-bun1.3.14';
-export const FREEBUFF_RUNTIME_IMAGE_ARM64 = 'koryphaios/freebuff-runtime:0.2.16-bun1.3.14-arm64';
+const FREEBUFF_RUNTIME_REPOSITORY = 'koryphaios/freebuff-runtime';
+const FREEBUFF_BUN_VERSION = '1.3.14';
+/** Recipe rev: any Dockerfile change produces fresh image tags, never an
+ * optimistic reuse of a stale image under a moved version tag. */
+const FREEBUFF_RECIPE_REV = createHash('sha256').update(dockerfile).digest('hex').slice(0, 12);
+
+export type FreebuffDockerArchitecture = 'amd64' | 'arm64';
+
+export interface FreebuffRuntimeImageRef {
+  version: string;
+  image: string;
+}
+
+/** Versioned runtime image tag: pinned version, bun pin, recipe rev, arch. */
+export function freebuffRuntimeImageTag(
+  version: string,
+  architecture: FreebuffDockerArchitecture,
+): string {
+  return `${FREEBUFF_RUNTIME_REPOSITORY}:${version}-bun${FREEBUFF_BUN_VERSION}-r${FREEBUFF_RECIPE_REV}${architecture === 'arm64' ? '-arm64' : ''}`;
+}
+
+/** Parse a local tag only when it belongs to this exact recipe and arch. */
+function freebuffRuntimeTagVersion(
+  tag: string,
+  architecture: FreebuffDockerArchitecture,
+): string | null {
+  const suffix = architecture === 'arm64' ? '-arm64' : '';
+  const match = new RegExp(
+    `^(\\d{1,4}\\.\\d{1,4}\\.\\d{1,6})-bun${FREEBUFF_BUN_VERSION.replace(/\./g, '\\.')}-r${FREEBUFF_RECIPE_REV}${suffix}$`,
+  ).exec(tag);
+  const version = match?.[1];
+  return version &&
+    isValidFreebuffVersion(version) &&
+    compareFreebuffVersions(version, FREEBUFF_MIN_RUNTIME_VERSION) >= 0
+    ? version
+    : null;
+}
+
 export interface FreebuffRuntimeStatus {
   available: boolean;
   kind: 'native' | 'docker' | 'unavailable';
   reason?: string;
   version?: string;
+  /** Internal: the exact image turns must launch; never a guessed latest tag. */
+  image?: string;
 }
 export interface FreebuffRuntimeOptions {
   runRoot: string;
@@ -57,14 +101,32 @@ export interface FreebuffTurnRuntime {
   start(cliArgs: string[]): Promise<void>;
   cleanup(): Promise<void>;
 }
-type FreebuffDockerArchitecture = 'amd64' | 'arm64';
-
 function dockerArchitecture(env: NodeJS.ProcessEnv): FreebuffDockerArchitecture {
   return env.KORY_FREEBUFF_DOCKER_ARCH === 'arm64' ? 'arm64' : 'amd64';
 }
 
-function runtimeImage(architecture: FreebuffDockerArchitecture): string {
-  return architecture === 'arm64' ? FREEBUFF_RUNTIME_IMAGE_ARM64 : FREEBUFF_RUNTIME_IMAGE;
+/** Local versioned images for this recipe+arch, newest valid version first. */
+async function listFreebuffRuntimeImages(
+  probe: typeof command,
+  env: NodeJS.ProcessEnv,
+  architecture: FreebuffDockerArchitecture,
+): Promise<FreebuffRuntimeImageRef[]> {
+  const output = await probe(
+    'docker',
+    ['image', 'ls', FREEBUFF_RUNTIME_REPOSITORY, '--format', '{{.Tag}}'],
+    30_000,
+    env,
+  );
+  return output
+    .split('\n')
+    .map((tag) => tag.trim())
+    .filter(Boolean)
+    .map((tag) => {
+      const version = freebuffRuntimeTagVersion(tag, architecture);
+      return version ? { version, image: `${FREEBUFF_RUNTIME_REPOSITORY}:${tag}` } : null;
+    })
+    .filter((entry): entry is FreebuffRuntimeImageRef => entry !== null)
+    .sort((a, b) => compareFreebuffVersions(b.version, a.version));
 }
 
 function runtimePath(value: string, hostRoot: string, sandboxRoot: string): string {
@@ -86,6 +148,28 @@ export function getFreebuffRuntimeCatalog(): FreebuffBundledCatalog | null {
 }
 export function getFreebuffRuntimeStatus(): FreebuffRuntimeStatus {
   return { ...status };
+}
+
+/** Test seam: drain a pending update, then restore the pre-probe module
+ * state so sibling files in one process never inherit a probed runtime. */
+export async function resetFreebuffRuntimeStateForTests(): Promise<void> {
+  await imageSetup?.catch(() => {});
+  await imageUpdate?.catch(() => {});
+  await forcedUpdate?.catch(() => {});
+  await checking?.catch(() => {});
+  status = {
+    available: false,
+    kind: 'unavailable',
+    reason: 'Freebuff isolation runtime has not been checked. Reconnect to probe it.',
+  };
+  checkedAt = 0;
+  checking = undefined;
+  executionCatalog = null;
+  selectedRuntimeImage = undefined;
+  imageSetup = undefined;
+  imageUpdate = undefined;
+  forcedUpdate = undefined;
+  lastScheduleAt = 0;
 }
 
 /**
@@ -173,70 +257,305 @@ async function command(
 export interface FreebuffDockerSetupDependencies {
   environment: typeof freebuffDockerEnvironment;
   command: typeof command;
-  build: (env: NodeJS.ProcessEnv) => Promise<void>;
+  build: (
+    env: NodeJS.ProcessEnv,
+    version: string,
+    sha256: string,
+  ) => Promise<FreebuffRuntimeImageRef>;
+  resolveLatest: typeof resolveLatestFreebuffVersion;
+  /** Injectable only for tests; production always proves the real runtime. */
+  probeRuntime?: typeof probeFreebuffRuntime;
 }
+
+async function buildFreebuffRuntimeImage(
+  env: NodeJS.ProcessEnv,
+  version: string,
+  sha256: string,
+): Promise<FreebuffRuntimeImageRef> {
+  // Embedded recipe works in the compiled desktop backend too. stdin
+  // is the entire build context: no project, HOME, login or device keys enter it.
+  // Only the validated version and a hex archive hash ever enter the build.
+  if (!isValidFreebuffVersion(version))
+    throw new Error(`Refusing to build a Freebuff runtime for invalid version '${version}'`);
+  const architecture = dockerArchitecture(env);
+  const image = freebuffRuntimeImageTag(version, architecture);
+  const child = Bun.spawn(
+    [
+      'docker',
+      'build',
+      '--platform',
+      `linux/${architecture}`,
+      '--build-arg',
+      `FREEBUFF_VERSION=${version}`,
+      '--build-arg',
+      `FREEBUFF_SHA256=${/^[0-9a-f]{64}$/i.test(sha256) ? sha256 : ''}`,
+      '--tag',
+      image,
+      '-',
+    ],
+    { env, stdin: new Blob([dockerfile]), stdout: 'ignore', stderr: 'ignore' },
+  );
+  const timer = setTimeout(() => child.kill(), 10 * 60_000);
+  try {
+    if ((await child.exited) !== 0)
+      throw new Error('Freebuff runtime installation failed. Reconnect to retry.');
+  } finally {
+    clearTimeout(timer);
+  }
+  return { version, image };
+}
+
 const setupDependencies: FreebuffDockerSetupDependencies = {
   environment: freebuffDockerEnvironment,
   command,
-  async build(env) {
-    // Embedded pinned recipe works in the compiled desktop backend too. stdin
-    // is the entire build context: no project, HOME, login or device keys enter it.
-    const architecture = dockerArchitecture(env);
-    const child = Bun.spawn([
-      'docker', 'build', '--platform', `linux/${architecture}`, '--tag', runtimeImage(architecture), '-',
-    ], { env, stdin: new Blob([dockerfile]), stdout: 'ignore', stderr: 'ignore' });
-    const timer = setTimeout(() => child.kill(), 10 * 60_000);
-    try {
-      if (await child.exited !== 0) throw new Error('Freebuff runtime installation failed. Reconnect to retry.');
-    } finally { clearTimeout(timer); }
-  },
+  build: buildFreebuffRuntimeImage,
+  resolveLatest: resolveLatestFreebuffVersion,
 };
-let imageSetup: Promise<void> | undefined;
-/** App-owned, coalesced installation. Existing images are reused; the caller
- * still has to prove real bubblewrap isolation afterward. Never an optimistic pass. */
-export function ensureFreebuffDockerImage(
-  dependencies: FreebuffDockerSetupDependencies = setupDependencies,
+
+/** The image turns currently launch. Set only by a successful probe or swap —
+ * never by image discovery alone. */
+let selectedRuntimeImage: FreebuffRuntimeImageRef | undefined;
+let imageSetup: Promise<FreebuffRuntimeImageRef> | undefined;
+let imageUpdate: Promise<void> | undefined;
+let forcedUpdate: Promise<FreebuffRuntimeStatus> | undefined;
+let lastScheduleAt = 0;
+
+async function freebuffDockerEnvironmentWithResume(
+  dependencies: Pick<FreebuffDockerSetupDependencies, 'environment' | 'command'>,
+): Promise<NodeJS.ProcessEnv> {
+  try {
+    return await dependencies.environment();
+  } catch (error) {
+    // Resume an existing, correctly sized architecture profile without
+    // creating a VM or switching Docker's global context.
+    if (process.env.KORY_FREEBUFF_DOCKER_CONTEXT || process.env.DOCKER_CONTEXT || process.env.DOCKER_HOST)
+      throw error;
+    const profiles = (await dependencies.command('colima', ['list', '--json'], 10_000, controlEnv()))
+      .split('\n').filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+    const existing = profiles.find((profile) =>
+      profile.name === 'default' &&
+      ['x86_64', 'aarch64', 'arm64'].includes(String(profile.arch)) &&
+      profile.runtime === 'docker' &&
+      profile.status === 'Stopped');
+    if (!existing) throw error;
+    await dependencies.command('colima', ['start', 'default', '--activate=false'], 120_000, controlEnv());
+    return dependencies.environment();
+  }
+}
+
+/**
+ * Remove only this repository's same-arch tags beyond the current and the
+ * immediately previous version. Removal errors (e.g. an image in use) are
+ * ignored; no other repository is ever touched.
+ */
+async function gcFreebuffRuntimeImages(
+  probe: typeof command,
+  env: NodeJS.ProcessEnv,
+  architecture: FreebuffDockerArchitecture,
+  currentVersion: string,
 ): Promise<void> {
+  let local: FreebuffRuntimeImageRef[];
+  try {
+    local = await listFreebuffRuntimeImages(probe, env, architecture);
+  } catch {
+    return;
+  }
+  const keep = new Set([currentVersion]);
+  const previous = local.find(
+    (entry) => compareFreebuffVersions(entry.version, currentVersion) < 0,
+  );
+  if (previous) keep.add(previous.version);
+  for (const entry of local) {
+    if (keep.has(entry.version)) continue;
+    await probe('docker', ['image', 'rm', entry.image], 30_000, env).catch(() => {});
+  }
+}
+
+/**
+ * Coalesced background update: build the resolved target image, prove real
+ * bubblewrap isolation with it, then swap the runtime status atomically.
+ * Turns already running keep their container.
+ */
+function scheduleFreebuffImageUpdate(
+  env: NodeJS.ProcessEnv,
+  architecture: FreebuffDockerArchitecture,
+  target: string,
+  dependencies: FreebuffDockerSetupDependencies,
+  prebuilt?: FreebuffRuntimeImageRef,
+): void {
+  if (imageUpdate) return;
+  imageUpdate = (async () => {
+    try {
+      const built =
+        prebuilt ??
+        (await dependencies.build(
+          env,
+          target,
+          KNOWN_FREEBUFF_ARCHIVE_SHA256[target]?.[architecture] ?? '',
+        ));
+      const next = await (dependencies.probeRuntime ?? probeFreebuffRuntime)(built);
+      if (!next.available) return;
+      status = next;
+      selectedRuntimeImage = built;
+      checkedAt = Date.now();
+      await gcFreebuffRuntimeImages(
+        dependencies.command,
+        env,
+        architecture,
+        built.version,
+      );
+    } catch {
+      /* Keep the proven current runtime; a failed update never downgrades it. */
+    }
+  })().finally(() => {
+    imageUpdate = undefined;
+  });
+}
+
+/**
+ * App-owned, coalesced image candidate selection. Target = npm `latest` when
+ * resolvable, else the newest local image. The returned ref is only a
+ * CANDIDATE: selectedRuntimeImage changes solely through a successful probe
+ * or a swap path, so an unprobed local image can never serve turns. A newer
+ * local image while a proven image serves swaps in the background; a missing
+ * target builds in the background while the proven image keeps serving; with
+ * no local image the build is blocking.
+ */
+export function ensureFreebuffRuntimeImage(
+  dependencies: FreebuffDockerSetupDependencies = setupDependencies,
+): Promise<FreebuffRuntimeImageRef> {
   if (imageSetup) return imageSetup;
   imageSetup = (async () => {
-    let env: NodeJS.ProcessEnv;
-    try { env = await dependencies.environment(); } catch (error) {
-      // Resume an existing, correctly sized architecture profile without
-      // creating a VM or switching Docker's global context.
-      if (process.env.KORY_FREEBUFF_DOCKER_CONTEXT || process.env.DOCKER_CONTEXT || process.env.DOCKER_HOST)
-        throw error;
-      const profiles = (await dependencies.command('colima', ['list', '--json'], 10_000, controlEnv()))
-        .split('\n').filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
-      const existing = profiles.find((profile) =>
-        profile.name === 'default' &&
-        ['x86_64', 'aarch64', 'arm64'].includes(String(profile.arch)) &&
-        profile.runtime === 'docker' &&
-        profile.status === 'Stopped');
-      if (!existing) throw error;
-      await dependencies.command('colima', ['start', 'default', '--activate=false'], 120_000, controlEnv());
-      env = await dependencies.environment();
+    const env = await freebuffDockerEnvironmentWithResume(dependencies);
+    const architecture = dockerArchitecture(env);
+    const local = await listFreebuffRuntimeImages(dependencies.command, env, architecture);
+    const latest = await dependencies.resolveLatest().catch(() => null);
+    const target = latest ?? local[0]?.version;
+    const proven = selectedRuntimeImage;
+    if (target) {
+      const existing = local.find((entry) => entry.version === target);
+      if (existing) {
+        if (proven && existing.image !== proven.image) {
+          // Built by another process or an earlier run: probe it in the
+          // background and swap on success — never hand turns an unprobed tag.
+          scheduleFreebuffImageUpdate(env, architecture, target, dependencies, existing);
+          return proven;
+        }
+        return existing;
+      }
+      if (local.length > 0) {
+        scheduleFreebuffImageUpdate(env, architecture, target, dependencies);
+        return proven ?? local[0]!;
+      }
+      return dependencies.build(
+        env,
+        target,
+        KNOWN_FREEBUFF_ARCHIVE_SHA256[target]?.[architecture] ?? '',
+      );
     }
-    try {
-      const image = runtimeImage(dockerArchitecture(env));
-      await dependencies.command('docker', ['image', 'inspect', '--format', '{{.Id}}', image], 30_000, env);
-    } catch (error) {
-      // A busy/offline daemon is not a missing image. Never queue a rebuild on
-      // every transient transport failure.
-      if (!/no such (?:image|object)/i.test(String((error as { stderr?: string }).stderr ?? '')))
-        throw error;
-      await dependencies.build(env);
-    }
-  })().finally(() => { imageSetup = undefined; });
+    throw new Error(
+      'Freebuff isolated runtime image is not installed and the latest release could not be resolved. Check network access to the npm registry and reconnect.',
+    );
+  })().finally(() => {
+    imageSetup = undefined;
+  });
   return imageSetup;
 }
+
+/**
+ * Non-blocking latest check. Throttled to once per ten minutes and skipped
+ * while any image flow is in flight: this runs on status-render paths, which
+ * must never spawn docker work back to back.
+ */
+export function scheduleFreebuffRuntimeUpdate(
+  dependencies: FreebuffDockerSetupDependencies = setupDependencies,
+): void {
+  if (!isMac() && !isWindows()) return;
+  if (imageSetup || imageUpdate || forcedUpdate) return;
+  if (Date.now() - lastScheduleAt < 10 * 60_000) return;
+  lastScheduleAt = Date.now();
+  void ensureFreebuffRuntimeImage(dependencies).catch(() => {});
+}
+
+/**
+ * Forced update used by the 410 self-heal for a runtime that was rejected at
+ * `failedVersion`. Already-advanced status returns immediately, in-flight
+ * updates are awaited first, and all concurrent callers share one build.
+ * Throws an actionable error when Codebuff already requires more than the
+ * latest published release.
+ */
+export function forceFreebuffRuntimeUpdate(
+  failedVersion?: string,
+  signal?: AbortSignal,
+  dependencies: FreebuffDockerSetupDependencies = setupDependencies,
+): Promise<FreebuffRuntimeStatus> {
+  const alreadyAdvanced = () =>
+    status.available &&
+    status.version !== undefined &&
+    (!failedVersion ||
+      compareFreebuffVersions(status.version, failedVersion) > 0);
+  const begin = async (): Promise<FreebuffRuntimeStatus> => {
+    // Shared across concurrent callers — it must never observe one caller's
+    // signal, or cancelling that turn would fail the update for the others.
+    // Per-caller cancellation is a pre-check in run() plus the caller-side race.
+    if (imageUpdate) await imageUpdate.catch(() => {});
+    if (alreadyAdvanced()) return getFreebuffRuntimeStatus();
+    if (!isMac() && !isWindows()) {
+      throw new Error(
+        'the installed Freebuff CLI is retired; update it and reconnect',
+      );
+    }
+    const env = await dependencies.environment();
+    const architecture = dockerArchitecture(env);
+    const latest = await dependencies.resolveLatest({ force: true });
+    if (!latest)
+      throw new Error(
+        'the latest Freebuff release could not be resolved; check network access to the npm registry and retry',
+      );
+    if (failedVersion && compareFreebuffVersions(latest, failedVersion) <= 0)
+      throw new Error(
+        `Codebuff requires a newer Freebuff than the latest published release v${latest}`,
+      );
+    const local = await listFreebuffRuntimeImages(dependencies.command, env, architecture);
+    const built =
+      local.find((entry) => entry.version === latest) ??
+      (await dependencies.build(
+        env,
+        latest,
+        KNOWN_FREEBUFF_ARCHIVE_SHA256[latest]?.[architecture] ?? '',
+      ));
+    const next = await (dependencies.probeRuntime ?? probeFreebuffRuntime)(built);
+    if (!next.available)
+      throw new Error('the updated Freebuff runtime failed its isolation probe');
+    status = next;
+    selectedRuntimeImage = built;
+    checkedAt = Date.now();
+    await gcFreebuffRuntimeImages(dependencies.command, env, architecture, built.version);
+    return getFreebuffRuntimeStatus();
+  };
+  const run = async (): Promise<FreebuffRuntimeStatus> => {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    if (alreadyAdvanced()) return getFreebuffRuntimeStatus();
+    forcedUpdate ??= begin().finally(() => {
+      forcedUpdate = undefined;
+    });
+    return forcedUpdate;
+  };
+  return run();
+}
+
 export async function ensureFreebuffRuntimeReady(): Promise<FreebuffRuntimeStatus> {
   if (isMac() || isWindows()) {
-    try { await ensureFreebuffDockerImage(); } catch {
+    let candidate: FreebuffRuntimeImageRef;
+    try {
+      candidate = await ensureFreebuffRuntimeImage();
+    } catch {
       return {
         available: false, kind: 'unavailable',
         reason: 'Freebuff could not prepare its isolated Linux runtime. Make sure Docker is running, then reconnect. Koryphaios installs the runtime automatically.',
       };
     }
+    return refreshFreebuffRuntimeStatus(true, candidate);
   }
   return refreshFreebuffRuntimeStatus(true);
 }
@@ -331,6 +650,7 @@ export function validateFreebuffRuntimePaths(options: FreebuffRuntimeOptions): v
 export function freebuffDockerRunArgs(
   root: string,
   name: string,
+  image: string,
   allowNetwork = true,
   architecture: FreebuffDockerArchitecture = 'amd64',
   mountTarget = root,
@@ -375,13 +695,14 @@ export function freebuffDockerRunArgs(
     '--mount',
     `type=bind,src=${root},dst=${mountTarget}`,
     ...(!allowNetwork ? ['--network', 'none'] : []),
-    runtimeImage(architecture),
+    image,
   ];
 }
 
 async function makeRuntime(
   options: FreebuffRuntimeOptions,
   kind: 'native' | 'docker',
+  image?: string,
 ): Promise<FreebuffTurnRuntime> {
   validateFreebuffRuntimePaths(options);
   const { runRoot, runHome, workspace, privateTmp } = options;
@@ -396,6 +717,9 @@ async function makeRuntime(
   const socket = join(controlDir, 'tmux.sock');
   const dockerEnv = kind === 'docker' ? await freebuffDockerEnvironment() : undefined;
   const dockerArch = dockerEnv ? dockerArchitecture(dockerEnv) : undefined;
+  const runImage = kind === 'docker' ? image ?? selectedRuntimeImage?.image : undefined;
+  if (kind === 'docker' && !runImage)
+    throw new Error('Freebuff runtime image is not selected; reconnect to prepare it.');
   // Windows paths cannot be used as paths inside the Linux container. Docker
   // mounts the host run root at this stable POSIX location, while native Linux
   // and macOS keep the existing same-path mount contract.
@@ -519,6 +843,7 @@ async function makeRuntime(
            freebuffDockerRunArgs(
              runRoot,
              container,
+             runImage!,
              options.allowNetwork !== false,
              dockerArch ?? 'amd64',
              sandboxRoot,
@@ -641,10 +966,29 @@ async function makeRuntime(
 }
 
 /** Credential-free real kernel/filesystem + private tmux probe, used by readiness and setup. */
-export async function probeFreebuffRuntime(): Promise<FreebuffRuntimeStatus> {
+export async function probeFreebuffRuntime(
+  target?: FreebuffRuntimeImageRef,
+): Promise<FreebuffRuntimeStatus> {
   if (!isLinux() && !isMac() && !isWindows())
     throw new Error('Freebuff requires Linux or a Docker Linux runtime');
   const kind = isLinux() ? 'native' : 'docker';
+  // The probe must know exactly which image it is proving: an explicit target
+  // (update swap), the selected image, or the newest local versioned image.
+  let probeImage = target;
+  if (kind === 'docker' && !probeImage) {
+    if (selectedRuntimeImage) probeImage = selectedRuntimeImage;
+    else {
+      const env = await freebuffDockerEnvironment();
+      const local = await listFreebuffRuntimeImages(
+        command,
+        env,
+        dockerArchitecture(env),
+      );
+      probeImage = local[0];
+    }
+    if (!probeImage)
+      throw new Error('no Freebuff runtime image is installed');
+  }
   // Colima shares HOME, not Darwin's /private/var/folders temporary directory.
   // Only the fresh run subdirectory is mounted, never this parent or HOME.
   const probeParent =
@@ -675,6 +1019,7 @@ export async function probeFreebuffRuntime(): Promise<FreebuffRuntimeStatus> {
         allowNetwork: false,
       },
       kind,
+      probeImage?.image,
     );
     const script =
       'test ! -e "$1"; ! cat "$1" 2>/dev/null; ! (echo denied > "$1") 2>/dev/null; ! (echo denied > /usr/kory-denied) 2>/dev/null; echo allowed > "$2"; printf isolation-ok';
@@ -692,24 +1037,44 @@ export async function probeFreebuffRuntime(): Promise<FreebuffRuntimeStatus> {
     const catalog = parseFreebuffBundledCatalog(Buffer.from(
       await runtime.exec(runtime.bunBinary, ['-e', FREEBUFF_DYNAMIC_CATALOG_PROBE, runtime.freebuffBinary]),
     ));
-    if (catalog.cliVersion !== FREEBUFF_RUNTIME_VERSION)
-      throw new Error('Freebuff execution catalog version does not match its runtime');
+    if (kind === 'docker') {
+      // The probed image's own version tag is the contract; never an optimistic pass.
+      if (catalog.cliVersion !== probeImage!.version)
+        throw new Error('Freebuff execution catalog version does not match its runtime image');
+    } else if (
+      !isValidFreebuffVersion(catalog.cliVersion) ||
+      compareFreebuffVersions(catalog.cliVersion, FREEBUFF_MIN_RUNTIME_VERSION) < 0
+    ) {
+      throw new Error(
+        `Freebuff ${catalog.cliVersion} is retired; version ${FREEBUFF_MIN_RUNTIME_VERSION} or newer is required`,
+      );
+    }
     await runtime.tmux(['new-session', '-d', '-s', runtime.session, 'sleep 15']);
     await runtime.tmux(['has-session', '-t', runtime.session]);
     await runtime.tmux(['kill-server']);
     executionCatalog = catalog;
-    return { available: true, kind, version: FREEBUFF_RUNTIME_VERSION };
+    return {
+      available: true,
+      kind,
+      version: kind === 'docker' ? probeImage!.version : catalog.cliVersion,
+      ...(probeImage ? { image: probeImage.image } : {}),
+    };
   } finally {
     await runtime?.cleanup();
     rmSync(root, { recursive: true, force: true });
   }
 }
-export async function refreshFreebuffRuntimeStatus(force = false): Promise<FreebuffRuntimeStatus> {
+export async function refreshFreebuffRuntimeStatus(
+  force = false,
+  target?: FreebuffRuntimeImageRef,
+): Promise<FreebuffRuntimeStatus> {
   if (checking) return checking;
   if (!force && checkedAt && Date.now() - checkedAt < 60_000) return getFreebuffRuntimeStatus();
   checking = (async () => {
     try {
-      status = await probeFreebuffRuntime();
+      status = await probeFreebuffRuntime(target);
+      if (status.available && status.image)
+        selectedRuntimeImage = { version: status.version ?? '', image: status.image };
     } catch (error) {
       executionCatalog = null;
       // Readiness must be actionable, but never echo commands/env/credential-bearing stderr.
@@ -743,5 +1108,6 @@ export async function createFreebuffTurnRuntime(
   const ready = await refreshFreebuffRuntimeStatus();
   if (!ready.available || ready.kind === 'unavailable')
     throw new Error(ready.reason || 'Freebuff runtime unavailable');
-  return makeRuntime(options, ready.kind);
+  // Turns always launch the PROVEN image from status, never a candidate ref.
+  return makeRuntime(options, ready.kind, ready.image);
 }

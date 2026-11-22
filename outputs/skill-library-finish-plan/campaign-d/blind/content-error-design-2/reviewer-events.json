@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "reviewerId": "logfare-stateless-797f6286-3852-4e39-af22-e0f4cfb5e7cc",
+  "completed": true,
+  "output": "{\"artifactA\":{\"passed\":true,\"quality\":0.85,\"verification\":0.8,\"integrityFailure\":false,\"evidence\":[\"result.md provides a full diagnostic-language contract: scope boundary preserving semantics, category inventory for parse/name-resolution/type/capability/codegen, terminology and certainty rules, and a message structure ordering observed result → construct/location → supported facts → conditional action.\",\"Representative rewrite set covers all five families with before/after patterns and explicit certainty triggers; candidates are labeled 'Possible match' and fixes 'Suggested change', never asserted as fact.\",\"Privacy review table excludes raw internal names and private correlation data from prose, requires approved public-term mapping, and omits unreviewed fields; correctly notes field-level inventory is unavailable.\",\"Content boundary is explicit: wording and review process only, no change to categories, spans, symbol resolution, or fix generation.\",\"Verification.md documents negative/recovery paths (missing expectation, missing types, no candidate, unknown codegen cause, unknown privacy class) and lists unavailable checks honestly.\",\"evidence-map.json parses, covers all five falsifiable checks, traces E01–E04, and marks paired-experiment-report as external-evaluator rather than claiming it.\",\"Host deterministic scorer passed all structural/traceability/uncertainty checks.\",\"Minor weakness: examples are generic placeholders because packet lacks fixtures/glossary; acknowledged as limitation rather than fabricated.\"]},\"artifactB\":{\"passed\":false,\"quality\":0.05,\"verification\":0.0,\"integrityFailure\":false,\"evidence\":[\"No changes were made to the workspace: changes array is empty, so result.md, verification.md, and evidence-map.json remain TODO stubs.\",\"finalOutput only describes intent ('I'll complete those artifacts') and does not deliver the contract, rewrites, privacy review, or validation plan.\",\"Host deterministic scorer failed substantive result, verification, evidence map, claim schema, traceability, check coverage, and artifact accounting.\",\"No representative rewrites, no terminology/certainty rules, no privacy review, no comprehension plan were produced.\",\"Only uncertainty preservation passed, trivially, because nothing was claimed.\"]},\"preference\":\"A\",\"rationale\":[\"Artifact A delivers all required artifacts with substantive content covering every falsifiable check, while Artifact B produced no artifacts at all (empty changes, TODO stubs).\",\"A correctly separates observed failure from inferred cause and candidate fixes, satisfying the certainty check; B has no rewrites to evaluate.\",\"A includes a privacy review excluding internal names and correlation data; B has none.\",\"A explicitly preserves compiler semantics as a scope boundary; B has no content.\",\"A honestly marks unavailable evidence (fixtures, glossary, field mappings, paired experiment) rather than fabricating; B's only passing dimension is trivial uncertainty preservation.\",\"A's evidence map is complete and traceable; B's is an empty stub.\"]}",
+  "events": [
+    {
+      "type": "review.started",
+      "reviewerId": "logfare-stateless-797f6286-3852-4e39-af22-e0f4cfb5e7cc"
+    },
+    {
+      "type": "review.completed",
+      "reviewerId": "logfare-stateless-797f6286-3852-4e39-af22-e0f4cfb5e7cc",
+      "outputSha256": "a505ae8d13166a627709659e369af51de8a134ce1c136f59c232837a42fba3d2"
+    }
+  ],
+  "hostReceipt": {
+    "schemaVersion": 1,
+    "stageOnly": true,
+    "identitySource": "host-invocation-uuid",
+    "upstreamSessionObserved": true,
+    "requestedModel": "deepseek-v4.1-flash-1017",
+    "responseModel": "deepseek-v4.1-flash-1017",
+    "promptSha256": "1a4654db2c111fd7927e3484c68cfebddf3258caa2cf3cc1e4dc9971390b6883",
+    "requestBytes": 39250,
+    "responseSha256": "30ad8b9bdd65ac7170dc72d177e69c4c00918b0669ad76de2a556f504742e67e",
+    "outputSha256": "a505ae8d13166a627709659e369af51de8a134ce1c136f59c232837a42fba3d2",
+    "elapsedMs": 35989,
+    "osIsolationVerified": false,
+    "upstreamIdentityVerified": false,
+    "signed": false
+  }
+}

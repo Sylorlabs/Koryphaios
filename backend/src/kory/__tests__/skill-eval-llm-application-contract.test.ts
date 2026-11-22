@@ -2,8 +2,8 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createConceptFixtures, scoreConceptFixture } from '../skill-eval-concept-fixtures';
-import { SYSTEMS_PROTOCOL_CONCEPTS } from '../skill-eval-systems-protocol-concept-fixtures';
+import { createConceptFixtures, scoreConceptFixture } from '../../eval/skills/skill-eval-concept-fixtures';
+import { SYSTEMS_PROTOCOL_CONCEPTS } from '../../eval/skills/skill-eval-systems-protocol-concept-fixtures';
 
 const definition = SYSTEMS_PROTOCOL_CONCEPTS.find(
   (item) => item.id === 'llm-application-engineering-full-task-2-individual',

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { completePairForScenario } from '../backend/src/kory/skill-eval-blind-review';
-import { selectEligibleSkillEvaluationEvidence } from '../backend/src/kory/skill-eval-eligibility';
+import { completePairForScenario, selectBlindReviewQueue } from '../backend/src/eval/skills/skill-eval-blind-review';
+import { selectEligibleSkillEvaluationEvidence } from '../backend/src/eval/skills/skill-eval-eligibility';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import {
@@ -25,7 +25,7 @@ import { strictJson } from './reviewer-json';
 import {
   BUILTIN_SKILL_EVAL_MATERIALIZERS,
   BUILTIN_SKILL_EVAL_SCORERS,
-} from '../backend/src/kory/skill-eval-fixtures';
+} from '../backend/src/eval/skills/skill-eval-fixtures';
 import {
   CURRENT_SKILL_EVAL_CONTRACT_VERSION,
   listSkillEvaluationRuns,
@@ -38,15 +38,14 @@ import {
   findBlindJudgeArtifactMismatch,
   findBlindJudgeRubricViolation,
   type BlindPairExecutionEvidence,
-} from '../backend/src/kory/skill-eval-blind-review';
+} from '../backend/src/eval/skills/skill-eval-blind-review';
 import { loadV5SkillPackages, type V5FullTaskFixture } from '../backend/src/kory/skill-packages';
-import { skillEvaluationV5ContractHash } from '../backend/src/kory/skill-eval-contract-hash';
-import type { SkillEvalScenarioV3 } from '../backend/src/kory/skill-eval-harness';
+import { skillEvaluationV5ContractHash } from '../backend/src/eval/skills/skill-eval-contract-hash';
+import type { SkillEvalScenarioV3 } from '../backend/src/eval/skills/skill-eval-harness';
 import { listSkills } from '../backend/src/kory/skills';
 import {
-  buildSkillStewardDisplayLabel,
   getSkillSteward,
-  isChatGptWebSkillStewardIdentity,
+  isEligibleBlindReviewerProvenance,
 } from '../backend/src/kory/skill-stewards';
 
 const projectRoot = resolve(import.meta.dir, '..');
@@ -54,21 +53,18 @@ const evaluationContractVersion = CURRENT_SKILL_EVAL_CONTRACT_VERSION;
 const BLIND_HARNESS_VERSION = 'v5-blind-semantic@8';
 const BLIND_EVALUATOR_ID = 'independent-blind-semantic-v7';
 /**
- * Record who actually graded. The steward display label is the trusted-reviewer
- * boundary: the promotion gate reads it to decide whether a blind review came
- * from the sanctioned channel. Forcing it onto every importer envelope made the
- * recorded provenance claim a ChatGPT Web identity the reviewer never had, so
- * the saved evidence could not be audited for the identity it asserted. A
- * reviewer that genuinely is the trusted channel keeps the steward label; every
- * other reviewer is recorded under its own provider.
+ * Record who actually graded, under its own name.
+ *
+ * No provider is the reviewer of record. Eligibility is independence from the
+ * skill author plus a blind assignment, not membership of a preferred vendor, so
+ * the label states the provider that produced the judgement and the skill it
+ * graded. Nothing is rewritten to another channel's name.
  */
 function blindReviewerDisplayLabel(
   skill: string,
   reviewer: { provider: string; model: string },
 ): string {
-  return isChatGptWebSkillStewardIdentity(reviewer.provider, reviewer.model)
-    ? buildSkillStewardDisplayLabel(skill)
-    : `${reviewer.provider} reviewer — ${skill}`;
+  return `${reviewer.provider} reviewer — ${skill}`;
 }
 const packages = loadV5SkillPackages(resolve(projectRoot, 'skills-v5')).packages;
 const currentByName = new Map(
@@ -390,13 +386,10 @@ const currentBlindReviews = evidenceEligibility.runs.filter((run) => {
   if (!current || !matchesCurrentSourceContract(run, current)) {
     return false;
   }
-  const provenance = run.evaluatorProvenance;
-  const steward = getSkillSteward(projectRoot, run.skill);
-  return Boolean(
-    provenance?.agentId &&
-    provenance.displayLabel === buildSkillStewardDisplayLabel(run.skill) &&
-    steward &&
-    provenance.agentId !== steward.agentId,
+  return isEligibleBlindReviewerProvenance(
+    run.skill,
+    run.evaluatorProvenance,
+    getSkillSteward(projectRoot, run.skill),
   );
 });
 const blockingBlindReviews = retryFailed
@@ -413,17 +406,49 @@ const pending = eligible.filter(
       `${item.skill}\0${item.task.id}\0${item.pair.withSkill.comparisonId ?? ''}`,
     ),
 );
-const currentReviewCountBySkill = new Map<string, number>();
-for (const run of blockingBlindReviews) {
-  currentReviewCountBySkill.set(run.skill, (currentReviewCountBySkill.get(run.skill) ?? 0) + 1);
+// A replaced pair is a new observation and needs its own adjudication; a pair that
+// was already judged at its current identity is never re-reviewed. The per-skill
+// cap bounds what this invocation stages, not the skill's lifetime review count,
+// which used to freeze any skill holding two passing reviews on one case and leave
+// a different case with no adjudication at all.
+// A blind review exists to adjudicate whether a reviewer's prose judgement tracks the
+// deterministic signal. On a pair where both arms scored identically there is nothing to
+// adjudicate, and the reviewer correctly returns a tie, which reads as weak evidence when
+// it is only weak staging. Stage the most discriminating pair for each skill first, with
+// the newest pair as the tie breaker. No acceptance rule changes: the same reviewer, the
+// same envelope, the same gate.
+function pairDiscrimination(item: (typeof pending)[number]): number {
+  const withSkill = item.pair.withSkill;
+  const withoutSkill = item.pair.withoutSkill;
+  const passGap = Math.abs(Number(Boolean(withSkill.passed)) - Number(Boolean(withoutSkill.passed)));
+  const qualityGap = Math.abs((withSkill.quality ?? 0) - (withoutSkill.quality ?? 0));
+  const verificationGap = Math.abs((withSkill.verification ?? 0) - (withoutSkill.verification ?? 0));
+  return passGap * 2 + qualityGap + verificationGap;
 }
-const queue = pending.filter((item, index, items) => {
-  if (maxPerSkill === Number.POSITIVE_INFINITY) return true;
-  const priorForSkill = items
-    .slice(0, index)
-    .filter((candidate) => candidate.skill === item.skill).length;
-  return (currentReviewCountBySkill.get(item.skill) ?? 0) + priorForSkill < maxPerSkill;
+const pendingByDiscrimination = [...pending].sort((left, right) => {
+  const delta = pairDiscrimination(right) - pairDiscrimination(left);
+  if (delta !== 0) return delta;
+  const leftAt = [left.pair.withSkill.recordedAt, left.pair.withoutSkill.recordedAt].sort().at(-1)!;
+  const rightAt = [right.pair.withSkill.recordedAt, right.pair.withoutSkill.recordedAt].sort().at(-1)!;
+  return rightAt.localeCompare(leftAt);
 });
+const queue = selectBlindReviewQueue(
+  pendingByDiscrimination.map((item) => ({
+    skill: item.skill,
+    scenarioId: item.task.id,
+    comparisonId: item.pair.withSkill.comparisonId!,
+    pairRecordedAt: [item.pair.withSkill.recordedAt, item.pair.withoutSkill.recordedAt].sort().at(-1)!,
+  })),
+  currentBlindReviews.map((run) => ({
+    skill: run.skill,
+    scenarioId: run.scenarioId ?? run.caseId,
+    comparisonId: run.comparisonId,
+    recordedAt: run.recordedAt,
+  })),
+  maxPerSkill,
+).map((selected) => pending.find((item) =>
+  item.skill === selected.skill && item.task.id === selected.scenarioId &&
+  item.pair.withSkill.comparisonId === selected.comparisonId)!);
 
 const persisted: SkillEvaluationRun[] = [];
 const failures: Array<{ skill: string; scenarioId: string; detail: string }> = [];
@@ -849,9 +874,26 @@ function ingestBlindReviews(path: string, writeEvaluation: boolean): void {
 }
 
 const preparedAssignments: PreparedAssignmentRecord[] = [];
+const unavailableAssignments: Array<{ assignmentId: string; reason: string }> = [];
 if (prepareOnly) {
   mkdirSync(pendingRoot, { recursive: true, mode: 0o700 });
-  for (const item of queue) preparedAssignments.push(prepareAssignment(item));
+  const preparedBySkill = new Map<string, number>();
+  for (const item of pending) {
+    const preparedForSkill = preparedBySkill.get(item.skill) ?? 0;
+    if (preparedForSkill >= maxPerSkill) continue;
+    // One unreadable historical artifact must not consume a capped slot and starve the rest of
+    // the skill: the pair is reported by id and reason as unavailable, and the next reviewable
+    // current pair takes the slot instead.
+    try {
+      preparedAssignments.push(prepareAssignment(item));
+      preparedBySkill.set(item.skill, preparedForSkill + 1);
+    } catch (error) {
+      unavailableAssignments.push({
+        assignmentId: assignmentIdFor(item),
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 }
 if (ingestPath) {
   mkdirSync(blindRoot, { recursive: true, mode: 0o700 });
@@ -883,6 +925,7 @@ console.log(
       excludedEvidence,
       skippedExistingReviews: eligible.length - pending.length,
       queuedPairs: queue.length,
+      unavailableAssignments,
       preparedAssignments: preparedAssignments.map((item) => ({
         assignmentId: item.assignmentId,
         skill: item.skill,

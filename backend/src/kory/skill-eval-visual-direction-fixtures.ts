@@ -346,7 +346,7 @@ function measuredTruncation(
 export function scoreRealDirectionFixture(
   root: string,
   scenario: string,
-): ReturnType<SkillEvalDeterministicScorer['score']> | Promise<ReturnType<SkillEvalDeterministicScorer['score']>> {
+): ReturnType<SkillEvalDeterministicScorer['score']> {
   return (async () => {
     const checks: Array<{ name: string; passed: boolean; detail: string }> = [];
     const add = (name: string, passed: boolean, detail: string) =>
@@ -372,7 +372,7 @@ export function scoreRealDirectionFixture(
     );
 
     const token = (list: Array<{ token?: string; role?: string }> | undefined, names: readonly string[]) =>
-      list && names.every((name) => list.some((entry) => entry.token === name && (entry.role ?? '').trim().length >= 20));
+      !!list && names.every((name) => list.some((entry) => entry.token === name && (entry.role ?? '').trim().length >= 20));
     const system = direction?.system;
     add(
       'type, spacing and color steps come from the supplied tokens',

@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "research-full-task-1-individual",
+  "sourceRecords": [
+    {
+      "id": "agent-skills-spec",
+      "sourceUrl": "https://agentskills.io/specification",
+      "file": "agent-skills-spec.html",
+      "sha256": "9181f4efe72daa1171ace26388745aec866acc231c3ca9e279f8d0cc9b317840",
+      "publisher": "agentskills.io",
+      "versionScope": "portable Agent Skills specification, capture 2026-09-01 before the 2026-09-04 cutoff",
+      "provenance": {
+        "kind": "internet-archive",
+        "timestamp": "20260901090451"
+      }
+    },
+    {
+      "id": "cursor-skills-docs",
+      "sourceUrl": "https://cursor.com/docs/skills",
+      "file": "cursor-skills-docs.html",
+      "sha256": "37ef27a9cecbc2714dd47a22c77aea64f5a3cfdf5146641e8d7c61968b1bbb60",
+      "publisher": "Cursor",
+      "versionScope": "Cursor Agent Skills documentation, capture 2026-09-02 before the 2026-09-04 cutoff",
+      "provenance": {
+        "kind": "internet-archive",
+        "timestamp": "20260902233357"
+      }
+    },
+    {
+      "id": "community-client-extension",
+      "sourceUrl": "https://github.com/btakita/skill-harness/blob/17a2d3fcdc9fe51569af3d525098704e42ac31df/SPEC.md",
+      "file": "skill-harness-spec.md",
+      "sha256": "f06969c51b516c8fc083dab279846b95b51c04f22e370945ee3dfc7b6b2d8b43",
+      "publisher": "btakita/skill-harness",
+      "versionScope": "SPEC.md at 17a2d3f, 2026-07-18, present-tense skill format",
+      "provenance": {
+        "kind": "github-commit",
+        "repository": "btakita/skill-harness",
+        "revision": "17a2d3fcdc9fe51569af3d525098704e42ac31df",
+        "path": "SPEC.md",
+        "blobSha": "a038f017e9af8f5ca3dec960264b7cd634b33705"
+      }
+    },
+    {
+      "id": "pre-support-internal-note",
+      "sourceUrl": "https://github.com/DVC2/cursor-agent-configs/blob/3d11e136405113ab5aa8be3f7e61b6cfa00e7cc3/examples/use_cases/cursor-mdc-rules-guide.md",
+      "file": "cursor-rules-guide.md",
+      "sha256": "941f4e8709c5bf505532a57f0445a05ecd72859e0c6e8b586c0b8913a7ce3de7",
+      "publisher": "DVC2/cursor-agent-configs",
+      "versionScope": "rules guide at 3d11e13, 2025-06-24, before client skills support",
+      "provenance": {
+        "kind": "github-commit",
+        "repository": "DVC2/cursor-agent-configs",
+        "revision": "3d11e136405113ab5aa8be3f7e61b6cfa00e7cc3",
+        "path": "examples/use_cases/cursor-mdc-rules-guide.md",
+        "blobSha": "26ccfa6c33f9481a575ee6a9e0f2ded00e9798ea"
+      }
+    }
+  ]
+}

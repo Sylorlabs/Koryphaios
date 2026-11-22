@@ -21,6 +21,7 @@ import {
   safeProviderFailureMessage,
 } from '../provider-diagnostics';
 import { appendBoundedProviderFrames } from '../bounded-provider-stream';
+import { recordProviderRateLimit } from '../../billing/rate-limits';
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 
@@ -265,6 +266,7 @@ export class OpenAICompatiblePlugin implements ProviderPlugin {
         signal: this.abortController.signal,
       });
 
+      recordProviderRateLimit(this.name, request.model, response.headers, response.status);
       if (!response.ok) {
         await response.body?.cancel().catch(() => undefined);
         // The body carries the gateway's own reason; classify from the status

@@ -20,10 +20,13 @@ import { isTransientStreamErrorText } from './provider-diagnostics';
 import { providerLog } from '../logger';
 import {
   createFreebuffTurnRuntime,
+  forceFreebuffRuntimeUpdate,
   getFreebuffRuntimeStatus,
   getFreebuffRuntimeCatalog,
   refreshFreebuffRuntimeStatus,
+  scheduleFreebuffRuntimeUpdate,
 } from './freebuff-runtime';
+import { compareFreebuffVersions } from './freebuff-runtime-version';
 import { prepareFreebuffBridge } from './freebuff-bridge-runtime';
 import { createKoryBridgeGrantLease } from './bridge-grant';
 import { buildProviderCliEnv } from './cli-environment';
@@ -314,6 +317,89 @@ export async function pasteFreebuffBuffer(
 /** Only adapter-owned messages may reach diagnostics; panes and child errors can contain secrets. */
 class FreebuffPtyError extends Error {}
 
+/** Codebuff retired the runtime this turn launched with (HTTP 410). Never
+ * yielded to the caller directly; the stream wrapper self-heals once. */
+class FreebuffUpdateRequiredError extends FreebuffPtyError {
+  constructor(
+    message: string,
+    readonly version?: string,
+  ) {
+    super(message);
+  }
+}
+
+/** The 0.2.36 TUI shows a native out-of-date screen instead of a composer. */
+export function freebuffUpdateRequiredPane(pane: string): boolean {
+  const screen = pane.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+  return /This version of Freebuff is out of date/i.test(screen);
+}
+
+interface FreebuffUpstreamError {
+  statusCode?: number;
+  code?: string;
+  message?: string;
+  isRetryable?: boolean;
+}
+
+/** Extract only the bounded upstream-error fields from a log row's data.error.
+ * requestBodyValues, url, stack and headers are never read into diagnostics. */
+function freebuffUpstreamError(data: Record<string, unknown>): FreebuffUpstreamError | null {
+  const error = data.error;
+  if (!freebuffRecord(error)) return null;
+  const upstream: FreebuffUpstreamError = {};
+  if (typeof error.statusCode === 'number' && Number.isFinite(error.statusCode))
+    upstream.statusCode = error.statusCode;
+  if (error.isRetryable === true) upstream.isRetryable = true;
+  if (typeof error.responseBody === 'string' && error.responseBody.length <= 64 * 1024) {
+    try {
+      const parsed: unknown = JSON.parse(error.responseBody);
+      if (freebuffRecord(parsed)) {
+        const inner = freebuffRecord(parsed.error) ? parsed.error : parsed;
+        if (typeof inner.code === 'string') upstream.code = inner.code;
+        else if (typeof inner.error === 'string') upstream.code = inner.error;
+        if (typeof inner.message === 'string') upstream.message = inner.message;
+      }
+    } catch {
+      /* An unparseable body contributes nothing; it is never surfaced raw. */
+    }
+  }
+  if (upstream.message === undefined && typeof error.message === 'string')
+    upstream.message = error.message;
+  return upstream;
+}
+
+function freebuffUpdateRequiredFromRow(
+  data: Record<string, unknown>,
+  msg = '',
+): boolean {
+  const error = data.error;
+  if (!freebuffRecord(error)) return false;
+  if (
+    typeof error.responseBody === 'string' &&
+    error.responseBody.includes('freebuff_update_required')
+  )
+    return true;
+  // A bare 410 on an unrelated row must never trigger a runtime rebuild; only
+  // the model-stream rows carry the retirement verdict.
+  return (
+    error.statusCode === 410 &&
+    (msg === 'Error in AI SDK stream' || msg === 'Agent execution failed')
+  );
+}
+
+/** Render the real upstream failure without prompt, request, url or token material. */
+function freebuffUpstreamErrorMessage(upstream: FreebuffUpstreamError): string {
+  const sanitized = (upstream.message ?? 'unknown upstream error')
+    .replace(/[\x00-\x1f\x7f]/g, ' ')
+    .replace(/(eyJ|sk-|cb-)[A-Za-z0-9._-]{10,}/g, '[redacted]')
+    .slice(0, 300)
+    .trim();
+  const detail = upstream.statusCode
+    ? `HTTP ${upstream.statusCode}${upstream.code ? `, ${upstream.code}` : ''}`
+    : (upstream.code ?? 'request failed');
+  return `Freebuff model request failed (${detail}): ${sanitized || 'no upstream detail'}`;
+}
+
 function checkAbort(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 }
@@ -352,9 +438,14 @@ export function freebuffStartupState(pane: string): FreebuffStartupState {
 
 /** Turn a native account-limit screen into an actionable provider error instead
  * of waiting for the MCP readiness deadline and reporting a misleading bridge
- * failure. */
+ * failure. The 0.2.36 concurrent-session gate offers "Enter: take over", which
+ * would kill the account's other live session; never auto-confirm it. */
 export function freebuffAccountLimitError(pane: string): string | null {
-  return /(?:not enough|insufficient|no) freebucks?/i.test(pane)
+  const screen = pane.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+  if (/concurrent-session limit/i.test(screen)) {
+    return 'Freebuff reports that the account concurrent-session limit across CLI and Desktop is reached. Close another Freebuff session or take it over in the Freebuff TUI, then retry.';
+  }
+  return /(?:not enough|insufficient|no) freebucks?/i.test(screen)
     ? 'Freebuff has no Freebucks available for this request. Add Freebucks or choose a currently free model, then retry.'
     : null;
 }
@@ -606,6 +697,44 @@ function matchPriceByName(displayName: string, prices: Record<string, number>): 
   return matches === 1 ? match : undefined;
 }
 
+/** Per-turn channel for an attempt to report a Codebuff runtime retirement to
+ * the stream wrapper without yielding a caller-visible error. */
+interface FreebuffAttemptState {
+  updateRequired?: { version?: string };
+}
+
+/**
+ * Best-effort graceful TUI exit before the forced teardown. Ctrl-C is the
+ * TUI's stop/quit key; sending it twice (stop, then quit) gives Freebuff's
+ * clean-exit path a chance to release its server-side session lease. This is
+ * DEFENSIVE: a stale crashed-session lease was observed once to produce the
+ * concurrent-session gate, but our own teardown leaving such a lease was
+ * never reproduced on back-to-back turns. Kept because it is bounded and
+ * cannot delay forced cleanup past the timeout; it never throws.
+ */
+async function gracefulFreebuffTuiExit(
+  runtime: FreebuffTurnRuntime | undefined,
+  timeoutMs = 5_000,
+): Promise<void> {
+  if (!runtime) return;
+  try {
+    await runtime.tmux(['send-keys', '-t', runtime.session, 'C-c']);
+    await Bun.sleep(400);
+    await runtime.tmux(['send-keys', '-t', runtime.session, 'C-c']);
+  } catch {
+    return;
+  }
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      await runtime.tmux(['has-session', '-t', runtime.session]);
+    } catch {
+      return;
+    }
+    await Bun.sleep(250);
+  }
+}
+
 const freebuffDependencies = {
   discoverAccounts: discoverFreebuffAccounts,
   findBinary: nativeFreebuffBinary,
@@ -620,6 +749,8 @@ const freebuffDependencies = {
   discoverAccountCatalog: getFreebuffModelCatalog,
   runtimeStatus: getFreebuffRuntimeStatus,
   refreshRuntimeStatus: refreshFreebuffRuntimeStatus,
+  scheduleRuntimeUpdate: scheduleFreebuffRuntimeUpdate,
+  forceRuntimeUpdate: forceFreebuffRuntimeUpdate,
   createRuntime: createFreebuffTurnRuntime,
   prepareBridge: prepareFreebuffBridge,
   createLease: createKoryBridgeGrantLease,
@@ -744,6 +875,7 @@ export class FreebuffProvider implements Provider {
 
   refreshModels(forceRefresh = false): Promise<ModelDef[]> {
     if (this.refreshInFlight) return this.refreshInFlight;
+    this.deps.scheduleRuntimeUpdate();
     const accounts = this.deps.discoverAccounts();
     const revision = catalogRevision(accounts, this.deps.findBinary);
     if (
@@ -776,7 +908,16 @@ export class FreebuffProvider implements Provider {
         const binary = this.deps.findBinary(account.profileDir);
         if (!binary) throw new Error('Freebuff executable is missing for an account');
         const catalog = await this.deps.discoverCatalog(binary);
-        const qualifiedRuntime = this.deps.runtimeStatus();
+        let qualifiedRuntime = this.deps.runtimeStatus();
+        if (
+          qualifiedRuntime.available &&
+          qualifiedRuntime.version &&
+          catalog.cliVersion !== qualifiedRuntime.version
+        ) {
+          // A host CLI self-update can race the cached probe: force one
+          // re-probe of the real runtime before refusing the account.
+          qualifiedRuntime = await this.deps.refreshRuntimeStatus(true);
+        }
         if (
           qualifiedRuntime.available &&
           qualifiedRuntime.version &&
@@ -870,7 +1011,94 @@ export class FreebuffProvider implements Provider {
     return this.refreshInFlight;
   }
 
+  /**
+   * Outer turn wrapper: runs one PTY attempt, and on a Codebuff 410 retirement
+   * performs a forced runtime update outside the attempt timer, then reruns the
+   * attempt exactly once. Never loops, and never retries after content or tool
+   * evidence was already emitted.
+   */
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
+    let emittedPayload = false;
+    let retried = false;
+    for (;;) {
+      const state: FreebuffAttemptState = {};
+      for await (const event of this.streamFreebuffAttempt(request, state)) {
+        if (event.type === 'content_delta' || event.type === 'tool_executed')
+          emittedPayload = true;
+        yield event;
+      }
+      const required = state.updateRequired;
+      if (!required) return;
+      const failed = required.version;
+      const retired = `Codebuff has retired Freebuff ${failed ?? 'runtime'}.`;
+      if (retried || emittedPayload) {
+        yield {
+          type: 'error',
+          error: `${retired} Koryphaios could not install a newer runtime: ${
+            emittedPayload
+              ? 'the turn had already produced output before the rejection'
+              : 'the updated runtime was still rejected'
+          }`,
+        };
+        return;
+      }
+      retried = true;
+      // The update may take minutes; give the UI a live state instead of a hang.
+      yield {
+        type: 'waiting',
+        waitingReason: 'Updating the Freebuff runtime to the latest release…',
+      };
+      // The build is coalesced and useful to the next turn: on cancellation we
+      // return promptly but let it finish in the background.
+      const update = this.deps.forceRuntimeUpdate(failed).then(
+        (status) => ({ status }),
+        (error: unknown) => ({ error }),
+      );
+      const abortWait = request.signal
+        ? new Promise<'aborted'>((resolve) => {
+            if (request.signal!.aborted) resolve('aborted');
+            else
+              request.signal!.addEventListener('abort', () => resolve('aborted'), {
+                once: true,
+              });
+          })
+        : undefined;
+      const outcome = await Promise.race(
+        abortWait ? [update, abortWait] : [update],
+      );
+      if (outcome === 'aborted') {
+        yield { type: 'error', error: 'Freebuff PTY turn cancelled.' };
+        return;
+      }
+      if ('error' in outcome) {
+        const reason =
+          outcome.error instanceof Error
+            ? outcome.error.message.split('\n')[0]!
+            : 'update failed';
+        yield {
+          type: 'error',
+          error: `${retired} Koryphaios could not install a newer runtime: ${reason.slice(0, 240)}`,
+        };
+        return;
+      }
+      const updated = outcome.status;
+      if (
+        !failed ||
+        (updated.version && compareFreebuffVersions(updated.version, failed) > 0)
+      )
+        continue;
+      yield {
+        type: 'error',
+        error: `${retired} Koryphaios could not install a newer runtime: the update did not advance past v${failed}`,
+      };
+      return;
+    }
+  }
+
+  private async *streamFreebuffAttempt(
+    request: StreamRequest,
+    state: FreebuffAttemptState,
+  ): AsyncGenerator<ProviderEvent> {
     let runRoot = '';
     let runtime: FreebuffTurnRuntime | undefined;
     let prepared: Awaited<ReturnType<typeof prepareFreebuffBridge>> | undefined;
@@ -888,13 +1116,25 @@ export class FreebuffProvider implements Provider {
         ? Math.min(MAX_RUNTIME_MS, requestedLimit * 1000)
         : MAX_RUNTIME_MS;
     const timer = setTimeout(() => timeout.abort(), runtimeMs);
+    // Shared with the finally path: the graceful exit runs at most once.
+    let gracefulExit: Promise<void> | undefined;
+    const releaseSession = (timeoutMs = 3_000) =>
+      (gracefulExit ??= gracefulFreebuffTuiExit(runtime, timeoutMs));
     const onAbort = () => {
-      void stopRuntime()?.catch(() => {});
+      // Give the TUI's clean-exit path a bounded chance before the forced
+      // teardown; cancellation itself stays prompt.
+      void (async () => {
+        await releaseSession().catch(() => {});
+        await stopRuntime()?.catch(() => {});
+      })();
     };
     signal.addEventListener('abort', onAbort, { once: true });
+    let attemptVersion: string | undefined;
     try {
       checkAbort(signal);
       if (!this.config.disabled) await this.deps.refreshRuntimeStatus();
+      this.deps.scheduleRuntimeUpdate();
+      attemptVersion = this.deps.runtimeStatus().version;
       checkAbort(signal);
       if (!this.isAvailable()) {
         yield { type: 'error', error: FREEBUFF_PTY_UNAVAILABLE_ERROR };
@@ -1167,6 +1407,11 @@ export class FreebuffProvider implements Provider {
         }
         await tmux(['has-session', '-t', session]);
         const pane = await tmux(['capture-pane', '-p', '-J', '-t', session]);
+        if (freebuffUpdateRequiredPane(pane))
+          throw new FreebuffUpdateRequiredError(
+            'Freebuff reported its runtime as retired',
+            attemptVersion,
+          );
         const accountLimit = freebuffAccountLimitError(pane);
         if (accountLimit) throw new FreebuffPtyError(accountLimit);
         if (!sessionConfirmationSent && freebuffNeedsSessionConfirmation(pane)) {
@@ -1183,6 +1428,7 @@ export class FreebuffProvider implements Provider {
       const pendingToolResults = new Map<string, Record<string, unknown>>();
       phase = 'turn completion';
       let selectedModel: string | null = null;
+      let lastUpstreamError: FreebuffUpstreamError | null = null;
       const usageByModel = new Map<string, number[]>();
       let emittedContent = false;
       let complete = false;
@@ -1195,6 +1441,32 @@ export class FreebuffProvider implements Provider {
         requestInputTokens: [],
       };
 
+      // The runtime can die between the liveness check and the row drain (the
+      // TUI exits inside the container); both paths funnel here. A retired
+      // runtime exits its own TUI on the 410 answer, so drain the remaining
+      // log rows first — the self-heal must still see the retirement.
+      const throwRuntimeDead = async (): Promise<never> => {
+        checkAbort(signal);
+        const drained = await this.deps
+          .readLogRows(runtime!, logsRoot, offsets)
+          .catch(() => [] as { data?: unknown; msg?: unknown }[]);
+        if (
+          drained.some((row) =>
+            freebuffUpdateRequiredFromRow(
+              row.data && typeof row.data === 'object'
+                ? (row.data as Record<string, unknown>)
+                : {},
+              typeof row.msg === 'string' ? row.msg : '',
+            ),
+          )
+        )
+          throw new FreebuffUpdateRequiredError(
+            'Codebuff requires a newer Freebuff runtime',
+            attemptVersion,
+          );
+        throw new FreebuffPtyError('Freebuff TUI exited before producing a completion event');
+      };
+
       while (!complete) {
         checkAbort(signal);
         if (Date.now() - lastSessionCheck > 1_000) {
@@ -1202,20 +1474,35 @@ export class FreebuffProvider implements Provider {
           try {
             await tmux(['has-session', '-t', session]);
           } catch {
-            checkAbort(signal);
-            throw new FreebuffPtyError('Freebuff TUI exited before producing a completion event');
+            await throwRuntimeDead();
           }
-          const accountLimit = freebuffAccountLimitError(
-            await tmux(['capture-pane', '-p', '-J', '-t', session]),
-          );
+          const pane = await tmux(['capture-pane', '-p', '-J', '-t', session]);
+          if (freebuffUpdateRequiredPane(pane))
+            throw new FreebuffUpdateRequiredError(
+              'Freebuff reported its runtime as retired',
+              attemptVersion,
+            );
+          const accountLimit = freebuffAccountLimitError(pane);
           if (accountLimit) throw new FreebuffPtyError(accountLimit);
         }
-        const rows = await this.deps.readLogRows(runtime, logsRoot, offsets);
+        const rows = await this.deps
+          .readLogRows(runtime, logsRoot, offsets)
+          .catch(() => throwRuntimeDead());
         checkAbort(signal);
         for (const row of rows) {
           const msg = typeof row.msg === 'string' ? row.msg : '';
           const data =
             row.data && typeof row.data === 'object' ? (row.data as Record<string, unknown>) : {};
+          if (freebuffUpdateRequiredFromRow(data, msg))
+            throw new FreebuffUpdateRequiredError(
+              'Codebuff requires a newer Freebuff runtime',
+              attemptVersion,
+            );
+          if (
+            ['Error in AI SDK stream', 'Agent execution failed'].includes(msg) &&
+            (data.agentId === undefined || data.agentId === 'main-agent')
+          )
+            lastUpstreamError = freebuffUpstreamError(data) ?? lastUpstreamError;
           const loggedModel = typeof data.model === 'string' ? data.model : '';
           const requestContextTokens = freebuffUsageFromLogRow(row, loggedModel);
           if (loggedModel && requestContextTokens !== null) {
@@ -1263,8 +1550,21 @@ export class FreebuffProvider implements Provider {
             row,
             emittedContent && selectedModel !== null,
           );
-          if (completion === 'error')
+          if (completion === 'error') {
+            if (lastUpstreamError) {
+              throw Object.assign(
+                new FreebuffPtyError(freebuffUpstreamErrorMessage(lastUpstreamError)),
+                {
+                  transient:
+                    lastUpstreamError.isRetryable === true ||
+                    lastUpstreamError.statusCode === 429 ||
+                    (lastUpstreamError.statusCode !== undefined &&
+                      lastUpstreamError.statusCode >= 500),
+                },
+              );
+            }
             throw new FreebuffPtyError('Freebuff main prompt returned an error or no output');
+          }
           yield* freebuffToolEvents(data, pendingToolCalls, pendingToolResults, emittedTools);
           if (completion === 'success') complete = true;
         }
@@ -1308,6 +1608,12 @@ export class FreebuffProvider implements Provider {
       }
       yield { type: 'complete', finishReason: 'end_turn' };
     } catch (err: unknown) {
+      if (err instanceof FreebuffUpdateRequiredError) {
+        // Report retirement to the wrapper; the per-attempt cleanup below
+        // still runs before any retry launches.
+        state.updateRequired = { version: err.version ?? attemptVersion };
+        return;
+      }
       const aborted = signal.aborted || (err instanceof Error && err.name === 'AbortError');
       yield {
         type: 'error',
@@ -1319,11 +1625,18 @@ export class FreebuffProvider implements Provider {
               : err instanceof FreebuffPtyError
                 ? err.message
                 : `Freebuff PTY failed during ${phase}. No private diagnostic output was retained.`,
-        errorTransient: !aborted && isTransientStreamErrorText(err),
+        errorTransient:
+          !aborted &&
+          ((err as { transient?: boolean }).transient === true ||
+            isTransientStreamErrorText(err)),
       };
     } finally {
       clearTimeout(timer);
       signal.removeEventListener('abort', onAbort);
+      // Give the TUI a moment to run its clean-exit path (defensive lease
+      // release; shared with the abort path so it runs at most once) — then
+      // the forced cleanup still runs unconditionally.
+      await releaseSession(5_000);
       // Each cleanup is independent: one failure must not retain copied credentials or live grants.
       try {
         await stopRuntime();

@@ -29,6 +29,12 @@ describe('permission preset policy', () => {
     expect(decideToolPermission(plan, 'write_file').action).toBe('deny');
     expect(decideToolPermission(plan, 'record_work_note').action).toBe('deny');
     expect(decideToolPermission(plan, 'bash').action).toBe('deny');
+    // Plan mode governs workspace mutation, not orchestration. A manager may
+    // delegate investigation while planning; each worker still runs under its
+    // own permission policy and worktree grant.
+    expect(decideToolPermission(plan, 'delegate_to_worker').action).toBe('allow');
+    expect(decideToolPermission(plan, 'manage_agents').action).toBe('allow');
+    expect(decideToolPermission(plan, 'send_agent_message').action).toBe('allow');
   });
 
   it('makes YOLO bypass every local tool approval', () => {
@@ -100,6 +106,44 @@ describe('permission preset policy', () => {
     expect(decideToolPermission(permissive, 'edit_file').action).toBe('allow');
     expect(decideToolPermission(permissive, 'delete_file').action).toBe('allow');
   });
+
+  it('allows the session directory tools in Ask and Plan modes', () => {
+    const ask = policy('ask');
+    expect(decideToolPermission(ask, 'list_sessions').action).toBe('allow');
+    expect(decideToolPermission(ask, 'read_session').action).toBe('allow');
+
+    const plan = resolveToolPermissionPolicy(DEFAULT_AGENT_SETTINGS, 'plan');
+    expect(decideToolPermission(plan, 'list_sessions').action).toBe('allow');
+    expect(decideToolPermission(plan, 'read_session').action).toBe('allow');
+  });
+
+  it('auto-approves merge_chat_back in YOLO and asks in every other preset', () => {
+    expect(decideToolPermission(policy('yolo'), 'merge_chat_back').action).toBe('allow');
+    for (const mode of ['guarded', 'edits', 'ask', 'custom', 'sub-agent-user'] as const) {
+      const decision = decideToolPermission(policy(mode), 'merge_chat_back');
+      expect(decision.action, mode).toBe('ask');
+    }
+    expect(decideToolPermission(policy('guarded'), 'merge_chat_back').reason).toContain(
+      'needs your approval',
+    );
+  });
+
+  it('denies merge_chat_back in Plan mode and honors blocklist precedence', () => {
+    const plan = resolveToolPermissionPolicy(
+      { ...DEFAULT_AGENT_SETTINGS, permissionMode: 'yolo' },
+      'plan',
+    );
+    expect(decideToolPermission(plan, 'merge_chat_back').action).toBe('deny');
+    const blocked = policy('yolo', { toolBlocklist: ['merge_chat_back'] });
+    expect(decideToolPermission(blocked, 'merge_chat_back').action).toBe('deny');
+  });
+
+  it('applies normal mutating-tool policy to isolate_chat', () => {
+    expect(decideToolPermission(policy('yolo'), 'isolate_chat').action).toBe('allow');
+    expect(decideToolPermission(policy('ask'), 'isolate_chat').action).toBe('ask');
+    const plan = resolveToolPermissionPolicy(DEFAULT_AGENT_SETTINGS, 'plan');
+    expect(decideToolPermission(plan, 'isolate_chat').action).toBe('deny');
+  });
 });
 
 describe('ToolRegistry host enforcement', () => {
@@ -168,9 +212,28 @@ describe('ToolRegistry host enforcement', () => {
 });
 
 describe('resolveSandboxOptions', () => {
-  it('auto mode honors the natural sandboxed state', () => {
+  it('auto mode confines under guarded, including the direct manager path', () => {
+    // The permission preset now sets the strict end of the range: guarded is the
+    // user saying they want the tight posture, so every agent shell is confined.
     expect(resolveSandboxOptions(DEFAULT_AGENT_SETTINGS, true).isSandboxed).toBe(true);
-    expect(resolveSandboxOptions(DEFAULT_AGENT_SETTINGS, false).isSandboxed).toBe(false);
+    expect(resolveSandboxOptions(DEFAULT_AGENT_SETTINGS, false).isSandboxed).toBe(true);
+    const standard = { ...DEFAULT_AGENT_SETTINGS, permissionMode: 'edits' as const };
+    expect(resolveSandboxOptions(standard, true).isSandboxed).toBe(true);
+    expect(resolveSandboxOptions(standard, false).isSandboxed).toBe(false);
+  });
+
+  it('guarded closes network and path reach without removing a policy grant', () => {
+    const guarded = {
+      ...DEFAULT_AGENT_SETTINGS,
+      permissionMode: 'guarded' as const,
+      sandbox: { ...DEFAULT_AGENT_SETTINGS.sandbox, network: true, pathConfinement: false },
+    };
+    const resolved = resolveSandboxOptions(guarded, true);
+    expect(resolved.network).toBe(false);
+    expect(resolved.pathConfinement).toBe(true);
+    // Strictness narrows reach; it never refuses a capability the policy grants,
+    // so window capture stays available to a guarded session.
+    expect(resolved.isSandboxed).toBe(true);
   });
 
   it('always mode sandboxes even the direct manager path', () => {
@@ -207,22 +270,20 @@ describe('resolveSandboxOptions', () => {
     expect(resolved.metacharacters).toBe(true);
   });
 
-  it('YOLO permission mode does NOT disable the sandbox', () => {
-    // Approval and confinement are independent. YOLO removes prompts, not the
-    // kernel boundary — a worker running autonomously is exactly when the
-    // worktree grant must still be enforced.
+  it('YOLO permission mode leaves the shell unconstrained', () => {
+    // Yolo is the user saying the run is unconstrained, so the permission level
+    // decides confinement just as it decides prompts.
     const yolo = { ...DEFAULT_AGENT_SETTINGS, permissionMode: 'yolo' as const };
-    expect(resolveSandboxOptions(yolo, true).isSandboxed).toBe(true);
-    // The direct manager path is naturally unsandboxed, so YOLO changes nothing.
+    expect(resolveSandboxOptions(yolo, true).isSandboxed).toBe(false);
     expect(resolveSandboxOptions(yolo, false).isSandboxed).toBe(false);
 
-    // sandbox.mode='always' still overrides the natural state, as it always did.
+    // An explicit request for confinement still overrides the preset.
     const yoloAlways = {
       ...yolo,
       sandbox: { ...DEFAULT_AGENT_SETTINGS.sandbox, mode: 'always' as const },
     };
-    expect(resolveSandboxOptions(yoloAlways, true).isSandboxed).toBe(true);
     expect(resolveSandboxOptions(yoloAlways, false).isSandboxed).toBe(true);
+    expect(resolveSandboxOptions(yolo, true, 'always').isSandboxed).toBe(true);
   });
 
   it('workspace.sandbox=off disables confinement even for a naturally sandboxed agent', () => {
@@ -279,6 +340,23 @@ describe('sub-agent approval policy', () => {
     expect(resolveSubAgentSandboxOptions(settings, 'user', true).isSandboxed).toBe(true);
   });
 
+  it('a YOLO chat posture leaves workers unsandboxed like the manager', () => {
+    // The chat's durable YOLO preset disables OS confinement for workers too:
+    // their ToolContext carries the same sandbox posture as the manager and no
+    // mandatory workspace root. Non-YOLO postures keep the confinement.
+    const yolo = {
+      ...DEFAULT_AGENT_SETTINGS,
+      permissionMode: 'yolo' as const,
+      sandbox: { ...DEFAULT_AGENT_SETTINGS.sandbox, mode: 'off' as const },
+    };
+    expect(resolveSubAgentSandboxOptions(yolo, 'manager', true).isSandboxed).toBe(false);
+    const confined = {
+      ...DEFAULT_AGENT_SETTINGS,
+      sandbox: { ...DEFAULT_AGENT_SETTINGS.sandbox, mode: 'always' as const },
+    };
+    expect(resolveSubAgentSandboxOptions(confined, 'manager', true).isSandboxed).toBe(true);
+  });
+
   it("workspace.sandbox='off' leaves workers unconfined", () => {
     expect(
       resolveSubAgentSandboxOptions(DEFAULT_AGENT_SETTINGS, 'auto', true, 'off').isSandboxed,
@@ -296,7 +374,13 @@ describe('sub-agent approval policy', () => {
   it('manager mode honors the sandbox settings', () => {
     const settings = { ...DEFAULT_AGENT_SETTINGS };
     expect(resolveSubAgentSandboxOptions(settings, 'manager', true).isSandboxed).toBe(true);
-    expect(resolveSubAgentSandboxOptions(settings, 'manager', false).isSandboxed).toBe(false);
+    expect(resolveSubAgentSandboxOptions(settings, 'manager', false).isSandboxed).toBe(true);
+
+    // The chat's durable YOLO preset applies to delegated work too: a worker
+    // in a yolo chat runs unsandboxed like the manager, with no worktree jail.
+    const yolo = { ...DEFAULT_AGENT_SETTINGS, permissionMode: 'yolo' as const };
+    expect(resolveSubAgentSandboxOptions(yolo, 'auto', true).isSandboxed).toBe(false);
+    expect(resolveSubAgentSandboxOptions(yolo, 'auto', false).isSandboxed).toBe(false);
   });
 });
 

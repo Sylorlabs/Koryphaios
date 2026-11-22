@@ -3,20 +3,20 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { browserControlTest } from './browser-runtime-test-policy';
-import { auditSkillEvalExecutionReadiness } from '../skill-eval-execution';
-import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
-import { writeFixtureFile } from '../skill-eval-fixture-helpers';
-import { VUE_BROWSER_EVAL_CONSTANTS } from '../skill-eval-vue-browser-fixtures';
-import { NEXTJS_RUNTIME_EVAL_CONSTANTS } from '../skill-eval-nextjs-runtime-fixtures';
+import { auditSkillEvalExecutionReadiness } from '../../eval/skills/skill-eval-execution';
+import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
+import { writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
+import { VUE_BROWSER_EVAL_CONSTANTS } from '../../eval/skills/skill-eval-vue-browser-fixtures';
+import { NEXTJS_RUNTIME_EVAL_CONSTANTS } from '../../eval/skills/skill-eval-nextjs-runtime-fixtures';
 import {
   EXTERNAL_ENVIRONMENT_GATES,
   EXTERNAL_ENVIRONMENT_SKILL_EVAL_MATERIALIZERS,
   EXTERNAL_ENVIRONMENT_SKILL_EVAL_SCORERS,
-} from '../skill-eval-external-environment-fixtures';
+} from '../../eval/skills/skill-eval-external-environment-fixtures';
 import {
   BUILTIN_SKILL_EVAL_MATERIALIZERS,
   BUILTIN_SKILL_EVAL_SCORERS,
-} from '../skill-eval-fixtures';
+} from '../../eval/skills/skill-eval-fixtures';
 import { loadV5SkillPackages } from '../skill-packages';
 
 describe('external full-task environment gates', () => {
@@ -35,7 +35,7 @@ describe('external full-task environment gates', () => {
       packages.flatMap((skill) => skill.evaluation.tasks.map((task) => task.id)),
     );
     const gatedScenarioIds = EXTERNAL_ENVIRONMENT_GATES.flatMap((gate) => gate.scenarioIds);
-    expect(gatedScenarioIds).toHaveLength(63);
+    expect(gatedScenarioIds).toHaveLength(54);
     expect(new Set(gatedScenarioIds).size).toBe(gatedScenarioIds.length);
     for (const scenarioId of gatedScenarioIds)
       expect(knownScenarios.has(scenarioId), scenarioId).toBe(true);
@@ -131,8 +131,12 @@ describe('external full-task environment gates', () => {
   }, 60_000);
 
   test('remaining gate scorers can never turn unavailable environment evidence into a pass', async () => {
-    expect(EXTERNAL_ENVIRONMENT_SKILL_EVAL_MATERIALIZERS).toHaveLength(61);
-    expect(EXTERNAL_ENVIRONMENT_SKILL_EVAL_SCORERS).toHaveLength(61);
+    // image-generation-practice, embedded-firmware and the macOS arm of
+    // native-interface moved to real runtimes (an image service, an emulated
+    // Cortex-M4, and a real AppKit window), so their scenarios are no longer
+    // served by the gate fallback; the remaining 50 stay fail-closed.
+    expect(EXTERNAL_ENVIRONMENT_SKILL_EVAL_MATERIALIZERS).toHaveLength(50);
+    expect(EXTERNAL_ENVIRONMENT_SKILL_EVAL_SCORERS).toHaveLength(50);
     for (const scorer of EXTERNAL_ENVIRONMENT_SKILL_EVAL_SCORERS) {
       if (!scorer.id.includes('/external-environment-gate-scorer/')) continue;
       const score = await scorer.score({

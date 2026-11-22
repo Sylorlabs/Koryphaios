@@ -1,0 +1,27 @@
+{"type":"progress","complete":1,"failed":0,"totalQueued":2,"skill":"experimental-analysis","scenarioId":"experimental-analysis-full-task-2-individual","pairId":"experimental-analysis-full-task-2-individual:4a4b142d-ada4-4bfa-a6be-7d434559d9ee","withSkill":false,"withoutSkill":true,"withSkillInfrastructureFailure":false,"withoutSkillInfrastructureFailure":false,"infrastructureFailure":false,"integrityFailure":false}
+{"type":"progress","complete":2,"failed":0,"totalQueued":2,"skill":"experimental-analysis","scenarioId":"experimental-analysis-full-task-1-individual","pairId":"experimental-analysis-full-task-1-individual:567fe059-3e6a-49df-bdd7-8a5ef15d1cfa","withSkill":true,"withoutSkill":true,"withSkillInfrastructureFailure":false,"withoutSkillInfrastructureFailure":false,"infrastructureFailure":false,"integrityFailure":false}
+{
+  "schemaVersion": 1,
+  "executor": {
+    "mode": "codex",
+    "id": "codex-cli-isolated:codex-cli 0.166.0:reasoning=none:multi-turn",
+    "subject": "codex",
+    "provider": "codex",
+    "model": "gpt-6-luna",
+    "runtimeIdentity": "codex-cli 0.166.0:reasoning=none:multi-turn",
+    "executionMode": "multi-turn",
+    "reasoningEffort": "none",
+    "concurrency": 2,
+    "wallClockMs": 420000
+  },
+  "selectedSkills": 1,
+  "readyScenarios": 2,
+  "environmentBlockedScenarios": 0,
+  "skippedComplete": 0,
+  "queued": 2,
+  "completed": 2,
+  "failed": 0,
+  "failedScenarios": [],
+  "stoppedReason": null,
+  "notStarted": 0
+}

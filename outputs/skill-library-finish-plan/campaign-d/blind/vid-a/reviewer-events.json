@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "reviewerId": "logfare-stateless-238abe5e-2a1c-44e4-92fb-05d85ee1901f",
+  "completed": true,
+  "output": "{\"artifactA\":{\"passed\":true,\"quality\":0.82,\"verification\":0.8,\"integrityFailure\":false,\"evidence\":[\"direction.json is complete: status=proposed, surface recorded, identity.shared=5, adapted has macos+windows entries, all required type/spacing/color tokens present with role text over 20 chars.\",\"stateReviews cover all seven contexts; min-dark-de-large lists exactly the 12 clipped IDs (2 labels + 10 values) matching the geometry sidecar; other contexts list none, consistent with truncated:false everywhere.\",\"Platform identity is separated into shared carriers (title, sidebar geometry, label/value rhythm, control pair, semantic colors) and per-platform adaptations with rationale, satisfying the platform-aware read.\",\"System section ties typography, spacing, color, iconography, and density to supplied tokens; hierarchy covers primary/secondary/content/status; motion introduced=false with reduced-motion rationale.\",\"Boundary: visualOnly=true, preserved=4, tradeoffs=1 naming the German large-text clipping as unresolved.\",\"Weakness: verificationMatrix row for min-dark-de-large says 'three labels and nine values' while the state review and actual geometry show two labels and ten values — an internal inconsistency in the matrix narrative (the authoritative truncated list is correct).\",\"Weakness: verification matrix is thinner than B's; it cites geometry files but does not enumerate unverified Windows/interactive-state conditions as explicitly.\",\"Final output claims 'exact truncation matches across all seven geometry files' and 'all 12 clipped elements' — supported by the artifact content.\"]},\"artifactB\":{\"passed\":true,\"quality\":0.9,\"verification\":0.88,\"integrityFailure\":false,\"evidence\":[\"direction.json complete: status=proposed, surface recorded, identity.shared=4, adapted macos+windows, all required tokens present with adequate role text.\",\"stateReviews cover all seven contexts; min-dark-de-large lists exactly the 12 clipped IDs matching geometry; others empty and consistent.\",\"Adds a sourceLedger distinguishing observed/provided/unverified sources, including explicit 'Windows platform capture: unverified' — strong evidence discipline.\",\"Platform identity separated with rationale; system ties type/spacing/color/iconography/density to measured token values (e.g., 44px title band, 130px label column, 22px row).\",\"Motion introduced=false with reduced-motion rationale; boundary visualOnly=true, preserved=3, tradeoffs=3 including German clipping, unverified Windows, and missing interactive-state fixtures.\",\"verificationMatrix is richer: per-context conditions with expected/method/status/evidence, plus explicit unverified Windows and interactive-state rows and a partially_observed large-text row — better actual-medium verification strategy.\",\"Final output honestly states Windows rendering and uncaptured interaction states remain unverified and that it did not rebuild the surface — consistent with artifact.\",\"Minor: matrix min-dark-de-large condition cites specific German strings not directly verifiable from supplied geometry, but the truncated ID list itself is correct.\"]},\"preference\":\"B\",\"rationale\":[\"Both artifacts satisfy the contract: complete token coverage, correct seven-context state reviews with exact 12-ID truncation match, platform-aware identity split, motion and boundary sections.\",\"B provides a stronger evidence discipline via sourceLedger marking Windows and interactive states as unverified, and a richer verification matrix with per-condition expected/method/status/evidence plus explicit unverified rows — better satisfying 'actual-medium verification strategy' and 'unresolved cross-platform compromises'.\",\"A's verification matrix contains an internal inconsistency ('three labels and nine values' vs the correct two labels/ten values in its own state review), a minor accuracy defect.\",\"B's tradeoffs enumerate three distinct unresolved compromises (German clipping, unverified Windows, missing interactive-state fixtures) versus A's single tradeoff, better covering the required 'unresolved cross-platform compromises' evidence.\",\"Neither shows integrity failure; both final outputs are consistent with their artifacts.\"]}",
+  "events": [
+    {
+      "type": "review.started",
+      "reviewerId": "logfare-stateless-238abe5e-2a1c-44e4-92fb-05d85ee1901f"
+    },
+    {
+      "type": "review.completed",
+      "reviewerId": "logfare-stateless-238abe5e-2a1c-44e4-92fb-05d85ee1901f",
+      "outputSha256": "e534b7dd392aa3c4f56c9904f31768a27e088a561a8160d2bd895652dc569125"
+    }
+  ],
+  "hostReceipt": {
+    "schemaVersion": 1,
+    "stageOnly": true,
+    "identitySource": "host-invocation-uuid",
+    "upstreamSessionObserved": true,
+    "requestedModel": "deepseek-v4.1-flash-1017",
+    "responseModel": "deepseek-v4.1-flash-1017",
+    "promptSha256": "190aae58775f23dc1eb04743cf04f26974a0fcf52d3beebe14ee0f695fd7414b",
+    "requestBytes": 127320,
+    "responseSha256": "0b24be95c4cf7d97280d552615334dd1a42c4e90b824df4d779cc9a7335ebe54",
+    "outputSha256": "e534b7dd392aa3c4f56c9904f31768a27e088a561a8160d2bd895652dc569125",
+    "elapsedMs": 5334,
+    "osIsolationVerified": false,
+    "upstreamIdentityVerified": false,
+    "signed": false
+  }
+}

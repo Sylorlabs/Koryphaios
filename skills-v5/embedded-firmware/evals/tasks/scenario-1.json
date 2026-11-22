@@ -1,15 +1,16 @@
 {
   "id": "embedded-firmware-full-task-1-individual",
   "maturity": "individual",
-  "prompt": "Fix firmware configuration persistence that corrupts the only settings page when power drops during flash erase/write. The MCU has two flash pages, no filesystem, and limited write cycles. Design a versioned journal/commit protocol with CRC and monotonic sequence, preserve the previous committed config across brownout at every write step, and verify boot recovery, torn records, page rollover, and wear behavior on the hardware-simulated flash model.",
+  "prompt": "A Cortex-M4 device running under an emulated target keeps its settings in a two-page NOR flash with a programming model that only clears bits: an erase fills a 256-byte page with 0xFF, a program can only turn 1s into 0s, and a brownout can stop the device after any erase or program, leaving that operation half applied. The shipped config_store.c erases its only page and rewrites a single record, so a power cut during a save destroys the last good configuration. Implement config_load/config_save against src/config_store.h so that a save is durable: the previous committed record survives a brownout at every erase and program of the new one, a torn record never validates, wear is spread across both pages, and a record written with the legacy schema 1 still loads. src/flash_port.c is the only path to flash and journals every operation; a boot that exhausts the harness power budget dies at that operation, and the harness replays the journal to rebuild the image (a torn operation is applied to half of its bytes) before booting again.",
   "environment": {
     "kind": "repository",
     "startingState": "fixture://embedded-firmware/brownout-flash-journal",
     "requirements": [
-      "MCU flash model with erase-page granularity, one-way bit programming, and write-cycle counters",
-      "power-cut injection after every erase/program operation",
-      "versioned configuration corpus including an older supported schema",
-      "bootloader/application boundary that must not be modified",
+      "two page NOR flash model with 256-byte erase granularity, one-way bit programming, and per-page erase counters",
+      "power budget consumed by every erase and program, with the device dying exactly at the exhausted operation",
+      "journal of erase and program operations replayed by the harness with half-application for the interrupted operation",
+      "record contract in src/config_store.h: status 1 committed, 0 nothing committed, -1 torn or corrupt",
+      "legacy schema 1 record written by the harness into a blank image and loaded by the candidate's own loader",
       "paired same-model skill/no-skill execution from the identical starting snapshot"
     ]
   },
@@ -37,7 +38,10 @@
         "independent evaluator record",
         "quality comparison without variant labels"
       ],
-      "blindTo": ["skill-variant", "expected-outcome"]
+      "blindTo": [
+        "skill-variant",
+        "expected-outcome"
+      ]
     }
   ],
   "requiredEvidence": [

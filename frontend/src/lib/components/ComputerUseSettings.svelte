@@ -226,7 +226,7 @@
     onclick={() => (expanded = !expanded)}
   >
     <span class="heading-label"
-      ><span class="section-icon"><Monitor size={15} /></span><span
+      ><span class="section-icon" aria-hidden="true"><Monitor size={16} /></span><span
         ><strong>Computer use</strong><small
           >App grants, permission presets & agent roles · {settings.enabled ? 'On' : 'Off'}</small
         ></span
@@ -473,13 +473,8 @@
   }
   .section-icon {
     display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 2rem;
-    height: 2rem;
-    border-radius: 0.5rem;
-    background: var(--color-surface-2);
-    color: var(--color-text-secondary);
+    flex-shrink: 0;
+    color: var(--color-text-muted);
   }
   .section-content {
     display: grid;
@@ -566,11 +561,17 @@
   }
   .actions .primary-action {
     background: var(--color-accent);
-    color: var(--color-surface-0);
+    color: var(--color-on-accent);
   }
   button:disabled {
     opacity: 0.55;
     cursor: not-allowed;
+  }
+  .actions .primary-action:disabled {
+    opacity: 1;
+    background: var(--color-surface-3);
+    color: var(--color-text-muted);
+    box-shadow: none;
   }
   button:focus-visible {
     outline: 2px solid var(--color-accent);

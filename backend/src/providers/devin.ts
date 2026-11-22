@@ -6,11 +6,13 @@
 // per-step reasoning, tool calls with output, and exact token usage come from
 // the `--export` ATIF JSON. Stdout remains a fallback for legacy exports.
 //
-// Model list: Devin exposes a fixed set of named models (SWE-1.6,
-// Claude, GPT, Gemini, GLM, Kimi families) selected via --model. There is NO
-// separate reasoning-effort flag — the tier is part of the model name
-// (e.g. swe-1.6-fast / swe-1.6-slow), so we surface models only and never
-// show a reasoning picker.
+// Model list: `devin models list` reports the account's real catalog — SWE,
+// Claude, GPT, Gemini, GLM, Kimi, Fusion families selected via --model. There
+// is no separate reasoning-effort flag — the tier is part of the model name
+// (e.g. swe-2-medium / swe-2-high, claude-opus-5-5-max) — so per-effort slugs
+// are collapsed into one base model whose `reasoningLevels`/`reasoningVariants`
+// drive the native Koryphaios reasoning picker; resolveCliModel maps the pick
+// back to the slug passed to --model.
 
 import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
@@ -33,12 +35,24 @@ import {
   type StreamRequest,
 } from './types';
 import { DevinCliBridge, getKoryphaiosDevinHome } from './devin-bridge';
+import { DevinLiveTail } from './devin-live-tail';
 import { createKoryBridgeGrantLease } from './bridge-grant';
+import { koryBridgeUnavailableError } from './kory-cli-mcp-config';
 import {
   getDevinCapabilitiesAsync,
   getDevinCapabilities as getDevinCapabilitiesSync,
   invalidateDevinCapabilities,
+  collapseDevinReasoningTiers,
+  matchDevinModel,
+  resolveDevinSlug,
 } from './devin-capabilities';
+import { parseFusionSlug, resolveFusionSlug } from '@koryphaios/shared';
+import type { FusionSelection } from '@koryphaios/shared';
+import {
+  getDevinAccountSnapshot,
+  devinQuotaGroupsFrom,
+  type DevinQuotaGroup,
+} from './devin-account';
 import {
   assertPrivateValuesAbsentFromArgv,
   createPrivateCliTextArtifact,
@@ -183,8 +197,11 @@ export class DevinProvider implements Provider {
       contextWindow: m.contextWindow ?? 0,
       contextVerified: typeof m.contextWindow === 'number' && m.contextWindow >= 1024,
       maxOutputTokens: 0,
+      costPerMInputTokens: m.costPerMInputTokens,
+      costPerMInputCached: m.costPerMInputCached,
+      costPerMOutputTokens: m.costPerMOutputTokens,
     }));
-    return applyModelsDevMetadata('devin', base, [
+    const enriched = applyModelsDevMetadata('devin', base, [
       'anthropic',
       'openai',
       'google',
@@ -193,17 +210,18 @@ export class DevinProvider implements Provider {
       'moonshot',
       'mistral',
       'deepseek',
-    ]).map((m) => ({
-      ...m,
-      // Devin has no reasoning-effort flag: the tier is embedded in the model
-      // id itself (e.g. swe-1.6-fast / swe-1.6-slow, claude-opus-5-5-max), so
-      // choosing the model IS choosing the reasoning — one choice, never a
-      // separate picker. models.dev enrichment above may attach generic
-      // reasoningLevels for ids it recognizes; drop them so the UI never
-      // offers a second reasoning choice. Context windows, output limits,
-      // and costs from enrichment are kept.
-      reasoningLevels: undefined,
-    }));
+    ]);
+    // Devin encodes effort in the model slug (`claude-opus-5-5-high`,
+    // `gpt-6-sol-low-priority`, `glm-5-2-none-1m`). Collapse every per-effort
+    // family into one base model exposing the real tiers as `reasoningLevels`
+    // + `reasoningVariants` — the same native Koryphaios mapping providers
+    // with a reasoning parameter get, resolved back to a concrete slug at
+    // spawn time via resolveCliModel. Models with no effort siblings keep
+    // their verbatim id; generic models.dev `reasoningLevels` on them are
+    // dropped — a single-tier slug cannot take an effort.
+    return collapseDevinReasoningTiers(enriched).map((m) =>
+      m.reasoningVariants ? m : { ...m, reasoningLevels: undefined },
+    );
   }
 
   async refreshModels(): Promise<void> {
@@ -216,10 +234,60 @@ export class DevinProvider implements Provider {
     await getDevinCapabilitiesAsync();
   }
 
-  private resolveCliModel(modelId: string | undefined): string | undefined {
+  private quotaGroupsCache: DevinQuotaGroup[] | null = null;
+
+  /** Synchronous quota-groups read for GET /api/providers/devin/quota — the
+   *  route contract is sync, so this kicks an account refresh in the
+   *  background and serves last-known groups (same pattern as the Antigravity
+   *  provider's module cache). */
+  getQuotaGroups(): DevinQuotaGroup[] | null {
+    void getDevinAccountSnapshot()
+      .then((snapshot) => {
+        this.quotaGroupsCache = devinQuotaGroupsFrom(snapshot);
+      })
+      .catch(() => {});
+    return this.quotaGroupsCache;
+  }
+
+  private resolveCliModel(
+    modelId: string | undefined,
+    effort?: string,
+    speedTier?: string,
+    fusion?: FusionSelection,
+  ): { slug: string } | { error: string } | undefined {
     if (!modelId) return undefined;
-    const def = this.listModels().find((m) => m.id === modelId || m.apiModelId === modelId);
-    return def?.apiModelId ?? modelId.replace(/^devin-/, '');
+    const match = matchDevinModel(this.listModels(), modelId);
+    if (!match) return { slug: modelId.replace(/^devin-/, '') };
+    if (match.model.fusion) {
+      // Fusion is one model with two composer-edited slots; the exact slug
+      // comes from the catalog's pairing matrix, never the generic
+      // effort/speed fold. A legacy `fusion-…` alias restores its own cell.
+      const catalog = match.model.fusion;
+      const legacySel = modelId.startsWith('fusion-')
+        ? parseFusionSlug(modelId)
+        : undefined;
+      const sel = fusion ?? legacySel ?? catalog.defaultSelection;
+      const slug = resolveFusionSlug(catalog, sel);
+      if (!slug) {
+        return {
+          error:
+            "This Fusion pairing isn't offered by Devin. Pick another Fusion 2 model.",
+        };
+      }
+      return { slug };
+    }
+    // The Koryphaios reasoning level plus the composer's speed tier resolve
+    // to the concrete Devin slug for --model. `auto`/unset falls through to
+    // the family's default slug (bare member when the CLI offers one, else
+    // its medium/default tier); a speed variant only replaces it when the
+    // tier covers that effort, and a persisted fast selection implies the
+    // tier on its own.
+    const slug = resolveDevinSlug(
+      match.model,
+      effort ?? match.legacyEffort,
+      speedTier ?? match.legacySpeedTier,
+    );
+    return { slug: slug.replace(/^devin-/, '') };
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
@@ -311,21 +379,51 @@ export class DevinProvider implements Provider {
     // Write the kory MCP server to the isolated user config so the CLI discovers
     // it on startup and gets access to all kory__ tools.
     const mcpConfigs = researchOnly ? null : bridge.buildMcpConfig(bridgeCtx);
+    // Fail closed: a session-scoped non-research turn without the kory MCP
+    // server would spawn the CLI with every native tool denied and no kory__
+    // tools — the silent "talks but cannot act" failure this must never ship.
+    if (!researchOnly && bridgeCtx.sessionId && (!mcpConfigs || mcpConfigs.length === 0)) {
+      agentConfigArtifact?.cleanup();
+      bridgeGrantLease?.cleanup();
+      yield { type: 'error', error: koryBridgeUnavailableError('devin') };
+      return;
+    }
     if (mcpConfigs && mcpConfigs.length > 0 && devinHome) {
       try {
         bridge.writeMcpConfig(mcpConfigs, devinHome);
       } catch (mcpErr) {
         providerLog.warn({ err: mcpErr }, 'Failed to write kory MCP config for Devin');
+        agentConfigArtifact?.cleanup();
+        bridgeGrantLease?.cleanup();
+        yield {
+          type: 'error',
+          error:
+            'Devin: could not write the kory MCP configuration — refusing to run without tools.',
+        };
+        return;
       }
     }
 
-    // ── Wire hooks (PreToolUse enforcement layer) ────────────────────
+    // ── Managed user config (hooks + permissions + subagents) ──────
+    // config.json is the only enforcement surface this CLI generation reads:
+    // --agent-config does not exist on it. The file carries the signed-grant
+    // hooks, the tool-name deny rules, `subagents_enabled: false`, and the
+    // cross-tool import kill-switch. Fail-closed like every managed provider:
+    // a turn that cannot write its enforcement never spawns ungated.
     const hookConfigs = researchOnly ? null : bridge.buildHooks(bridgeCtx);
-    if (hookConfigs && hookConfigs.length > 0 && devinHome) {
+    if (devinHome) {
       try {
-        bridge.writeHooksConfig(hookConfigs, devinHome);
-      } catch (hookErr) {
-        providerLog.warn({ err: hookErr }, 'Failed to write hooks config for Devin');
+        bridge.writeManagedUserConfig(bridgeCtx, hookConfigs ?? [], devinHome);
+      } catch (configErr) {
+        providerLog.warn({ err: configErr }, 'Failed to write managed Devin config');
+        agentConfigArtifact?.cleanup();
+        bridgeGrantLease?.cleanup();
+        yield {
+          type: 'error',
+          error:
+            'Devin: could not write the managed CLI configuration — refusing to run unenforced.',
+        };
+        return;
       }
     }
 
@@ -375,19 +473,17 @@ export class DevinProvider implements Provider {
       promptArtifact.path,
       // Non-interactive: auto-approve so a headless run never blocks. With
       // --agent-config the permission scopes govern; the mode is the coarse
-      // fallback. Research uses the ordinary auto mode; strict agent-config
-      // removes every non-web tool from visibility and denies filesystem/exec.
-      // Do not require Devin's optional OS sandbox here: it has extra host
-      // dependencies and the exact visibility allowlist is the authority
-      // boundary. Devin does not have a "plan" permission-mode value.
+      // fallback. Managed turns run 'dangerous': Kory is the permission
+      // authority (config.json deny rules still apply in dangerous mode —
+      // Deny > Ask > Allow — so native tools stay denied and mcp__kory__*
+      // stays allowed), and any headless prompt would stall the turn since
+      // nothing can answer it. Research uses the ordinary auto mode; strict
+      // agent-config removes every non-web tool from visibility and denies
+      // filesystem/exec. Do not require Devin's optional OS sandbox here: it
+      // has extra host dependencies and the exact visibility allowlist is the
+      // authority boundary. Devin does not have a "plan" permission-mode value.
       '--permission-mode',
-      caps.supportsPermissionMode
-        ? researchOnly
-          ? 'auto'
-          : request.harnessRole === 'critic'
-            ? 'normal'
-            : 'accept-edits'
-        : 'auto',
+      caps.supportsPermissionMode ? (researchOnly ? 'auto' : 'dangerous') : 'auto',
       ...(!researchOnly && caps.supportsSandbox ? ['--sandbox'] : []),
       '--respect-workspace-trust',
       'false',
@@ -395,18 +491,19 @@ export class DevinProvider implements Provider {
       exportPath,
     ];
     if (agentConfigPath) args.push('--agent-config', agentConfigPath);
-    const cliModel = this.resolveCliModel(request.model);
-    if (request.reasoningLevel) {
-      // No separate effort flag exists: the tier embedded in the model id
-      // (e.g. -low / -medium / -high / -max) IS the reasoning choice and is
-      // passed to --model verbatim below. Log the mapping so a stale
-      // composer-level value never looks silently dropped.
-      providerLog.debug(
-        { provider: 'devin', model: cliModel, requestedReasoning: request.reasoningLevel },
-        'Devin reasoning tier comes from the model id; Koryphaios reasoning level not applied separately',
-      );
+    // The composer's reasoning level resolves to the concrete effort slug
+    // inside the selected family — Devin's --model IS the effort control.
+    const cliModel = this.resolveCliModel(
+      request.model,
+      request.reasoningLevel,
+      request.speedTier,
+      request.fusion,
+    );
+    if (cliModel && 'error' in cliModel) {
+      yield { type: 'error', error: cliModel.error };
+      return;
     }
-    if (cliModel) args.push('--model', cliModel);
+    if (cliModel) args.push('--model', cliModel.slug);
 
     const baseEnv = buildProviderCliEnv('devin', {
       ...(devinHome && !researchOnly
@@ -451,6 +548,13 @@ export class DevinProvider implements Provider {
     // Point the CLI at the isolated per-session home so our rules/skills/hooks
     // and session transcripts stay separate from the user's interactive runs.
     const env = buildDevinProcessEnv(baseEnv, jail?.env, devinHome);
+    // Live transcript tail: the CLI persists each step to its sessions.db as
+    // it runs. Without this, reasoning, text and tool calls only reached the
+    // transcript after process exit — a long turn looked dead the whole time.
+    // The ATIF export stays authoritative; live events are deduplicated below.
+    // Snapshot before spawn so rows written by earlier turns are skipped.
+    const liveTail = devinHome && !researchOnly ? new DevinLiveTail(devinHome) : null;
+    liveTail?.snapshot();
     const child = spawnWithPrivateArtifactCleanup(
       () =>
         spawn(wrapped.command, wrapped.args, {
@@ -516,10 +620,15 @@ export class DevinProvider implements Provider {
           exportArtifact.cleanup();
           return;
         }
+        // Last DB writes can land just after the exit signal — drain once more
+        // before reading the export so the tail's coverage is complete.
+        if (liveTail) for (const event of liveTail.drainFinal()) yield event;
         const exportEvents = this.readExportEvents(exportPath);
-        const hasAgentContent = exportEvents.some(
-          (event) => event.type === 'content_delta' && event.content?.trim(),
-        );
+        const remaining = liveTail ? liveTail.dedupeExportEvents(exportEvents) : exportEvents;
+        const hasAgentContent =
+          exportEvents.some(
+            (event) => event.type === 'content_delta' && event.content?.trim(),
+          ) || liveTail?.emittedAnyContent === true;
         if (settled.code !== 0 && !hasAgentContent) {
           const diagnostic = safeProviderDiagnostic('devin', 'stderr', stderr, {
             exitCode: settled.code,
@@ -535,10 +644,18 @@ export class DevinProvider implements Provider {
           return;
         }
         exportArtifact.cleanup();
-        yield* selectDevinResponseEvents(stdoutQueue.join(''), exportEvents);
+        // Live text already shown suppresses the stdout fallback (it would
+        // duplicate the same final message); the export's non-dup events
+        // (usage, anything the tail missed) still land.
+        if (liveTail?.emittedAnyContent) {
+          yield* remaining;
+        } else {
+          yield* selectDevinResponseEvents(stdoutQueue.join(''), remaining);
+        }
         yield { type: 'complete', finishReason: 'end_turn' };
         return;
       }
+      if (liveTail) for (const event of liveTail.drain()) yield event;
     }
   }
 

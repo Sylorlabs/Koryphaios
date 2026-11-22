@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, mock, beforeEach, afterEach } from 'bun:test';
-import { validateProviderKey, type KeyStatus } from '../../core/auth/KeyValidator';
+import { validateProviderKey, type KeyStatus } from '../key-validator';
 import { ANTHROPIC_VERSION } from '../../providers/api-endpoints';
 
 const PROVIDERS = ['anthropic', 'openai', 'google'] as const;

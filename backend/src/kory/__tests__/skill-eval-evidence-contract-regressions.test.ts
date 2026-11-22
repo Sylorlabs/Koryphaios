@@ -6,27 +6,29 @@ import { dirname, join } from 'node:path';
 import {
   ACCESSIBILITY_SKILL_EVAL_MATERIALIZERS,
   ACCESSIBILITY_SKILL_EVAL_SCORERS,
-} from '../skill-eval-accessibility-fixtures';
-import { auditSkillEvalExecutionReadiness } from '../skill-eval-execution';
+} from '../../eval/skills/skill-eval-accessibility-fixtures';
+import { auditSkillEvalExecutionReadiness } from '../../eval/skills/skill-eval-execution';
+import { WEB_LIVE_SESSION } from '../../eval/skills/skill-eval-accessibility-web-live';
+import { ANDROID_LIVE_SESSION } from '../../eval/skills/skill-eval-accessibility-android-live';
 import {
   PILOT_SKILL_EVAL_MATERIALIZERS,
   PILOT_SKILL_EVAL_SCORERS,
-} from '../skill-eval-pilot-fixtures';
+} from '../../eval/skills/skill-eval-pilot-fixtures';
 import {
   DATA_ENGINEERING_SKILL_EVAL_MATERIALIZERS,
   DATA_ENGINEERING_SKILL_EVAL_SCORERS,
-} from '../skill-eval-data-engineering-fixtures';
+} from '../../eval/skills/skill-eval-data-engineering-fixtures';
 import {
   DATA_PERFORMANCE_VISUALIZATION_MATERIALIZERS,
   DATA_PERFORMANCE_VISUALIZATION_SCORERS,
-} from '../skill-eval-data-performance-visualization-fixtures';
-import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
-import { createConceptFixtures, scoreConceptFixture } from '../skill-eval-concept-fixtures';
-import { hasRegressionText } from '../skill-eval-fixture-helpers';
+} from '../../eval/skills/skill-eval-data-performance-visualization-fixtures';
+import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
+import { createConceptFixtures, scoreConceptFixture } from '../../eval/skills/skill-eval-concept-fixtures';
+import { hasRegressionText } from '../../eval/skills/skill-eval-fixture-helpers';
 import {
   BUILTIN_SKILL_EVAL_MATERIALIZERS,
   BUILTIN_SKILL_EVAL_SCORERS,
-} from '../skill-eval-fixtures';
+} from '../../eval/skills/skill-eval-fixtures';
 import { loadV5SkillPackages } from '../skill-packages';
 
 const roots: string[] = [];
@@ -235,7 +237,7 @@ describe('evidence contract regressions', () => {
     expect(streamVerification).toContain('Do not require unrelated protobuf field-evolution');
   });
 
-  test('accessibility verification remains blocked until representative live runtimes exist', () => {
+  test('accessibility verification runs against recorded live sessions instead of blocking', () => {
     const skillPackage = loadV5SkillPackages().packages.find(
       (item) => item.sidecar.name === 'accessibility-verification',
     )!;
@@ -246,9 +248,11 @@ describe('evidence contract regressions', () => {
     );
 
     expect(readiness).toHaveLength(2);
-    expect(readiness.every((row) => row.ready === false)).toBe(true);
-    expect(readiness[0]?.reasons.join(' ')).toMatch(/real supported browser/i);
-    expect(readiness[1]?.reasons.join(' ')).toMatch(/real Android device or emulator/i);
+    expect(readiness.every((row) => row.ready === true)).toBe(true);
+    expect(readiness.map((row) => row.materializerId).sort()).toEqual([
+      'accessibility-verification/android-live-session@4',
+      'accessibility-verification/web-delete-dialog-live@4',
+    ]);
   });
 
   test('game accessibility rejects keyword-only lists without task, channel, and verification evidence', async () => {
@@ -390,56 +394,85 @@ describe('evidence contract regressions', () => {
       'accessibility-verification',
       'accessibility-verification-full-task-1',
     );
-    const tasks = [
-      'focus-entry',
-      'focus-trap',
-      'cancel',
-      'confirm',
-      'escape',
-      'focus-return',
-      'semantic-title',
-      'busy-state',
-      'server-error-announcement',
-      'zoom-200-long-name',
-    ];
-    writeFileSync(
-      join(root, '.kory-eval/web-verification.json'),
-      `${JSON.stringify(
+    const session = JSON.parse(WEB_LIVE_SESSION) as {
+      browser: string;
+      locale: string;
+      keyboard: { focusOnOpen: string; tabStops: string[]; closedByEscape: boolean; focusAfterEscape: string };
+      errorState: { visible: boolean; role: string; text: string };
+      zoom200: { horizontalOverflow: boolean; dialogFits: boolean; longTextFits: boolean; dialogRectWidth: number; viewportWidth: number };
+    };
+    const submission = {
+      environment: {
+        browser: session.browser,
+        locale: session.locale,
+        screenReader: 'orca 43.1 with Speech Dispatcher 0.11.4 on Debian bookworm (aarch64), Xvfb 1280x800',
+      },
+      keyboard: session.keyboard,
+      errorState: session.errorState,
+      zoom200: session.zoom200,
+      rows: [
         {
-          environment: {
-            platformVersion: 'Windows 11',
-            appBuild: 'fixture',
-            assistiveTechnology: 'NVDA 2026.2',
-            browser: 'Chromium 140',
-          },
-          rows: tasks.map((task, index) => ({
-            task,
-            input: index === 0 ? 'keyboard-only' : 'keyboard',
-            platform: 'Windows 11',
-            at: 'NVDA 2026.2',
-            manual: true,
-            simulated: true,
-            passed: true,
-            observations: [],
-          })),
-          automation: { tool: 'fixture scanner', passed: true, findings: [] },
-          manualVerdict: 'pass',
-          automationControlsVerdict: false,
-          liveRuntimeVerified: false,
-          untested: ['real browser and assistive-technology combinations'],
+          task: 'failure-alert-announcement',
+          input: 'keyboard',
+          platform: 'Debian bookworm',
+          at: 'orca 43.1',
+          manual: true,
+          passed: true,
+          observations: ['Speech Dispatcher log records "Löschen fehlgeschlagen. Erneut versuchen." for the opened dialog'],
         },
-        null,
-        2,
-      )}\n`,
-    );
-
-    const score = await scorer.score({
+        {
+          task: 'focus-escape-defect',
+          input: 'keyboard',
+          platform: 'Debian bookworm',
+          at: 'orca 43.1',
+          manual: true,
+          passed: true,
+          observations: ['recorded tabStops show focus left the dialog onto the Seitenreiter (document body)'],
+        },
+        {
+          task: 'zoom-200-reflow',
+          input: 'keyboard',
+          platform: 'Debian bookworm',
+          at: 'orca 43.1',
+          manual: true,
+          passed: true,
+          observations: ['dialog fits at 200 percent zoom: no horizontal overflow at viewport width 640'],
+        },
+      ],
+      automation: {
+        tool: 'axe-core 4.10.2 with @axe-core/playwright 4.10.2',
+        executed: true,
+        accepted: ['spoken-announcement', 'escape-returns-focus', 'zoom-200-reflow'],
+        rejected: ['focus-trap'],
+      },
+      conflicts: [
+        {
+          claimId: 'focus-trap',
+          evidence: 'the recorded tabStops place one Tab stop on the document body outside the dialog',
+          verdict: 'rejected',
+        },
+      ],
+      manualVerdict: 'partial',
+      automationControlsVerdict: false,
+      liveRuntimeVerified: true,
+      untested: ['NVDA on Windows and VoiceOver on macOS were not driven'],
+    };
+    writeFileSync(join(root, '.kory-eval/web-verification.json'), JSON.stringify(submission));
+    expect((await scorer.score({
       scenario,
       experiment: {} as never,
       workingDirectory: root,
       observation,
-    });
-    expect(score.passed).toBe(true);
+    })).passed).toBe(true);
+
+    submission.environment.screenReader = 'NVDA 2026.2 (labeled as the recorded technology)';
+    writeFileSync(join(root, '.kory-eval/web-verification.json'), JSON.stringify(submission));
+    expect((await scorer.score({
+      scenario,
+      experiment: {} as never,
+      workingDirectory: root,
+      observation,
+    })).passed).toBe(false);
   });
 
   test('Android verification preserves the exact TalkBack identity without capability padding', async () => {
@@ -447,52 +480,101 @@ describe('evidence contract regressions', () => {
       'accessibility-verification',
       'accessibility-verification-full-task-2',
     );
-    const tasks = [
-      'row-label-role-state',
-      'disabled-reason',
-      'switch-spoken-state',
-      'no-duplicate-label',
-      'detail-focus-return',
-      'alternate-switch-input',
-      'max-text-scale-long-name',
-    ];
-    writeFileSync(
-      join(root, '.kory-eval/android-verification.json'),
-      `${JSON.stringify(
+    const session = JSON.parse(ANDROID_LIVE_SESSION) as {
+      device: { model: string };
+      assistiveTechnology: { talkBack: string; switchAccess: string };
+      focusTraversal: { label: string }[];
+      toggles: { label: string; checked: boolean }[];
+      textScale: { defaultRowHeight: number; largeRowHeight: number };
+    };
+    const submission = {
+      environment: {
+        platformVersion: 'Android 17 (API 37)',
+        device: session.device.model,
+        assistiveTechnology: session.assistiveTechnology.talkBack,
+        switchAccess: session.assistiveTechnology.switchAccess,
+      },
+      focusOrder: session.focusTraversal.map((stop) => stop.label),
+      toggles: session.toggles.map((toggle) => ({ label: toggle.label, checked: toggle.checked })),
+      textScale: {
+        largeScale: '1.5',
+        defaultRowHeight: session.textScale.defaultRowHeight,
+        largeRowHeight: session.textScale.largeRowHeight,
+        grew: true,
+      },
+      rows: [
         {
-          environment: {
-            platformVersion: 'Android API 37',
-            appBuild: 'fixture',
-            assistiveTechnology: 'TalkBack 17.0',
-          },
-          rows: tasks.map((task) => ({
-            task,
-            input: task === 'alternate-switch-input' ? 'switch input' : 'touch exploration',
-            platform: 'Android API 37',
-            at: 'TalkBack 17.0',
-            manual: true,
-            simulated: true,
-            passed: true,
-            observations: [],
-          })),
-          automation: { tool: 'fixture scanner', passed: true, findings: [] },
-          manualVerdict: 'pass',
-          automationControlsVerdict: false,
-          liveRuntimeVerified: false,
-          untested: ['real Android device and assistive-technology combinations'],
+          task: 'focus-traversal-order',
+          input: 'keyboard',
+          platform: 'Android 17 (API 37)',
+          at: session.assistiveTechnology.talkBack,
+          manual: true,
+          passed: true,
+          observations: ['recorded focusTraversal lists six stops in the submitted order'],
         },
-        null,
-        2,
-      )}\n`,
-    );
-
-    const score = await scorer.score({
+        {
+          task: 'toggle-checked-state',
+          input: 'touch exploration',
+          platform: 'Android 17 (API 37)',
+          at: session.assistiveTechnology.talkBack,
+          manual: true,
+          passed: true,
+          observations: ['both recorded switch controls expose checked true'],
+        },
+        {
+          task: 'text-scale-reflow',
+          input: 'touch exploration',
+          platform: 'Android 17 (API 37)',
+          at: session.assistiveTechnology.talkBack,
+          manual: true,
+          passed: true,
+          observations: ['row height grew from 65 to 92 at text scale 1.5 without clipping'],
+        },
+      ],
+      automation: {
+        tool: 'androidx.test.espresso:espresso-core:3.6.1',
+        executed: true,
+        accepted: [] as string[],
+        rejected: ['spoken-state-change', 'switch-traversal', 'duplicate-label'],
+      },
+      conflicts: [
+        {
+          claimId: 'spoken-state-change',
+          evidence: 'the recording captured no utterance, so the Espresso assertion cannot attest spoken output',
+          verdict: 'rejected',
+        },
+        {
+          claimId: 'switch-traversal',
+          evidence: 'Switch Access is not bound in the recording (switchAccessBound false)',
+          verdict: 'rejected',
+        },
+        {
+          claimId: 'duplicate-label',
+          evidence: 'the two switch controls expose resource identifiers, not human labels',
+          verdict: 'rejected',
+        },
+      ],
+      manualVerdict: 'partial',
+      automationControlsVerdict: false,
+      liveRuntimeVerified: true,
+      untested: ['spoken output was not captured and Switch Access input was not exercised'],
+    };
+    writeFileSync(join(root, '.kory-eval/android-verification.json'), JSON.stringify(submission));
+    expect((await scorer.score({
       scenario,
       experiment: {} as never,
       workingDirectory: root,
       observation,
-    });
-    expect(score.passed).toBe(true);
+    })).passed).toBe(true);
+
+    submission.environment.assistiveTechnology = 'TalkBack 17.0 (capability-padded identity)';
+    writeFileSync(join(root, '.kory-eval/android-verification.json'), JSON.stringify(submission));
+    expect((await scorer.score({
+      scenario,
+      experiment: {} as never,
+      workingDirectory: root,
+      observation,
+    })).passed).toBe(false);
   });
 
   test('application-security scorer accepts canonical roots and safe option allowlisting', async () => {

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "dryRun": false,
+  "reviewOnly": true,
+  "reviewerModel": "deepseek-v4.1-flash-1017",
+  "reviewerBaseUrl": "http://127.0.0.1:17841/v1",
+  "reasoningEffort": "high",
+  "concurrency": 1,
+  "maxPerSkill": 1,
+  "retryFailed": false,
+  "maxReviewerAttempts": 3,
+  "reviewerWallClockMs": 180000,
+  "requestedSkills": [
+    "integration-implementation"
+  ],
+  "skippedExistingReviews": 0,
+  "availableAssignments": 0,
+  "queued": 0,
+  "completed": 0,
+  "notAttempted": 0,
+  "terminalBlocker": null,
+  "persisted": 0,
+  "reviewed": 0,
+  "stagedReviews": [],
+  "infrastructureFailures": 0,
+  "failures": []
+}

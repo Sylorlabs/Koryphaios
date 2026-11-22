@@ -1,19 +1,19 @@
 {
   "id": "robotics-control-full-task-2-individual",
   "maturity": "individual",
-  "prompt": "The evaluation repository asks the agent to \"Apply robotics expertise to this task\". The fixture contains version/runtime ambiguity, a tempting shortcut, a compatibility edge case, and a failure path that distinguishes real expertise from generic completion. The acceptance boundary is robotics-control: Define physical plant, coordinate frames, sensors/actuators, rates/latencies, calibration, estimator state, planner constraints, controller limits, safety interlocks, and human/environment interaction. The adjacent csharp-dotnet-engineering discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "prompt": "The repository is the same MuJoCo two-link arm, and this task is about an actuator that stops delivering full torque. `robot/model.xml` and `robot/trajectory.py` are unchanged; `robot/controller.py` is yours. Implement `Controller.step(dt, qpos, qvel, target, t)` so the arm tracks the reference within 0.10 rad rms and 0.20 rad worst case before the fault, never leaves the joint limits at any point, does not sit saturated against the half-strength actuator for more than 250 consecutive control cycles, and resumes tracking within two seconds of full torque returning. The model's actuator gear is visible while it is derated. Two identical runs must produce the identical trajectory. The hidden checks step the real plant and measure this behaviour; the text of your answer is not graded.",
   "environment": {
     "kind": "repository",
-    "startingState": "fixture://robotics-control/arm-joint-limit-trajectory",
+    "startingState": "fixture://robotics-control/two-link-arm-derate",
     "requirements": [
-      "multi-joint trajectory fixture with joint position/velocity/acceleration limits",
-      "waypoints whose endpoints are valid but cubic interpolation overshoots one joint",
-      "dense/reference extremum checker for continuous-segment validation",
-      "infeasible/cancel/emergency-stop cases in simulation",
-      "paired same-model skill/no-skill execution from the identical starting snapshot",
-      "robotics-control parent/child/neighbor hierarchy boundary fixture",
-      "domain-specific tempting anti-pattern or shortcut",
-      "representative negative, interruption, compatibility, or recovery path"
+      "two-link arm model with hinge limits and torque-limited actuators, stepped at 2 ms",
+      "half-strength actuator torque from two to four seconds, visible in actuator gear",
+      "tracking tolerance of 0.10 rad rms and 0.20 rad worst case before the fault",
+      "no unbroken saturated command run longer than 250 control cycles while derated",
+      "tracking resumed within two seconds of full torque returning",
+      "joint limits respected throughout, including the derated window",
+      "identical final joint state across two identical runs",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
     ]
   },
   "scorers": [
@@ -40,7 +40,10 @@
         "independent evaluator record",
         "quality comparison without variant labels"
       ],
-      "blindTo": ["skill-variant", "expected-outcome"]
+      "blindTo": [
+        "skill-variant",
+        "expected-outcome"
+      ]
     }
   ],
   "requiredEvidence": [

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "status": "unimported",
+  "assignmentId": "blind-v5-a7e242e088a6f19a1fd1",
+  "skill": "graphql-engineering",
+  "scenarioId": "graphql-engineering-full-task-1-individual",
+  "pairId": "graphql-engineering-full-task-1-individual:b61161eb-0a34-491a-8974-96f25435ab89",
+  "reviewerThread": "logfare-stateless-21c7010e-45b6-4481-a4e4-f905395a67b1",
+  "reviewerIdentitySource": "external-reviewer-adapter-output",
+  "reviewerAdapter": "scripts/kory-logfare-stateless-reviewer",
+  "reviewerModel": "deepseek-v4.1-flash-1017",
+  "reviewerModelSource": "configured-provider-model-metadata",
+  "reviewerBaseUrl": "http://127.0.0.1:17841/v1",
+  "promptSha256": "904516968a966b174d9cbc67ba3f9eb157fe01a1b864fd05ae59b7b375c1acab",
+  "privateAssignmentSha256": "d262031c342abf1c0b518a520e5207d32936bc4a19aa5f5347a548cd7c44e752",
+  "reviewerEventsSha256": "317025103bb60298ebf0dbba72474d03f26b8cb41cbe9f3c575ef177aca8674f",
+  "judgeOutputSha256": "12954f2568678fe6a0cde6206f589517e0face1d9cd2b1e9299b825b526360c3",
+  "envelopeSha256": "c335b79bcf8198fff37ad55190fd8cc1f7dd84c9b3b8790eab593f44c878bcf0",
+  "importValidation": {
+    "mode": "validate",
+    "validatedReviews": 1,
+    "persistedReviews": 0
+  },
+  "promptSnapshotPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-OdRN44/review-task.prompt.txt",
+  "reviewerEventsPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-OdRN44/reviewer-events.json",
+  "envelopePath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-OdRN44/import.json"
+}

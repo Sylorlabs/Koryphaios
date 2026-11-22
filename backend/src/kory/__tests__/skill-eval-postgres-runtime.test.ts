@@ -7,7 +7,7 @@ import {
   postgresRuntimeReadiness,
   runPostgresConstraintRuntime,
   runPostgresQueueRuntime,
-} from '../skill-eval-postgres-runtime';
+} from '../../eval/skills/skill-eval-postgres-runtime';
 
 const roots: string[] = [];
 

@@ -1,0 +1,44 @@
+{"type":"reviewer-status","assignmentId":"blind-v5-a7458c29ff8476a30789","skill":"mlops","scenarioId":"mlops-full-task-1-individual","reason":"preflight","ready":false,"canAttempt":false,"routeVerified":false,"browserBusy":false,"executableAvailable":true,"isolationVerified":false,"stageOnlyAttemptAllowed":true,"detail":"Provider-neutral reviewer executable is available; route and isolation are unverified. Stage-only evidence requires coordinator qualification before ingestion."}
+{"type":"progress","complete":1,"totalQueued":2,"assignmentId":"blind-v5-a7458c29ff8476a30789","skill":"mlops","scenarioId":"mlops-full-task-1-individual","reviewerThread":"logfare-stateless-e3bb998a-b3bc-46d7-a7ad-1bf5bafb9546","attempts":1,"persisted":false,"staged":true,"infrastructureFailure":false}
+{"type":"reviewer-status","assignmentId":"blind-v5-ff2b18b6de389e20364b","skill":"mlops","scenarioId":"mlops-full-task-2-individual","reason":"preflight","ready":false,"canAttempt":false,"routeVerified":false,"browserBusy":false,"executableAvailable":true,"isolationVerified":false,"stageOnlyAttemptAllowed":true,"detail":"Provider-neutral reviewer executable is available; route and isolation are unverified. Stage-only evidence requires coordinator qualification before ingestion."}
+{"type":"progress","complete":2,"totalQueued":2,"assignmentId":"blind-v5-ff2b18b6de389e20364b","skill":"mlops","scenarioId":"mlops-full-task-2-individual","reviewerThread":"logfare-stateless-a5b6b1f7-3dea-445c-aaeb-363ded2aeccf","attempts":1,"persisted":false,"staged":true,"infrastructureFailure":false}
+{
+  "schemaVersion": 1,
+  "dryRun": false,
+  "reviewOnly": true,
+  "reviewerModel": "deepseek-v4.1-flash-1017",
+  "reviewerBaseUrl": "http://127.0.0.1:17841/v1",
+  "reasoningEffort": "low",
+  "concurrency": 1,
+  "maxPerSkill": 2,
+  "retryFailed": true,
+  "maxReviewerAttempts": 3,
+  "reviewerWallClockMs": 180000,
+  "requestedSkills": [
+    "mlops"
+  ],
+  "skippedExistingReviews": 0,
+  "availableAssignments": 2,
+  "queued": 2,
+  "completed": 2,
+  "notAttempted": 0,
+  "terminalBlocker": null,
+  "persisted": 0,
+  "reviewed": 2,
+  "stagedReviews": [
+    {
+      "assignmentId": "blind-v5-a7458c29ff8476a30789",
+      "reviewerThread": "logfare-stateless-e3bb998a-b3bc-46d7-a7ad-1bf5bafb9546",
+      "attestationPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-26FySF/review-attestation.json",
+      "envelopePath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-26FySF/import.json"
+    },
+    {
+      "assignmentId": "blind-v5-ff2b18b6de389e20364b",
+      "reviewerThread": "logfare-stateless-a5b6b1f7-3dea-445c-aaeb-363ded2aeccf",
+      "attestationPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-jYH1kx/review-attestation.json",
+      "envelopePath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-jYH1kx/import.json"
+    }
+  ],
+  "infrastructureFailures": 0,
+  "failures": []
+}

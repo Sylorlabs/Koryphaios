@@ -1,0 +1,4 @@
+r1 ios-swiftui blocked pass 0.895 q 0.895 v 0.895 blind 0 regr 2
+r1 ios-swiftui insufficient-evidence pass 1.000 q 1.000 v 1.000 blind 0 regr 0
+r1 ios-swiftui blocked pass 1.000 q 1.000 v 1.000 blind 0 regr 4
+r1 ios-swiftui blocked pass 0.905 q 0.905 v 0.905 blind 2 regr 1

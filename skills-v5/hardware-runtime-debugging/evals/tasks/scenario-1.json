@@ -1,34 +1,34 @@
 {
   "id": "hardware-runtime-debugging-full-task-1",
   "maturity": "individual",
-  "prompt": "A Cortex-M4 telemetry board running a fixed firmware image resets only after a specific packet sequence. A captured HardFault record contains the stacked register frame plus CFSR, HFSR, BFAR, and MMFAR. Diagnose the hardware bug without reflashing first: decode the fault class and fault address validity, map the stacked PC/LR to the exact ELF, determine whether the captured instruction is the cause or only the point of an imprecise fault, then use the narrowest debugger watchpoint/trace needed to catch the first corrupting access. Reproduce on the same board revision and prove the corrected build no longer produces the original fault signature while the packet path still works. Preserve the distinction between debugger-assisted evidence and autonomous target behavior.",
+  "prompt": "A Cortex-M4 telemetry board latches a fault during the factory calibration read at boot, before any packet is streamed. The workspace holds the board source, the build and capture tools, the record the target wrote in faults/fault-1.txt, and the matching image with symbols in faults/fault-1.elf. Triage it from that record rather than by reflashing: decode the fault status registers, decide which fault address registers are valid and what they name, and resolve the stacked PC and LR against the matching ELF to the exact function and call site. Then decide whether the recorded instruction caused the fault or only surfaced it, repair firmware/board.c so the calibration read completes and the board streams its packets, and record the triage in diagnosis.json in the shape the README specifies. The harness rebuilds your source with a fresh seed and runs it on the target, so the published checksum has to come from the repaired packet path actually executing.",
   "environment": {
     "kind": "synthetic",
-    "startingState": "fixture://hardware-runtime-debugging/scenario-1",
+    "startingState": "fixture://hardware-runtime-debugging/cortex-m-fault-triage",
     "requirements": [
-      "Cortex-M4 board revision and MCU identity",
-      "exact firmware image and matching ELF with symbols",
-      "captured exception frame plus CFSR/HFSR/BFAR/MMFAR and reset reason",
-      "SWD debugger capable of hardware watchpoints with probe/debugger version recorded",
-      "paired same-model skill/no-skill execution"
+      "real Cortex-M4 target built from the workspace source with clang for thumbv7m-none-eabi and linked with ld.lld",
+      "hardware fault record captured from the running target, carrying the stacked frame plus CFSR, HFSR, MMFAR, BFAR and EXC_RETURN",
+      "matching ELF with symbols shipped next to the record it produced",
+      "diagnosis.json derived from the record and the ELF symbol table",
+      "repaired source, rebuilt with a fresh seed and executed on the target"
     ]
   },
   "falsifiableChecks": [
     {
       "id": "hardware-runtime-debugging-fault-decode-1",
-      "assertion": "The diagnosis decodes the captured Cortex-M fault-status bits and address-valid fields and maps the stacked PC/LR against the exact matching ELF rather than assuming the current source line is the cause."
+      "assertion": "The diagnosis reports the recorded CFSR/HFSR values and the individual status bits they carry, identifies which fault address registers are valid, and does not claim an address from a register the core marked invalid."
     },
     {
       "id": "hardware-runtime-debugging-layer-localization-1",
-      "assertion": "The evidence identifies a specific first invalid/corrupting access or explicitly leaves the cause inconclusive; it does not label the MCU or board defective solely because a HardFault occurred."
+      "assertion": "The stacked PC and LR are resolved against faults/fault-1.elf to a named function and call site, and the cause is attributed to the configuration or code the board applied rather than to a defective MCU."
     },
     {
       "id": "hardware-runtime-debugging-watchpoint-1",
-      "assertion": "Any breakpoint/watchpoint/trace is scoped to a stated address or invariant, and the result records whether hardware or software observation was used and how debugger attachment may perturb reset/timing behavior."
+      "assertion": "The diagnosis states whether the fault is precise or imprecise and what that implies about whether the recorded instruction is the cause, rather than assuming the faulting line is the defect."
     },
     {
       "id": "hardware-runtime-debugging-real-target-proof-1",
-      "assertion": "The original packet sequence is rerun on the same physical board revision with the corrected build, the original fault signature is absent, and the expected telemetry behavior still completes."
+      "assertion": "The repaired source is rebuilt with a fresh seed and executed on the target, the original fault signature is absent, and the packet path publishes the checksum derived from that seed."
     }
   ],
   "scorers": [
@@ -52,14 +52,18 @@
         "independent evaluator record",
         "quality comparison without variant labels"
       ],
-      "blindTo": ["skill-variant", "expected-outcome"]
+      "blindTo": [
+        "skill-variant",
+        "expected-outcome"
+      ]
     }
   ],
   "requiredEvidence": [
-    "board/MCU, firmware, ELF, probe, and debugger identity",
-    "raw and decoded fault record",
-    "layer-localizing watchpoint/trace or explicit inconclusive result",
-    "real-target before/after reproduction",
+    "board and MCU identity, image hash, and the ELF that matches the record",
+    "raw captured record with decoded fault status and address-validity fields",
+    "stacked PC and LR resolved to named symbols in the matching ELF",
+    "stated precision class for the fault and the cause it implies",
+    "target before/after reproduction of the packet path",
     "paired skill/no-skill run artifacts"
   ],
   "requiredArtifacts": [

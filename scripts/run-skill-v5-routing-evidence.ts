@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import { newRoutingCampaignId, routingComparisonId } from './skill-v5-routing-identity';
-import { createTaskContract } from '../backend/src/kory/prompts';
+import { createTaskContract } from '../backend/src/kory/prompts/index';
 import {
   evaluateSkillPromotion,
   recordSkillEvaluationRuns,

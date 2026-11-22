@@ -5,6 +5,7 @@ import { SessionRunCoordinator } from '../../runs/session-run-coordinator';
 import { SessionRunStore } from '../../runs/session-run-store';
 import { ManagerRunLifecycle } from './ManagerRunLifecycle';
 import { TurnRuntime } from './TurnRuntime';
+import { durableRunOwnsTurn, TurnOwnershipLostError } from './TurnRuntime.types';
 import type { TurnRuntimeDependencies, TurnStreamInput } from './TurnRuntime.types';
 
 async function fixture(events: ProviderEvent[] | (() => AsyncIterable<ProviderEvent>)) {
@@ -111,7 +112,7 @@ describe('TurnRuntime provider stream', () => {
     expect((await f.runtime.stream(f.input)).reasoningContent).toBeUndefined();
   });
 
-  test('preserves cache occupancy maxima and sticky estimated usage across samples', async () => {
+  test('a per-request snapshot replaces an earlier cumulative receipt, with its own cache figures', async () => {
     const f = await fixture([
       {
         type: 'usage_update',
@@ -132,13 +133,15 @@ describe('TurnRuntime provider stream', () => {
       },
     ]);
     const result = await f.runtime.stream(f.input);
+    // The cumulative receipt (130, estimated) used to stick as a maximum. The
+    // per-request snapshot is the live context, so it wins outright.
     expect(result.usage).toEqual({
-      tokensIn: 130,
+      tokensIn: 90,
       tokensOut: 12,
-      cachedInputTokens: 20,
-      cacheWriteInputTokens: 10,
+      cachedInputTokens: 5,
+      cacheWriteInputTokens: 2,
       usageKnown: true,
-      estimated: true,
+      estimated: false,
     });
     expect(f.input.effects.usage).toHaveBeenLastCalledWith(result.usage);
     expect(f.phase).not.toHaveBeenCalled();
@@ -174,6 +177,32 @@ describe('TurnRuntime provider stream', () => {
     expect(result.content).toBe('One two three');
     expect(f.phase).toHaveBeenCalledTimes(1);
     expect(f.phase).toHaveBeenCalledWith(f.input.handle, 'streaming', 'provider_content');
+  });
+
+  test('publishes the thinking status once, not once per reasoning chunk', async () => {
+    const f = await fixture([
+      { type: 'thinking_delta', thinking: 'Let ' },
+      { type: 'thinking_delta', thinking: 'me ' },
+      { type: 'thinking_delta', thinking: 'think.' },
+    ]);
+
+    const result = await f.runtime.stream(f.input);
+
+    expect(result.reasoningContent).toBe('Let me think.');
+    expect(f.phase).toHaveBeenCalledTimes(1);
+    expect(f.phase).toHaveBeenCalledWith(f.input.handle, 'thinking', 'provider_reasoning');
+    const thinkingStatuses = f.emit.mock.calls.filter(
+      ([type, payload]) =>
+        type === 'agent.status' && (payload as { status?: string }).status === 'thinking',
+    );
+    expect(thinkingStatuses).toHaveLength(1);
+    expect(thinkingStatuses[0]![1]).toEqual({
+      agentId: 'kory-manager',
+      status: 'thinking',
+      detail: 'Provider reported reasoning activity',
+    });
+    // Per-chunk reasoning still streams to the UI; only the status is deduped.
+    expect(f.emit.mock.calls.filter(([type]) => type === 'stream.thinking')).toHaveLength(3);
   });
 
   test('retains output-limit completion separately from provider errors', async () => {
@@ -497,5 +526,48 @@ describe('TurnRuntime provider stream', () => {
     expect(result.completedToolCalls).toEqual([
       { id: 'a', name: 'read_file', input: { path: 'a.ts' } },
     ]);
+  });
+});
+
+describe('durableRunOwnsTurn', () => {
+  test('owns the turn while its run is active or parked waiting', () => {
+    expect(durableRunOwnsTurn({ runId: 'r1', status: 'active' }, 'r1')).toBe(true);
+    expect(durableRunOwnsTurn({ runId: 'r1', status: 'waiting' }, 'r1')).toBe(true);
+  });
+
+  test('does not own the turn for another run, settled states, or a missing row', () => {
+    expect(durableRunOwnsTurn({ runId: 'other', status: 'active' }, 'r1')).toBe(false);
+    expect(durableRunOwnsTurn({ runId: 'other', status: 'waiting' }, 'r1')).toBe(false);
+    expect(durableRunOwnsTurn({ runId: 'r1', status: 'terminal' }, 'r1')).toBe(false);
+    expect(durableRunOwnsTurn({ runId: 'r1', status: 'idle' }, 'r1')).toBe(false);
+    expect(durableRunOwnsTurn({ runId: null, status: 'active' }, 'r1')).toBe(false);
+    expect(durableRunOwnsTurn(null, 'r1')).toBe(false);
+    expect(durableRunOwnsTurn(undefined, 'r1')).toBe(false);
+  });
+});
+
+describe('parked run keeps turn ownership', () => {
+  test('a provider event while the durable run waits on a question is not ownership loss', async () => {
+    // Mirrors the manager.ts assertActive closure: the durable row parks
+    // (status 'waiting') mid-stream while CLI bridge tools keep executing —
+    // the next provider event must not trip the ownership check.
+    const durable: { runId: string | null; status: string } = { runId: null, status: 'active' };
+    const f = await fixture(() => {
+      let parked = false;
+      return (async function* (): AsyncIterable<ProviderEvent> {
+        yield { type: 'content_delta', content: 'before' };
+        durable.status = 'waiting';
+        parked = true;
+        yield { type: 'content_delta', content: 'after' };
+        yield { type: 'complete' };
+      })();
+    });
+    durable.runId = f.input.handle.runId;
+    f.dependencies.assertActive = (handle) => {
+      if (!durableRunOwnsTurn(durable, handle.runId)) throw new TurnOwnershipLostError();
+    };
+    const result = await f.runtime.stream(f.input);
+    expect(result.content).toContain('before');
+    expect(result.content).toContain('after');
   });
 });

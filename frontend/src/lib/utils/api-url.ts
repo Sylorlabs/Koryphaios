@@ -37,8 +37,10 @@ function getDefaultBackendUrl(): string {
     }
   }
 
-  // Check Vite-injected env (set by vite.config.ts based on .active-port.json)
-  const viteUrl = import.meta.env.VITE_BACKEND_URL;
+  // Check Vite-injected env (set by vite.config.ts based on .active-port.json).
+  // Dev only: the baked target is meaningless for production/Tauri builds and
+  // could point the app at an unrelated dev backend on the same port.
+  const viteUrl = isDev() ? import.meta.env.VITE_BACKEND_URL : undefined;
   if (viteUrl) return normalizeUrlForBrowser(viteUrl);
   return getBackendUrl(defaultConfig);
 }
@@ -56,7 +58,7 @@ function getDefaultWebSocketUrl(): string {
     }
   }
 
-  const viteUrl = import.meta.env.VITE_BACKEND_WS_URL;
+  const viteUrl = isDev() ? import.meta.env.VITE_BACKEND_WS_URL : undefined;
   if (viteUrl) return normalizeUrlForBrowser(viteUrl);
   return getWebSocketUrl(defaultConfig);
 }
@@ -201,10 +203,14 @@ export function getWsCandidates(): string[] {
   const primary = getWsUrl();
   if (primary) candidates.push(primary);
 
-  // Fallback: Direct backend connection using default config
-  const fallbackUrl = getDefaultWebSocketUrl();
-  if (!candidates.includes(fallbackUrl)) {
-    candidates.push(fallbackUrl);
+  // Fallback: Direct backend connection using default config — dev only. In
+  // production/Tauri the config default is just a guess (the dev port) and
+  // would send the bearer token to an unrelated listener.
+  if (isDev()) {
+    const fallbackUrl = getDefaultWebSocketUrl();
+    if (!candidates.includes(fallbackUrl)) {
+      candidates.push(fallbackUrl);
+    }
   }
 
   return candidates;

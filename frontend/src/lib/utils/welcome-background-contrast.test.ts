@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { welcomeTextColorForPixels } from './welcome-background-contrast';
+import { feedChromeColors, welcomeTextColorForPixels } from './welcome-background-contrast';
 
 function pixel(r: number, g: number, b: number, alpha = 255): number[] {
   return [r, g, b, alpha];
@@ -41,5 +41,31 @@ describe('welcome background text contrast', () => {
   it('uses image-wide average luminance for mixed color samples', () => {
     expect(welcomeTextColorForPixels([...pixel(255, 255, 255), ...pixel(0, 0, 0)], 1, darkSurface)).toBe('#000000');
     expect(welcomeTextColorForPixels([...pixel(0, 0, 0), ...pixel(0, 0, 0)], 1, lightSurface)).toBe('#ffffff');
+  });
+});
+
+describe('feedChromeColors', () => {
+  it('uses theme tokens when no background text color is resolved', () => {
+    expect(feedChromeColors(undefined)).toEqual({
+      fg: 'var(--color-text-muted)',
+      fgHover: 'var(--color-text-primary)',
+      hoverBg: 'var(--color-surface-2)',
+    });
+  });
+
+  it('uses dark chrome over light backgrounds', () => {
+    expect(feedChromeColors('#000000')).toEqual({
+      fg: 'rgba(0, 0, 0, 0.82)',
+      fgHover: '#000000',
+      hoverBg: 'rgba(255, 255, 255, 0.55)',
+    });
+  });
+
+  it('uses light chrome over dark backgrounds', () => {
+    expect(feedChromeColors('#ffffff')).toEqual({
+      fg: 'rgba(255, 255, 255, 0.88)',
+      fgHover: '#ffffff',
+      hoverBg: 'rgba(0, 0, 0, 0.45)',
+    });
   });
 });

@@ -1,0 +1,189 @@
+{
+  "server": {
+    "name": "error-debugging-mcp-server",
+    "version": "1.0.0",
+    "logLevel": "info",
+    "maxConnections": 10,
+    "timeout": 30000
+  },
+  "transport": {
+    "type": "stdio"
+  },
+  "detection": {
+    "enabled": true,
+    "realTime": true,
+    "sources": {
+      "console": true,
+      "runtime": true,
+      "build": true,
+      "test": true,
+      "linter": true,
+      "staticAnalysis": true,
+      "ide": false,
+      "buildTools": true,
+      "processMonitor": true,
+      "multiLanguage": true
+    },
+    "filters": {
+      "categories": [],
+      "severities": [],
+      "excludeFiles": [
+        "node_modules/**",
+        "dist/**",
+        "build/**"
+      ],
+      "excludePatterns": [
+        "*.min.js",
+        "*.map"
+      ]
+    },
+    "polling": {
+      "interval": 1000,
+      "maxRetries": 3
+    },
+    "bufferSize": 1000,
+    "maxErrorsPerSession": 10000
+  },
+  "analysis": {
+    "enabled": false,
+    "aiEnhanced": false,
+    "confidenceThreshold": 0.7,
+    "maxAnalysisTime": 10000,
+    "enablePatternMatching": true,
+    "enableSimilaritySearch": true,
+    "enableRootCauseAnalysis": true,
+    "enableImpactPrediction": false,
+    "customPatterns": [],
+    "historicalDataRetention": 30
+  },
+  "debugging": {
+    "enabled": false,
+    "languages": {},
+    "defaultTimeout": 30000,
+    "maxConcurrentSessions": 5,
+    "enableHotReload": false,
+    "enableRemoteDebugging": false,
+    "breakpoints": {
+      "maxPerSession": 50,
+      "enableConditional": true,
+      "enableLogPoints": true
+    },
+    "variableInspection": {
+      "maxDepth": 10,
+      "maxStringLength": 1000,
+      "enableLazyLoading": true
+    }
+  },
+  "performance": {
+    "enabled": false,
+    "profiling": {
+      "enabled": false,
+      "sampleRate": 100,
+      "maxDuration": 60000,
+      "includeMemory": true,
+      "includeCpu": true
+    },
+    "monitoring": {
+      "enabled": true,
+      "interval": 5000,
+      "thresholds": {
+        "memory": 536870912,
+        "cpu": 80,
+        "responseTime": 1000
+      }
+    },
+    "optimization": {
+      "enableSuggestions": true,
+      "enableAutomaticOptimization": false,
+      "aggressiveness": "moderate"
+    }
+  },
+  "integrations": {
+    "buildSystems": {
+      "webpack": false,
+      "vite": false,
+      "rollup": false,
+      "parcel": false,
+      "esbuild": false
+    },
+    "testRunners": {
+      "jest": false,
+      "vitest": false,
+      "mocha": false,
+      "pytest": false,
+      "goTest": false,
+      "cargoTest": false
+    },
+    "linters": {
+      "eslint": false,
+      "tslint": false,
+      "pylint": false,
+      "flake8": false,
+      "golint": false,
+      "clippy": false
+    },
+    "versionControl": {
+      "git": false,
+      "enableCommitHooks": false,
+      "enableBranchAnalysis": false
+    },
+    "containers": {
+      "docker": false,
+      "kubernetes": false,
+      "enableContainerDebugging": false
+    },
+    "ides": {
+      "vscode": false,
+      "cursor": false,
+      "windsurf": false,
+      "augmentCode": false
+    }
+  },
+  "security": {
+    "enableSecurityScanning": false,
+    "vulnerabilityDatabases": [],
+    "enableDependencyScanning": false,
+    "enableCodeScanning": false,
+    "reportingLevel": "medium-high",
+    "autoFixVulnerabilities": false,
+    "excludePatterns": [
+      "test/**",
+      "tests/**"
+    ]
+  },
+  "detectors": {
+    "enabled": true,
+    "realTime": true,
+    "sources": {
+      "console": true,
+      "runtime": true,
+      "build": true,
+      "test": true,
+      "linter": true,
+      "staticAnalysis": true,
+      "ide": false,
+      "buildTools": true,
+      "processMonitor": true,
+      "multiLanguage": true
+    },
+    "filters": {
+      "categories": [],
+      "severities": [],
+      "excludeFiles": [
+        "node_modules/**",
+        "dist/**",
+        "build/**"
+      ],
+      "excludePatterns": [
+        "*.min.js",
+        "*.map"
+      ]
+    },
+    "polling": {
+      "interval": 1000,
+      "maxRetries": 3
+    },
+    "bufferSize": 1000,
+    "maxErrorsPerSession": 10000
+  }
+}

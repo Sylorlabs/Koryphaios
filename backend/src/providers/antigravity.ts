@@ -58,7 +58,13 @@ import {
   inferenceSandboxPolicy,
   wrapCommand,
 } from '../collaboration/sandbox-runner';
-import { getCliBridge, getKoryphaiosAntigravityHome, KORY_CUSTOM_MCP_NOTE } from './cli-bridges';
+import {
+  antigravityProbeEnv,
+  getCliBridge,
+  getKoryphaiosAntigravityHome,
+  hasAntigravityPortableLogin,
+  KORY_CUSTOM_MCP_NOTE,
+} from './cli-bridges';
 import { buildAntigravityHooks, buildAntigravitySettings } from './antigravity-permissions';
 import {
   fetchAntigravityQuota,
@@ -405,14 +411,7 @@ let cachedQuotaGroups: AntigravityQuotaGroup[] | null = null;
  *  The credential itself is never read or copied by Koryphaios: agy reads the
  *  staged/link-only CLI record from the managed GEMINI_DIR. */
 function agyDiscoveryEnv(): NodeJS.ProcessEnv {
-  const home = getKoryphaiosAntigravityHome();
-  return {
-    ...getSafeSubprocessEnv(),
-    HOME: home,
-    USERPROFILE: home,
-    ANTIGRAVITY_HOME: home,
-    GEMINI_DIR: join(home, '.gemini'),
-  };
+  return antigravityProbeEnv();
 }
 
 function buildAntigravityModels(
@@ -460,6 +459,20 @@ function refreshModelsInBackground(forceRefresh = false): Promise<ModelDef[]> {
   if (modelsFetchInProgress) return modelsFetchPromise ?? Promise.resolve(cachedModels ?? []);
   const bin = whichBinary('agy');
   if (!bin) return Promise.resolve(cachedModels ?? []);
+
+  // A passive probe must never be able to start an interactive sign-in. When
+  // agy finds no credential in its home it opens the browser OAuth flow, and
+  // this provider is probed from every stale status render plus the catalog
+  // scheduler. Without a staged portable login there is nothing to discover,
+  // so record the attempt (negative cache) instead of spawning.
+  if (!hasAntigravityPortableLogin()) {
+    lastModelsProbeAt = Date.now();
+    providerLog.debug(
+      { provider: 'antigravity' },
+      'Antigravity has no staged portable login; skipped the passive `agy models` probe so it cannot launch a browser sign-in',
+    );
+    return Promise.resolve(cachedModels ?? []);
+  }
 
   if (!forceRefresh && Date.now() - lastModelsProbeAt < MODELS_PROBE_FAILURE_COOLDOWN_MS) {
     return Promise.resolve(cachedModels ?? []);

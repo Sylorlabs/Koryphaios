@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   deleteEntry: vi.fn(),
   sessionStore: { activeSessionId: 'session-1' },
   isLoadingSession: false,
+  isReplaying: false,
   feed: [] as Array<Record<string, unknown>>,
 }));
 
@@ -23,7 +24,11 @@ vi.mock('$lib/stores/sessions.svelte', () => ({
 }));
 
 vi.mock('$lib/stores/feed.svelte', () => ({
-  feedStore: { sessionId: 'session-1', deleteEntry: mocks.deleteEntry },
+  feedStore: {
+    sessionId: 'session-1',
+    deleteEntry: mocks.deleteEntry,
+    isReplayingSession: () => mocks.isReplaying,
+  },
 }));
 
 vi.mock('$lib/stores/toast.svelte', () => ({
@@ -62,6 +67,7 @@ const autoScroll = vi.hoisted(() => ({
   notifyNewEntry: vi.fn(),
   jumpToBottom: vi.fn(),
   setFollow: vi.fn(),
+  setSuspended: vi.fn(),
 }));
 
 vi.mock('$lib/utils/autoscroll.svelte', () => ({
@@ -82,6 +88,7 @@ describe('ManagerFeed suggestion controls', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.isLoadingSession = false;
+    mocks.isReplaying = false;
     mocks.feed = [];
     welcomePreferencesStore.setBackground(undefined);
   });
@@ -118,6 +125,29 @@ describe('ManagerFeed suggestion controls', () => {
     expect(screen.getByText('hello there')).toBeTruthy();
   });
 
+  it('does not hold the transcript cover for a replay burst once landed', async () => {
+    mocks.feed = [
+      {
+        id: 'entry-1',
+        timestamp: Date.now(),
+        type: 'content',
+        agentId: 'agent-1',
+        agentName: 'Agent',
+        glowClass: '',
+        text: 'hello there',
+      },
+    ];
+    mocks.isReplaying = true;
+    const { container } = render(ManagerFeed);
+
+    // Replayed events fold without touching the visible rows and merge in one
+    // settle at the burst's end, so the reader is not kept behind a spinner
+    // for the remainder of the log.
+    await waitFor(() =>
+      expect(container.querySelector('.chat-loading.cover')).toBeNull(),
+    );
+  });
+
   it('keeps load and edit actions as sibling buttons with independent behavior', async () => {
     const onUseSuggestion = vi.fn();
     const { container } = render(ManagerFeed, { props: { onUseSuggestion } });
@@ -145,6 +175,7 @@ describe('ManagerFeed home background', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.isLoadingSession = false;
+    mocks.isReplaying = false;
     mocks.feed = [];
     welcomePreferencesStore.setBackground(undefined);
   });

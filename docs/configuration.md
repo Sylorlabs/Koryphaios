@@ -186,7 +186,7 @@ mandatory write confinement, legacy migration, recovery, and platform/provider l
 ```jsonc
 {
   "workspace": {
-    "worktreeLimit": 4, // max concurrent isolated worker worktrees
+    "worktreeLimit": 0, // 0 = no host limit (default); >0 = user-chosen cap, extra work queues
     "worktreeDir": ".trees", // base directory, relative to the project root
     "copyEnvFiles": false, // do not copy .env files into worktrees
     "skipHooks": true, // skip pre-commit hooks on AI reconcile commits
@@ -195,6 +195,10 @@ mandatory write confinement, legacy migration, recovery, and platform/provider l
   },
 }
 ```
+
+`worktreeLimit` is unlimited by default (`0`). Set a positive number only when
+you want to bound the machine; additional delegations then wait in FIFO order
+and appear as `queued` in workspace status instead of failing.
 
 `worktreeDir` and Koryphaios' own `.koryphaios/` state directory are excluded
 from Git through `.git/info/exclude` by default, so Koryphaios never edits a

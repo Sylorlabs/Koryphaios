@@ -1,7 +1,16 @@
 import type { ServerWebSocket } from 'bun';
-import { hasRequiredSessionIdentity, type WSMessage } from '@koryphaios/shared';
+import {
+  hasRequiredSessionIdentity,
+  type SessionHistoryPrunedPayload,
+  type WSMessage,
+} from '@koryphaios/shared';
 import { serverLog } from '../logger';
-import { getOrderedEventLog } from './ordered-event-log';
+import {
+  getOrderedEventLog,
+  prunedBoundaryAhead,
+  type ReplayPageBudget,
+} from './ordered-event-log';
+import { mergePayload } from './stream-coalescer';
 
 interface WSClientData {
   id: string;
@@ -37,7 +46,13 @@ const TERMINAL_EVENT_TYPES = new Set<string>([
   'session.timeline_rewritten',
   'session.changes_resolved',
   'kory.ask_user_resolved',
+  'turn.provider_completed',
+  'run.settled',
 ]);
+
+// Lifecycle events that stop the UI spinner. Under backpressure they are never
+// held or merged: the session's pending deltas flush first, then they go out at once.
+const IMMEDIATE_EVENT_TYPES = new Set<string>(['turn.provider_completed', 'run.settled']);
 
 const TERMINAL_AGENT_STATUSES = new Set<string>(['done', 'error', 'idle']);
 
@@ -70,6 +85,36 @@ const TERMINAL_RETRY_MS = 2_000;
 // through the same overload guard as live delivery instead of blasting up to
 // 2_048 events per tick over raw ws.send at a slow client.
 const REPLAY_PAGE_SIZE = 256;
+/** Replay pages also stop at this many serialized bytes (B6). A page keeps at least one event. */
+export const REPLAY_PAGE_MAX_BYTES = 512 * 1024;
+
+// Live stream backpressure (B6). A client whose socket holds more than
+// DELTA_BACKPRESSURE_THRESHOLD bytes stops receiving individual stream.delta /
+// stream.thinking events. They accumulate per contiguous run (session, agent,
+// kind, turn) and go out as one merged frame once the socket drains below
+// DELTA_RESUME_THRESHOLD (half the threshold). Sequenced events are never
+// dropped or reordered: the frontend reorders strictly by sequence and fills
+// gaps by replay, so each merged frame sits at its run's last sequence and the
+// earlier sequences get a replay_skipped placeholder.
+const DELTA_BACKPRESSURE_THRESHOLD = 4 * 1024 * 1024;
+const DELTA_RESUME_THRESHOLD = DELTA_BACKPRESSURE_THRESHOLD / 2;
+// A merged frame carries at most about this much text, so one flush cannot queue an unbounded frame.
+const MERGED_DELTA_FRAME_CHARS = 64 * 1024;
+
+/** A contiguous run of stream deltas that share one agent, kind and turn. */
+interface DeltaRun {
+  kind: 'delta';
+  sessionId: string;
+  key: string;
+  messages: WSMessage[];
+}
+
+/** A non-delta event that must keep its place behind deltas still queued for its session. */
+interface QueuedEvent {
+  kind: 'event';
+  sessionId: string;
+  message: WSMessage;
+}
 
 interface WSClient {
   ws: ServerWebSocket<WSClientData>;
@@ -81,6 +126,69 @@ interface WSClient {
   // Terminal events that could not be sent due to backpressure. Drained by
   // retryTerminalEvents() on the TERMINAL_RETRY_MS timer.
   pendingTerminalEvents: WSMessage[];
+  // Stream deltas (and events that follow them) held while the socket is over
+  // the delta threshold. Drained in order by drainDeliveryQueue().
+  deliveryQueue: Array<DeltaRun | QueuedEvent>;
+}
+
+function bufferedBytes(client: WSClient): number {
+  return client.ws.getBufferedAmount?.() ?? 0;
+}
+
+/** Only sequenced stream deltas can merge: their sequence positions the merged frame. */
+function isMergeableDelta(message: WSMessage): boolean {
+  return (
+    (message.type === 'stream.delta' || message.type === 'stream.thinking') &&
+    !!message.sessionId &&
+    Number.isSafeInteger(message.sequence) &&
+    Number.isSafeInteger(message.epoch)
+  );
+}
+
+function deltaRunKey(message: WSMessage): string {
+  const payload = message.payload as { agentId?: string; messageId?: string };
+  return `${message.type}\u0000${payload?.agentId ?? ''}\u0000${payload?.messageId ?? ''}`;
+}
+
+function deltaTextLength(message: WSMessage): number {
+  const payload = message.payload as { content?: string; thinking?: string } | null;
+  return (payload?.content?.length ?? 0) + (payload?.thinking?.length ?? 0);
+}
+
+/** Take the next chunk of a run, bounded by MERGED_DELTA_FRAME_CHARS (always at least one message). */
+function takeDeltaChunk(messages: WSMessage[]): WSMessage[] {
+  let chars = 0;
+  let count = 0;
+  while (count < messages.length) {
+    chars += deltaTextLength(messages[count]);
+    count++;
+    if (chars >= MERGED_DELTA_FRAME_CHARS) break;
+  }
+  return messages.splice(0, count);
+}
+
+/**
+ * Frames for one chunk of a delta run: a replay_skipped placeholder at each
+ * sequence but the last, then one merged delta at the last sequence carrying
+ * the concatenated text. The merged frame keeps payload.messageId, so the turn
+ * identity Invariant 2 relies on is unchanged.
+ */
+function mergeDeltaChunk(chunk: WSMessage[]): WSMessage[] {
+  const frames: WSMessage[] = chunk.slice(0, -1).map(
+    (message) =>
+      ({
+        type: 'session.replay_skipped',
+        sessionId: message.sessionId,
+        epoch: message.epoch,
+        sequence: message.sequence,
+        timestamp: message.timestamp,
+        payload: null,
+      }) as WSMessage,
+  );
+  let payload = chunk[0].payload;
+  for (let i = 1; i < chunk.length; i++) payload = mergePayload(payload, chunk[i].payload);
+  frames.push({ ...chunk[chunk.length - 1], payload });
+  return frames;
 }
 
 export class WSManager {
@@ -142,6 +250,7 @@ export class WSManager {
       isAlive: true,
       overloaded: false,
       pendingTerminalEvents: [],
+      deliveryQueue: [],
     });
     serverLog.debug({ clientId: id, totalClients: this.clients.size }, 'WebSocket client added');
   }
@@ -240,17 +349,36 @@ export class WSManager {
     const log = getOrderedEventLog();
     const current = log.getCursor(sessionId);
     const epoch = current.epoch;
-    // A freshly opened chat already loads its durable message/context
-    // projection over HTTP. Replaying the entire operational event log here
-    // only makes old tool/thinking rows stream in one by one and delays the
-    // recent conversation. Live events after this point still deliver normally.
     let after = replayHistory
       ? cursor?.epoch === current.epoch
         ? Math.max(0, cursor?.sequence ?? 0)
         : 0
       : current.latestSequence;
+    if (replayHistory) {
+      // The replay below re-sends everything after the cursor, including any
+      // deltas this client was still holding. Keeping the held copies too would duplicate them.
+      client.deliveryQueue = client.deliveryQueue.filter((item) => item.sessionId !== sessionId);
+      // Pruned history cannot be replayed. Tell this client where the retained
+      // history begins without rotating the epoch: the marker jumps its cursor
+      // to the mark, and replay continues from there. Rotating would discard
+      // causal links for in-flight tool results and would reset every reload.
+      const pruned = prunedBoundaryAhead(log.getPruneMark(sessionId), current, cursor);
+      if (pruned) {
+        this.sendHistoryPruned(client, sessionId, epoch, pruned.sequence);
+        after = pruned.sequence;
+      }
+    }
+    // A freshly opened chat already loads its durable message/context
+    // projection over HTTP, and the subscription's replayFilter suppresses
+    // stream events whose turn is persisted as `parts` — replay then carries
+    // only operational state plus the in-flight turn. Live events after this
+    // point still deliver normally.
+    const budget: ReplayPageBudget = {
+      maxEvents: REPLAY_PAGE_SIZE,
+      maxBytes: REPLAY_PAGE_MAX_BYTES,
+    };
     while (after < current.latestSequence) {
-      const events = log.getAfter(sessionId, epoch, after, REPLAY_PAGE_SIZE);
+      const events = log.getPage(sessionId, epoch, after, budget);
       if (events.length === 0) break;
       for (const event of events) {
         if (client.ws.readyState !== 1) return;
@@ -272,6 +400,36 @@ export class WSManager {
         // remaining history from its cursor on the next subscribe.
         if (client.overloaded) return;
       }
+    }
+  }
+
+  /**
+   * Unsequenced control event: the retained history of `epoch` begins after
+   * `throughSequence`. The client jumps its cursor there and reloads persisted
+   * messages only if it had already applied part of that epoch. Sent straight
+   * to one client, ahead of any replay page, and never queued.
+   */
+  private sendHistoryPruned(
+    client: WSClient,
+    sessionId: string,
+    epoch: number,
+    throughSequence: number,
+  ): void {
+    if (client.ws.readyState !== 1) return;
+    const marker: WSMessage<SessionHistoryPrunedPayload> = {
+      type: 'session.history_pruned',
+      sessionId,
+      epoch,
+      timestamp: Date.now(),
+      payload: { epoch, throughSequence },
+    };
+    try {
+      client.ws.send(JSON.stringify(marker));
+    } catch (err) {
+      serverLog.warn(
+        { sessionId, error: err instanceof Error ? err.message : String(err) },
+        'Failed to send history-pruned marker',
+      );
     }
   }
 
@@ -318,9 +476,36 @@ export class WSManager {
   private deliverToClient(client: WSClient, message: WSMessage, data: string): boolean {
     if (client.ws.readyState !== 1) return false;
 
-    const overloaded = this.isClientOverloaded(client);
-    client.overloaded = overloaded;
-    if (overloaded) {
+    const buffered = bufferedBytes(client);
+    client.overloaded = buffered > BACKPRESSURE_THRESHOLD;
+
+    if (message.sessionId && IMMEDIATE_EVENT_TYPES.has(message.type)) {
+      return this.sendImmediately(client, message);
+    }
+
+    // Per-session order is strict. A message joins whichever queue already
+    // holds undelivered messages for its session, so it cannot overtake them.
+    const queuedIn = message.sessionId ? this.queueHolding(client, message.sessionId) : null;
+    if (queuedIn === 'delivery') {
+      this.enqueueDelivery(client, message);
+      this.drainDeliveryQueue(client);
+      return false;
+    }
+    if (queuedIn === 'terminal') {
+      this.retryTerminalEvents(client.ws.data.id, client);
+      if (this.queueHolding(client, message.sessionId!) === 'terminal') {
+        client.pendingTerminalEvents.push(message);
+        return false;
+      }
+    }
+
+    if (isMergeableDelta(message)) {
+      // Deltas keep flowing up to the delta threshold, then accumulate for a merged flush.
+      if (buffered > DELTA_BACKPRESSURE_THRESHOLD) {
+        this.enqueueDelivery(client, message);
+        return false;
+      }
+    } else if (client.overloaded) {
       if (isTerminalEvent(message)) {
         client.pendingTerminalEvents.push(message);
       }
@@ -334,6 +519,96 @@ export class WSManager {
     } catch (err) {
       serverLog.warn({ error: String(err) }, 'Failed to send WebSocket message to client');
       return false;
+    }
+  }
+
+  /** Which queue, if any, still holds undelivered messages for this session. */
+  private queueHolding(client: WSClient, sessionId: string): 'delivery' | 'terminal' | null {
+    if (client.deliveryQueue.some((item) => item.sessionId === sessionId)) return 'delivery';
+    if (client.pendingTerminalEvents.some((event) => event.sessionId === sessionId)) {
+      return 'terminal';
+    }
+    return null;
+  }
+
+  /**
+   * Send a spinner-stopping lifecycle event now. Everything already held for
+   * its session goes first, in order, regardless of buffer level, so the event
+   * never overtakes the text it follows. A send failure falls back to the
+   * terminal retry queue.
+   */
+  private sendImmediately(client: WSClient, message: WSMessage): boolean {
+    const sessionId = message.sessionId!;
+    try {
+      const held = client.deliveryQueue.filter((item) => item.sessionId === sessionId);
+      client.deliveryQueue = client.deliveryQueue.filter((item) => item.sessionId !== sessionId);
+      for (const item of held) {
+        if (item.kind === 'event') {
+          client.ws.send(JSON.stringify(item.message));
+          continue;
+        }
+        while (item.messages.length > 0) {
+          for (const frame of mergeDeltaChunk(takeDeltaChunk(item.messages))) {
+            client.ws.send(JSON.stringify(frame));
+          }
+        }
+      }
+      const heldTerminal = client.pendingTerminalEvents.filter(
+        (event) => event.sessionId === sessionId,
+      );
+      client.pendingTerminalEvents = client.pendingTerminalEvents.filter(
+        (event) => event.sessionId !== sessionId,
+      );
+      for (const event of heldTerminal) client.ws.send(JSON.stringify(event));
+      client.ws.send(JSON.stringify(message));
+      return true;
+    } catch (err) {
+      serverLog.warn(
+        { type: message.type, error: String(err) },
+        'Failed to deliver lifecycle event immediately; queued for retry',
+      );
+      client.pendingTerminalEvents.push(message);
+      return false;
+    }
+  }
+
+  private enqueueDelivery(client: WSClient, message: WSMessage): void {
+    const sessionId = message.sessionId!;
+    if (!isMergeableDelta(message)) {
+      client.deliveryQueue.push({ kind: 'event', sessionId, message });
+      return;
+    }
+    // Only the newest run can grow, so merged text never jumps over another event.
+    const key = deltaRunKey(message);
+    const last = client.deliveryQueue[client.deliveryQueue.length - 1];
+    if (last?.kind === 'delta' && last.sessionId === sessionId && last.key === key) {
+      last.messages.push(message);
+      return;
+    }
+    client.deliveryQueue.push({ kind: 'delta', sessionId, key, messages: [message] });
+  }
+
+  /** Send queued deliveries in order while the socket is at or below the resume threshold. */
+  private drainDeliveryQueue(client: WSClient): void {
+    while (client.deliveryQueue.length > 0 && bufferedBytes(client) <= DELTA_RESUME_THRESHOLD) {
+      const head = client.deliveryQueue[0];
+      let chunk: WSMessage[] = [];
+      try {
+        if (head.kind === 'event') {
+          client.ws.send(JSON.stringify(head.message));
+          client.deliveryQueue.shift();
+          continue;
+        }
+        chunk = takeDeltaChunk(head.messages);
+        for (const frame of mergeDeltaChunk(chunk)) client.ws.send(JSON.stringify(frame));
+        if (head.messages.length === 0) client.deliveryQueue.shift();
+      } catch (err) {
+        // Put an unsent chunk back. Frames the client already applied are
+        // recognised by sequence on resend.
+        if (head.kind === 'delta' && chunk.length > 0) head.messages.unshift(...chunk);
+        serverLog.warn({ error: String(err) }, 'Failed to flush queued stream deltas');
+        return;
+      }
     }
   }
 
@@ -374,6 +649,7 @@ export class WSManager {
       client.pendingTerminalEvents = client.pendingTerminalEvents.filter(
         (event) => event.sessionId !== sessionId,
       );
+      client.deliveryQueue = client.deliveryQueue.filter((item) => item.sessionId !== sessionId);
     }
     this.deliverPersistedToSession(sessionId, ordered);
     return { epoch: ordered.epoch!, latestSequence: ordered.sequence! };
@@ -426,6 +702,7 @@ export class WSManager {
       client.pendingTerminalEvents = client.pendingTerminalEvents.filter(
         (event) => event.sessionId !== sessionId,
       );
+      client.deliveryQueue = client.deliveryQueue.filter((item) => item.sessionId !== sessionId);
       if (client.ws.data.sessionId === sessionId) client.ws.data.sessionId = undefined;
     }
   }
@@ -470,6 +747,7 @@ export class WSManager {
     if (this.isShutdown) return;
     for (const [id, client] of this.clients) {
       try {
+        this.drainDeliveryQueue(client);
         this.retryTerminalEvents(id, client);
       } catch (err) {
         serverLog.error({ clientId: id, error: String(err) }, 'Terminal-event retry loop error');

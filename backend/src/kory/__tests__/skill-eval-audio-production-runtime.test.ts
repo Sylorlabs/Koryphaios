@@ -11,7 +11,7 @@ import {
   materializeAudioProductionFixture,
   renderAudioProductionControl,
   runAudioProductionRuntime,
-} from '../skill-eval-audio-production-runtime';
+} from '../../eval/skills/skill-eval-audio-production-runtime';
 
 const scenarios = [
   AUDIO_PRODUCTION_RUNTIME_SCENARIOS.interview,

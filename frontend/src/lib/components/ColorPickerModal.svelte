@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { theme, type CustomAccent } from '$lib/stores/theme.svelte';
+  import { theme, type CustomAccent, type ThemeScheme } from '$lib/stores/theme.svelte';
   import X from 'lucide-svelte/icons/x';
   import Check from 'lucide-svelte/icons/check';
   import Pipette from 'lucide-svelte/icons/pipette';
@@ -11,10 +11,12 @@
     open: boolean;
     onClose: () => void;
     target?: 'primary' | 'secondary';
+    /** When set, the picker edits that mode's accent slot instead of the active one. */
+    scheme?: ThemeScheme;
     onApply?: (hex: string) => void;
   }
 
-  let { open, onClose, target = 'primary', onApply }: Props = $props();
+  let { open, onClose, target = 'primary', scheme, onApply }: Props = $props();
 
   // ---- Color state (HSV internally, hex as the canonical exchange format) ----
   // Start from the current effective accent so the picker opens on a sensible value.
@@ -304,7 +306,11 @@
   // Initialize from current accent when opening
   $effect(() => {
     if (!open) return;
-    const cur = target === 'secondary' ? theme.currentSecondaryAccent : theme.currentAccent;
+    const cur = scheme
+      ? theme.accentFor(scheme, target)
+      : target === 'secondary'
+        ? theme.currentSecondaryAccent
+        : theme.currentAccent;
     const rgb = hexToRgb(cur.main);
     if (rgb) {
       const [h, s, v] = rgbToHsv(rgb[0], rgb[1], rgb[2]);
@@ -332,7 +338,8 @@
       return;
     }
     const custom: CustomAccent = { main: currentHex, hover: effectiveHover };
-    if (target === 'secondary') theme.setCustomSecondaryAccent(custom);
+    if (scheme) theme.setModeCustomAccent(scheme, target, custom);
+    else if (target === 'secondary') theme.setCustomSecondaryAccent(custom);
     else theme.setCustomAccent(custom);
     onClose();
   }
@@ -560,7 +567,7 @@
             >
             <button
               type="button"
-              class="text-[10px] px-2 py-1 rounded-md border transition-colors flex items-center gap-1"
+              class="text-[11px] px-2 py-1 rounded-md border transition-colors flex items-center gap-1"
               style="background: var(--color-surface-2); border-color: var(--color-border); color: {hoverAuto
                 ? 'var(--color-accent)'
                 : 'var(--color-text-secondary)'};"
@@ -601,7 +608,7 @@
             />
           </div>
           {#if hoverAuto}
-            <p class="text-[10px] mt-1.5" style="color: var(--color-text-muted);">
+            <p class="text-[11px] mt-1.5" style="color: var(--color-text-muted);">
               Derived from the main color. Click the hex field or switch to Manual to customize.
             </p>
           {/if}
@@ -620,7 +627,7 @@
               class="rounded-lg p-2.5 border"
               style="background: var(--color-surface-2); border-color: var(--color-border);"
             >
-              <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">On surface</div>
+              <div class="text-[11px] mb-1" style="color: var(--color-text-muted);">On surface</div>
               <div
                 class="text-base font-bold font-mono"
                 style="color: {Number(contrastOnBg) >= 4.5
@@ -631,7 +638,7 @@
               >
                 {contrastOnBg}
               </div>
-              <div class="text-[9px] mt-0.5" style="color: var(--color-text-muted);">
+              <div class="text-[11px] mt-0.5" style="color: var(--color-text-muted);">
                 {Number(contrastOnBg) >= 4.5
                   ? 'AAA'
                   : Number(contrastOnBg) >= 3
@@ -643,7 +650,7 @@
               class="rounded-lg p-2.5 border"
               style="background: var(--color-surface-2); border-color: var(--color-border);"
             >
-              <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">
+              <div class="text-[11px] mb-1" style="color: var(--color-text-muted);">
                 Text on accent
               </div>
               <div
@@ -656,7 +663,7 @@
               >
                 {contrastOnAccent}
               </div>
-              <div class="text-[9px] mt-0.5" style="color: var(--color-text-muted);">
+              <div class="text-[11px] mt-0.5" style="color: var(--color-text-muted);">
                 {Number(contrastOnAccent) >= 4.5
                   ? 'AAA'
                   : Number(contrastOnAccent) >= 3
@@ -668,7 +675,7 @@
               class="rounded-lg p-2.5 border"
               style="background: var(--color-surface-2); border-color: var(--color-border);"
             >
-              <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">
+              <div class="text-[11px] mb-1" style="color: var(--color-text-muted);">
                 Hover on surf.
               </div>
               <div
@@ -681,7 +688,7 @@
               >
                 {contrastHoverOnBg}
               </div>
-              <div class="text-[9px] mt-0.5" style="color: var(--color-text-muted);">
+              <div class="text-[11px] mt-0.5" style="color: var(--color-text-muted);">
                 {Number(contrastHoverOnBg) >= 4.5
                   ? 'AAA'
                   : Number(contrastHoverOnBg) >= 3

@@ -295,6 +295,15 @@ export class GoalDriveService {
               goal.execution.model,
               goal.execution.provider,
             );
+            if (adjudication.criticUnavailable) {
+              const paused = await this.goals.transitionActiveAttempt(goalId, attemptId, {
+                status: 'paused',
+                blocker: `Independent verification could not run: ${adjudication.feedback ?? 'unknown error'}. Resume to retry verification.`,
+              });
+              if (!paused) return;
+              this.publish(paused);
+              return;
+            }
             if (adjudication.skipped) {
               const paused = await this.goals.transitionActiveAttempt(goalId, attemptId, {
                 status: 'paused',
@@ -836,6 +845,15 @@ Continue until this checklist item is genuinely complete. You may invoke a regis
           execution.model,
           execution.provider,
         );
+        if (adjudication.criticUnavailable) {
+          const paused = await this.goals.transitionActiveAttempt(goalId, attemptId, {
+            status: 'paused',
+            blocker: `Independent verification could not run: ${adjudication.feedback ?? 'unknown error'}. Resume to retry verification.`,
+          });
+          if (!paused) return;
+          this.publish(paused);
+          return;
+        }
         if (adjudication.skipped) {
           const paused = await this.goals.transitionActiveAttempt(goalId, attemptId, {
             status: 'paused',
@@ -909,6 +927,15 @@ Continue until this checklist item is genuinely complete. You may invoke a regis
             execution.model,
             execution.provider,
           );
+          if (adjudication.criticUnavailable) {
+            const paused = await this.goals.transitionActiveAttempt(goalId, attemptId, {
+              status: 'paused',
+              blocker: `Independent verification could not run: ${adjudication.feedback ?? 'unknown error'}. Resume to retry verification.`,
+            });
+            if (!paused) return;
+            this.publish(paused);
+            return;
+          }
           if (adjudication.skipped) {
             const paused = await this.goals.transitionActiveAttempt(goalId, attemptId, {
               status: 'paused',
@@ -986,6 +1013,16 @@ Continue until this checklist item is genuinely complete. You may invoke a regis
       if (reviewedItem?.status === 'completed') {
         verificationFeedback = '';
         continue;
+      }
+
+      if (verification.criticUnavailable) {
+        const paused = await this.goals.transitionActiveAttempt(goalId, attemptId, {
+          status: 'paused',
+          blocker: `Independent verification could not run: ${verification.feedback ?? 'unknown error'}. Resume to retry verification.`,
+        });
+        if (!paused) return;
+        this.publish(paused);
+        return;
       }
 
       if (verification.skipped) {

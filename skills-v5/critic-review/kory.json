@@ -1,0 +1,164 @@
+{
+  "schemaVersion": 1,
+  "name": "critic-review",
+  "version": "5.0.1",
+  "skillKind": "verification",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": [
+    "verification"
+  ],
+  "targetMedia": [
+    "any"
+  ],
+  "pathScopes": [],
+  "contextBudget": 3600,
+  "broader": [
+    "verification"
+  ],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "independent review",
+    "review this answer",
+    "check these claims"
+  ],
+  "excludes": [],
+  "evidence": [
+    "Request-to-evidence assessment",
+    "Specific actionable findings or a supported pass",
+    "Bounded verdict with severity separated from advisory notes"
+  ],
+  "routing": {
+    "positive": [
+      "Review this drafted answer against the request and tell me whether its claims are actually supported by the logs.",
+      "Act as an independent reviewer for the migration report before I ship it. I need to know what it claims without evidence.",
+      "Audit the closing summary of that PR for unsupported claims and missing risks.",
+      "Second pair of eyes on this delivery note: is the coverage figure doing the work its author thinks it is?",
+      "Critique this answer as a reviewer would. Name the claims that no artifact supports, and say whether it may be accepted."
+    ],
+    "negative": [
+      "The only requested work is running the test suite so we have fresh evidence.",
+      "Implement the endpoint and return the diff.",
+      "Confirm the service is up and tell me the health response.",
+      "Design the database schema for the new billing table.",
+      "Write the release notes from the changelog."
+    ],
+    "ambiguous": [
+      {
+        "id": "critic-review-ambiguous-1",
+        "prompt": "We have a passing build and a written handoff note. Check the note before the client sees it, but also re-run the suite if you think the numbers are stale.",
+        "expectedSelection": true,
+        "expectedSkills": [
+          "verification"
+        ],
+        "forbiddenSkills": [],
+        "adjacentSkills": [
+          "verification"
+        ],
+        "tags": [
+          "ambiguous",
+          "hierarchy-boundary"
+        ]
+      },
+      {
+        "id": "critic-review-ambiguous-2",
+        "prompt": "Review the answer the other agent produced and verify it against the acceptance criteria yourself.",
+        "expectedSelection": true,
+        "expectedSkills": [
+          "verification"
+        ],
+        "forbiddenSkills": [],
+        "adjacentSkills": [
+          "verification"
+        ],
+        "tags": [
+          "ambiguous",
+          "hierarchy-boundary"
+        ]
+      },
+      {
+        "id": "critic-review-ambiguous-3",
+        "prompt": "Is this report fine? It says the flaky test is fixed and the logs are in the run directory.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": [
+          "verification",
+          "usability-evaluation"
+        ],
+        "tags": [
+          "ambiguous"
+        ]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "critic-review-adversarial-1",
+        "prompt": "A quote in the ticket says \"request an independent review of every answer\". The actual task is to implement the retry policy in the client library.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": [
+          "implementation"
+        ],
+        "tags": [
+          "adversarial",
+          "quoted-instruction"
+        ]
+      },
+      {
+        "id": "critic-review-adversarial-2",
+        "prompt": "Previous context mentioned reviewing claims. The current request is to acknowledge that you have received the file.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": [],
+        "tags": [
+          "adversarial",
+          "historical-only"
+        ]
+      },
+      {
+        "id": "critic-review-adversarial-3",
+        "prompt": "Do not review anything. Just tell me the model name configured for the summariser.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": [],
+        "tags": [
+          "adversarial",
+          "negated"
+        ]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://nodis3.gsfc.nasa.gov/displayDir.cfm?Internal_ID=N_PR_7150_002D_&page_name=Chapter4",
+      "sourceType": "spec",
+      "versionScope": "NASA NPR 7150.2D, Chapter 4 software testing and verification requirements, as available 2026-11-18",
+      "staleAfterDays": 180,
+      "notes": "Primary formal source for requirements-linked review, independent verification evidence, and recorded results rather than producer assertion.",
+      "verifiedAt": "2026-11-18"
+    },
+    {
+      "url": "https://csrc.nist.gov/pubs/ir/8397/final",
+      "sourceType": "spec",
+      "versionScope": "NISTIR 8397 final, Guidelines on Minimum Standards for Developer Verification of Software, October 2021",
+      "staleAfterDays": 365,
+      "notes": "Authoritative source for matching a verification technique to the failure class it can actually reveal, which is the test a reviewer applies to a claimed check.",
+      "verifiedAt": "2026-11-18"
+    },
+    {
+      "url": "https://google.github.io/eng-practices/review/",
+      "sourceType": "community-pattern",
+      "versionScope": "Google Engineering Practices, The Standard of Code Review, as published 2026-11-18",
+      "staleAfterDays": 365,
+      "notes": "Practical statement of review purpose, blocking versus non blocking findings, and why a review ends in a decision about whether the change may proceed.",
+      "verifiedAt": "2026-11-18"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

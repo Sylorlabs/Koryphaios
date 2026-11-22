@@ -161,10 +161,12 @@ export function validateConfig(config: Partial<KoryphaiosConfig>): void {
     if (config.workspace.worktreeLimit !== undefined) {
       if (
         typeof config.workspace.worktreeLimit !== 'number' ||
-        config.workspace.worktreeLimit < 1 ||
-        config.workspace.worktreeLimit > 100
+        !Number.isInteger(config.workspace.worktreeLimit) ||
+        config.workspace.worktreeLimit < 0
       ) {
-        errors.push('workspace.worktreeLimit must be a number between 1 and 100');
+        errors.push(
+          'workspace.worktreeLimit must be a non-negative integer (0 means unlimited)',
+        );
       }
     }
     if (

@@ -34,6 +34,10 @@ Choose data access based on ownership and freshness requirements. Avoid duplicat
 
 For cached data, name the active cache model and the invalidation contract. Under Cache Components, distinguish time-based `cacheLife` from on-demand `revalidateTag`, `updateTag`, or `revalidatePath`. Do not infer production freshness from development behavior.
 
+Cache scope must match who owns the value. A cached entry whose result depends on a cookie, an `Authorization` header, a session, or any other request-scoped identity is a privacy defect rather than an optimization: the first requester's value is served to the next one, and to anonymous visitors. Cache only values that are identical for every requester. Compute per-requester values such as prices, entitlements, plans, and identity-derived flags inside the request scope that owns them, and keep them out of reach of a shared cache even when that cache is already present and appears convenient. Adding an identity to a cache key does not make a shared cache safe for private data, because the key is rarely part of every downstream read.
+
+State the two-value test for any caching change: a cold request as one identity, a second identity, and an anonymous request, each receiving its own value before and after a revalidation. A run with one identity cannot tell a working cache from a leaking one.
+
 Treat Server Actions and Route Handlers as server entry points. Validate input, re-check authorization at the mutation boundary, perform the mutation, and then invalidate or update the cache scope that actually contains the changed data.
 
 Account for pending submissions, retries, repeated invocation, and errors at both boundaries. A disabled submit control or a pending flag can improve interaction feedback but cannot guarantee a server mutation runs only once: Server Functions can also be reached through direct requests. For a non-idempotent write that must tolerate repetition, enforce its deduplication or transaction invariant on the server, and return actionable, serializable success or error state to the client. Use the installed React/Next.js form-state APIs where appropriate and preserve progressive enhancement when the existing application depends on it.
@@ -45,7 +49,7 @@ Verify the behavior through the route boundary that users and production will ex
 - Test a direct deep link and browser refresh, not only client navigation.
 - Exercise server render plus hydration for any changed Server and Client Component seam.
 - Verify that client bundles do not contain imports or secrets that are server only after moving a boundary.
-- For cache work, demonstrate the stale state, perform the mutation or expiry path, then show the expected fresh state under the configured cache model.
+- For cache work, demonstrate the stale state, perform the mutation or expiry path, then show the expected fresh state under the configured cache model, and show the two-value test above passing for both identities and the anonymous request. A cache fix that leaves one value visible to a second identity is not done.
 - Exercise authenticated and unauthenticated or unauthorized paths for server mutations when access control is involved.
 - For mutating forms, exercise repeated submission, pending-state transitions, server errors, retry/recovery, and the resulting persisted state. Do not infer exactly-once behavior from client-side disabling.
 - Run the deployment build and a representative production runtime check for behavior that depends on build-time or hosting semantics.
@@ -54,6 +58,6 @@ Verify the behavior through the route boundary that users and production will ex
 
 ## Verification artifacts
 
-When a task supplies a verification artifact schema, write it with the exact field names, version strings, check identifiers, and terminal status it lists. Set the status from what you actually ran: a check you performed carries its observed result, and a check you could not run stays unverified with the reason recorded. Never leave a placeholder status after performing the work, and never claim a check you did not run.
+When a task supplies a verification artifact schema, write it with the exact field names, version strings, check identifiers, and terminal status it lists. Write the artifact as the work completes rather than at the end of the turn: a correct change that leaves a placeholder artifact is a failed task. Set the status from what you actually ran: a check you performed carries its observed result, and a check you could not run stays unverified with the reason recorded. Never leave a placeholder status after performing the work, and never claim a check you did not run.
 
 Use [the maintained source map](references/sources.md) for version-sensitive App Router and caching behavior.

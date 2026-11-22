@@ -18,6 +18,7 @@
   import KorySelect from './KorySelect.svelte';
   import KorySlider from './KorySlider.svelte';
   import SettingsSwitch from './SettingsSwitch.svelte';
+  import SettingsPage from './settings/SettingsPage.svelte';
 
   interface Props {
     attention?: boolean;
@@ -81,6 +82,28 @@
   let localModelBusy = $state(false);
   let localModelProgress = $state(0);
   let localModelError = $state('');
+  // Names and jargon the transcriber should spell the user's way. It is a
+  // client-side preference, not server state: it only ever becomes decoder
+  // prompt text, and every list is meaningless to the next device anyway.
+  const VOICE_VOCABULARY_KEY = 'koryphaios.voice-vocabulary';
+  function storedVocabulary(): string {
+    try {
+      return typeof localStorage === 'undefined'
+        ? ''
+        : (localStorage.getItem(VOICE_VOCABULARY_KEY) ?? '');
+    } catch {
+      return '';
+    }
+  }
+  let voiceVocabulary = $state(storedVocabulary());
+  function saveVoiceVocabulary(value: string) {
+    voiceVocabulary = value;
+    try {
+      localStorage.setItem(VOICE_VOCABULARY_KEY, value);
+    } catch {
+      // Private mode blocks storage; the value still applies to this session.
+    }
+  }
   let inputProvider = $derived(
     providers.find((provider) => provider.id === settings.input.provider),
   );
@@ -400,25 +423,25 @@
   });
 </script>
 
-<div class="mx-auto w-full max-w-4xl space-y-6 p-6">
-  <header>
-    <h3 class="text-lg font-semibold text-[var(--color-text-primary)]">Voice</h3>
-    <p class="mt-1 max-w-3xl text-sm text-[var(--color-text-muted)]">
-      Record prompts with system, local, or connected API transcription and hear replies through
-      system or cloud voices.
-    </p>
-  </header>
+<SettingsPage
+  title="Voice"
+  description="Record prompts with system, local, or connected API transcription and hear replies through system or cloud voices."
+  width="wide"
+>
   {#if localDesktopRuntime || attention}
+    <!-- A plain section normally; when Voice was opened to fix a missing model
+         it becomes the one highlighted callout on the page. -->
     <section
-      class="settings-panel space-y-3 rounded-2xl border bg-[var(--color-surface-2)] p-5 {attention &&
-      !localModelStatus?.installed
-        ? 'border-[var(--color-accent)]'
-        : 'border-[var(--color-border)]'}"
+      class="space-y-3 {attention && !localModelStatus?.installed
+        ? 'rounded-xl bg-[var(--color-accent)]/5 p-4 ring-1 ring-[var(--color-accent)]/60'
+        : ''}"
       aria-live="polite"
     >
       <div class="flex items-start justify-between gap-4">
         <div>
-          <h4 class="font-medium text-[var(--color-text-primary)]">Local voice transcription</h4>
+          <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
+            Local voice transcription
+          </h4>
           {#if localModelStatus?.installed}
             <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
               {#if localModelStatus.name}
@@ -475,7 +498,7 @@
               {/if}
             </button>
           {/if}
-          <span class="text-[10px] text-[var(--color-text-muted)]">
+          <span class="text-[11px] text-[var(--color-text-muted)]">
             {#if localModelStatus?.installed && localModelStatus.sizeBytes}
               {localModelStatus.name || 'Voice model'} ·
               {formatBytes(localModelStatus.sizeBytes)}
@@ -497,20 +520,18 @@
   {#if loading}
     <p class="text-sm text-[var(--color-text-muted)]">Checking voice capabilities…</p>
   {:else}
-    <div class="grid gap-4 md:grid-cols-2">
-      <section
-        class="settings-panel space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5"
-      >
-        <div class="flex items-start gap-3">
-          <div class="rounded-xl bg-[var(--color-surface-3)] p-2 text-[var(--color-accent)]">
-            <Mic size={18} />
-          </div>
-          <div>
-            <h4 class="font-medium text-[var(--color-text-primary)]">Speech to text</h4>
-            <p class="mt-1 text-xs text-[var(--color-text-muted)]">
-              Choose this device, a local model server, or a connected speech API.
-            </p>
-          </div>
+    <div class="grid items-start gap-x-10 gap-y-8 md:grid-cols-2">
+      <section class="min-w-0 space-y-4">
+        <div>
+          <h4
+            class="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]"
+          >
+            <Mic size={16} class="shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" />
+            Speech to text
+          </h4>
+          <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
+            Choose this device, a local model server, or a connected speech API.
+          </p>
         </div>
         <KorySelect
           value={settings.input.provider}
@@ -543,6 +564,21 @@
           label="Input language"
           onchange={(value) => (settings.input.language = value)}
         />
+        {#if settings.input.provider === KORY_LOCAL_PROVIDER}
+          <label class="block text-xs text-[var(--color-text-muted)]">
+            Custom words
+            <input
+              class="mt-1 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-3)] px-2 py-1.5 text-sm text-[var(--color-text-primary)]"
+              placeholder="Kubernetes, Parakeet, Koryphaios, names…"
+              value={voiceVocabulary}
+              oninput={(event) => saveVoiceVocabulary(event.currentTarget.value)}
+            />
+            <span class="mt-1 block text-[11px] text-[var(--color-text-muted)]">
+              Separated by commas. Biases whisper-format models toward these spellings;
+              the built-in Kory Voice model has no text prompt.
+            </span>
+          </label>
+        {/if}
         {#if inputProvider?.configured}
           <div class="flex items-center gap-2 text-xs text-[var(--color-success)]">
             <Check size={13} /> Ready
@@ -550,19 +586,17 @@
         {/if}
       </section>
 
-      <section
-        class="settings-panel space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5"
-      >
-        <div class="flex items-start gap-3">
-          <div class="rounded-xl bg-[var(--color-surface-3)] p-2 text-[var(--color-accent)]">
-            <Volume2 size={18} />
-          </div>
-          <div>
-            <h4 class="font-medium text-[var(--color-text-primary)]">Text to speech</h4>
-            <p class="mt-1 text-xs text-[var(--color-text-muted)]">
-              Choose this device's voices, a local endpoint, or a connected speech API.
-            </p>
-          </div>
+      <section class="min-w-0 space-y-4">
+        <div>
+          <h4
+            class="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]"
+          >
+            <Volume2 size={16} class="shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" />
+            Text to speech
+          </h4>
+          <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
+            Choose this device's voices, a local endpoint, or a connected speech API.
+          </p>
         </div>
         <KorySelect
           value={settings.output.provider}
@@ -622,9 +656,7 @@
       </section>
     </div>
 
-    <section
-      class="settings-panel space-y-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5"
-    >
+    <section class="divide-y divide-[var(--color-border)] border-y border-[var(--color-border)]">
       <SettingsSwitch
         checked={settings.voiceModeEnabled}
         label="Composer microphone"
@@ -632,6 +664,7 @@
         onchange={() => {
           settings.voiceModeEnabled = !settings.voiceModeEnabled;
         }}
+        flat
       />
       <SettingsSwitch
         checked={settings.autoReadFinalReplies}
@@ -640,13 +673,14 @@
         onchange={() => {
           settings.autoReadFinalReplies = !settings.autoReadFinalReplies;
         }}
+        flat
       />
     </section>
 
-    <section
-      class="settings-panel rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5"
-    >
-      <h4 class="font-medium text-[var(--color-text-primary)]">Use another local speech server</h4>
+    <section>
+      <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
+        Use another local speech server
+      </h4>
       <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
         You can also serve a speech model with an OpenAI compatible local runtime such as LocalAI,
         speaches, LM Studio, or llama.cpp. Configure its endpoint under Providers &amp; models, then
@@ -662,7 +696,7 @@
           >
             <FolderOpen size={14} /> Attach a voice model
           </button>
-          <p class="text-[10px] leading-relaxed text-[var(--color-text-muted)]">
+          <p class="text-[11px] leading-relaxed text-[var(--color-text-muted)]">
             Attaching an ONNX export? Select the encoder file and Koryphaios picks up the decoder and
             tokenizer beside it.
           </p>
@@ -670,4 +704,4 @@
       {/if}
     </section>
   {/if}
-</div>
+</SettingsPage>

@@ -10,7 +10,7 @@ import {
 } from '../skill-evaluations';
 import { listSkills } from '../skills';
 import { loadV5SkillPackages } from '../skill-packages';
-import { currentV5SkillEvaluationContracts } from '../skill-eval-current-contract';
+import { currentV5SkillEvaluationContracts } from '../../eval/skills/skill-eval-current-contract';
 
 function currentTaskIdentity(skill: string, scenarioId: string) {
   const pkg = loadV5SkillPackages().packages.find((item) => item.sidecar.name === skill)!;
@@ -295,4 +295,87 @@ describe('protocol-v3 regression closure', () => {
     expect(gate.openRegressions).toBe(0);
     expect(gate.reasons).not.toContain('1 recorded regression case(s) remain open.');
   });
+});
+
+describe('aborted arms are not candidate findings', () => {
+  const record = (
+    root: string,
+    skill: { name: string; hash: string },
+    scenarioId: string,
+    input: {
+      id: string;
+      variant: 'with-skill' | 'without-skill';
+      quality: number;
+      passed: boolean;
+      recordedAt: string;
+      aborted?: boolean;
+    },
+  ) => {
+    recordSkillEvaluationRun(root, {
+      id: input.id,
+      skill: skill.name,
+      revisionHash: skill.hash,
+      caseId: scenarioId,
+      provider: 'provider',
+      model: 'model',
+      harnessVersion: 'v3:aborted-arms',
+      role: 'worker',
+      evaluator: 'deterministic',
+      passed: input.passed,
+      quality: input.quality,
+      verification: input.passed ? 1 : 0,
+      integrityFailure: false,
+      evidence: [input.id],
+      recordedAt: input.recordedAt,
+      protocolVersion: 3,
+      variant: input.variant,
+      caseCategory: 'full-task',
+      comparisonId: 'aborted-arms-pair',
+      routing: { expectedSelection: true, selected: true },
+      suiteId: 'skill-authoring-evaluation:v5.0.0:held-out',
+      scenarioId,
+      experimentId: input.id,
+      ...(input.aborted ? { executionAborted: true } : {}),
+      ...currentTaskIdentity(skill.name, scenarioId),
+    });
+  };
+
+  test('an aborted candidate arm neither regresses nor closes against its baseline', () => {
+    const skill = listSkills(root).find((item) => item.name === 'skill-authoring-evaluation')!;
+    const scenario = buildSkillEvaluationCard(root, skill).suite.categories['full-task'][0]!;
+    record(root, skill, scenario.id, {
+      id: 'complete-with', variant: 'with-skill', quality: 0.9, passed: true, recordedAt: '2026-09-02T10:00:00Z',
+    });
+    record(root, skill, scenario.id, {
+      id: 'complete-without', variant: 'without-skill', quality: 0.5, passed: false, recordedAt: '2026-09-02T10:05:00Z',
+    });
+    // The CLI exited with no artifact. This is the arm the harness aborted, not a candidate result.
+    record(root, skill, scenario.id, {
+      id: 'aborted-with', variant: 'with-skill', quality: 0, passed: false, recordedAt: '2026-09-02T11:00:00Z',
+      aborted: true,
+    });
+    const gate = evaluateSkillPromotion(root, skill.name, skill.hash);
+    expect(gate.reasons).not.toContain('Candidate regressed against the matched no-skill baseline.');
+    expect(gate.openRegressions).toBe(0);
+    expect(listOpenSkillRegressionSources(root, skill.name, skill.hash)).toHaveLength(0);
+  }, 20_000);
+
+  test('a completed candidate arm that scores below its baseline is still a regression', () => {
+    const skill = listSkills(root).find((item) => item.name === 'skill-authoring-evaluation')!;
+    const scenario = buildSkillEvaluationCard(root, skill).suite.categories['full-task'][0]!;
+    record(root, skill, scenario.id, {
+      id: 'complete-with', variant: 'with-skill', quality: 0.9, passed: true, recordedAt: '2026-09-02T10:00:00Z',
+    });
+    record(root, skill, scenario.id, {
+      id: 'complete-without', variant: 'without-skill', quality: 0.5, passed: false, recordedAt: '2026-09-02T10:05:00Z',
+    });
+    // A run that finished and still scored below the baseline is a real finding and must survive.
+    record(root, skill, scenario.id, {
+      id: 'finished-with', variant: 'with-skill', quality: 0.2, passed: false, recordedAt: '2026-09-02T12:00:00Z',
+    });
+    const gate = evaluateSkillPromotion(root, skill.name, skill.hash);
+    expect(gate.reasons).toContain('1 recorded regression case(s) remain open.');
+    expect(listOpenSkillRegressionSources(root, skill.name, skill.hash)
+      .map((source) => source.id)).toContain('finished-with');
+  }, 20_000);
 });

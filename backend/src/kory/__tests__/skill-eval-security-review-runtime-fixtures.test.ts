@@ -2,12 +2,12 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, renameSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { writeFixtureFile } from '../skill-eval-fixture-helpers';
+import { writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
 import {
   hasAffirmativeLlvmVulnerabilityClaim,
   SECURITY_REVIEW_RUNTIME_SKILL_EVAL_MATERIALIZERS,
   SECURITY_REVIEW_RUNTIME_SKILL_EVAL_SCORERS,
-} from '../skill-eval-security-review-runtime-fixtures';
+} from '../../eval/skills/skill-eval-security-review-runtime-fixtures';
 
 const HOST_SCENARIO_ID = 'infrastructure-security-full-task-2';
 const temporaryRoots: string[] = [];

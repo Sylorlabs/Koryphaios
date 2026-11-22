@@ -1,0 +1,39 @@
+[18:17:38] warn  [server] Multiple koryphaios.json files found in parent directories; using the innermost. The outer file(s) are ignored. {"chosen":"/Users/Shared/micah/Documents/koryphaios","shadowed":["/Users/Shared/micah/Documents","/Users/Shared/micah"]}
+{"type":"progress","complete":0,"failed":1,"totalQueued":2,"skill":"exploratory-data-analysis","scenarioId":"exploratory-data-analysis-full-task-1-individual","pairId":"exploratory-data-analysis-full-task-1-individual:62a3eb12-f82c-4999-8da6-55d1bbb8df29","withSkill":false,"withoutSkill":false,"withSkillInfrastructureFailure":false,"withoutSkillInfrastructureFailure":false,"infrastructureFailure":false,"integrityFailure":true,"withSkillIntegrityEvidence":"README.md integrity: fail | evidence-packet.json integrity: pass | Closed-packet deterministic scoring covers integrity, traceability, structure, and uncertainty only; domain correctness still requires blind semantic review.","withoutSkillIntegrityEvidence":"README.md integrity: fail | evidence-packet.json integrity: pass | Closed-packet deterministic scoring covers integrity, traceability, structure, and uncertainty only; domain correctness still requires blind semantic review."}
+{"type":"progress","complete":0,"failed":2,"totalQueued":2,"skill":"exploratory-data-analysis","scenarioId":"exploratory-data-analysis-full-task-2-individual","pairId":"exploratory-data-analysis-full-task-2-individual:0ae5d556-defa-4046-952a-69d14fbd1405","withSkill":false,"withoutSkill":false,"withSkillInfrastructureFailure":false,"withoutSkillInfrastructureFailure":false,"infrastructureFailure":false,"integrityFailure":true,"withSkillIntegrityEvidence":"README.md integrity: fail | evidence-packet.json integrity: pass | Closed-packet deterministic scoring covers integrity, traceability, structure, and uncertainty only; domain correctness still requires blind semantic review.","withoutSkillIntegrityEvidence":"README.md integrity: fail | evidence-packet.json integrity: pass | Closed-packet deterministic scoring covers integrity, traceability, structure, and uncertainty only; domain correctness still requires blind semantic review."}
+{
+  "schemaVersion": 1,
+  "executor": {
+    "mode": "codex",
+    "id": "codex-cli-isolated:codex-cli 0.167.0:reasoning=none:multi-turn",
+    "subject": "codex",
+    "provider": "codex",
+    "model": "gpt-6-luna",
+    "runtimeIdentity": "codex-cli 0.167.0:reasoning=none:multi-turn",
+    "executionMode": "multi-turn",
+    "reasoningEffort": "none",
+    "concurrency": 1,
+    "wallClockMs": 900000
+  },
+  "selectedSkills": 1,
+  "readyScenarios": 2,
+  "environmentBlockedScenarios": 0,
+  "skippedComplete": 0,
+  "queued": 2,
+  "completed": 0,
+  "failed": 2,
+  "failedScenarios": [
+    {
+      "skill": "exploratory-data-analysis",
+      "scenarioId": "exploratory-data-analysis-full-task-1-individual",
+      "detail": "with-skill evaluator integrity failure: README.md integrity: fail | evidence-packet.json integrity: pass | Closed-packet deterministic scoring covers integrity, traceability, structure, and uncertainty only; domain correctness still requires blind semantic review. | without-skill evaluator integrity failure: README.md integrity: fail | evidence-packet.json integrity: pass | Closed-packet deterministic scoring covers integrity, traceability, structure, and uncertainty only; domain correctness still requires blind semantic review."
+    },
+    {
+      "skill": "exploratory-data-analysis",
+      "scenarioId": "exploratory-data-analysis-full-task-2-individual",
+      "detail": "with-skill evaluator integrity failure: README.md integrity: fail | evidence-packet.json integrity: pass | Closed-packet deterministic scoring covers integrity, traceability, structure, and uncertainty only; domain correctness still requires blind semantic review. | without-skill evaluator integrity failure: README.md integrity: fail | evidence-packet.json integrity: pass | Closed-packet deterministic scoring covers integrity, traceability, structure, and uncertainty only; domain correctness still requires blind semantic review."
+    }
+  ],
+  "stoppedReason": null,
+  "notStarted": 0
+}

@@ -2,6 +2,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import {
   chmodSync,
   copyFileSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   readFileSync,
@@ -13,6 +14,7 @@ import { join, resolve } from 'node:path';
 import type { CliMcpServerConfig } from './cli-bridge';
 import { readBridgeGrantScopeFromFile } from './bridge-grant';
 import { BRIDGE_CATALOG_TIMEOUT_MS, BRIDGE_EXECUTE_TIMEOUT_MS } from './kory-mcp-bridge';
+import { isCompiledStandalone } from '../runtime/standalone';
 
 const CATALOG = '/api/v1/mcp-bridge/catalog';
 const EXECUTE = '/api/v1/mcp-bridge/execute';
@@ -266,6 +268,22 @@ export interface PreparedFreebuffBridge {
   cleanup(): Promise<void>;
 }
 
+/** How the turn-private bridge bundle is produced for `dir`:
+ * - `prebuilt` set → copy that shipped sibling bundle (bundled backend layout,
+ *   where only `kory-mcp-bridge.js` exists next to `server.js`).
+ * - `prebuilt` unset → `bun build` `source` (dev/source layout).
+ * The compiled-standalone guard rejects `/$bunfs` before this is consulted. */
+export function freebuffBridgeStagePlan(dir: string): {
+  source: string;
+  prebuilt?: string;
+} {
+  const source = join(dir, 'kory-mcp-bridge.ts');
+  const prebuilt = join(dir, 'kory-mcp-bridge.js');
+  return existsSync(source)
+    ? { source }
+    : { source, prebuilt: existsSync(prebuilt) ? prebuilt : undefined };
+}
+
 /** Stage a single self-contained JS bundle plus a grant in the only mounted
  * per-turn root. No project checkout, node_modules or host runtime mounts. */
 export async function prepareFreebuffBridge(
@@ -323,37 +341,53 @@ export async function prepareFreebuffBridge(
       env.KORY_BACKEND_URL = relay.url.replace('127.0.0.1', 'host.docker.internal');
       env.KORY_BRIDGE_RELAY_TOKEN = relay.token;
     }
-    // Use a fresh bundler process: Bun's in-process build cache can retain
-    // stale source descriptors across repeated turns after stdio child cleanup.
-    const build = Bun.spawn(
-      [
-        process.execPath,
-        'build',
-        join(import.meta.dir, 'kory-mcp-bridge.ts'),
-        '--target=bun',
-        '--format=esm',
-        '--minify',
-        '--outfile',
-        join(directory, 'kory-mcp-bridge.js'),
-      ],
-      {
-        env: { PATH: '/usr/bin:/bin' },
-        stdout: 'ignore',
-        stderr: 'ignore',
-      },
-    );
-    const cancelBuild = () => {
-      build.kill();
-    };
-    options.signal?.addEventListener('abort', cancelBuild, { once: true });
-    const buildDeadline = setTimeout(cancelBuild, BRIDGE_CATALOG_TIMEOUT_MS);
-    try {
-      if ((await build.exited) !== 0) throw new Error('Unable to stage standalone Kory bridge');
-    } finally {
-      clearTimeout(buildDeadline);
-      options.signal?.removeEventListener('abort', cancelBuild);
+    // A compiled backend has no bridge source under import.meta.dir — Bun's
+    // virtual root cannot feed `bun build` — so staging the sandbox bridge
+    // would fail as an opaque build error. Fail closed with the real reason.
+    if (isCompiledStandalone()) {
+      throw new Error(
+        'Freebuff managed turns are unavailable in the packaged backend: the compiled binary cannot restage the Kory bridge source for the Linux sandbox.',
+      );
     }
-    chmodSync(join(directory, 'kory-mcp-bridge.js'), 0o600);
+    const stagedBundle = join(directory, 'kory-mcp-bridge.js');
+    const stage = freebuffBridgeStagePlan(import.meta.dir);
+    if (stage.prebuilt) {
+      // The bundled backend ships the bridge as a sibling bundle — the exact
+      // artifact `bun build` would produce from source — so stage it directly.
+      copyFileSync(stage.prebuilt, stagedBundle);
+    } else {
+      // Use a fresh bundler process: Bun's in-process build cache can retain
+      // stale source descriptors across repeated turns after stdio child cleanup.
+      const build = Bun.spawn(
+        [
+          process.execPath,
+          'build',
+          stage.source,
+          '--target=bun',
+          '--format=esm',
+          '--minify',
+          '--outfile',
+          stagedBundle,
+        ],
+        {
+          env: { PATH: '/usr/bin:/bin' },
+          stdout: 'ignore',
+          stderr: 'ignore',
+        },
+      );
+      const cancelBuild = () => {
+        build.kill();
+      };
+      options.signal?.addEventListener('abort', cancelBuild, { once: true });
+      const buildDeadline = setTimeout(cancelBuild, BRIDGE_CATALOG_TIMEOUT_MS);
+      try {
+        if ((await build.exited) !== 0) throw new Error('Unable to stage standalone Kory bridge');
+      } finally {
+        clearTimeout(buildDeadline);
+        options.signal?.removeEventListener('abort', cancelBuild);
+      }
+    }
+    chmodSync(stagedBundle, 0o600);
     const configPath = join(directory, 'environment.json');
     writeFileSync(configPath, JSON.stringify(env), { mode: 0o600 });
     const runner = join(directory, 'run.js');

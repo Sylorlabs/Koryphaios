@@ -1,0 +1,1 @@
+stage=read-response httpStatus=200 finish=stop

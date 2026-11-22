@@ -102,6 +102,19 @@ export class SessionBusyError extends Error {
   }
 }
 
+/** Turn ownership is run identity, not run status. A run parked on a user
+ * question (status 'waiting') still owns the turn — provider-stream events for
+ * it must not trip ownership checks. Mirrors
+ * ManagerRunLifecycle.isAuthoritativelyLive. */
+export function durableRunOwnsTurn(
+  durable: { runId: string | null; status: string } | null | undefined,
+  runId: string,
+): boolean {
+  return (
+    durable?.runId === runId && (durable.status === 'active' || durable.status === 'waiting')
+  );
+}
+
 /** Partial transcript data is deliberately non-enumerable: logging an error
  * must not serialize conversation content or tool arguments. */
 export class TurnStreamFailure extends Error {

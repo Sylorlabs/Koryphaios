@@ -208,7 +208,7 @@ describe('immutability', () => {
 describe('legacyTurnParts', () => {
   test('renders reasoning then text', () => {
     expect(legacyTurnParts('answer', 'why', 42)).toEqual([
-      { kind: 'reasoning', text: 'why', startedAt: 42, endedAt: 42 },
+      { kind: 'reasoning', text: 'why', startedAt: 42, endedAt: 42, timeUnknown: true },
       { kind: 'text', text: 'answer', startedAt: 42 },
     ]);
   });
@@ -217,7 +217,7 @@ describe('legacyTurnParts', () => {
     expect(legacyTurnParts('answer', '', 1)).toEqual([{ kind: 'text', text: 'answer', startedAt: 1 }]);
     expect(legacyTurnParts('', undefined, 1)).toEqual([]);
     expect(legacyTurnParts('', 'why', 1)).toEqual([
-      { kind: 'reasoning', text: 'why', startedAt: 1, endedAt: 1 },
+      { kind: 'reasoning', text: 'why', startedAt: 1, endedAt: 1, timeUnknown: true },
     ]);
   });
 });

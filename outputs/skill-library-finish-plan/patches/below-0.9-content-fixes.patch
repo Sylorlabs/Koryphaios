@@ -1,0 +1,1530 @@
+diff --git a/skills-v5/cloud-security/SKILL.md b/skills-v5/cloud-security/SKILL.md
+index 943a03bf..0a6c58c4 100644
+--- a/skills-v5/cloud-security/SKILL.md
++++ b/skills-v5/cloud-security/SKILL.md
+@@ -11,7 +11,16 @@ Reason from the provider control plane and resource policy model. Cloud security
+ 
+ 1. **Map governance boundaries.** Inventory organization/tenant, accounts/subscriptions/projects, environments, ownership, root/break-glass paths, organization policies/SCPs/policy constraints, central security/logging accounts, and cross account/project trusts.
+ 2. **Separate human and workload identity.** Prefer federation and short-lived credentials over long-lived access keys. Give workloads dedicated identities attached to the specific service; avoid shared instance/node identities where they grant unrelated workloads excess access.
+-3. **Evaluate effective permission, not policy prose.** Combine identity policies, resource policies, permission boundaries, org policies, session policies, conditions, service-control mechanisms, and trust/assume-role configuration. Reduce wildcard actions/resources and constrain sensitive cross account principals/conditions.
++3. **Evaluate effective permission, not policy prose.** Combine identity policies, resource policies, permission boundaries, org policies, session policies, conditions, service-control mechanisms, and trust/assume-role configuration. Reduce wildcard actions/resources and constrain sensitive cross account principals/conditions. Compose the layers the way the provider evaluates them, because the operator's mistake is usually assuming the wrong operator:
++
++   - Identity-based and resource-based policies combine as a **union**. An action allowed by either is allowed.
++   - Permissions boundaries, service control policies and resource control policies combine with the identity grant as an **intersection**. The action must be allowed by every layer.
++   - An explicit deny in any layer wins over every allow.
++   - SCPs do not apply to the management account, so a guardrail proven only there is proven nowhere.
++   - A resource policy that denies with `NotPrincipal` always denies a principal that has a permissions boundary attached, whatever the `NotPrincipal` value says. Use `ArnNotEquals` on `aws:PrincipalArn` instead.
++   - A VPC endpoint policy bounds only traffic that traverses that endpoint; it is not an account-wide control.
++
++Write the provider-evidence boundary down, because a reader cannot tell a designed control from an observed one. The decision record must say whether the evidence is synthetic or design-level rather than captured from a live account, name the secrets and key-management boundary the design stops at, and carry an explicit boolean for any unqualified randomness assumption (set false when no unqualified randomness is assumed). A policy review that leaves this unstated reads as a live-account proof it is not.
+ 4. **Review public and lateral exposure.** Inspect managed-service public access, security groups/firewalls, load balancers, storage/database endpoints, private-service connectivity, egress/NAT/proxy paths, and control-plane/admin access. Verify effective routes and resource settings, not just diagram intent.
+ 5. **Protect data and keys deliberately.** Map resource encryption to KMS/key policies/grants, separation of key administrators from data users where required, rotation/revocation implications, backups/snapshots/replicas, and cross account sharing. Key lifecycle belongs to `secrets-key-management`.
+ 6. **Centralize evidence.** Enable and protect organization/account audit logs, identity and resource-policy changes, network/access logs where useful, security findings, and alerts. Keep the log/archive destination harder to tamper with than the workloads it observes.
+diff --git a/skills-v5/cloud-security/kory.json b/skills-v5/cloud-security/kory.json
+index 5c912145..d36a6fb2 100644
+--- a/skills-v5/cloud-security/kory.json
++++ b/skills-v5/cloud-security/kory.json
+@@ -1,17 +1,26 @@
+ {
+   "schemaVersion": 1,
+   "name": "cloud-security",
+-  "version": "5.0.4",
++  "version": "5.0.6",
+   "skillKind": "rulebook",
+   "selectionMode": "conditional",
+   "invocationMode": "model-invoked",
+-  "domains": ["security", "cloud"],
+-  "targetMedia": ["any"],
++  "domains": [
++    "security",
++    "cloud"
++  ],
++  "targetMedia": [
++    "any"
++  ],
+   "pathScopes": [],
+   "contextBudget": 4400,
+-  "broader": ["infrastructure-security"],
++  "broader": [
++    "infrastructure-security"
++  ],
+   "facets": [],
+-  "requires": ["security-verification"],
++  "requires": [
++    "security-verification"
++  ],
+   "conflicts": [],
+   "activation": [
+     "cloud security",
+@@ -57,8 +66,13 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["infrastructure-security"],
+-        "tags": ["ambiguous", "neighbor-boundary"]
++        "adjacentSkills": [
++          "infrastructure-security"
++        ],
++        "tags": [
++          "ambiguous",
++          "neighbor-boundary"
++        ]
+       },
+       {
+         "id": "cloud-security-ambiguous-2",
+@@ -66,8 +80,13 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["authorization-security"],
+-        "tags": ["ambiguous", "scope-control"]
++        "adjacentSkills": [
++          "authorization-security"
++        ],
++        "tags": [
++          "ambiguous",
++          "scope-control"
++        ]
+       },
+       {
+         "id": "cloud-security-ambiguous-3",
+@@ -75,8 +94,13 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["secrets-key-management"],
+-        "tags": ["ambiguous", "scope-control"]
++        "adjacentSkills": [
++          "secrets-key-management"
++        ],
++        "tags": [
++          "ambiguous",
++          "scope-control"
++        ]
+       }
+     ],
+     "adversarial": [
+@@ -86,8 +110,13 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["infrastructure-security"],
+-        "tags": ["adversarial", "neighbor-boundary"]
++        "adjacentSkills": [
++          "infrastructure-security"
++        ],
++        "tags": [
++          "adversarial",
++          "neighbor-boundary"
++        ]
+       },
+       {
+         "id": "cloud-security-adversarial-2",
+@@ -95,8 +124,13 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["authorization-security"],
+-        "tags": ["adversarial", "scope-control"]
++        "adjacentSkills": [
++          "authorization-security"
++        ],
++        "tags": [
++          "adversarial",
++          "scope-control"
++        ]
+       },
+       {
+         "id": "cloud-security-adversarial-3",
+@@ -104,8 +138,13 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["secrets-key-management"],
+-        "tags": ["adversarial", "scope-control"]
++        "adjacentSkills": [
++          "secrets-key-management"
++        ],
++        "tags": [
++          "adversarial",
++          "scope-control"
++        ]
+       }
+     ]
+   },
+diff --git a/skills-v5/data-analysis/SKILL.md b/skills-v5/data-analysis/SKILL.md
+index 7ace7f76..04fd9333 100644
+--- a/skills-v5/data-analysis/SKILL.md
++++ b/skills-v5/data-analysis/SKILL.md
+@@ -60,6 +60,12 @@ Turn data into a reproducible, bounded conclusion without exceeding its provenan
+ - Do not overstate statistical significance as practical importance.
+ - Do not use a chart when a sentence or small table is clearer.
+ 
++## State the missingness, concentration and sensitivity result
++
++A segment comparison is not a finding until the reader can see whether the segments were comparable in the first place. The analysis artifact must record how much data is missing per cohort and how missingness was handled, the concentration of the difference (which account or segment dominates, and the share it holds), and a sensitivity figure computed with the dominant contributor removed, reported as each cohort's rate and the difference in percentage points. End with two explicit booleans: whether the conclusion survives that removal, and whether the difference can be called causal.
++
++Write that result as the structured object the task declares, at the path it declares, with the keys it names. Where the contract asks for a naive comparison, an account concentration with the dominant contributor and its share, a sensitivity block with each cohort's rate and the difference in percentage points, and a conclusion with `robust` and `causal` booleans, supply all four blocks: a prose summary in `analysis.json` with the right numbers in the wrong shape scores the same as a wrong answer, and a partially filled object is read as a failed contract. A rate quoted without the concentration and without the removal test is the exact claim a dominated cohort produces, and it is not supportable.
++
+ ## Completion evidence
+ 
+ - Reproducible calculations plus the analysis invariant and data-quality/provenance record.
+diff --git a/skills-v5/data-analysis/kory.json b/skills-v5/data-analysis/kory.json
+index c9929a24..3edcd17c 100644
+--- a/skills-v5/data-analysis/kory.json
++++ b/skills-v5/data-analysis/kory.json
+@@ -1,12 +1,16 @@
+ {
+   "schemaVersion": 1,
+   "name": "data-analysis",
+-  "version": "5.1.1",
++  "version": "5.1.3",
+   "skillKind": "orchestrator",
+   "selectionMode": "conditional",
+   "invocationMode": "model-invoked",
+-  "domains": ["data"],
+-  "targetMedia": ["any"],
++  "domains": [
++    "data"
++  ],
++  "targetMedia": [
++    "any"
++  ],
+   "pathScopes": [],
+   "contextBudget": 3200,
+   "broader": [],
+@@ -49,8 +53,13 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["database-performance"],
+-        "tags": ["ambiguous", "hierarchy-boundary"]
++        "adjacentSkills": [
++          "database-performance"
++        ],
++        "tags": [
++          "ambiguous",
++          "hierarchy-boundary"
++        ]
+       },
+       {
+         "id": "data-analysis-ambiguous-2",
+@@ -58,8 +67,13 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["mongodb-engineering"],
+-        "tags": ["ambiguous", "hierarchy-boundary"]
++        "adjacentSkills": [
++          "mongodb-engineering"
++        ],
++        "tags": [
++          "ambiguous",
++          "hierarchy-boundary"
++        ]
+       },
+       {
+         "id": "data-analysis-ambiguous-3",
+@@ -67,8 +81,13 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["mysql-engineering"],
+-        "tags": ["ambiguous", "hierarchy-boundary"]
++        "adjacentSkills": [
++          "mysql-engineering"
++        ],
++        "tags": [
++          "ambiguous",
++          "hierarchy-boundary"
++        ]
+       }
+     ],
+     "adversarial": [
+@@ -78,8 +97,13 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["postgres-engineering"],
+-        "tags": ["adversarial", "hierarchy-boundary"]
++        "adjacentSkills": [
++          "postgres-engineering"
++        ],
++        "tags": [
++          "adversarial",
++          "hierarchy-boundary"
++        ]
+       },
+       {
+         "id": "data-analysis-adversarial-2",
+@@ -87,8 +111,13 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["privacy-engineering"],
+-        "tags": ["adversarial", "hierarchy-boundary"]
++        "adjacentSkills": [
++          "privacy-engineering"
++        ],
++        "tags": [
++          "adversarial",
++          "hierarchy-boundary"
++        ]
+       },
+       {
+         "id": "data-analysis-adversarial-3",
+@@ -96,8 +125,13 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["redis-engineering"],
+-        "tags": ["adversarial", "hierarchy-boundary"]
++        "adjacentSkills": [
++          "redis-engineering"
++        ],
++        "tags": [
++          "adversarial",
++          "hierarchy-boundary"
++        ]
+       }
+     ]
+   },
+diff --git a/skills-v5/integration-fault-testing/SKILL.md b/skills-v5/integration-fault-testing/SKILL.md
+index af77bdea..8b39e03b 100644
+--- a/skills-v5/integration-fault-testing/SKILL.md
++++ b/skills-v5/integration-fault-testing/SKILL.md
+@@ -18,6 +18,10 @@ Prove how collaborating components behave when a real boundary fails, recovers,
+ 
+ ## Evidence
+ 
++Treat the task's own artifact list as a checklist, because that is exactly how it is scored. When a task names a test file and a report path and then enumerates what the report must contain (proxy and dependency identities with versions, the commit-before-cut ordering, the bounded retry policy, the idempotency key, the caller-visible uncertain result, the durable count before and after a same-key replay, fresh-key success, cleanup), every one of those items has to appear as a named field with its value. A report that describes the scenario in prose, or omits the durable count because the test asserted it instead, is read as missing evidence even when the test is genuinely correct.
++
++The rollback report is part of the deliverable, and it has to answer the question a reviewer asks after a fault: what did the caller see, and what survived. Record the exact runtime identities you injected against (the PostgreSQL version line and the Toxiproxy or proxy version), the injection point in the transaction (after the insert and before the commit, or the equivalent pre-commit boundary), what the caller or client observed at the failure (an error, a reset, or an uncertain outcome), the state of the written rows and the response headers after recovery, and the behaviour of any child worker or connection it spawned. A report that says "the test passed" without those facts cannot distinguish a real rollback from a swallowed error.
++
+ For each case preserve a boundary/fault matrix containing starting state, injected fault, expected caller result, expected durable state, retry/recovery expectation, and observed evidence. Label simulations precisely; a TCP proxy fault proves behavior at that proxied boundary, not physical device/network resilience.
+ 
+ ## Boundaries
+diff --git a/skills-v5/integration-fault-testing/kory.json b/skills-v5/integration-fault-testing/kory.json
+index 471613df..2eebf061 100644
+--- a/skills-v5/integration-fault-testing/kory.json
++++ b/skills-v5/integration-fault-testing/kory.json
+@@ -1,15 +1,22 @@
+ {
+   "schemaVersion": 1,
+   "name": "integration-fault-testing",
+-  "version": "5.1.1",
++  "version": "5.1.3",
+   "skillKind": "workflow",
+   "selectionMode": "conditional",
+   "invocationMode": "model-invoked",
+-  "domains": ["test", "integration"],
+-  "targetMedia": ["any"],
++  "domains": [
++    "test",
++    "integration"
++  ],
++  "targetMedia": [
++    "any"
++  ],
+   "pathScopes": [],
+   "contextBudget": 4300,
+-  "broader": ["testing-engineering"],
++  "broader": [
++    "testing-engineering"
++  ],
+   "facets": [],
+   "requires": [],
+   "conflicts": [],
+@@ -54,8 +61,13 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["testing-engineering"],
+-        "tags": ["ambiguous", "neighbor-boundary"]
++        "adjacentSkills": [
++          "testing-engineering"
++        ],
++        "tags": [
++          "ambiguous",
++          "neighbor-boundary"
++        ]
+       },
+       {
+         "id": "integration-fault-testing-ambiguous-2",
+@@ -63,8 +75,13 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["deterministic-contract-testing"],
+-        "tags": ["ambiguous", "scope-control"]
++        "adjacentSkills": [
++          "deterministic-contract-testing"
++        ],
++        "tags": [
++          "ambiguous",
++          "scope-control"
++        ]
+       },
+       {
+         "id": "integration-fault-testing-ambiguous-3",
+@@ -72,8 +89,13 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["integration-implementation"],
+-        "tags": ["ambiguous", "scope-control"]
++        "adjacentSkills": [
++          "integration-implementation"
++        ],
++        "tags": [
++          "ambiguous",
++          "scope-control"
++        ]
+       }
+     ],
+     "adversarial": [
+@@ -83,8 +105,13 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["testing-engineering"],
+-        "tags": ["adversarial", "neighbor-boundary"]
++        "adjacentSkills": [
++          "testing-engineering"
++        ],
++        "tags": [
++          "adversarial",
++          "neighbor-boundary"
++        ]
+       },
+       {
+         "id": "integration-fault-testing-adversarial-2",
+@@ -92,8 +119,13 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["deterministic-contract-testing"],
+-        "tags": ["adversarial", "scope-control"]
++        "adjacentSkills": [
++          "deterministic-contract-testing"
++        ],
++        "tags": [
++          "adversarial",
++          "scope-control"
++        ]
+       },
+       {
+         "id": "integration-fault-testing-adversarial-3",
+@@ -101,8 +133,13 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["integration-implementation"],
+-        "tags": ["adversarial", "scope-control"]
++        "adjacentSkills": [
++          "integration-implementation"
++        ],
++        "tags": [
++          "adversarial",
++          "scope-control"
++        ]
+       }
+     ]
+   },
+diff --git a/skills-v5/language-runtime-security/SKILL.md b/skills-v5/language-runtime-security/SKILL.md
+index 2a16f242..9a9b9b40 100644
+--- a/skills-v5/language-runtime-security/SKILL.md
++++ b/skills-v5/language-runtime-security/SKILL.md
+@@ -33,6 +33,10 @@ Before changing or approving a runtime, record these as separate contract fields
+ 12. **Prove security invariants with adversarial programs.** Use minimized reproducers, optimization-level comparisons, differential/interpreter-vs-JIT tests, malformed module corpora, capability-denial cases, and resource-exhaustion cases. Preserve the smallest cross layer trace that explains the failure instead of stopping at a crash symptom.
+ 13. **Bind evidence to ownership and supplied contracts.** Record the exact runtime/compiler/toolchain identity, target/ABI, flags or modes, feature set, module/corpus identity, and custom runtime/compiler ownership boundary. When a task provides a schema, fixed simulator, corpus, lifecycle command, or named layers, preserve it exactly. Put required facts inside the structured artifact using the supplied field names; do not replace them with synonyms or a final-message summary. Keep staged privileged work distinct from durable committed effects.
+ 
++## Name the toolchain and the scope
++
++A language-runtime security finding is only meaningful with the exact runtime it was measured against and the limit of what was inspected. The report must carry the version string it ran (for a V8 finding, the `22.0.0` line and which tier executed, interpreter or optimizing), the pipeline stages inspected (`lower`, `ir`, `optimizer` where those exist), and an explicit statement that the evidence covers that runtime build rather than the language in general. It must not claim a specification or memory-safety vulnerability the corpus did not demonstrate.
++
+ ## Evidence and claims
+ 
+ Produce a guarantee model, representation/cross layer trace, isolation and escape boundary map, host capability map, resource limit enforcement matrix, structured observability/audit record, recovery record, and adversarial reproducer or verification corpus. Include runtime/compiler version, enabled feature set, optimization/JIT mode, target/ABI, module or corpus identity, exact bytes/digest where relevant, and the boundary between custom runtime-owned behavior and third-party toolchain/host behavior. Distinguish desired configuration from observed execution, and live from simulated, inferred, stale, unavailable, or unverified evidence.
+diff --git a/skills-v5/language-runtime-security/kory.json b/skills-v5/language-runtime-security/kory.json
+index 332c108c..5b84876c 100644
+--- a/skills-v5/language-runtime-security/kory.json
++++ b/skills-v5/language-runtime-security/kory.json
+@@ -1,15 +1,22 @@
+ {
+   "schemaVersion": 1,
+   "name": "language-runtime-security",
+-  "version": "5.1.5",
++  "version": "5.1.6",
+   "skillKind": "rulebook",
+   "selectionMode": "conditional",
+   "invocationMode": "model-invoked",
+-  "domains": ["security", "runtime"],
+-  "targetMedia": ["any"],
++  "domains": [
++    "security",
++    "runtime"
++  ],
++  "targetMedia": [
++    "any"
++  ],
+   "pathScopes": [],
+   "contextBudget": 6500,
+-  "broader": ["security-review"],
++  "broader": [
++    "security-review"
++  ],
+   "facets": [],
+   "requires": [],
+   "conflicts": [],
+@@ -81,8 +88,13 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["security-review"],
+-        "tags": ["ambiguous", "neighbor-boundary"]
++        "adjacentSkills": [
++          "security-review"
++        ],
++        "tags": [
++          "ambiguous",
++          "neighbor-boundary"
++        ]
+       },
+       {
+         "id": "language-runtime-security-ambiguous-2",
+@@ -90,8 +102,13 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["application-security"],
+-        "tags": ["ambiguous", "scope-control"]
++        "adjacentSkills": [
++          "application-security"
++        ],
++        "tags": [
++          "ambiguous",
++          "scope-control"
++        ]
+       },
+       {
+         "id": "language-runtime-security-ambiguous-3",
+@@ -99,8 +116,13 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["applied-cryptography"],
+-        "tags": ["ambiguous", "scope-control"]
++        "adjacentSkills": [
++          "applied-cryptography"
++        ],
++        "tags": [
++          "ambiguous",
++          "scope-control"
++        ]
+       }
+     ],
+     "adversarial": [
+@@ -110,8 +132,13 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["security-review"],
+-        "tags": ["adversarial", "neighbor-boundary"]
++        "adjacentSkills": [
++          "security-review"
++        ],
++        "tags": [
++          "adversarial",
++          "neighbor-boundary"
++        ]
+       },
+       {
+         "id": "language-runtime-security-adversarial-2",
+@@ -119,8 +146,13 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["application-security"],
+-        "tags": ["adversarial", "scope-control"]
++        "adjacentSkills": [
++          "application-security"
++        ],
++        "tags": [
++          "adversarial",
++          "scope-control"
++        ]
+       },
+       {
+         "id": "language-runtime-security-adversarial-3",
+@@ -128,8 +160,13 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["applied-cryptography"],
+-        "tags": ["adversarial", "scope-control"]
++        "adjacentSkills": [
++          "applied-cryptography"
++        ],
++        "tags": [
++          "adversarial",
++          "scope-control"
++        ]
+       }
+     ]
+   },
+diff --git a/skills-v5/native-interface/SKILL.md b/skills-v5/native-interface/SKILL.md
+index e63d4568..a7d71ee1 100644
+--- a/skills-v5/native-interface/SKILL.md
++++ b/skills-v5/native-interface/SKILL.md
+@@ -11,6 +11,35 @@ For native visual anti-slop, start from the platform's information density, comm
+ 
+ Keep lifecycle and interaction state explicit. Verify loading, empty, partial, disabled, destructive, success, failure, cancellation, background/foreground transitions, restoration, resize or display changes, and supported alternate inputs in the real runtime or a faithful platform simulator. Do not substitute browser screenshots for native verification.
+ 
++Give every lifecycle state its own truthful status text. A cancelled job must not
++still read as running, a disabled surface must not report progress it is not
++making, and a restored job must not be indistinguishable from a fresh success,
++because the status line is the user's only evidence of what the job is doing. Two
++states that share a sentence are one state to the reader. Measured example: a
++desktop operations window whose cancelled state printed "Running: cancellation
++requested", whose disabled state printed the running text, and whose recovered
++state printed "Job complete" left the user unable to tell a stopped job from a
++live one, even though the cancel button was correctly disabled.
++
++Keyboard focus is state, so place it deliberately. A recovery surface that offers a
++retry must take first responder in the error and stale states, and the retry control
++must be both focused and enabled there; focus left on a list or a text field turns the
++recovery path into a mouse-only path. Verify it by reading the window's first responder
++in the running application, not by assuming the initial key view survived a state
++change.
++
++Size is part of the contract too. Create the window at the smallest supported size and
++at an enlarged text scale, then check every control's frame against the content
++bounds: a primary action that sits outside a 640 by 420 window, or a label clipped by
++its own container, is a defect that a maximized screenshot hides. Keep the primary
++action at least 80 by 24 points and fully visible in the narrow layout, and keep it
++enabled in any state where starting work is legitimate.
++
++When the evaluator supplies an immutable shell and the deliverable is one model
++file, read that boundary as part of the platform contract. Editing the shell to
++make the window fit, or adding the missing element there, moves work outside the
++part that gets measured.
++
+ Scope native evidence to the inspected application, platform, toolkit, and
+ states. AppKit/WindowServer accessibility observations and compositor captures
+ can establish evidence for the inspected macOS app and state when their source
+diff --git a/skills-v5/native-interface/kory.json b/skills-v5/native-interface/kory.json
+index affe29aa..4066d341 100644
+--- a/skills-v5/native-interface/kory.json
++++ b/skills-v5/native-interface/kory.json
+@@ -1,14 +1,26 @@
+ {
+   "schemaVersion": 1,
+   "name": "native-interface",
+-  "version": "5.0.0",
++  "version": "5.1.1",
+   "skillKind": "workflow",
+   "selectionMode": "conditional",
+-  "domains": ["ui", "native"],
+-  "targetMedia": ["native", "mobile"],
++  "domains": [
++    "ui",
++    "native"
++  ],
++  "targetMedia": [
++    "native",
++    "mobile"
++  ],
+   "contextBudget": 3600,
+-  "broader": ["visual-interface-design", "frontend-engineering"],
+-  "facets": ["interaction-design", "accessibility-practice"],
++  "broader": [
++    "visual-interface-design",
++    "frontend-engineering"
++  ],
++  "facets": [
++    "interaction-design",
++    "accessibility-practice"
++  ],
+   "requires": [],
+   "conflicts": [],
+   "activation": [
+@@ -56,8 +68,14 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["desktop-electron-tauri", "visual-verification"],
+-        "tags": ["desktop", "windowed"]
++        "adjacentSkills": [
++          "desktop-electron-tauri",
++          "visual-verification"
++        ],
++        "tags": [
++          "desktop",
++          "windowed"
++        ]
+       },
+       {
+         "id": "native-interface-ambiguous-mobile",
+@@ -65,8 +83,15 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["ios-swiftui", "android-compose", "react-native-expo"],
+-        "tags": ["mobile", "lifecycle"]
++        "adjacentSkills": [
++          "ios-swiftui",
++          "android-compose",
++          "react-native-expo"
++        ],
++        "tags": [
++          "mobile",
++          "lifecycle"
++        ]
+       },
+       {
+         "id": "native-interface-ambiguous-cross-platform",
+@@ -74,8 +99,15 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["desktop-electron-tauri", "react-native-expo", "frontend-engineering"],
+-        "tags": ["cross-platform", "platform-divergence"]
++        "adjacentSkills": [
++          "desktop-electron-tauri",
++          "react-native-expo",
++          "frontend-engineering"
++        ],
++        "tags": [
++          "cross-platform",
++          "platform-divergence"
++        ]
+       }
+     ],
+     "adversarial": [
+@@ -85,8 +117,13 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["debugging", "concurrency-debugging"],
+-        "tags": ["quoted-decoy"]
++        "adjacentSkills": [
++          "debugging",
++          "concurrency-debugging"
++        ],
++        "tags": [
++          "quoted-decoy"
++        ]
+       },
+       {
+         "id": "native-interface-adversarial-negated",
+@@ -94,8 +131,13 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["migration-planning", "relational-data-modeling"],
+-        "tags": ["negation"]
++        "adjacentSkills": [
++          "migration-planning",
++          "relational-data-modeling"
++        ],
++        "tags": [
++          "negation"
++        ]
+       },
+       {
+         "id": "native-interface-adversarial-pasted",
+@@ -103,8 +145,13 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["backup-recovery", "cost-finops"],
+-        "tags": ["pasted-decoy"]
++        "adjacentSkills": [
++          "backup-recovery",
++          "cost-finops"
++        ],
++        "tags": [
++          "pasted-decoy"
++        ]
+       }
+     ]
+   },
+diff --git a/skills-v5/performance-verification/SKILL.md b/skills-v5/performance-verification/SKILL.md
+index ce08b73d..60002afc 100644
+--- a/skills-v5/performance-verification/SKILL.md
++++ b/skills-v5/performance-verification/SKILL.md
+@@ -39,6 +39,10 @@ Map every declared claim to an observable metric and threshold, then issue one o
+ 
+ Report workload/environment identity, warmup versus measured state, p50/p95/p99 or the declared metric set, throughput/traffic, errors, relevant resources, repeat-run variance, baseline comparability, correctness results, and the exact reason for the verdict. Preserve raw artifacts when the harness emits them.
+ 
++A gate verdict is a measurement, not a diagnosis. Keep remedy words out of the verdict object entirely: a field named `rootCause`, `root_cause`, `fix`, `proposedFix`, `diagnosis` or `remediation` with any content, or a `diagnosisAttempted: true`, converts a correct failure verdict into an incorrect one. If the work has already identified a cause, it belongs in a separate findings document that cites the measurement isolating it, never in the gate record.
++
++Absolute resource budgets are machine artifacts. A resident-memory ceiling that a busy laptop exceeds says more about the machine than about the release, so report it as an absolute failure that is not a comparability gate while the relative comparison stands, keep the repeat range beside it, and do not convert it into a profile or leak story. "1.5 GB absolute RSS budget exceeded on repeats spanning 1.58 to 1.63 GB; relative throughput gate passes at 22.7 percent" is the complete record. State the budget you compared against by its number, the percentiles you measured, and the spread across repeats, and stop there: a `FAIL` that also asserts a cause is wrong, because the run did not isolate a cause. "p99 412 ms against the 350 ms budget, p95 268 ms, three repeats spanning 391 to 424 ms" is a complete verdict. "p99 412 ms because the CPU throttled" is not, unless the same run also measured the CPU frequency and the correlation that would let you say so.
++
+ ## Boundary with adjacent performance skills
+ 
+ - `performance-testing` owns designing or extending reusable benchmarks, load profiles, generators, and test strategy when the main request is how to measure.
+diff --git a/skills-v5/performance-verification/kory.json b/skills-v5/performance-verification/kory.json
+index bb43c5ca..07a7b73f 100644
+--- a/skills-v5/performance-verification/kory.json
++++ b/skills-v5/performance-verification/kory.json
+@@ -1,15 +1,22 @@
+ {
+   "schemaVersion": 1,
+   "name": "performance-verification",
+-  "version": "5.1.1",
++  "version": "5.1.3",
+   "skillKind": "verification",
+   "selectionMode": "conditional",
+   "invocationMode": "model-invoked",
+-  "domains": ["verification", "performance"],
+-  "targetMedia": ["any"],
++  "domains": [
++    "verification",
++    "performance"
++  ],
++  "targetMedia": [
++    "any"
++  ],
+   "pathScopes": [],
+   "contextBudget": 7600,
+-  "broader": ["verification"],
++  "broader": [
++    "verification"
++  ],
+   "facets": [],
+   "requires": [],
+   "conflicts": [],
+@@ -59,8 +66,13 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["performance-testing"],
+-        "tags": ["ambiguous", "gate-plus-harness"]
++        "adjacentSkills": [
++          "performance-testing"
++        ],
++        "tags": [
++          "ambiguous",
++          "gate-plus-harness"
++        ]
+       },
+       {
+         "id": "performance-verification-ambiguous-2",
+@@ -68,8 +80,13 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["performance-debugging"],
+-        "tags": ["ambiguous", "gate-plus-diagnosis"]
++        "adjacentSkills": [
++          "performance-debugging"
++        ],
++        "tags": [
++          "ambiguous",
++          "gate-plus-diagnosis"
++        ]
+       },
+       {
+         "id": "performance-verification-ambiguous-3",
+@@ -77,8 +94,13 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["database-performance"],
+-        "tags": ["ambiguous", "end-to-end-boundary"]
++        "adjacentSkills": [
++          "database-performance"
++        ],
++        "tags": [
++          "ambiguous",
++          "end-to-end-boundary"
++        ]
+       }
+     ],
+     "adversarial": [
+@@ -88,8 +110,13 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["verification"],
+-        "tags": ["adversarial", "quoted-decoy"]
++        "adjacentSkills": [
++          "verification"
++        ],
++        "tags": [
++          "adversarial",
++          "quoted-decoy"
++        ]
+       },
+       {
+         "id": "performance-verification-adversarial-2",
+@@ -97,8 +124,13 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["performance-testing"],
+-        "tags": ["adversarial", "explicit-negation"]
++        "adjacentSkills": [
++          "performance-testing"
++        ],
++        "tags": [
++          "adversarial",
++          "explicit-negation"
++        ]
+       },
+       {
+         "id": "performance-verification-adversarial-3",
+@@ -106,8 +138,13 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["database-performance"],
+-        "tags": ["adversarial", "concept-only"]
++        "adjacentSkills": [
++          "database-performance"
++        ],
++        "tags": [
++          "adversarial",
++          "concept-only"
++        ]
+       }
+     ]
+   },
+diff --git a/skills-v5/swift-engineering/SKILL.md b/skills-v5/swift-engineering/SKILL.md
+index 50bcdbb9..3bf50a5d 100644
+--- a/skills-v5/swift-engineering/SKILL.md
++++ b/skills-v5/swift-engineering/SKILL.md
+@@ -42,6 +42,10 @@ Use this skill for Swift language, package, ARC, actor, and concurrency behavior
+ - Test Codable or Objective-C interop with representative existing consumers when those public contracts change.
+ - Use the actual supported Apple platform for framework or device claims that host-only Swift tests cannot establish.
+ 
++## Ship the regression test with the fix
++
++A concurrency fix that is not pinned by a test is a fix the next refactor will undo. Write the regression test into the test target the task names, and make it fail on the old implementation: exercise the concurrent entry the bug came through, and the denial, thrown-error and cancellation exits separately, asserting that the observable state (a balance, a reservation, a counter) survives each one. A test that only proves the happy path compiles does not count as regression coverage, and reporting the fix without that file leaves the work at partial credit however correct the actor code is.
++
+ ## Completion evidence
+ 
+ - Swift language mode, ownership, isolation, and public contract assumptions affected
+diff --git a/skills-v5/swift-engineering/kory.json b/skills-v5/swift-engineering/kory.json
+index aaeac97c..e2ff73cd 100644
+--- a/skills-v5/swift-engineering/kory.json
++++ b/skills-v5/swift-engineering/kory.json
+@@ -1,17 +1,26 @@
+ {
+   "schemaVersion": 1,
+   "name": "swift-engineering",
+-  "version": "5.1.2",
++  "version": "5.1.3",
+   "skillKind": "rulebook",
+   "selectionMode": "conditional",
+   "invocationMode": "model-invoked",
+-  "domains": ["code", "swift"],
+-  "targetMedia": ["any"],
++  "domains": [
++    "code",
++    "swift"
++  ],
++  "targetMedia": [
++    "any"
++  ],
+   "pathScopes": [],
+   "contextBudget": 4100,
+-  "broader": ["implementation"],
++  "broader": [
++    "implementation"
++  ],
+   "facets": [],
+-  "requires": ["verification"],
++  "requires": [
++    "verification"
++  ],
+   "conflicts": [],
+   "activation": [
+     "swift language",
+@@ -51,8 +60,13 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["c-cpp-systems-engineering"],
+-        "tags": ["ambiguous", "hierarchy-boundary"]
++        "adjacentSkills": [
++          "c-cpp-systems-engineering"
++        ],
++        "tags": [
++          "ambiguous",
++          "hierarchy-boundary"
++        ]
+       },
+       {
+         "id": "swift-engineering-ambiguous-2",
+@@ -60,8 +74,13 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["csharp-dotnet-engineering"],
+-        "tags": ["ambiguous", "hierarchy-boundary"]
++        "adjacentSkills": [
++          "csharp-dotnet-engineering"
++        ],
++        "tags": [
++          "ambiguous",
++          "hierarchy-boundary"
++        ]
+       },
+       {
+         "id": "swift-engineering-ambiguous-3",
+@@ -69,8 +88,13 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["feature-implementation"],
+-        "tags": ["ambiguous", "hierarchy-boundary"]
++        "adjacentSkills": [
++          "feature-implementation"
++        ],
++        "tags": [
++          "ambiguous",
++          "hierarchy-boundary"
++        ]
+       }
+     ],
+     "adversarial": [
+@@ -80,8 +104,13 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["game-development"],
+-        "tags": ["adversarial", "hierarchy-boundary"]
++        "adjacentSkills": [
++          "game-development"
++        ],
++        "tags": [
++          "adversarial",
++          "hierarchy-boundary"
++        ]
+       },
+       {
+         "id": "swift-engineering-adversarial-2",
+@@ -89,8 +118,13 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["go-engineering"],
+-        "tags": ["adversarial", "hierarchy-boundary"]
++        "adjacentSkills": [
++          "go-engineering"
++        ],
++        "tags": [
++          "adversarial",
++          "hierarchy-boundary"
++        ]
+       },
+       {
+         "id": "swift-engineering-adversarial-3",
+@@ -98,8 +132,13 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["integration-implementation"],
+-        "tags": ["adversarial", "hierarchy-boundary"]
++        "adjacentSkills": [
++          "integration-implementation"
++        ],
++        "tags": [
++          "adversarial",
++          "hierarchy-boundary"
++        ]
+       }
+     ]
+   },
+diff --git a/skills-v5/vector-search-systems/SKILL.md b/skills-v5/vector-search-systems/SKILL.md
+index b6f5d566..2fca8c85 100644
+--- a/skills-v5/vector-search-systems/SKILL.md
++++ b/skills-v5/vector-search-systems/SKILL.md
+@@ -19,10 +19,27 @@ Own the storage and search mechanics around an already-defined vector representa
+ 8. **Measure index build and steady-state cost.** Record build duration, peak/resident memory, index/storage size, CPU/IO and any maintenance impact. A configuration that meets query latency but cannot be built, replicated or held in memory is not production-qualified.
+ 9. **Validate updates, upserts and deletes.** Define ID uniqueness/idempotency, visibility lag, tombstone/delete semantics, compaction/vacuum/rebuild needs and consistency expectations. Test that deleted vectors stop appearing within the stated freshness SLO and that concurrent updates do not create duplicates.
+ 10. **Quantize with measured reranking/recall tradeoffs.** Half precision, scalar/product/binary quantization or compressed indexes can reduce memory and latency, but compare against the uncompressed exact/reference results. If the engine expects reranking, include it in the measured query path.
+-11. **Plan capacity and partitioning.** Model corpus growth, vector bytes, metadata/index overhead, replicas, hot working set and query concurrency. For sharded systems, verify routing/fan-out and global top-k merge semantics; for Postgres-style systems, consider partitioning/filter indexes when they improve selective queries.
++11. **Merge shards by exact score, then freshness.** Approximate scores from different shards are not comparable, so a distributed top-k is not a merge of the per-shard ANN scores. Take each shard's candidate set, rerank the union by the exact full-precision score for the query, and break ties by freshness, then cut to k. Verify that the global top-k equals what a single exact index would return for the same query, because that equality is the property a shard cut silently breaks.
++
++12. **Refuse a cutover the index cannot hold.** A rebuild that ranks correctly can still be the wrong index to promote: check that the new index can hold the projected corpus at the declared capacity before flipping traffic, and block the cutover when it cannot, reporting the shortfall rather than the ranking win. An overflow discovered after promotion is an outage with correct ordering.
++
++13. **Plan capacity and partitioning.** Model corpus growth, vector bytes, metadata/index overhead, replicas, hot working set and query concurrency. For sharded systems, verify routing/fan-out and global top-k merge semantics; for Postgres-style systems, consider partitioning/filter indexes when they improve selective queries.
+ 12. **Migrate indexes reversibly.** Build the new index/store from a versioned vector snapshot or dual-write stream, shadow the same queries, compare recall/filter correctness/latency/freshness, verify update catch-up and switch readers only after coverage. Keep the previous index until rollback is no longer required.
+ 13. **Monitor the search layer.** Track query latency/errors, returned-k shortfalls, recall canaries versus exact/reference search, filter selectivity, index freshness/build state, memory/storage and delete lag. A healthy service metric alone does not prove neighbor quality.
+ 
++## Reading the retrieval specification
++
++The task states its contract, and the contract decides the pipeline. Apply exactly the stages it names,
++in the order it names them: filter, preserve order, take k. Do not add a stage the specification does not
++ask for, and do not relocate one it does. A deduplication or aggregation step the task never mentions
++changes which ids are retrieved and moves recall, and it is not defensive engineering when the acceptance
++check compares against a literal reading of the contract.
++
++Where the specification is genuinely ambiguous, record the resolution next to the test that pins it, so a
++reviewer can see the ambiguity was a decision rather than a misreading. Where the input shows duplicates
++or an attractive aggregate that would change the unit of analysis, resolve it with the rule the task
++states, and if the task states none, keep the units the input defines and say so.
++
+ ## Boundaries
+ 
+ - `embedding-systems` owns provider/model/task/preprocessing/dimension/normalization representation identity and re-embedding migration. This skill owns how compatible vectors are stored, indexed, filtered and searched.
+diff --git a/skills-v5/vector-search-systems/kory.json b/skills-v5/vector-search-systems/kory.json
+index e925fb41..ed9287e2 100644
+--- a/skills-v5/vector-search-systems/kory.json
++++ b/skills-v5/vector-search-systems/kory.json
+@@ -1,17 +1,28 @@
+ {
+   "schemaVersion": 1,
+   "name": "vector-search-systems",
+-  "version": "5.1.1",
++  "version": "5.1.2",
+   "skillKind": "rulebook",
+   "selectionMode": "conditional",
+   "invocationMode": "model-invoked",
+-  "domains": ["data", "search", "ai"],
+-  "targetMedia": ["any"],
++  "domains": [
++    "data",
++    "search",
++    "ai"
++  ],
++  "targetMedia": [
++    "any"
++  ],
+   "pathScopes": [],
+   "contextBudget": 6900,
+-  "broader": ["backend-engineering"],
++  "broader": [
++    "backend-engineering"
++  ],
+   "facets": [],
+-  "requires": ["verification", "ml-evaluation"],
++  "requires": [
++    "verification",
++    "ml-evaluation"
++  ],
+   "conflicts": [],
+   "activation": [
+     "vector database",
+@@ -85,8 +96,13 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["embedding-systems"],
+-        "tags": ["ambiguous", "neighbor-boundary"]
++        "adjacentSkills": [
++          "embedding-systems"
++        ],
++        "tags": [
++          "ambiguous",
++          "neighbor-boundary"
++        ]
+       },
+       {
+         "id": "vector-search-systems-ambiguous-2",
+@@ -94,8 +110,13 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["rag-retrieval-systems"],
+-        "tags": ["ambiguous", "scope-control"]
++        "adjacentSkills": [
++          "rag-retrieval-systems"
++        ],
++        "tags": [
++          "ambiguous",
++          "scope-control"
++        ]
+       },
+       {
+         "id": "vector-search-systems-ambiguous-3",
+@@ -103,8 +124,13 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["recommendation-ranking"],
+-        "tags": ["ambiguous", "scope-control"]
++        "adjacentSkills": [
++          "recommendation-ranking"
++        ],
++        "tags": [
++          "ambiguous",
++          "scope-control"
++        ]
+       }
+     ],
+     "adversarial": [
+@@ -114,8 +140,13 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["implementation"],
+-        "tags": ["adversarial", "quoted-decoy"]
++        "adjacentSkills": [
++          "implementation"
++        ],
++        "tags": [
++          "adversarial",
++          "quoted-decoy"
++        ]
+       },
+       {
+         "id": "vector-search-systems-adversarial-2",
+@@ -123,8 +154,13 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["documentation"],
+-        "tags": ["adversarial", "inert-evidence"]
++        "adjacentSkills": [
++          "documentation"
++        ],
++        "tags": [
++          "adversarial",
++          "inert-evidence"
++        ]
+       },
+       {
+         "id": "vector-search-systems-adversarial-3",
+@@ -132,8 +168,13 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["documentation"],
+-        "tags": ["adversarial", "filename-decoy"]
++        "adjacentSkills": [
++          "documentation"
++        ],
++        "tags": [
++          "adversarial",
++          "filename-decoy"
++        ]
+       }
+     ]
+   },
+diff --git a/skills-v5/video-production/SKILL.md b/skills-v5/video-production/SKILL.md
+index d4e2498e..132334b8 100644
+--- a/skills-v5/video-production/SKILL.md
++++ b/skills-v5/video-production/SKILL.md
+@@ -24,6 +24,16 @@ For practical source inspection, timestamp mapping, filter graphs, color convers
+ 
+ Inspect the **encoded** video and audio streams for duration, dimensions, frame rate, channel layout, codecs, and subtitles. Measure integrated loudness and true peak against each delivery target. Decode and review frame cadence, color scopes and levels, cut boundaries, opening, seek points, captions, cue alignment, and ending on every version. Watch the full render and listen to representative playback when possible; project previews and metadata alone cannot prove pacing, sync, legibility, or audio balance.
+ 
++A measurement is only a measurement when the probe succeeded. A nonzero encoder or analyser exit status means the file was never inspected, so record the check as unavailable and fix the pipeline instead of reporting a number. The classic silent failure is a filter graph or stream-map expression that matches no streams: the command exits non-zero and any "measured" loudness afterwards is fiction. Name the exact stream you intend to read (`-map 0:v:0`, `-map 0:a:0`) rather than relying on implicit selection.
++
++Prove motion, not just frame count. A render assembled from a handful of stills can carry a perfectly regular timestamps list while every frame repeats, so hash decoded frames at several cue times and compare: a duplicate-frame ratio above roughly a third means the delivery is a slide show, whatever the frame rate says. Likewise, a visual marker that only exists in the source must be visible in the decoded output at each of its cue times, before, during and after.
++
++For loudness, normalise to the declared delivery target and verify with an EBU R128 meter on the encoded file: if the task names a target, hit it within the stated tolerance, and if it does not, state the platform target you chose. Keep true peak at or below -1 dBTP so lossy encoding cannot clip.
++
++A delivery contract is a fixed shape, not a summary you design. When the task declares a result object with a boundary, a neighbour skill, a decision sequence, and labels for pacing, shot grammar, motion language, captions, brand constraints and ownership, fill every one of those keys at the declared path. Each entry needs enough substance to be checkable: a sentence that names the choice and why, or a list of at least two concrete items. An empty key, a renamed key, or a nested object where the contract asked for a string fails the check even when the production itself is right.
++
++Separate what you verified from what you judged. The verification object carries the negative path you actually exercised, the recovery you observed, and one explicit playback status: `unverified` unless a person watched it end to end on a real display. Never mark subjective quality as reviewed when the only evidence is your own reading of the file. A report that claims human review it did not receive, or omits the failed-and-repaired path, fails the same check as a missing report.
++
+ Keep an artifact receipt for every delivery version: source and generated media identifiers/hashes, rights or permission boundary, project/renderer and FFmpeg versions, effective settings or command, output path and SHA-256, and the measured probe/loudness results tied to that exact file. A project file, preview, successful encoder exit, or copied measurement from another version is not final-file evidence. If the renderer, decoder, required media, or playback review is unavailable, record the precise blocker and leave the affected check unavailable; do not fill the gap with a still frame, transcript, metadata inference, or text-only claim.
+ 
+ When failure and recovery are in scope, export a genuine decodable version with the specified defect, measure its failure, rebuild a corrected version from source material, and verify the recovered export independently. Report measured results, actual visual or listening review, and any unavailable human review separately. Never claim an inspection that was not performed.
+diff --git a/skills-v5/video-production/kory.json b/skills-v5/video-production/kory.json
+index 5e9b1866..99547c91 100644
+--- a/skills-v5/video-production/kory.json
++++ b/skills-v5/video-production/kory.json
+@@ -1,15 +1,22 @@
+ {
+   "schemaVersion": 1,
+   "name": "video-production",
+-  "version": "5.1.0",
++  "version": "5.1.2",
+   "skillKind": "workflow",
+   "selectionMode": "conditional",
+   "invocationMode": "model-invoked",
+-  "domains": ["creative", "video"],
+-  "targetMedia": ["any"],
++  "domains": [
++    "creative",
++    "video"
++  ],
++  "targetMedia": [
++    "any"
++  ],
+   "pathScopes": [],
+   "contextBudget": 3309,
+-  "broader": ["human-experience"],
++  "broader": [
++    "human-experience"
++  ],
+   "facets": [],
+   "requires": [],
+   "conflicts": [],
+@@ -51,8 +58,13 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["audio-production"],
+-        "tags": ["ambiguous", "hierarchy-boundary"]
++        "adjacentSkills": [
++          "audio-production"
++        ],
++        "tags": [
++          "ambiguous",
++          "hierarchy-boundary"
++        ]
+       },
+       {
+         "id": "video-production-ambiguous-2",
+@@ -60,8 +72,13 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["accessibility-practice"],
+-        "tags": ["ambiguous", "hierarchy-boundary"]
++        "adjacentSkills": [
++          "accessibility-practice"
++        ],
++        "tags": [
++          "ambiguous",
++          "hierarchy-boundary"
++        ]
+       },
+       {
+         "id": "video-production-ambiguous-3",
+@@ -69,8 +86,13 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["content-error-design"],
+-        "tags": ["ambiguous", "hierarchy-boundary"]
++        "adjacentSkills": [
++          "content-error-design"
++        ],
++        "tags": [
++          "ambiguous",
++          "hierarchy-boundary"
++        ]
+       }
+     ],
+     "adversarial": [
+@@ -80,8 +102,13 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["customer-success"],
+-        "tags": ["adversarial", "hierarchy-boundary"]
++        "adjacentSkills": [
++          "customer-success"
++        ],
++        "tags": [
++          "adversarial",
++          "hierarchy-boundary"
++        ]
+       },
+       {
+         "id": "video-production-adversarial-2",
+@@ -89,8 +116,13 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["developer-experience"],
+-        "tags": ["adversarial", "hierarchy-boundary"]
++        "adjacentSkills": [
++          "developer-experience"
++        ],
++        "tags": [
++          "adversarial",
++          "hierarchy-boundary"
++        ]
+       },
+       {
+         "id": "video-production-adversarial-3",
+@@ -98,8 +130,13 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["information-architecture"],
+-        "tags": ["adversarial", "hierarchy-boundary"]
++        "adjacentSkills": [
++          "information-architecture"
++        ],
++        "tags": [
++          "adversarial",
++          "hierarchy-boundary"
++        ]
+       }
+     ]
+   },
+diff --git a/skills-v5/web-interface/SKILL.md b/skills-v5/web-interface/SKILL.md
+index d80bae55..2b3e89a6 100644
+--- a/skills-v5/web-interface/SKILL.md
++++ b/skills-v5/web-interface/SKILL.md
+@@ -5,6 +5,14 @@ description: Design and implement browser-based interfaces with web-native seman
+ 
+ # Web interface
+ 
++## Definition of done
++
++Before anything else, list the artifacts the task declares and treat them as the deliverable: the implementation contract, the state and viewport matrix, the verification record, and any capture the task names, each at its declared path with the declared field names. A run that ships a working page and no contract or matrix is scored as a failure of both, because the evaluator reads those files, not the browser. Write them as you build, not afterwards, and re-read the task's artifact list before you report.
++
++Their shapes are boring, so write them first and fill them as you go. An implementation contract is an object that echoes the supplied backend contract version, lists every state identifier, and carries routing, focus and network blocks of booleans plus two short sentences for cancellation and retry semantics. The state and viewport matrix is an object with the evidence type, the required viewport labels, the same state list, the degraded network states, and one row per capture. Two minutes of writing them removes the most common way a working page scores zero.
++
++## Browser target
++
+ Confirm the browser target, supported environments, repository framework and component system, routes, data-loading model, content, assets, and existing design language before editing. Prefer semantic web primitives and established product components; do not replace repository-required controls or select a framework without evidence.
+ 
+ Preserve URL and history behavior, meaningful document structure, forms and validation, keyboard/focus semantics, network and async states, refresh/deep links, and recovery. Make responsive behavior follow content, task priority, available space, zoom/reflow, and user preferences rather than fixed device stereotypes.
+@@ -21,6 +29,14 @@ Keep the browser verification record claim-level. Each required state or viewpor
+ 
+ ## Fixed harness inputs
+ 
+-A task or fixture may mark harness files, shared controls, or starting data as evaluator owned. Treat those as immutable: change only the candidate component or file the task names, and leave the harness, shared control, and supplied data byte for byte. Record the framework version, the execution context, and the observed failure and recovery in the report format the task supplies, using the exact field names and check identifiers it lists.
++The artifacts a task declares are the deliverable, not paperwork to add afterwards. If the task asks for an implementation contract, a state and viewport matrix, a content-led plan, or a responsive verification contract, write each one at the declared path with the declared field names and a row per required state and viewport. A correct page with a missing or empty matrix fails every check that reads the matrix, and an artifact written after the task is not evidence of the work it describes.
++
++A task or fixture may mark harness files, shared controls, or starting data as evaluator owned. Treat those as immutable: change only the candidate component or file the task names, and leave the harness, shared control, and supplied data byte for byte.
++
++The sealed set is usually wider than the word "harness" suggests. Supplied page shells, design-token stylesheets, content packets, brand specifications, logos and product imagery are inputs, not scaffolding to tidy up. A run that rewrites `index.html` or the supplied token stylesheet to suit a nicer layout scores zero on integrity no matter how good the page becomes, because the evaluator can no longer tell what the candidate added. Put every change in a new file that layers over the supplied shell, and prove the sealed files are unchanged before reporting.
++
++When a task asks for a verification contract, the contract is a claim with a fixed shape: the evidence type the task names, one entry per required viewport in the task's spelling, and a boolean for each behaviour the task lists, all true only where you actually observed it. A contract that omits the listed viewports, uses different keys, or records `true` for a behaviour you did not exercise fails the same check as a missing file.
++
++Derive the values from what the task supplies instead of inventing them. If the task hands you a backend contract with a version, echo that exact version string into the implementation contract. Enumerate every state identifier the task lists, not the subset your page happens to reveal. Group the behaviours under the keys the task names (routing with deep links, history and refresh; focus with dialog restoration and keyboard actions; network with slow, failed and stale response paths), and describe cancellation and retry as the task's own vocabulary does, so the reader can tell an acknowledgement from an effect. Then build the matrix from real captures at each required viewport, one row per state, including the degraded network states, and set the evidence type to the one the task declares. A page that works while both artifacts are missing or half-filled scores as if the page did not work. Record the framework version, the execution context, and the observed failure and recovery in the report format the task supplies, using the exact field names and check identifiers it lists.
+ 
+ [Sources](references/sources.md).
+diff --git a/skills-v5/web-interface/kory.json b/skills-v5/web-interface/kory.json
+index fa014e97..40c5a862 100644
+--- a/skills-v5/web-interface/kory.json
++++ b/skills-v5/web-interface/kory.json
+@@ -1,14 +1,26 @@
+ {
+   "schemaVersion": 1,
+   "name": "web-interface",
+-  "version": "5.0.1",
++  "version": "5.0.6",
+   "skillKind": "workflow",
+   "selectionMode": "conditional",
+-  "domains": ["ui", "web", "browser"],
+-  "targetMedia": ["web"],
++  "domains": [
++    "ui",
++    "web",
++    "browser"
++  ],
++  "targetMedia": [
++    "web"
++  ],
+   "contextBudget": 3900,
+-  "broader": ["visual-interface-design", "frontend-engineering"],
+-  "facets": ["interaction-design", "accessibility-practice"],
++  "broader": [
++    "visual-interface-design",
++    "frontend-engineering"
++  ],
++  "facets": [
++    "interaction-design",
++    "accessibility-practice"
++  ],
+   "requires": [],
+   "conflicts": [],
+   "activation": [
+@@ -61,8 +73,15 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["react-engineering", "svelte-engineering", "vue-engineering"],
+-        "tags": ["framework-unknown", "browser-confirmed"]
++        "adjacentSkills": [
++          "react-engineering",
++          "svelte-engineering",
++          "vue-engineering"
++        ],
++        "tags": [
++          "framework-unknown",
++          "browser-confirmed"
++        ]
+       },
+       {
+         "id": "web-interface-ambiguous-visual",
+@@ -70,8 +89,14 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["visual-interface-design", "interaction-design"],
+-        "tags": ["visual-direction", "anti-generic"]
++        "adjacentSkills": [
++          "visual-interface-design",
++          "interaction-design"
++        ],
++        "tags": [
++          "visual-direction",
++          "anti-generic"
++        ]
+       },
+       {
+         "id": "web-interface-ambiguous-async",
+@@ -79,8 +104,16 @@
+         "expectedSelection": true,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["interaction-design", "content-error-design", "functional-verification"],
+-        "tags": ["async", "navigation", "recovery"]
++        "adjacentSkills": [
++          "interaction-design",
++          "content-error-design",
++          "functional-verification"
++        ],
++        "tags": [
++          "async",
++          "navigation",
++          "recovery"
++        ]
+       }
+     ],
+     "adversarial": [
+@@ -90,8 +123,13 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["debugging", "relational-data-modeling"],
+-        "tags": ["quoted-decoy"]
++        "adjacentSkills": [
++          "debugging",
++          "relational-data-modeling"
++        ],
++        "tags": [
++          "quoted-decoy"
++        ]
+       },
+       {
+         "id": "web-interface-adversarial-negated",
+@@ -99,8 +137,14 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["terminal-interface", "shell-cli-engineering"],
+-        "tags": ["negation", "medium-boundary"]
++        "adjacentSkills": [
++          "terminal-interface",
++          "shell-cli-engineering"
++        ],
++        "tags": [
++          "negation",
++          "medium-boundary"
++        ]
+       },
+       {
+         "id": "web-interface-adversarial-pasted",
+@@ -108,8 +152,13 @@
+         "expectedSelection": false,
+         "expectedSkills": [],
+         "forbiddenSkills": [],
+-        "adjacentSkills": ["backup-recovery", "database-design"],
+-        "tags": ["pasted-decoy"]
++        "adjacentSkills": [
++          "backup-recovery",
++          "database-design"
++        ],
++        "tags": [
++          "pasted-decoy"
++        ]
+       }
+     ]
+   },

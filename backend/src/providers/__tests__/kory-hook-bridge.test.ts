@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { encodeHookDecision, parseArgs, readToolCall, resolveHookAuthFile } from '../kory-hook-bridge';
+import {
+  buildHookBody,
+  encodeHookDecision,
+  parseArgs,
+  readToolCall,
+  resolveHookAuthFile,
+} from '../kory-hook-bridge';
 import { createKoryBridgeGrantLease } from '../bridge-grant';
 
 describe('hook bridge argument parsing', () => {
@@ -152,5 +158,82 @@ describe('hook bridge decision encoding', () => {
     } finally {
       lease.cleanup();
     }
+  });
+});
+
+describe('hook bridge request body', () => {
+  // The backend re-digests the body after Elysia normalizes it to the route's
+  // declared schema — undeclared keys are stripped, which silently 401s any
+  // request that signed them. These contracts mirror the t.Object schemas in
+  // routes/v1/mcp-bridge.ts.
+  const sid = 'sess-1';
+  const toolPayload = {
+    tool_name: 'Bash',
+    tool_input: { command: 'ls' },
+    tool_response: { success: true },
+  };
+
+  test('pre-tool and permission sign session_id + tool_name + tool_input', () => {
+    for (const endpoint of ['pre-tool', 'permission']) {
+      expect(buildHookBody(endpoint, toolPayload, sid)).toEqual({
+        session_id: sid,
+        tool_name: 'Bash',
+        tool_input: { command: 'ls' },
+      });
+    }
+  });
+
+  test('post-tool signs tool_response and never tool_input', () => {
+    const body = buildHookBody('post-tool', toolPayload, sid);
+    expect(body).toEqual({
+      session_id: sid,
+      tool_name: 'Bash',
+      tool_response: { success: true },
+    });
+    expect('tool_input' in body).toBe(false);
+  });
+
+  test('non-tool events sign session_id only', () => {
+    for (const endpoint of ['prompt-submit', 'stop', 'session-start', 'session-end']) {
+      const body = buildHookBody(endpoint, toolPayload, sid);
+      expect(body).toEqual({ session_id: sid });
+    }
+  });
+
+  test('tool fields do not leak into non-tool bodies even when payload carries them', () => {
+    // Non-tool hook payloads leave tool_name ''/tool_input {} — sending those
+    // undeclared keys is what desynced the HMAC and caused the 401 storm.
+    const body = buildHookBody('stop', { tool_name: '', tool_input: {} }, sid);
+    expect(body).toEqual({ session_id: sid });
+  });
+});
+
+describe('hook bridge provider hint', () => {
+  const sid = 'session-1';
+  const toolPayload = { tool_name: 'Bash', tool_input: { command: 'ls' } };
+
+  test('parseArgs reads --provider and defaults to empty', () => {
+    expect(parseArgs(['node', 'bridge.ts', '--event', 'PreToolUse']).provider).toBe('');
+    expect(
+      parseArgs(['node', 'bridge.ts', '--event', 'PreToolUse', '--provider', 'devin']).provider,
+    ).toBe('devin');
+  });
+
+  test('buildHookBody signs provider only when configured', () => {
+    expect(buildHookBody('pre-tool', toolPayload, sid, 'devin')).toEqual({
+      session_id: sid,
+      provider: 'devin',
+      tool_name: 'Bash',
+      tool_input: { command: 'ls' },
+    });
+    // Absent or empty stays undeclared so the signed digest still matches a
+    // schema that only knows provider as optional.
+    expect('provider' in buildHookBody('pre-tool', toolPayload, sid)).toBe(false);
+    expect('provider' in buildHookBody('pre-tool', toolPayload, sid, '')).toBe(false);
+    // Non-tool endpoints never sign provider — their schemas don't declare it.
+    expect(buildHookBody('stop', toolPayload, sid, 'devin')).toEqual({ session_id: sid });
+    expect(buildHookBody('prompt-submit', toolPayload, sid, 'devin')).toEqual({
+      session_id: sid,
+    });
   });
 });

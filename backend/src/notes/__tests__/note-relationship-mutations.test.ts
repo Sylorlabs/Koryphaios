@@ -99,9 +99,17 @@ describe('revision-safe association mutations', () => {
     const file = join(root, 'atomic-source.md');
     writeFileSync(file, original);
     await syncProjectDocuments(root);
-    const source = (await listNotes(undefined, root)).find(
+    const imported = (await listNotes(undefined, root)).find(
       (note) => note.sourcePath === 'atomic-source.md',
     )!;
+    // Track the document first (file-backed notes gain history on their first
+    // Koryphaios edit) so rollback must preserve existing revision rows too.
+    const edited = '# Atomic file\n\nEdited through Koryphaios.\n';
+    const source = await updateNote(
+      imported.id,
+      { content: edited, expectedRevision: imported.revision },
+      root,
+    );
     const target = await createNote({ title: 'Atomic association target' }, root);
     const sqlite = getDb();
     sqlite.exec(`CREATE TRIGGER test_association_derived_abort BEFORE INSERT ON note_links
@@ -109,8 +117,8 @@ describe('revision-safe association mutations', () => {
     try {
       await expect(linkNotes(source.id, target.id, { syncContent: true }, root)).rejects.toThrow();
       expect((await getNote(source.id, root))?.revision).toBe(source.revision);
-      expect((await getNote(source.id, root))?.content).toBe(original);
-      expect(readFileSync(file, 'utf8')).toBe(original);
+      expect((await getNote(source.id, root))?.content).toBe(edited);
+      expect(readFileSync(file, 'utf8')).toBe(edited);
       expect(await getNoteOutlinks(source.id, root)).toEqual([]);
       expect(
         sqlite

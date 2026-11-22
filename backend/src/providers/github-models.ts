@@ -13,6 +13,7 @@ import { providerLog } from '../logger';
 import { OpenAIProvider } from './openai';
 import { isLikelyChatModelId, modelFromRemoteId } from './model-list-cache';
 import { withTimeoutSignal } from './utils';
+import { foldVendorSpeedTiers } from './speed-tiers';
 
 export const GITHUB_MODELS_INFERENCE_BASE = 'https://models.github.ai/inference';
 export const GITHUB_MODELS_CATALOG_URL = 'https://models.github.ai/catalog/models';
@@ -124,7 +125,7 @@ export class GitHubModelsProvider extends OpenAIProvider {
         this.catalogError = 'GitHub Models returned no chat-capable catalog entries';
         return;
       }
-      this.catalog = models;
+      this.catalog = foldVendorSpeedTiers(models);
       this.catalogAt = Date.now();
       this.catalogError = undefined;
     } catch (error: unknown) {

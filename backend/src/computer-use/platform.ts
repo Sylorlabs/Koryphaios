@@ -16,6 +16,7 @@ import { WINDOWS_HELPER_SOURCE } from './platform-windows';
 import { LINUX_HELPER_SOURCE } from './platform-linux';
 import { hostOS, isUnix } from '../runtime/platform';
 import { NativeComputerController } from './native-controller';
+import { killOwnerDisplayProcesses } from '../security/owner-display-guard';
 
 const MAX_OUTPUT = 24 * 1024 * 1024;
 const ACTIONS = new Set([
@@ -31,7 +32,10 @@ const ACTIONS = new Set([
   'scroll',
   'wait',
   'focus',
+  'place',
+  'sequence',
 ]);
+const MAX_QUEUE_STEPS = 64;
 type NativeRequest = ComputerAction | { kind: 'status' };
 /** Injection seam for platform-independent tests; never populated from tool arguments/settings. */
 export interface ComputerPlatformOptions {
@@ -54,6 +58,7 @@ function target(value: unknown): ComputerTarget {
     !boundedString(value.windowId, 256) ||
     !Number.isSafeInteger(value.pid) ||
     (value.pid as number) <= 0 ||
+    (value.hidden !== undefined && typeof value.hidden !== 'boolean') ||
     typeof value.title !== 'string' ||
     value.title.length > 16384
   ) {
@@ -233,6 +238,9 @@ function nativeInvoker(platform: NodeJS.Platform, originalEnv: NodeJS.ProcessEnv
   }
   return async (request: NativeRequest, signal?: AbortSignal): Promise<unknown> => {
     signal?.throwIfAborted();
+    // Computer use runs where it was granted. A Kory operations window on this Mac is never that, so
+    // it is stopped before this request can add another one.
+    killOwnerDisplayProcesses();
     prepared ??= prepare(signal).catch((error) => {
       prepared = undefined;
       throw error;
@@ -314,6 +322,106 @@ export function createComputerPlatformAdapter(
       throw new Error('Invalid native window enumeration');
     return response.targets.map(target);
   }
+  /** Re-resolve a step's window and rebuild only the fields the native helper accepts. */
+  async function stepRequest(step: unknown, cache: Map<string, ComputerTarget>, signal?: AbortSignal): Promise<ComputerAction> {
+    if (!object(step) || typeof step.kind !== 'string') throw new Error('Invalid queue step');
+    const kind = step.kind;
+    if (kind === 'wait') {
+      const ms = step.ms;
+      if (!Number.isSafeInteger(ms) || (ms as number) < 0 || (ms as number) > 10_000)
+        throw new Error('Invalid queue wait');
+      return { kind: 'wait', ms: ms as number } as ComputerAction;
+    }
+    if (!['click', 'doubleClick', 'move', 'drag', 'type', 'key', 'scroll'].includes(kind))
+      throw new Error(`Unsupported queue step ${kind}`);
+    const requested = target(step.target);
+    const key = `${requested.appId}\u0000${requested.windowId}`;
+    let current = cache.get(key);
+    if (!current) {
+      current = (await discover(signal)).find((item) => sameTarget(item, requested));
+      if (!current) throw new Error('Queue step target is no longer available');
+      cache.set(key, current);
+    }
+    const elementId = typeof step.elementId === 'string' ? step.elementId : undefined;
+    if (kind === 'type') {
+      if (!boundedString(step.text, 16384)) throw new Error('Invalid queue text');
+      return { kind: 'type', target: current, ...(elementId ? { elementId } : {}), text: step.text };
+    }
+    if (kind === 'key') {
+      if (!boundedString(step.key, 64)) throw new Error('Invalid queue key');
+      return { kind: 'key', target: current, ...(elementId ? { elementId } : {}), key: step.key };
+    }
+    if (kind === 'scroll') {
+      if (!Number.isFinite(step.delta)) throw new Error('Invalid queue scroll');
+      return { kind: 'scroll', target: current, ...(elementId ? { elementId } : {}), delta: step.delta as number };
+    }
+    if (kind === 'drag') {
+      if (!Array.isArray(step.path) || step.path.length < 1 || step.path.length > 512)
+        throw new Error('Invalid queue drag path');
+      const path = step.path.map((point) => {
+        if (!object(point) || !Number.isFinite(point.x) || !Number.isFinite(point.y))
+          throw new Error('Invalid queue drag point');
+        return { x: point.x as number, y: point.y as number };
+      });
+      return { kind: 'drag', target: current, ...(elementId ? { elementId } : {}), path };
+    }
+    const coords =
+      Number.isFinite(step.x) && Number.isFinite(step.y) ? { x: step.x as number, y: step.y as number } : {};
+    const button = step.button === 'right' || step.button === 'middle' ? step.button : undefined;
+    return {
+      kind: kind as 'click' | 'doubleClick' | 'move',
+      target: current,
+      ...(elementId ? { elementId } : {}),
+      ...coords,
+      ...(button && kind === 'click' ? { button } : {}),
+    } as ComputerAction;
+  }
+
+  async function executeSequence(
+    action: Extract<ComputerAction, { kind: 'sequence' }>,
+    signal?: AbortSignal,
+  ): Promise<ComputerActionResult> {
+    signal?.throwIfAborted();
+    if (!Array.isArray(action.steps) || action.steps.length === 0 || action.steps.length > MAX_QUEUE_STEPS)
+      throw new Error(`A queue needs 1 to ${MAX_QUEUE_STEPS} steps`);
+    const cache = new Map<string, ComputerTarget>();
+    const steps: ComputerAction[] = [];
+    for (const step of action.steps) steps.push(await stepRequest(step, cache, signal));
+    const observationId =
+      typeof action.observationId === 'string' && action.observationId.length <= 128
+        ? action.observationId
+        : undefined;
+    const native: NativeRequest = {
+      kind: 'sequence',
+      steps,
+      ...(observationId ? { observationId } : {}),
+      ...(action.background === true ? { background: true } : {}),
+    } as NativeRequest;
+    const response = await call(native, signal);
+    const result: ComputerActionResult = {};
+    if (typeof response.text === 'string') result.text = response.text;
+    if (typeof response.observationId === 'string') result.observationId = response.observationId;
+    if (Array.isArray(response.steps)) {
+      result.steps = (response.steps as Array<Record<string, unknown>>)
+        .filter((step) => object(step))
+        .map((step, index) => ({
+          index: Number.isSafeInteger(step.index) ? (step.index as number) : index,
+          status: step.status === 'failed' ? 'failed' : 'done',
+          ...(typeof step.message === 'string' ? { message: step.message.slice(0, 512) } : {}),
+        }));
+    }
+    if (object(response.interference) && typeof response.interference.kind === 'string') {
+      result.interference = {
+        kind: response.interference.kind === 'window-changed' ? 'window-changed' : 'user-input',
+        message:
+          typeof response.interference.message === 'string'
+            ? response.interference.message.slice(0, 512)
+            : 'The window changed outside this action',
+      };
+    }
+    return result;
+  }
+
   return {
     async status(): Promise<ComputerPlatformStatus> {
       try {
@@ -348,8 +456,11 @@ export function createComputerPlatformAdapter(
     async execute(action: ComputerAction, signal?: AbortSignal): Promise<ComputerActionResult> {
       signal?.throwIfAborted();
       if (!object(action) || !ACTIONS.has(action.kind)) throw new Error('Invalid computer action');
+      if (action.kind === 'sequence') return executeSequence(action, signal);
       if (action.kind === 'discover') return { targets: await discover(signal) };
       if (action.kind === 'wait') throw new Error('Wait is handled by the tool boundary');
+      if (action.kind === 'place' && typeof action.hidden !== 'boolean')
+        throw new Error('A placement needs an explicit hidden flag');
       const requested = target(action.target);
       if (action.kind === 'click' || action.kind === 'doubleClick' || action.kind === 'move') {
         if (
@@ -390,8 +501,24 @@ export function createComputerPlatformAdapter(
                       ? { kind: 'key', target: current, ...(action.elementId ? { elementId: action.elementId } : {}), key: action.key }
                       : action.kind === 'scroll'
                         ? { kind: 'scroll', target: current, ...(action.elementId ? { elementId: action.elementId } : {}), delta: action.delta }
-                        : { kind: action.kind, target: current };
-      const response = await call(request, signal);
+                        : // Placement returned above, so the remaining kinds need only their target.
+                          ({ kind: action.kind, target: current } as ComputerAction);
+      // Directed delivery is a delivery detail, not a new native instruction shape.
+      if (action.kind === 'place') {
+        const response = await call(
+          { kind: 'place', target: current, hidden: action.hidden } as NativeRequest,
+          signal,
+        );
+        return {
+          ...(typeof response.text === 'string' ? { text: response.text } : {}),
+          ...(object(response.target) ? { targets: [target(response.target)] } : {}),
+        };
+      }
+      const directed = 'background' in action && action.background === true;
+      const native: NativeRequest = directed
+        ? ({ ...request, background: true } as NativeRequest)
+        : request;
+      const response = await call(native, signal);
       if (action.kind === 'listElements') {
         if (!Array.isArray(response.elements)) throw new Error('Invalid native element response');
         return { elements: response.elements as ComputerActionResult['elements'] };

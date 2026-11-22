@@ -84,6 +84,17 @@ export class ManagerRunLifecycle {
 
   constructor(private readonly runs?: SessionRunCoordinator) {}
 
+  /** Handle for the session's currently leased run, or null when no run owns
+   *  the lease. Out-of-band callers (MCP bridge tool executions run in an HTTP
+   *  handler, outside the turn's async-local run scope) use this to bind the
+   *  same generation proof that the async-local store carries for in-turn
+   *  callers. `requireOwnedLease` still validates the run id against the lease
+   *  at use time, so a stale minted handle cannot act. */
+  handleForSession(sessionId: string): ManagerRunHandle | null {
+    const lease = this.leases.get(sessionId);
+    return lease ? this.createHandle(sessionId, lease.runId) : null;
+  }
+
   begin(sessionId: string, reason: string): Promise<ManagerRunHandle> {
     return this.serialized(sessionId, async () => {
       this.assertAttached();
@@ -141,9 +152,15 @@ export class ManagerRunLifecycle {
       // An agent membership change is a durable lifecycle fact even when the
       // provider phase itself stays the same (for example, a worker starts
       // while the manager remains in tool_calling).
+      // A parked run (waiting on a user question or on background processes)
+      // owns its wait state — provider-stream phase writes must not clobber it,
+      // and a successful write would silently un-park the question. Resume and
+      // answer paths set the phase themselves.
       if (
         !lease ||
         this.deferredTerminals.get(handle.runId)?.decision ||
+        lease.phase === 'waiting_user' ||
+        lease.phase === 'waiting_terminal' ||
         (lease.phase === phase && activeAgentIds === undefined)
       ) {
         return;

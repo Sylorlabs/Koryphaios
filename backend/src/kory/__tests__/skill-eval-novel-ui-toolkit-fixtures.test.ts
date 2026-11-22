@@ -2,14 +2,14 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { chmodSync, existsSync, lstatSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
-import { readJsonArtifact, writeFixtureFile } from '../skill-eval-fixture-helpers';
+import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
+import { readJsonArtifact, writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
 import {
   createNovelUiToolkitFixtureEvaluators,
   NOVEL_UI_TOOLKIT_EVAL_CONSTANTS,
   NOVEL_UI_TOOLKIT_SKILL_EVAL_MATERIALIZERS,
   NOVEL_UI_TOOLKIT_SKILL_EVAL_SCORERS,
-} from '../skill-eval-novel-ui-toolkit-fixtures';
+} from '../../eval/skills/skill-eval-novel-ui-toolkit-fixtures';
 import { loadV5SkillPackages } from '../skill-packages';
 import { isUnix } from '../../runtime/platform';
 

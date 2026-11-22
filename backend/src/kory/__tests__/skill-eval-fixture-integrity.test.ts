@@ -8,7 +8,7 @@ import {
   runCandidateBunTests,
   runHiddenBunTest,
   writeFixtureFile,
-} from '../skill-eval-fixture-helpers';
+} from '../../eval/skills/skill-eval-fixture-helpers';
 
 const roots: string[] = [];
 function workspace() {

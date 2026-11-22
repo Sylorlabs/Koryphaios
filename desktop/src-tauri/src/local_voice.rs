@@ -16,7 +16,8 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    time::Duration,
+    sync::{Mutex, OnceLock},
+    time::{Duration, Instant},
 };
 
 use serde::Serialize;
@@ -646,14 +647,71 @@ pub fn install_bundled(dir: &Path, downloaded: &Path) -> Result<InstalledVoiceMo
     })
 }
 
+/// One loaded speech model kept between calls.
+///
+/// Reading a 670 MB Parakeet bundle, or a whisper context, costs far more than
+/// transcribing a couple of seconds of speech. Loading it again for every live
+/// caption pass is what made transcription fall behind the speaker, so the
+/// loaded model is reused while it is warm.
+pub(crate) struct CachedModel<T> {
+    key: String,
+    last_used: Instant,
+    model: T,
+}
+
+/// How long a loaded model may sit idle before its weights are released, so a
+/// single dictation does not pin hundreds of megabytes for the rest of the
+/// session.
+const MODEL_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Run `run` against the model cached under `key`, loading it only when the
+/// cached one is a different model or has gone cold. Calls are serialized: one
+/// model instance cannot run two transcriptions at once.
+pub(crate) fn with_cached_model<T>(
+    slot: &'static OnceLock<Mutex<Option<CachedModel<T>>>>,
+    key: &str,
+    load: impl FnOnce() -> Result<T, String>,
+    run: impl FnOnce(&mut T) -> Result<String, String>,
+) -> Result<String, String> {
+    let mutex = slot.get_or_init(|| Mutex::new(None));
+    let mut guard = mutex
+        .lock()
+        .map_err(|_| "The local voice model could not be locked for transcription.".to_string())?;
+    let stale = match guard.as_ref() {
+        Some(cached) => cached.key != key || cached.last_used.elapsed() >= MODEL_IDLE_TIMEOUT,
+        None => true,
+    };
+    if stale {
+        *guard = None;
+    }
+    if guard.is_none() {
+        *guard = Some(CachedModel {
+            key: key.to_string(),
+            last_used: Instant::now(),
+            model: load()?,
+        });
+    }
+    let cached = guard
+        .as_mut()
+        .ok_or_else(|| "The local voice model is unavailable.".to_string())?;
+    cached.last_used = Instant::now();
+    run(&mut cached.model)
+}
+
 /// Run transcription with whichever runtime the installed model needs.
+///
+/// `prompt` biases the decoder toward words it would otherwise avoid, which is
+/// how names and jargon are kept spelled the way the user writes them. Only the
+/// whisper runtimes accept it; Parakeet is a transducer with no text prompt, and
+/// the ONNX export decodes without one.
 pub fn transcribe(
     model: &InstalledVoiceModel,
     samples: &[f32],
     language: &str,
+    prompt: Option<&str>,
 ) -> Result<String, String> {
     match model.format {
-        VoiceModelFormat::Ggml => transcribe_ggml(model, samples, language),
+        VoiceModelFormat::Ggml => transcribe_ggml(model, samples, language, prompt),
         VoiceModelFormat::Onnx => whisper_onnx::transcribe(model, samples, language),
         VoiceModelFormat::Parakeet => crate::parakeet::transcribe(&model.primary, samples, SAMPLE_RATE),
         VoiceModelFormat::Torch => voice_python::transcribe(model, samples, language),
@@ -661,39 +719,58 @@ pub fn transcribe(
     }
 }
 
+static GGML_CONTEXT: OnceLock<Mutex<Option<CachedModel<whisper_rs::WhisperContext>>>> = OnceLock::new();
+
 fn transcribe_ggml(
     model: &InstalledVoiceModel,
     samples: &[f32],
     language: &str,
+    prompt: Option<&str>,
 ) -> Result<String, String> {
     use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
-    let path = model.primary.to_string_lossy().into_owned();
-    let context = WhisperContext::new_with_params(&path, WhisperContextParameters::default())
-        .map_err(|error| format!("Could not load the local voice model: {error}"))?;
-    let mut state = context
-        .create_state()
-        .map_err(|error| format!("Could not initialize local transcription: {error}"))?;
-    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-    params.set_language(Some(language));
-    params.set_translate(false);
-    params.set_print_special(false);
-    params.set_print_progress(false);
-    params.set_print_realtime(false);
-    params.set_print_timestamps(false);
-    let threads = std::thread::available_parallelism()
-        .map(|count| count.get().min(8) as i32)
-        .unwrap_or(4);
-    params.set_n_threads(threads);
-    state
-        .full(params, samples)
-        .map_err(|error| format!("Local transcription failed: {error}"))?;
-    Ok(state
-        .as_iter()
-        .map(|segment| segment.to_string())
-        .collect::<Vec<_>>()
-        .join("")
-        .trim()
-        .to_string())
+    let key = model.primary.to_string_lossy().into_owned();
+    let path = key.clone();
+    with_cached_model(
+        &GGML_CONTEXT,
+        &key,
+        move || {
+            WhisperContext::new_with_params(&path, WhisperContextParameters::default())
+                .map_err(|error| format!("Could not load the local voice model: {error}"))
+        },
+        |context| {
+            let mut state = context
+                .create_state()
+                .map_err(|error| format!("Could not initialize local transcription: {error}"))?;
+            let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+            params.set_language(Some(language));
+            params.set_translate(false);
+            params.set_print_special(false);
+            params.set_print_progress(false);
+            params.set_print_realtime(false);
+            params.set_print_timestamps(false);
+            // `set_initial_prompt` panics on a NUL byte, so a prompt carrying one
+            // is dropped rather than killing the transcription thread.
+            if let Some(prompt) =
+                prompt.filter(|value| !value.trim().is_empty() && !value.contains('\0'))
+            {
+                params.set_initial_prompt(prompt);
+            }
+            let threads = std::thread::available_parallelism()
+                .map(|count| count.get().min(8) as i32)
+                .unwrap_or(4);
+            params.set_n_threads(threads);
+            state
+                .full(params, samples)
+                .map_err(|error| format!("Local transcription failed: {error}"))?;
+            Ok(state
+                .as_iter()
+                .map(|segment| segment.to_string())
+                .collect::<Vec<_>>()
+                .join("")
+                .trim()
+                .to_string())
+        },
+    )
 }
 
 /// Decode base64 PCM and enforce the recording limits shared by every runtime.
@@ -1199,6 +1276,7 @@ pub async fn transcribe_local_voice(
     app: AppHandle,
     pcm_base64: String,
     language: Option<String>,
+    prompt: Option<String>,
 ) -> Result<LocalVoiceTranscription, String> {
     let (samples, duration_ms) = decode_pcm(&pcm_base64)?;
     let dir = voice_dir(&app)?;
@@ -1218,8 +1296,11 @@ pub async fn transcribe_local_voice(
         .file_name()
         .map(|value| value.to_string_lossy().into_owned())
         .unwrap_or_default();
+    let prompt = prompt
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
     let text = tauri::async_runtime::spawn_blocking(move || {
-        transcribe(&model, &samples, &inference_language)
+        transcribe(&model, &samples, &inference_language, prompt.as_deref())
     })
     .await
     .map_err(|error| format!("Local transcription task failed: {error}"))??;

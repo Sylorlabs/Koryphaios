@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-11-14T19:13:43.216Z",
+  "recordedBy": "scripts/record-accessibility-verification-web-session.ts",
+  "browser": "Chromium 151.0.7922.34",
+  "locale": "de-DE",
+  "page": "delete-confirmation-dialog",
+  "keyboard": {
+    "initialFocus": "other",
+    "focusOnOpen": "cancel",
+    "dialogOpen": true,
+    "tabStops": [
+      "confirm-button",
+      "body",
+      "cancel",
+      "confirm-button"
+    ],
+    "trapHeld": false,
+    "closedByEscape": true,
+    "focusAfterEscape": "open"
+  },
+  "errorState": {
+    "visible": true,
+    "role": "alert",
+    "text": "Löschen fehlgeschlagen. Erneut versuchen."
+  },
+  "zoom200": {
+    "horizontalOverflow": false,
+    "dialogFits": true,
+    "longTextFits": true,
+    "dialogRectWidth": 631,
+    "viewportWidth": 640
+  },
+  "captures": [
+    "backend/src/kory/fixtures/accessibility-verification/web-live-captures/dialog-default.png",
+    "backend/src/kory/fixtures/accessibility-verification/web-live-captures/dialog-zoom-200.png"
+  ],
+  "spokenOutput": {
+    "captured": true,
+    "screenReader": "43.1 with Speech Dispatcher 0.11.4 on Debian bookworm (aarch64), Xvfb 1280x800",
+    "recordedBy": "scripts/record-accessibility-verification-orca-session.ts",
+    "steps": {
+      "page-ready": [],
+      "tab-to-help": [
+        "Tab Hilfe Druckknopf."
+      ],
+      "tab-to-open": [
+        "Tab Ordner löschen... Druckknopf."
+      ],
+      "activate-open": [
+        "Enter"
+      ],
+      "dialog-opened": [],
+      "dialog-tab-1": [
+        "Tab Endgültig löschen Druckknopf."
+      ],
+      "dialog-tab-2": [
+        "Tab German Seitenreiter."
+      ],
+      "dialog-tab-3": [
+        "Tab Translate options Druckknopf."
+      ],
+      "dialog-escape": [
+        "Escape"
+      ],
+      "reopen-dialog": [
+        "Enter"
+      ],
+      "confirm-reach": [
+        "Tab Abbrechen Druckknopf. Tab Endgültig löschen Druckknopf."
+      ],
+      "confirm-activate": [
+        "Enter Löschen fehlgeschlagen. Erneut versuchen."
+      ]
+    }
+  },
+  "spokenCapture": {
+    "mode": "Speech Dispatcher generic output module appending the exact text handed to the speech engine",
+    "note": "Utterances are copied verbatim from that log."
+  }
+}

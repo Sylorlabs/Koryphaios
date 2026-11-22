@@ -4,6 +4,7 @@
 import { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
 import { serverLog } from '../logger';
+import { reportStartupPhase } from '../runtime/startup-status';
 
 export interface Migration {
   /** Unique version number (e.g., 20240101_001) */
@@ -1920,6 +1921,268 @@ export const MIGRATIONS: Migration[] = [
       DROP TABLE IF EXISTS remote_operations;
     `,
   },
+  {
+    version: '0056',
+    description: 'Accept user-sourced turns in the session-turn command ledger',
+    // SQLite cannot alter a CHECK constraint, so the ledger is rebuilt with the
+    // widened source list and every existing command row is copied unchanged.
+    up: `
+      DROP TABLE IF EXISTS session_turn_commands_widened;
+      CREATE TABLE session_turn_commands_widened (
+        command_key TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        source TEXT NOT NULL,
+        source_command_id TEXT NOT NULL,
+        input_hash TEXT NOT NULL,
+        user_message_id TEXT NOT NULL,
+        response_message_id TEXT NOT NULL,
+        run_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        terminal_reason TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        finished_at INTEGER,
+        FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+        CHECK (source IN ('goal', 'collaboration', 'internal', 'user')),
+        CHECK (status IN ('active', 'completed', 'failed', 'cancelled', 'waiting')),
+        CHECK (length(command_key) = 40 AND command_key NOT GLOB '*[^0-9a-f]*'),
+        CHECK (length(source_command_id) BETWEEN 1 AND 512),
+        CHECK (length(input_hash) = 64 AND input_hash NOT GLOB '*[^0-9a-f]*'),
+        CHECK (user_message_id = 'command-user-' || command_key),
+        CHECK (response_message_id = 'command-response-' || command_key),
+        CHECK (length(run_id) BETWEEN 1 AND 128),
+        CHECK (created_at >= 0 AND updated_at >= created_at),
+        CHECK (finished_at IS NULL OR finished_at >= created_at),
+        CHECK (
+          (status IN ('active', 'waiting') AND terminal_reason IS NULL AND finished_at IS NULL)
+          OR
+          (status IN ('completed', 'failed', 'cancelled')
+            AND terminal_reason IS NOT NULL
+            AND length(trim(terminal_reason)) BETWEEN 1 AND 2048
+            AND finished_at IS NOT NULL)
+        )
+      );
+      INSERT INTO session_turn_commands_widened (
+        command_key, session_id, source, source_command_id, input_hash,
+        user_message_id, response_message_id, run_id, status, terminal_reason,
+        created_at, updated_at, finished_at
+      )
+        SELECT command_key, session_id, source, source_command_id, input_hash,
+               user_message_id, response_message_id, run_id, status, terminal_reason,
+               created_at, updated_at, finished_at
+        FROM session_turn_commands;
+      DROP TABLE session_turn_commands;
+      ALTER TABLE session_turn_commands_widened RENAME TO session_turn_commands;
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_session_turn_commands_source
+        ON session_turn_commands(session_id, source, source_command_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_session_turn_commands_user_message
+        ON session_turn_commands(user_message_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_session_turn_commands_response_message
+        ON session_turn_commands(response_message_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_session_turn_commands_run
+        ON session_turn_commands(run_id);
+      CREATE INDEX IF NOT EXISTS idx_session_turn_commands_session_status
+        ON session_turn_commands(session_id, status, updated_at);
+    `,
+  },
+  {
+    version: '0057',
+    description: 'Record per-session ordered-event prune marks',
+    up: `
+      CREATE TABLE IF NOT EXISTS ordered_session_prune_marks (
+        session_id TEXT PRIMARY KEY,
+        epoch INTEGER NOT NULL,
+        sequence INTEGER NOT NULL,
+        pruned_at INTEGER NOT NULL
+      );
+    `,
+    down: `
+      DROP TABLE IF EXISTS ordered_session_prune_marks;
+    `,
+  },
+
+  // ─── Version 0058: Notes FTS trigger removal ───────────────────────────────
+  // notes_fts.note_id is UNINDEXED, so the 0014 ad/au triggers deleted the old
+  // FTS row with a full content-table scan on every notes write — including
+  // trash, pin, and sync updates that never touch searchable text. This
+  // migration only removes them and creates the rowid map shell: 0059 rebuilds
+  // notes_fts as a contentless index immediately afterwards, and the resumable
+  // compaction populates the map and the index from TypeScript, so spending
+  // seconds backfilling rows 0059 deletes would be pure waste.
+  {
+    version: '0058',
+    description:
+      'Drop the unindexed 0014 notes_fts triggers and create the rowid map shell (0059 rebuilds the index; compaction populates the map)',
+    up: `
+      -- The 0014 ai/ad/au triggers maintain notes_fts by note_id, which is
+      -- UNINDEXED, so every notes UPDATE/DELETE full-scans the FTS content
+      -- table synchronously. They are dropped here and never recreated: 0059
+      -- replaces notes_fts with a contentless index maintained from
+      -- TypeScript through this map, and the resumable compaction backfills
+      -- the map and the index.
+      DROP TRIGGER IF EXISTS notes_fts_ai;
+      DROP TRIGGER IF EXISTS notes_fts_ad;
+      DROP TRIGGER IF EXISTS notes_fts_au;
+
+      CREATE TABLE IF NOT EXISTS notes_fts_rowids (
+        fts_rowid INTEGER PRIMARY KEY,
+        note_id TEXT NOT NULL UNIQUE
+      );
+    `,
+    down: `
+      DROP TRIGGER IF EXISTS notes_fts_au;
+      DROP TRIGGER IF EXISTS notes_fts_ad;
+      DROP TRIGGER IF EXISTS notes_fts_ai;
+      DROP TABLE IF EXISTS notes_fts_rowids;
+
+      CREATE TRIGGER IF NOT EXISTS notes_fts_ai AFTER INSERT ON notes BEGIN
+        INSERT INTO notes_fts(note_id, title, content, tags)
+          VALUES (new.id, new.title, new.content, new.tags);
+      END;
+      CREATE TRIGGER IF NOT EXISTS notes_fts_ad AFTER DELETE ON notes BEGIN
+        DELETE FROM notes_fts WHERE note_id = old.id;
+      END;
+      CREATE TRIGGER IF NOT EXISTS notes_fts_au AFTER UPDATE ON notes BEGIN
+        DELETE FROM notes_fts WHERE note_id = old.id;
+        INSERT INTO notes_fts(note_id, title, content, tags)
+          VALUES (new.id, new.title, new.content, new.tags);
+      END;
+    `,
+  },
+
+  // ─── Version 0059: File-backed notes — contentless FTS + revision blobs ────
+  // Project documents are files; the DB must stop duplicating them. Three
+  // structural changes land together, with the data backfill left to the
+  // resumable TypeScript compaction pass (it needs filesystem access):
+  //   - notes gains derived content columns (hash/bytes/aliases/has_refs) so
+  //     no SQL ever has to read, LIKE-filter, or substring notes.content for a
+  //     project document.
+  //   - notes_fts is rebuilt contentless (tokens + rowids only) and indexing
+  //     moves to TypeScript helpers — the 0058 triggers are dropped for good.
+  //     notes_fts_rowids remains as the note_id ↔ fts_rowid map.
+  //   - note_revisions moves to deduplicated compressed blobs; the old table
+  //     is renamed note_revisions_legacy until compaction drains it.
+  {
+    version: '0059',
+    description:
+      'File-backed notes: contentless FTS, derived content columns, and revision blobs (down restores the schema only, not deleted data)',
+    up: `
+      -- Derived metadata so SQL never reads notes.content for project docs.
+      ALTER TABLE notes ADD COLUMN content_hash TEXT;
+      ALTER TABLE notes ADD COLUMN content_bytes INTEGER;
+      ALTER TABLE notes ADD COLUMN aliases TEXT NOT NULL DEFAULT '[]';
+      ALTER TABLE notes ADD COLUMN has_refs INTEGER NOT NULL DEFAULT 0;
+
+      -- Contentless index: tokens and rowids only, keyed through the 0058 map.
+      DROP TRIGGER IF EXISTS notes_fts_ai;
+      DROP TRIGGER IF EXISTS notes_fts_ad;
+      DROP TRIGGER IF EXISTS notes_fts_au;
+      DROP TABLE IF EXISTS notes_fts;
+      CREATE VIRTUAL TABLE notes_fts USING fts5(
+        title, content, tags,
+        content = '',
+        contentless_delete = 1,
+        detail = column,
+        tokenize = 'porter unicode61'
+      );
+
+      -- Compressed, hash-deduplicated revision bodies.
+      CREATE TABLE IF NOT EXISTS note_revision_blobs (
+        id INTEGER PRIMARY KEY,
+        hash TEXT NOT NULL UNIQUE,
+        codec TEXT NOT NULL,
+        raw_bytes INTEGER NOT NULL,
+        data BLOB NOT NULL
+      );
+
+      ALTER TABLE note_revisions RENAME TO note_revisions_legacy;
+      DROP INDEX IF EXISTS idx_note_revisions_project_note;
+      CREATE TABLE note_revisions (
+        note_id TEXT NOT NULL,
+        revision INTEGER NOT NULL,
+        project_root TEXT NOT NULL,
+        operation TEXT NOT NULL,
+        title TEXT NOT NULL,
+        content_blob_id INTEGER NOT NULL REFERENCES note_revision_blobs(id),
+        content_bytes INTEGER NOT NULL,
+        folder_path TEXT NOT NULL,
+        tags TEXT NOT NULL,
+        pinned INTEGER NOT NULL,
+        include_in_context INTEGER NOT NULL,
+        format TEXT NOT NULL,
+        source_path TEXT,
+        trashed_at INTEGER,
+        trash_reason TEXT,
+        note_created_at INTEGER NOT NULL,
+        note_updated_at INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (note_id, revision),
+        FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE CASCADE
+      );
+      CREATE INDEX idx_note_revisions_project_note
+        ON note_revisions(project_root, note_id, revision DESC);
+
+      -- Resumable background-compaction progress (key → JSON state).
+      CREATE TABLE IF NOT EXISTS notes_compaction_state (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+    `,
+    // Restore the schema only: bodies dropped by compaction (project-document
+    // content, drained legacy revisions) live in their source files and are
+    // intentionally not recreated.
+    down: `
+      DROP TABLE IF EXISTS notes_compaction_state;
+      DROP TABLE IF EXISTS note_revisions;
+      DROP TABLE IF EXISTS note_revision_blobs;
+      ALTER TABLE note_revisions_legacy RENAME TO note_revisions;
+      CREATE INDEX IF NOT EXISTS idx_note_revisions_project_note
+        ON note_revisions(project_root, note_id, revision DESC);
+
+      DROP TABLE IF EXISTS notes_fts;
+      CREATE VIRTUAL TABLE notes_fts USING fts5(
+        note_id UNINDEXED, title, content, tags,
+        tokenize = 'porter unicode61'
+      );
+      CREATE TRIGGER notes_fts_ai AFTER INSERT ON notes BEGIN
+        DELETE FROM notes_fts
+          WHERE rowid = (SELECT fts_rowid FROM notes_fts_rowids WHERE note_id = new.id);
+        DELETE FROM notes_fts_rowids WHERE note_id = new.id;
+        INSERT INTO notes_fts_rowids(note_id) VALUES (new.id);
+        INSERT INTO notes_fts(rowid, note_id, title, content, tags)
+          VALUES (
+            (SELECT fts_rowid FROM notes_fts_rowids WHERE note_id = new.id),
+            new.id, new.title, new.content, new.tags
+          );
+      END;
+      CREATE TRIGGER notes_fts_ad AFTER DELETE ON notes BEGIN
+        DELETE FROM notes_fts
+          WHERE rowid = (SELECT fts_rowid FROM notes_fts_rowids WHERE note_id = old.id);
+        DELETE FROM notes_fts_rowids WHERE note_id = old.id;
+      END;
+      CREATE TRIGGER notes_fts_au AFTER UPDATE OF id, title, content, tags ON notes
+      WHEN old.id IS NOT new.id
+        OR old.title IS NOT new.title
+        OR old.content IS NOT new.content
+        OR old.tags IS NOT new.tags
+      BEGIN
+        DELETE FROM notes_fts
+          WHERE rowid = (SELECT fts_rowid FROM notes_fts_rowids WHERE note_id = old.id);
+        DELETE FROM notes_fts_rowids WHERE note_id = old.id;
+        INSERT INTO notes_fts_rowids(note_id) VALUES (new.id);
+        INSERT INTO notes_fts(rowid, note_id, title, content, tags)
+          VALUES (
+            (SELECT fts_rowid FROM notes_fts_rowids WHERE note_id = new.id),
+            new.id, new.title, new.content, new.tags
+          );
+      END;
+
+      ALTER TABLE notes DROP COLUMN has_refs;
+      ALTER TABLE notes DROP COLUMN aliases;
+      ALTER TABLE notes DROP COLUMN content_bytes;
+      ALTER TABLE notes DROP COLUMN content_hash;
+    `,
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────────────
@@ -2734,7 +2997,12 @@ export class MigrationRunner {
     this.requireCheck('session_feed_tombstones', 'CHECK (length(target_key) BETWEEN 1 AND 512)');
   }
 
-  private validateSessionTurnCommandSchema(): void {
+  /**
+   * `sources` is the source list the CHECK must carry. Attestation re-runs every
+   * applied migration's postconditions on each startup, so 0043 cannot pin the
+   * list that 0056 later widened; only the latest rebuild checks it.
+   */
+  private validateSessionTurnCommandSchema(sources?: readonly string[]): void {
     this.requireColumns('session_turn_commands', {
       command_key: { type: 'TEXT', primaryKey: true },
       session_id: { type: 'TEXT', notNull: true },
@@ -2756,10 +3024,12 @@ export class MigrationRunner {
     this.requireIndex('session_turn_commands', ['response_message_id'], true);
     this.requireIndex('session_turn_commands', ['run_id'], true);
     this.requireIndex('session_turn_commands', ['session_id', 'status', 'updated_at'], false);
-    this.requireCheck(
-      'session_turn_commands',
-      "CHECK (source IN ('goal', 'collaboration', 'internal'))",
-    );
+    if (sources) {
+      this.requireCheck(
+        'session_turn_commands',
+        `CHECK (source IN (${sources.map((source) => `'${source}'`).join(', ')}))`,
+      );
+    }
     this.requireCheck(
       'session_turn_commands',
       "CHECK (status IN ('active', 'completed', 'failed', 'cancelled', 'waiting'))",
@@ -2829,13 +3099,19 @@ export class MigrationRunner {
       trashed_at: { type: 'INTEGER', notNull: false },
       trash_reason: { type: 'TEXT', notNull: false },
     });
+    // 0059 replaced the inline `content` column with a pointer into the
+    // deduplicated blob store. Attest whichever schema this database carries.
+    const revisionColumns = this.getColumns('note_revisions').map(({ name }) => name);
+    const blobBackedHistory = revisionColumns.includes('content_blob_id');
     this.requireColumns('note_revisions', {
       note_id: { type: 'TEXT', notNull: true },
       revision: { type: 'INTEGER', notNull: true },
       project_root: { type: 'TEXT', notNull: true },
       operation: { type: 'TEXT', notNull: true },
       title: { type: 'TEXT', notNull: true },
-      content: { type: 'TEXT', notNull: true },
+      ...(blobBackedHistory
+        ? { content_blob_id: { type: 'INTEGER', notNull: true } }
+        : { content: { type: 'TEXT', notNull: true } }),
       content_bytes: { type: 'INTEGER', notNull: true },
       folder_path: { type: 'TEXT', notNull: true },
       tags: { type: 'TEXT', notNull: true },
@@ -2868,18 +3144,23 @@ export class MigrationRunner {
         'Migration postcondition failed: note_revisions.note_id must cascade to notes.id',
       );
     }
-    const missingBaselines = this.db
-      .query<{ count: number }, []>(
-        `SELECT COUNT(*) AS count
-         FROM notes
-         LEFT JOIN note_revisions
-           ON note_revisions.note_id = notes.id
-          AND note_revisions.revision = notes.revision
-         WHERE note_revisions.note_id IS NULL`,
-      )
-      .get()?.count;
-    if ((missingBaselines ?? 0) !== 0) {
-      throw new Error('Migration postcondition failed: not every note has a current revision');
+    // Baseline coverage is only an invariant of the pre-0059 model, where every
+    // imported/synced note got a snapshot row. File-backed project documents
+    // are deliberately untracked until their first Koryphaios edit.
+    if (!blobBackedHistory) {
+      const missingBaselines = this.db
+        .query<{ count: number }, []>(
+          `SELECT COUNT(*) AS count
+           FROM notes
+           LEFT JOIN note_revisions
+             ON note_revisions.note_id = notes.id
+            AND note_revisions.revision = notes.revision
+           WHERE note_revisions.note_id IS NULL`,
+        )
+        .get()?.count;
+      if ((missingBaselines ?? 0) !== 0) {
+        throw new Error('Migration postcondition failed: not every note has a current revision');
+      }
     }
   }
 
@@ -3060,6 +3341,9 @@ export class MigrationRunner {
     if (migration.version === '0041') this.validateVaultRestoreCommitSchema();
     if (migration.version === '0042') this.validateFeedPersistenceSchema();
     if (migration.version === '0043') this.validateSessionTurnCommandSchema();
+    if (migration.version === '0056') {
+      this.validateSessionTurnCommandSchema(['goal', 'collaboration', 'internal', 'user']);
+    }
   }
 
   /**
@@ -3418,6 +3702,12 @@ export class MigrationRunner {
 
     let applied = 0;
     for (const migration of pending) {
+      // The desktop reads this marker while the port is still unbound — a slow
+      // migration must read as progress, not as a dead backend.
+      reportStartupPhase(
+        'database-migrations',
+        `Applying migration ${migration.version}: ${migration.description}`,
+      );
       if (await this.applyMigration(migration)) applied += 1;
     }
 

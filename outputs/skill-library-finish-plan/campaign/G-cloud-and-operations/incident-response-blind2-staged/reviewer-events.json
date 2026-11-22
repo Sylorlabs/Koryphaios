@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "reviewerId": "logfare-stateless-9efc107b-c612-4054-9fc1-4b75100cb528",
+  "completed": true,
+  "output": "{\"artifactA\":{\"passed\":true,\"quality\":0.95,\"verification\":0.9,\"integrityFailure\":false,\"evidence\":[\"Declares SEV-1 from explicit impact (27% 5xx vs 0.4%, p95 590ms vs 280ms) at minute 0.\",\"Assigns single IC (Maya Chen) plus distinct operations (Luis Ortega), communications (Priya Shah), scribe (Noah Williams) at minute 1, before mitigation at minute 5.\",\"Freezes independent flag edits and all production mutations at minute 2, requiring IC approval and operations execution.\",\"Preserves rollout/configuration/telemetry/logs before mitigation at minute 3, with preservedBeforeMitigation list.\",\"Single reversible mitigation rollback-release with sole owner Luis Ortega, documented undo path, start minute 5, intended effect, and observed result at minute 7.\",\"Stakeholder update at minute 8 states impact, status, unknowns, no confirmed root cause, and next-update cadence (10 min) plus triggers.\",\"Recovery verified across 5xx, p95, checkout probe, dependency health, rollback state at minutes 10, 18, 24 spanning recurrence point 18.\",\"Observation window 22 minutes post-mitigation spanning recurrence minute 18 with two stable checkpoints.\",\"Handoff records temporary divergence (release and flag state), named follow-up owners (Elena Park, Jordan Lee, Sam Rivera, Amina Patel) with checkpoints and reopen triggers.\",\"Host scorer: hidden test pass; command precedes mutation and recovery survives recurrence.\"]},\"artifactB\":{\"passed\":true,\"quality\":0.8,\"verification\":0.85,\"integrityFailure\":false,\"evidence\":[\"Declares SEV-1 from explicit impact at minute -11.\",\"Assigns IC (Alex Chen), operations (Priya Shah), communications (Morgan Lee), scribe (Jordan Kim) at minute -10, before mitigation at minute -6.\",\"Freezes independent flag changes and uncoordinated mutations at minute -9.\",\"Preserves rollout/configuration/telemetry/logs at minute -8 before mitigation.\",\"Single reversible rollback-release with owner Priya Shah, undo path, start minute -6.\",\"Stakeholder update at minute -7 states impact, status, unknowns, no confirmed root cause, next-update cadence and triggers.\",\"Recovery verified across 5xx, p95, checkout probe, dependency health, rollback state at minutes 0, 10, 18, 24 spanning recurrence point 18.\",\"Observation window 30 minutes; two post-recurrence checkpoints.\",\"Handoff records temporary release divergence and named follow-up owners (Priya Shah, Jordan Kim, Diego Ruiz, Alex Chen).\",\"Weaker: temporaryDivergence omits the feature-flag divergence from the two responders' pre-freeze edits, which the task explicitly requires handing off.\",\"Weaker: followups lack explicit timestamps/checkpoints for most owners (only implicit), reducing handoff precision.\",\"Host scorer: hidden test pass.\"]},\"preference\":\"A\",\"rationale\":[\"Both artifacts satisfy the core contract: severity declaration, command roles, mutation freeze, evidence preservation, single reversible mitigation with undo, factual stakeholder update, multi-signal recovery through recurrence point, and handoff.\",\"Artifact A is stronger on handoff completeness: it explicitly records the feature-flag divergence from pre-freeze edits as temporary divergence, whereas Artifact B only records release divergence and omits the flag-state divergence the task calls out.\",\"Artifact A provides more precise follow-up ownership with explicit checkpoints (minute 56, next business day) and reopen triggers, better satisfying the handoff falsifiable check.\",\"Artifact A's timeline is more internally consistent (mitigation start minute 5, result minute 7, observation window 22 min spanning recurrence 18).\",\"Artifact B is competent but slightly less complete on residual-risk/divergence coverage and follow-up timestamp precision.\"]}",
+  "events": [
+    {
+      "type": "review.started",
+      "reviewerId": "logfare-stateless-9efc107b-c612-4054-9fc1-4b75100cb528"
+    },
+    {
+      "type": "review.completed",
+      "reviewerId": "logfare-stateless-9efc107b-c612-4054-9fc1-4b75100cb528",
+      "outputSha256": "8ff2dbfdc0cd600db21bf1317fd73d6f76ecbd66a38a09a7bc1d2c5fba85b7b1"
+    }
+  ],
+  "hostReceipt": {
+    "schemaVersion": 1,
+    "stageOnly": true,
+    "identitySource": "host-invocation-uuid",
+    "upstreamSessionObserved": true,
+    "requestedModel": "deepseek-v4.1-flash-1017",
+    "responseModel": "deepseek-v4.1-flash-1017",
+    "promptSha256": "47fafa238a257bf1f825cfe42a3bb737b905b9581f96aabf7478310839029cd9",
+    "requestBytes": 52448,
+    "responseSha256": "26893dd0cdc36c6996117575ece811b57e15601502aa85b37d53dacc5cc42e4a",
+    "outputSha256": "8ff2dbfdc0cd600db21bf1317fd73d6f76ecbd66a38a09a7bc1d2c5fba85b7b1",
+    "elapsedMs": 28976,
+    "osIsolationVerified": false,
+    "upstreamIdentityVerified": false,
+    "signed": false
+  }
+}

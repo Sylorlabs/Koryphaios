@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { toastStore } from '$lib/stores/toast.svelte';
+  import { isUndoToast, toastStore } from '$lib/stores/toast.svelte';
+  import { formatShortcut } from '$lib/utils/platform';
+  import { isTextEntryTarget, isUndoChord } from '$lib/utils/toast-undo';
   import X from 'lucide-svelte/icons/x';
   import CheckCircle from 'lucide-svelte/icons/check-circle';
   import AlertCircle from 'lucide-svelte/icons/alert-circle';
@@ -19,11 +21,20 @@
     warning: AlertTriangle,
   };
 
-  const colorMap = {
-    success: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400',
-    error: 'border-red-500/40 bg-red-500/10 text-red-400',
-    info: 'border-blue-500/40 bg-blue-500/10 text-blue-400',
-    warning: 'border-amber-500/40 bg-amber-500/10 text-amber-400',
+  // Variant colour lives on the border and icon only. The card itself stays an
+  // opaque surface with primary text so it reads over custom chat backgrounds —
+  // a translucent tint let the wallpaper bleed through and wash the text out.
+  const borderMap = {
+    success: 'border-[var(--color-success)]/50',
+    error: 'border-[var(--color-error)]/50',
+    info: 'border-[var(--color-info)]/50',
+    warning: 'border-[var(--color-warning)]/50',
+  };
+  const iconColorMap = {
+    success: 'text-[var(--color-success)]',
+    error: 'text-[var(--color-error)]',
+    info: 'text-[var(--color-info)]',
+    warning: 'text-[var(--color-warning)]',
   };
 
   /** Explicit reader intent, so a collapse is never re-opened or re-collapsed
@@ -52,6 +63,14 @@
       .join(' · ');
   });
 
+  /** The platform undo chord answers the newest undo offer, unless the reader
+   *  is typing: text fields keep their own undo. */
+  function handleWindowKeydown(event: KeyboardEvent) {
+    if (event.defaultPrevented || !isUndoChord(event)) return;
+    if (isTextEntryTarget(event.target) || isTextEntryTarget(document.activeElement)) return;
+    if (toastStore.runLatestUndo()) event.preventDefault();
+  }
+
   // Writing this through a plain statement (not in the button handler) covers
   // the pile shrinking from anywhere — a timeout, a clear-all, a dismiss.
   $effect(() => {
@@ -59,22 +78,33 @@
   });
 </script>
 
+<svelte:window onkeydown={handleWindowKeydown} />
+
 {#if toastStore.toasts.length > 0}
   <div class="toast-anchor">
     <div class="toast-stack" role="region" aria-label="Notifications">
       {#each shown as toast (toast.id)}
         {@const ToastIcon = iconMap[toast.type]}
         <div
-          class="toast-card border {colorMap[toast.type]}"
+          class="toast-card border {borderMap[toast.type]}"
           onmouseenter={() => toastStore.pause(toast.id)}
           onmouseleave={() => toastStore.resume(toast.id)}
           role="alert"
           aria-live="assertive"
           data-toast-type={toast.type}
         >
-          <ToastIcon size={18} class="mt-0.5 shrink-0" />
+          <ToastIcon size={18} class="mt-0.5 shrink-0 {iconColorMap[toast.type]}" />
           <p class="min-w-0 flex-1 text-sm break-words [overflow-wrap:anywhere]">{toast.message}</p>
-          {#if toast.onRetry}
+          {#if toast.action}
+            <button
+              type="button"
+              class="ml-1 shrink-0 text-xs underline opacity-75 transition-opacity hover:opacity-100"
+              onclick={() => toastStore.runAction(toast.id)}
+              title={isUndoToast(toast) ? `Undo (${formatShortcut('Mod+Z')})` : undefined}
+            >
+              {toast.action.label}
+            </button>
+          {:else if toast.onRetry}
             <button
               class="ml-1 shrink-0 text-xs underline opacity-75 transition-opacity hover:opacity-100"
               onclick={() => {
@@ -167,8 +197,9 @@
     border-radius: 12px;
     border-width: 1px;
     border-style: solid;
+    background: var(--color-surface-2);
+    color: var(--color-text-primary);
     box-shadow: 0 12px 32px -12px rgb(0 0 0 / 0.45);
-    backdrop-filter: blur(14px);
     animation: toast-drop 0.22s ease-out;
   }
 

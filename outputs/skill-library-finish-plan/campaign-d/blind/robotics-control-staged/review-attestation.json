@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "status": "unimported",
+  "assignmentId": "blind-v5-b8afc01976f4bb5c9d3d",
+  "skill": "robotics-control",
+  "scenarioId": "robotics-control-full-task-1-individual",
+  "pairId": "robotics-control-full-task-1-individual:ffaa9abc-afc1-4e70-bd25-c70cb1856d98",
+  "reviewerThread": "logfare-stateless-005fb113-b998-4d30-83d0-c033ef7da110",
+  "reviewerIdentitySource": "external-reviewer-adapter-output",
+  "reviewerAdapter": "scripts/kory-logfare-stateless-reviewer",
+  "reviewerModel": "deepseek-v4.1-flash-1017",
+  "reviewerModelSource": "configured-provider-model-metadata",
+  "reviewerBaseUrl": "http://127.0.0.1:17841/v1",
+  "promptSha256": "0b3bc45c7b571e9decbfee1c4086085d8686d7472e51a928a8f2b84a2607400b",
+  "privateAssignmentSha256": "a273b2c17f882ab01d6a82c26e83c71d0c45d074e0def3b1d9b3d63b7268b059",
+  "reviewerEventsSha256": "a24081d9cec24dac99442ab4b817da8e95ca6c2066ce5fcb01701f8d315ca3ee",
+  "judgeOutputSha256": "04f6a21ebf2ada9dd6152065b642311a3d54984ac6f3d9a779497c3a6fb33ab0",
+  "envelopeSha256": "d5ab89796e6ea703dcdb52a2c9f5b63c235ce1edc5edb129b63aca0851f732c0",
+  "importValidation": {
+    "mode": "validate",
+    "validatedReviews": 1,
+    "persistedReviews": 0
+  },
+  "promptSnapshotPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-c4EFto/review-task.prompt.txt",
+  "reviewerEventsPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-c4EFto/reviewer-events.json",
+  "envelopePath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-c4EFto/import.json"
+}

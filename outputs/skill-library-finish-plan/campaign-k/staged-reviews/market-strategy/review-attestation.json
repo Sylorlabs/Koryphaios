@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "status": "unimported",
+  "assignmentId": "blind-v5-82711d92cae73c92fa79",
+  "skill": "market-strategy",
+  "scenarioId": "market-strategy-full-task-1-individual",
+  "pairId": "market-strategy-full-task-1-individual:598896a1-27b7-42c0-b227-9fc4ec97520a",
+  "reviewerThread": "logfare-stateless-e3d5601a-5185-4be6-9c16-713593ed0b49",
+  "reviewerIdentitySource": "external-reviewer-adapter-output",
+  "reviewerAdapter": "scripts/kory-logfare-stateless-reviewer",
+  "reviewerModel": "deepseek-v4.1-flash-1017",
+  "reviewerModelSource": "configured-provider-model-metadata",
+  "reviewerBaseUrl": "http://127.0.0.1:17841/v1",
+  "promptSha256": "221b3d2dec19720ec91a9844c31b1569c65ea62b00beba3ff2d14a9d2ce8cb1f",
+  "privateAssignmentSha256": "b169e0d1758a11783aaca6aea82efdba5b50d78b68d30864f03f5d0dec4d4d87",
+  "reviewerEventsSha256": "6500adc611d9c957034134430dc0e20232f54fff7e51e34ea541125ed24a4f3e",
+  "judgeOutputSha256": "40be629b95aea3ad4ef584bdea0b40c4df96106c3bc5c3ffc2ba4f5d6535e7e0",
+  "envelopeSha256": "7fc74d541e10f71fcf5ead5686802009c819e4935ff87b29d688df461b937fca",
+  "importValidation": {
+    "mode": "validate",
+    "validatedReviews": 1,
+    "persistedReviews": 0
+  },
+  "promptSnapshotPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-UqnkV7/review-task.prompt.txt",
+  "reviewerEventsPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-UqnkV7/reviewer-events.json",
+  "envelopePath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-UqnkV7/import.json"
+}

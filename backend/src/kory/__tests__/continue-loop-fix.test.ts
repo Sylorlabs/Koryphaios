@@ -167,6 +167,7 @@ async function makeWorkerHarness(
     resolveSessionWorkingDirectoryPublic: async () => repo,
     getWorkerReasoningLevel: () => 'medium',
     getQualityPolicy: () => ({ gateStrictness: 'off', maxCriticIterations }),
+    getWorktreeMode: () => 'auto' as const,
     waitForUserInput: async () => 'Allow once',
     emitThought: () => undefined,
     updateWorkflowState: async (_s: string, st: string) => {

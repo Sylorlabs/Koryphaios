@@ -98,6 +98,8 @@ let _agentPermissionsSaving = $state(false);
 let _isPanelOpen = $state(false);
 let _error = $state<string | null>(null);
 let _indexWarning = $state<string | null>(null);
+/** Shown only when a pass actually stops at the soft limit. */
+let _indexLimitNotice = $state<string | null>(null);
 let _isIndexing = $state(false);
 let _conflict = $state<{
   noteId: string;
@@ -358,6 +360,7 @@ function applyProjectSyncMeta(sync?: ProjectSyncMeta): void {
     _indexWarning =
       sync.error ??
       `Indexed ${sync.discovered ?? 0} project documents. Some files could not be verified, so their existing entries were preserved.`;
+    if (!_settings.hideIndexLimitNotice) _indexLimitNotice = _indexWarning;
     clearOperationError('sync-project');
     return;
   }
@@ -1525,7 +1528,7 @@ async function importMemoryAsNotes(): Promise<void> {
 }
 
 /** Re-index real Markdown and HTML files from the open project. */
-async function syncProjectDocuments(): Promise<void> {
+async function syncProjectDocuments(options?: { continueBeyondLimit?: boolean }): Promise<void> {
   if (isDemoMode) {
     toastStore.success('Notes are already loaded in the demo');
     return;
@@ -1537,7 +1540,8 @@ async function syncProjectDocuments(): Promise<void> {
   try {
     const res = await apiFetch(apiUrl('/api/notes/sync-project'), {
       method: 'POST',
-      headers: mutation.headers,
+      headers: { ...mutation.headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ continueBeyondLimit: options?.continueBeyondLimit === true }),
     });
     const data = await res.json();
     if (!res.ok || !data.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
@@ -1548,10 +1552,16 @@ async function syncProjectDocuments(): Promise<void> {
     if (result.truncated) {
       _indexWarning =
         result.message ??
-        `Indexed ${result.discovered ?? 0} project documents. Some files could not be verified, so their existing entries were preserved.`;
-      toastStore.warning(_indexWarning);
+        `Indexed ${result.discovered ?? 0} project documents before the soft limit.`;
+      if (_settings.hideIndexLimitNotice) {
+        _indexLimitNotice = null;
+      } else {
+        _indexLimitNotice = _indexWarning;
+        toastStore.warning(_indexWarning);
+      }
     } else {
       _indexWarning = null;
+      _indexLimitNotice = null;
       toastStore.success(`Indexed ${result.discovered ?? 0} project documents`);
     }
   } catch (err) {
@@ -1564,6 +1574,17 @@ async function syncProjectDocuments(): Promise<void> {
   } finally {
     finishLocalMutation(mutation.mutationId, mutationSucceeded);
   }
+}
+
+/** Continue a pass that stopped at the configured soft limit. */
+async function continueIndexing(): Promise<void> {
+  _indexLimitNotice = null;
+  await syncProjectDocuments({ continueBeyondLimit: true });
+}
+
+/** Dismiss the soft-limit notice without changing the configured limit. */
+function dismissIndexLimitNotice(): void {
+  _indexLimitNotice = null;
 }
 
 /** Fetch agent note-tool permissions from backend */
@@ -2249,6 +2270,11 @@ export const notesStore = {
   get isIndexing() {
     return _isIndexing;
   },
+  get indexLimitNotice() {
+    return _indexLimitNotice;
+  },
+  continueIndexing,
+  dismissIndexLimitNotice,
   get conflict() {
     return _conflict;
   },

@@ -49,7 +49,7 @@
 
         <div class="flex items-center gap-2">
           <button
-            class="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold rounded-lg bg-emerald-500 text-black hover:bg-emerald-400 transition-colors disabled:opacity-60"
+            class="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold rounded-lg bg-[var(--color-success)] text-[var(--color-on-success)] hover:brightness-110 transition-colors disabled:opacity-60"
             use:capturedClick={decisions.keep}
             disabled={applying}
           >
@@ -57,7 +57,7 @@
             Keep All
           </button>
           <button
-            class="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold rounded-lg bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30 transition-colors disabled:opacity-60"
+            class="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold rounded-lg bg-[var(--color-error)]/20 text-[var(--color-error)] border border-[var(--color-error)]/30 hover:bg-[var(--color-error)]/30 transition-colors disabled:opacity-60"
             use:capturedClick={decisions.reject}
             disabled={applying}
           >
@@ -80,24 +80,24 @@
           {#each changes as change}
             <div class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--color-surface-2)] transition-colors">
               {#if change.operation === 'create'}
-                <Plus size={12} class="text-emerald-400" />
+                <Plus size={12} class="text-[var(--color-success)]" />
               {:else if change.operation === 'delete'}
-                <Minus size={12} class="text-red-400" />
+                <Minus size={12} class="text-[var(--color-error)]" />
               {:else}
-                <Pencil size={12} class="text-amber-400" />
+                <Pencil size={12} class="text-[var(--color-warning)]" />
               {/if}
               
               <div class="flex-1 min-w-0">
                 <p class="text-xs font-mono truncate text-[var(--color-text-primary)]">{getFileName(change.path)}</p>
-                <p class="text-[9px] font-mono text-[var(--color-text-muted)] truncate">{change.path}</p>
+                <p class="text-[11px] font-mono text-[var(--color-text-muted)] truncate">{change.path}</p>
               </div>
 
-              <div class="flex items-center gap-2 font-mono text-[10px]">
+              <div class="flex items-center gap-2 font-mono text-[11px]">
                 {#if change.linesAdded > 0}
-                  <span class="text-emerald-400">+{change.linesAdded}</span>
+                  <span class="text-[var(--color-success)]">+{change.linesAdded}</span>
                 {/if}
                 {#if change.linesDeleted > 0}
-                  <span class="text-red-400">-{change.linesDeleted}</span>
+                  <span class="text-[var(--color-error)]">-{change.linesDeleted}</span>
                 {/if}
               </div>
             </div>

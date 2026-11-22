@@ -7,8 +7,8 @@ import {
   FINOPS_FULL_TASK_SKILL_EVAL_MATERIALIZERS,
   FINOPS_FULL_TASK_SKILL_EVAL_SCORERS,
   scoreFinopsFullTask,
-} from '../skill-eval-finops-full-task-fixtures';
-import type { SkillEvalScenarioV3 } from '../skill-eval-harness';
+} from '../../eval/skills/skill-eval-finops-full-task-fixtures';
+import type { SkillEvalScenarioV3 } from '../../eval/skills/skill-eval-harness';
 
 const roots: string[] = [];
 const finopsTaskRoot = join(import.meta.dir, '../../../../skills-v5/finops-cloud-cost/evals/tasks');

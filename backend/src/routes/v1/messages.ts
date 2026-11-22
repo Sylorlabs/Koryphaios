@@ -1,16 +1,14 @@
 import { Elysia, t } from 'elysia';
-import {
-  legacyTurnParts,
-  type StoredMessage,
-  type ProviderName,
-} from '@koryphaios/shared';
+import { legacyTurnParts, type StoredMessage, type ProviderName } from '@koryphaios/shared';
 import { getContext } from '../../context';
 import { nanoid } from 'nanoid';
 import { ID, MESSAGE } from '../../constants';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 import { serverLog } from '../../logger';
 import { resolveImageModelSelection, runImageJob } from './images';
+import { normalizeSpeedTier } from '../../providers/speed-tiers';
 import { ConflictError } from '../../errors/types';
+import { TurnOwnershipLostError } from '../../kory/services/TurnRuntime.types';
 import type { KoryManager, SessionTurnAdmission } from '../../kory/manager';
 import type { RegenerationBranchReservation } from '../../stores/message-store';
 
@@ -24,7 +22,9 @@ function reportTurnFailure(
   sessionId: string,
   wsManager: ReturnType<typeof getContext>['wsManager'],
 ): void {
-  if (isIntentionalCancellation(error, admission)) return;
+  // A superseded turn is a steer outcome, never a user-facing failure.
+  if (isIntentionalCancellation(error, admission) || error instanceof TurnOwnershipLostError)
+    return;
   wsManager.broadcastToSession(sessionId, {
     type: 'system.error',
     payload: { error: error instanceof Error ? error.message : String(error), sessionId },
@@ -94,21 +94,41 @@ async function processImageMessage(
       const extension = result.data.mimeType.includes('jpeg')
         ? 'jpg'
         : (result.data.mimeType.split('/')[1] ?? 'png');
-      const content = result.data.revisedPrompt
+      let content = result.data.revisedPrompt
         ? `Generated image.\n\n${result.data.revisedPrompt}`
         : 'Generated image.';
       const review = await kory.runCriticGate(
         sessionId,
-        [{ role: 'user', content: prompt }, { role: 'assistant', content }, {
-          role: 'user', content: [{ type: 'text', text: 'Generated image to evaluate against the original request.' },
-            { type: 'image', imageData: result.data.imageBase64, imageMimeType: result.data.mimeType }],
-        }],
-        undefined, prompt, await kory.resolveSessionWorkingDirectoryPublic(sessionId),
+        [
+          { role: 'user', content: prompt },
+          { role: 'assistant', content },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Generated image to evaluate against the original request.' },
+              {
+                type: 'image',
+                imageData: result.data.imageBase64,
+                imageMimeType: result.data.mimeType,
+              },
+            ],
+          },
+        ],
+        undefined,
+        prompt,
+        await kory.resolveSessionWorkingDirectoryPublic(sessionId),
         { provider: result.data.provider as ProviderName, model: result.data.model },
-        undefined, { responseOnly: true, purpose: 'image' },
+        undefined,
+        { responseOnly: true, purpose: 'image' },
       );
       signal.throwIfAborted();
-      if (!review.passed) throw new Error(`Critic did not approve the generated response: ${review.feedback}`);
+      if (review.criticUnavailable) {
+        // The Critic could not run — deliver the image marked unverified
+        // rather than failing the whole generation turn.
+        content += `\n\nUNVERIFIED: Critic could not run:\n${review.feedback ?? ''}`;
+      } else if (!review.passed) {
+        throw new Error(`Critic did not approve the generated response: ${review.feedback}`);
+      }
       const generatedMessage: StoredMessage = {
         id: generatedMessageId,
         sessionId,
@@ -155,6 +175,25 @@ async function processImageMessage(
  * Assistant rows always leave the API with `parts`. Rows written before parts
  * existed are rendered as [reasoning?, text] so the client has one shape.
  */
+/**
+ * Backstop for a ledger-owned turn whose completion rejects. A user stop is a
+ * cancellation, not a failure, so it is never published as a system error.
+ */
+function reportLedgerTurnFailure(
+  error: unknown,
+  sessionId: string,
+  wsManager: ReturnType<typeof getContext>['wsManager'],
+): void {
+  if (error instanceof DOMException && error.name === 'AbortError') return;
+  if (error instanceof TurnOwnershipLostError) return;
+  wsManager.broadcastToSession(sessionId, {
+    type: 'system.error',
+    payload: { error: error instanceof Error ? error.message : String(error), sessionId },
+    timestamp: Date.now(),
+    sessionId,
+  });
+}
+
 export function withDisplayParts(message: StoredMessage): StoredMessage {
   if (message.role !== 'assistant') return message;
   return {
@@ -170,10 +209,14 @@ export const messageRoutes = new Elysia({ prefix: '/api/messages' })
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const { messages } = getContext();
     const requestedLimit = Number(query?.limit);
+    // The ceiling matches the frontend's MAX_RESUME_PAGE_SIZE: a parked
+    // reader's first read must reach from their saved anchor to the newest
+    // message in one request, or the position cannot be restored.
     const limit = Number.isFinite(requestedLimit)
-      ? Math.max(20, Math.min(200, Math.floor(requestedLimit)))
+      ? Math.max(20, Math.min(1000, Math.floor(requestedLimit)))
       : 120;
-    const beforeMessageId = typeof query?.before === 'string' && query.before ? query.before : undefined;
+    const beforeMessageId =
+      typeof query?.before === 'string' && query.before ? query.before : undefined;
     const projection = await messages.getDisplayProjection(sessionId, limit, { beforeMessageId });
     return {
       ok: true,
@@ -197,6 +240,93 @@ export const messageRoutes = new Elysia({ prefix: '/api/messages' })
         return { ok: false, error: 'Recover this archived chat before sending a message.' };
       }
 
+      // Every user turn that is not an image turn starts through the session-turn
+      // command ledger: the command row is the durable intent record, the input
+      // write is idempotent, and receipts replay. A send without a client id gets
+      // a server-minted id, so it is a new command on the same path.
+      // Image turns keep their admitted path below because image generation is
+      // not a provider chat loop and has no ledger-backed dispatch yet.
+      const imageSelection = resolveImageModelSelection(body.model);
+      if (!imageSelection) {
+        const sourceCommandId = body.clientMessageId ?? `srv_${nanoid()}`;
+        const submission = await kory.startSessionTurn({
+          sessionId: body.sessionId,
+          source: 'user',
+          sourceCommandId,
+          userMessage: body.content,
+          preferredModel: body.model,
+          reasoningLevel: body.reasoningLevel,
+          contextWindow: body.contextWindow,
+          attachments: body.attachments,
+          interactionMode: body.interactionMode ?? session.interactionMode ?? 'act',
+          fastMode: body.fastMode,
+          speedTier: normalizeSpeedTier(body.model?.split(':')[0], body.speedTier, body.fastMode),
+          modelParameters: body.modelParameters,
+          fusion: body.fusion,
+          imageInputMode: body.imageInputMode ?? 'reject',
+        });
+        if (submission.accepted === 'queued') {
+          // The session has a live run, so the send was parked behind it and
+          // will be admitted as the next turn when the running stack yields at
+          // a safe boundary. Its user message is already durable.
+          return {
+            ok: true,
+            data: {
+              status: 'queued',
+              steeringCommandId: submission.steeringCommandId,
+              messageId: submission.userMessageId,
+            },
+          };
+        }
+        if (!submission.accepted) {
+          const { result } = submission;
+          // A replayed command reports its own run and user message. A command
+          // still in flight may not have persisted its message yet, so it is
+          // replayed without the check. Otherwise the message must exist: a
+          // command that failed before persisting its input is not accepted.
+          if (submission.replay !== undefined) {
+            if (
+              submission.replay === 'in_flight' ||
+              (await messages.getById(body.sessionId, submission.userMessageId))
+            ) {
+              return {
+                ok: true,
+                data: {
+                  status: 'processing',
+                  runId: result.runId,
+                  messageId: submission.userMessageId,
+                },
+              };
+            }
+            throw new ConflictError(
+              'This message id belongs to an attempt that failed before its message was recorded. Retry with a new message id.',
+            );
+          }
+          if (result.reason === 'session_busy') {
+            throw new ConflictError(
+              'This session already has active work. Wait for it to finish before starting another turn.',
+            );
+          }
+          throw new ConflictError(
+            'This message id is already bound to a command that did not complete. Retry with a new message id.',
+          );
+        }
+        // Not awaited: the HTTP response reports admission, and the turn's
+        // outcome reaches the client through the run and transcript events.
+        submission.completion.catch((error: unknown) => {
+          reportLedgerTurnFailure(error, body.sessionId, wsManager);
+        });
+        return {
+          ok: true,
+          data: {
+            status: 'processing',
+            runId: submission.runId,
+            messageId: submission.userMessageId,
+          },
+        };
+      }
+
+      // Image turn (documented exception in docs/architecture/transcript-integrity.md).
       const userMsg = {
         id: nanoid(ID.SESSION_ID_LENGTH),
         sessionId: body.sessionId,
@@ -205,12 +335,7 @@ export const messageRoutes = new Elysia({ prefix: '/api/messages' })
         attachments: body.attachments,
         createdAt: Date.now(),
       };
-
-      const imageSelection = resolveImageModelSelection(body.model);
-      const admission = await kory.reserveSessionTurn(
-        body.sessionId,
-        imageSelection ? 'image_turn' : 'user_turn',
-      );
+      const admission = await kory.reserveSessionTurnAfterSteer(body.sessionId, 'image_turn');
       if (!admission) {
         throw new ConflictError(
           'This session already has active work. Wait for it to finish before starting another turn.',
@@ -224,39 +349,16 @@ export const messageRoutes = new Elysia({ prefix: '/api/messages' })
         throw error;
       }
 
-      if (imageSelection) {
-        processImageMessage(
-          kory,
-          admission,
-          body.sessionId,
-          body.content,
-          imageSelection,
-          body.attachments,
-        ).catch((error: unknown) => {
-          reportTurnFailure(error, admission, body.sessionId, wsManager);
-        });
-        return {
-          ok: true,
-          data: { status: 'processing', runId: admission.runId, messageId: userMsg.id },
-        };
-      }
-
-      kory
-        .dispatchAdmittedTask(admission, {
-          userMessage: body.content,
-          preferredModel: body.model,
-          reasoningLevel: body.reasoningLevel,
-          contextWindow: body.contextWindow,
-          attachments: body.attachments,
-          interactionMode: body.interactionMode ?? session.interactionMode ?? 'act',
-          fastMode: body.fastMode,
-          inputAlreadyPersisted: true,
-          imageInputMode: body.imageInputMode ?? 'reject',
-        })
-        .catch((error: unknown) => {
-          reportTurnFailure(error, admission, body.sessionId, wsManager);
-        });
-
+      processImageMessage(
+        kory,
+        admission,
+        body.sessionId,
+        body.content,
+        imageSelection,
+        body.attachments,
+      ).catch((error: unknown) => {
+        reportTurnFailure(error, admission, body.sessionId, wsManager);
+      });
       return {
         ok: true,
         data: { status: 'processing', runId: admission.runId, messageId: userMsg.id },
@@ -266,10 +368,24 @@ export const messageRoutes = new Elysia({ prefix: '/api/messages' })
       body: t.Object({
         sessionId: t.String(),
         content: t.String(),
+        clientMessageId: t.Optional(
+          t.String({ minLength: 8, maxLength: 64, pattern: '^[A-Za-z0-9_-]+$' }),
+        ),
         model: t.Optional(t.String()),
         reasoningLevel: t.Optional(t.String()),
         contextWindow: t.Optional(t.Number()),
         fastMode: t.Optional(t.Boolean()),
+        speedTier: t.Optional(t.String()),
+        modelParameters: t.Optional(t.Record(t.String(), t.Union([t.Number(), t.String()]))),
+        fusion: t.Optional(
+          t.Object({
+            lead: t.String(),
+            leadEffort: t.String(),
+            leadFast: t.Boolean(),
+            sidekick: t.String(),
+            sidekickEffort: t.Union([t.String(), t.Null()]),
+          }),
+        ),
         interactionMode: t.Optional(t.Union([t.Literal('act'), t.Literal('plan')])),
         imageInputMode: t.Optional(
           t.Union([t.Literal('reject'), t.Literal('omit'), t.Literal('allow')]),
@@ -381,7 +497,7 @@ export const messageRoutes = new Elysia({ prefix: '/api/messages' })
         body.model ??
         (target.provider && target.model ? `${target.provider}:${target.model}` : undefined);
       const imageSelection = resolveImageModelSelection(selectedModel);
-      const admission = await kory.reserveSessionTurn(
+      const admission = await kory.reserveSessionTurnAfterSteer(
         body.sessionId,
         imageSelection ? 'image_regenerate_turn' : 'regenerate_turn',
       );

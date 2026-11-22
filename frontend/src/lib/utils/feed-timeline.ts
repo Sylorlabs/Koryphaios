@@ -23,21 +23,58 @@ export function mergeFeedTimeline(
     return true;
   });
 
-  return merged.sort((a, b) => {
-    const aOrder = canonicalOrder(a);
-    const bOrder = canonicalOrder(b);
-    if (aOrder && bOrder && aOrder.epoch === bOrder.epoch) {
-      const bySequence = aOrder.sequence - bOrder.sequence;
-      if (bySequence !== 0) return bySequence;
-    }
-    const byTime = a.timestamp - b.timestamp;
-    if (byTime !== 0) return byTime;
+  return merged.sort(compareFeedChronology);
+}
 
-    // Persisted user input existed before operational events for its turn;
-    // persisted assistant/system output is written only after those events.
-    // Preserve live source order for every other same-millisecond collision.
-    return persistedBoundaryRank(a) - persistedBoundaryRank(b);
-  });
+/**
+ * The one chronology comparator for feed rows.
+ *
+ * Canonical (epoch, sequence) is the authority whenever both rows carry it,
+ * because the backend assigns it at emission time. Wall-clock `timestamp` is
+ * only a fallback: WebSocket delivery order is not the same thing as event
+ * order. Replayed durable events arrive on subscribe and coalesced or
+ * backpressured frames arrive late, so a row can reach a lane minutes after
+ * the rows that followed it. Appending on arrival would place it below newer
+ * work while still displaying its original time, which is the "skill row below
+ * a later tool call" defect.
+ */
+export function compareFeedChronology(a: FeedEntryLocal, b: FeedEntryLocal): number {
+  const aOrder = canonicalOrder(a);
+  const bOrder = canonicalOrder(b);
+  if (aOrder && bOrder && aOrder.epoch === bOrder.epoch) {
+    const bySequence = aOrder.sequence - bOrder.sequence;
+    if (bySequence !== 0) return bySequence;
+  }
+  const byTime = a.timestamp - b.timestamp;
+  if (byTime !== 0) return byTime;
+
+  // Persisted user input existed before operational events for its turn;
+  // persisted assistant/system output is written only after those events.
+  // Preserve live source order for every other same-millisecond collision.
+  return persistedBoundaryRank(a) - persistedBoundaryRank(b);
+}
+
+/**
+ * Insert `entry` at its chronological position instead of at the tail.
+ *
+ * A lane is kept sorted on every insert so an event that arrives late is
+ * placed where it happened. Returns the index the entry occupies, so callers
+ * can report and test position rather than only membership.
+ */
+export function insertByChronology(
+  lane: FeedEntryLocal[],
+  entry: FeedEntryLocal,
+): number {
+  let low = 0;
+  let high = lane.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    // `<= 0` keeps equal rows in arrival order rather than reversing them.
+    if (compareFeedChronology(lane[mid], entry) <= 0) low = mid + 1;
+    else high = mid;
+  }
+  lane.splice(low, 0, entry);
+  return low;
 }
 
 function canonicalOrder(entry: FeedEntryLocal): { epoch: number; sequence: number } | null {

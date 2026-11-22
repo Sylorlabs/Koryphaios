@@ -26,7 +26,7 @@
   import { toastStore } from '$lib/stores/toast.svelte';
   import { mcpRegistryIconUrl } from '$lib/utils/mcp-registry-icon';
   import KorySelect from './KorySelect.svelte';
-  import SettingsPageIntro from './SettingsPageIntro.svelte';
+  import SettingsPage from './settings/SettingsPage.svelte';
 
   // ─── Form state ──────────────────────────────────────────────────────────
   let editingName = $state<string | null>(null);
@@ -407,6 +407,14 @@
 
   const formValid = $derived(formName.trim().length > 0);
 
+  const focusRing =
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60';
+  const ghostBtn = `flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)] disabled:opacity-50 ${focusRing}`;
+  const dangerBtn = `flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-error-bg)] hover:text-[var(--color-error)] ${focusRing}`;
+  const softBtn = `flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg bg-[var(--color-surface-2)] px-3 text-xs font-medium text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-3)] disabled:opacity-50 ${focusRing}`;
+  const softSurfaceBtn = `flex min-h-9 items-center gap-1.5 rounded-lg bg-[var(--color-surface-1)] px-3 text-xs font-medium text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-3)] ${focusRing}`;
+  const primaryBtn = `flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg bg-[var(--color-accent)] px-3 text-xs font-semibold text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:bg-[var(--color-surface-3)] disabled:text-[var(--color-text-muted)] disabled:shadow-none ${focusRing}`;
+
   /**
    * How a browse-list entry should present its sign-in requirement. A user
    * choosing a connector should learn what it will cost them before adding it,
@@ -446,42 +454,138 @@
   });
 </script>
 
-<div class="flex h-full min-h-0 flex-col overflow-hidden">
-  <SettingsPageIntro title="MCP servers" description="Connect local or remote tool servers.">
-    {#if view === 'list'}
-      <div class="flex items-center gap-2">
-        <button
-          type="button"
-          onclick={openBrowse}
-          class="flex min-h-9 items-center gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-        >
-          <Search size={13} /> Browse registry
-        </button>
-        <button
-          type="button"
-          onclick={openAddForm}
-          class="flex min-h-9 items-center gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-        >
-          <Plus size={13} /> Add manually
-        </button>
-      </div>
-    {/if}
-  </SettingsPageIntro>
+{#snippet transportGlyph(transport: string)}
+  {#if transport === 'sse'}
+    <Globe size={18} class="text-[var(--color-text-muted)]" />
+  {:else}
+    <Terminal size={18} class="text-[var(--color-text-muted)]" />
+  {/if}
+{/snippet}
 
-  <div class="min-h-0 flex-1 overflow-y-auto p-4">
-    <div class="mx-auto max-w-5xl space-y-3">
+{#snippet registryRow(result: McpRegistrySearchResult)}
+  {@const badge = authBadge(result.auth)}
+  <article
+    class="grid grid-cols-[20px_minmax(0,1fr)_auto] items-start gap-x-3 rounded-xl px-3 py-3.5 transition-colors hover:bg-[var(--color-surface-2)]"
+  >
+    <span class="flex h-5 w-5 items-center justify-center">
+      {#if registryIconSrc(result)}
+        <img
+          src={registryIconSrc(result)}
+          alt=""
+          width="20"
+          height="20"
+          loading="lazy"
+          referrerpolicy="no-referrer"
+          draggable="false"
+          class="h-5 w-5 rounded-[5px] object-cover"
+          onerror={() => markRegistryIconFailed(result.id)}
+        />
+      {:else}
+        {@render transportGlyph(result.transport)}
+      {/if}
+    </span>
+    <div class="min-w-0">
+      <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">{result.title}</h4>
+        <span class="text-xs text-[var(--color-text-muted)]">
+          {result.transport}{#if result.version && /^\d/.test(result.version)}&nbsp;· v{result.version}{/if}
+        </span>
+        {#if badge}
+          <span class="text-xs font-medium {badge.tone}">· {badge.text}</span>
+        {/if}
+      </div>
+      {#if result.description}
+        <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-secondary)]">
+          {result.description}
+        </p>
+      {/if}
+      {#if badge && result.auth?.detail}
+        <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
+          {result.auth.detail}
+        </p>
+      {/if}
+      {#if result.transport === 'stdio' && result.command}
+        <p
+          class="mt-1.5 truncate font-mono text-[11px] text-[var(--color-text-muted)]"
+          title={`${result.command} ${result.args.join(' ')}`}
+        >
+          {result.command}
+          {result.args.join(' ')}
+        </p>
+      {:else if result.url}
+        <p class="mt-1.5 truncate font-mono text-[11px] text-[var(--color-text-muted)]" title={result.url}>
+          {result.url}
+        </p>
+      {/if}
+      {#if result.envVars.length > 0 || result.headerVars.length > 0}
+        <p class="mt-1 flex flex-wrap gap-x-2.5 gap-y-0.5 font-mono text-[11px]">
+          {#each result.envVars as envVar (envVar.name)}
+            <span
+              class={envVar.isRequired
+                ? 'text-[var(--color-warning)]'
+                : 'text-[var(--color-text-muted)]'}
+              title={envVar.description}>{envVar.name}{envVar.isRequired ? ' *' : ''}</span
+            >
+          {/each}
+          {#each result.headerVars as headerVar (headerVar.name)}
+            <span class="text-[var(--color-warning)]" title={headerVar.description}
+              >{headerVar.name}</span
+            >
+          {/each}
+        </p>
+      {/if}
+      {#if result.websiteUrl || result.repositoryUrl}
+        <div class="mt-1.5 flex flex-wrap gap-x-4 text-xs text-[var(--color-text-muted)]">
+          {#if result.websiteUrl}
+            <a
+              href={result.websiteUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              class="transition-colors hover:text-[var(--color-accent)]">Website</a
+            >
+          {/if}
+          {#if result.repositoryUrl}
+            <a
+              href={result.repositoryUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              class="transition-colors hover:text-[var(--color-accent)]">Repository</a
+            >
+          {/if}
+        </div>
+      {/if}
+    </div>
+    <button type="button" onclick={() => addFromRegistry(result)} class={primaryBtn}>
+      <Plus size={13} /> Add
+    </button>
+  </article>
+{/snippet}
+
+<SettingsPage title="MCP servers" description="Connect local or remote tool servers." width="wide">
+  {#snippet actions()}
+    {#if view === 'list'}
+      <button type="button" onclick={openBrowse} class={softBtn}>
+        <Search size={13} /> Browse registry
+      </button>
+      <button type="button" onclick={openAddForm} class={softBtn}>
+        <Plus size={13} /> Add manually
+      </button>
+    {/if}
+  {/snippet}
+
+    <div class="space-y-3">
       {#if view === 'list'}
         {#if mcpServersStore.error && mcpServersStore.servers.length === 0}
           <section
             role="alert"
-            class="flex items-start gap-3 rounded-2xl border border-[var(--color-error)]/35 bg-[var(--color-error-bg)] p-4"
+            class="flex items-start gap-3 rounded-xl bg-[var(--color-error-bg)] p-4"
           >
             <AlertTriangle size={18} class="mt-0.5 shrink-0 text-[var(--color-error)]" />
             <div class="min-w-0 flex-1">
               <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
                 MCP servers unavailable
               </h4>
-              <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
+              <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-secondary)]">
                 {mcpServersStore.error}
               </p>
             </div>
@@ -489,7 +593,7 @@
               type="button"
               disabled={mcpServersStore.loading}
               onclick={() => void mcpServersStore.loadAll()}
-              class="flex min-h-10 shrink-0 items-center gap-2 rounded-xl border border-[var(--color-border)] px-3 text-xs text-[var(--color-text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:opacity-50"
+              class={softBtn}
             >
               <RefreshCw size={14} /> Retry
             </button>
@@ -497,7 +601,7 @@
         {:else if mcpServersStore.loading && mcpServersStore.servers.length === 0}
           <section
             role="status"
-            class="flex min-h-40 items-center justify-center gap-2 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] text-sm text-[var(--color-text-muted)]"
+            class="flex items-center justify-center gap-2 py-12 text-sm text-[var(--color-text-muted)]"
           >
             <RefreshCw size={16} class="animate-spin" /> Loading MCP servers…
           </section>
@@ -506,11 +610,7 @@
             class="flex flex-col items-center px-4 py-12 text-center"
             aria-live="polite"
           >
-            <span
-              class="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--color-surface-2)] text-[var(--color-text-muted)]"
-            >
-              <Server size={20} />
-            </span>
+            <Server size={26} class="text-[var(--color-text-muted)]" />
             <h4 class="mt-3 text-sm font-semibold text-[var(--color-text-primary)]">
               No servers configured
             </h4>
@@ -519,81 +619,105 @@
               tools.
             </p>
             <div class="mt-4 flex flex-wrap items-center justify-center gap-2">
-              <button
-                type="button"
-                onclick={openBrowse}
-                class="flex min-h-9 items-center gap-1.5 rounded-xl bg-[var(--color-accent)] px-3 text-xs font-semibold text-[var(--color-surface-1)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-              >
+              <button type="button" onclick={openBrowse} class={primaryBtn}>
                 <Search size={13} /> Browse registry
               </button>
-              <button
-                type="button"
-                onclick={openAddForm}
-                class="flex min-h-9 items-center gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-              >
+              <button type="button" onclick={openAddForm} class={softBtn}>
                 <Plus size={13} /> Add manually
               </button>
             </div>
           </section>
         {:else}
-          <div class="divide-y divide-[var(--color-border)]">
+          <div class="-mx-3 space-y-1">
             {#each mcpServersStore.servers as server (server.name)}
-              <section class="py-4 first:pt-0">
-                <div class="flex flex-wrap items-start justify-between gap-3">
+              <section
+                class="grid grid-cols-[20px_minmax(0,1fr)] gap-x-3 rounded-xl px-3 py-3.5 transition-colors hover:bg-[var(--color-surface-2)]/60"
+              >
+                <span class="flex h-5 w-5 items-center justify-center">
+                  {@render transportGlyph(server.transport)}
+                </span>
+                <div class="min-w-0">
+                <div class="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
                   <div class="min-w-0 flex-1">
-                    <div class="flex flex-wrap items-center gap-2">
-                      <span
-                        class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text-secondary)]"
-                      >
-                        {#if server.transport === 'sse'}
-                          <Globe size={15} />
-                        {:else}
-                          <Terminal size={15} />
-                        {/if}
-                      </span>
+                    <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                       <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
                         {server.name}
                       </h4>
                       <span
-                        class="rounded-full px-2 py-0.5 text-[10px] font-medium {server.connected
-                          ? 'bg-[var(--color-success-bg)] text-[var(--color-success)]'
-                          : 'bg-[var(--color-error-bg)] text-[var(--color-error)]'}"
+                        class="inline-flex items-center gap-1.5 text-xs font-medium {server.connected
+                          ? 'text-[var(--color-success)]'
+                          : 'text-[var(--color-error)]'}"
                       >
-                        {#if server.connected}
-                          <span class="inline-flex items-center gap-1">
-                            <Check size={10} /> Connected
-                          </span>
-                        {:else}
-                          <span class="inline-flex items-center gap-1">
-                            <X size={10} /> Disconnected
-                          </span>
-                        {/if}
-                      </span>
-                      <span
-                        class="rounded-full bg-[var(--color-surface-3)] px-2 py-0.5 text-[10px] text-[var(--color-text-muted)]"
-                      >
-                        {server.transport}
+                        <span class="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true"></span>
+                        {server.connected ? 'Connected' : 'Disconnected'}
                       </span>
                     </div>
                     <div
-                      class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-[var(--color-text-muted)]"
+                      class="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-[var(--color-text-muted)]"
                     >
+                      <span>{server.transport}</span>
+                      <span aria-hidden="true">·</span>
                       <span>{server.toolCount} tool{server.toolCount === 1 ? '' : 's'}</span>
                       {#if server.protocolVersion}
+                        <span aria-hidden="true">·</span>
                         <span>protocol {server.protocolVersion}</span>
                       {/if}
                       {#if server.oauth?.authorized && !server.oauth.expired}
+                        <span aria-hidden="true">·</span>
                         <span class="text-[var(--color-success)]">
                           authorized{#if server.oauth.scope} · {server.oauth.scope}{/if}
                         </span>
                       {/if}
                     </div>
+                  </div>
+                  <div class="-mr-1 flex shrink-0 flex-wrap gap-0.5">
+                    <button
+                      type="button"
+                      disabled={testingName === server.name}
+                      onclick={() => void handleTest(server.name)}
+                      class={ghostBtn}
+                    >
+                      {#if testingName === server.name}
+                        <LoaderCircle size={13} class="animate-spin" /> Testing…
+                      {:else}
+                        <Plug size={13} /> Test
+                      {/if}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={mcpServersStore.loading}
+                      onclick={() => void handleReload(server.name)}
+                      class={ghostBtn}
+                    >
+                      <RefreshCw size={13} /> Reload
+                    </button>
+                    <button type="button" onclick={() => void startEdit(server)} class={ghostBtn}>
+                      <Pencil size={13} /> Edit
+                    </button>
+                    {#if server.transport !== 'stdio' && server.oauth?.authorized}
+                      <button
+                        type="button"
+                        onclick={() => void handleDisconnect(server.name)}
+                        class={ghostBtn}
+                      >
+                        <LogOut size={13} /> Disconnect
+                      </button>
+                    {/if}
+                    <button
+                      type="button"
+                      onclick={() => confirmRemove(server.name)}
+                      class={dangerBtn}
+                    >
+                      <Trash2 size={13} /> Remove
+                    </button>
+                  </div>
+                </div>
                     {#if server.transport !== 'stdio' && authKind(server) !== 'none'}
                       {@const kind = authKind(server)}
                       <div
-                        class="mt-3 rounded-xl border p-3 {kind === 'oauth' || kind === 'manual'
-                          ? 'border-[var(--color-warning)]/35 bg-[var(--color-warning-bg)]'
-                          : 'border-[var(--color-border)] bg-[var(--color-surface-2)]'}"
+                        class="mt-3 rounded-xl p-3.5 {kind === 'oauth' || kind === 'manual'
+                          ? 'bg-[var(--color-warning-bg)]'
+                          : 'bg-[var(--color-surface-2)]'}"
                       >
                         <div class="flex items-start gap-2">
                           <KeyRound size={14} class="mt-0.5 shrink-0 text-[var(--color-text-secondary)]" />
@@ -609,14 +733,14 @@
                                 Sign-in required
                               {/if}
                             </p>
-                            <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
+                            <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-secondary)]">
                               {server.auth?.detail ?? 'This server needs a credential before it can be used.'}
                             </p>
                           </div>
                         </div>
 
                         {#if manualClientFor === server.name}
-                          <div class="mt-3 space-y-2 rounded-lg border border-[var(--color-border)] p-3">
+                          <div class="mt-3 space-y-3 pl-[22px]">
                             <p class="text-xs leading-relaxed text-[var(--color-text-secondary)]">
                               Paste the credentials from the app you created. Koryphaios stores them
                               in its own secret store, never in your project config.
@@ -624,7 +748,7 @@
                             <div>
                               <label
                                 for={`mcp-client-id-${server.name}`}
-                                class="mb-1 block text-[10px] font-medium text-[var(--color-text-secondary)]"
+                                class="mb-1.5 block text-xs font-medium text-[var(--color-text-secondary)]"
                               >
                                 Client ID
                               </label>
@@ -639,7 +763,7 @@
                             <div>
                               <label
                                 for={`mcp-client-secret-${server.name}`}
-                                class="mb-1 block text-[10px] font-medium text-[var(--color-text-secondary)]"
+                                class="mb-1.5 block text-xs font-medium text-[var(--color-text-secondary)]"
                               >
                                 Client secret (optional)
                               </label>
@@ -652,22 +776,18 @@
                               />
                             </div>
                             {#if manualClientError}
-                              <p class="text-[10px] text-[var(--color-error)]">{manualClientError}</p>
+                              <p class="text-xs text-[var(--color-error)]">{manualClientError}</p>
                             {/if}
-                            <div class="flex items-center justify-end gap-2 pt-1">
-                              <button
-                                type="button"
-                                onclick={closeManualClientForm}
-                                class="flex min-h-8 items-center rounded-lg border border-[var(--color-border)] px-2.5 text-[10px] text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-                              >
+                            <div class="flex items-center justify-end gap-2">
+                              <button type="button" onclick={closeManualClientForm} class={ghostBtn}>
                                 Cancel
                               </button>
                               <button
                                 type="button"
                                 onclick={() => void submitManualClient(server.name)}
-                                class="flex min-h-8 items-center gap-1.5 rounded-lg bg-[var(--color-accent)] px-3 text-[10px] font-semibold text-[var(--color-surface-1)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+                                class={primaryBtn}
                               >
-                                <KeyRound size={11} /> Authorize
+                                <KeyRound size={13} /> Authorize
                               </button>
                             </div>
                           </div>
@@ -675,7 +795,7 @@
                           <button
                             type="button"
                             onclick={() => openManualClientForm(server.name)}
-                            class="mt-2.5 flex min-h-9 items-center gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+                            class="mt-3 ml-[22px] {softSurfaceBtn}"
                           >
                             <KeyRound size={13} /> Enter app credentials
                           </button>
@@ -683,7 +803,7 @@
                           <button
                             type="button"
                             onclick={() => startEdit(server)}
-                            class="mt-2.5 flex min-h-9 items-center gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+                            class="mt-3 ml-[22px] {softSurfaceBtn}"
                           >
                             <Pencil size={13} /> Add credential
                           </button>
@@ -691,7 +811,7 @@
                           <button
                             type="button"
                             onclick={() => startEdit(server)}
-                            class="mt-2.5 flex min-h-9 items-center gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+                            class="mt-3 ml-[22px] {softSurfaceBtn}"
                           >
                             <Pencil size={13} /> Configure headers
                           </button>
@@ -700,7 +820,7 @@
                             type="button"
                             disabled={awaitingConsent === server.name}
                             onclick={() => void handleAuthorize(server.name)}
-                            class="mt-2.5 flex min-h-9 items-center gap-1.5 rounded-xl bg-[var(--color-accent)] px-3 text-xs font-semibold text-[var(--color-surface-1)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:cursor-not-allowed disabled:opacity-40"
+                            class="mt-3 ml-[22px] {primaryBtn}"
                           >
                             {#if awaitingConsent === server.name}
                               <LoaderCircle size={13} class="animate-spin" /> Waiting for consent…
@@ -719,22 +839,22 @@
                     {#if testResult[server.name]}
                       {@const result = testResult[server.name]}
                       {#if result}
-                        <div class="mt-3 border-t border-[var(--color-border)] pt-3">
+                        <div class="mt-3">
                           <div class="flex items-center gap-2 text-xs">
                             {#if result.connected}
-                              <Check size={12} class="text-[var(--color-success)]" />
+                              <Check size={13} class="text-[var(--color-success)]" />
                               <span class="text-[var(--color-text-primary)]"
                                 >Connected · {result.tools.length} tool{result.tools.length === 1
                                   ? ''
                                   : 's'}</span
                               >
                             {:else}
-                              <X size={12} class="text-[var(--color-error)]" />
+                              <X size={13} class="text-[var(--color-error)]" />
                               <span class="text-[var(--color-text-primary)]">Not connected</span>
                             {/if}
                           </div>
                           {#if result.error}
-                            <p class="mt-1.5 text-[10px] leading-relaxed text-[var(--color-error)]">
+                            <p class="mt-1.5 text-xs leading-relaxed text-[var(--color-error)]">
                               {result.error}
                             </p>
                           {/if}
@@ -742,13 +862,13 @@
                             <div class="mt-2 flex flex-wrap gap-1.5">
                               {#each result.tools.slice(0, 12) as tool}
                                 <span
-                                  class="rounded-md bg-[var(--color-surface-3)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text-secondary)]"
+                                  class="rounded-md bg-[var(--color-surface-2)] px-1.5 py-0.5 font-mono text-[11px] text-[var(--color-text-secondary)]"
                                 >
                                   {tool}
                                 </span>
                               {/each}
                               {#if result.tools.length > 12}
-                                <span class="text-[10px] text-[var(--color-text-muted)]">
+                                <span class="py-0.5 text-[11px] text-[var(--color-text-muted)]">
                                   +{result.tools.length - 12} more
                                 </span>
                               {/if}
@@ -757,52 +877,6 @@
                         </div>
                       {/if}
                     {/if}
-                  </div>
-                  <div class="flex shrink-0 flex-wrap gap-1">
-                    <button
-                      type="button"
-                      disabled={testingName === server.name}
-                      onclick={() => void handleTest(server.name)}
-                      class="flex min-h-9 items-center gap-1.5 rounded-md px-2 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:opacity-50"
-                    >
-                      {#if testingName === server.name}
-                        <LoaderCircle size={13} class="animate-spin" /> Testing…
-                      {:else}
-                        <Plug size={13} /> Test
-                      {/if}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={mcpServersStore.loading}
-                      onclick={() => void handleReload(server.name)}
-                      class="flex min-h-9 items-center gap-1.5 rounded-md px-2 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:opacity-50"
-                    >
-                      <RefreshCw size={13} /> Reload
-                    </button>
-                    <button
-                      type="button"
-                      onclick={() => void startEdit(server)}
-                      class="flex min-h-9 items-center gap-1.5 rounded-md px-2 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-                    >
-                      <Pencil size={13} /> Edit
-                    </button>
-                    {#if server.transport !== 'stdio' && server.oauth?.authorized}
-                      <button
-                        type="button"
-                        onclick={() => void handleDisconnect(server.name)}
-                        class="flex min-h-9 items-center gap-1.5 rounded-md px-2 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-                      >
-                        <LogOut size={13} /> Disconnect
-                      </button>
-                    {/if}
-                    <button
-                      type="button"
-                      onclick={() => confirmRemove(server.name)}
-                      class="flex min-h-9 items-center gap-1.5 rounded-md px-2 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-error-bg)] hover:text-[var(--color-error)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-                    >
-                      <Trash2 size={13} /> Remove
-                    </button>
-                  </div>
                 </div>
               </section>
             {/each}
@@ -810,7 +884,7 @@
         {/if}
       {:else if view === 'browse'}
         <!-- ─── Browse registry view ──────────────────────────────────── -->
-        <section class="space-y-4">
+        <section class="space-y-5">
           <div class="flex items-start justify-between gap-3">
             <div>
               <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
@@ -848,13 +922,13 @@
                 bind:value={registrySearchInput}
                 aria-label="Search MCP registry"
                 placeholder="Search servers…"
-                class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] py-2.5 pl-9 pr-4 text-sm text-[var(--color-text-primary)] outline-none transition-all placeholder:text-[var(--color-text-muted)] focus-visible:border-[var(--color-accent)]"
+                class="h-10 w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] pl-9 pr-4 text-sm text-[var(--color-text-primary)] outline-none transition-all placeholder:text-[var(--color-text-muted)] focus-visible:border-[var(--color-accent)]"
               />
             </div>
             <button
               type="submit"
               disabled={mcpServersStore.registrySearching}
-              class="flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl bg-[var(--color-accent)] px-4 text-xs font-semibold text-[var(--color-surface-1)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:cursor-not-allowed disabled:opacity-40"
+              class="{primaryBtn} min-h-10 px-4"
             >
               {#if mcpServersStore.registrySearching}
                 <LoaderCircle size={13} class="animate-spin" /> Searching…
@@ -866,17 +940,15 @@
 
           <!-- Search results -->
           {#if mcpServersStore.registryError}
-            <div
-              class="flex items-start gap-3 rounded-xl border border-[var(--color-error)]/35 bg-[var(--color-error-bg)] p-4"
-            >
+            <div class="flex items-start gap-3 rounded-xl bg-[var(--color-error-bg)] p-4">
               <AlertTriangle size={16} class="mt-0.5 shrink-0 text-[var(--color-error)]" />
-              <p class="text-xs leading-relaxed text-[var(--color-text-muted)]">
+              <p class="text-xs leading-relaxed text-[var(--color-text-secondary)]">
                 {mcpServersStore.registryError}
               </p>
             </div>
           {:else if mcpServersStore.registrySearching && mcpServersStore.registryResults.length === 0}
             <div
-              class="flex min-h-32 items-center justify-center gap-2 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] text-sm text-[var(--color-text-muted)]"
+              class="flex min-h-32 items-center justify-center gap-2 text-sm text-[var(--color-text-muted)]"
             >
               <LoaderCircle size={16} class="animate-spin" /> Searching the registry…
             </div>
@@ -885,119 +957,22 @@
             <div class="space-y-6">
               {#each featuredGroups as group (group.category)}
                 <div>
-                  <h5 class="mb-1 text-xs font-medium text-[var(--color-text-secondary)]">
+                  <h5
+                    class="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-text-muted)]"
+                  >
                     {group.category}
                   </h5>
-                  <div class="divide-y divide-[var(--color-border)]">
+                  <div class="-mx-3 space-y-0.5">
                     {#each group.servers as result (result.id)}
-                      <section class="flex flex-col py-3">
-                        <div class="flex items-start justify-between gap-3">
-                          <div class="min-w-0">
-                            <div class="flex flex-wrap items-center gap-2">
-                              <span
-                                class="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text-secondary)]"
-                              >
-                                {#if registryIconSrc(result)}
-                                  <img
-                                    src={registryIconSrc(result)}
-                                    alt=""
-                                    width="20"
-                                    height="20"
-                                    loading="lazy"
-                                    referrerpolicy="no-referrer"
-                                    draggable="false"
-                                    class="h-5 w-5 rounded-[4px] object-cover"
-                                    onerror={() => markRegistryIconFailed(result.id)}
-                                  />
-                                {:else if result.transport === 'sse'}
-                                  <Globe size={15} />
-                                {:else}
-                                  <Terminal size={15} />
-                                {/if}
-                              </span>
-                              <h6 class="text-sm font-semibold text-[var(--color-text-primary)]">
-                                {result.title}
-                              </h6>
-                              <span
-                                class="rounded-full bg-[var(--color-surface-3)] px-2 py-0.5 text-[10px] text-[var(--color-text-muted)]"
-                              >
-                                {result.transport}
-                              </span>
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            onclick={() => addFromRegistry(result)}
-                            class="flex min-h-9 shrink-0 items-center gap-1.5 rounded-xl bg-[var(--color-accent)] px-3 text-xs font-semibold text-[var(--color-surface-1)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-                          >
-                            <Plus size={13} /> Add
-                          </button>
-                        </div>
-                        <p class="mt-2 text-xs leading-relaxed text-[var(--color-text-muted)]">
-                          {result.description}
-                        </p>
-                        {#if result.auth}
-                          {@const badge = authBadge(result.auth)}
-                          {#if badge}
-                            <div class="mt-2 flex items-start gap-1.5">
-                              <span
-                                class="mt-0.5 shrink-0 rounded-md bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[10px] font-medium {badge.tone}"
-                              >
-                                {badge.text}
-                              </span>
-                              <p class="text-[10px] leading-relaxed text-[var(--color-text-muted)]">
-                                {result.auth.detail}
-                              </p>
-                            </div>
-                          {/if}
-                        {/if}
-                        {#if result.transport === 'stdio' && result.command}
-                          <div
-                            class="mt-2 truncate rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 font-mono text-[10px] text-[var(--color-text-secondary)]"
-                          >
-                            {result.command}
-                            {result.args.join(' ')}
-                          </div>
-                        {:else if result.url}
-                          <div
-                            class="mt-2 truncate rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 font-mono text-[10px] text-[var(--color-text-secondary)]"
-                          >
-                            {result.url}
-                          </div>
-                        {/if}
-                        {#if result.envVars.length > 0 || result.headerVars.length > 0}
-                          <div class="mt-2 flex flex-wrap gap-1.5">
-                            {#each result.envVars as envVar (envVar.name)}
-                              <span
-                                class="rounded-md bg-[var(--color-surface-3)] px-1.5 py-0.5 font-mono text-[10px] {envVar.isRequired
-                                  ? 'text-[var(--color-warning)]'
-                                  : 'text-[var(--color-text-muted)]'}"
-                                title={envVar.description}
-                              >
-                                {envVar.name}{envVar.isRequired ? ' *' : ''}
-                              </span>
-                            {/each}
-                            {#each result.headerVars as headerVar (headerVar.name)}
-                              <span
-                                class="rounded-md bg-[var(--color-surface-3)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-warning)]"
-                                title={headerVar.description}
-                              >
-                                {headerVar.name}
-                              </span>
-                            {/each}
-                          </div>
-                        {/if}
-                      </section>
+                      {@render registryRow(result)}
                     {/each}
                   </div>
                 </div>
               {/each}
             </div>
           {:else if mcpServersStore.registryResults.length === 0}
-            <div
-              class="rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-10 text-center"
-            >
-              <Search size={28} class="mx-auto text-[var(--color-text-muted)]" />
+            <div class="px-4 py-12 text-center">
+              <Search size={26} class="mx-auto text-[var(--color-text-muted)]" />
               <h4 class="mt-3 text-sm font-semibold text-[var(--color-text-primary)]">
                 {mcpServersStore.registryQuery ? 'No servers found' : 'Search for MCP servers'}
               </h4>
@@ -1008,131 +983,17 @@
               </p>
             </div>
           {:else}
-            <div class="divide-y divide-[var(--color-border)]">
+            <div class="-mx-3 space-y-0.5">
               {#each mcpServersStore.registryResults as result (result.id)}
-                <section class="py-4 first:pt-0">
-                  <div class="flex flex-wrap items-start justify-between gap-3">
-                    <div class="min-w-0 flex-1">
-                      <div class="flex flex-wrap items-center gap-2">
-                        <span
-                          class="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text-secondary)]"
-                        >
-                          {#if registryIconSrc(result)}
-                            <img
-                              src={registryIconSrc(result)}
-                              alt=""
-                              width="20"
-                              height="20"
-                              loading="lazy"
-                              referrerpolicy="no-referrer"
-                              draggable="false"
-                              class="h-5 w-5 rounded-[4px] object-cover"
-                              onerror={() => markRegistryIconFailed(result.id)}
-                            />
-                          {:else if result.transport === 'sse'}
-                            <Globe size={15} />
-                          {:else}
-                            <Terminal size={15} />
-                          {/if}
-                        </span>
-                        <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
-                          {result.title}
-                        </h4>
-                        <span
-                          class="rounded-full bg-[var(--color-surface-3)] px-2 py-0.5 text-[10px] text-[var(--color-text-muted)]"
-                        >
-                          {result.transport}
-                        </span>
-                        {#if result.version}
-                          <span class="text-[10px] text-[var(--color-text-muted)]"
-                            >v{result.version}</span
-                          >
-                        {/if}
-                      </div>
-                      <p class="mt-2 text-xs leading-relaxed text-[var(--color-text-muted)]">
-                        {result.description}
-                      </p>
-                      {#if result.auth}
-                        {@const badge = authBadge(result.auth)}
-                        {#if badge}
-                          <div class="mt-2 flex items-start gap-1.5">
-                            <span
-                              class="mt-0.5 shrink-0 rounded-md bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[10px] font-medium {badge.tone}"
-                            >
-                              {badge.text}
-                            </span>
-                            <p class="text-[10px] leading-relaxed text-[var(--color-text-muted)]">
-                              {result.auth.detail}
-                            </p>
-                          </div>
-                        {/if}
-                      {/if}
-                      {#if result.transport === 'stdio' && result.command}
-                        <div
-                          class="mt-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 font-mono text-[10px] text-[var(--color-text-secondary)]"
-                        >
-                          {result.command}
-                          {result.args.join(' ')}
-                        </div>
-                      {:else if result.transport === 'sse' && result.url}
-                        <div
-                          class="mt-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 font-mono text-[10px] text-[var(--color-text-secondary)]"
-                        >
-                          {result.url}
-                        </div>
-                      {/if}
-                      {#if result.envVars.length > 0}
-                        <div class="mt-2 flex flex-wrap gap-1.5">
-                          {#each result.envVars as envVar}
-                            <span
-                              class="rounded-md bg-[var(--color-surface-3)] px-1.5 py-0.5 font-mono text-[10px] {envVar.isRequired
-                                ? 'text-[var(--color-warning)]'
-                                : 'text-[var(--color-text-muted)]'}"
-                              title={envVar.description}
-                            >
-                              {envVar.name}{envVar.isRequired ? ' *' : ''}
-                            </span>
-                          {/each}
-                        </div>
-                      {/if}
-                      <div
-                        class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-[var(--color-text-muted)]"
-                      >
-                        {#if result.websiteUrl}
-                          <a
-                            href={result.websiteUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            class="transition-colors hover:text-[var(--color-accent)]">Website</a
-                          >
-                        {/if}
-                        {#if result.repositoryUrl}
-                          <a
-                            href={result.repositoryUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            class="transition-colors hover:text-[var(--color-accent)]">Repository</a
-                          >
-                        {/if}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onclick={() => addFromRegistry(result)}
-                      class="flex min-h-9 shrink-0 items-center gap-1.5 rounded-xl bg-[var(--color-accent)] px-3 text-xs font-semibold text-[var(--color-surface-1)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-                    >
-                      <Plus size={13} /> Add
-                    </button>
-                  </div>
-                </section>
+                {@render registryRow(result)}
               {/each}
               {#if mcpServersStore.registryNextCursor}
-                <div class="flex justify-center pt-2">
+                <div class="flex justify-center pt-3">
                   <button
                     type="button"
                     disabled={mcpServersStore.registrySearching}
                     onclick={loadMoreRegistry}
-                    class="flex min-h-9 items-center gap-1.5 rounded-xl border border-[var(--color-border)] px-4 text-xs text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:opacity-50"
+                    class={softBtn}
                   >
                     {#if mcpServersStore.registrySearching}
                       <LoaderCircle size={13} class="animate-spin" /> Loading…
@@ -1225,7 +1086,7 @@
               >
                 Arguments
               </label>
-              <p class="mb-1.5 text-[10px] text-[var(--color-text-muted)]">
+              <p class="mb-1.5 text-xs text-[var(--color-text-muted)]">
                 One argument per line.
               </p>
               <textarea
@@ -1261,7 +1122,7 @@
               >
                 Headers
               </label>
-              <p class="mb-1.5 text-[10px] text-[var(--color-text-muted)]">
+              <p class="mb-1.5 text-xs text-[var(--color-text-muted)]">
                 One header per line, in <code>Key: Value</code> format.
               </p>
               <textarea
@@ -1284,9 +1145,9 @@
                 <button
                   type="button"
                   onclick={addEnvRow}
-                  class="flex min-h-8 items-center gap-1 rounded-lg border border-[var(--color-border)] px-2.5 text-[10px] text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+                  class={ghostBtn}
                 >
-                  <Plus size={11} /> Add variable
+                  <Plus size={13} /> Add variable
                 </button>
               </div>
               <p class="mb-2 mt-1 text-xs text-[var(--color-text-muted)]">
@@ -1336,7 +1197,7 @@
             <button
               type="button"
               onclick={closeForm}
-              class="flex min-h-10 items-center gap-2 rounded-xl border border-[var(--color-border)] px-4 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+              class="{softBtn} min-h-10 px-4"
             >
               Cancel
             </button>
@@ -1344,7 +1205,7 @@
               type="button"
               disabled={!formValid || formSaving}
               onclick={() => void handleSubmit()}
-              class="flex min-h-10 items-center gap-2 rounded-xl bg-[var(--color-accent)] px-4 text-xs font-semibold text-[var(--color-surface-1)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:cursor-not-allowed disabled:opacity-40"
+              class="{primaryBtn} min-h-10 px-4"
             >
               {#if formSaving}
                 <LoaderCircle size={14} class="animate-spin" /> Saving…
@@ -1356,8 +1217,7 @@
         </section>
       {/if}
     </div>
-  </div>
-</div>
+</SettingsPage>
 
 <ConfirmDialog
   open={removeTarget !== null}

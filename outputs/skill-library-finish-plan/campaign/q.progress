@@ -1,0 +1,37 @@
+r1 av=0 research insufficient-evidence pass 1.000 q 1.000 v 1.000 pairs undefined blind 0 regr 0/?
+r2 av=0 research insufficient-evidence pass 1.000 q 1.000 v 1.000 pairs undefined blind 0 regr 0/?
+r3 av=0 research insufficient-evidence pass 1.000 q 1.000 v 1.000 pairs undefined blind 0 regr 0/?
+final research insufficient-evidence pass 1.000 q 1.000 v 1.000 pairs undefined blind 0 regr 0/?
+r1 av=0 mlops blocked pass 0.909 q 0.909 v 0.909 pairs undefined blind 2 regr 2/?
+r2 av=0 mlops ready pass 0.955 q 0.955 v 0.955 pairs undefined blind 2 regr 0/?
+r3 av=0 mlops blocked pass 0.909 q 0.909 v 0.909 pairs undefined blind 2 regr 2/?
+final mlops blocked pass 0.909 q 0.909 v 0.909 pairs undefined blind 2 regr 2/?
+x1 mlops ready pass 0.955 q 0.955 v 0.955 pairs undefined blind 2 regr 0/?
+x2 mlops ready pass 0.955 q 0.955 v 0.955 pairs undefined blind 2 regr 0/?
+x3 mlops ready pass 1.000 q 1.000 v 1.000 pairs undefined blind 2 regr 0/?
+r1 av=0 accessibility-verification blocked pass 1.000 q 1.000 v 1.000 pairs undefined blind 0 regr 2/?
+r2 av=0 accessibility-verification blocked pass 1.000 q 1.000 v 1.000 pairs undefined blind 0 regr 2/?
+r3 av=0 accessibility-verification blocked pass 1.000 q 1.000 v 1.000 pairs undefined blind 0 regr 2/?
+final accessibility-verification blocked pass 1.000 q 1.000 v 1.000 pairs undefined blind 0 regr 2/?
+r1 av=1 market-competitive-research insufficient-evidence pass 0.960 q 0.960 v 0.960 pairs undefined blind 0 regr 0/?
+final market-competitive-research ready pass 0.960 q 0.960 v 0.960 pairs undefined blind 1 regr 0/?
+r1 av=1 literature-research blocked pass 0.727 q 0.926 v 0.727 pairs undefined blind 0 regr 2/?
+final literature-research blocked pass 0.727 q 0.926 v 0.727 pairs undefined blind 1 regr 2/?
+r1 av=1 factual-research insufficient-evidence pass 0.773 q 0.853 v 0.773 pairs undefined blind 0 regr 0/?
+final factual-research insufficient-evidence pass 0.773 q 0.853 v 0.773 pairs undefined blind 1 regr 0/?
+r1 av=1 novel-ui-toolkit insufficient-evidence pass 0.333 q 0.808 v 0.333 pairs undefined blind 0 regr 0/?
+final novel-ui-toolkit insufficient-evidence pass 0.333 q 0.808 v 0.333 pairs undefined blind 1 regr 0/?
+r1 av=0 integration-implementation blocked pass 0.842 q 0.842 v 0.842 pairs undefined blind 1 regr 0/?
+r2 av=0 integration-implementation blocked pass 0.842 q 0.842 v 0.842 pairs undefined blind 1 regr 0/?
+r3 av=0 integration-implementation blocked pass 0.842 q 0.842 v 0.842 pairs undefined blind 1 regr 0/?
+final integration-implementation blocked pass 0.842 q 0.842 v 0.842 pairs undefined blind 1 regr 0/?
+r1 av=1 react-engineering insufficient-evidence pass 0.947 q 0.995 v 0.994 pairs undefined blind 0 regr 0/?
+r1 av=1 react-engineering insufficient-evidence pass 0.947 q 0.995 v 0.994 pairs undefined blind 0 regr 0/?
+final react-engineering blocked pass 0.900 q 0.991 v 0.989 pairs undefined blind 1 regr 3/?
+final react-engineering blocked pass 0.900 q 0.991 v 0.989 pairs undefined blind 1 regr 3/?
+r1 av=1 literature-research blocked pass 0.727 q 0.855 v 0.727 pairs undefined blind 0 regr 2/?
+final literature-research blocked pass 0.727 q 0.855 v 0.727 pairs undefined blind 1 regr 2/?
+r1 av=0 novel-ui-toolkit ready pass 0.818 q 0.984 v 0.818 pairs undefined blind 1 regr 0/?
+r2 av=0 novel-ui-toolkit blocked pass 0.818 q 0.980 v 0.818 pairs undefined blind 1 regr 3/?
+r3 av=0 novel-ui-toolkit blocked pass 0.773 q 0.947 v 0.773 pairs undefined blind 1 regr 3/?
+final novel-ui-toolkit blocked pass 0.773 q 0.947 v 0.773 pairs undefined blind 1 regr 3/?

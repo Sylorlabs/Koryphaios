@@ -87,8 +87,8 @@
 
   // Render only facts the provider actually reported. An unverified context
   // window is deliberately absent: showing a guessed number would look like a
-  // real limit. This is also what makes two identically named catalog entries
-  // distinguishable (their raw ids and credit prices differ).
+  // real limit. The credit multiplier is not part of this line — it renders as
+  // a badge beside the name, where it cannot be truncated away.
   function modelDetailLine(model: Pick<ModelDef, 'id' | 'name'> & Partial<ModelDef>): string {
     const parts: string[] = [];
     const rawId = model.apiModelId ?? model.id;
@@ -109,7 +109,10 @@
     }
     if (model.vision === true) parts.push('vision');
     if (model.canReason === true) parts.push('reasoning');
-    if (model.creditsLabel) parts.push(model.creditsLabel);
+    // Vendor-reported quota factor. `1` is the baseline and adds no information.
+    if (typeof model.quotaMultiplier === 'number' && model.quotaMultiplier !== 1) {
+      parts.push(`${model.quotaMultiplier}× quota`);
+    }
     return parts.join(' · ');
   }
 
@@ -260,7 +263,7 @@
             onclick={selectNone}>Select None</button
           >
         </div>
-        <span class="text-[10px] font-medium" style="color: var(--color-text-muted);">
+        <span class="text-[11px] font-medium" style="color: var(--color-text-muted);">
           {#if hasSearch}
             {visibleSelectedCount} of {filteredModels.length} shown selected · {localSelected.length} total
           {:else}
@@ -315,13 +318,28 @@
                   {/if}
                 </div>
                 <div class="flex min-w-0 flex-col items-start text-left">
-                  <span
-                    class="text-sm font-medium"
-                    style="color: {selectedModelIds.has(model.id)
-                      ? 'var(--color-text-primary)'
-                      : 'var(--color-text-secondary)'};"
-                  >
-                    {model.name}
+                  <span class="flex min-w-0 items-center gap-2">
+                    <span
+                      class="truncate text-sm font-medium"
+                      style="color: {selectedModelIds.has(model.id)
+                        ? 'var(--color-text-primary)'
+                        : 'var(--color-text-secondary)'};"
+                    >
+                      {model.name}
+                    </span>
+                    {#if model.creditsLabel}
+                      <!-- The provider's own per-request credit multiplier
+                           (e.g. 0.29x) or "free". Shown on every row so the
+                           cost is visible before selecting, not only for the
+                           duplicate names that carry a price suffix. -->
+                      <span
+                        data-testid="model-credit-badge"
+                        class="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold tabular-nums"
+                        style="background: var(--color-surface-3); color: var(--color-text-secondary);"
+                      >
+                        {model.creditsLabel}
+                      </span>
+                    {/if}
                   </span>
                   {#if modelDetailLine(model)}
                     <span

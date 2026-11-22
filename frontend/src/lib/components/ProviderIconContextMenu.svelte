@@ -175,7 +175,7 @@
 
   .menu-kicker {
     color: var(--color-accent);
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.12em;
     text-transform: uppercase;
@@ -242,7 +242,7 @@
 
   .provider-icon-context-menu > button small {
     color: var(--color-text-muted);
-    font-size: 10px;
+    font-size: 11px;
     line-height: 1.35;
   }
 </style>

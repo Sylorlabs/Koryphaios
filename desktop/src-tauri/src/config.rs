@@ -21,6 +21,32 @@ pub(crate) fn read_service_endpoint() -> Option<(String, u16, u32)> {
     parse_service_endpoint(&fs::read_to_string(path).ok()?)
 }
 
+/// The backend's pre-listen progress marker, written by
+/// `backend/src/runtime/startup-status.ts` next to `.active-port.json`. It
+/// lets the readiness wait tell "alive and still booting" (migrations, a
+/// one-time VACUUM) apart from "dead" before /api/health can answer.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct StartupStatus {
+    pub pid: u32,
+    pub phase: String,
+    pub detail: Option<String>,
+    pub started_at: u64,
+    #[allow(dead_code)]
+    pub phase_started_at: u64,
+    pub updated_at: u64,
+    pub ready: bool,
+}
+
+/// Read the backend startup marker. Only meaningful when an OS-managed
+/// background service owns the backend data dir; dev mode returns None.
+pub(crate) fn read_startup_status() -> Option<StartupStatus> {
+    let path = BACKEND_DATA_DIR
+        .get()?
+        .join(".koryphaios/.startup-status.json");
+    serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
+}
+
 fn parse_service_endpoint(raw: &str) -> Option<(String, u16, u32)> {
     let parsed: serde_json::Value = serde_json::from_str(raw).ok()?;
     let port = u16::try_from(parsed.get("port")?.as_u64()?)
@@ -44,9 +70,14 @@ fn parse_service_endpoint(raw: &str) -> Option<(String, u16, u32)> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
+    // `app` is required: the packaged config is the bundle's identity, and a
+    // silently invented one is worse than a parse failure.
     pub app: AppInfo,
+    #[serde(default)]
     pub server: ServerConfig,
+    #[serde(default)]
     pub window: WindowConfig,
+    #[serde(default)]
     pub security: SecurityConfig,
 }
 
@@ -58,18 +89,25 @@ pub struct AppInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
-    #[serde(default = "default_ws_path")]
     pub ws_path: String,
 }
 
-fn default_ws_path() -> String {
-    "/ws".to_string()
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            host: "127.0.0.1".to_string(),
+            port: 3000,
+            ws_path: "/ws".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct WindowConfig {
     pub width: u32,
     pub height: u32,
@@ -83,9 +121,29 @@ pub struct WindowConfig {
     pub max_height: u32,
 }
 
+impl Default for WindowConfig {
+    fn default() -> Self {
+        Self {
+            width: 1280,
+            height: 800,
+            min_width: 1024,
+            min_height: 640,
+            max_width: 3840,
+            max_height: 2160,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SecurityConfig {
     pub csp: Option<CspConfig>,
+}
+
+impl Default for SecurityConfig {
+    fn default() -> Self {
+        Self { csp: None }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -122,15 +180,21 @@ impl AppConfig {
                 eprintln!("[Koryphaios] Failed to load config: {}. Using defaults.", e);
                 Self::default()
             });
-            if let Ok(host) = std::env::var("KORYPHAIOS_HOST") {
-                if !host.trim().is_empty() {
-                    config.server.host = host;
+            // Dev launchers forward KORYPHAIOS_HOST/PORT so the shell agrees
+            // with its launcher-owned backend. A release build always uses the
+            // packaged config: an inherited eval-script value must never
+            // redirect the installed service or the UI's health checks.
+            if cfg!(debug_assertions) {
+                if let Ok(host) = std::env::var("KORYPHAIOS_HOST") {
+                    if !host.trim().is_empty() {
+                        config.server.host = host;
+                    }
                 }
-            }
-            if let Ok(port) = std::env::var("KORYPHAIOS_PORT") {
-                if let Ok(port) = port.parse::<u16>() {
-                    if port > 0 {
-                        config.server.port = port;
+                if let Ok(port) = std::env::var("KORYPHAIOS_PORT") {
+                    if let Ok(port) = port.parse::<u16>() {
+                        if port > 0 {
+                            config.server.port = port;
+                        }
                     }
                 }
             }
@@ -214,7 +278,54 @@ pub(crate) fn browser_host(host: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
-    use super::{browser_host, parse_service_endpoint};
+    use super::{browser_host, parse_service_endpoint, AppConfig};
+
+    /// The shipped `config/app.config.json` carries only the `app` section;
+    /// every other section must fall back to `AppConfig::default()` values.
+    #[test]
+    fn packaged_config_parses_with_defaulted_sections() {
+        let config: AppConfig = serde_json::from_str(include_str!(
+            "../../../config/app.config.json"
+        ))
+        .expect("the packaged app.config.json must parse");
+        let defaults = AppConfig::default();
+        assert_eq!(config.app.name, "Koryphaios");
+        assert_eq!(config.app.identifier, "com.sylorlabs.koryphaios");
+        assert_eq!(config.server.host, defaults.server.host);
+        assert_eq!(config.server.port, defaults.server.port);
+        assert_eq!(config.server.ws_path, defaults.server.ws_path);
+        assert_eq!(config.window.width, defaults.window.width);
+        assert_eq!(config.window.height, defaults.window.height);
+        assert_eq!(config.window.min_width, defaults.window.min_width);
+        assert_eq!(config.window.min_height, defaults.window.min_height);
+        assert_eq!(config.window.max_width, defaults.window.max_width);
+        assert_eq!(config.window.max_height, defaults.window.max_height);
+        assert!(config.security.csp.is_none());
+    }
+
+    /// Missing fields inside a present section fall back to the same defaults.
+    #[test]
+    fn missing_fields_inside_sections_use_defaults() {
+        let config: AppConfig = serde_json::from_str(
+            r#"{"app":{"name":"K","version":"0","identifier":"i"},"server":{"port":4000}}"#,
+        )
+        .unwrap();
+        let defaults = AppConfig::default();
+        assert_eq!(config.server.host, defaults.server.host);
+        assert_eq!(config.server.port, 4000);
+        assert_eq!(config.server.ws_path, defaults.server.ws_path);
+    }
+
+    /// The `app` section stays required: an empty object or a config that
+    /// omits it is a parse error, not a silently-defaulted identity.
+    #[test]
+    fn config_without_app_section_still_fails() {
+        assert!(serde_json::from_str::<AppConfig>("{}").is_err());
+        assert!(
+            serde_json::from_str::<AppConfig>(r#"{"server":{"host":"127.0.0.1","port":3000}}"#)
+                .is_err()
+        );
+    }
 
     #[test]
     fn service_marker_remains_valid_across_days_and_validates_pid_and_port() {
@@ -247,20 +358,9 @@ impl Default for AppConfig {
                 version: env!("CARGO_PKG_VERSION").to_string(),
                 identifier: "com.sylorlabs.koryphaios".to_string(),
             },
-            server: ServerConfig {
-                host: "127.0.0.1".to_string(),
-                port: 3000,
-                ws_path: "/ws".to_string(),
-            },
-            window: WindowConfig {
-                width: 1280,
-                height: 800,
-                min_width: 1024,
-                min_height: 640,
-                max_width: 3840,
-                max_height: 2160,
-            },
-            security: SecurityConfig { csp: None },
+            server: ServerConfig::default(),
+            window: WindowConfig::default(),
+            security: SecurityConfig::default(),
         }
     }
 }

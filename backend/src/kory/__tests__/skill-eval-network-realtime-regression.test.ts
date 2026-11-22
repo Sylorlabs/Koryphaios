@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import {
   BACKEND_STATE_SKILL_EVAL_MATERIALIZERS,
   BACKEND_STATE_SKILL_EVAL_SCORERS,
-} from '../skill-eval-backend-state-fixtures';
-import { readFixtureText, writeFixtureFile } from '../skill-eval-fixture-helpers';
+} from '../../eval/skills/skill-eval-backend-state-fixtures';
+import { readFixtureText, writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
 
 const roots: string[] = [];
 afterEach(() => {

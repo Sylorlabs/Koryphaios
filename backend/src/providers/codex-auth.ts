@@ -11,6 +11,10 @@ import type { Provider, ProviderEvent, ProviderMessage, StreamRequest } from './
 import { providerLog } from '../logger';
 import { getCliBridge, getKoryphaiosCodexHome, serializeCodexMcpProfile } from './cli-bridges';
 import {
+  koryBridgeUnavailableError,
+  resolveKoryBridgeScript,
+} from './kory-cli-mcp-config';
+import {
   appendPrivateDiagnostic,
   safeProviderDiagnostic,
   safeProviderFailureMessage,
@@ -28,9 +32,11 @@ import {
   codexImageArgs,
   codexJsonEvents,
   codexReasoningArgs,
+  codexSpeedTierArgs,
   codexTransientFailureMessage,
   isTransientCodexFailure,
 } from './codex-cli';
+import { SPEED_TIER_FAST_CODEX } from './speed-tiers';
 import { createKoryBridgeGrantLease } from './bridge-grant';
 import { writeManagedCliFile } from './managed-cli-storage';
 
@@ -58,6 +64,10 @@ function modelDefinition(model: CodexAppServerModel): ModelDef | null {
         .map((entry) => entry?.reasoningEffort)
         .filter((level: unknown): level is string => typeof level === 'string' && level.length > 0)
     : [];
+  const supportsFastTier = Array.isArray(model?.supportedServiceTiers)
+    ? model.supportedServiceTiers.includes('fast')
+    : /^gpt-5\.(4|5|6)(?:[-.]|$)/.test(id.toLowerCase()) &&
+      !/(?:^|-)mini(?:$|-)|codex-spark/.test(id.toLowerCase());
   return {
     id,
     apiModelId: id,
@@ -71,10 +81,8 @@ function modelDefinition(model: CodexAppServerModel): ModelDef | null {
     costPerMOutputTokens: 0,
     canReason: reasoningLevels.length > 0,
     reasoningLevels,
-    supportsFastMode: Array.isArray(model?.supportedServiceTiers)
-      ? model.supportedServiceTiers.includes('fast')
-      : /^gpt-5\.(4|5|6)(?:[-.]|$)/.test(id.toLowerCase()) &&
-        !/(?:^|-)mini(?:$|-)|codex-spark/.test(id.toLowerCase()),
+    supportsFastMode: supportsFastTier,
+    ...(supportsFastTier ? { speedTiers: [SPEED_TIER_FAST_CODEX] } : {}),
     supportsAttachments: model?.inputModalities?.includes?.('image') === true,
     supportsStreaming: true,
     tier: model?.isDefault ? 'flagship' : undefined,
@@ -194,6 +202,14 @@ export class CodexAuthProvider implements Provider {
     if (hasTools) {
       try {
         const mcpConfigs = codexBridge?.buildMcpConfig(bridgeCtx);
+        if (
+          bridgeCtx.sessionId &&
+          (!mcpConfigs || mcpConfigs.length === 0) &&
+          !resolveKoryBridgeScript()
+        ) {
+          yield { type: 'error', error: koryBridgeUnavailableError('codex') };
+          return;
+        }
         if (mcpConfigs && mcpConfigs.length > 0) {
           writeManagedCliFile(
             join(codexHome, 'kory.config.toml'),
@@ -228,7 +244,7 @@ export class CodexAuthProvider implements Provider {
       'read-only',
       '--model',
       request.model,
-      ...(request.fastMode ? ['--config', 'service_tier="fast"'] : []),
+      ...codexSpeedTierArgs(request.speedTier),
       ...codexReasoningArgs(request.reasoningLevel),
       ...codexImageArgs(attachmentScope),
       '-',

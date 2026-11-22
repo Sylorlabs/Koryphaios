@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { NOTE_CONTEXT_LIMITS, retrieveNoteContext } from '../note-context';
 import { saveNotesAgentPermissions } from '../notes-settings';
 import { NOTE_SEMANTIC_INDEX_DDL, rebuildNoteSemanticIndex } from '../note-semantic-index';
+import { setNoteSearchText } from '../note-search-index';
 
 let database: Database;
 let root: string;
@@ -32,10 +33,8 @@ beforeEach(() => {
       provenance TEXT DEFAULT 'user', evidence TEXT DEFAULT '', weight REAL DEFAULT 1, revision INTEGER DEFAULT 1,
       source_revision INTEGER DEFAULT 1, target_revision INTEGER DEFAULT 1);
     ${NOTE_SEMANTIC_INDEX_DDL}
-    CREATE VIRTUAL TABLE notes_fts USING fts5(note_id UNINDEXED, title, content, tags);
-    CREATE TRIGGER insert_fts AFTER INSERT ON notes BEGIN
-      INSERT INTO notes_fts VALUES (new.id, new.title, new.content, new.tags);
-    END;
+    CREATE VIRTUAL TABLE notes_fts USING fts5(title, content, tags, content='', contentless_delete=1, detail='column', tokenize='porter unicode61');
+    CREATE TABLE notes_fts_rowids (fts_rowid INTEGER PRIMARY KEY, note_id TEXT NOT NULL UNIQUE);
   `);
 });
 afterEach(() => {
@@ -51,6 +50,7 @@ function note(id: string, content: string, project = root, trashed = false) {
   database
     .query('INSERT INTO notes(id,title,content,project_root,trashed_at) VALUES (?,?,?,?,?)')
     .run(id, id, content, project, trashed ? 10 : null);
+  setNoteSearchText(id, id, content, '[]', database);
 }
 function link(from: string, to: string, association = true) {
   if (association)

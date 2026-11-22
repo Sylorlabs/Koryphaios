@@ -48,6 +48,7 @@ import { KORY_TOOLS, toolsForRole } from './kory-mcp-bridge';
 import { ensureManagedCliDirectory } from './managed-cli-storage';
 import { credentialLinkCandidates } from './cli-config-paths';
 import { currentProviderExecutionScope } from './execution-scope';
+import { getSafeSubprocessEnv } from '../runtime/safe-env';
 
 // ─── Shared harness note ─────────────────────────────────────────────────────
 
@@ -58,6 +59,8 @@ export const KORY_HARNESS_NOTE =
   'by the "kory" MCP server. Every kory__ tool call goes through Koryphaios permission + ' +
   'sandbox policy. Never spawn native subagents; delegate through Koryphaios only when ' +
   'your advertised role-scoped tool list contains one; otherwise return the need to the manager. ' +
+  'To ask the user a question, call kory__ask_user when your tool list has it (workers: ' +
+  'kory__ask_manager); never use a native question tool. ' +
   'For custom MCP servers, discover exact schemas with kory__list_mcp_tools and invoke them ' +
   'with kory__invoke_mcp_tool if your CLI tool list has not refreshed.';
 export const KORY_CUSTOM_MCP_NOTE =
@@ -168,13 +171,23 @@ export function buildKoryHookConfigs(ctx: CliBridgeContext): CliHookConfig[] | n
     UserPromptSubmit: 'hook:prompt-submit',
     Stop: 'hook:stop',
   };
-  const backendUrl = process.env.KORY_BACKEND_URL?.trim();
-  const backendFlag = backendUrl ? ` --backend-url ${JSON.stringify(backendUrl)}` : '';
+  // The hook is spawned by the CLI, not the backend — always pass the backend
+  // URL explicitly so a non-default-port backend stays reachable.
+  const backendUrl =
+    process.env.KORY_BACKEND_URL?.trim() ||
+    `http://${process.env.KORYPHAIOS_HOST ?? '127.0.0.1'}:${process.env.KORYPHAIOS_PORT ?? '3001'}`;
+  const backendFlag = ` --backend-url ${JSON.stringify(backendUrl)}`;
+  // Same runtime rule as the MCP bridge: bare `node` cannot run the source .ts
+  // or the bun-targeted packaged .js, so the hook silently no-ops.
+  const hookCommand =
+    process.env.KORY_HOOK_BRIDGE_COMMAND ||
+    process.env.KORY_MCP_BRIDGE_COMMAND ||
+    process.execPath;
   return events.map((event) => {
     const grant = ctx.bridgeGrantLease
       ? ctx.bridgeGrantLease.grant([actionForEvent[event]])
       : getKoryBridgeGrant(ctx.sessionId!, ctx.role, [actionForEvent[event]]);
-    const command = `node ${JSON.stringify(hookScript)} --auth-file ${JSON.stringify(grant.path)}${backendFlag} --event ${event}`;
+    const command = `${JSON.stringify(hookCommand)} ${JSON.stringify(hookScript)} --auth-file ${JSON.stringify(grant.path)}${backendFlag} --event ${event} --provider claude`;
     return { events: [event], command, matcher: '' };
   });
 }
@@ -233,6 +246,38 @@ const ANTIGRAVITY_CREDENTIAL_FILES = [
   'oauth_creds.json',
   'google_accounts.json',
 ] as const;
+
+/** True when a portable OAuth record is staged in the managed home.
+ *
+ *  agy answers a missing credential with its browser sign-in flow, and
+ *  Koryphaios probes this provider from status renders and the catalog
+ *  scheduler. This predicate is what keeps a passive probe from launching a
+ *  login window: no staged credential means nothing to discover.
+ */
+export function hasAntigravityPortableLogin(
+  home: string = getKoryphaiosAntigravityHome(),
+): boolean {
+  return ANTIGRAVITY_CREDENTIAL_FILES.some((file) => existsSync(join(home, '.gemini', file)));
+}
+
+/** Environment for a passive agy probe.
+ *
+ *  HOME and GEMINI_DIR point at the managed home so agy reads the staged
+ *  portable login. Inheriting the host HOME instead lets agy resolve the user's
+ *  login keychain, which is what produced macOS consent prompts from a routine
+ *  status poll and from the billing quota scan.
+ */
+export function antigravityProbeEnv(
+  home: string = getKoryphaiosAntigravityHome(),
+): NodeJS.ProcessEnv {
+  return {
+    ...getSafeSubprocessEnv(),
+    HOME: home,
+    USERPROFILE: home,
+    ANTIGRAVITY_HOME: home,
+    GEMINI_DIR: join(home, '.gemini'),
+  };
+}
 
 export function getKoryphaiosAntigravityHome(subscope?: string): string {
   const staged = currentProviderExecutionScope()?.antigravityHome;
@@ -545,6 +590,7 @@ export class ClaudeCodeCliBridge extends ManagedCliBridge implements CliBridge {
       'WebSearch',
       'Task',
       'Agent',
+      'AskUserQuestion',
     ];
     // Allow only the kory MCP tools + TodoWrite (planning only).
     // Claude Code prefixes MCP tools with mcp__<server>__.

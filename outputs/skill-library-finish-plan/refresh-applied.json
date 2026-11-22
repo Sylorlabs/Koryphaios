@@ -1,0 +1,305 @@
+{
+  "dryRun": false,
+  "packagesRefreshed": 40,
+  "sourcesRefreshed": 93,
+  "sourcesSkipped": [
+    {
+      "skill": "ai-safety-evaluation",
+      "url": "https://openai.com/index/trustworthy-third-party-evaluations-foundations/",
+      "why": "no evidence record"
+    }
+  ],
+  "changedFileCount": 67,
+  "report": [
+    {
+      "skill": "accessibility-verification",
+      "refreshed": 2,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": [
+        "2026-09-05"
+      ]
+    },
+    {
+      "skill": "ai-safety-evaluation",
+      "refreshed": 1,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": [
+        "2026-09-05"
+      ]
+    },
+    {
+      "skill": "analytics-engineering",
+      "refreshed": 3,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": []
+    },
+    {
+      "skill": "aws-cloud",
+      "refreshed": 6,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": [
+        "2026-10-17"
+      ]
+    },
+    {
+      "skill": "cicd-engineering",
+      "refreshed": 1,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": []
+    },
+    {
+      "skill": "container-engineering",
+      "refreshed": 1,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": [
+        "2026-09-05"
+      ]
+    },
+    {
+      "skill": "embedded-firmware",
+      "refreshed": 1,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": []
+    },
+    {
+      "skill": "event-driven-architecture",
+      "refreshed": 1,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": [
+        "2026-09-06"
+      ]
+    },
+    {
+      "skill": "fine-tuning-training",
+      "refreshed": 1,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": []
+    },
+    {
+      "skill": "finops-cloud-cost",
+      "refreshed": 1,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": [
+        "2026-09-05"
+      ]
+    },
+    {
+      "skill": "gcp-cloud",
+      "refreshed": 1,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": []
+    },
+    {
+      "skill": "grpc-protobuf",
+      "refreshed": 4,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": []
+    },
+    {
+      "skill": "image-generation-practice",
+      "refreshed": 1,
+      "lingeringSourceDocBlocks": [
+        "https://developers.openai.com/api/docs/guides/image-generation"
+      ],
+      "dateMentionsLeft": []
+    },
+    {
+      "skill": "infrastructure-security",
+      "refreshed": 1,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": [
+        "2026-09-05"
+      ]
+    },
+    {
+      "skill": "kotlin-engineering",
+      "refreshed": 2,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": []
+    },
+    {
+      "skill": "kubernetes-operations",
+      "refreshed": 3,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": []
+    },
+    {
+      "skill": "language-runtime-security",
+      "refreshed": 2,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": [
+        "2026-09-05"
+      ]
+    },
+    {
+      "skill": "linux-systems",
+      "refreshed": 3,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": [
+        "2026-09-05"
+      ]
+    },
+    {
+      "skill": "llm-evaluation",
+      "refreshed": 4,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": []
+    },
+    {
+      "skill": "mongodb-engineering",
+      "refreshed": 4,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": [
+        "2026-09-06"
+      ]
+    },
+    {
+      "skill": "mysql-engineering",
+      "refreshed": 4,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": []
+    },
+    {
+      "skill": "nextjs-engineering",
+      "refreshed": 3,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": []
+    },
+    {
+      "skill": "observability-sre",
+      "refreshed": 1,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": [
+        "2026-09-05"
+      ]
+    },
+    {
+      "skill": "payment-integration",
+      "refreshed": 3,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": [
+        "2026-09-06"
+      ]
+    },
+    {
+      "skill": "performance-testing",
+      "refreshed": 3,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": [
+        "2026-09-05"
+      ]
+    },
+    {
+      "skill": "php-engineering",
+      "refreshed": 3,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": []
+    },
+    {
+      "skill": "postgres-engineering",
+      "refreshed": 6,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": [
+        "2026-09-06"
+      ]
+    },
+    {
+      "skill": "product-analytics",
+      "refreshed": 1,
+      "lingeringSourceDocBlocks": [
+        "https://posthog.com/docs/product-analytics/funnels"
+      ],
+      "dateMentionsLeft": [
+        "2026-09-06"
+      ]
+    },
+    {
+      "skill": "property-fuzz-differential-testing",
+      "refreshed": 3,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": [
+        "2026-09-05"
+      ]
+    },
+    {
+      "skill": "python-engineering",
+      "refreshed": 2,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": []
+    },
+    {
+      "skill": "react-native-expo",
+      "refreshed": 3,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": []
+    },
+    {
+      "skill": "rust-engineering",
+      "refreshed": 3,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": []
+    },
+    {
+      "skill": "simulation-device-testing",
+      "refreshed": 2,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": [
+        "2026-09-05"
+      ]
+    },
+    {
+      "skill": "speech-audio-ai",
+      "refreshed": 1,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": []
+    },
+    {
+      "skill": "swift-engineering",
+      "refreshed": 2,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": []
+    },
+    {
+      "skill": "terraform-iac",
+      "refreshed": 1,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": []
+    },
+    {
+      "skill": "typescript-javascript-engineering",
+      "refreshed": 3,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": []
+    },
+    {
+      "skill": "visual-verification",
+      "refreshed": 4,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": [
+        "2026-09-05"
+      ]
+    },
+    {
+      "skill": "vue-engineering",
+      "refreshed": 1,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": [
+        "2026-10-05"
+      ]
+    },
+    {
+      "skill": "web-security",
+      "refreshed": 1,
+      "lingeringSourceDocBlocks": [],
+      "dateMentionsLeft": [
+        "2026-09-05"
+      ]
+    }
+  ]
+}
+ skills-v5/web-security/references/sources.md       |  20 +-
+ skills-v5/webhook-integration/SKILL.md             |  26 ++-
+ skills-v5/webhook-integration/kory.json            |   4 +-
+ .../webhook-integration/references/sources.md      |   8 +-
+ 541 files changed, 9586 insertions(+), 4330 deletions(-)
+

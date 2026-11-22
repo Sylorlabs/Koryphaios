@@ -180,20 +180,18 @@ describe('Notes data trust', () => {
 
     rmSync(source);
     expect((await syncProjectDocuments(project)).removed).toBe(1);
+    // Untracked + missing source: the mirror row is hard-deleted, not trashed —
+    // nothing recoverable existed beyond the file itself.
     expect(await getNote(note!.id, project)).toBeNull();
-    expect((await listTrashedNotes(project))[0]).toMatchObject({
-      id: note!.id,
-      trashReason: 'source_removed',
-    });
+    expect(await listTrashedNotes(project)).toEqual([]);
 
     writeFileSync(source, '# Returning\n\nSecond copy.\n');
     await syncProjectDocuments(project);
+    // The deterministic document id is re-imported as a fresh row.
     expect((await getNote(note!.id, project))?.content).toContain('Second copy');
-    expect((await listNoteRevisions(note!.id, project)).map((entry) => entry.operation)).toEqual([
-      'restore',
-      'source_removed',
-      'create',
-    ]);
+    // The document was only ever imported/synced, so it is untracked: hard
+    // delete and re-import record no revision rows.
+    expect(await listNoteRevisions(note!.id, project)).toEqual([]);
   });
 
   test('whole-vault export is deterministic, complete, and project scoped', async () => {

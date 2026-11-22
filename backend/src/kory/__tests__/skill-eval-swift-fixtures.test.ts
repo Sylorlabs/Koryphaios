@@ -3,14 +3,14 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isMac } from '../../runtime/platform';
-import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
-import { writeFixtureFile } from '../skill-eval-fixture-helpers';
+import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
+import { writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
 import { loadV5SkillPackages } from '../skill-packages';
 import {
   SWIFT_SKILL_EVAL_MATERIALIZERS,
   SWIFT_SKILL_EVAL_SCORERS,
-} from '../skill-eval-swift-fixtures';
-import { swiftRuntimeReadiness } from '../skill-eval-swift-runtime';
+} from '../../eval/skills/skill-eval-swift-fixtures';
+import { swiftRuntimeReadiness } from '../../eval/skills/skill-eval-swift-runtime';
 
 const roots: string[] = [];
 afterEach(() => {

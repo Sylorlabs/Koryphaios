@@ -1,10 +1,7 @@
 <script lang="ts">
   import AlertTriangle from 'lucide-svelte/icons/alert-triangle';
-  import DollarSign from 'lucide-svelte/icons/dollar-sign';
-  import PauseCircle from 'lucide-svelte/icons/pause-circle';
   import RefreshCw from 'lucide-svelte/icons/refresh-cw';
   import RotateCcw from 'lucide-svelte/icons/rotate-ccw';
-  import ShieldCheck from 'lucide-svelte/icons/shield-check';
   import {
     DEFAULT_SPEND_CAP_CONFIG,
     experimentalStore,
@@ -14,6 +11,12 @@
   import KorySelect from './KorySelect.svelte';
   import NumberStepper from './NumberStepper.svelte';
   import SettingsSwitch from './SettingsSwitch.svelte';
+  import SettingsPage from './settings/SettingsPage.svelte';
+  import { SETTINGS_CATALOG } from '$lib/utils/settings-catalog';
+
+  const pageDescription =
+    SETTINGS_CATALOG.find((entry) => entry.id === 'experimental')?.description ??
+    'Runtime-enforced spend limits and recovery for paused sessions.';
 
   let showResetDialog = $state(false);
   let announcement = $state('');
@@ -78,18 +81,18 @@
 <div class="flex h-full min-h-0 flex-col overflow-hidden">
   <p class="sr-only" aria-live="polite">{announcement}</p>
 
-  <div class="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
-    <div class="mx-auto max-w-5xl space-y-5">
+  <div class="min-h-0 flex-1 overflow-y-auto">
+    <SettingsPage title="Safety limits" description={pageDescription} width="narrow">
       {#if experimentalStore.spendCapError}
         <section
           role="alert"
-          class="flex items-start gap-3 rounded-2xl border border-[var(--color-error)]/35 bg-[var(--color-error-bg)] p-4"
+          class="flex items-start gap-3 rounded-xl border border-[var(--color-error)]/35 bg-[var(--color-error-bg)] p-4"
         >
           <AlertTriangle size={18} class="mt-0.5 shrink-0 text-[var(--color-error)]" />
           <div class="min-w-0 flex-1">
-            <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
+            <h3 class="text-sm font-semibold text-[var(--color-text-primary)]">
               Safety limits unavailable
-            </h4>
+            </h3>
             <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
               {experimentalStore.spendCapError}
             </p>
@@ -98,21 +101,16 @@
             type="button"
             disabled={experimentalStore.isLoading}
             onclick={() => void experimentalStore.loadAll()}
-            class="flex min-h-10 shrink-0 items-center gap-2 rounded-xl border border-[var(--color-border)] px-3 text-xs text-[var(--color-text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:opacity-50"
+            class="flex min-h-9 shrink-0 items-center gap-2 rounded-lg border border-[var(--color-border)] px-3 text-xs text-[var(--color-text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:cursor-not-allowed disabled:opacity-50"
             ><RefreshCw size={14} /> Retry</button
           >
         </section>
       {:else if experimentalStore.isLoading}
-        <section
-          role="status"
-          class="flex min-h-40 items-center justify-center gap-2 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] text-sm text-[var(--color-text-muted)]"
-        >
+        <p role="status" class="flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
           <RefreshCw size={16} class="animate-spin" /> Loading enforced limits…
-        </section>
+        </p>
       {:else}
-        <section
-          class="settings-panel rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
-        >
+        <section>
           <SettingsSwitch
             checked={config.enabled}
             label="Enforce recorded-spend limits"
@@ -128,38 +126,29 @@
           />
         </section>
 
-        <section
-          class="settings-panel space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
-        >
-          <div class="flex items-start gap-3">
-            <span
-              class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--color-surface-2)] text-[var(--color-accent)]"
-              ><DollarSign size={17} /></span
+        <section class="space-y-3" aria-labelledby="safety-limits-windows">
+          <div>
+            <h3
+              id="safety-limits-windows"
+              class="text-sm font-semibold text-[var(--color-text-primary)]"
             >
-            <div>
-              <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
-                Rolling spend windows
-              </h4>
-              <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
-                Values are US dollars. Enter 0 to disable one limit while keeping the others active.
-              </p>
-            </div>
+              Rolling spend windows
+            </h3>
+            <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
+              Values are US dollars. Enter 0 to disable one limit while keeping the others active.
+            </p>
           </div>
 
-          <div class="grid auto-rows-fr gap-3 sm:grid-cols-2">
+          <div class="grid items-start gap-3 sm:grid-cols-2">
             {#each limitControls as control (control.key)}
-              <div
-                class="flex min-h-[148px] flex-col rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4"
-              >
-                <div class="min-w-0">
-                  <h5 class="text-xs font-semibold text-[var(--color-text-primary)]">
-                    {control.label}
-                  </h5>
-                  <p class="mt-1 text-[10px] leading-relaxed text-[var(--color-text-muted)]">
-                    {control.description}
-                  </p>
-                </div>
-                <div class="mt-auto pt-3">
+              <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
+                <h4 class="text-xs font-semibold text-[var(--color-text-primary)]">
+                  {control.label}
+                </h4>
+                <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
+                  {control.description}
+                </p>
+                <div class="pt-3">
                   <NumberStepper
                     compact
                     quiet
@@ -183,22 +172,17 @@
           </div>
         </section>
 
-        <section
-          class="settings-panel space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
-        >
-          <div class="flex items-start gap-3">
-            <span
-              class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--color-surface-2)] text-[var(--color-warning)]"
-              ><ShieldCheck size={17} /></span
+        <section class="space-y-3" aria-labelledby="safety-limits-response">
+          <div>
+            <h3
+              id="safety-limits-response"
+              class="text-sm font-semibold text-[var(--color-text-primary)]"
             >
-            <div>
-              <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
-                When a limit is reached
-              </h4>
-              <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
-                The selected response is enforced by the backend before provider streaming starts.
-              </p>
-            </div>
+              When a limit is reached
+            </h3>
+            <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
+              The selected response is enforced by the backend before provider streaming starts.
+            </p>
           </div>
           <KorySelect
             value={config.action}
@@ -233,57 +217,53 @@
           />
         </section>
 
-        <section
-          class="settings-panel space-y-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
-        >
-          <div class="flex items-start gap-3">
-            <PauseCircle size={18} class="mt-0.5 shrink-0 text-[var(--color-text-secondary)]" />
-            <div>
-              <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
-                Paused sessions
-              </h4>
-              <p class="mt-1 text-xs text-[var(--color-text-muted)]">
-                Pauses survive backend restarts. Resume only after reviewing the recorded spend and
-                limits.
-              </p>
-            </div>
+        <section class="space-y-3" aria-labelledby="safety-limits-paused">
+          <div>
+            <h3
+              id="safety-limits-paused"
+              class="text-sm font-semibold text-[var(--color-text-primary)]"
+            >
+              Paused sessions
+            </h3>
+            <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
+              Pauses survive backend restarts. Resume only after reviewing the recorded spend and
+              limits.
+            </p>
           </div>
           {#if experimentalStore.pausedSessions.length}
             <div class="space-y-2">
               {#each experimentalStore.pausedSessions as session (session.sessionId)}
                 <div
-                  class="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3"
+                  class="flex flex-wrap items-center gap-3 rounded-xl bg-[var(--color-surface-2)] p-3"
                 >
                   <div class="min-w-0 flex-1">
                     <div class="truncate font-mono text-xs text-[var(--color-text-primary)]">
                       {session.sessionId}
                     </div>
-                    <p class="mt-1 text-[10px] leading-relaxed text-[var(--color-text-muted)]">
+                    <p class="mt-1 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
                       {session.reason}
                     </p>
                   </div>
                   <button
                     type="button"
                     onclick={() => void experimentalStore.resumeSession(session.sessionId)}
-                    class="min-h-10 rounded-xl border border-[var(--color-border)] px-3 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+                    class="min-h-9 rounded-lg border border-[var(--color-border)] px-3 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
                     >Resume</button
                   >
                 </div>
               {/each}
             </div>
           {:else}
-            <div
-              class="rounded-xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-5 text-center text-xs text-[var(--color-text-muted)]"
-            >
+            <p class="text-xs text-[var(--color-text-muted)]">
               No session is paused by a spend limit.
-            </div>
+            </p>
           {/if}
         </section>
 
         <div
           class="flex items-center justify-between gap-4 border-t border-[var(--color-border)] pt-4"
         >
-          <div class="text-[10px] text-[var(--color-text-muted)]">
+          <div class="text-[11px] text-[var(--color-text-muted)]">
             {differsFromDefaults
               ? 'These limits differ from the recommended defaults.'
               : 'Recommended defaults are active.'}
@@ -292,12 +272,12 @@
             type="button"
             disabled={!differsFromDefaults || experimentalStore.isLoading}
             onclick={() => (showResetDialog = true)}
-            class="flex min-h-10 items-center gap-2 rounded-xl border border-[var(--color-border)] px-3 text-xs text-[var(--color-text-secondary)] hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:cursor-not-allowed disabled:opacity-40"
+            class="flex min-h-9 items-center gap-2 rounded-lg border border-[var(--color-border)] px-3 text-xs text-[var(--color-text-secondary)] hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:cursor-not-allowed disabled:opacity-40"
             ><RotateCcw size={14} /> Restore defaults</button
           >
         </div>
       {/if}
-    </div>
+    </SettingsPage>
   </div>
 </div>
 

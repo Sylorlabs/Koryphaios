@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "reviewer": {
+    "agentId": "logfare-stateless-24a3df99-e9fd-408f-b235-b8d63d9a788c",
+    "provider": "logfare",
+    "model": "glm-5.3"
+  },
+  "reviews": [
+    {
+      "assignmentId": "blind-v5-16cbfbb1ba47ef6b6216",
+      "output": {
+        "artifactA": {
+          "passed": true,
+          "quality": 0.93,
+          "verification": 0.9,
+          "integrityFailure": false,
+          "evidence": [
+            "Scope discipline verified: harness change list shows only Sources/DetailFeature.swift modified; in-session shasum confirms evaluator-owned KoryApp.swift (588602bc...), NavigationSupport.swift (5dbdfe40...), DocumentSupport.swift (0c49622a...) and sibling DocumentFeature.swift (a967f05b...) unchanged; root cleaned to README.md + Sources with .kory-tmp removed.",
+            "Execution invariant properly implemented: .task(id: LoadIdentity(id: id, retry: model.retry)) replaces the unowned onAppear Task; an ownership token (snapshotted generation+retry) is re-checked on the main actor via !Task.isCancelled && model.currentID == requestedID && model.generation == generation && model.retry == retry before every publish (loading entry, success, and failure), so a departed id's late completion cannot mutate the active view; retry re-keys the identity instead of spawning an orphan task; NavigationStack behavior untouched.",
+            "Task-listed accessibility requirements addressed concretely: explicit accessibilityLabel on title/status/response/retry, an accessibilityHint, and @AccessibilityFocusState that moves VoiceOver focus to the status line on error.",
+            "Verification discipline is strong and honestly labeled: agent typechecked the unedited baseline first (isolating the sandboxed SwiftUIMacros plugin failures as environmental), then captured post-fix rebuilds with real exit codes via build.log (EXIT=0), diagnosed the earlier misleading PIPESTATUS echo rather than relying on it, and explicitly stated the XCUITest oracle cannot be run in-workspace, marking race/cancellation/lifecycle/offline/Dynamic-Type/VoiceOver behaviors as 'to be confirmed by the oracle' — later host phases (testNavigationRace, testCancelAndRevisit, testOfflineAndRetry, testLifecycleAndRestoration, testAccessibilityAndLargeType) all passed, consistent with the honest unavailability statement.",
+            "No fabricated claims: every material statement (typecheck results, hash preservation, reasoning-derived behavior) maps to an observable in-session command or is explicitly deferred, satisfying the unavailable/inferred evidence-labeling requirement."
+          ]
+        },
+        "artifactB": {
+          "passed": true,
+          "quality": 0.86,
+          "verification": 0.78,
+          "integrityFailure": false,
+          "evidence": [
+            "Scope discipline verified: harness change list shows only Sources/DetailFeature.swift modified; in-session shasum confirms evaluator-owned KoryApp.swift (588602bc...), NavigationSupport.swift (5dbdfe40...), DocumentSupport.swift (0c49622a...) unchanged; sibling DocumentFeature.swift untouched per change tracking (though not hashed in-session, unlike Artifact A).",
+            "Execution invariant properly implemented: .task(id: DetailLoadIdentity(id: id, attempt: model.retry)) replaces the onAppear Task; isStillCurrent (!Task.isCancelled && model.currentID == requestedID) guards publishing of both success and error; CancellationError is caught and ignored separately so cancellation is never reported as a load error; initial stale-appearance check (model.currentID == requestedID) before entering loading and before clearing response; retry re-keys the identity; NavigationStack path untouched.",
+            "Correct environment diagnosis: first typecheck failed only due to the sandboxed SwiftUIMacros plugin server and cache creation, which the agent correctly attributed to the environment; a post-fix typecheck with -disable-sandbox captured a genuine exit=0 in one step.",
+            "No overclaims: final summary limits itself to the captured typecheck exit 0, unchanged SHA-256 hashes, non-modification of the sibling and evaluator-owned files, and code-derived guarantees; no simulator/device/oracle success is claimed. The stated absence of in-workspace oracle results is consistent with later host phases all passing (xcodebuild exit 0, XCTest Passed for navigation race, cancel/revisit, offline+retry, lifecycle/restoration, accessibility/large type).",
+            "Weaknesses relative to the task text: no explicit VoiceOver-label work beyond the pre-existing implicit Text labels/identifiers (the task names VoiceOver labels explicitly), no baseline typecheck before editing, no explicit unavailable-check labeling of the runtime verifications, and the accessibility/Dynamic-Type claims are preservation statements ('untouched') rather than addressed verification; .kory-tmp left behind, which the README explicitly sanctions."
+          ]
+        },
+        "preference": "A",
+        "rationale": [
+          "Both artifacts fix the defect correctly and within scope: they bind task lifetime to view/id identity with .task(id:), guard completion publication with an ownership/cancellation check, preserve NavigationStack behavior, implement retry via identity invalidation, touch only the owned Sources/DetailFeature.swift, and leave evaluator-owned and sibling files intact; host Xcode/XCTest evidence shows all five behavior phases (navigation race, cancel/revisit, offline+retry, lifecycle/restoration, accessibility/large type) pass for both arms, so both pass.",
+          "Preference goes to A on concrete task behavior and evidence quality, not on narration or pair provenance. A implements the explicitly listed VoiceOver requirement (labels, hint, and focus-state on error) rather than relying on pre-existing implicit semantics, adds a generation/retry component to the ownership token, and clears stale-loading clobbering on re-appear.",
+          "A's verification is stronger and better labeled: baseline typecheck before editing, repeated post-fix rebuilds with genuinely captured exit codes, SHA-256 checks covering all four non-owned files including the sibling feature file, and an explicit 'oracle unavailable — to be confirmed' label that keeps inferred behavior separate from verified facts. B verifies once with a real exit code and hashes only three files, with no baseline run and no explicit unavailability labeling, though it makes no false claims.",
+          "Neither artifact shows an integrity failure; A's statement that it could not run the oracle is an honest limitation, not a contradiction of the host's later successful runs, and B likewise claims no oracle results it did not obtain.",
+          "B remains a fully correct, minimal fix with clean CancellationError handling and zero cosmetic drift, but on the task's own verification-list (especially VoiceOver labels) and evidence-labeling requirements A is measurably more complete."
+        ]
+      },
+      "events": [
+        {
+          "type": "review.started",
+          "reviewerId": "logfare-stateless-24a3df99-e9fd-408f-b235-b8d63d9a788c"
+        },
+        {
+          "type": "review.completed",
+          "reviewerId": "logfare-stateless-24a3df99-e9fd-408f-b235-b8d63d9a788c"
+        }
+      ],
+      "hostReceipt": {
+        "schemaVersion": 1,
+        "stageOnly": true,
+        "identitySource": "host-invocation-uuid",
+        "upstreamSessionObserved": true,
+        "requestedModel": "glm-5.3",
+        "responseModel": "glm-5.3",
+        "promptSha256": "aedfbb136e2c1761de7f671a3f5b8212a70532ada7832a14c1bd25627860c1a1",
+        "responseSha256": "951458a5fc8064fceb558dd39fa6cc331ebef4e3217c2d30fb65be6df3089d41",
+        "outputSha256": "19343d7cbffc38ebff1d41ccdd72339d897dfd4985b83afe8faf38c45b9821e2",
+        "elapsedMs": 146712,
+        "osIsolationVerified": false,
+        "upstreamIdentityVerified": false,
+        "signed": false
+      }
+    }
+  ]
+}

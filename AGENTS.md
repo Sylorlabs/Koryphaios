@@ -96,9 +96,60 @@ part every change must respect.
 - **Per-session server state lives in `SessionRuntime`.** Do not add a
   `Map<sessionId, …>` field to `KoryManager`; add a property to `SessionRuntime`,
   which session deletion disposes in one call.
+- **Turn start is one durable write path.** New producers of user turns call
+  `startSessionTurn`; never write a user message and dispatch separately. See
+  `docs/architecture/transcript-integrity.md` § Turn start is one durable write path.
+- **Replay never rebuilds a persisted turn.** A fresh subscribe replays
+  operational state plus the in-flight turn only; the server filters `stream.*`
+  events whose fold is already durable as `parts`
+  (`isReplayCoveredByPersistedParts` in `websocket-handler.ts`). Never
+  reintroduce transcript reconstruction from replayed stream events; fix
+  `parts` coverage instead. See `docs/architecture/transcript-integrity.md`
+  § Replay never rebuilds a persisted turn.
 - The guards are tests: `turn-transcript-parity.test.ts` (backend),
   `transcript-reload-parity.test.ts` and `session-isolation.test.ts` (frontend).
   A change that needs one of them weakened is the bug.
+
+## Desktop packaging
+
+`tauri build` owns a coherent payload through `desktop/scripts/before-build.ts`:
+a local build writes `compat-hash.json` first, compiles the embedded backend
+(stamping it with `KORYPHAIOS_BACKEND_BUILD_HASH`), then builds the static
+frontend — so a packaged app can never ship a stale backend against a fresh
+frontend. `KORY_EMBEDDED_BACKEND=prebuilt` skips the hash and backend steps and
+is only for CI and `scripts/build-desktop.ts`, which supply a target-matched
+payload themselves.
+
+At runtime the cached service name carries a resource stamp
+(`koryphaios-service-{ver}-{id}-{hash}-{size}{mtime}`, and the persistent
+`frontend-{ver}-{hash}-{stamp}` tree likewise), so a new app build always
+changes the service manifest and restarts the running service on all three
+OSes. Release builds always own their backend: they ignore inherited
+`KORYPHAIOS_PORT`/`KORYPHAIOS_HOST` (eval scripts export them) and fail closed
+when the backend resource is missing rather than falling into dev-supervisor
+mode.
+
+## App icon
+
+Every shipped icon is generated from one master,
+`desktop/src-tauri/icons/source/app-icon-master.png` (the bare black-and-gold
+hexagon on a transparent canvas). After changing the master, run
+`bun run desktop/scripts/generate-app-icons.ts` (macOS: `sips` + `iconutil`); it
+rewrites `icon.icns` (a real 16–1024 px ICNS), `icon.ico`, the Tauri PNGs and
+`dock-icon.png`. `--check` fails when any of them is stale. Never hand-edit or
+rename an image into one of those files: `icon.icns` was once a PNG with an
+`.icns` extension.
+
+macOS 26 draws any bundle icon that is not a full-bleed squircle on a gray
+platter, so the hexagon cannot ship as the bundle icon without that platter.
+The app shows it as drawn by setting the running Dock image
+(`install_dock_icon`) and by writing a custom Finder icon onto its own bundle
+at launch and after an in-app update (`desktop/src-tauri/src/bundle_icon.rs`).
+That write is decided by content — `Icon\r` missing, its Finder flag missing, or
+its `com.sylorlabs.koryphaios.icon-art` marker naming different artwork — never
+by `Icon\r` merely existing, and it re-registers the bundle with LaunchServices
+so a non-running Dock tile re-reads the icon. Never ship `Icon\r` in the bundle
+(it fails strict codesign) and never `killall Dock` from the app.
 
 ## UI controls
 
@@ -128,6 +179,8 @@ part every change must respect.
   - The bridge server (`kory-mcp-bridge.ts`) uses `fromJsonSchema()` from `@modelcontextprotocol/server` to wrap the dynamic JSON Schemas fetched from the backend catalog at runtime. This provides the same automatic validation that Zod-based tools get, but for JSON Schema objects.
 - Errors from `McpServer` use `ProtocolError` / `ProtocolErrorCode` (renamed from `McpError` / `ErrorCode`). Unknown tools throw `ProtocolError(InvalidParams, "Tool <name> not found")`.
 - Build the error-detection server before registering it: `bun run --filter @koryphaios/mcp-server build` (entry point is `mcp-server/dist/index.js`).
+- **The v2 story is verified on the wire, not assumed.** `mcp-server/tests/unit/protocol-negotiation.test.ts` spawns the real entry point as a stdio client and asserts the negotiated revision for a modern (`auto`, `pin: 2026-07-28`) and a legacy (`initialize`) client, the empty tool surface of the passive responder, the nine registered tools in active mode, and `-32602` for an unknown tool. `backend/src/providers/__tests__/kory-mcp-bridge-protocol.test.ts` does the same for the bridge over `InMemoryTransport` in both eras. Change either server and these are the tests that notice.
+- **No v1 remains in Kory's own stack.** Both manifests declare `@modelcontextprotocol/server`/`client` `2.0.0`, both installed trees are `2.0.0`, and no source file imports `@modelcontextprotocol/sdk`. The single `@modelcontextprotocol/sdk@1.30.0` entry in `bun.lock` is the *optional* peer of `@google/genai`; it is not installed (`node_modules/@modelcontextprotocol/sdk` is absent), so it is unreachable at runtime and must not be treated as a Kory dependency or "migrated".
 - The error-detection server is registered in Devin CLI at the machine-local scopes: project-local (`.devin/mcp_config.local.json`) and user (`~/.config/devin/mcp_config.json`). These are local-only and never committed.
 - Note: `backend/src/validation/schemas.ts` defines Koryphaios's own Zod HTTP API schemas named `*RequestSchema` (e.g. `CreateSessionRequestSchema`). These are NOT MCP SDK schemas and are unrelated to the v1-to-v2 migration.
 
@@ -144,13 +197,24 @@ Eight built-ins have no chat-completions contract: `lmnt`, `voyageai`, `mem0`, `
 - Async generation goes through `capabilities/poll.ts`. Provider media must be downloaded and persisted, not linked: Kling clears generated assets after 30 days.
 - Adding a `video` or `embedding` usage kind requires the CHECK constraints in migration `0049` and `ensureSchema` to agree.
 
+## Provider auto-detection
+
+Built-in providers whose connection material is found on the machine connect automatically — but only after that provider's real verification probe succeeds. `ProviderRegistry.autoDetectProviders` runs inside `autoConnectCliProviders` (the same refresh-status pass that auto-enables agent CLIs). Covered sources: env-var API keys/auth tokens (`ENV_API_KEY_MAP` / `ENV_AUTH_TOKEN_MAP`), AWS credentials for Bedrock, and running local model servers (Ollama / LM Studio / llama.cpp, plus `LOCAL_ENDPOINT` for `local`).
+
+- **Verified-only enablement.** Detection never enables; the pass calls `setCredentials(..., { autoDetected: true })`, so the same `verifyConnection` path a manual Connect uses decides. A failed probe retains nothing.
+- **Runtime-only material.** Configs marked `autoDetected` are sanitized in `syncProviderConfigsToConfig` — discovered keys, endpoints, enabled state, and probe verdicts never reach koryphaios.json or the secret store. Next launch the provider is default-disabled and the pass re-verifies; a removed env var or a stopped Ollama simply isn't connected.
+- **Disconnect always wins.** A persisted `disabled: true` or an in-session `removeApiKey` (`userDisconnected`) blocks reconnection; an explicit non-autodetect `setCredentials` retires the `autoDetected` flag and its source label.
+- **Opt-outs.** `KORY_DISABLE_PROVIDER_AUTODETECT=1`, or `KORY_DISABLE_CLI_AUTODETECT=1` (the flag the test suite already sets to isolate from the host).
+- **Login-shell hydration.** Packaged/background launches inherit no rc exports, so `runtime/login-shell-env.ts` runs the user's login shell once per process and adopts only allowlisted provider env names. Unix-only, marker-delimited `env -0` output, 3 s hard kill, values never logged.
+- Agent CLIs keep their existing `cliAutoEnableCreds` path untouched; capability providers stay out of chat and out of the pass.
+
 ## Freebuff and Codebuff providers
 
-Freebuff runs through its real TUI (OpenTUI in the qualified native 0.2.16 build) in `backend/src/providers/freebuff-cli.ts`. The adapter uses a private tmux server as a PTY, stages the CLI-owned login and selected model settings in a per-turn private HOME, installs `.agents/mcp.json`, and reads structured completion/tool evidence from Freebuff's own `log.jsonl` inside isolation. It has no headless mode or general native-tool deny hook, so Linux bubblewrap isolation is mandatory, either on native Linux or inside the pinned Docker/Colima Linux runtime on macOS: native Freebuff tools can affect only a disposable checkout. The real session workspace is available only through `backend/src/providers/kory-mcp-bridge.ts`, whose grant is scoped to the Kory session and role and whose executions flow through `ToolRegistry.execute()` and `permission-policy.ts`. Never weaken this to an unsandboxed fallback or claim the native tools are disabled.
+Freebuff runs through its real TUI (OpenTUI; the qualified floor is native 0.2.36) in `backend/src/providers/freebuff-cli.ts`. Kory auto-tracks the latest Freebuff release exactly like the official npm launcher: `resolveLatestFreebuffVersion` in `freebuff-runtime-version.ts` reads the unauthenticated npm `latest` tag (10 s, redirects refused, 6 h success / 10 min negative cache) and `freebuff-runtime.ts` builds a versioned image `koryphaios/freebuff-runtime:<version>-bun1.3.14-r<recipeRev>` from the embedded Dockerfile. Known archive hashes are verified; new releases build trust-on-first-use and record the hash into the image. A missing latest image builds in the background while the proven one keeps serving, then swaps after a real isolation probe; a Codebuff 410 `freebuff_update_required` forces an update and one retried turn — never a loop, and never after content was emitted. The adapter uses a private tmux server as a PTY, stages the CLI-owned login and selected model settings in a per-turn private HOME, installs `.agents/mcp.json`, and reads structured completion/tool evidence from Freebuff's own `log.jsonl` inside isolation. It has no headless mode or general native-tool deny hook, so Linux bubblewrap isolation is mandatory, either on native Linux or inside the Docker/Colima Linux runtime on macOS: native Freebuff tools can affect only a disposable checkout. The real session workspace is available only through `backend/src/providers/kory-mcp-bridge.ts`, whose grant is scoped to the Kory session and role and whose executions flow through `ToolRegistry.execute()` and `permission-policy.ts`. Never weaken this to an unsandboxed fallback or claim the native tools are disabled.
 
-Credentials remain owned by `freebuff login` in `~/.config/manicode/credentials.json` or the Freebuff-owned Keychain item it references. Koryphaios resolves only that exact referenced item through the normal OS permission gate, stages a private 0600 per-turn copy, and deletes it afterward; never dump Keychains, log tokens, alter the original login, or reuse the token as a Codebuff SDK key. Modern account models come only from authenticated read-only `GET https://www.codebuff.com/api/v1/freebuff/models` (protocol 1) in `freebuff-model-catalog.ts`. Only open, issued rows are selectable; vision, windows and reasoning levels come from those rows. Kory wraps stable picker keys as `freebuff/catalog-<key>` and writes `freebuffModelKey`/`freebuffCatalogReasoningEfforts` into the private turn settings. Opaque handles stay backend-only for root-model verification; never publish them as upstream IDs or guess prices. `freebuff/cli-default` preserves CLI-owned selection. Docker discovery inspects the actual pinned execution binary, not the independently auto-updating host launcher. Native Linux still requires the installed execution version to match qualification. Connect prepares the pinned image automatically using its embedded credential-free recipe and then proves isolation; do not make users run setup scripts. Any execution-runtime upgrade must revalidate the actual model selection, `.agents/mcp.json` loading, private-workspace `--trust-agents`, startup keystrokes, and root `log.jsonl` completion/error shapes. See `docs/freebuff-cli.md` and `docker/freebuff-runtime/README.md`.
+Credentials remain owned by `freebuff login` in `~/.config/manicode/credentials.json` or the Freebuff-owned Keychain item it references. Koryphaios resolves only that exact referenced item through the normal OS permission gate, stages a private 0600 per-turn copy, and deletes it afterward; never dump Keychains, log tokens, alter the original login, or reuse the token as a Codebuff SDK key. Modern account models come only from authenticated read-only `GET https://www.codebuff.com/api/v1/freebuff/models` (protocol 1) in `freebuff-model-catalog.ts`. Only open, issued rows are selectable; vision, windows and reasoning levels come from those rows. Kory wraps stable picker keys as `freebuff/catalog-<key>` and writes `freebuffModelKey`/`freebuffCatalogReasoningEfforts` into the private turn settings. Opaque handles stay backend-only for root-model verification; never publish them as upstream IDs or guess prices. `freebuff/cli-default` preserves CLI-owned selection. Docker discovery inspects the actual selected execution binary, not the independently auto-updating host launcher. Native Linux runs the installed binary at any version >= 0.2.36, re-probing once when the account catalog version disagrees. Connect prepares the runtime image automatically using its embedded credential-free recipe and then proves isolation; do not make users run setup scripts. Per-turn fail-closed evidence — the MCP ready marker, root-model verification against the account handle, and exact completion/error log shapes — is the runtime qualification, and real upstream errors are surfaced with only bounded code/message fields. The 0.2.36 concurrent-session "take over" gate is reported, never auto-confirmed. Turn teardown sends the TUI's own Ctrl-C quit sequence first — a defensive bid for Freebuff's clean-exit path to release its server-side session lease (a stale lease from a crashed session was observed once; our teardown leaving one was never reproduced) — then the forced tmux/container cleanup runs unconditionally. Any change to Kory's TUI/log assumptions must be revalidated with the live probes. See `docs/freebuff-cli.md` and `docker/freebuff-runtime/README.md`.
 
-The 0.2.16 Docker/Colima qualification includes actual signed MCP Notes reads with short and long prompts, root completion, and account-attributed input-only billing samples. Use explicit bracketed paste frames and wait for the bordered composer's receipt (or a native long-text attachment's character count) before Enter. Freebuck billing lives in `freebuff-account.ts`: read-only GET on the canonical `www.codebuff.com` host, the same narrowly scoped credential resolver, per-profile cached balances with stale/unavailable states, and no USD conversion. The runtime requires a native x64 Docker kernel, not an x64 container emulated by an ARM daemon; context selection is local to Freebuff and never changes Docker's global context.
+The 0.2.36 Docker/Colima live qualification includes actual signed MCP Notes reads with short and long prompts, root completion, and account-attributed input-only billing samples; each newly tracked runtime version must re-earn the same evidence. Use explicit bracketed paste frames and wait for the bordered composer's receipt (or a native long-text attachment's character count) before Enter. Freebuck billing lives in `freebuff-account.ts`: read-only GET on the canonical `www.codebuff.com` host, the same narrowly scoped credential resolver, per-profile cached balances with stale/unavailable states, and no USD conversion. The runtime requires a native x64 Docker kernel, not an x64 container emulated by an ARM daemon; context selection is local to Freebuff and never changes Docker's global context.
 
 Codebuff is a separate API-key provider in `backend/src/providers/codebuff.ts`, using `@codebuff/sdk` v0.10.7 and the documented `codebuff/base@0.0.16` store agent. It must use a real `CODEBUFF_API_KEY`; Freebuff CLI credentials are never reused as an SDK key. Supported SDK filesystem and command tools are overridden through Kory's tool pipeline, while SDK-local artifacts are confined to a disposable workspace with native reads blocked. `RunState.output.type === "error"` is a provider error and must never be converted into an empty successful completion.
 
@@ -171,6 +235,62 @@ The Antigravity CLI (`agy`) has a real declarative permission engine, and Koryph
 - **The window is shared with agy's own prompt.** agy's native system prompt, tool surface, MCP registration and `AGENTS.md` are in context before Kory's first turn, and Kory can neither see nor shrink that prefix. Budgeting against the raw model window therefore overstates what the CLI accepts and the turn dies on overflow. `antigravityPromptBudget()` reserves a quarter of the window (8k floor, 48k ceiling) plus an output reserve, and `fitAntigravityPrompt()` keeps the instruction header and the newest turns, marking how many older ones it dropped. The header is instructions, never history: it is never trimmed. agy's usage receipt is a turn total (`estimated`), so it is never used for accounting or compaction — only, above 95% of the window, as the signal to drop the cached `--conversation` and replay Kory's authority next turn.
 
 Any `agy` upgrade must revalidate settings.json key names, hook schema and decision vocabulary, MCP config location, the credential filename, and the headless soft-deny behavior. Each of these has changed before and each failure is silent.
+
+## One banned name: “Native Settings”
+
+The name `Native Settings` is banned on the owner’s Mac. It arrived as desktop-evaluation
+spam — an agent asked to fix a settings window leaves a file, an app bundle, a window title or
+a Dock entry carrying that name — and cleaning up afterwards never works: something always
+survives the sweep (a window still on screen, a LaunchServices registration, a path outside
+the scanned tree). So the name is refused at the door, by a bouncer.
+
+- `backend/src/security/banned-names.ts` holds the pattern (`native[\s._-]*settings`, any
+  case, any separator) and `BANNED_NAME_REASON`, the refusal text the agent reads back.
+  `screenToolCall()` walks every string in a tool call’s input.
+- `backend/src/tools/execution-pipeline.ts` calls `screenToolCall()` before ownership, sandbox
+  or approval work, so a refused call never reaches the filesystem or the process table and
+  leaves no artifact. Returning a later error would make this a killer instead of a bouncer.
+- Observation-only tools are exempt because the repository legitimately contains the token
+  (`frontend/src/lib/components/native-settings-controls.test.ts`). `READ_ONLY_TOOLS` is
+  deliberately not reused for that exemption: it also lists window-driving tools like
+  `computer_place_window`, which must be screened.
+- `scripts/native-settings-bouncer.ts` (`bun run guard:native-settings`, `--kill`, `--watch N`,
+  `--dock`) is the backstop for anything that entered before the bouncer existed or through a
+  provider that bypassed the tool pipeline. It imports the same pattern, so there is one
+  definition. Deleting the artifact is not enough on macOS, so it also covers the places a
+  deleted app keeps showing up: `~/Applications`, `/Applications`, Desktop/Documents/Downloads,
+  `Application Support`, `LaunchAgents` (unloaded with `launchctl bootout` first), `Saved
+  Application State`, `Preferences`, and `/tmp` + `/private/tmp` (one hit per canonical path).
+  An `.app` is deregistered with `lsregister -u` before removal, and a Dock tile is cleared only
+  when `--dock` is passed. Its own test is `scripts/native-settings-bouncer.test.ts`
+  (`bun run test:guards`).
+- Do not rename the ban into a settings-window feature, and do not add the name to fixtures,
+  window titles, or generated app metadata. Pick a different name.
+
+## Evidence runs target the packaged backend
+
+Qualification campaigns and blind reviews spend provider calls through the Kory backend, so
+that backend must never be a file watcher. `bun run --filter backend dev` is
+`bun --watch src/server.ts`: any edit under `backend/src` restarts it, the restart kills the
+turn mid stream, and the arm is then scored as a candidate failure. This produced two false
+"svelte-engineering delivered nothing" verdicts before it was diagnosed.
+
+`bun run eval:backend` is the fixture: it rebuilds `backend/build/server.js` when it is older
+than the newest `backend/src` file, then runs that bundle with the same config, credentials
+and data directory, on `KORYPHAIOS_PORT` (default 3001), logging to `outputs/eval-backend.log`.
+`scripts/eval-backend-guard.ts` asks the backend which executable is serving it and both
+campaign scripts refuse a source watcher unless `--allow-watcher-backend` (or
+`KORY_SKILL_EVAL_ALLOW_WATCHER_BACKEND`) is set deliberately. A stale bundle silently serves
+older evaluator code, which is why the launcher rebuilds rather than trusting an existing file.
+
+An evaluation fixture builds, renders and screenshots, and the `guarded` agent preset refuses that
+shell: the backend records `SHELL_METACHARACTERS` or `EXECUTABLE_NOT_ALLOWED` and the subject's turn
+ends with no artifact to score. `scripts/eval-permission.ts` reads, sets and restores the project
+scoped preset through the product API; `scripts/run-skill-v5-qualification-campaign.ts
+--permission-mode=<preset>` applies it for the run and restores it on the way out, and
+`scripts/eval-permission-profile.ts --mode=<preset> -- <command>` does the same around any command.
+The preset is project scoped, so a wrapper that forgets to restore leaves the operator's own chats
+unguarded.
 
 ## Model catalog refresh
 
@@ -195,7 +315,7 @@ Every native CLI provider writes configuration that the CLI only honours if it r
 Verified against the real CLIs:
 
 - **codex** — `CODEX_HOME/<name>.config.toml` layered by `codex exec --profile <name>` is correct and documented in `codex --help`.
-- **devin** — `<DEVIN_CONFIG_DIR>/devin/config.json` with a top-level `hooks` key keyed by event name is correct; confirmed by running `devin doctor`. The `hooks.v1.json` comments in `devin-bridge.ts` are stale, not the writer. Devin parses Claude Code's hook output contract (`ClaudeHookSpecificOutput`, `permissionDecision`), so the shared hook bridge vocabulary is correct for it.
+- **devin** — `<DEVIN_CONFIG_DIR>/devin/config.json` with a top-level `hooks` key keyed by event name is correct; confirmed by running `devin doctor`. The `hooks.v1.json` comments in `devin-bridge.ts` are stale, not the writer. Devin parses Claude Code's hook output contract (`ClaudeHookSpecificOutput`, `permissionDecision`), so the shared hook bridge vocabulary is correct for it. On devin 3000.14 there is no `--agent-config` flag, so the same `config.json` carries the enforcement layer: `permissions` uses the documented grammar (bare tool names `read`/`edit`/`grep`/`glob`/`exec` for whole-tool denies, `Read(glob)`/`Write(glob)`/`Exec(prefix)`/`Fetch(pattern)` scopes, `mcp__kory__*` for the bridge namespace; Deny > Ask > Allow), `subagents_enabled: false` removes `run_subagent`/`read_subagent`, and `read_config_from` disables cross-tool MCP/rule imports. In the hook channel MCP calls appear as `mcp__<server>__<tool>` — the kory bridge tools therefore show up as `mcp__kory__kory__read_file` — while the ATIF export records the same call as `mcp_call_tool`; the hook decision path must handle both spellings. Account plan/quota comes from the Connect RPC `POST {api_server_url}/exa.seat_management_pb.SeatManagementService/GetUserStatus` (header `connect-protocol-version: 1`, body `{"metadata": {apiKey, ide_name, ide_version, extension_name, extension_version}}` — a bare apiKey is rejected) using `windsurf_api_key` from the CLI-owned `credentials.toml`; `user_status.plan_status` reports `planName`/`teamsTier`, `dailyQuotaRemainingPercent`/`weeklyQuotaRemainingPercent`, `dailyQuotaResetAtUnix`/`weeklyQuotaResetAtUnix`, `hideDailyQuota`/`hideWeeklyQuota`, `planStart`/`planEnd`, credits and ACU. There is no `/usage` slash command.
 - **claude** — hooks come from the `hooks` key of a settings file (or plugin `hooks/hooks.json`, or skill/subagent frontmatter). There is no sibling `hooks.json`. Because this provider symlinks the user's real `settings.json` to share auth, per-turn hooks are injected with `--settings <json>`, which layers rather than replaces. See `buildClaudePerTurnSettings()`.
 
 Hook decision output is **per-event** and is not interchangeable. Claude Code and Devin read a top-level `{decision, reason}` for `Stop`/`UserPromptSubmit`/`PostToolUse`, but require `hookSpecificOutput.permissionDecision` for `PreToolUse` and `hookSpecificOutput.decision.behavior` for `PermissionRequest`. `kory-hook-bridge.ts` encodes per event; adding an event without a case there silently degrades to "no decision", which means the tool call proceeds.

@@ -5,7 +5,7 @@
 // one call, so a field cannot be missed by the cleanup path.
 // See docs/architecture/transcript-integrity.md Invariant 5.
 
-import type { AgentStatus, ProviderName } from '@koryphaios/shared';
+import type { AgentFallbackStep, AgentStatus, ProviderName } from '@koryphaios/shared';
 import type { Provider } from '../../providers/types';
 import type { TaskContract } from '../prompts';
 
@@ -25,6 +25,14 @@ export interface SessionRuntimeWorkerUsage {
 export interface SessionRuntimeProviderPreflight {
   routing: SessionRuntimeRouting;
   provider: Provider;
+}
+
+/** Manager routing changes are per chat and remain in effect until changed. */
+export interface SessionRuntimeManagerControl {
+  model: string;
+  provider?: ProviderName;
+  reasoningLevel?: string;
+  fallbacks: AgentFallbackStep[];
 }
 
 export class SessionRuntime {
@@ -71,8 +79,22 @@ export class SessionRuntime {
   titlePromise?: Promise<void>;
   titleAbort?: AbortController;
 
+  /** Serializes concurrent waitForUserInput calls (parallel CLI tool calls can
+   *  issue two questions or a question plus an approval at once): each wait
+   *  chains behind the previous one so a second park cannot clobber the first
+   *  resolver. Resolves when the current wait finishes; never rejects. */
+  questionQueue: Promise<void> = Promise.resolve();
+
   /** Steering drain in flight per agent. Removed by the drain that created it. */
   steeringDrains = new Map<string, Promise<{ runId: string } | null>>();
+
+  /** User sends parked behind the live run for checkpoint steering, keyed by
+   *  their durable agent_steering_commands row id. A non-empty map is what
+   *  tells the manager turn loop to yield at the next safe boundary instead
+   *  of finishing the turn — see docs/architecture/transcript-integrity.md.
+   *  The durable row is the restart-surviving receipt; this map only carries
+   *  full input fidelity (attachments, model parameters) the row cannot. */
+  pendingSteerInputs = new Map<string, import('../manager').SessionTurnCommandInput>();
 
   /** Pending usage-retry timers. */
   usageRetryTimers = new Set<ReturnType<typeof setTimeout>>();
@@ -83,8 +105,43 @@ export class SessionRuntime {
   /** Collision choices persist per project and are reused by task workers/critics. */
   skillCollisionChoices?: SkillCollisionChoices;
 
+  /** Skills whose full instructions this chat's agent already holds in its
+   *  live context (load_skill_detail results not yet compacted, pruned, or
+   *  shrunk away). The feeder feeds these as minimal pointers only. */
+  skillDetailInContext = new Set<string>();
+
+  /** Skills this chat's agent blocked via manage_skill_feeding. The feeder
+   *  stops injecting them until unblocked or the chat is disposed. Mirrored
+   *  durably in the session's agentOverrides.blockedSkillFeeds and rehydrated
+   *  from there when a fresh runtime replaces a disposed one (idle reaper,
+   *  app restart), so a block outlives the process that made it. */
+  skillFeedBlocked = new Set<string>();
+  /** Whether skillFeedBlocked has been seeded from the durable override this
+   *  runtime lifetime. One-shot: later durable changes flow through the tool. */
+  skillFeedBlocksHydrated = false;
+
+  /** Signature of the last emitted kory.skill feed set; the feeder emits a
+   *  feed row only when the fed skill set actually changes, not every turn. */
+  emittedSkillSetKey?: string;
+  /** Skill names fed on the most recent turn, for manage_skill_feeding report. */
+  lastFedSkills?: string[];
+
   /** User-selected manager identity, used only to enforce role independence. */
   managerRouting?: SessionRuntimeRouting;
+
+  /** Critic routes (`${provider}:${model}`) that recently failed to run, with
+   *  the failure time and message. Entries expire after a TTL at read time so
+   *  a transiently broken route becomes eligible again without bookkeeping. */
+  failedCriticRoutes = new Map<string, { failedAt: number; error: string }>();
+
+  /** Explicit manager controls keyed by manager agent id. A control applies to
+   *  manager turns until changed, except when the user pins a model on the
+   *  request. Keys are manager identities, not the chat, so peer-manager records
+   *  do not collide with the primary manager. */
+  managerControls = new Map<string, SessionRuntimeManagerControl>();
+
+  /** True once this runtime has copied the durable agent override blob. */
+  agentOverridesHydrated = false;
 
   /** Client-side session context budget (tokens) from the composer. Budgeting only. */
   contextWindowOverride?: number;
@@ -103,6 +160,20 @@ export class SessionRuntime {
   /** Last automatic-compaction failure; cooldown prevents a crash loop. */
   lastAutoCompactFailureAt?: number;
 
+  /** Tool-context modes this chat's agent chose for itself. Wins over the
+   *  user's project-wide `toolContextPolicies`. */
+  toolContextOverrides = new Map<string, import('../../tool-context-policy').ToolContextMode>();
+
+  /** Agent-authored or auxiliary-model summaries keyed by archive id. Applied
+   *  when a tool result is assembled into the agent's context. */
+  toolSummaries = new Map<
+    string,
+    { summary: string; toolName: string; ts: number; source: 'agent' | 'model' }
+  >();
+
+  /** The agent asked to compact before the configured pressure threshold. */
+  compactionRequested?: { at: number; reason: string };
+
   /** Goal state is immutable task context, not a conversational suggestion. */
   goalContext?: NonNullable<TaskContract['goalContext']>;
 
@@ -118,6 +189,20 @@ export class SessionRuntime {
   workingDir?: string;
   /** Workspace preparation in flight. Owned by its operation; dispose() does not clear it. */
   workspacePreparation?: Promise<string>;
+  /** Bumped whenever the session's workspace binding changes (isolate_chat /
+   *  merge_chat_back). A workingDir prepared under an older epoch is never
+   *  cached, so the next resolution re-reads the new binding. */
+  workspaceEpoch = 0;
+  /** Set when the chat's workspace binding changed earlier in the current turn
+   *  (isolate_chat or merge_chat_back). While set, workspace-mutating tools are
+   *  denied — the manager's ToolContext still points at the pre-change root.
+   *  `resume` marks the isolate case: after this turn the host schedules one
+   *  automatic continuation in the new workspace. Cleared at the next run claim. */
+  workspaceRebindPending?: { resume: boolean; note: string };
+  /** A workspace-mutating tool (write/patch/delete/bash/git) ran successfully
+   *  earlier this turn while the chat ran in place. isolate_chat refuses then:
+   *  uncommitted in-place edits cannot move to the copy. Reset at run claim. */
+  mutatedInPlaceThisTurn = false;
 
   /** Clears timers and drops per-session state. Aborts nothing: aborts belong
    *  to the operation that owns the controller (the manager clears the title
@@ -129,6 +214,8 @@ export class SessionRuntime {
     for (const timer of this.usageRetryTimers) clearTimeout(timer);
     this.usageRetryTimers.clear();
     this.steeringDrains.clear();
+    this.questionQueue = Promise.resolve();
+    this.pendingSteerInputs.clear();
     this.abort = undefined;
     this.runClaimed = false;
     this.runClaimedAt = undefined;
@@ -140,18 +227,31 @@ export class SessionRuntime {
     this.titleAbort = undefined;
     this.promptManifestHash = undefined;
     this.skillCollisionChoices = undefined;
+    this.skillDetailInContext.clear();
+    this.skillFeedBlocked.clear();
+    this.emittedSkillSetKey = undefined;
+    this.lastFedSkills = undefined;
     this.managerRouting = undefined;
+    this.failedCriticRoutes.clear();
+    this.managerControls.clear();
+    this.agentOverridesHydrated = false;
     this.contextWindowOverride = undefined;
     this.contextShrinkHints.clear();
     this.cachePrewarm = undefined;
     this.compacting = undefined;
     this.providerPreflight = undefined;
     this.lastAutoCompactFailureAt = undefined;
+    this.toolContextOverrides.clear();
+    this.toolSummaries.clear();
+    this.compactionRequested = undefined;
     this.goalContext = undefined;
     this.autoContinuationIssued = false;
     this.warnedUnverifiedContextWindows.clear();
     this.warnedCompilationMessages.clear();
     this.workingDir = undefined;
+    this.workspaceEpoch += 1;
+    this.workspaceRebindPending = undefined;
+    this.mutatedInPlaceThisTurn = false;
   }
 }
 

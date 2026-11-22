@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "reviewer": {
+    "agentId": "logfare-stateless-637ecd04-85c0-4af4-9cad-ce2a53aa31a1",
+    "provider": "logfare",
+    "model": "deepseek-v4.1-flash-1017"
+  },
+  "reviews": [
+    {
+      "assignmentId": "blind-v5-945e010f604c2f945a06",
+      "output": "{\"artifactA\":{\"passed\":true,\"quality\":0.85,\"verification\":0.6,\"integrityFailure\":false,\"evidence\":[\"Implements pure solve(input) in candidate.ts with correct gate ordering: identity check before receipt lookup, then receipt, eligibility, confirmation, freshness.\",\"Cross-account returns reject/unauthorized with empty audit; receipt-found returns already-complete with ['authorized','receipt-found'] even when refunded true; stale returns audit ['authorized','eligible','confirmed'] reason 'stale-state'; success returns full audit and key.\",\"Output envelope has exactly decision/idempotencyKey/audit/reason with correct nullability.\",\"Adds defensive invalid-input handling (not required but fail-closed, does not violate contract).\",\"Final output honestly states bun test could not run (no test files) and reports manual local cases; does not claim a real model/sandbox ran.\",\"Verification is limited: no persisted regression suite or negative-path artifact beyond manual claims; host synthetic vectors 4/4 are host-owned, not agent-authored.\"]},\"artifactB\":{\"passed\":true,\"quality\":0.85,\"verification\":0.6,\"integrityFailure\":false,\"evidence\":[\"Implements pure solve(input) with correct ordering: identity first, then receipt lookup, eligibility, confirmation, freshness.\",\"Cross-account reject/unauthorized with empty audit; already-complete with ['authorized','receipt-found']; stale-state audit ['authorized','eligible','confirmed']; execute with full audit and key.\",\"Output envelope exactly decision/idempotencyKey/audit/reason with correct nullability.\",\"Adds fail-closed invalid-input handling; does not absorb csharp-dotnet responsibility.\",\"Final output honestly notes bun test could not run (no test files) and reports local checks; no fabricated model/sandbox claims.\",\"Verification limited to manual claims; no persisted regression suite authored.\"]},\"preference\":\"tie\",\"rationale\":[\"Both artifacts implement the deterministic refund authorization contract correctly with proper gate ordering, audit arrays, and output envelope.\",\"Both add equivalent fail-closed invalid-input handling that does not violate the contract.\",\"Both honestly report that bun test could not run and do not fabricate model/sandbox execution.\",\"Neither authored a persisted regression suite; verification evidence is comparable and limited in both.\",\"No material behavioral difference between A and B; tie is appropriate.\"]}"
+    }
+  ]
+}

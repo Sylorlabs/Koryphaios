@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import {
   PRIVACY_WEB_DEVICE_SKILL_EVAL_MATERIALIZERS,
   PRIVACY_WEB_DEVICE_SKILL_EVAL_SCORERS,
-} from '../skill-eval-privacy-web-device-fixtures';
+} from '../../eval/skills/skill-eval-privacy-web-device-fixtures';
 
 const scenario = { id: 'embedded-device-security-full-task-1-individual' } as never;
 const materializer = PRIVACY_WEB_DEVICE_SKILL_EVAL_MATERIALIZERS.find((item) =>

@@ -91,6 +91,40 @@ export class OrderedSessionEventIngress<T extends SessionSequencedEvent> {
     };
   }
 
+  /**
+   * Apply a server `session.history_pruned` marker: history through
+   * `throughSequence` no longer exists, so the buffer jumps past it instead of
+   * waiting on a gap that can never fill. `missed` is true only when this
+   * client had already applied part of that epoch and is now missing events it
+   * never saw; a fresh renderer (cursor 0) loads persisted history over HTTP
+   * and has nothing to recover.
+   */
+  skipPrunedHistory(
+    sessionId: string,
+    epoch: number,
+    throughSequence: number,
+  ): { events: T[]; missed: boolean } {
+    if (!sessionId || !Number.isSafeInteger(epoch) || !Number.isSafeInteger(throughSequence)) {
+      return { events: [], missed: false };
+    }
+    const cursor = this.cursors.get(sessionId);
+    const applied = cursor?.epoch === epoch ? cursor.sequence : 0;
+    const missed = applied > 0 && applied < throughSequence;
+    let buffer = this.buffers.get(sessionId);
+    if (!buffer) {
+      buffer = new OrderedEventBuffer(epoch, applied, true);
+      this.buffers.set(sessionId, buffer);
+    }
+    const events = buffer.skipTo(epoch, throughSequence);
+    const last = events.at(-1);
+    this.cursors.set(sessionId, {
+      epoch,
+      sequence: last ? last.sequence : Math.max(applied, throughSequence),
+    });
+    if (!buffer.isWaitingForGap) this.replayRequestedForGap.delete(sessionId);
+    return { events, missed };
+  }
+
   getCursor(sessionId: string): OrderedSessionCursor | undefined {
     return this.cursors.get(sessionId);
   }

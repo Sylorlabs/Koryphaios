@@ -203,7 +203,14 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
             commandBlocklist: pending.commandBlocklist || [],
           },
         });
-        if (!submission.accepted) {
+        if (submission.accepted !== true) {
+          if (submission.accepted === 'queued') {
+            set.status = 409;
+            return {
+              ok: false,
+              error: 'The target chat is busy; the guest prompt remains pending.',
+            };
+          }
           if (submission.result.status === 'rejected') {
             set.status = 409;
             return {
@@ -221,7 +228,7 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
           }
         }
         const prompt = await collaborationManager.resolveGuestPrompt(promptId, true);
-        if (submission.accepted) {
+        if (submission.accepted === true) {
           void submission.completion.catch(() => undefined);
         }
         return {
@@ -229,7 +236,7 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
           data: {
             approved: true,
             prompt,
-            runId: submission.accepted ? submission.runId : submission.result.runId,
+            runId: submission.accepted === true ? submission.runId : '',
           },
         };
       }

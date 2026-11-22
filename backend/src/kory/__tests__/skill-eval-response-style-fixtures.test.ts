@@ -7,7 +7,7 @@ import {
   RESPONSE_STYLE_SKILL_EVAL_MATERIALIZERS,
   RESPONSE_STYLE_SKILL_EVAL_SCORERS,
   scoreResponseStyle,
-} from '../skill-eval-response-style-fixtures';
+} from '../../eval/skills/skill-eval-response-style-fixtures';
 
 const roots: string[] = [];
 

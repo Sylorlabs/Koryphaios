@@ -68,8 +68,11 @@ function harness(
     readyOnSubmit?: boolean;
     runtimeAvailable?: boolean;
     catalogVersion?: string;
+    refreshedVersion?: string;
+    forceUpdate?: () => Promise<{ available: boolean; kind: 'docker'; version: string }>;
     accountCatalog?: FreebuffAccountCatalog;
     accountCatalogFailure?: boolean;
+    readLogRows?: () => Promise<Record<string, unknown>[]>;
   } = {},
 ) {
   // Only synthetic credentials in a temporary fixture. Never discover actual CLI accounts.
@@ -87,8 +90,11 @@ function harness(
   temporary.push(runRoot);
   const calls: string[] = [];
   const tmuxCalls: string[][] = [];
+  let runtimeVersion = '0.2.12';
+  let forcedRefreshes = 0;
   let loadedPrompt = '';
   let pastedPrompt = '';
+  let tuiExited = false;
   let runtimeOptions: FreebuffRuntimeOptions | undefined;
   const readyPath = join(runRoot, 'bridge-ready.json');
   const selectedModel = options.selectedModel ?? FREEBUFF_CLI_DEFAULT_MODEL_ID;
@@ -117,6 +123,7 @@ function harness(
     }),
     start: mock(async (args: string[]) => {
       calls.push('start');
+      tuiExited = false;
       expect(args).toEqual(['--cwd', join(runRoot, 'workspace'), '--trust-agents']);
       options.onStart?.(runRoot);
       fail('start');
@@ -131,6 +138,11 @@ function harness(
       if (options.readyOnSubmit && args[0] === 'send-keys' && args.at(-1) === 'Enter') {
         writeFileSync(readyPath, '{"ready":true}');
       }
+      if (args[0] === 'send-keys' && args.at(-1) === 'C-c') {
+        tuiExited = true;
+        calls.push('tui-quit');
+      }
+      if (args[0] === 'has-session' && tuiExited) throw new Error('session ended');
       if (args[0] === 'capture-pane') {
         fail('capture');
         return `${options.pane ?? READY}\n${pastedPrompt ? (pastedPrompt.length > 2000 ? `Pasted text (${pastedPrompt.length.toLocaleString()} chars)` : pastedPrompt) : ''}`;
@@ -188,13 +200,24 @@ function harness(
     runtimeStatus: () => ({
       available: options.runtimeAvailable !== false,
       kind: 'docker',
-      version: '0.2.12',
+      version: runtimeVersion,
     }),
-    refreshRuntimeStatus: async () => ({
-      available: options.runtimeAvailable !== false,
-      kind: 'docker',
-      version: '0.2.12',
-    }),
+    refreshRuntimeStatus: async (force?: boolean) => {
+      if (force === true) {
+        forcedRefreshes += 1;
+        if (options.refreshedVersion) runtimeVersion = options.refreshedVersion;
+      }
+      return {
+        available: options.runtimeAvailable !== false,
+        kind: 'docker' as const,
+        version: runtimeVersion,
+      };
+    },
+    scheduleRuntimeUpdate: () => {},
+    forceRuntimeUpdate: options.forceUpdate ??
+      (async () => {
+        throw new Error('synthetic update failure');
+      }),
     createRunRoot: () => {
       if (options.failure === 'credentials') rmSync(join(profileDir, 'credentials.json'));
       return runRoot;
@@ -230,10 +253,15 @@ function harness(
       fail('bridge');
       return prepared;
     },
-    readLogRows: mock(async () => {
-      calls.push('logs');
-      return rows.shift() ?? [];
-    }),
+    readLogRows: options.readLogRows
+      ? mock(async () => {
+          calls.push('logs');
+          return options.readLogRows!();
+        })
+      : mock(async () => {
+          calls.push('logs');
+          return rows.shift() ?? [];
+        }),
   };
   const provider = new FreebuffProvider({ name: 'freebuff' }, dependencies);
   const request: StreamRequest = {
@@ -258,6 +286,7 @@ function harness(
     prepared,
     runRoot,
     runtimeOptions: () => runtimeOptions,
+    forcedRefreshes: () => forcedRefreshes,
   };
 }
 
@@ -295,6 +324,17 @@ describe('Freebuff native TUI evidence', () => {
   it('reports an account Freebuck limit instead of misclassifying it as bridge startup failure', () => {
     expect(freebuffAccountLimitError('Not enough Freebucks available')).toContain('no Freebucks');
     expect(freebuffAccountLimitError('Freebucks: 12 remaining')).toBeNull();
+  });
+
+  it('reports the 0.2.36 concurrent-session gate instead of auto-confirming take over', () => {
+    // Real 0.2.36 modal shape: confirming would stop the account's other session.
+    const gate = [
+      '│ Your concurrent-session limit across CLI and Desktop is reached. Take over to stop another session and use its slot here. │',
+      '│ Enter: take over  Esc: back to draft │',
+    ].join('\n');
+    expect(freebuffAccountLimitError(gate)).toContain('concurrent-session limit');
+    expect(freebuffNeedsSessionConfirmation(gate)).toBe(false);
+    expect(freebuffAccountLimitError('model session ready')).toBeNull();
   });
 
   it('does not approve a trust prompt or include pane contents in failures', async () => {
@@ -575,9 +615,16 @@ describe('Freebuff mocked lifecycle (no login or inference)', () => {
     }
   });
 
-  it('refuses a host CLI upgrade that differs from the qualified runtime', async () => {
-    const fixture = harness({ catalogVersion: '0.2.13' });
+  it('re-probes the real runtime on a catalog mismatch and accepts the CLI it confirms', async () => {
+    const fixture = harness({ catalogVersion: '0.2.13', refreshedVersion: '0.2.13' });
     const events = await fixture.collect();
+    expect(fixture.forcedRefreshes()).toBeGreaterThanOrEqual(1);
+    expect(events.some((event) => event.type === 'complete')).toBe(true);
+  });
+  it('refuses a host CLI upgrade that still differs after a forced re-probe', async () => {
+    const fixture = harness({ catalogVersion: '0.2.13', refreshedVersion: '0.2.12' });
+    const events = await fixture.collect();
+    expect(fixture.forcedRefreshes()).toBeGreaterThanOrEqual(1);
     expect(events.some((event) => event.type === 'complete')).toBe(false);
     expect(events.find((event) => event.type === 'error')?.error).toContain(
       'differs from the qualified execution runtime',
@@ -707,8 +754,10 @@ describe('Freebuff mocked lifecycle (no login or inference)', () => {
     expect(events[0]).toMatchObject({ type: 'error' });
     expect(JSON.stringify(events)).not.toContain(SECRET);
     expect(
-      fixture.tmuxCalls.some((args) =>
-        ['send-keys', 'load-buffer', 'paste-buffer'].includes(args[0]!),
+      fixture.tmuxCalls.some(
+        (args) =>
+          ['load-buffer', 'paste-buffer'].includes(args[0]!) ||
+          (args[0] === 'send-keys' && args.at(-1) !== 'C-c'),
       ),
     ).toBe(false);
   });
@@ -840,6 +889,238 @@ describe('Freebuff mocked lifecycle (no login or inference)', () => {
       if (previous === undefined) delete process.env[key];
       else process.env[key] = previous;
     }
+  });
+
+  const retiredRow = {
+    msg: 'Error in AI SDK stream',
+    data: {
+      agentId: 'main-agent',
+      error: {
+        statusCode: 410,
+        responseBody: '{"error":{"code":"freebuff_update_required","message":"update"}}',
+      },
+    },
+  };
+
+  it('self-heals a Codebuff 410 once: update, cleanup, retry, completion', async () => {
+    const forceUpdate = mock(async () => ({
+      available: true,
+      kind: 'docker' as const,
+      version: '0.2.13',
+    }));
+    const fixture = harness({
+      forceUpdate,
+      rows: [[retiredRow], [rootRow(), finished()]],
+    });
+    const events = await fixture.collect();
+    expect(forceUpdate).toHaveBeenCalledTimes(1);
+    expect(events.some((event) => event.type === 'complete')).toBe(true);
+    expect(events.some((event) => event.type === 'error')).toBe(false);
+    // The retired attempt's cleanup ran before the retried turn staged its runtime.
+    const runtimes = fixture.calls
+      .map((call, index) => ({ call, index }))
+      .filter((entry) => entry.call === 'runtime');
+    expect(runtimes).toHaveLength(2);
+    expect(fixture.calls.indexOf('runtime-cleanup')).toBeLessThan(runtimes[1]!.index);
+    expect(fixture.calls.indexOf('grant-cleanup')).toBeLessThan(runtimes[1]!.index);
+    expect(existsSync(fixture.runRoot)).toBe(false);
+  });
+
+  it('reports retirement after the retried turn is rejected without a third attempt', async () => {
+    const forceUpdate = mock(async () => ({
+      available: true,
+      kind: 'docker' as const,
+      version: '0.2.13',
+    }));
+    const fixture = harness({
+      forceUpdate,
+      rows: [[retiredRow], [retiredRow], [rootRow(), finished()]],
+    });
+    const events = await fixture.collect();
+    expect(forceUpdate).toHaveBeenCalledTimes(1);
+    expect(events.some((event) => event.type === 'complete')).toBe(false);
+    const error = events.find((event) => event.type === 'error');
+    expect(error?.error).toContain('Codebuff has retired Freebuff 0.2.12');
+    expect(fixture.calls.filter((call) => call === 'runtime')).toHaveLength(2);
+  });
+
+  it('surfaces an actionable retirement error when the runtime update fails', async () => {
+    const fixture = harness({ rows: [[retiredRow]] });
+    const events = await fixture.collect();
+    expect(events.some((event) => event.type === 'complete')).toBe(false);
+    const error = events.find((event) => event.type === 'error');
+    expect(error?.error).toContain('Codebuff has retired Freebuff 0.2.12');
+    expect(error?.error).toContain('could not install a newer runtime');
+    expect(error?.error).toContain('synthetic update failure');
+    expect(fixture.calls.filter((call) => call === 'runtime')).toHaveLength(1);
+  });
+
+  it('never retries a retirement after content was already emitted', async () => {
+    const forceUpdate = mock(async () => ({
+      available: true,
+      kind: 'docker' as const,
+      version: '0.2.13',
+    }));
+    const fixture = harness({
+      forceUpdate,
+      rows: [[rootRow(), retiredRow]],
+    });
+    const events = await fixture.collect();
+    expect(events.some((event) => event.type === 'content_delta')).toBe(true);
+    expect(events.some((event) => event.type === 'complete')).toBe(false);
+    expect(forceUpdate).not.toHaveBeenCalled();
+    expect(fixture.calls.filter((call) => call === 'runtime')).toHaveLength(1);
+  });
+
+  it('surfaces the real upstream error code and message without private material', async () => {
+    const token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.fixture';
+    const fixture = harness({
+      rows: [
+        [
+          {
+            msg: 'Error in AI SDK stream',
+            data: {
+              agentId: 'main-agent',
+              error: {
+                statusCode: 502,
+                isRetryable: true,
+                url: 'https://internal.example/request?key=hidden',
+                requestBodyValues: { prompt: 'the user prompt must never surface' },
+                stack: 'Error: stack\n at internal',
+                responseBody: JSON.stringify({
+                  error: { code: 'upstream_bad_gateway', message: `model endpoint broke ${token}` },
+                }),
+              },
+            },
+          },
+          finished('error'),
+        ],
+      ],
+    });
+    const events = await fixture.collect();
+    const error = events.find((event) => event.type === 'error');
+    expect(error?.error).toBe(
+      'Freebuff model request failed (HTTP 502, upstream_bad_gateway): model endpoint broke [redacted]',
+    );
+    expect(error?.errorTransient).toBe(true);
+    const serialized = JSON.stringify(events);
+    expect(serialized).not.toContain(token);
+    expect(serialized).not.toContain('user prompt must never surface');
+    expect(serialized).not.toContain('requestBodyValues');
+    expect(serialized).not.toContain('internal.example');
+  });
+
+  it('reports a waiting state while the forced runtime update installs', async () => {
+    const forceUpdate = mock(async () => ({
+      available: true,
+      kind: 'docker' as const,
+      version: '0.2.13',
+    }));
+    const fixture = harness({
+      forceUpdate,
+      rows: [[retiredRow], [rootRow(), finished()]],
+    });
+    const events = await fixture.collect();
+    const waitingIndex = events.findIndex((event) => event.type === 'waiting');
+    expect(waitingIndex).toBeGreaterThanOrEqual(0);
+    expect(events[waitingIndex]?.waitingReason).toContain('Updating the Freebuff runtime');
+    const completeIndex = events.findIndex((event) => event.type === 'complete');
+    expect(completeIndex).toBeGreaterThan(waitingIndex);
+  });
+
+  it('cancels promptly while a forced runtime update is still installing', async () => {
+    const controller = new AbortController();
+    let releaseUpdate: (() => void) | undefined;
+    const forceUpdate = mock(async () => {
+      await new Promise<void>((resolve) => {
+        releaseUpdate = resolve;
+      });
+      return { available: true, kind: 'docker' as const, version: '0.2.13' };
+    });
+    const fixture = harness({
+      forceUpdate,
+      signal: controller.signal,
+      rows: [[retiredRow], [rootRow(), finished()]],
+    });
+    const collected = fixture.collect();
+    for (let attempt = 0; attempt < 100 && !releaseUpdate; attempt += 1)
+      await Bun.sleep(10);
+    expect(forceUpdate).toHaveBeenCalledTimes(1);
+    controller.abort();
+    const events = await collected;
+    releaseUpdate?.();
+    const error = events.find((event) => event.type === 'error');
+    expect(error?.error).toBe('Freebuff PTY turn cancelled.');
+    expect(events.some((event) => event.type === 'complete')).toBe(false);
+  });
+
+  it('does not rebuild the runtime for a bare 410 on an unrelated row', async () => {
+    const forceUpdate = mock(async () => ({
+      available: true,
+      kind: 'docker' as const,
+      version: '0.2.13',
+    }));
+    const fixture = harness({
+      forceUpdate,
+      rows: [
+        [
+          { msg: 'Runtime telemetry flush failed', data: { error: { statusCode: 410 } } },
+          rootRow(),
+          finished(),
+        ],
+      ],
+    });
+    const events = await fixture.collect();
+    expect(forceUpdate).not.toHaveBeenCalled();
+    expect(events.some((event) => event.type === 'complete')).toBe(true);
+  });
+
+  it('treats a 410 on the model-stream rows as retirement', async () => {
+    const forceUpdate = mock(async () => ({
+      available: true,
+      kind: 'docker' as const,
+      version: '0.2.13',
+    }));
+    const fixture = harness({
+      forceUpdate,
+      rows: [
+        [{ msg: 'Error in AI SDK stream', data: { error: { statusCode: 410 } } }],
+        [rootRow(), finished()],
+      ],
+    });
+    const events = await fixture.collect();
+    expect(forceUpdate).toHaveBeenCalledTimes(1);
+    expect(events.some((event) => event.type === 'complete')).toBe(true);
+  });
+
+  it('reports the TUI exit when the runtime dies between the liveness check and the log drain', async () => {
+    let callsToDrain = 0;
+    const fixture = harness({
+      readLogRows: async () => {
+        callsToDrain += 1;
+        throw new Error('Freebuff runtime command failed');
+      },
+    });
+    const events = await fixture.collect();
+    const error = events.find((event) => event.type === 'error');
+    expect(error?.error).toBe('Freebuff TUI exited before producing a completion event');
+    // The raw runtime error must not surface, and the failure stays fail-closed.
+    expect(events.some((event) => event.type === 'complete')).toBe(false);
+    expect(callsToDrain).toBeGreaterThanOrEqual(2);
+  });
+
+  it('sends the TUI quit before the forced teardown on cancellation', async () => {
+    const controller = new AbortController();
+    const fixture = harness({
+      signal: controller.signal,
+      onProbe: () => controller.abort(),
+    });
+    const events = await fixture.collect();
+    expect(events[0]).toMatchObject({ type: 'error', error: 'Freebuff PTY turn cancelled.' });
+    const quitIndex = fixture.calls.indexOf('tui-quit');
+    expect(quitIndex).toBeGreaterThanOrEqual(0);
+    expect(quitIndex).toBeLessThan(fixture.calls.indexOf('runtime-cleanup'));
+    expect(fixture.calls.filter((call) => call === 'runtime-cleanup')).toHaveLength(1);
   });
 
   it('propagates cancellation during setup and tears runtime down exactly once', async () => {

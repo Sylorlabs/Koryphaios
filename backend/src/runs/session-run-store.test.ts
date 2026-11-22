@@ -1381,6 +1381,10 @@ describe('SessionRunCoordinator', () => {
           detail: 'Interrupted by backend restart',
         },
       }),
+      expect.objectContaining({
+        type: 'run.settled',
+        payload: { runId: 'run-with-workers', outcome: 'interrupted', settledAt: expect.any(Number) },
+      }),
     ]);
     sqlite.close();
   });

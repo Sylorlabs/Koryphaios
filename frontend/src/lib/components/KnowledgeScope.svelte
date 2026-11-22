@@ -8,10 +8,13 @@
     scope,
     description,
     compact = false,
+    showProjectName = false,
   }: {
     scope: string;
     description: string;
     compact?: boolean;
+    /** Show the concrete project name in the selector instead of the scope word. */
+    showProjectName?: boolean;
   } = $props();
 
   // The project selector already names the concrete project. Keep the
@@ -24,7 +27,7 @@
 </script>
 
 <div class="knowledge-scope-row" class:compact>
-  {#if showProjectSelector}<SettingsScopeBar {compact} {projectLabel} />{/if}
+  {#if showProjectSelector}<SettingsScopeBar {compact} {projectLabel} {showProjectName} />{/if}
   {#if showProjectSelector}
     <!-- The project selector beside this is the control that changes scope.
          This used to repeat "Project" as a second dotted-underline link that

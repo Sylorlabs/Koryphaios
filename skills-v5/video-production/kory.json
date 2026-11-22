@@ -1,15 +1,22 @@
 {
   "schemaVersion": 1,
   "name": "video-production",
-  "version": "5.1.0",
+  "version": "5.1.3",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
-  "domains": ["creative", "video"],
-  "targetMedia": ["any"],
+  "domains": [
+    "creative",
+    "video"
+  ],
+  "targetMedia": [
+    "any"
+  ],
   "pathScopes": [],
   "contextBudget": 3309,
-  "broader": ["human-experience"],
+  "broader": [
+    "human-experience"
+  ],
   "facets": [],
   "requires": [],
   "conflicts": [],
@@ -51,8 +58,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["audio-production"],
-        "tags": ["ambiguous", "hierarchy-boundary"]
+        "adjacentSkills": [
+          "audio-production"
+        ],
+        "tags": [
+          "ambiguous",
+          "hierarchy-boundary"
+        ]
       },
       {
         "id": "video-production-ambiguous-2",
@@ -60,8 +72,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["accessibility-practice"],
-        "tags": ["ambiguous", "hierarchy-boundary"]
+        "adjacentSkills": [
+          "accessibility-practice"
+        ],
+        "tags": [
+          "ambiguous",
+          "hierarchy-boundary"
+        ]
       },
       {
         "id": "video-production-ambiguous-3",
@@ -69,8 +86,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["content-error-design"],
-        "tags": ["ambiguous", "hierarchy-boundary"]
+        "adjacentSkills": [
+          "content-error-design"
+        ],
+        "tags": [
+          "ambiguous",
+          "hierarchy-boundary"
+        ]
       }
     ],
     "adversarial": [
@@ -80,8 +102,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["customer-success"],
-        "tags": ["adversarial", "hierarchy-boundary"]
+        "adjacentSkills": [
+          "customer-success"
+        ],
+        "tags": [
+          "adversarial",
+          "hierarchy-boundary"
+        ]
       },
       {
         "id": "video-production-adversarial-2",
@@ -89,8 +116,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["developer-experience"],
-        "tags": ["adversarial", "hierarchy-boundary"]
+        "adjacentSkills": [
+          "developer-experience"
+        ],
+        "tags": [
+          "adversarial",
+          "hierarchy-boundary"
+        ]
       },
       {
         "id": "video-production-adversarial-3",
@@ -98,8 +130,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["information-architecture"],
-        "tags": ["adversarial", "hierarchy-boundary"]
+        "adjacentSkills": [
+          "information-architecture"
+        ],
+        "tags": [
+          "adversarial",
+          "hierarchy-boundary"
+        ]
       }
     ]
   },

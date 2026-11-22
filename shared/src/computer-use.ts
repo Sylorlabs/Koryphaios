@@ -61,6 +61,8 @@ export interface ComputerTarget {
   title: string;
   pid: number;
   scope?: 'window' | 'desktop';
+  /** Keep the window out of the person's way; capture still reads its pixels. */
+  hidden?: boolean;
 }
 export interface ComputerElement {
   /** Short-lived identifier returned by element discovery for this window. */
@@ -91,6 +93,8 @@ export type ComputerAction =
   | {
       kind: 'click';
       target: ComputerTarget;
+      /** Deliver to the window's process without moving the pointer or taking focus. */
+      background?: boolean;
       elementId?: string;
       x?: number;
       y?: number;
@@ -99,28 +103,84 @@ export type ComputerAction =
   | {
       kind: 'doubleClick';
       target: ComputerTarget;
+      background?: boolean;
       elementId?: string;
       x?: number;
       y?: number;
     }
-  | { kind: 'move'; target: ComputerTarget; elementId?: string; x?: number; y?: number }
+  | {
+      kind: 'move';
+      target: ComputerTarget;
+      elementId?: string;
+      x?: number;
+      y?: number;
+      background?: boolean;
+    }
   | {
       kind: 'drag';
       target: ComputerTarget;
+      background?: boolean;
       elementId?: string;
       path: Array<{ x: number; y: number }>;
     }
+  | {
+      kind: 'type';
+      target: ComputerTarget;
+      elementId?: string;
+      text: string;
+      background?: boolean;
+    }
+  | {
+      kind: 'key';
+      target: ComputerTarget;
+      elementId?: string;
+      key: string;
+      background?: boolean;
+    }
+  | {
+      kind: 'scroll';
+      target: ComputerTarget;
+      elementId?: string;
+      delta: number;
+      background?: boolean;
+    }
+  | { kind: 'wait'; target?: ComputerTarget; ms: number }
+  | { kind: 'focus'; target: ComputerTarget; background?: boolean }
+  /** Move a window off screen so the task runs out of the person's way, or put it back. */
+  | { kind: 'place'; target: ComputerTarget; hidden: boolean }
+  | {
+      /**
+       * Many actions in one native round trip. `observationId` reuses one observation so a
+       * long, rapid run (drawing, for example) does not re-analyze the window between steps.
+       */
+      kind: 'sequence';
+      steps: ComputerStep[];
+      observationId?: string;
+      background?: boolean;
+    };
+/** One step of a queue. Each step names its own window, so a queue can span several. */
+export type ComputerStep =
+  | { kind: 'click'; target: ComputerTarget; elementId?: string; x?: number; y?: number; button?: 'left' | 'right' | 'middle' }
+  | { kind: 'doubleClick'; target: ComputerTarget; elementId?: string; x?: number; y?: number }
+  | { kind: 'move'; target: ComputerTarget; elementId?: string; x?: number; y?: number }
+  | { kind: 'drag'; target: ComputerTarget; elementId?: string; path: Array<{ x: number; y: number }> }
   | { kind: 'type'; target: ComputerTarget; elementId?: string; text: string }
   | { kind: 'key'; target: ComputerTarget; elementId?: string; key: string }
   | { kind: 'scroll'; target: ComputerTarget; elementId?: string; delta: number }
-  | { kind: 'wait'; target?: ComputerTarget; ms: number }
-  | { kind: 'focus'; target: ComputerTarget };
+  | { kind: 'wait'; ms: number };
+
 export interface ComputerActionResult {
   targets?: ComputerTarget[];
   elements?: ComputerElement[];
   /** PNG data, transported only as authorized model-visible image content. */
   imageBase64?: string;
   text?: string;
+  /** One observation handle; pass it back as `observationId` to run a queue without re-observing. */
+  observationId?: string;
+  /** Present when the window changed outside this action: the agent must re-observe. */
+  interference?: { kind: 'user-input' | 'window-changed'; message: string };
+  /** Per step outcome for a queue. */
+  steps?: Array<{ index: number; status: 'done' | 'failed'; message?: string }>;
 }
 /** Display evidence, not authority to perform or repeat an action. No typed text or pixels. */
 export interface ComputerUseReceipt {

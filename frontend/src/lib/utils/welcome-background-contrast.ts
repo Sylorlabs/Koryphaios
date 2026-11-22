@@ -54,3 +54,27 @@ export function welcomeTextColorForPixels(
   const whiteContrast = 1.05 / (average + 0.05);
   return blackContrast >= whiteContrast ? '#000000' : '#ffffff';
 }
+
+/**
+ * Transcript chrome (action buttons, timestamps, skill labels) sits directly
+ * on the welcome background image, where the theme's muted text can be
+ * unreadable. When a background resolved a text color, these keep the chrome
+ * in the same black/white family; without a background the theme tokens win.
+ */
+export function feedChromeColors(textColor: WelcomeTextColor | undefined): {
+  fg: string;
+  fgHover: string;
+  hoverBg: string;
+} {
+  if (textColor === '#000000') {
+    return { fg: 'rgba(0, 0, 0, 0.82)', fgHover: '#000000', hoverBg: 'rgba(255, 255, 255, 0.55)' };
+  }
+  if (textColor === '#ffffff') {
+    return { fg: 'rgba(255, 255, 255, 0.88)', fgHover: '#ffffff', hoverBg: 'rgba(0, 0, 0, 0.45)' };
+  }
+  return {
+    fg: 'var(--color-text-muted)',
+    fgHover: 'var(--color-text-primary)',
+    hoverBg: 'var(--color-surface-2)',
+  };
+}

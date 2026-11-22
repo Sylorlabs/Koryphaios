@@ -1,19 +1,19 @@
 {
   "id": "robotics-control-full-task-1-individual",
   "maturity": "individual",
-  "prompt": "The evaluation repository asks the agent to \"Apply robotics expertise to this task\". The fixture contains a plausible happy path, an adjacent-skill decoy, one invalid or partial state, and a recovery condition that must be demonstrated rather than assumed. The acceptance boundary is robotics-control: Define physical plant, coordinate frames, sensors/actuators, rates/latencies, calibration, estimator state, planner constraints, controller limits, safety interlocks, and human/environment interaction. The adjacent c-cpp-systems-engineering discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "prompt": "The repository is a two-link planar arm in the vertical plane simulated with MuJoCo. `robot/model.xml` is the plant (joint limits on both hinges, torque-limited motors), `robot/trajectory.py` is the reference joint trajectory, and `robot/controller.py` holds the starter. Implement `Controller.step(dt, qpos, qvel, target, t)` so the arm tracks the reference within 0.10 rad rms and 0.20 rad worst-case after one second, never leaves the joint limits, commands zero torque and latches `self.fault` within three cycles when the joint-state feed drops out, resumes tracking within two seconds of the feed returning, and reproduces the identical trajectory on two identical runs. The hidden checks step the real plant at 2 ms and measure those quantities; the text of your answer is not graded. `python3 tests/test_control.py` is the public smoke test.",
   "environment": {
     "kind": "repository",
-    "startingState": "fixture://robotics-control/mobile-base-command-watchdog",
+    "startingState": "fixture://robotics-control/two-link-arm-tracking",
     "requirements": [
-      "differential-drive simulator with command timestamps and wheel/pose telemetry",
-      "command dropout/delay sequences plus emergency-stop input",
-      "declared acceleration, jerk, and safe-stop timing limits",
-      "monotonic clock/control-loop frequency identity and restart sequence",
-      "paired same-model skill/no-skill execution from the identical starting snapshot",
-      "robotics-control parent/child/neighbor hierarchy boundary fixture",
-      "domain-specific tempting anti-pattern or shortcut",
-      "representative negative, interruption, compatibility, or recovery path"
+      "two-link arm model with hinge limits and torque-limited actuators, stepped at 2 ms",
+      "reference joint trajectory with position, velocity and acceleration",
+      "tracking tolerance of 0.10 rad rms and 0.20 rad worst case after one second",
+      "zero commanded torque inside three cycles of the joint-state feed dropping out",
+      "tracking resumed within two seconds of the feed returning",
+      "identical final joint state across two identical runs",
+      "public smoke test that only proves the controller loads and answers in range",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
     ]
   },
   "scorers": [
@@ -40,7 +40,10 @@
         "independent evaluator record",
         "quality comparison without variant labels"
       ],
-      "blindTo": ["skill-variant", "expected-outcome"]
+      "blindTo": [
+        "skill-variant",
+        "expected-outcome"
+      ]
     }
   ],
   "requiredEvidence": [

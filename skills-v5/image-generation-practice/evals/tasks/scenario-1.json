@@ -1,21 +1,44 @@
 {
   "id": "image-generation-practice-full-task-1-individual",
   "maturity": "individual",
-  "prompt": "The evaluation repository asks the agent to \"Apply image generation expertise to this task\". The fixture contains a plausible happy path, an adjacent-skill decoy, one invalid or partial state, and a recovery condition that must be demonstrated rather than assumed. The acceptance boundary is image-generation-practice: Translate the intended use into subject, composition, camera/view, lighting, palette, material, typography constraints, aspect ratio, negative constraints, and required fidelity. The adjacent data-visualization discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "prompt": "The repository is a brand-asset workspace: `brief/brand.json` carries the palette, the identity descriptor and the constraint thresholds, `brief/examples.json` records measurements the author observed from three example specs on the live model, and `generation/spec.json` is the spec you must deliver. Your spec is replayed against the real image model and graded on what comes back, not on a description: at most two variants for a 1024x1024 hero render, the first that conforms wins. A conforming render is a flat image on the brief's background colour, holding the brief's accent colour in at least 3 percent of the frame, with at most 12 colours covering 95 percent of it, quiet corners, nothing in the outer 10 percent border, and no pixel of the forbidden colour. Write prompts that state the palette and composition explicitly and pin the model and seed; `bun run tools/check-spec.mjs generation/spec.json` validates the shape of what you hand in.",
   "environment": {
     "kind": "synthetic",
-    "startingState": "fixture://image-generation-practice/product-hero-iteration",
+    "startingState": "fixture://image-generation-practice/brand-hero-variants",
     "requirements": [
-      "product-shape reference sheet and explicit no-logo/no-text constraint",
-      "16:9 desktop hero plus crop-safe mobile region requirements",
-      "candidate set with known geometry/text/reflection failure modes",
-      "review rubric for silhouette fidelity, material plausibility, composition, artifacts, and crop safety",
-      "paired same-model skill/no-skill execution from the identical starting snapshot",
-      "image-generation-practice parent/child/neighbor hierarchy boundary fixture",
-      "domain-specific tempting anti-pattern or shortcut",
-      "representative negative, interruption, compatibility, or recovery path"
+      "live image model reached over the network, with the token bucket and model list recorded in the brief",
+      "palette, identity descriptor and constraint thresholds disclosed in brief/brand.json",
+      "measurements from real renders of example specs shipped in brief/examples.json",
+      "generation spec replayed by the harness, one request per variant, at most two variants per target",
+      "per-image measurements: palette spread, background share, accent share, corner spread, border share, forbidden share"
     ]
   },
+  "falsifiableChecks": [
+    {
+      "id": "image-generation-practice-spec-contract-1",
+      "assertion": "The delivered spec names an allowed model, pins a distinct numeric seed per variant, declares its canvas, and stays inside the two-variant budget."
+    },
+    {
+      "id": "image-generation-practice-render-succeeds-1",
+      "assertion": "The harness obtained at least one image from the live service using the delivered prompt, model and seed."
+    },
+    {
+      "id": "image-generation-practice-palette-discipline-1",
+      "assertion": "The accepted render uses at most 12 distinct colours to cover 95 percent of its pixels."
+    },
+    {
+      "id": "image-generation-practice-layout-conformance-1",
+      "assertion": "The accepted render holds at least 60 percent background, a corner luma spread of at most 20, and at most 10 percent non-background pixels in the outer border."
+    },
+    {
+      "id": "image-generation-practice-accent-and-exclusion-1",
+      "assertion": "The accepted render contains the brief accent in at least 3 percent of its pixels and the forbidden colour in at most 1 percent."
+    },
+    {
+      "id": "image-generation-practice-budget-honoured-1",
+      "assertion": "No more than two variants were requested for the target."
+    }
+  ],
   "scorers": [
     {
       "id": "image-generation-practice-individual-deterministic-1",
@@ -40,48 +63,22 @@
         "independent evaluator record",
         "quality comparison without variant labels"
       ],
-      "blindTo": ["skill-variant", "expected-outcome"]
+      "blindTo": [
+        "skill-variant",
+        "expected-outcome"
+      ]
     }
   ],
   "requiredEvidence": [
-    "image-generation-practice decision and boundary evidence",
-    "Representative verification results or explicit unavailable checks",
-    "Hierarchy boundary and selected specialist rationale",
-    "Representative success, negative-path, and recovery verification",
-    "hierarchy boundary and selected specialist rationale",
-    "representative success plus negative/recovery evidence",
-    "paired skill/no-skill run artifacts",
-    "explicit unavailable, simulated, inferred, or stale evidence labels"
+    "recorded model identity and the exact prompt, seed and canvas per variant",
+    "the delivered generation spec",
+    "rendered images and their measured palette, background, accent, corner, border and exclusion values",
+    "which variant was accepted and which constraints it satisfied",
+    "paired skill/no-skill run artifacts"
   ],
   "requiredArtifacts": [
     "image-generation-practice-individual-scenario-1-result",
     "image-generation-practice-individual-scenario-1-verification",
     "image-generation-practice-individual-scenario-1-paired-evaluation"
-  ],
-  "falsifiableChecks": [
-    {
-      "id": "scope-and-hierarchy",
-      "assertion": "The result must establish the actual image-generation-practice boundary and relevant environment before acting, preserve the hierarchy relationship (broader=visual-interface-design; near-neighbor=data-visualization), and not absorb the near-neighbor responsibility merely because it is adjacent."
-    },
-    {
-      "id": "operating-contract",
-      "assertion": "Translate the intended use into subject, composition, camera/view, lighting, palette, material, typography constraints, aspect ratio, negative constraints, and required fidelity."
-    },
-    {
-      "id": "execution-invariant",
-      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
-    },
-    {
-      "id": "verification-discipline",
-      "assertion": "Inspect output at delivery resolution for anatomy/geometry, text accuracy, edge artifacts, repeated patterns, perspective, brand/style consistency, and task-specific fidelity; compare variants against the intended use rather than prompt literalism."
-    },
-    {
-      "id": "anti-pattern-resistance",
-      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not claim exact likeness or trademark/style fidelity without evidence, hide obvious generation artifacts under effects, or keep expanding prompts when the composition itself is wrong."
-    },
-    {
-      "id": "evidence-and-uncertainty",
-      "assertion": "Every material completion claim must map to observable evidence (image-generation-practice decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
-    }
   ]
 }

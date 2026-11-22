@@ -8,14 +8,14 @@ import {
   DENO_RUNTIME_SKILL_EVAL_MATERIALIZERS,
   denoPermissionReadiness,
   scoreDenoPermissions,
-} from '../skill-eval-deno-runtime-fixtures';
+} from '../../eval/skills/skill-eval-deno-runtime-fixtures';
 import { loadV5SkillPackages } from '../skill-packages';
-import { auditSkillEvalExecutionReadiness } from '../skill-eval-execution';
+import { auditSkillEvalExecutionReadiness } from '../../eval/skills/skill-eval-execution';
 import {
   BUILTIN_SKILL_EVAL_MATERIALIZERS,
   BUILTIN_SKILL_EVAL_SCORERS,
-} from '../skill-eval-fixtures';
-import type { SkillEvalScenarioV3 } from '../skill-eval-harness';
+} from '../../eval/skills/skill-eval-fixtures';
+import type { SkillEvalScenarioV3 } from '../../eval/skills/skill-eval-harness';
 
 // Author-owned controls validate the evaluator; they are not model runs or blind qualification.
 // Never materialize the positive control into an evaluation subject's workspace.

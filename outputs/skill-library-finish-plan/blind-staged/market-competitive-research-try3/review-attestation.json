@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "status": "unimported",
+  "assignmentId": "blind-v5-a2c0d2b3e650f5357ea2",
+  "skill": "market-competitive-research",
+  "scenarioId": "market-competitive-research-full-task-1-individual",
+  "pairId": "market-competitive-research-full-task-1-individual:8a2e2272-f179-4c5e-b86a-4d6cb2f7868d",
+  "reviewerThread": "logfare-stateless-fac7cd52-ce0a-4c76-8676-25caa7c4d5a1",
+  "reviewerIdentitySource": "external-reviewer-adapter-output",
+  "reviewerAdapter": "scripts/kory-logfare-stateless-reviewer",
+  "reviewerModel": "deepseek-v4.1-flash-1017",
+  "reviewerModelSource": "configured-provider-model-metadata",
+  "reviewerBaseUrl": "http://127.0.0.1:17841/v1",
+  "promptSha256": "8d4568a38eab0c07b761c0d7805d2add1856eb0434ef1f40162f34e69ae20b56",
+  "privateAssignmentSha256": "973ebd675c137dc767484a3b281cadbe1636bdac4258a6fa36969f894572d45d",
+  "reviewerEventsSha256": "b5a50b00489c414408787b9516ee1d07c52e65e537a5d9fb940dc3f9a18631bb",
+  "judgeOutputSha256": "a659b9eac858b3c14a708169e659f59f69aec7ce555e1269be32b124ad104300",
+  "envelopeSha256": "77de32d84b4dd9d8eb99e3561211350fee5f71723e4cbe43b9afabeae7d635c0",
+  "importValidation": {
+    "mode": "validate",
+    "validatedReviews": 1,
+    "persistedReviews": 0
+  },
+  "promptSnapshotPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-J85zH0/review-task.prompt.txt",
+  "reviewerEventsPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-J85zH0/reviewer-events.json",
+  "envelopePath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-J85zH0/import.json"
+}

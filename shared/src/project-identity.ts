@@ -5,15 +5,10 @@
  */
 export type ProjectId = string;
 
-export interface ProjectCheckout {
-  projectId: ProjectId;
-  rootPath: string;
-}
-
-export const PROJECT_ICON_MODES = ['automatic', 'emoji', 'monogram', 'color', 'image'] as const;
+export const PROJECT_ICON_MODES = ['automatic', 'monogram', 'color', 'image'] as const;
 export type ProjectIconMode = (typeof PROJECT_ICON_MODES)[number];
 
-export const PROJECT_ICON_SHAPES = ['circle', 'rounded-square', 'square'] as const;
+export const PROJECT_ICON_SHAPES = ['circle', 'rounded-square', 'square', 'transparent'] as const;
 export type ProjectIconShape = (typeof PROJECT_ICON_SHAPES)[number];
 
 /** Theme tokens understood by consumers; arbitrary CSS is not part of the contract. */
@@ -39,7 +34,6 @@ type ProjectIconPresentation = {
 
 export type ProjectIconSpec =
   | ({ mode: 'automatic' } & ProjectIconPresentation)
-  | ({ mode: 'emoji'; value: string } & ProjectIconPresentation)
   | ({ mode: 'monogram'; value: string } & ProjectIconPresentation)
   | ({ mode: 'color' } & ProjectIconPresentation)
   | ({ mode: 'image'; assetId: string } & ProjectIconPresentation);
@@ -53,7 +47,6 @@ export interface ProjectIdentity {
   assetUrl?: string;
 }
 
-export const MAX_PROJECT_EMOJI_GRAPHEMES = 1;
 export const MAX_PROJECT_MONOGRAM_GRAPHEMES = 2;
 
 const PROJECT_ICON_COLOR_SET = new Set<string>(PROJECT_ICON_COLORS);
@@ -67,7 +60,7 @@ type GraphemeSegmenter = {
   segment(input: string): Iterable<{ segment: string }>;
 };
 
-function segmentGraphemes(value: string): string[] {
+export function segmentGraphemes(value: string): string[] {
   const Segmenter = (
     Intl as typeof Intl & {
       Segmenter?: new (
@@ -155,7 +148,7 @@ function opaqueAssetId(value: unknown): value is string {
   return typeof value === 'string' && OPAQUE_ASSET_ID.test(value);
 }
 
-export function normalizeProjectIconMode(value: unknown): ProjectIconMode {
+function normalizeProjectIconMode(value: unknown): ProjectIconMode {
   return typeof value === 'string' && PROJECT_ICON_MODE_SET.has(value)
     ? (value as ProjectIconMode)
     : 'automatic';
@@ -174,21 +167,18 @@ export function normalizeProjectIconSpec(value: unknown): ProjectIconSpec {
   };
   const color = projectIconColor(input.color);
   const customColor = normalizeProjectIconCustomColor(input.customColor);
-  const shape = projectIconShape(input.shape);
+  // Specs saved before emoji and monogram merged treat emoji as monogram.
+  const mode = normalizeProjectIconMode(input.mode === 'emoji' ? 'monogram' : input.mode);
+  // A color tile with no background would be invisible; every client coerces
+  // the combination to a rounded-square tile.
+  const parsedShape = projectIconShape(input.shape);
+  const shape = mode === 'color' && parsedShape === 'transparent' ? 'rounded-square' : parsedShape;
   const presentation = {
     ...(color ? { color } : {}),
     ...(customColor ? { customColor } : {}),
     ...(shape ? { shape } : {}),
   };
-  const mode = normalizeProjectIconMode(input.mode);
 
-  if (
-    mode === 'emoji' &&
-    typeof input.value === 'string' &&
-    hasGraphemeCount(input.value, 1, MAX_PROJECT_EMOJI_GRAPHEMES)
-  ) {
-    return { mode, value: input.value, color, ...presentationWithoutColor(presentation) };
-  }
   if (
     mode === 'monogram' &&
     typeof input.value === 'string' &&
@@ -214,53 +204,6 @@ function presentationWithoutColor(presentation: {
 }) {
   const { color: _color, ...rest } = presentation;
   return rest;
-}
-
-export function isProjectIconSpec(value: unknown): value is ProjectIconSpec {
-  if (!value || typeof value !== 'object') return false;
-  const input = value as {
-    mode?: unknown;
-    value?: unknown;
-    assetId?: unknown;
-    color?: unknown;
-    customColor?: unknown;
-    shape?: unknown;
-  };
-  if (normalizeProjectIconMode(input.mode) !== input.mode) return false;
-  if (input.color !== undefined && projectIconColor(input.color) === undefined) return false;
-  if (
-    input.customColor !== undefined &&
-    normalizeProjectIconCustomColor(input.customColor) === undefined
-  )
-    return false;
-  if (input.shape !== undefined && projectIconShape(input.shape) === undefined) return false;
-  switch (input.mode) {
-    case 'automatic':
-      return input.value === undefined && input.assetId === undefined;
-    case 'emoji':
-      return (
-        typeof input.value === 'string' &&
-        hasGraphemeCount(input.value, 1, MAX_PROJECT_EMOJI_GRAPHEMES) &&
-        input.assetId === undefined
-      );
-    case 'monogram':
-      return (
-        typeof input.value === 'string' &&
-        hasGraphemeCount(input.value, 1, MAX_PROJECT_MONOGRAM_GRAPHEMES) &&
-        input.assetId === undefined
-      );
-    case 'color':
-      return (
-        input.value === undefined &&
-        input.assetId === undefined &&
-        (projectIconColor(input.color) !== undefined ||
-          normalizeProjectIconCustomColor(input.customColor) !== undefined)
-      );
-    case 'image':
-      return input.value === undefined && opaqueAssetId(input.assetId);
-    default:
-      return false;
-  }
 }
 
 function hashProjectIdentity(identity: Pick<ProjectIdentity, 'id' | 'name'>): number {
@@ -302,8 +245,14 @@ export function resolveProjectIcon(
   value: unknown,
 ): Exclude<ProjectIconSpec, { mode: 'automatic' }> {
   const normalized = normalizeProjectIconSpec(value);
-  if (normalized.mode !== 'automatic') return normalized;
   const automatic = automaticProjectIcon(identity);
+  if (normalized.mode !== 'automatic') {
+    // A stored spec without an explicit color still renders on the
+    // deterministic project color, matching what "Initials" does.
+    return normalized.color || normalized.customColor
+      ? normalized
+      : { ...normalized, color: automatic.color };
+  }
   return {
     ...automatic,
     ...(normalized.color ? { color: normalized.color } : {}),

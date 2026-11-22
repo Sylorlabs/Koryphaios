@@ -1,0 +1,27 @@
+[19:45:19] warn  [server] Multiple koryphaios.json files found in parent directories; using the innermost. The outer file(s) are ignored. {"chosen":"/Users/Shared/micah/Documents/koryphaios","shadowed":["/Users/Shared/micah/Documents","/Users/Shared/micah"]}
+{"type":"progress","complete":1,"failed":0,"totalQueued":1,"skill":"frontend-engineering","scenarioId":"frontend-engineering-full-task-unknown-medium","pairId":"frontend-engineering-full-task-unknown-medium:6621b2d6-97e4-4358-9880-78a43222ea96","withSkill":false,"withoutSkill":false,"withSkillInfrastructureFailure":false,"withoutSkillInfrastructureFailure":false,"infrastructureFailure":false,"integrityFailure":false}
+{
+  "schemaVersion": 1,
+  "executor": {
+    "mode": "codex",
+    "id": "codex-cli-isolated:codex-cli 0.167.0:reasoning=none:multi-turn",
+    "subject": "codex",
+    "provider": "codex",
+    "model": "gpt-6-luna",
+    "runtimeIdentity": "codex-cli 0.167.0:reasoning=none:multi-turn",
+    "executionMode": "multi-turn",
+    "reasoningEffort": "none",
+    "concurrency": 1,
+    "wallClockMs": 900000
+  },
+  "selectedSkills": 1,
+  "readyScenarios": 1,
+  "environmentBlockedScenarios": 1,
+  "skippedComplete": 0,
+  "queued": 1,
+  "completed": 1,
+  "failed": 0,
+  "failedScenarios": [],
+  "stoppedReason": null,
+  "notStarted": 0
+}

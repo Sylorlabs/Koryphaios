@@ -64,5 +64,8 @@ export interface StoredMessage {
   contextRevision?: number;
   /** Display projection only: true when this retained row belongs to the durable active lineage. */
   isActiveBranch?: boolean;
+  /** The source of an imported row recorded no time for it. `createdAt` then only
+   *  orders the row; the UI must show "Time unknown" rather than a clock time. */
+  timeUnknown?: true;
   createdAt: number;
 }

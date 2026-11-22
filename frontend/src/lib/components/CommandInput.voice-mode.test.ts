@@ -174,6 +174,18 @@ function pressVoiceToggle(repeat = false) {
   );
 }
 
+/** Releases the held binding: the voice shortcut is push-to-talk. */
+function releaseVoiceToggle() {
+  window.dispatchEvent(
+    new KeyboardEvent('keyup', {
+      key: ' ',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+}
+
 /** The hint the microphone button advertises, composed the way the UI does. */
 function voiceShortcutHint() {
   return formatChord(...shortcutStore.keys('voice_mode'));
@@ -229,7 +241,7 @@ describe('voice mode toggling and microphone control', () => {
       return undefined;
     });
   });
-  it('starts on the first press and transcribes on the second', async () => {
+  it('records while the shortcut is held and transcribes when it is released', async () => {
     const getUserMedia = installMicrophone();
     const { unmount } = composer();
     await screen.findByRole('button', { name: /record a voice prompt/i });
@@ -244,7 +256,7 @@ describe('voice mode toggling and microphone control', () => {
     expect(invoke).not.toHaveBeenCalledWith('transcribe_local_voice', expect.anything());
 
     FakeAudioContext.emitAudio();
-    pressVoiceToggle();
+    releaseVoiceToggle();
     // Even a fast local transcription must get a paint with the stopped,
     // frozen waveform before the strip is cleared.
     expect(voiceRecorder.state.phase).toBe('transcribing');
@@ -260,7 +272,7 @@ describe('voice mode toggling and microphone control', () => {
     unmount();
   });
 
-  it('keeps the capture running when the window loses focus', async () => {
+  it('ends a held capture when the window loses focus so the key cannot stick', async () => {
     installMicrophone();
     const { unmount } = composer();
     await screen.findByRole('button', { name: /record a voice prompt/i });
@@ -268,11 +280,16 @@ describe('voice mode toggling and microphone control', () => {
     pressVoiceToggle();
     await waitFor(() => expect(recorderPanel()).toHaveAttribute('data-state', 'recording'));
 
-    // Blur used to end a push-to-talk hold. With a toggle the capture keeps
-    // running until the user presses again, so a focus change cannot silently
-    // drop the recording.
+    // A release outside the window never reaches the keyup listener, so losing
+    // focus has to end the hold instead of leaving the microphone open.
+    FakeAudioContext.emitAudio();
     window.dispatchEvent(new Event('blur'));
-    expect(recorderPanel()).toHaveAttribute('data-state', 'recording');
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith(
+        'transcribe_local_voice',
+        expect.objectContaining({ language: 'en' }),
+      ),
+    );
     unmount();
   });
 
@@ -311,7 +328,7 @@ describe('voice mode toggling and microphone control', () => {
     expect(voiceRecorder.active).toBe(true);
 
     FakeAudioContext.emitAudio();
-    pressVoiceToggle();
+    releaseVoiceToggle();
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith(
         'transcribe_local_voice',
@@ -349,7 +366,7 @@ describe('voice mode toggling and microphone control', () => {
     await waitFor(() => expect(recorderPanel()).toHaveAttribute('data-state', 'recording'));
     const analyser = FakeAudioContext.analysers[0];
     FakeAudioContext.emitAudio();
-    pressVoiceToggle();
+    releaseVoiceToggle();
 
     await waitFor(() => expect(recorderPanel()).toHaveAttribute('data-state', 'transcribing'));
     expect(voiceRecorder.active).toBe(true);
@@ -386,7 +403,7 @@ describe('voice mode toggling and microphone control', () => {
     const mic = await screen.findByRole('button', { name: /record a voice prompt/i });
     // The chord is composed the way the UI composes it, never hard-coded.
     expect(mic.getAttribute('title')).toBe(
-      `Click to record · ${voiceShortcutHint()} starts and stops recording`,
+      `Click to record · hold ${voiceShortcutHint()} to talk`,
     );
     unmount();
   });
@@ -439,7 +456,7 @@ describe('voice mode toggling and microphone control', () => {
     await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
     await waitFor(() => expect(recorderPanel()).toHaveAttribute('data-state', 'recording'));
     FakeAudioContext.emitAudio();
-    pressVoiceToggle();
+    releaseVoiceToggle();
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith(
         'transcribe_local_voice',
@@ -460,12 +477,12 @@ describe('voice mode toggling and microphone control', () => {
     screen.getByRole('textbox').focus();
     pressVoiceToggle();
     await waitFor(() => expect(recorderPanel()).toHaveAttribute('data-state', 'recording'));
-    pressVoiceToggle();
+    releaseVoiceToggle();
     await waitFor(() => expect(recorderPanel()).toHaveAttribute('data-state', 'idle'));
     unmount();
   });
 
-  it('relays both native fn edges to the same toggle', async () => {
+  it('relays the native fn press and release edges as a hold', async () => {
     (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
     installMicrophone();
     const { unmount } = composer();
@@ -476,11 +493,12 @@ describe('voice mode toggling and microphone control', () => {
       s.id === 'voice_mode' ? { ...s, keys: ['Fn'] } : s,
     );
     await waitFor(() => expect(nativeListeners.has('voice://fn-down')).toBe(true));
+    await waitFor(() => expect(nativeListeners.has('voice://fn-up')).toBe(true));
     nativeListeners.get('voice://fn-down')!();
     await waitFor(() => expect(recorderPanel()).toHaveAttribute('data-state', 'recording'));
     FakeAudioContext.emitAudio();
-    // A toggle only needs the press edge, so the relay is the same event.
-    nativeListeners.get('voice://fn-down')!();
+    // The release edge ends the hold, exactly like the keyboard keyup.
+    nativeListeners.get('voice://fn-up')!();
     await waitFor(() => expect(invoke).toHaveBeenCalledWith('transcribe_local_voice', expect.anything()));
     unmount();
     expect(nativeListeners.size).toBe(0);
@@ -510,10 +528,12 @@ describe('voice mode toggling and microphone control', () => {
     pressVoiceToggle();
     await waitFor(() => expect(recorderPanel()).toHaveAttribute('data-state', 'recording'));
     FakeAudioContext.emitAudio();
+    releaseVoiceToggle();
+    // A new press that lands while the previous capture is still transcribing
+    // must be dropped, so the follow-up transcription belongs to one capture.
     pressVoiceToggle();
     await waitFor(() => expect(invoke).toHaveBeenCalledWith('transcribe_local_voice', expect.anything()));
-    pressVoiceToggle();
-    expect(recorderPanel()).toHaveAttribute('data-state', 'idle');
+    await waitFor(() => expect(recorderPanel()).toHaveAttribute('data-state', 'idle'));
     expect(transcribeCalls()).toBe(1);
     unmount();
   });
@@ -546,15 +566,43 @@ describe('voice mode toggling and microphone control', () => {
     await waitFor(() => expect(recorderPanel()).toHaveAttribute('data-state', 'recording'));
     expect(localStorage.getItem('koryphaios.microphone-consent')).toBe('granted');
 
-    // Once allowed, later presses record immediately without re-asking.
+    // Once allowed, later holds record immediately without re-asking.
     FakeAudioContext.emitAudio();
-    pressVoiceToggle();
-    await waitFor(() => expect(voiceRecorder.active).toBe(false));
+    releaseVoiceToggle();
+    // Let the transcription finish: a press that lands while it is still
+    // running is deliberately dropped instead of interrupting it.
+    await waitFor(() => expect(recorderPanel()).toHaveAttribute('data-state', 'idle'));
     pressVoiceToggle();
     await waitFor(() => expect(recorderPanel()).toHaveAttribute('data-state', 'recording'));
     expect(
       screen.queryByText('“Koryphaios” Would Like to Access the Microphone'),
     ).toBeNull();
+    unmount();
+  });
+
+  it('shows live transcription while the voice shortcut is held', async () => {
+    installMicrophone();
+    invoke.mockImplementation(async (command: string) => {
+      if (command === 'local_voice_model_status') {
+        return { installed: true, modelId: 'kory-local-voice', name: 'ggml-tiny.bin', format: 'Ggml' };
+      }
+      if (command === 'transcribe_local_voice') return { text: 'live words' };
+      return undefined;
+    });
+    const { unmount } = composer();
+    await screen.findByRole('button', { name: /record a voice prompt/i });
+
+    pressVoiceToggle();
+    await waitFor(() => expect(recorderPanel()).toHaveAttribute('data-state', 'recording'));
+    // More than the live pass threshold, so the cadence has audio to send.
+    FakeAudioContext.emitAudio(48_000);
+
+    await waitFor(() => expect(voiceRecorder.state.partialText).toBe('live words'), {
+      timeout: 4_000,
+    });
+    // The caption is a preview: the composer only receives the final text.
+    expect(screen.getByRole('textbox')).toHaveValue('');
+    releaseVoiceToggle();
     unmount();
   });
 });

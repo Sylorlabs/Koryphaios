@@ -48,6 +48,10 @@ const BREAKDOWN = {
   output: 250,
 };
 
+// agy's receipt is a turn total, so the meter bounds its CLI-runtime remainder by
+// what Kory measured: 21k of categories + at most 21k of overhead + 250 output.
+const AGY_BOUNDED_USED = 21_000 + 21_000 + 250;
+
 function liveUsage(overrides: Record<string, unknown> = {}) {
   return {
     agentId: 'kory-manager',
@@ -80,11 +84,13 @@ describe('context window denominator stability', () => {
     beginManagerContextPreview(sessionId, 'antigravity', 'minimax-m3', 262_144);
     updateUsage(sessionId, 'kory-manager', liveUsage({ provider: 'antigravity', cachedInputTokens: 100_000 }));
     expect(getContextUsage()).toMatchObject({
-      used: 120_900,
+      used: AGY_BOUNDED_USED,
       max: 262_144,
       estimated: true,
+      harnessCapped: true,
       cachedInputTokens: 100_000,
     });
+    expect(manager().tokensUsed).toBe(120_900);
   });
 
   it('a planning estimate that cannot resolve a window never erases a verified one', () => {
@@ -436,7 +442,7 @@ describe('manager session binding', () => {
     // Pending telemetry is not displayed before its route has been checked.
     expect(getContextUsage()).toMatchObject({ used: 0, isReliable: false });
     beginManagerContextPreview(sessionId, 'antigravity', 'minimax-m3', 262_144);
-    expect(getContextUsage()).toMatchObject({ used: 120_900, max: 262_144, estimated: true });
+    expect(getContextUsage()).toMatchObject({ used: AGY_BOUNDED_USED, max: 262_144, estimated: true });
   });
 
   it('does not adopt pending replay for a different selected route or a discarded branch', () => {
@@ -467,7 +473,7 @@ describe('manager session binding', () => {
     // like a model switch just because an old thread identity loaded.
     beginManagerContextPreview(sessionId, 'antigravity', 'minimax-m3', 262_144);
     expect(getContextUsage()).toMatchObject({
-      used: 120_900, max: 262_144, breakdown: BREAKDOWN, cachedInputTokens: 100_000,
+      used: AGY_BOUNDED_USED, max: 262_144, breakdown: BREAKDOWN, cachedInputTokens: 100_000,
     });
   });
 });

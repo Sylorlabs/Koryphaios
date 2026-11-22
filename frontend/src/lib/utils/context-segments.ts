@@ -17,7 +17,7 @@ const CATEGORIES = [
     key: 'skills',
     label: 'Skills',
     color: '#a78bfa',
-    hint: 'Workflow guidance from the skills attached to this session.',
+    hint: 'Workflow guidance the selected skills injected into this turn. The transcript labels each skill the turn used.',
   },
   {
     key: 'tools',
@@ -60,7 +60,16 @@ export type ContextMeterUsage = {
   breakdown?: ContextBreakdown;
   cachedInputTokens?: number;
   cacheWriteInputTokens?: number;
+  harnessCapped?: boolean;
+  harnessCap?: number;
 };
+
+/** Tooltip for a CLI runtime overhead that was bounded because the CLI only
+ *  reported a cumulative total across its internal requests. */
+export function cappedHarnessHint(cap: number | undefined): string {
+  const bound = typeof cap === 'number' && cap > 0 ? `~${cap.toLocaleString()} tokens` : 'a bound';
+  return `This CLI reported only a cumulative total across its internal requests, which counts the same prompt once per request. CLI runtime overhead is capped at ${bound} (no more than what Kory measured itself, within 8k–48k), so the total shown is an estimate.`;
+}
 
 export function buildContextSegments(usage: ContextMeterUsage) {
   if (!usage.isReliable || usage.max <= 0 || usage.used <= 0) return null;
@@ -68,6 +77,9 @@ export function buildContextSegments(usage: ContextMeterUsage) {
   const perToken = Math.min(100, (usage.used / usage.max) * 100) / usage.used;
   return CATEGORIES.map((category) => ({
     ...category,
+    ...(category.key === 'cliHarness' && usage.harnessCapped
+      ? { hint: cappedHarnessHint(usage.harnessCap) }
+      : {}),
     tokens: breakdown[category.key] ?? 0,
     widthPercent: (breakdown[category.key] ?? 0) * perToken,
   })).filter((category) => category.tokens > 0);

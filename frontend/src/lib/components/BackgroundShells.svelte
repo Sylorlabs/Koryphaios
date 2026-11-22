@@ -84,7 +84,7 @@
       >
         <Terminal size={12} class="text-[var(--color-success)]" />
         Background shells
-        <span class="rounded-full bg-[var(--color-surface-3)] px-1.5 py-0.5 font-mono text-[9px]"
+        <span class="rounded-full bg-[var(--color-surface-3)] px-1.5 py-0.5 font-mono text-[11px]"
           >{shells.length}</span
         >
       </div>
@@ -119,7 +119,7 @@
               <span class="truncate text-xs font-semibold text-[var(--color-text-primary)]"
                 >{process.name}</span
               >
-              <span class="truncate font-mono text-[10px] text-[var(--color-text-muted)]"
+              <span class="truncate font-mono text-[11px] text-[var(--color-text-muted)]"
                 >$ {process.command}</span
               >
             </button>
@@ -156,7 +156,7 @@
                 />
                 <button
                   type="submit"
-                  class="rounded-lg bg-[var(--color-accent)] px-3 text-[var(--color-surface-0)] disabled:opacity-40"
+                  class="rounded-lg bg-[var(--color-accent)] px-3 text-[var(--color-on-accent)] disabled:opacity-40"
                   disabled={!(inputs[process.id] ?? '')}
                   aria-label="Send input"
                 >

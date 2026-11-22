@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "status": "unimported",
+  "assignmentId": "blind-v5-39f4185aec6e2867e4dd",
+  "skill": "kubernetes-operations",
+  "scenarioId": "kubernetes-operations-full-task-1-individual",
+  "pairId": "kubernetes-operations-full-task-1-individual:cce5f952-8e4f-4369-a59d-6e52ad09d295",
+  "reviewerThread": "opencode:ses-eb73e7af6ffelYGOVqi6whp9FT",
+  "reviewerIdentitySource": "external-reviewer-adapter-output",
+  "reviewerAdapter": "/Users/Shared/micah/Documents/koryphaios/scripts/kory-opencode-reviewer",
+  "reviewerModel": "unorouter/claude-sonnet-5",
+  "reviewerModelSource": "configured-provider-model-metadata",
+  "reviewerBaseUrl": "http://127.0.0.1:17841/v1",
+  "promptSha256": "e264f83e34dc9418bf172a3bf95da3607dd094dc653018a3cc482c0359ea323f",
+  "privateAssignmentSha256": "348db018aeff2a51dae769721d80bfc82eb4d0cae32872feea47c0584cba0824",
+  "reviewerEventsSha256": "4b8ed76ce1273711dc0221fd803215d3615450a02b731e0c8d3de77e8c9dbccf",
+  "judgeOutputSha256": "b72071276af95b9f56a563fddccec29345511ca6ac8b67de3470e5d9f93471cf",
+  "envelopeSha256": "7cb9833b70446ef21328b8fcd3108f25c632fb112738626bb1c6afc07d46fd62",
+  "importValidation": {
+    "mode": "validate",
+    "validatedReviews": 1,
+    "persistedReviews": 0
+  },
+  "promptSnapshotPath": "/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-xC2Hfv/review-task.prompt.txt",
+  "reviewerEventsPath": "/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-xC2Hfv/reviewer-events.json",
+  "envelopePath": "/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-xC2Hfv/import.json"
+}

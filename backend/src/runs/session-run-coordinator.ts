@@ -1,6 +1,8 @@
 import {
   SessionRunTransitionError,
   type KoryAskUserPayload,
+  type RunSettledOutcome,
+  type RunSettledPayload,
   type SessionRunActivePhase,
   type SessionRunSnapshot,
   type SessionRunStatePayload,
@@ -326,6 +328,7 @@ export class SessionRunCoordinator {
           result.payload.snapshot,
           snapshot.activeAgentIds.length > 0 ? snapshot.activeAgentIds : ['kory-manager'],
         );
+        await this.publishSettled(snapshot.sessionId, snapshot.runId, 'interrupted');
         recovered++;
       } catch (error) {
         if (!this.isStaleRecoverySnapshot(error)) throw error;
@@ -342,6 +345,7 @@ export class SessionRunCoordinator {
       try {
         const result = this.store.terminalizeOrphanedWait(snapshot, `orphaned_${snapshot.phase}`);
         await this.publishStored(result.payload, result.publishRequired);
+        await this.publishSettled(snapshot.sessionId, snapshot.runId, 'interrupted');
         recovered++;
       } catch (error) {
         if (!this.isStaleRecoverySnapshot(error)) throw error;
@@ -360,7 +364,7 @@ export class SessionRunCoordinator {
       }
       const now = Date.now();
       if (now - this.lastOutboxPruneAt >= 60 * 60 * 1_000) {
-        this.store.prunePublished(now - 7 * 24 * 60 * 60 * 1_000);
+        this.store.prunePublished(now - 24 * 60 * 60 * 1_000);
         this.lastOutboxPruneAt = now;
       }
       return published;
@@ -403,7 +407,39 @@ export class SessionRunCoordinator {
           : { kind, expectedRunId: runId, expectedRevision, reason },
     );
     await this.publishStored(result.payload, result.publishRequired);
+    await this.publishSettled(
+      sessionId,
+      runId,
+      kind === 'complete' ? 'completed' : kind === 'fail' ? 'failed' : 'cancelled',
+    );
     return result.payload.snapshot;
+  }
+
+  /**
+   * run.settled follows the run's terminal run.state. Every terminal transition
+   * reaches this class exactly once (terminal() is idempotent, and recovery
+   * applies each listed run once), and outbox replay never re-emits it. The
+   * owner of a process-local run defers its terminal commit until its follow-up
+   * work is finished, so for owned runs this point is "settled". Best-effort,
+   * like run.state: a failed publication is logged, never thrown into recovery.
+   */
+  private async publishSettled(
+    sessionId: string,
+    runId: string | null,
+    outcome: RunSettledOutcome,
+  ): Promise<void> {
+    if (!runId) return;
+    const settledAt = Date.now();
+    try {
+      await this.publish(sessionId, {
+        type: 'run.settled',
+        sessionId,
+        payload: { runId, outcome, settledAt } satisfies RunSettledPayload,
+        timestamp: settledAt,
+      });
+    } catch (error) {
+      serverLog.error({ error, sessionId, runId }, 'Session run settlement publish failed');
+    }
   }
 
   private isStaleRecoverySnapshot(error: unknown): boolean {

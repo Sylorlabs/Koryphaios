@@ -112,6 +112,58 @@ describe('KoryManager model context preview provenance', () => {
     }
   });
 
+  test('reuses the session breakdown (rescaled) when switching routes, not a char count', async () => {
+    const directory = createTestDirectory();
+    await new ContextArchiveService(directory).recordUsage('route-switch', {
+      used: 63_000,
+      max: 200_000,
+      contextKnown: true,
+      model: 'devin-model',
+      provider: 'devin',
+      activeMessageId: 'assistant-final',
+      contextRevision: 2,
+      cachedInputTokens: 40_000,
+      breakdown: {
+        system: 10_000,
+        memory: 2_000,
+        skills: 1_000,
+        tools: 8_000,
+        chat: 39_000,
+        output: 3_000,
+      },
+      ts: Date.now(),
+    });
+    const { registerLiveModelResolver } = await import('../../providers/models');
+    // A narrower destination window forces the rescale branch.
+    registerLiveModelResolver((modelId, provider) =>
+      modelId === 'minimax-m3' && provider === 'codex'
+        ? ({ contextVerified: true, contextWindow: 50_000 } as never)
+        : undefined,
+    );
+    const manager = createManager(directory, {
+      // Same boundary — the transcript didn't change, only the route did.
+      getActiveBoundary: async () => ({ messageId: 'assistant-final', contextRevision: 2 }),
+      getContextMessages: async () =>
+        [{ role: 'user', content: 'tiny' } as never],
+    });
+    try {
+      const preview = await manager.previewModelContext('route-switch', 'minimax-m3', 'codex');
+      // A char-count fallback would report ~2 tokens; the breakdown wins and
+      // is rescaled into the destination window.
+      expect(preview.usageKnown).toBe(true);
+      expect(preview.estimated).toBe(true);
+      expect(preview.used).toBe(50_000);
+      const b = preview.breakdown!;
+      // 63k → 50k is a 50/63 scale, applied per category.
+      expect(b.system).toBe(Math.floor(10_000 * (50_000 / 63_000)));
+      expect(b.output).toBe(Math.floor(3_000 * (50_000 / 63_000)));
+      expect(preview.cachedInputTokens).toBe(Math.floor(40_000 * (50_000 / 63_000)));
+    } finally {
+      registerLiveModelResolver(() => undefined);
+      manager.shutdown();
+    }
+  });
+
   test('fails closed when a new message or rewind changes the conversation boundary', async () => {
     for (const scenario of [
       { name: 'new-message', boundary: { messageId: 'user-new', contextRevision: 4 } },

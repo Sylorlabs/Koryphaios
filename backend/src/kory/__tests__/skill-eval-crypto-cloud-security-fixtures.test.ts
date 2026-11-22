@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import {
   CRYPTO_CLOUD_SECURITY_SKILL_EVAL_MATERIALIZERS,
   CRYPTO_CLOUD_SECURITY_SKILL_EVAL_SCORERS,
-} from '../skill-eval-crypto-cloud-security-fixtures';
-import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
+} from '../../eval/skills/skill-eval-crypto-cloud-security-fixtures';
+import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
 import { loadV5SkillPackages } from '../skill-packages';
 
 const roots: string[] = [];

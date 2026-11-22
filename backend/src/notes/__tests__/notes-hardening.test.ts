@@ -21,7 +21,6 @@ import {
   getAttachment,
   getNote,
   getProjectSyncStatus,
-  PROJECT_DOCUMENT_SCAN_LIMIT,
   listNotes,
   saveAttachment,
   syncProjectDocuments,
@@ -431,18 +430,22 @@ describe('long-form Notes hardening', () => {
     await syncProjectDocuments(scanProject);
 
     unlinkSync(authoritative);
-    for (let index = 0; index < PROJECT_DOCUMENT_SCAN_LIMIT + 1; index++) {
+    // Inject a small soft limit instead of creating 50k fixture files: the
+    // production default is a stopping point, not something the test must walk
+    // to. The behaviour under test is the truncated pass, not the number.
+    const scanLimit = 4;
+    for (let index = 0; index < scanLimit + 1; index++) {
       writeFileSync(join(scanProject, `document-${String(index).padStart(4, '0')}.md`), '# Doc\n');
     }
-    const partial = await syncProjectDocuments(scanProject);
+    const partial = await syncProjectDocuments(scanProject, { maxFiles: scanLimit });
 
     expect(partial.truncated).toBe(true);
     expect(partial.scanLimitReached).toBe(true);
-    expect(partial.discovered).toBe(PROJECT_DOCUMENT_SCAN_LIMIT);
-    expect(partial.message).toContain('scan limit was reached');
+    expect(partial.discovered).toBe(scanLimit);
+    expect(partial.message).toContain('soft limit was reached');
     expect(getProjectSyncStatus(scanProject)).toMatchObject({
       state: 'partial',
-      discovered: PROJECT_DOCUMENT_SCAN_LIMIT,
+      discovered: scanLimit,
     });
     expect(await getNote(previous!.id, scanProject)).not.toBeNull();
   });

@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "reviewer": {
+    "agentId": "logfare-stateless-8819f3a5-585a-4cdb-b43a-2cd31aa95e6e",
+    "provider": "logfare",
+    "model": "deepseek-v4.1-flash-1017"
+  },
+  "reviews": [
+    {
+      "assignmentId": "blind-v5-d1eb1b1b467679057b7b",
+      "output": {
+        "artifactA": {
+          "passed": false,
+          "quality": 0.6,
+          "verification": 0.4,
+          "integrityFailure": false,
+          "evidence": [
+            "Only Sources/DocumentFeature.swift was modified among mutable sources; no evaluator-owned Sources files were changed, and derived caches remained under .kory-tmp.",
+            "Host evidence shows standard-testConcurrentSceneIsolation, standard-testAutosaveAndDocumentScopedUndo, standard-testFailedDiskSaveAndRecovery, and standard-testDiscardAndReopenScene all passed on the iOS 27 simulator.",
+            "Host evidence shows accessibility-large / DocumentUITests.testPerSceneFocusAndAccessibleLargeType failed: XCTAssertEqual failed: (\"\") is not equal to (\"Draft for document A\"), so the required keyboard focus/accessibility scenario is not met.",
+            "No host evidence demonstrates the required process termination/restoration scenario; the only restoration-labeled item is dynamic-type-restoration, not document process restoration.",
+            "Agent honestly states the oracle/simulator lifecycle checks could not be exercised and typecheck failed due a sandbox SwiftUI macro plugin error.",
+            "A finalOutput claims scene-owned editor focus, but the host focus test failure leaves that focus-behavior claim unsupported and contradicted for the required scenario."
+          ]
+        },
+        "artifactB": {
+          "passed": false,
+          "quality": 0.65,
+          "verification": 0.5,
+          "integrityFailure": false,
+          "evidence": [
+            "Only Sources/DocumentFeature.swift was modified among mutable sources; caches were kept under .kory-tmp, including .kory-tmp/swift-cache-2, with no evaluator-owned source changes.",
+            "Host evidence shows the same four standard scenario tests passed: concurrent scene isolation, autosave/document-scoped undo, failed disk save/recovery, and discard/reopen.",
+            "Host evidence shows the same accessibility-large / focus test failed: XCTAssertEqual failed: (\"\") is not equal to (\"Draft for document A\"), so the required keyboard focus/accessibility scenario is not met.",
+            "No host evidence demonstrates the required process termination/restoration scenario.",
+            "B finalOutput claims autosave, failed-save dirty retry, persisted undo, and save-on-close/reopen load; those claims align with the four passing host scenario tests.",
+            "B explicitly states the requested focus and other lifecycle behaviors could not be exercised locally, and it does not overclaim focus test success."
+          ]
+        },
+        "preference": "B",
+        "rationale": [
+          "Both artifacts fail the task because the required keyboard focus/accessibility scenario failed in host evidence, and neither provides process termination/restoration scenario evidence.",
+          "Both respect scope: only the allowed DocumentFeature.swift source was modified, evaluator-owned sources were not altered, and derived caches stayed inside .kory-tmp.",
+          "Both honestly disclose that local oracle execution/typecheck was blocked by the sandbox, so no fabricated verification success is present.",
+          "B is preferred because its completion claims about autosave, failed-save retry, undo, and discard/reopen align with the host's passing tests, while A additionally claims scene-owned editor focus that the failing focus test contradicts; B is more evidence-aligned and less overclaiming."
+        ]
+      },
+      "events": [
+        {
+          "type": "review.started",
+          "reviewerId": "logfare-stateless-8819f3a5-585a-4cdb-b43a-2cd31aa95e6e"
+        },
+        {
+          "type": "review.completed",
+          "reviewerId": "logfare-stateless-8819f3a5-585a-4cdb-b43a-2cd31aa95e6e",
+          "outputSha256": "75f6f0680a078414a697c6c86f5a31dd0848764219d6cf11f57fa6a5fa1300fb"
+        }
+      ],
+      "hostReceipt": {
+        "schemaVersion": 1,
+        "stageOnly": true,
+        "identitySource": "host-invocation-uuid",
+        "upstreamSessionObserved": true,
+        "requestedModel": "deepseek-v4.1-flash-1017",
+        "responseModel": "deepseek-v4.1-flash-1017",
+        "promptSha256": "f5ebd00df66c8d077f5dabc89b2868713ff8b99cc8c58b891e8de8f6f0921f62",
+        "requestBytes": 280755,
+        "responseSha256": "ed1478e103540e4d90289c12cf54575a7758b4f2154618efe986a222d7b7f194",
+        "outputSha256": "75f6f0680a078414a697c6c86f5a31dd0848764219d6cf11f57fa6a5fa1300fb",
+        "elapsedMs": 72097,
+        "osIsolationVerified": false,
+        "upstreamIdentityVerified": false,
+        "signed": false
+      }
+    }
+  ]
+}

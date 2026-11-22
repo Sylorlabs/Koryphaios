@@ -6,20 +6,20 @@ import {
   createConceptFixtures,
   scoreConceptFixture,
   type ConceptFixture,
-} from '../skill-eval-concept-fixtures';
-import { SAFETY_PROTOCOL_CONCEPTS } from '../skill-eval-safety-protocol-fixtures';
-import { LIFECYCLE_CONCEPTS } from '../skill-eval-lifecycle-concept-fixtures';
-import { MEDIA_RUNTIME_CONCEPTS } from '../skill-eval-media-runtime-concept-fixtures';
+} from '../../eval/skills/skill-eval-concept-fixtures';
+import { SAFETY_PROTOCOL_CONCEPTS } from '../../eval/skills/skill-eval-safety-protocol-fixtures';
+import { LIFECYCLE_CONCEPTS } from '../../eval/skills/skill-eval-lifecycle-concept-fixtures';
+import { MEDIA_RUNTIME_CONCEPTS } from '../../eval/skills/skill-eval-media-runtime-concept-fixtures';
 import { loadV5SkillPackages } from '../skill-packages';
 import {
   auditSkillEvalExecutionReadiness,
   runPairedSkillEvaluationV3,
-} from '../skill-eval-execution';
+} from '../../eval/skills/skill-eval-execution';
 import {
   BUILTIN_SKILL_EVAL_MATERIALIZERS,
   BUILTIN_SKILL_EVAL_SCORERS,
-} from '../skill-eval-fixtures';
-import type { SkillEvalScenarioV3 } from '../skill-eval-harness';
+} from '../../eval/skills/skill-eval-fixtures';
+import type { SkillEvalScenarioV3 } from '../../eval/skills/skill-eval-harness';
 
 // Positive controls establish evaluator reachability, NOT skill uplift or blind qualification.
 // They are never copied into the subject's fixture by a production materializer.

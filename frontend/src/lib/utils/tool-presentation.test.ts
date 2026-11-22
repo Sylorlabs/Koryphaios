@@ -261,8 +261,8 @@ describe('tool activity presentation', () => {
     expect(toolPresentation(entry('command_execution', { command: 'git status' }, 'clean'))).toMatchObject({ icon: 'git', complete: true });
   });
 
-  it('keeps all 25 activity glyphs on smooth cubic-bezier curves with refined icon geometry', () => {
-    expect(activityGlyphOrder).toHaveLength(25);
+  it('keeps all 26 activity glyphs on smooth cubic-bezier curves with refined icon geometry', () => {
+    expect(activityGlyphOrder).toHaveLength(26);
     const css = readFileSync(resolve(__dirname, '../components/activity-glyphs.css'), 'utf8');
     expect(css).not.toContain('steps(');
     expect(activityGlyphs['file-edit'].svg.match(/class="agi-ink"/g)).toHaveLength(1);
@@ -274,5 +274,43 @@ describe('tool activity presentation', () => {
     expect(activityGlyphs.attachment.svg).toContain('agi-attach-photo');
     expect(activityGlyphs.attachment.svg).toContain('agi-clip');
     expect(activityGlyphs.git.svg).toContain('agi-git-flow');
+  });
+
+  it('gives a skill its own mark instead of a file, note or generic tool icon', () => {
+    const skill = activityGlyphs.skill;
+    expect(skill.svg).toContain('agi-tassel');
+    const pending = toolPresentation(entry('kory__load_skill_detail', { name: 'frontend-engineering' }));
+    const done = toolPresentation(entry('load_skill_detail', { name: 'frontend-engineering' }, 'guidance'));
+    expect(pending).toMatchObject({ icon: 'skill', action: 'Using skill', target: '“frontend-engineering”' });
+    expect(done).toMatchObject({ icon: 'skill', action: 'Used skill', target: '“frontend-engineering”' });
+  });
+
+  it('never marks a tool with a wrench', () => {
+    // Two wrench marks were retired: an amber lucide Wrench tapping a wall for
+    // tool_calling, and a wrench-and-bolt glyph for the generic tool icon. Both
+    // implied one hardware action for every tool, and neither read as "running".
+    // The generic mark is a cog and tool_calling is a terminal prompt, so any
+    // wrench in the glyph map or the status-icon markup is a regression.
+    const glyphs = readFileSync(resolve(__dirname, '../components/activity-glyphs.ts'), 'utf8');
+    expect(glyphs).not.toMatch(/agi-wrench|agi-wall|agi-impact/);
+    expect(glyphs).not.toMatch(/\bwrench\b/i);
+
+    expect(activityGlyphs.tool.svg).toContain('agi-cog-group');
+    expect(activityGlyphOrder).toContain('tool');
+
+    const status = readFileSync(resolve(__dirname, '../components/AnimatedStatusIcon.svelte'), 'utf8');
+    // The explanatory comment names the retired icon, so strip comments first.
+    const markup = status.replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(markup).not.toMatch(/lucide-svelte\/icons\/wrench/);
+    expect(markup).not.toMatch(/wrench-icon|wrench-tap|tool-tapping/);
+    expect(markup).toContain('tool-command');
+
+    // The stylesheet is a third place the mark lived: the strike, flex and tap
+    // keyframes animated the retired glyph, so dropping only the markup leaves
+    // dead rules that reintroduce the motion the moment a class name returns.
+    const stylesheet = readFileSync(resolve(__dirname, '../components/activity-glyphs.css'), 'utf8');
+    expect(stylesheet).not.toMatch(/agi-wrench|agi-wall|agi-impact/);
+    expect(stylesheet).not.toMatch(/\bwrench\b/i);
+    expect(stylesheet).toContain('agi-cog-turn');
   });
 });

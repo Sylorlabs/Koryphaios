@@ -1,0 +1,5 @@
+# Representative MCU secure-boot/OTA fixture
+
+Write `.kory-eval/boot-config.json` as `BootConfig` using the supplied production key hash/product. Immutable Boot ROM trusts the production key-hash/fuse record and authenticates the mutable bootloader; bootloader authenticates application/recovery image signature and product. Protected rollback state rejects the signed older image. Recovery is separately authorized rather than a signature-only rollback bypass.
+
+The board-observed current image boots; unsigned, corrupt and wrong-product fixtures reject before execution. Exercise every supplied power-cut transition and show it recovers to authenticated current/candidate/authorized recovery without executing an unverified slot. Write `.kory-eval/boot-evidence.json` keyed by image digest/version and cut step with serial decision evidence, board-observed vs emulator-only labels. Do not infer debug-lock/fuse/physical-extraction resistance from emulator behavior; only the supplied key-hash fuse record is board-observed here.

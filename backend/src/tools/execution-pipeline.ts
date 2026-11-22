@@ -2,6 +2,7 @@ import { crossAgentEvidenceCache, stableEvidenceVariant } from '../cache/evidenc
 import { tryResolveGitTreeEvidenceIdentity } from '../cache/git-evidence';
 import { toolLog } from '../logger';
 import { summarizeToolErrorForAudit } from '../security/bash-sandbox';
+import { screenToolCall } from '../security/banned-names';
 import { decideToolPermission, READ_ONLY_TOOLS } from './permission-policy';
 import { toolSchemaGuidance, validateToolInputAgainstSchema } from './tool-exposure';
 import { isNoteToolName } from '@koryphaios/shared';
@@ -14,7 +15,7 @@ import { canonicalizePath, isContainedBy } from '../runtime/platform';
 import { tryAcquireWorkspaceOperation } from './workspace-operation-gate';
 import { roleIncludesTool } from './tool-roles';
 import type { Tool, ToolCallInput, ToolCallOutput, ToolContext } from './registry';
-import { FILESYSTEM_TOOLS, FILE_MUTATING_TOOLS, FilePathScope, bindFilePathScope } from './external-paths';
+import { FILESYSTEM_TOOLS, FILE_MUTATING_TOOLS, WORKSPACE_MUTATING_TOOLS, FilePathScope, bindFilePathScope } from './external-paths';
 
 function approvalSubject(ctx: ToolContext): string {
   if (ctx.callerDomain) return `${ctx.callerDomain[0].toUpperCase()}${ctx.callerDomain.slice(1)} worker`;
@@ -37,6 +38,31 @@ export function deriveToolContext(ctx: ToolContext, overrides: Partial<ToolConte
   return Object.create(Object.getPrototypeOf(ctx), {
     ...Object.getOwnPropertyDescriptors(ctx),
     ...Object.getOwnPropertyDescriptors(overrides),
+  });
+}
+
+/** A read-only tool must not keep the turn alive after Stop. The underlying
+ *  work is harmless and is left to finish, but the tool loop returns now.
+ *  File-mutating tools are deliberately excluded: they check the signal at
+ *  their own mutation boundary so a write is never reported as stopped while
+ *  it is still landing. */
+function raceToolWithAbort<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return work;
+  const reason = signal.reason ?? new DOMException('Tool call stopped by user', 'AbortError');
+  if (signal.aborted) return Promise.reject(reason);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+    work.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      },
+    );
   });
 }
 
@@ -127,6 +153,34 @@ export async function executeTool(
     };
   }
 
+  // Bouncer, not a killer: a name the owner has banned never reaches the
+  // filesystem or the process table. Screened here, before ownership, sandbox
+  // and approval work, so a refused call costs nothing and leaves no artifact.
+  const banned = screenToolCall(call);
+  if (banned) {
+    return {
+      callId: call.id,
+      name: call.name,
+      output: banned.reason,
+      isError: true,
+      durationMs: 0,
+    };
+  }
+
+  // The workspace binding was swapped mid-turn (isolate_chat/merge_chat_back):
+  // this context still points at the pre-change directory, so mutations must
+  // wait for the next turn's fresh context.
+  if (ctx.workspaceRebindPending === true && WORKSPACE_MUTATING_TOOLS.has(call.name)) {
+    return {
+      callId: call.id,
+      name: call.name,
+      output:
+        "This chat's workspace changed during this turn; the work continues in the next turn.",
+      isError: true,
+      durationMs: 0,
+    };
+  }
+
   const start = performance.now();
 
   // Ownership, not provider input or sandbox preferences, establishes the
@@ -135,10 +189,20 @@ export async function executeTool(
   try {
     const owner = sessionWorkspaceOwnership(ctx.workingDirectory);
     const reviewRoot = ctx.reviewWorkspaceRoot ? canonicalizePath(ctx.reviewWorkspaceRoot) : undefined;
-    if (!owner && !reviewRoot && ctx.requiredWorkspaceRoot) {
-      throw new Error('Owned workspace is no longer available');
+    // canonicalizePath resolves symlinks and therefore throws on a missing
+    // path; a vanished grant is the same "no longer available" failure.
+    let grantRoot: string | undefined;
+    if (ctx.requiredWorkspaceRoot) {
+      try {
+        grantRoot = canonicalizePath(ctx.requiredWorkspaceRoot);
+      } catch {
+        throw new Error('Owned workspace is no longer available');
+      }
+      if (!existsSync(grantRoot)) {
+        throw new Error('Owned workspace is no longer available');
+      }
     }
-    const cwd = owner || reviewRoot ? canonicalizePath(ctx.workingDirectory) : undefined;
+    const cwd = owner || reviewRoot || grantRoot ? canonicalizePath(ctx.workingDirectory) : undefined;
     if (reviewRoot && (!cwd || !isContainedBy(reviewRoot, cwd)))
       throw new Error('Verification cwd escaped its disposable grant');
     if (owner && cwd) {
@@ -146,10 +210,19 @@ export async function executeTool(
         throw new Error('Owned workspace cwd was redirected outside its checkout');
       }
     }
+    // No owned checkout and no review grant: the host-issued workspace grant is
+    // the boundary. It is host-set, never provider input — a worker pointed at
+    // a directory this session does not own still gets its sandbox grant, not a
+    // blanket refusal.
+    if (!owner && !reviewRoot && grantRoot) {
+      if (!cwd || !isContainedBy(grantRoot, cwd)) {
+        throw new Error('Workspace grant cwd was redirected outside its root');
+      }
+    }
     // A manager opened on a repository subdirectory still owns that chat's
     // independent Git metadata. Workers retain only their task checkout.
-    const root = reviewRoot ?? (owner ? (ctx.callerRole === 'manager' ? owner.checkout : cwd) : undefined);
-    if (ctx.requiredWorkspaceRoot && root !== ctx.requiredWorkspaceRoot) {
+    const root = reviewRoot ?? (owner ? (ctx.callerRole === 'manager' ? owner.checkout : cwd) : grantRoot);
+    if (grantRoot && root !== grantRoot) {
       throw new Error('The pinned workspace grant was redirected');
     }
     if (root || ctx.requiredWorkspaceRoot) {
@@ -157,12 +230,13 @@ export async function executeTool(
       ctx.approvedToolCallIds ??= new Set();
       ctx = deriveToolContext(ctx, { requiredWorkspaceRoot: root, ...(cwd ? { workingDirectory: cwd } : {}) });
     }
-  } catch {
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
     return {
       callId: call.id,
       name: call.name,
       isError: true,
-      output: 'Cannot establish the mandatory workspace boundary.',
+      output: `Cannot establish the mandatory workspace boundary: ${reason}`,
       durationMs: performance.now() - start,
     };
   }
@@ -593,8 +667,20 @@ export async function executeTool(
       // Keep live policy getters and the invocation-bound context intact.
       if (!fileScope) ctx = deriveToolContext(ctx, { allowedPaths: [root] });
     }
-    const result = await runToolWithEvidenceCache(tool, ctx, call);
+    ctx.signal?.throwIfAborted();
+    const work = runToolWithEvidenceCache(tool, ctx, call);
+    // Bash owns its own abort path: it must return the "command continues"
+    // result instead of being raced away as a generic cancelled tool.
+    const result =
+      FILE_MUTATING_TOOLS.has(call.name) || call.name === 'bash'
+        ? await work
+        : await raceToolWithAbort(work, ctx.signal);
     result.durationMs = performance.now() - start;
+    // A successful workspace mutation this turn blocks a later isolate_chat:
+    // uncommitted in-place edits cannot travel to the new copy.
+    if (!result.isError && WORKSPACE_MUTATING_TOOLS.has(call.name)) {
+      ctx.noteWorkspaceMutation?.();
+    }
     return result;
   } catch (err: unknown) {
     const errorAudit = summarizeToolErrorForAudit(err);

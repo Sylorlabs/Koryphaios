@@ -1,0 +1,32 @@
+{
+  "artifactA": {
+    "passed": true,
+    "quality": 0.95,
+    "verification": 0.9,
+    "integrityFailure": false,
+    "evidence": [
+      "claim.sql contains one atomic WITH...UPDATE...RETURNING statement using FOR UPDATE SKIP LOCKED, priority DESC, id ASC, expired-lease recovery, attempt_count increment, and gen_random_uuid() fencing token.",
+      "The JSON records PostgreSQL 17.5, unavailable runtime observations with failure reasons, a 20-worker/five-minute workload, and the relational-data-modeling/MySQL boundary.",
+      "Host execution evidence reports 20-worker claim uniqueness, empty queue, crash/retry visibility, constraint violations, read-committed isolation, extensions, statistics, and EXPLAIN (ANALYZE, BUFFERS) passed.",
+      "No separate broker or index was added, and the transaction boundary is documented as commit before external work."
+    ]
+  },
+  "artifactB": {
+    "passed": true,
+    "quality": 0.95,
+    "verification": 0.9,
+    "integrityFailure": false,
+    "evidence": [
+      "claim.sql contains one atomic WITH...UPDATE...RETURNING statement using FOR UPDATE SKIP LOCKED, priority DESC, id ASC, expired-lease recovery, attempt_count increment, and gen_random_uuid() fencing token.",
+      "The JSON records PostgreSQL 17.5, unavailable runtime observations with failure reasons, a 20-worker/five-minute workload, and the relational-data-modeling/MySQL boundary.",
+      "Host execution evidence reports 20-worker claim uniqueness, empty queue, crash/retry visibility, constraint violations, read-committed isolation, extensions, statistics, and EXPLAIN (ANALYZE, BUFFERS) passed.",
+      "No separate broker or index was added, and the transaction boundary is documented as commit before external work."
+    ]
+  },
+  "preference": "tie",
+  "rationale": [
+    "Both artifacts implement the required atomic skip-locked claim pattern and expired-lease recovery; host runtime evidence passes both.",
+    "Both preserve the numeric quantity 20, the literal constraint category, priority ordering, and explicit unavailable labels for checks the candidate shell could not run.",
+    "Artifact A has a more detailed operating-contract and claim-contract record, while Artifact B has cleaner unavailable-status reporting and an explicit top-level constraint category; neither shows a decisive behavioral advantage."
+  ]
+}

@@ -1,0 +1,28 @@
+[09:51:32] warn  [server] Multiple koryphaios.json files found in parent directories; using the innermost. The outer file(s) are ignored. {"chosen":"/Users/Shared/micah/Documents/koryphaios","shadowed":["/Users/Shared/micah/Documents","/Users/Shared/micah"]}
+{"type":"progress","complete":1,"failed":0,"totalQueued":2,"skill":"sqlite-engineering","scenarioId":"sqlite-engineering-full-task-2-individual","pairId":"sqlite-engineering-full-task-2-individual:68679b38-520b-42ca-98a7-5964fb1a941b","withSkill":false,"withoutSkill":false,"withSkillInfrastructureFailure":false,"withoutSkillInfrastructureFailure":false,"infrastructureFailure":false,"integrityFailure":false}
+{"type":"progress","complete":2,"failed":0,"totalQueued":2,"skill":"sqlite-engineering","scenarioId":"sqlite-engineering-full-task-2-individual","pairId":"sqlite-engineering-full-task-2-individual:d287aaf0-c56d-499d-867a-04592287e937","withSkill":false,"withoutSkill":true,"withSkillInfrastructureFailure":false,"withoutSkillInfrastructureFailure":false,"infrastructureFailure":false,"integrityFailure":false}
+{
+  "schemaVersion": 1,
+  "executor": {
+    "mode": "codex",
+    "id": "codex-cli-isolated:codex-cli 0.167.0:reasoning=none:multi-turn",
+    "subject": "codex",
+    "provider": "codex",
+    "model": "gpt-6-luna",
+    "runtimeIdentity": "codex-cli 0.167.0:reasoning=none:multi-turn",
+    "executionMode": "multi-turn",
+    "reasoningEffort": "none",
+    "concurrency": 1,
+    "wallClockMs": 900000
+  },
+  "selectedSkills": 1,
+  "readyScenarios": 2,
+  "environmentBlockedScenarios": 0,
+  "skippedComplete": 0,
+  "queued": 2,
+  "completed": 2,
+  "failed": 0,
+  "failedScenarios": [],
+  "stoppedReason": null,
+  "notStarted": 0
+}

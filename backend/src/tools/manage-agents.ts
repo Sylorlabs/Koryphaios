@@ -5,18 +5,33 @@ export class ManageAgentsTool implements Tool {
   readonly name = 'manage_agents';
   readonly role = 'manager' as const;
   readonly description =
-    'Inspect and control workers spawned in this chat. Actions: list, message, cancel, set_controls, prune_context. ' +
-    'Use list to see worker ids, status, model, provider, reasoning level, and busy state. ' +
-    'Use message to send an instruction when the worker is idle, set_controls to change its model or reasoning for the next turn, ' +
-    'cancel to stop it, or prune_context to remove older prompt messages while retaining the visible transcript.';
+    'Inspect and control agents in this chat. Actions: list, message, cancel, set_controls, prune_context. ' +
+    'Use list to see every manager, worker, and critic with its model, provider, reasoning level, fallback chain, permission posture, worktree mode, status, and busy state. ' +
+    'Workers are controllable; the manager row accepts durable set_controls. Use message to send an instruction when the worker is idle, ' +
+    'set_controls to change model, reasoning, or fallback chain for the next turn, cancel to stop a worker, or prune_context to remove older prompt messages while retaining the visible transcript. ' +
+    'Permissions stay user-owned and cannot be changed through this tool. Managers should change controls only when the user asks or the task requires it.';
   readonly inputSchema = {
     type: 'object',
     properties: {
       action: { type: 'string', enum: ['list', 'message', 'cancel', 'set_controls', 'prune_context'] },
       agentId: { type: 'string' },
       message: { type: 'string' },
-      model: { type: 'string' },
+      model: { type: 'string', description: 'Worker model, optionally provider:model.' },
       reasoningLevel: { type: 'string' },
+      fallbacks: {
+        type: 'array',
+        maxItems: 20,
+        description: 'Ordered fallback models tried only on provider or rate-limit failure.',
+        items: {
+          type: 'object',
+          properties: {
+            model: { type: 'string' },
+            reasoningLevel: { type: 'string' },
+          },
+          required: ['model'],
+          additionalProperties: false,
+        },
+      },
       keepRecent: { type: 'number', minimum: 2, maximum: 100 },
     },
     required: ['action'],

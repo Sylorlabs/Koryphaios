@@ -1,6 +1,9 @@
 // Live account balances — only providers that expose a balance to a normal
 // API key are probed (verified July–Sept 2026): OpenRouter, DeepSeek,
 // Moonshot/Kimi, DeepInfra, SiliconFlow, Novita, Vultr, DigitalOcean.
+// Token Harbor publishes no wallet endpoint, but it does report its live
+// free-tier allowance on inference responses, so that one is read from the
+// gateway's own X-TH-* headers rather than a fabricated quota.
 // Everything else has no key-based endpoint: OpenAI needs a session or admin
 // key, xAI needs a management key + team id, Fireworks balance is an internal
 // gRPC method, Together billing needs org scope, Anthropic/Google/Groq/Cohere/
@@ -15,6 +18,12 @@ export interface ProviderBalance {
   /** Lifetime/period usage USD when the endpoint reports it (OpenRouter). */
   usedUsd?: number;
   detail?: string;
+  /** Provider-reported plan tier when it exposes one (Token Harbor). */
+  plan?: string;
+  /** 0–100 share of the provider's free allowance already consumed. */
+  allowanceUsedPercent?: number;
+  /** Unix-ms when the provider says the free allowance window resets. */
+  allowanceResetsAt?: number;
   fetchedAt: number;
 }
 
@@ -32,6 +41,157 @@ async function getJson(url: string, headers: Record<string, string>): Promise<un
 }
 
 type Fetcher = (apiKey: string) => Promise<ProviderBalance>;
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function asNumber(value: unknown): number | undefined {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function asTimestampMs(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+/**
+ * Build one balance row from Coarena's two real account endpoints.
+ *
+ * `/credits` is a top-level object (`available_usd`, `held_usd`, `plan`), while
+ * `/limits` wraps its payload in `data` and reports today's spend, the daily
+ * allowance and the account's rate limits. Either endpoint may fail without
+ * inventing the other one's numbers. `available_usd` is server-authoritative;
+ * held funds are never subtracted from it a second time.
+ */
+export function coarenaBalanceFrom(credits: unknown, limits: unknown): ProviderBalance {
+  const credit = asRecord(credits) ?? {};
+  const limitsRoot = asRecord(limits);
+  const limitData = asRecord(limitsRoot?.data) ?? limitsRoot ?? {};
+  const today = asRecord(limitData.today) ?? {};
+
+  const balance = asNumber(credit.balance_usd);
+  const held = asNumber(credit.held_usd);
+  const available =
+    asNumber(credit.available_usd) ??
+    (balance !== undefined && held !== undefined ? Math.max(0, balance - held) : balance);
+
+  const used = asNumber(today.used_usd);
+  const heldToday = asNumber(today.held_usd);
+  const dailyLimit = asNumber(limitData.usd_per_day) ?? asNumber(credit.free_daily_usd);
+  const left =
+    asNumber(today.left_usd) ??
+    (dailyLimit !== undefined && used !== undefined
+      ? Math.max(0, dailyLimit - used - (heldToday ?? 0))
+      : undefined);
+  const effective = used !== undefined ? used + (heldToday ?? 0) : undefined;
+
+  let allowanceUsedPercent: number | undefined;
+  if (dailyLimit !== undefined) {
+    if (dailyLimit === 0) allowanceUsedPercent = 100;
+    else if (effective !== undefined) {
+      allowanceUsedPercent = Math.min(100, Math.max(0, (effective / dailyLimit) * 100));
+    }
+  }
+
+  const plan =
+    typeof credit.plan === 'string' ? credit.plan : limitData.free === true ? 'free' : undefined;
+  const resetsAt = asTimestampMs(today.resets_at);
+  const rpm =
+    asNumber(limitData.requests_per_minute_key) ?? asNumber(limitData.requests_per_minute_account);
+  const concurrency = asNumber(limitData.concurrency);
+  const detail = [
+    dailyLimit !== undefined ? `$${dailyLimit.toFixed(2)}/day` : undefined,
+    left !== undefined ? `$${left.toFixed(2)} left today` : undefined,
+    rpm !== undefined ? `${rpm} req/min` : undefined,
+    concurrency !== undefined ? `${concurrency} concurrent` : undefined,
+  ].filter((part): part is string => !!part);
+
+  // A free account has no purchased wallet, so `available_usd` is 0 while its
+  // real entitlement is the daily allowance. Showing $0.00 would hide the
+  // usage the user actually has; leave the wallet unknown so the billing card
+  // renders the allowance percentage instead.
+  const availableForDisplay =
+    plan === 'free' && available === 0 && dailyLimit !== undefined ? null : available;
+
+  return {
+    provider: 'coarena',
+    availableUsd: availableForDisplay ?? null,
+    ...(used !== undefined ? { usedUsd: used } : {}),
+    ...(plan ? { plan } : {}),
+    ...(allowanceUsedPercent !== undefined ? { allowanceUsedPercent } : {}),
+    ...(resetsAt !== undefined ? { allowanceResetsAt: resetsAt } : {}),
+    ...(detail.length ? { detail: detail.join(' · ') } : {}),
+    fetchedAt: Date.now(),
+  };
+}
+
+/**
+ * Build one balance row from CrowLLM's standard One API billing routes.
+ *
+ * The routes answered 401 unauthenticated, but their authenticated payloads
+ * are not documented and were not live-verified. Parse only explicit fields:
+ * a remaining/balance value is never inferred from a spend cap, and
+ * `total_usage` is the One API cent value. If only a spend cap and usage are
+ * available, report the percentage of that cap rather than pretending it is a
+ * wallet balance.
+ */
+export function crowllmBalanceFrom(subscription: unknown, usage: unknown): ProviderBalance {
+  const subRoot = asRecord(subscription);
+  const sub = asRecord(subRoot?.data) ?? subRoot ?? {};
+  const usageRoot = asRecord(usage);
+  const usageData = asRecord(usageRoot?.data) ?? usageRoot ?? {};
+
+  const explicitAvailable =
+    asNumber(sub.available_usd) ??
+    asNumber(sub.balance_usd) ??
+    asNumber(sub.remaining_usd) ??
+    asNumber(usageData.remaining_usd);
+
+  const totalUsage = asNumber(usageData.total_usage);
+  const totalUsageUsd = asNumber(usageData.total_usage_usd);
+  const used =
+    totalUsageUsd ??
+    (totalUsage !== undefined ? totalUsage / 100 : undefined) ??
+    asNumber(sub.used_usd);
+
+  const hardLimit =
+    asNumber(sub.hard_limit_usd) ??
+    asNumber(sub.system_hard_limit_usd) ??
+    asNumber(sub.soft_limit_usd);
+  const plan = typeof sub.plan === 'string' && sub.plan.trim() ? sub.plan.trim() : undefined;
+
+  let allowanceUsedPercent: number | undefined;
+  if (hardLimit !== undefined && hardLimit > 0 && used !== undefined) {
+    allowanceUsedPercent = Math.min(100, Math.max(0, (used / hardLimit) * 100));
+  }
+
+  const detail = [
+    used !== undefined ? `$${used.toFixed(2)} used this period` : undefined,
+    hardLimit !== undefined ? `$${hardLimit.toFixed(2)} spend cap` : undefined,
+  ].filter((part): part is string => !!part);
+
+  return {
+    provider: 'crowllm',
+    availableUsd: explicitAvailable ?? null,
+    ...(used !== undefined ? { usedUsd: used } : {}),
+    ...(plan ? { plan } : {}),
+    ...(allowanceUsedPercent !== undefined ? { allowanceUsedPercent } : {}),
+    ...(detail.length ? { detail: detail.join(' · ') } : {}),
+    fetchedAt: Date.now(),
+  };
+}
 
 const FETCHERS: Record<string, Fetcher> = {
   // GET /api/v1/credits → { data: { total_credits, total_usage } }
@@ -126,6 +286,100 @@ const FETCHERS: Record<string, Fetcher> = {
       detail: typeof balance === 'number' ? `pending $${pending.toFixed(2)}` : undefined,
       fetchedAt: Date.now(),
     };
+  },
+  // Token Harbor has no key-based wallet endpoint. Its gateway does report the
+  // live free allowance on every inference response, so read those headers
+  // from a one-token :free call instead of inventing a quota. The free model id
+  // is taken from the live catalog, never hardcoded, because the lineup rotates.
+  tokenharbor: async (key) => {
+    // One abort budget covers both requests, so a slow catalog cannot push the
+    // billing probe past its own timeout.
+    const signal = AbortSignal.timeout(TIMEOUT_MS);
+    const catalogResponse = await fetch('https://tokenharbor.ai/v1/models', {
+      headers: { Authorization: `Bearer ${key}` },
+      signal,
+    });
+    if (!catalogResponse.ok) throw new Error(`${catalogResponse.status}`);
+    const catalog = (await catalogResponse.json()) as { data?: Array<{ id?: unknown }> };
+    const freeModel = catalog.data?.find(
+      (entry): entry is { id: string } =>
+        typeof entry?.id === 'string' && entry.id.endsWith(':free'),
+    )?.id;
+    if (!freeModel) throw new Error('No free model published');
+
+    const response = await fetch('https://tokenharbor.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: freeModel,
+        messages: [{ role: 'user', content: 'ping' }],
+        max_tokens: 1,
+        stream: false,
+      }),
+      signal,
+    });
+
+    const plan = response.headers.get('x-th-plan')?.trim();
+    const used = Number.parseFloat(response.headers.get('x-th-free-used-pct') ?? '');
+    const reset = Date.parse(response.headers.get('x-th-free-resets') ?? '');
+    const allowanceExhausted = response.status === 429 && Number.isFinite(used);
+    if (!response.ok && !allowanceExhausted) throw new Error(`${response.status}`);
+    await response.text();
+
+    return {
+      provider: 'tokenharbor',
+      availableUsd: null,
+      ...(plan ? { plan } : {}),
+      ...(Number.isFinite(used) ? { allowanceUsedPercent: Math.min(100, Math.max(0, used)) } : {}),
+      ...(Number.isFinite(reset) ? { allowanceResetsAt: reset } : {}),
+      fetchedAt: Date.now(),
+    };
+  },
+  // Coarena exposes both the wallet and today's allowance to a normal key:
+  // GET /api/v1/credits → { plan, balance_usd, held_usd, available_usd, ... }
+  // GET /api/v1/limits  → { data: { usd_per_day, today: { used_usd, ... } } }
+  coarena: async (key) => {
+    const headers = {
+      Authorization: `Bearer ${key}`,
+      'Content-Type': 'application/json',
+      'User-Agent': 'Koryphaios/1.0',
+    };
+    const credits = await getJson('https://coarena.ai/api/v1/credits', headers);
+    // The wallet is the authoritative part; a limits failure must not hide a
+    // real balance, and neither failure may manufacture a zero.
+    const limits = await getJson('https://coarena.ai/api/v1/limits', headers).catch(
+      () => undefined,
+    );
+    return coarenaBalanceFrom(credits, limits);
+  },
+  // CrowLLM exposes the standard One API billing routes. They answered 401
+  // unauthenticated; only explicitly reported fields are used, and a failed
+  // route never invents a zero wallet.
+  crowllm: async (key) => {
+    const headers = {
+      Authorization: `Bearer ${key}`,
+      'Content-Type': 'application/json',
+      'User-Agent': 'Koryphaios/1.0',
+    };
+    const end = new Date();
+    const start = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), 1));
+    const date = (value: Date) => value.toISOString().slice(0, 10);
+    const [subscription, usage] = await Promise.all([
+      getJson('https://crowllm.com/v1/dashboard/billing/subscription', headers).catch(
+        () => undefined,
+      ),
+      getJson(
+        `https://crowllm.com/v1/dashboard/billing/usage?start_date=${date(start)}&end_date=${date(end)}`,
+        headers,
+      ).catch(() => undefined),
+    ]);
+    if (subscription === undefined && usage === undefined) {
+      throw new Error('billing unavailable');
+    }
+    return crowllmBalanceFrom(subscription, usage);
   },
   // GET /v2/customers/my/balance → { account_balance: "12.23", month_to_date_usage }
   digitalocean: async (key) => {

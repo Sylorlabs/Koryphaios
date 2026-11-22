@@ -3,7 +3,7 @@ import {
   awsBaselineEffectiveAccessEvidenceIsExplicit,
   awsRecoveryEnvironmentEvidenceIsExplicit,
   gcpFailbackEvidenceIsExplicit,
-} from '../skill-eval-cloud-platform-fixtures';
+} from '../../eval/skills/skill-eval-cloud-platform-fixtures';
 
 test('GCP recovery treats an explicit false failbackExercised field as a bounded limitation', () => {
   expect(

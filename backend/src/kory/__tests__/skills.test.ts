@@ -45,8 +45,8 @@ import {
   deriveSkillContextBudget,
   requiresMultiAgentDelegation,
   textTokenUpperBound,
-} from '../prompts';
-import { registerLiveModelResolver } from '../../providers/models';
+} from '../prompts/index';
+import { registerLiveModelResolver } from '../../providers/models/index';
 import {
   listHarnessQualifications,
   rankHarnessCandidates,
@@ -60,7 +60,7 @@ import {
   recordSkillEvaluationRuns,
 } from '../skill-evaluations';
 import { syncSkillStewardRegistry } from '../skill-stewards';
-import { currentV5SkillEvaluationContracts } from '../skill-eval-current-contract';
+import { currentV5SkillEvaluationContracts } from '../../eval/skills/skill-eval-current-contract';
 
 function currentFullTaskEvidence(skill: string, scenarioId: string, experimentId: string) {
   const pkg = V5_SKILL_PACKAGE_CATALOG.packages.find((item) => item.sidecar.name === skill)!;
@@ -165,7 +165,8 @@ const MANDATORY_ACCESSIBLE_WEB_SKILLS = [
 ];
 
 // Host workflow controls are seeded at runtime, but have no V5 packages and
-// are not part of the 182-package qualification/promotion inventory.
+// are not part of the 182-package qualification/promotion inventory. The
+// canonical definition lives in skill-packages.ts; imported below.
 const RUNTIME_CONTROL_SKILL_NAMES = ['critic-auto-selection', 'critic-review'];
 
 describe('local Koryphaios skills', () => {
@@ -236,7 +237,10 @@ describe('local Koryphaios skills', () => {
 
     const activeByName = new Map(listSkills(root).map((skill) => [skill.name, skill]));
     const packageVersions = new Map(
-      V5_SKILL_PACKAGE_CATALOG.packages.map((skillPackage) => [
+      [
+        ...V5_SKILL_PACKAGE_CATALOG.packages,
+        ...V5_SKILL_PACKAGE_CATALOG.runtimeControls,
+      ].map((skillPackage) => [
         skillPackage.sidecar.name,
         skillPackage.sidecar.version,
       ]),
@@ -251,7 +255,6 @@ describe('local Koryphaios skills', () => {
     }
     for (const name of RUNTIME_CONTROL_SKILL_NAMES) {
       const definition = BUNDLED_SKILL_DEFINITIONS.find((item) => item.name === name)!;
-      expect(packageVersions.has(name)).toBe(false);
       expect(activeByName.get(name)!.instructions).toContain(definition.instructions);
     }
   });
@@ -400,6 +403,85 @@ describe('local Koryphaios skills', () => {
     });
     expect(outsideResult.evidence.contextPaths).toEqual([]);
     expect(outsideResult.selected.map((item) => item.skill.name)).not.toContain('terraform-iac');
+  });
+
+  test('the skill feeder honors agent blocks instead of re-stuffing refused skills', () => {
+    const prompt = 'Please review the current file and make the smallest correct change.';
+    const contract = createTaskContract(prompt);
+
+    // Baseline: terraform-iac is selected through its active path scope.
+    const baseline = resolveSkills(root, prompt, contract, {
+      activePaths: ['infra/main.tf'],
+      contextBudget: 60_000,
+    });
+    expect(baseline.selected.map((item) => item.skill.name)).toContain('terraform-iac');
+
+    // Blocking a directly matched skill keeps it out entirely.
+    const blocked = resolveSkills(root, prompt, contract, {
+      activePaths: ['infra/main.tf'],
+      agentBlocked: ['terraform-iac'],
+      contextBudget: 60_000,
+    });
+    expect(blocked.selected.map((item) => item.skill.name)).not.toContain('terraform-iac');
+    expect(blocked.rejectedCandidates).toContainEqual({
+      name: 'terraform-iac',
+      reason: 'Rejected: blocked by the agent for this session (manage_skill_feeding)',
+    });
+
+    // A blocked pin is ignored with a warning, not a hierarchy error: the
+    // agent's refusal wins without failing the turn.
+    const blockedPin = resolveSkills(root, prompt, contract, {
+      pins: ['plan-mode'],
+      agentBlocked: ['plan-mode'],
+      contextBudget: 60_000,
+    });
+    expect(blockedPin.selected.map((item) => item.skill.name)).not.toContain('plan-mode');
+    expect(blockedPin.hierarchyErrors).not.toContain(
+      'Skill plan-mode cannot be both pinned and removed',
+    );
+    expect(blockedPin.warnings).toContain(
+      'Skill plan-mode is blocked by the agent for this session; its pin was ignored',
+    );
+
+    // A blocked skill that a selected skill strictly requires stays as a
+    // minimal dependency stub so the manifest remains hierarchy closed.
+    const stubbed = resolveSkills(root, prompt, contract, {
+      activePaths: ['infra/main.tf'],
+      agentBlocked: ['architecture-planning'],
+      contextBudget: 60_000,
+    });
+    const stub = stubbed.selected.find((item) => item.skill.name === 'architecture-planning');
+    expect(stub?.representation).toBe('minimal');
+    expect(stub?.directSelection).toBe(false);
+    expect(stubbed.warnings.join(' ')).toContain('minimal hierarchy dependency stubs');
+    expectLosslessOrderedSkillContext(stubbed);
+  });
+
+  test('the feeder downgrades skills whose full text the agent already holds', () => {
+    const prompt = 'Please review the current file and make the smallest correct change.';
+    const contract = createTaskContract(prompt);
+
+    // Without the marker a directly selected skill upgrades past minimal.
+    const full = resolveSkills(root, prompt, contract, {
+      pins: ['plan-mode'],
+      contextBudget: 60_000,
+    });
+    const fullPlan = full.selected.find((item) => item.skill.name === 'plan-mode');
+    expect(fullPlan?.representation).not.toBe('minimal');
+
+    // With the marker the same selection stays a minimal pointer: the full
+    // text already lives in the agent's context from load_skill_detail.
+    const pointer = resolveSkills(root, prompt, contract, {
+      pins: ['plan-mode'],
+      detailAlreadyInContext: ['plan-mode'],
+      contextBudget: 60_000,
+    });
+    const pointerPlan = pointer.selected.find((item) => item.skill.name === 'plan-mode');
+    expect(pointerPlan?.representation).toBe('minimal');
+    expect(pointer.warnings.join(' ')).toContain(
+      'full guidance is already in this agent\'s context from load_skill_detail',
+    );
+    expectLosslessOrderedSkillContext(pointer);
   });
 
   test('loads V5 package cores without appending retired playbooks to migrated skills', () => {
@@ -1082,7 +1164,10 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
       'Design and build an accessible browser interface for a long-form research workspace',
       { taskKind: 'ui' },
     );
-    const result = resolveSkills(root, contract.goal, contract, { contextBudget: 60_000 });
+    // 80k: the WIP-fattened interface closure (visual-interface-design and
+    // accessibility-practice render ~31k as minimal) needs headroom beyond the
+    // old 60k for the one-hop facet this test exists to pin.
+    const result = resolveSkills(root, contract.goal, contract, { contextBudget: 80_000 });
     const names = result.selected.map((item) => item.skill.name);
     expect(result.hierarchyErrors).toEqual([]);
     expect(names).toContain('web-interface');
@@ -1101,7 +1186,7 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
       'Design and build an accessible browser interface for a research workspace',
       { taskKind: 'ui' },
     );
-    const result = resolveSkills(root, contract.goal, contract, { contextBudget: 60_000 });
+    const result = resolveSkills(root, contract.goal, contract, { contextBudget: 80_000 });
     const web = result.selected.find((item) => item.skill.name === 'web-interface')!;
     expect(web.promptText).toContain(
       'Broader skills: visual-interface-design, frontend-engineering',
@@ -1800,12 +1885,12 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
             supportsAttachments: false,
             supportsStreaming: true,
           }
-        : modelId === 'verified-32k'
+        : modelId === 'verified-48k'
           ? {
               id: modelId,
               name: modelId,
               provider,
-              contextWindow: 32_000,
+              contextWindow: 48_000,
               contextVerified: true,
               maxOutputTokens: MANAGER_OUTPUT_TOKEN_LIMIT,
               costPerMInputTokens: 0,
@@ -1840,7 +1925,7 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
     const crowdedCompiled = compilePrompt({
       role: 'manager',
       provider: 'openai',
-      model: 'verified-32k',
+      model: 'verified-48k',
       occupiedContextTokenUpperBound: 1_000,
       reservedOutputTokens: MANAGER_OUTPUT_TOKEN_LIMIT,
       requireVerifiedContextWindow: true,
@@ -1854,14 +1939,14 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
       compilePrompt({
         role: 'manager',
         provider: 'openai',
-        model: 'verified-32k',
+        model: 'verified-48k',
         occupiedContextTokenUpperBound: 48_000,
         reservedOutputTokens: MANAGER_OUTPUT_TOKEN_LIMIT,
         requireVerifiedContextWindow: true,
         workingDirectory: root,
         taskContract: contract,
       }),
-    ).toThrow('exceeding the verified 32000-token window');
+    ).toThrow('exceeding the verified 48000-token window');
     expect(() =>
       compilePrompt({
         role: 'manager',

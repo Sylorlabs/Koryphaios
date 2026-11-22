@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "reviewerId": "logfare-stateless-4198d257-e8b5-4c27-9821-5d6cdff3ca70",
+  "completed": true,
+  "output": "{\"artifactA\":{\"passed\":true,\"quality\":0.85,\"verification\":0.8,\"integrityFailure\":false,\"evidence\":[\"Worker.execute rejects stale tokens (token < highestAuthority) before committing, and dispatch() preserves the boolean contract while dispatchCommand exposes committed/duplicate/rejected-stale/unavailable outcomes.\",\"Scheduler sets recoveryRequired on failed acquire and returns 'unavailable' until a fresh lease is acquired, giving an explicit recovery gate.\",\"reconcile(commandId) queries worker outcome, and the lost-response test reconciles before retrying with the same commandId, yielding 'duplicate' with a single effect.\",\"Tests cover partition/failover, in-flight stale writer rejection, lost-response reconciliation, recovery with monotonic token 3, and concurrent duplicate suppression (6 tests, 28 assertions).\",\"Evidence JSON documents consistency model, single authority, retry owner (scheduler/caller; worker never retries), unknown-outcome reconciliation, recovery gate, token timeline, wallClockOwnershipProof:false, and synthetic/local simulation label.\",\"Hierarchy note present (broader backend-engineering; event-driven-architecture and stream-processing children); bun-deno-runtime not absorbed.\",\"Gaps: no explicit bounded backoff/attempt budget in code or JSON; retry owner is named but bounded retry behavior is not demonstrated. Evidence labels are coarse (single simulation label) rather than per-claim observed/simulated/unavailable separation.\",\"Host scorer notes 'partition/skew/fencing regressions: missing' while the visible test file contains such a test and host run shows it passing; treat as possible verifier defect, not agent integrity failure.\"]},\"artifactB\":{\"passed\":true,\"quality\":0.9,\"verification\":0.85,\"integrityFailure\":false,\"evidence\":[\"Worker.dispatch rejects token < highestAuthority before dedup, correctly fencing stale writers at the effect boundary while preserving the boolean API.\",\"Tests cover partition+skew (A's clock ahead but cannot commit), duplicate suppression by stable jobId, and recovery advancing fence to token 3 with first post-recovery write accepted and B/token 2 rejected (4 tests, 24 assertions).\",\"Evidence JSON is richer: names nodes, clocks, partition, authority, per-operation consistency (acquire/dispatch/compute/effects), deliveryAndRetry with commandIdentity, retryOwner, acknowledgementBoundary, unknownOutcome, cancellation semantics, token timeline, results, recoveryGate, wallClockOwnershipProof:false, topologyAssumptions, and hierarchy note.\",\"Explicitly states attemptBudget 'not implemented by this bounded fixture; callers must cap attempts' — honest about the bounded-backoff gap rather than overclaiming.\",\"Cancellation correctly noted as unable to prove a possibly committed dispatch absent; reconcile by jobId.\",\"Topology assumption explicitly disclaimed (no quorum/replicated store inferred).\",\"Gaps: no explicit bounded backoff/attempt-budget implementation; unknown-outcome reconciliation is described but the test only exercises duplicate suppression rather than a distinct reconcile path; evidence labels are coarse.\",\"Host scorer notes 'partition/skew/fencing regressions: present' consistent with visible tests.\"]},\"preference\":\"B\",\"rationale\":[\"Both artifacts correctly fix the core bug (stale-token fencing at the worker effect boundary), preserve the boolean dispatch contract, and add deterministic partition/failover/recovery/duplicate tests.\",\"Artifact B's evidence JSON is materially more complete: it enumerates nodes, clocks, partition, authority, per-operation consistency/availability, acknowledgement boundary, cancellation semantics, and explicitly disclaims unproven topology, satisfying more of the operation-matrix and execution-invariant checks.\",\"Artifact B is more honest about the bounded-backoff gap (attemptBudget not implemented, callers must cap) rather than leaving it unaddressed, improving evidence-and-uncertainty quality.\",\"Artifact A adds a richer outcome type and a reconcile() method with a lost-response test, which is a genuine strength, but its evidence JSON is thinner and omits explicit cancellation/acknowledgement-boundary discussion.\",\"Neither artifact implements bounded backoff, so both fall short of full retry-owner evidence; B's explicit disclosure edges it ahead.\",\"Host scorer's 'partition/skew/fencing regressions: missing' for A conflicts with the visible passing test, indicating a possible verifier defect rather than an agent failure; not counted against A's integrity.\"]}",
+  "events": [
+    {
+      "type": "review.started",
+      "reviewerId": "logfare-stateless-4198d257-e8b5-4c27-9821-5d6cdff3ca70"
+    },
+    {
+      "type": "review.completed",
+      "reviewerId": "logfare-stateless-4198d257-e8b5-4c27-9821-5d6cdff3ca70",
+      "outputSha256": "69466f7f2062b8c91a2daabb5c04a47f47edf024a15f2b717626488c95e914e6"
+    }
+  ],
+  "hostReceipt": {
+    "schemaVersion": 1,
+    "stageOnly": true,
+    "identitySource": "host-invocation-uuid",
+    "upstreamSessionObserved": true,
+    "requestedModel": "deepseek-v4.1-flash-1017",
+    "responseModel": "deepseek-v4.1-flash-1017",
+    "promptSha256": "5c15a2b913711e60d483824b23d687ea1a579008e1a2d88f402e499a4ff5e948",
+    "requestBytes": 46878,
+    "responseSha256": "6a315e7da9ce813ce9f186f27ee1bbfef3bebe8a4f2d1c0f6a5507e0dcd03cfb",
+    "outputSha256": "69466f7f2062b8c91a2daabb5c04a47f47edf024a15f2b717626488c95e914e6",
+    "elapsedMs": 4552,
+    "osIsolationVerified": false,
+    "upstreamIdentityVerified": false,
+    "signed": false
+  }
+}

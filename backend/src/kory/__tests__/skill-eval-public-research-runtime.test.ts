@@ -3,23 +3,23 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { auditSkillEvalExecutionReadiness } from '../skill-eval-execution';
-import { readFixtureText, writeFixtureFile } from '../skill-eval-fixture-helpers';
+import { auditSkillEvalExecutionReadiness } from '../../eval/skills/skill-eval-execution';
+import { readFixtureText, writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
 import {
   BUILTIN_SKILL_EVAL_MATERIALIZERS,
   BUILTIN_SKILL_EVAL_SCORERS,
-} from '../skill-eval-fixtures';
-import { buildSkillEvalSuiteV3, type SkillEvalScenarioV3 } from '../skill-eval-harness';
+} from '../../eval/skills/skill-eval-fixtures';
+import { buildSkillEvalSuiteV3, type SkillEvalScenarioV3 } from '../../eval/skills/skill-eval-harness';
 import {
   EXTERNAL_ENVIRONMENT_SKILL_EVAL_MATERIALIZERS,
   EXTERNAL_ENVIRONMENT_SKILL_EVAL_SCORERS,
-} from '../skill-eval-external-environment-fixtures';
+} from '../../eval/skills/skill-eval-external-environment-fixtures';
 import {
   PUBLIC_RESEARCH_CASES,
   PUBLIC_RESEARCH_SKILL_EVAL_MATERIALIZERS,
   PUBLIC_RESEARCH_SKILL_EVAL_SCORERS,
   scorePublicResearchRuntime,
-} from '../skill-eval-public-research-runtime';
+} from '../../eval/skills/skill-eval-public-research-runtime';
 import { loadV5SkillPackages } from '../skill-packages';
 
 const TIME = '2026-10-09T23:26:00.000Z';
@@ -67,20 +67,6 @@ function arxivBody(study: typeof routeLlm): string {
     `<entry><id>http://arxiv.org/abs/${study.id}</id><title>${study.title}</title>` +
     `<published>${study.published}T12:00:00Z</published><summary>${study.abstract}</summary></entry></feed>`
   );
-}
-
-function openAlexBody(study: typeof routeLlm): string {
-  return JSON.stringify({
-    meta: { count: 1 },
-    results: [
-      {
-        title: study.title,
-        doi: `https://doi.org/10.48550/arxiv.${study.id}`,
-        ids: { arxiv: `https://arxiv.org/abs/${study.id}` },
-        publication_date: study.published,
-      },
-    ],
-  });
 }
 
 const pubmed = [
@@ -163,10 +149,10 @@ function sourcesFor(scenario: SkillEvalScenarioV3): MockSource[] {
         body: arxivBody(routeLlm),
       },
       {
-        id: 'openalex-routellm',
+        id: 'arxiv-record-routellm',
         url: task.sources[1]!.url,
-        contentType: 'application/json',
-        body: openAlexBody(routeLlm),
+        contentType: 'application/atom+xml',
+        body: arxivBody(routeLlm),
       },
       {
         id: 'arxiv-routerbench',
@@ -175,10 +161,10 @@ function sourcesFor(scenario: SkillEvalScenarioV3): MockSource[] {
         body: arxivBody(routerBench),
       },
       {
-        id: 'openalex-routerbench',
+        id: 'arxiv-record-routerbench',
         url: task.sources[3]!.url,
-        contentType: 'application/json',
-        body: openAlexBody(routerBench),
+        contentType: 'application/atom+xml',
+        body: arxivBody(routerBench),
       },
     ];
   const search: MockSource = {
@@ -218,7 +204,14 @@ function sourcesFor(scenario: SkillEvalScenarioV3): MockSource[] {
       note: 'Europe PMC search results and indexed study identity.',
     }),
   };
-  return [search, details, metadata];
+  const control: MockSource = {
+    id: 'invalid-eutils-endpoint',
+    url: 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/definitely-not-an-endpoint',
+    contentType: 'application/json',
+    status: 400,
+    body: JSON.stringify({ error: "Invalid eutil name 'definitely-not-an-endpoint'" }),
+  };
+  return [search, details, metadata, control];
 }
 
 function transport(sources: MockSource[]) {
@@ -260,7 +253,7 @@ function greenReport(scenario: SkillEvalScenarioV3, sources: MockSource[]) {
       id: source.id,
       url: source.url,
       retrievedAt: TIME,
-      status: 200,
+      status: source.status ?? 200,
       sha256: sha(source.body),
       lastModified: null,
       excerpts: [excerpt(source.body)],
@@ -297,7 +290,7 @@ function greenReport(scenario: SkillEvalScenarioV3, sources: MockSource[]) {
         published: study.published,
         sourceIds: [
           `arxiv-${study === routeLlm ? 'routellm' : 'routerbench'}`,
-          `openalex-${study === routeLlm ? 'routellm' : 'routerbench'}`,
+          `arxiv-record-${study === routeLlm ? 'routellm' : 'routerbench'}`,
         ],
         publicationStatus: 'preprint',
         access: 'abstract-only',
@@ -329,15 +322,17 @@ function greenReport(scenario: SkillEvalScenarioV3, sources: MockSource[]) {
         abstractExcerpt: abstract(trial.title).slice(0, 100),
       }));
   const searches = first
-    ? sources.map((source) => ({
-        sourceId: source.id,
-        url: source.url,
-        total: 1,
-        includedIds: [source.id.includes('routellm') ? routeLlm.id : routerBench.id],
-        exclusions: [
-          'Unrelated records omitted because they do not match the named primary study and its dated research scope.',
-        ],
-      }))
+    ? sources
+        .filter((source) => !source.id.includes('record'))
+        .map((source) => ({
+          sourceId: source.id,
+          url: source.url,
+          total: 1,
+          includedIds: [source.id.includes('routellm') ? routeLlm.id : routerBench.id],
+          exclusions: [
+            'Unrelated records omitted because they do not match the named primary study and its dated research scope.',
+          ],
+        }))
     : [
         {
           sourceId: 'pubmed-search',
@@ -530,7 +525,7 @@ describe('public research V5 real-source scorer contract', () => {
     );
   });
 
-  test('PubMed trial choices, Crossref corroboration and alternate documented fields use actual source bytes', async () => {
+  test('PubMed grouped evidence, the negative control row and alternate documented fields use actual source bytes', async () => {
     const scenario = scenarios.find(
       (item) => item.id === 'literature-research-full-task-2-individual',
     )!;
@@ -539,12 +534,14 @@ describe('public research V5 real-source scorer contract', () => {
     PUBLIC_RESEARCH_SKILL_EVAL_MATERIALIZERS[0]!.materialize(root, scenario);
     const readme = readFixtureText(root, 'README.md');
     for (const field of [
-      'observedTotal',
-      'excludedAlternatives',
-      'qualityLimitations',
-      'pubmed-<PMID>',
-      'crossref-<PMID>',
+      'pubmed-trials',
+      'europepmc-trials',
       'invalid-eutils-endpoint',
+      'includedIds',
+      'exclusions',
+      'indexed-randomized-trial',
+      'abstract-only',
+      'indirect',
     ]) {
       expect(readme).toContain(field);
     }
@@ -558,72 +555,15 @@ describe('public research V5 real-source scorer contract', () => {
         note: 'The public trial search returned these source identifiers for independent study screening and verification.',
       },
     });
-    const meshUrl =
-      'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=' +
-      encodeURIComponent(
-        '"patient navigation"[MeSH Terms] AND "randomized controlled trial"[Publication Type]',
-      ) +
-      '&retmode=json&retmax=10';
-    const extras: MockSource[] = [
-      {
-        id: 'pubmed-mesh-search',
-        url: meshUrl,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          esearchresult: {
-            count: '4',
-            idlist: [pubmed[0]!.id, otherId],
-            note: 'A second focused randomized patient-navigation search returned the selected and excluded identifiers.',
-          },
-        }),
-      },
-      ...pubmed.flatMap((study): MockSource[] => [
-        {
-          id: `pubmed-${study.id}`,
-          url: `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=${study.id}&retmode=xml`,
-          contentType: 'application/xml',
-          body: pubmedXml([study]),
-        },
-        {
-          id: `crossref-${study.id}`,
-          url: `https://api.crossref.org/works/${encodeURIComponent(`10.1000/nav.${study.id}`)}`,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            message: {
-              DOI: `10.1000/nav.${study.id}`,
-              title: [study.title],
-              type: 'journal-article',
-              published: { 'date-parts': [[Number(study.year), 4, 7]] },
-            },
-          }),
-        },
-      ]),
-      {
-        id: 'invalid-eutils-endpoint',
-        url: 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/definitely-not-an-endpoint',
-        contentType: 'application/json',
-        status: 400,
-        body: JSON.stringify({ error: "Invalid eutil name 'definitely-not-an-endpoint'" }),
-      },
-    ];
-    const { request } = transport([...base, ...extras]);
+    const { request } = transport(base);
     const options = { request, now: () => new Date(TIME) };
     writeReports(root, scenario, base);
     const report: any = greenReport(scenario, base);
-    report.sources = [base[0], ...extras].map((source) => ({
-      id: source.id,
-      url: source.url,
-      status: source.status ?? 200,
-      retrievedAt: TIME,
-      sha256: sha(source.body),
-      lastModified: null,
-      excerpts: [excerpt(source.body)],
-    }));
     report.searches = [
       {
         sourceId: 'pubmed-search',
         url: base[0]!.url,
-        observedTotal: 12,
+        total: 12,
         includedIds: pubmed.map((study) => study.id),
         excludedAlternatives: [
           {
@@ -632,34 +572,7 @@ describe('public research V5 real-source scorer contract', () => {
           },
         ],
       },
-      {
-        sourceId: 'pubmed-mesh-search',
-        url: meshUrl,
-        observedTotal: 4,
-        includedIds: [pubmed[0]!.id],
-        excludedAlternatives: [
-          {
-            ids: [otherId],
-            reason: 'Only the sampled primary trials were used for this focused comparison.',
-          },
-        ],
-      },
     ];
-    for (const study of report.studies) {
-      study.sourceIds = [
-        'pubmed-search',
-        ...(study.id === pubmed[0]!.id ? ['pubmed-mesh-search'] : []),
-        `pubmed-${study.id}`,
-        `crossref-${study.id}`,
-      ];
-      study.publicationStatus =
-        'Published journal article indexed by PubMed as a Randomized Controlled Trial; Crossref DOI matched.';
-      study.access = 'PubMed abstract and metadata only; full text was not assessed.';
-      study.qualityLimitations = [
-        'The population and clinical setting limit generalization to software agents.',
-        'Abstract only; full methods, attrition and risk of bias were not assessed.',
-      ];
-    }
     const write = (value: unknown) =>
       writeFixtureFile(root, 'research.json', `${JSON.stringify(value, null, 2)}\n`);
     write(report);
@@ -668,25 +581,32 @@ describe('public research V5 real-source scorer contract', () => {
     expect(accepted.quality).toBe(1);
     expect(accepted.evidence.join('\n')).toContain('invalid-eutils-endpoint: HTTP 400');
 
-    const missing = structuredClone(report);
-    missing.sources = missing.sources.filter(
-      (row: { id: string }) => row.id !== `crossref-${pubmed[1]!.id}`,
-    );
-    write(missing);
-    const missingScore = await scorePublicResearchRuntime(scenario, root, options);
-    expect(missingScore.passed).toBe(false);
-    expect(missingScore.evidence.join('\n')).toContain(
+    // The grouped path is the supported path: a fifth source row fails coverage.
+    const extraRow = structuredClone(report);
+    extraRow.sources.push({
+      id: 'pubmed-mesh-search',
+      url: base[0]!.url,
+      status: 200,
+      retrievedAt: TIME,
+      sha256: sha(base[0]!.body),
+      lastModified: null,
+      excerpts: [excerpt(base[0]!.body)],
+    });
+    write(extraRow);
+    const extraScore = await scorePublicResearchRuntime(scenario, root, options);
+    expect(extraScore.passed).toBe(false);
+    expect(extraScore.evidence.join('\n')).toContain(
       'all required sources uniquely represented: fail',
     );
 
     const forged = structuredClone(report);
-    forged.sources.find((row: { id: string }) => row.id === `crossref-${pubmed[0]!.id}`).sha256 =
+    forged.sources.find((row: { id: string }) => row.id === 'europepmc-trials').sha256 =
       '0'.repeat(64);
     write(forged);
     const forgedScore = await scorePublicResearchRuntime(scenario, root, options);
     expect(forgedScore.passed).toBe(false);
     expect(forgedScore.evidence.join('\n')).toContain(
-      `crossref-${pubmed[0]!.id} direct HTTPS provenance: fail`,
+      'europepmc-trials direct HTTPS provenance: fail',
     );
 
     const misdated = structuredClone(report);
@@ -707,12 +627,11 @@ describe('public research V5 real-source scorer contract', () => {
       'pubmed-search search count, URL and eligibility: fail',
     );
 
-    const badStatus = transport([
-      ...base,
-      ...extras.map((source) =>
-        source.id === `crossref-${pubmed[0]!.id}` ? { ...source, status: 503 } : source,
+    const badStatus = transport(
+      base.map((source) =>
+        source.id === 'pubmed-trials' ? { ...source, status: 503 } : source,
       ),
-    ]);
+    );
     write(report);
     const unavailable = await scorePublicResearchRuntime(scenario, root, {
       ...options,

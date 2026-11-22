@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "status": "unimported",
+  "assignmentId": "blind-v5-a8c17a14e49cb58c02fc",
+  "skill": "procurement-vendor-evaluation",
+  "scenarioId": "procurement-vendor-evaluation-full-task-1-individual",
+  "pairId": "procurement-vendor-evaluation-full-task-1-individual:9cff36fe-cf4f-43b9-a90f-f57072701ef4",
+  "reviewerThread": "logfare-stateless-3b392d0d-cb6c-4c37-b11f-d061509d83c7",
+  "reviewerIdentitySource": "external-reviewer-adapter-output",
+  "reviewerAdapter": "scripts/kory-logfare-stateless-reviewer",
+  "reviewerModel": "deepseek-v4.1-flash-1017",
+  "reviewerModelSource": "configured-provider-model-metadata",
+  "reviewerBaseUrl": "http://127.0.0.1:17841/v1",
+  "promptSha256": "459bb6da232021fe18fa6de0865cbb34faf163aeb449212215b93fe915bbcdd6",
+  "privateAssignmentSha256": "3a77665bc5e6c8ba6ebbc98c63c060db28c6c641444fe6f6d445546d463dd904",
+  "reviewerEventsSha256": "bb34f9bbfee8a28ea21f18d7400cad30b84e9959e559d1b6a96fc99b595796ff",
+  "judgeOutputSha256": "78e3a0d968de2d80d80d4e64e24bc0ef7757d85a835c7535c77258e1278657fe",
+  "envelopeSha256": "52f22fcf3b808b1f69b2847791034ad720001e34ffec866cbf4ab4f9913974e2",
+  "importValidation": {
+    "mode": "validate",
+    "validatedReviews": 1,
+    "persistedReviews": 0
+  },
+  "promptSnapshotPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-NILswU/review-task.prompt.txt",
+  "reviewerEventsPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-NILswU/reviewer-events.json",
+  "envelopePath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-NILswU/import.json"
+}

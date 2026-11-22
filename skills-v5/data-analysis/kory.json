@@ -1,12 +1,16 @@
 {
   "schemaVersion": 1,
   "name": "data-analysis",
-  "version": "5.1.1",
+  "version": "5.1.3",
   "skillKind": "orchestrator",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
-  "domains": ["data"],
-  "targetMedia": ["any"],
+  "domains": [
+    "data"
+  ],
+  "targetMedia": [
+    "any"
+  ],
   "pathScopes": [],
   "contextBudget": 3200,
   "broader": [],
@@ -49,8 +53,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["database-performance"],
-        "tags": ["ambiguous", "hierarchy-boundary"]
+        "adjacentSkills": [
+          "database-performance"
+        ],
+        "tags": [
+          "ambiguous",
+          "hierarchy-boundary"
+        ]
       },
       {
         "id": "data-analysis-ambiguous-2",
@@ -58,8 +67,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["mongodb-engineering"],
-        "tags": ["ambiguous", "hierarchy-boundary"]
+        "adjacentSkills": [
+          "mongodb-engineering"
+        ],
+        "tags": [
+          "ambiguous",
+          "hierarchy-boundary"
+        ]
       },
       {
         "id": "data-analysis-ambiguous-3",
@@ -67,8 +81,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["mysql-engineering"],
-        "tags": ["ambiguous", "hierarchy-boundary"]
+        "adjacentSkills": [
+          "mysql-engineering"
+        ],
+        "tags": [
+          "ambiguous",
+          "hierarchy-boundary"
+        ]
       }
     ],
     "adversarial": [
@@ -78,8 +97,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["postgres-engineering"],
-        "tags": ["adversarial", "hierarchy-boundary"]
+        "adjacentSkills": [
+          "postgres-engineering"
+        ],
+        "tags": [
+          "adversarial",
+          "hierarchy-boundary"
+        ]
       },
       {
         "id": "data-analysis-adversarial-2",
@@ -87,8 +111,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["privacy-engineering"],
-        "tags": ["adversarial", "hierarchy-boundary"]
+        "adjacentSkills": [
+          "privacy-engineering"
+        ],
+        "tags": [
+          "adversarial",
+          "hierarchy-boundary"
+        ]
       },
       {
         "id": "data-analysis-adversarial-3",
@@ -96,8 +125,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["redis-engineering"],
-        "tags": ["adversarial", "hierarchy-boundary"]
+        "adjacentSkills": [
+          "redis-engineering"
+        ],
+        "tags": [
+          "adversarial",
+          "hierarchy-boundary"
+        ]
       }
     ]
   },

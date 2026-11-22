@@ -1,5 +1,29 @@
-import { computeCostUsd, resolvePricing, SUBSCRIPTION_PROVIDERS } from '../pricing';
+import {
+  costFromPricing,
+  resolvePricing,
+  SUBSCRIPTION_PROVIDERS,
+  type ResolvedPricing,
+} from '../pricing';
 import type { CreditUsageEventRow, UsageCostBreakdownRow } from '../credit-accountant/db';
+
+type PricingResolver = (provider: string, model: string) => ResolvedPricing | null;
+
+/**
+ * A pricing catalog miss scans the whole models.dev/OpenRouter catalogs, so
+ * resolving the same (provider, model) once per call instead of once per
+ * event turns a per-row catalog scan into a per-pair lookup. Misses are
+ * cached too — an unpriced pair stays unpriced within a summary.
+ */
+export function createMemoizedPricing(resolve: PricingResolver = resolvePricing): PricingResolver {
+  const cache = new Map<string, ResolvedPricing | null>();
+  return (provider, model) => {
+    const key = `${provider}::${model}`;
+    if (cache.has(key)) return cache.get(key) ?? null;
+    const resolved = resolve(provider, model);
+    cache.set(key, resolved);
+    return resolved;
+  };
+}
 
 export interface BillingModelCostSummary {
   model: string;
@@ -164,7 +188,10 @@ function sortedModels<T extends BillingModelCostSummary>(
   });
 }
 
-function providerSummaries(rows: UsageCostBreakdownRow[]): BillingProviderCostSummary[] {
+function providerSummaries(
+  rows: UsageCostBreakdownRow[],
+  pricing: PricingResolver = createMemoizedPricing(),
+): BillingProviderCostSummary[] {
   type ModelWorking = BillingModelCostSummary & {
     knownSpendUsd: number;
     knownEquivalentUsd: number;
@@ -237,8 +264,9 @@ function providerSummaries(rows: UsageCostBreakdownRow[]): BillingProviderCostSu
     }
 
     const apiProvider = inferApiProvider(row.provider, row.model);
-    const equivalent = apiProvider
-      ? computeCostUsd(apiProvider, row.model, row.tokensIn, row.tokensOut, {
+    const resolvedPricing = apiProvider ? pricing(apiProvider, row.model) : null;
+    const equivalent = resolvedPricing
+      ? costFromPricing(resolvedPricing, row.tokensIn, row.tokensOut, {
           cacheReadTokens: row.cacheReadTokens,
           cacheWriteTokens: row.cacheWriteTokens,
         })
@@ -295,8 +323,13 @@ function providerSummaries(rows: UsageCostBreakdownRow[]): BillingProviderCostSu
     });
 }
 
-export function summarizeBillingSpend(rows: UsageCostBreakdownRow[]): BillingSpendSummary {
-  const providers = providerSummaries(rows).filter((provider) => !provider.subscription);
+export function summarizeBillingSpend(
+  rows: UsageCostBreakdownRow[],
+  pricing: PricingResolver = createMemoizedPricing(),
+): BillingSpendSummary {
+  const providers = providerSummaries(rows, pricing).filter(
+    (provider) => !provider.subscription,
+  );
   const modelMap = new Map<
     string,
     {
@@ -362,8 +395,9 @@ export function summarizeSessionCosts(
   }
 
   const result: Record<string, SessionCostSummary> = {};
+  const pricing = createMemoizedPricing();
   for (const [sessionId, sessionRows] of bySession) {
-    const providers = providerSummaries(sessionRows);
+    const providers = providerSummaries(sessionRows, pricing);
     const metered = providers.filter((provider) => !provider.subscription);
     const spendUsd = metered.reduce((sum, provider) => sum + (provider.spendUsd ?? 0), 0);
     result[sessionId] = {
@@ -394,7 +428,10 @@ const WINDOW_CONFIGS: Array<{
   { key: '90d', granularity: 'day', bucketCount: 90, bucketMs: DAY_MS },
 ];
 
-function apportionEventCostByType(event: CreditUsageEventRow): {
+function apportionEventCostByType(
+  event: CreditUsageEventRow,
+  resolvePrice: PricingResolver,
+): {
   inputUsd: number;
   cacheReadUsd: number;
   outputUsd: number;
@@ -402,7 +439,7 @@ function apportionEventCostByType(event: CreditUsageEventRow): {
   const totalCost = event.costKnown && !SUBSCRIPTION_PROVIDERS.has(event.provider) ? event.costUsd : 0;
   if (totalCost <= 0) return { inputUsd: 0, cacheReadUsd: 0, outputUsd: 0 };
 
-  const pricing = resolvePricing(event.provider, event.model);
+  const pricing = resolvePrice(event.provider, event.model);
   const cacheReadTokens = Math.max(0, event.cacheReadTokens ?? 0);
   const cacheWriteTokens = Math.max(0, event.cacheWriteTokens ?? 0);
   const freshInputTokens = Math.max(0, event.tokensIn - cacheReadTokens - cacheWriteTokens);
@@ -445,6 +482,7 @@ function buildWindowAnalytics(
   config: (typeof WINDOW_CONFIGS)[number],
   events: CreditUsageEventRow[],
   now: number,
+  pricing: PricingResolver,
 ): UsageWindowAnalytics {
   const alignedEnd =
     config.granularity === 'hour'
@@ -531,8 +569,9 @@ function buildWindowAnalytics(
     let equivalentCost = 0;
     if (subscription) {
       const apiProvider = inferApiProvider(event.provider, event.model);
-      const eq = apiProvider
-        ? computeCostUsd(apiProvider, event.model, event.tokensIn, event.tokensOut, {
+      const resolvedPricing = apiProvider ? pricing(apiProvider, event.model) : null;
+      const eq = resolvedPricing
+        ? costFromPricing(resolvedPricing, event.tokensIn, event.tokensOut, {
             cacheReadTokens: event.cacheReadTokens,
             cacheWriteTokens: event.cacheWriteTokens,
           })
@@ -560,7 +599,7 @@ function buildWindowAnalytics(
     outputTokens += evTokensOut;
     cacheSavingsUsd += Math.max(0, event.cacheSavingsUsd ?? 0);
 
-    const split = apportionEventCostByType(event);
+    const split = apportionEventCostByType(event, pricing);
     inputUsd += split.inputUsd;
     cacheReadUsd += split.cacheReadUsd;
     outputUsd += split.outputUsd;
@@ -718,9 +757,13 @@ function buildWindowAnalytics(
 export function summarizeUsageAnalytics(
   events: CreditUsageEventRow[],
   now = Date.now(),
+  pricing: PricingResolver = createMemoizedPricing(),
 ): UsageAnalyticsSummary {
   const windows = Object.fromEntries(
-    WINDOW_CONFIGS.map((config) => [config.key, buildWindowAnalytics(config, events, now)]),
+    WINDOW_CONFIGS.map((config) => [
+      config.key,
+      buildWindowAnalytics(config, events, now, pricing),
+    ]),
   ) as Record<UsageWindowKey, UsageWindowAnalytics>;
 
   return {

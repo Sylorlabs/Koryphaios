@@ -418,7 +418,7 @@
   }
   .eyebrow,
   .section-label {
-    font-size: 10px;
+    font-size: 11px;
     color: var(--color-text-muted);
     letter-spacing: 0.12em;
     font-weight: 650;
@@ -497,7 +497,7 @@
     overflow-wrap: anywhere;
   }
   small {
-    font-size: 10px;
+    font-size: 11px;
     color: var(--color-text-muted);
   }
   .link-action {
@@ -598,7 +598,7 @@
     border-radius: 6px;
     background: var(--color-surface-3);
     white-space: nowrap;
-    font-size: 10px;
+    font-size: 11px;
   }
   .root-action {
     display: grid;
@@ -632,7 +632,7 @@
   }
   .primary {
     background: var(--color-accent);
-    color: var(--color-text-on-accent);
+    color: var(--color-on-accent);
     padding: 10px 12px;
     border-radius: 8px;
   }
@@ -680,7 +680,7 @@
     gap: 8px;
     padding: 14px 24px;
     border-top: 1px solid var(--color-border);
-    font-size: 10px;
+    font-size: 11px;
     color: var(--color-text-muted);
   }
   @media (max-width: 580px) {

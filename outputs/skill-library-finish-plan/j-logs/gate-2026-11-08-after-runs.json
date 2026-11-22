@@ -1,0 +1,817 @@
+{
+  "architecture-planning": {
+    "revisionHash": "591622933796601cc71e5d58c2405546ade2ad0af8602a89518a9d7abc38bcd3",
+    "status": "blocked",
+    "candidateRuns": 46,
+    "baselineRuns": 45,
+    "passRate": 0.9111111111111111,
+    "quality": 0.9388888888888889,
+    "verification": 0.9555555555555556,
+    "fullTaskCoverage": 2,
+    "categoryCoverage": {
+      "positive": 5,
+      "negative": 5,
+      "ambiguous": 3,
+      "adversarial": 3,
+      "full-task": 2,
+      "regression": 0
+    },
+    "pairedCases": 27,
+    "pairedFullTask": 11,
+    "pairedCategories": [
+      "positive",
+      "negative",
+      "ambiguous",
+      "adversarial",
+      "full-task"
+    ],
+    "routing": {
+      "precision": 1,
+      "recall": 1,
+      "n": 45
+    },
+    "blind": {
+      "provenanced": 1,
+      "human": 0
+    },
+    "regressions": {
+      "total": 4,
+      "open": 0
+    },
+    "deltas": {
+      "pass": 0.6666666666666666,
+      "quality": 0.5740740740740741,
+      "verification": -0.07407407407407407
+    },
+    "infrastructureFailures": 0,
+    "excluded": [
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for architecture-planning-full-task-1; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for architecture-planning-full-task-1; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for architecture-planning-full-task-2; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for architecture-planning-full-task-2; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for architecture-planning-full-task-1; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for architecture-planning-full-task-1; fresh qualification is required."
+    ],
+    "reasons": [
+      "Candidate regressed against the matched no-skill baseline.",
+      "Excluded execution evidence (6 run(s)): V5 full-task evidence does not match the exact current source task/materializer/scorer contract for architecture-planning-full-task-1; fresh qualification is required. V5 full-task evidence does not match the exact current source task/materializer/scorer contract for architecture-planning-full-task-2; fresh qualification is required."
+    ],
+    "execution": {
+      "ready": 2,
+      "blocked": []
+    }
+  },
+  "planning": {
+    "revisionHash": "9b22122b782821f7e8b0e910448c77c86c35076b354448eefcbaa7bdedd8af78",
+    "status": "blocked",
+    "candidateRuns": 39,
+    "baselineRuns": 38,
+    "passRate": 0.868421052631579,
+    "quality": 0.9539473684210527,
+    "verification": 0.868421052631579,
+    "fullTaskCoverage": 2,
+    "categoryCoverage": {
+      "positive": 5,
+      "negative": 5,
+      "ambiguous": 3,
+      "adversarial": 3,
+      "full-task": 2,
+      "regression": 0
+    },
+    "pairedCases": 19,
+    "pairedFullTask": 3,
+    "pairedCategories": [
+      "positive",
+      "negative",
+      "ambiguous",
+      "adversarial",
+      "full-task"
+    ],
+    "routing": {
+      "precision": 1,
+      "recall": 1,
+      "n": 38
+    },
+    "blind": {
+      "provenanced": 1,
+      "human": 0
+    },
+    "regressions": {
+      "total": 2,
+      "open": 2
+    },
+    "deltas": {
+      "pass": 0.8421052631578947,
+      "quality": 0.8421052631578947,
+      "verification": 0
+    },
+    "infrastructureFailures": 0,
+    "excluded": [
+      "opencode-stateless-text-patch evidence is quarantined: the source-inspected no-tools generation contract is not an enforced OS isolation boundary, and the host-observed unsigned response does not attest upstream model identity or isolated execution.",
+      "opencode-stateless-text-patch evidence is quarantined: the source-inspected no-tools generation contract is not an enforced OS isolation boundary, and the host-observed unsigned response does not attest upstream model identity or isolated execution.",
+      "opencode-stateless-text-patch evidence is quarantined: the source-inspected no-tools generation contract is not an enforced OS isolation boundary, and the host-observed unsigned response does not attest upstream model identity or isolated execution.",
+      "opencode-stateless-text-patch evidence is quarantined: the source-inspected no-tools generation contract is not an enforced OS isolation boundary, and the host-observed unsigned response does not attest upstream model identity or isolated execution.",
+      "opencode-stateless-text-patch evidence is quarantined: the source-inspected no-tools generation contract is not an enforced OS isolation boundary, and the host-observed unsigned response does not attest upstream model identity or isolated execution.",
+      "opencode-stateless-text-patch evidence is quarantined: the source-inspected no-tools generation contract is not an enforced OS isolation boundary, and the host-observed unsigned response does not attest upstream model identity or isolated execution.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-1-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-2-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-1-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-2-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-1-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-1-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-2-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-2-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-2-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-2-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-2-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-2-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-2-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-2-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-1-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-2-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-1-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-2-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-1-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-2-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-1-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-2-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-1-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-1-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-1-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-1-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-1-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-1-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-1-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-2-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-1-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-2-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-1-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-1-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-1-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-1-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-2-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-2-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-1-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-1-individual; fresh qualification is required."
+    ],
+    "reasons": [
+      "2 recorded regression case(s) remain open.",
+      "Excluded execution evidence (46 run(s)): opencode-stateless-text-patch evidence is quarantined: the source-inspected no-tools generation contract is not an enforced OS isolation boundary, and the host-observed unsigned response does not attest upstream model identity or isolated execution. V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-1-individual; fresh qualification is required. V5 full-task evidence does not match the exact current source task/materializer/scorer contract for planning-full-task-2-individual; fresh qualification is required."
+    ],
+    "execution": {
+      "ready": 2,
+      "blocked": []
+    }
+  },
+  "feature-implementation": {
+    "revisionHash": "e3c51393fbbc136fc752f51f24adc8ca6d4e4568e53ccce321cd9e1f2e894051",
+    "status": "ready",
+    "candidateRuns": 49,
+    "baselineRuns": 48,
+    "passRate": 0.875,
+    "quality": 0.875,
+    "verification": 0.875,
+    "fullTaskCoverage": 2,
+    "categoryCoverage": {
+      "positive": 5,
+      "negative": 5,
+      "ambiguous": 3,
+      "adversarial": 3,
+      "full-task": 2,
+      "regression": 0
+    },
+    "pairedCases": 26,
+    "pairedFullTask": 10,
+    "pairedCategories": [
+      "positive",
+      "negative",
+      "ambiguous",
+      "adversarial",
+      "full-task"
+    ],
+    "routing": {
+      "precision": 1,
+      "recall": 1,
+      "n": 48
+    },
+    "blind": {
+      "provenanced": 1,
+      "human": 0
+    },
+    "regressions": {
+      "total": 5,
+      "open": 0
+    },
+    "deltas": {
+      "pass": 0.5769230769230769,
+      "quality": 0.49038461538461536,
+      "verification": 0.15384615384615385
+    },
+    "infrastructureFailures": 0,
+    "excluded": [
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for feature-implementation-full-task-1-individual; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for feature-implementation-full-task-1-individual; fresh qualification is required."
+    ],
+    "reasons": [
+      "Excluded execution evidence (2 run(s)): V5 full-task evidence does not match the exact current source task/materializer/scorer contract for feature-implementation-full-task-1-individual; fresh qualification is required."
+    ],
+    "execution": {
+      "ready": 2,
+      "blocked": []
+    }
+  },
+  "refactor-implementation": {
+    "revisionHash": "efa8cd020fbbfa1f06528820d559f3f04d9599843048e7ac001425902b791214",
+    "status": "ready",
+    "candidateRuns": 27,
+    "baselineRuns": 24,
+    "passRate": 0.9615384615384616,
+    "quality": 0.9615384615384616,
+    "verification": 0.9615384615384616,
+    "fullTaskCoverage": 2,
+    "categoryCoverage": {
+      "positive": 5,
+      "negative": 5,
+      "ambiguous": 3,
+      "adversarial": 3,
+      "full-task": 2,
+      "regression": 0
+    },
+    "pairedCases": 22,
+    "pairedFullTask": 6,
+    "pairedCategories": [
+      "positive",
+      "negative",
+      "ambiguous",
+      "adversarial",
+      "full-task"
+    ],
+    "routing": {
+      "precision": 1,
+      "recall": 1,
+      "n": 26
+    },
+    "blind": {
+      "provenanced": 1,
+      "human": 0
+    },
+    "regressions": {
+      "total": 3,
+      "open": 0
+    },
+    "deltas": {
+      "pass": 0.5909090909090909,
+      "quality": 0.5909090909090909,
+      "verification": 0.22727272727272727
+    },
+    "infrastructureFailures": 2,
+    "excluded": [],
+    "reasons": [],
+    "execution": {
+      "ready": 2,
+      "blocked": []
+    }
+  },
+  "implementation": {
+    "revisionHash": "c5ea45886fdda6941dda478dd2ffc87da887ddc5c8be4764bfe4b2af34c24d66",
+    "status": "ready",
+    "candidateRuns": 41,
+    "baselineRuns": 40,
+    "passRate": 1,
+    "quality": 1,
+    "verification": 1,
+    "fullTaskCoverage": 2,
+    "categoryCoverage": {
+      "positive": 5,
+      "negative": 5,
+      "ambiguous": 3,
+      "adversarial": 3,
+      "full-task": 2,
+      "regression": 0
+    },
+    "pairedCases": 23,
+    "pairedFullTask": 7,
+    "pairedCategories": [
+      "positive",
+      "negative",
+      "ambiguous",
+      "adversarial",
+      "full-task"
+    ],
+    "routing": {
+      "precision": 1,
+      "recall": 1,
+      "n": 40
+    },
+    "blind": {
+      "provenanced": 1,
+      "human": 0
+    },
+    "regressions": {
+      "total": 1,
+      "open": 0
+    },
+    "deltas": {
+      "pass": 0.6956521739130435,
+      "quality": 0.6956521739130435,
+      "verification": 0
+    },
+    "infrastructureFailures": 0,
+    "excluded": [
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-1; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-2; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-1; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-2; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-1; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-1; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-2; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-2; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-2; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-2; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-1; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-1; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-1; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-1; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-1; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-2; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-1; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-2; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-1; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-1; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-1; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-1; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-2; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-2; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-2; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-2; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-2; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-2; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-1; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-2; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-2; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-1; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-2; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-2; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-2; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-2; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-2; fresh qualification is required.",
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-2; fresh qualification is required."
+    ],
+    "reasons": [
+      "Excluded execution evidence (38 run(s)): V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-1; fresh qualification is required. V5 full-task evidence does not match the exact current source task/materializer/scorer contract for implementation-full-task-2; fresh qualification is required."
+    ],
+    "execution": {
+      "ready": 2,
+      "blocked": []
+    }
+  },
+  "integration-implementation": {
+    "revisionHash": "a2d375974e6ea920caa2ea1a022f24aa33f78bb21f472a5ff60a5362493f4e15",
+    "status": "blocked",
+    "candidateRuns": 39,
+    "baselineRuns": 38,
+    "passRate": 0.8421052631578947,
+    "quality": 0.8421052631578947,
+    "verification": 0.8421052631578947,
+    "fullTaskCoverage": 2,
+    "categoryCoverage": {
+      "positive": 5,
+      "negative": 5,
+      "ambiguous": 3,
+      "adversarial": 3,
+      "full-task": 2,
+      "regression": 0
+    },
+    "pairedCases": 22,
+    "pairedFullTask": 6,
+    "pairedCategories": [
+      "positive",
+      "negative",
+      "ambiguous",
+      "adversarial",
+      "full-task"
+    ],
+    "routing": {
+      "precision": 1,
+      "recall": 1,
+      "n": 38
+    },
+    "blind": {
+      "provenanced": 1,
+      "human": 0
+    },
+    "regressions": {
+      "total": 0,
+      "open": 0
+    },
+    "deltas": {
+      "pass": 0.7272727272727273,
+      "quality": 0.7272727272727273,
+      "verification": 0
+    },
+    "infrastructureFailures": 0,
+    "excluded": [],
+    "reasons": [
+      "1 active provenanced blind review(s) failed semantic evaluation."
+    ],
+    "execution": {
+      "ready": 2,
+      "blocked": []
+    }
+  },
+  "developer-experience": {
+    "revisionHash": "b93890798aa2e666a6854afe79498fa8542048dee2a234f13359f0f1714abf53",
+    "status": "ready",
+    "candidateRuns": 45,
+    "baselineRuns": 44,
+    "passRate": 0.9090909090909091,
+    "quality": 0.9318181818181818,
+    "verification": 0.9545454545454546,
+    "fullTaskCoverage": 2,
+    "categoryCoverage": {
+      "positive": 5,
+      "negative": 5,
+      "ambiguous": 3,
+      "adversarial": 3,
+      "full-task": 2,
+      "regression": 0
+    },
+    "pairedCases": 27,
+    "pairedFullTask": 11,
+    "pairedCategories": [
+      "positive",
+      "negative",
+      "ambiguous",
+      "adversarial",
+      "full-task"
+    ],
+    "routing": {
+      "precision": 1,
+      "recall": 1,
+      "n": 44
+    },
+    "blind": {
+      "provenanced": 1,
+      "human": 0
+    },
+    "regressions": {
+      "total": 2,
+      "open": 0
+    },
+    "deltas": {
+      "pass": 0.7037037037037037,
+      "quality": 0.7037037037037037,
+      "verification": 0.1111111111111111
+    },
+    "infrastructureFailures": 0,
+    "excluded": [],
+    "reasons": [],
+    "execution": {
+      "ready": 2,
+      "blocked": []
+    }
+  },
+  "repository-environment-discovery": {
+    "revisionHash": "4c8ea2b02b29260b66882147f245221961980ef5dc7998016b5eac989be2556c",
+    "status": "ready",
+    "candidateRuns": 35,
+    "baselineRuns": 34,
+    "passRate": 0.9705882352941176,
+    "quality": 0.9926470588235294,
+    "verification": 1,
+    "fullTaskCoverage": 2,
+    "categoryCoverage": {
+      "positive": 5,
+      "negative": 5,
+      "ambiguous": 3,
+      "adversarial": 3,
+      "full-task": 2,
+      "regression": 0
+    },
+    "pairedCases": 18,
+    "pairedFullTask": 2,
+    "pairedCategories": [
+      "positive",
+      "negative",
+      "ambiguous",
+      "adversarial",
+      "full-task"
+    ],
+    "routing": {
+      "precision": 1,
+      "recall": 1,
+      "n": 34
+    },
+    "blind": {
+      "provenanced": 1,
+      "human": 0
+    },
+    "regressions": {
+      "total": 1,
+      "open": 0
+    },
+    "deltas": {
+      "pass": 0.8888888888888888,
+      "quality": 0.8888888888888888,
+      "verification": 0
+    },
+    "infrastructureFailures": 0,
+    "excluded": [],
+    "reasons": [],
+    "execution": {
+      "ready": 2,
+      "blocked": []
+    }
+  },
+  "repository-research": {
+    "revisionHash": "d80ccc205b5fd00c15b045e2a96fd953b93ac06a77b7186fb23264c8d6658f7c",
+    "status": "ready",
+    "candidateRuns": 41,
+    "baselineRuns": 40,
+    "passRate": 0.95,
+    "quality": 0.9875,
+    "verification": 1,
+    "fullTaskCoverage": 2,
+    "categoryCoverage": {
+      "positive": 5,
+      "negative": 5,
+      "ambiguous": 3,
+      "adversarial": 3,
+      "full-task": 2,
+      "regression": 0
+    },
+    "pairedCases": 20,
+    "pairedFullTask": 4,
+    "pairedCategories": [
+      "positive",
+      "negative",
+      "ambiguous",
+      "adversarial",
+      "full-task"
+    ],
+    "routing": {
+      "precision": 1,
+      "recall": 1,
+      "n": 40
+    },
+    "blind": {
+      "provenanced": 1,
+      "human": 0
+    },
+    "regressions": {
+      "total": 1,
+      "open": 0
+    },
+    "deltas": {
+      "pass": 0.45,
+      "quality": 0.4125,
+      "verification": 0
+    },
+    "infrastructureFailures": 4,
+    "excluded": [],
+    "reasons": [],
+    "execution": {
+      "ready": 2,
+      "blocked": []
+    }
+  },
+  "research": {
+    "revisionHash": "7a762c9a82b894bcb69a3bfe6d7f40403700aad1420ca52b3494991f007562ee",
+    "status": "insufficient-evidence",
+    "candidateRuns": 32,
+    "baselineRuns": 32,
+    "passRate": 1,
+    "quality": 1,
+    "verification": 1,
+    "fullTaskCoverage": 0,
+    "categoryCoverage": {
+      "positive": 5,
+      "negative": 5,
+      "ambiguous": 3,
+      "adversarial": 3,
+      "full-task": 0,
+      "regression": 0
+    },
+    "pairedCases": 16,
+    "pairedFullTask": 0,
+    "pairedCategories": [
+      "positive",
+      "negative",
+      "ambiguous",
+      "adversarial"
+    ],
+    "routing": {
+      "precision": 1,
+      "recall": 1,
+      "n": 32
+    },
+    "blind": {
+      "provenanced": 0,
+      "human": 0
+    },
+    "regressions": {
+      "total": 0,
+      "open": 0
+    },
+    "deltas": {
+      "pass": 1,
+      "quality": 1,
+      "verification": 0
+    },
+    "infrastructureFailures": 0,
+    "excluded": [],
+    "reasons": [
+      "At least one blind review with persisted evaluator provenance is required.",
+      "Benchmark coverage is missing: full-task.",
+      "V5 promotion requires at least two observed full-task candidate evaluations.",
+      "Skill-vs-no-skill baselines are missing for: full-task."
+    ],
+    "execution": {
+      "ready": 0,
+      "blocked": [
+        {
+          "scenarioId": "research-full-task-1-individual",
+          "reasons": [
+            "Requires the declared dated authoritative/community source corpus or live retrieval with exact provenance; the required historical snapshots are not captured locally and must not be fabricated."
+          ]
+        },
+        {
+          "scenarioId": "research-full-task-2-individual",
+          "reasons": [
+            "Requires the declared dated authoritative/community source corpus or live retrieval with exact provenance; the required historical snapshots are not captured locally and must not be fabricated."
+          ]
+        }
+      ]
+    }
+  },
+  "literature-research": {
+    "revisionHash": "1c20cdf289e6b46b61260c090bf7bfdfafa7ccb2e7c5b9fb340346b674c79985",
+    "status": "blocked",
+    "candidateRuns": 38,
+    "baselineRuns": 38,
+    "passRate": 0.8421052631578947,
+    "quality": 0.8883667502088555,
+    "verification": 0.8421052631578947,
+    "fullTaskCoverage": 2,
+    "categoryCoverage": {
+      "positive": 5,
+      "negative": 5,
+      "ambiguous": 3,
+      "adversarial": 3,
+      "full-task": 2,
+      "regression": 0
+    },
+    "pairedCases": 21,
+    "pairedFullTask": 5,
+    "pairedCategories": [
+      "positive",
+      "negative",
+      "ambiguous",
+      "adversarial",
+      "full-task"
+    ],
+    "routing": {
+      "precision": 1,
+      "recall": 1,
+      "n": 38
+    },
+    "blind": {
+      "provenanced": 0,
+      "human": 0
+    },
+    "regressions": {
+      "total": 3,
+      "open": 2
+    },
+    "deltas": {
+      "pass": 0.38095238095238093,
+      "quality": 0.4152809271856891,
+      "verification": 0
+    },
+    "infrastructureFailures": 0,
+    "excluded": [],
+    "reasons": [
+      "At least one blind review with persisted evaluator provenance is required.",
+      "2 recorded regression case(s) remain open."
+    ],
+    "execution": {
+      "ready": 2,
+      "blocked": []
+    }
+  },
+  "factual-research": {
+    "revisionHash": "9ae586843e421b6569f6a2206ccaae5291e6b17587d0f07c024c592c3ceae0b2",
+    "status": "blocked",
+    "candidateRuns": 43,
+    "baselineRuns": 45,
+    "passRate": 0.7619047619047619,
+    "quality": 0.8956043956043954,
+    "verification": 0.7619047619047619,
+    "fullTaskCoverage": 2,
+    "categoryCoverage": {
+      "positive": 5,
+      "negative": 5,
+      "ambiguous": 3,
+      "adversarial": 3,
+      "full-task": 2,
+      "regression": 0
+    },
+    "pairedCases": 22,
+    "pairedFullTask": 6,
+    "pairedCategories": [
+      "positive",
+      "negative",
+      "ambiguous",
+      "adversarial",
+      "full-task"
+    ],
+    "routing": {
+      "precision": 1,
+      "recall": 1,
+      "n": 42
+    },
+    "blind": {
+      "provenanced": 1,
+      "human": 0
+    },
+    "regressions": {
+      "total": 2,
+      "open": 1
+    },
+    "deltas": {
+      "pass": 0.36363636363636365,
+      "quality": 0.34265734265734266,
+      "verification": 0
+    },
+    "infrastructureFailures": 0,
+    "excluded": [],
+    "reasons": [
+      "Observed pass rate is below 80%.",
+      "Observed verification score is below 80%.",
+      "1 recorded regression case(s) remain open."
+    ],
+    "execution": {
+      "ready": 2,
+      "blocked": []
+    }
+  },
+  "market-competitive-research": {
+    "revisionHash": "89e475f0c8920f76ecd451f32cc4ab71376a64b60860619d04f6a9a47bccbb5e",
+    "status": "blocked",
+    "candidateRuns": 49,
+    "baselineRuns": 48,
+    "passRate": 1,
+    "quality": 1,
+    "verification": 1,
+    "fullTaskCoverage": 0,
+    "categoryCoverage": {
+      "positive": 5,
+      "negative": 5,
+      "ambiguous": 3,
+      "adversarial": 3,
+      "full-task": 0,
+      "regression": 0
+    },
+    "pairedCases": 16,
+    "pairedFullTask": 0,
+    "pairedCategories": [
+      "positive",
+      "negative",
+      "ambiguous",
+      "adversarial"
+    ],
+    "routing": {
+      "precision": 1,
+      "recall": 1,
+      "n": 48
+    },
+    "blind": {
+      "provenanced": 1,
+      "human": 0
+    },
+    "regressions": {
+      "total": 0,
+      "open": 0
+    },
+    "deltas": {
+      "pass": 1,
+      "quality": 1,
+      "verification": 0
+    },
+    "infrastructureFailures": 0,
+    "excluded": [
+      "V5 full-task evidence does not match the exact current source task/materializer/scorer contract for market-competitive-research-full-task-1-individual; fresh qualification is required."
+    ],
+    "reasons": [
+      "Evaluation contract conflict for scenario(s): market-competitive-research-full-task-1-individual, market-competitive-research-full-task-2-individual. Increment the materializer/scorer version for semantic changes before qualification.",
+      "Benchmark coverage is missing: full-task.",
+      "V5 promotion requires at least two observed full-task candidate evaluations.",
+      "Skill-vs-no-skill baselines are missing for: full-task.",
+      "Excluded execution evidence (1 run(s)): V5 full-task evidence does not match the exact current source task/materializer/scorer contract for market-competitive-research-full-task-1-individual; fresh qualification is required."
+    ],
+    "execution": {
+      "ready": 2,
+      "blocked": []
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "kory-eval-secure-boot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test"
+  }
+}

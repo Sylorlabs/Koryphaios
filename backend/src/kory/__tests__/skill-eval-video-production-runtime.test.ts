@@ -20,7 +20,7 @@ import {
   VIDEO_PRODUCTION_SKILL_EVAL_MATERIALIZERS,
   VIDEO_PRODUCTION_SKILL_EVAL_SCORERS,
   videoProductionRuntimeReadiness,
-} from '../skill-eval-video-production-runtime';
+} from '../../eval/skills/skill-eval-video-production-runtime';
 
 const { tutorial, multicam } = VIDEO_PRODUCTION_RUNTIME_SCENARIOS;
 const scenarios = [tutorial, multicam] as const;

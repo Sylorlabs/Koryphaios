@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { closeSync, constants, existsSync, fstatSync, fsyncSync, lstatSync, openSync, readlinkSync, readSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
 import { hasHardLinks, hasPosixPermissionBits, hasUnexpectedMode, hasUnexpectedOwner, isContainedBy } from '../backend/src/runtime/platform';
-import { verifyBlindReviewPublicContractSnapshot, type BlindReviewArtifact } from '../backend/src/kory/skill-eval-blind-review';
+import { verifyBlindReviewPublicContractSnapshot, type BlindReviewArtifact } from '../backend/src/eval/skills/skill-eval-blind-review';
 import type { SkillEvaluationRun } from '../backend/src/kory/skill-evaluations';
 
 export const blindImportSha256 = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
@@ -189,7 +189,7 @@ export function anonymousArtifact(run: SkillEvaluationRun, skill: string): Blind
   const manifest = JSON.parse(manifestBytes.toString('utf8')) as {
     changes?: Array<{ path?: unknown; change?: unknown; beforeSha256?: unknown; afterSha256?: unknown }>;
     evidence?: unknown; score?: { evidence?: unknown };
-    publicContractSnapshot?: import('../backend/src/kory/skill-eval-execution').SkillEvalPublicContractSnapshot;
+    publicContractSnapshot?: import('../backend/src/eval/skills/skill-eval-execution').SkillEvalPublicContractSnapshot;
   };
   let remaining = 80_000;
   const artifactRoot = dirname(manifestArtifact.location);
@@ -202,7 +202,13 @@ export function anonymousArtifact(run: SkillEvaluationRun, skill: string): Blind
     new Set(manifestChanges.map(change => change.path)).size !== manifestChanges.length) {
     throw new Error('Invalid blind snapshot change manifest');
   }
-  const reviewChanges = manifestChanges.filter(change => !String(change.path).startsWith('.gocache/'));
+  // Compiler caches and installed dependencies are not candidate work: a webpack pack or a
+  // dependency symlink cannot be carried into a reviewer bundle, and reading them must not fail
+  // the assignment. They are counted in the evidence so the reviewer knows what was left out.
+  const generatedRoots = ['.gocache/', '.next/', 'node_modules/'];
+  const reviewChanges = manifestChanges.filter(
+    (change) => !generatedRoots.some((root) => String(change.path).startsWith(root)),
+  );
   const omittedGeneratedChanges = manifestChanges.length - reviewChanges.length;
   const snapshotBudget = { remainingBytes: MAX_TOTAL_SNAPSHOT_BYTES };
   const changes = reviewChanges.map(change => {
@@ -223,7 +229,7 @@ export function anonymousArtifact(run: SkillEvaluationRun, skill: string): Blind
   const scoreEvidence = Array.isArray(manifest.score?.evidence) ? manifest.score.evidence.filter((item): item is string => typeof item === 'string') : [];
   let evidenceRemaining = 45_000;
   const executionEvidence = [
-    ...(omittedGeneratedChanges > 0 ? [`Blind harness omitted ${String(omittedGeneratedChanges)} generated .gocache change records from the reviewer bundle; the durable run manifest retains them.`] : []),
+    ...(omittedGeneratedChanges > 0 ? [`Blind harness omitted ${String(omittedGeneratedChanges)} generated build and dependency change records from the reviewer bundle; the durable run manifest retains them.`] : []),
     ...manifestEvidence, ...scoreEvidence,
   ].flatMap(item => {
     if (evidenceRemaining <= 0) return [];

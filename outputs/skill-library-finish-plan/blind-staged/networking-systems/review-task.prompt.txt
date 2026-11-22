@@ -1,0 +1,196 @@
+SNAPSHOT HASH DOMAINS: beforeSha256/afterSha256 identify complete workspace entries, using SHA256("file\0" + original file bytes), or SHA256("symlink\0" + link target). Scorer artifactSHA and durable artifact hashes use SHA256(raw bytes), without that tag. These different hash domains must not be compared as if identical. Visible beforeText/afterText may be bounded or privacy-scrubbed; they are not the original complete bytes to hash.
+
+You are an independent blind semantic evaluator.
+Two anonymous agents attempted the same task. You are not told which agent received any extra guidance, and you must not infer or speculate about that hidden condition.
+Judge each artifact independently against the task contract. Do not reward matching wording, verbosity, or references to a skill. Focus on behavioral correctness, scope discipline, evidence quality, preservation of required facts, negative paths, recovery behavior, and whether completion claims are actually supported.
+The artifact bundle may include harness captured execution evidence and before and after file snapshots. Treat that as observed evidence, not as an agent claim.
+PUBLIC CANDIDATE CONTRACT SNAPSHOT is the exact task prompt and allowlisted README.md/contract.json bytes visible to the candidate before execution. Hashes are verified by the harness. If an entry says UNAVAILABLE, do not reconstruct it from the current repository or treat current files as historical proof.
+executionEvidence is supplied by the host after the agent attempt, including deterministic scorer observations. An agent can truthfully report that it could not run a check even when the host subsequently runs that check successfully. Those observations have different owners and times; that difference alone is not an integrity failure.
+Attribute a completion claim to its actual source. Penalize an agent for fabricated or overstated verification only when its finalOutput or authored file content makes that unsupported claim. Do not attribute a host scorer statement to the agent, require the agent to predict later host results, or treat an honest statement of limited access as contradicting later host verification.
+Host evidence is not infallible. If a scorer result conflicts with concrete artifact behavior, identify the disputed check and evidence as a possible verifier defect. Keep instrument uncertainty separate from an agent integrity finding; a score label alone does not prove the task succeeded.
+Treat afterText JSON strings as literal source bytes. Before claiming a URL or origin is malformed or Markdown-formatted, inspect and quote the exact JSON value. Do not transform plain URL strings into Markdown hyperlinks and then mistake that display formatting for the original value.
+The PAIR EXECUTION EVIDENCE section is evaluator owned evidence. It certifies that Artifact A and Artifact B are the two randomized arms of one matched same model comparison for this exact scenario and evaluation contract.
+When REQUIRED EVIDENCE or REQUIRED ARTIFACTS asks for paired skill and no skill run artifacts, paired evaluation evidence, or an equivalent pair label, the anonymous A and B bundle plus PAIR EXECUTION EVIDENCE satisfies the existence and provenance of that pair. Do not require either agent output to claim, create, or narrate evaluator owned pair evidence.
+The REQUIRED ARTIFACTS entries below are evaluation evidence labels for the overall harness. They are not literal filenames the agent was instructed to create unless the task itself says so. Judge whether the bundle substantively supplies the required evidence; do not require those exact label strings to appear.
+Routing and hierarchy selection are evaluated independently by the harness. Do not require the agent to narrate which skill was selected or provide meta level specialist selection rationale when the artifact itself respects the requested scope and neighboring responsibility boundaries.
+Never lower passed, quality, verification, or integrity because an artifact omits hierarchy narration, specialist selection rationale, skill names, or evaluator owned paired A/B evidence. If a draft criticism relies on one of those omissions, remove that criticism and score only the concrete task behavior and evidence.
+If a REQUIRED EVIDENCE or REQUIRED ARTIFACTS label describes routing, hierarchy selection, specialist selection, or paired skill versus no skill provenance, treat that meta level requirement as evaluator owned. The harness evidence in this prompt is authoritative for those concerns.
+When choosing preference A, B, or tie, compare concrete task behavior and evidence only. Evaluator-owned hierarchy or specialist narration, skill-guidance scope, filenames, and paired-run provenance must not affect the preference comparison.
+Treat genuinely missing task evidence as missing. Do not assume unshown commands or tests passed.
+Return JSON only, with this exact shape:
+{"artifactA":{"passed":true,"quality":0.0,"verification":0.0,"integrityFailure":false,"evidence":["..."]},"artifactB":{"passed":true,"quality":0.0,"verification":0.0,"integrityFailure":false,"evidence":["..."]},"preference":"A","rationale":["..."]}
+
+TASK
+The evaluation repository asks the agent to "Apply network routing expertise to this task". The fixture includes partial failure, cancellation, retry/idempotency pressure, concurrency, and an attractive topology assumption that is not established by evidence. The acceptance boundary is networking-systems: Establish source/destination identity, address family, DNS resolution path, route, NAT, firewall, proxy/LB, transport, TLS/SNI, application protocol, timeout, and retry ownership. The adjacent edge-cdn discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.
+
+FALSIFIABLE CHECKS
+[
+  {
+    "id": "scope-and-hierarchy",
+    "assertion": "The result must establish the actual networking-systems boundary and relevant environment before acting, preserve the hierarchy relationship (broader=network-service-backend; near-neighbor=edge-cdn), and not absorb the near-neighbor responsibility merely because it is adjacent."
+  },
+  {
+    "id": "operating-contract",
+    "assertion": "Establish source/destination identity, address family, DNS resolution path, route, NAT, firewall, proxy/LB, transport, TLS/SNI, application protocol, timeout, and retry ownership."
+  },
+  {
+    "id": "execution-invariant",
+    "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+  },
+  {
+    "id": "verification-discipline",
+    "assertion": "Capture representative resolution/connectivity/handshake evidence from the actual source environment, test failure/timeouts/retries, validate firewall/LB health and certificate chains, and compare both directions when relevant."
+  },
+  {
+    "id": "anti-pattern-resistance",
+    "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not equate ping failure with service failure, flush global caches reflexively, disable TLS verification, or add retries before locating the timeout/loss boundary."
+  },
+  {
+    "id": "evidence-and-uncertainty",
+    "assertion": "Every material completion claim must map to observable evidence (Exact failing source/destination/address-family/DNS and selected route/source-address identity; Transport packet/flow evidence including TCP/UDP state, NAT/firewall return path, MTU/PMTUD and loss/retransmission behavior; Load-balancer/proxy/backend and TLS/SNI/certificate/ALPN evidence without disabled verification; Source-specific before/after connectivity plus staged network change, propagation and rollback evidence), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+  }
+]
+
+REQUIRED EVIDENCE
+[
+  "Exact failing source/destination/address-family/DNS and selected route/source-address identity",
+  "Transport packet/flow evidence including TCP/UDP state, NAT/firewall return path, MTU/PMTUD and loss/retransmission behavior",
+  "Load-balancer/proxy/backend and TLS/SNI/certificate/ALPN evidence without disabled verification",
+  "Source-specific before/after connectivity plus staged network change, propagation and rollback evidence",
+  "Hierarchy boundary and selected specialist rationale",
+  "Representative success, negative-path, and recovery verification",
+  "hierarchy boundary and selected specialist rationale",
+  "representative success plus negative/recovery evidence",
+  "paired skill/no-skill run artifacts",
+  "explicit unavailable, simulated, inferred, or stale evidence labels"
+]
+
+REQUIRED ARTIFACTS
+[
+  "networking-systems-individual-scenario-1-result",
+  "networking-systems-individual-scenario-1-verification",
+  "networking-systems-individual-scenario-1-paired-evaluation"
+]
+
+PUBLIC CANDIDATE CONTRACT SNAPSHOT
+{
+  "taskPrompt": {
+    "available": true,
+    "sha256": "5240aaf6cfa007e870462f0eb0beff1244a805f50bae6530ff71bca6dcf1b7c3",
+    "byteLength": 800,
+    "text": "The evaluation repository asks the agent to \"Apply network routing expertise to this task\". The fixture includes partial failure, cancellation, retry/idempotency pressure, concurrency, and an attractive topology assumption that is not established by evidence. The acceptance boundary is networking-systems: Establish source/destination identity, address family, DNS resolution path, route, NAT, firewall, proxy/LB, transport, TLS/SNI, application protocol, timeout, and retry ownership. The adjacent edge-cdn discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient."
+  },
+  "fixtureFiles": {
+    "README.md": {
+      "available": true,
+      "sha256": "c8a43b6138838819bcb29f83c9b90732724ef9364e7a9c05c86f489fc306dc1f",
+      "byteLength": 1409,
+      "text": "# networking-systems: transferable behavior exercise\n\nImplement the pure solve(input) export in candidate.ts. Input is a synthetic trace with: dns { a:boolean, aaaa:boolean } (record presence by address family), routes { ipv4:boolean|null, ipv6:boolean|null }, tcp { ipv4:boolean|null, ipv6:boolean|null }, tls { ipv4:boolean|null, ipv6:boolean|null, reason?:string }, http { ipv4:boolean|null, ipv6:boolean|null }. Localize the first failed layer from evidence, without assuming topology. If DNS resolves but an address-family route is false, return {failingLayer:'route-<family>', nextProbe:'compare-<family>-route-source', safeControl:'prefer-<other>-temporarily'} when the other family works, otherwise a safe preserve control. If route/TCP succeed but TLS fails with reason 'certificate-name', return {failingLayer:'tls-sni-certificate', nextProbe:'verify-sni-and-certificate-chain', safeControl:'rollback-lb-tls-config'}. Inputs vary identifiers, values, ordering, and failure paths.\n\nImplement the pure solve(input) export in candidate.ts. Return JSON data; no network, subprocesses, or real account access is needed. Inputs vary identifiers, values, ordering, and failure paths. Score the supplied evidence; do not claim a real model, device, browser, codec, or permission sandbox ran.\n\nThe subject is an explicitly synthetic trace corpus. This tests evaluation logic, not the safety of a live model.\n"
+    },
+    "contract.json": {
+      "available": true,
+      "sha256": "328e719664ce25fc0d0285469da405c8268966afa78c54ee8b2e22af8a887d81",
+      "byteLength": 117,
+      "text": "{\n  \"scenarioId\": \"networking-systems-full-task-1-individual\",\n  \"evidence\": \"synthetic\",\n  \"fullTaskBlockers\": []\n}\n"
+    }
+  }
+}
+
+PAIR EXECUTION EVIDENCE
+{
+  "matchedPair": true,
+  "sameScenario": true,
+  "sameProviderModel": true,
+  "sameHarness": true,
+  "sameEvaluationContract": true,
+  "sameMaterializer": true,
+  "sameDeterministicScorer": true,
+  "randomizedArmIdentity": true,
+  "evidenceOwner": "evaluation-harness"
+}
+
+ARTIFACT A
+{
+  "finalOutput": "<kory-eval-patch>[{\"operation\":\"write\",\"path\":\"candidate.ts\",\"content\":\"type Family = 'ipv4' | 'ipv6';\\ntype Outcome = { failingLayer: string; nextProbe: string; safeControl: string };\\n\\nconst PRESERVE = 'preserve-current-config';\\n\\nfunction asRecord(value: unknown): Record<string, any> {\\n  return (value && typeof value === 'object') ? (value as Record<string, any>) : {};\\n}\\n\\nfunction familyList(dns: Record<string, any>): Family[] {\\n  const families: Family[] = [];\\n  if (dns.a === true) families.push('ipv4');\\n  if (dns.aaaa === true) families.push('ipv6');\\n  return families;\\n}\\n\\nfunction otherFamily(family: Family): Family {\\n  return family === 'ipv4' ? 'ipv6' : 'ipv4';\\n}\\n\\nfunction laterLayersNotFailed(family: Family, tcp: Record<string, any>, tls: Record<string, any>, http: Record<string, any>): boolean {\\n  return tcp[family] !== false && tls[family] !== false && http[family] !== false;\\n}\\n\\nexport function solve(input: unknown): unknown {\\n  const trace = asRecord(input);\\n  const dns = asRecord(trace.dns);\\n  const routes = asRecord(trace.routes);\\n  const tcp = asRecord(trace.tcp);\\n  const tls = asRecord(trace.tls);\\n  const http = asRecord(trace.http);\\n\\n  const families = familyList(dns);\\n  if (families.length === 0) {\\n    return {\\n      failingLayer: 'dns',\\n      nextProbe: 'verify-dns-records',\\n      safeControl: PRESERVE,\\n    } as Outcome;\\n  }\\n\\n  for (const family of families) {\\n    if (routes[family] === false) {\\n      const other = otherFamily(family);\\n      const otherRouteWorks = families.includes(other) &&\\n        routes[other] === true &&\\n        laterLayersNotFailed(other, tcp, tls, http);\\n      return {\\n        failingLayer: `route-${family}`,\\n        nextProbe: `compare-${family}-route-source`,\\n        safeControl: otherRouteWorks ? `prefer-${other}-temporarily` : PRESERVE,\\n      } as Outcome;\\n    }\\n  }\\n\\n  for (const family of families) {\\n    if (routes[family] !== false && tcp[family] === false) {\\n      const other = otherFamily(family);\\n      const otherTcpWorks = families.includes(other) &&\\n        routes[other] !== false &&\\n        tcp[other] === true &&\\n        tls[other] !== false &&\\n        http[other] !== false;\\n      return {\\n        failingLayer: `tcp-${family}`,\\n        nextProbe: `compare-${family}-tcp-path`,\\n        safeControl: otherTcpWorks ? `prefer-${other}-temporarily` : PRESERVE,\\n      } as Outcome;\\n    }\\n  }\\n\\n  for (const family of families) {\\n    if (routes[family] !== false && tcp[family] !== false && tls[family] === false) {\\n      if (routes[family] === true && tcp[family] === true && tls.reason === 'certificate-name') {\\n        return {\\n          failingLayer: 'tls-sni-certificate',\\n          nextProbe: 'verify-sni-and-certificate-chain',\\n          safeControl: 'rollback-lb-tls-config',\\n        } as Outcome;\\n      }\\n      return {\\n        failingLayer: `tls-${family}`,\\n        nextProbe: `inspect-${family}-tls-handshake`,\\n        safeControl: PRESERVE,\\n      } as Outcome;\\n    }\\n  }\\n\\n  for (const family of families) {\\n    if (routes[family] !== false && tcp[family] !== false && tls[family] !== false && http[family] === false) {\\n      return {\\n        failingLayer: `http-${family}`,\\n        nextProbe: `inspect-${family}-application-response`,\\n        safeControl: PRESERVE,\\n      } as Outcome;\\n    }\\n  }\\n\\n  return {\\n    failingLayer: 'none',\\n    nextProbe: 'none',\\n    safeControl: PRESERVE,\\n  } as Outcome;\\n}\\n\"}]</kory-eval-patch>",
+  "executionEvidence": [
+    "Direct provider text-patch mode produced no test-execution evidence; host checks remain authoritative.",
+    "Text-only patch adapter parsed 1 operation(s) in tagged-json format.",
+    "Text-only patch adapter applied: candidate.ts.",
+    "Synthetic behavioral vectors: 2/2; full-task coverage: synthetic evaluation protocol."
+  ],
+  "publicContract": {
+    "taskPrompt": {
+      "available": true,
+      "sha256": "5240aaf6cfa007e870462f0eb0beff1244a805f50bae6530ff71bca6dcf1b7c3",
+      "byteLength": 800,
+      "text": "The evaluation repository asks the agent to \"Apply network routing expertise to this task\". The fixture includes partial failure, cancellation, retry/idempotency pressure, concurrency, and an attractive topology assumption that is not established by evidence. The acceptance boundary is networking-systems: Establish source/destination identity, address family, DNS resolution path, route, NAT, firewall, proxy/LB, transport, TLS/SNI, application protocol, timeout, and retry ownership. The adjacent edge-cdn discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient."
+    },
+    "fixtureFiles": {
+      "README.md": {
+        "available": true,
+        "sha256": "c8a43b6138838819bcb29f83c9b90732724ef9364e7a9c05c86f489fc306dc1f",
+        "byteLength": 1409,
+        "text": "# networking-systems: transferable behavior exercise\n\nImplement the pure solve(input) export in candidate.ts. Input is a synthetic trace with: dns { a:boolean, aaaa:boolean } (record presence by address family), routes { ipv4:boolean|null, ipv6:boolean|null }, tcp { ipv4:boolean|null, ipv6:boolean|null }, tls { ipv4:boolean|null, ipv6:boolean|null, reason?:string }, http { ipv4:boolean|null, ipv6:boolean|null }. Localize the first failed layer from evidence, without assuming topology. If DNS resolves but an address-family route is false, return {failingLayer:'route-<family>', nextProbe:'compare-<family>-route-source', safeControl:'prefer-<other>-temporarily'} when the other family works, otherwise a safe preserve control. If route/TCP succeed but TLS fails with reason 'certificate-name', return {failingLayer:'tls-sni-certificate', nextProbe:'verify-sni-and-certificate-chain', safeControl:'rollback-lb-tls-config'}. Inputs vary identifiers, values, ordering, and failure paths.\n\nImplement the pure solve(input) export in candidate.ts. Return JSON data; no network, subprocesses, or real account access is needed. Inputs vary identifiers, values, ordering, and failure paths. Score the supplied evidence; do not claim a real model, device, browser, codec, or permission sandbox ran.\n\nThe subject is an explicitly synthetic trace corpus. This tests evaluation logic, not the safety of a live model.\n"
+      },
+      "contract.json": {
+        "available": true,
+        "sha256": "328e719664ce25fc0d0285469da405c8268966afa78c54ee8b2e22af8a887d81",
+        "byteLength": 117,
+        "text": "{\n  \"scenarioId\": \"networking-systems-full-task-1-individual\",\n  \"evidence\": \"synthetic\",\n  \"fullTaskBlockers\": []\n}\n"
+      }
+    }
+  },
+  "changes": [
+    {
+      "path": "candidate.ts",
+      "change": "modified",
+      "beforeSha256": "ae926a5325a88321d95c1364eed088ceb8a3d57eaad30bd5d2548f54a6274a72",
+      "afterSha256": "7ca1ad2c8a2c9d5867c541ee28a139447388301b060b2edf459e820eff911c59",
+      "beforeText": "// Implement the contract in README.md. Architecture and internal representation are yours.\nexport function solve(input: unknown): unknown {\n  return null;\n}\n",
+      "afterText": "type Family = 'ipv4' | 'ipv6';\ntype Outcome = { failingLayer: string; nextProbe: string; safeControl: string };\n\nconst PRESERVE = 'preserve-current-config';\n\nfunction asRecord(value: unknown): Record<string, any> {\n  return (value && typeof value === 'object') ? (value as Record<string, any>) : {};\n}\n\nfunction familyList(dns: Record<string, any>): Family[] {\n  const families: Family[] = [];\n  if (dns.a === true) families.push('ipv4');\n  if (dns.aaaa === true) families.push('ipv6');\n  return families;\n}\n\nfunction otherFamily(family: Family): Family {\n  return family === 'ipv4' ? 'ipv6' : 'ipv4';\n}\n\nfunction laterLayersNotFailed(family: Family, tcp: Record<string, any>, tls: Record<string, any>, http: Record<string, any>): boolean {\n  return tcp[family] !== false && tls[family] !== false && http[family] !== false;\n}\n\nexport function solve(input: unknown): unknown {\n  const trace = asRecord(input);\n  const dns = asRecord(trace.dns);\n  const routes = asRecord(trace.routes);\n  const tcp = asRecord(trace.tcp);\n  const tls = asRecord(trace.tls);\n  const http = asRecord(trace.http);\n\n  const families = familyList(dns);\n  if (families.length === 0) {\n    return {\n      failingLayer: 'dns',\n      nextProbe: 'verify-dns-records',\n      safeControl: PRESERVE,\n    } as Outcome;\n  }\n\n  for (const family of families) {\n    if (routes[family] === false) {\n      const other = otherFamily(family);\n      const otherRouteWorks = families.includes(other) &&\n        routes[other] === true &&\n        laterLayersNotFailed(other, tcp, tls, http);\n      return {\n        failingLayer: `route-${family}`,\n        nextProbe: `compare-${family}-route-source`,\n        safeControl: otherRouteWorks ? `prefer-${other}-temporarily` : PRESERVE,\n      } as Outcome;\n    }\n  }\n\n  for (const family of families) {\n    if (routes[family] !== false && tcp[family] === false) {\n      const other = otherFamily(family);\n      const otherTcpWorks = families.includes(other) &&\n        routes[other] !== false &&\n        tcp[other] === true &&\n        tls[other] !== false &&\n        http[other] !== false;\n      return {\n        failingLayer: `tcp-${family}`,\n        nextProbe: `compare-${family}-tcp-path`,\n        safeControl: otherTcpWorks ? `prefer-${other}-temporarily` : PRESERVE,\n      } as Outcome;\n    }\n  }\n\n  for (const family of families) {\n    if (routes[family] !== false && tcp[family] !== false && tls[family] === false) {\n      if (routes[family] === true && tcp[family] === true && tls.reason === 'certificate-name') {\n        return {\n          failingLayer: 'tls-sni-certificate',\n          nextProbe: 'verify-sni-and-certificate-chain',\n          safeControl: 'rollback-lb-tls-config',\n        } as Outcome;\n      }\n      return {\n        failingLayer: `tls-${family}`,\n        nextProbe: `inspect-${family}-tls-handshake`,\n        safeControl: PRESERVE,\n      } as Outcome;\n    }\n  }\n\n  for (const family of families) {\n    if (routes[family] !== false && tcp[family] !== false && tls[family] !== false && http[family] === false) {\n      return {\n        failingLayer: `http-${family}`,\n        nextProbe: `inspect-${family}-application-response`,\n        safeControl: PRESERVE,\n      } as Outcome;\n    }\n  }\n\n  return {\n    failingLayer: 'none',\n    nextProbe: 'none',\n    safeControl: PRESERVE,\n  } as Outcome;\n}\n"
+    }
+  ]
+}
+
+ARTIFACT B
+{
+  "finalOutput": "<kory-eval-patch>[\n  {\n    \"operation\": \"write\",\n    \"path\": \"candidate.ts\",\n    \"content\": \"type Family = \\\"ipv4\\\" | \\\"ipv6\\\";\\ntype Result = { failingLayer: string | null; nextProbe: string; safeControl: string };\\ntype Failure = { rank: number; order: number; result: Result };\\n\\nconst PRESERVE = \\\"preserve-current-path\\\";\\n\\nfunction rec(value: unknown): Record<string, unknown> {\\n  return value !== null && typeof value === \\\"object\\\" && !Array.isArray(value)\\n    ? (value as Record<string, unknown>)\\n    : {};\\n}\\nfunction nil(value: unknown): boolean {\\n  return value === null || value === undefined;\\n}\\nfunction dnsKey(f: Family): \\\"a\\\" | \\\"aaaa\\\" {\\n  return f === \\\"ipv4\\\" ? \\\"a\\\" : \\\"aaaa\\\";\\n}\\nfunction other(f: Family): Family {\\n  return f === \\\"ipv4\\\" ? \\\"ipv6\\\" : \\\"ipv4\\\";\\n}\\n\\nexport function solve(input: unknown): unknown {\\n  const root = rec(input);\\n  const dns = rec(root.dns);\\n  const routes = rec(root.routes);\\n  const tcp = rec(root.tcp);\\n  const tls = rec(root.tls);\\n  const http = rec(root.http);\\n  const reason = typeof tls.reason === \\\"string\\\" && tls.reason.length > 0 ? tls.reason : undefined;\\n  const families: Family[] = [\\\"ipv4\\\", \\\"ipv6\\\"];\\n\\n  const dnsTrue = (f: Family): boolean => dns[dnsKey(f)] === true;\\n  const dnsFalse = (f: Family): boolean => dns[dnsKey(f)] === false;\\n  const later = (f: Family): boolean =>\\n    !nil(routes[f]) || !nil(tcp[f]) || !nil(tls[f]) || !nil(http[f]);\\n\\n  if (!families.some(dnsTrue)) {\\n    if (families.some(dnsFalse)) {\\n      return {\\n        failingLayer: \\\"dns\\\",\\n        nextProbe: \\\"query-a-and-aaaa-from-failing-resolver\\\",\\n        safeControl: PRESERVE\\n      };\\n    }\\n    return {\\n      failingLayer: null,\\n      nextProbe: \\\"collect-missing-observations\\\",\\n      safeControl: PRESERVE\\n    };\\n  }\\n\\n  function works(f: Family): boolean {\\n    if (!dnsTrue(f)) return false;\\n    if (routes[f] === false || tcp[f] === false || tls[f] === false || http[f] === false) return false;\\n    return tcp[f] === true;\\n  }\\n\\n  const failures: Failure[] = [];\\n  let attempted = false;\\n  let missing = false;\\n\\n  families.forEach((f, order) => {\\n    if (!(dnsTrue(f) || (dnsFalse(f) && later(f)))) return;\\n    attempted = true;\\n\\n    if (!dnsTrue(f)) {\\n      const o = other(f);\\n      failures.push({\\n        rank: 0,\\n        order,\\n        result: {\\n          failingLayer: `dns-${f}`,\\n          nextProbe: `query-${dnsKey(f)}-from-failing-resolver`,\\n          safeControl: works(o) ? `prefer-${o}-temporarily` : PRESERVE\\n        }\\n      });\\n      return;\\n    }\\n\\n    const route = routes[f];\\n    if (route === false) {\\n      const o = other(f);\\n      failures.push({\\n        rank: 1,\\n        order,\\n        result: {\\n          failingLayer: `route-${f}`,\\n          nextProbe: `compare-${f}-route-source`,\\n          safeControl: works(o) ? `prefer-${o}-temporarily` : PRESERVE\\n        }\\n      });\\n      return;\\n    }\\n\\n    const transport = tcp[f];\\n    if (transport === false) {\\n      const o = other(f);\\n      failures.push({\\n        rank: 2,\\n        order,\\n        result: {\\n          failingLayer: `tcp-${f}`,\\n          nextProbe: `probe-${f}-tcp-handshake`,\\n          safeControl: works(o) ? `prefer-${o}-temporarily` : PRESERVE\\n        }\\n      });\\n      return;\\n    }\\n\\n    if (transport === true) {\\n      const secure = tls[f];\\n      if (secure === false) {\\n        if (route === true && reason === \\\"certificate-name\\\") {\\n          failures.push({\\n            rank: 3,\\n            order,\\n            result: {\\n              failingLayer: \\\"tls-sni-certificate\\\",\\n              nextProbe: \\\"verify-sni-and-certificate-chain\\\",\\n              safeControl: \\\"rollback-lb-tls-config\\\"\\n            }\\n          });\\n        } else {\\n          failures.push({\\n            rank: 3,\\n            order,\\n            result: {\\n              failingLayer: `tls-${f}`,\\n              nextProbe: `inspect-${f}-tls-handshake`,\\n              safeControl: PRESERVE\\n            }\\n          });\\n        }\\n        return;\\n      }\\n      if (secure === true) {\\n        if (http[f] === false) {\\n          failures.push({\\n            rank: 4,\\n            order,\\n            result: {\\n              failingLayer: `http-${f}`,\\n              nextProbe: `inspect-${f}-http-response`,\\n              safeControl: PRESERVE\\n            }\\n          });\\n        } else if (nil(http[f])) {\\n          missing = true;\\n        }\\n        return;\\n      }\\n      missing = true;\\n      return;\\n    }\\n\\n    if (nil(route) || nil(transport)) missing = true;\\n  });\\n\\n  if (failures.length > 0) {\\n    failures.sort((a, b) => a.rank - b.rank || a.order - b.order);\\n    return failures[0].result;\\n  }\\n\\n  return {\\n    failingLayer: null,\\n    nextProbe: missing ? \\\"collect-missing-observations\\\" : (attempted ? \\\"none\\\" : \\\"collect-missing-observations\\\"),\\n    safeControl: PRESERVE\\n  };\\n}\\n\"\n  }\n]</kory-eval-patch>",
+  "executionEvidence": [
+    "Direct provider text-patch mode produced no test-execution evidence; host checks remain authoritative.",
+    "Text-only patch adapter parsed 1 operation(s) in tagged-json format.",
+    "Text-only patch adapter applied: candidate.ts.",
+    "Synthetic behavioral vectors: 2/2; full-task coverage: synthetic evaluation protocol."
+  ],
+  "publicContract": {
+    "taskPrompt": {
+      "available": true,
+      "sha256": "5240aaf6cfa007e870462f0eb0beff1244a805f50bae6530ff71bca6dcf1b7c3",
+      "byteLength": 800,
+      "text": "The evaluation repository asks the agent to \"Apply network routing expertise to this task\". The fixture includes partial failure, cancellation, retry/idempotency pressure, concurrency, and an attractive topology assumption that is not established by evidence. The acceptance boundary is networking-systems: Establish source/destination identity, address family, DNS resolution path, route, NAT, firewall, proxy/LB, transport, TLS/SNI, application protocol, timeout, and retry ownership. The adjacent edge-cdn discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient."
+    },
+    "fixtureFiles": {
+      "README.md": {
+        "available": true,
+        "sha256": "c8a43b6138838819bcb29f83c9b90732724ef9364e7a9c05c86f489fc306dc1f",
+        "byteLength": 1409,
+        "text": "# networking-systems: transferable behavior exercise\n\nImplement the pure solve(input) export in candidate.ts. Input is a synthetic trace with: dns { a:boolean, aaaa:boolean } (record presence by address family), routes { ipv4:boolean|null, ipv6:boolean|null }, tcp { ipv4:boolean|null, ipv6:boolean|null }, tls { ipv4:boolean|null, ipv6:boolean|null, reason?:string }, http { ipv4:boolean|null, ipv6:boolean|null }. Localize the first failed layer from evidence, without assuming topology. If DNS resolves but an address-family route is false, return {failingLayer:'route-<family>', nextProbe:'compare-<family>-route-source', safeControl:'prefer-<other>-temporarily'} when the other family works, otherwise a safe preserve control. If route/TCP succeed but TLS fails with reason 'certificate-name', return {failingLayer:'tls-sni-certificate', nextProbe:'verify-sni-and-certificate-chain', safeControl:'rollback-lb-tls-config'}. Inputs vary identifiers, values, ordering, and failure paths.\n\nImplement the pure solve(input) export in candidate.ts. Return JSON data; no network, subprocesses, or real account access is needed. Inputs vary identifiers, values, ordering, and failure paths. Score the supplied evidence; do not claim a real model, device, browser, codec, or permission sandbox ran.\n\nThe subject is an explicitly synthetic trace corpus. This tests evaluation logic, not the safety of a live model.\n"
+      },
+      "contract.json": {
+        "available": true,
+        "sha256": "328e719664ce25fc0d0285469da405c8268966afa78c54ee8b2e22af8a887d81",
+        "byteLength": 117,
+        "text": "{\n  \"scenarioId\": \"networking-systems-full-task-1-individual\",\n  \"evidence\": \"synthetic\",\n  \"fullTaskBlockers\": []\n}\n"
+      }
+    }
+  },
+  "changes": [
+    {
+      "path": "candidate.ts",
+      "change": "modified",
+      "beforeSha256": "ae926a5325a88321d95c1364eed088ceb8a3d57eaad30bd5d2548f54a6274a72",
+      "afterSha256": "5fa12a2ac37e1a70be4cd21860b5d620870ddcd7df81dcfc2e24deeb6445bddf",
+      "beforeText": "// Implement the contract in README.md. Architecture and internal representation are yours.\nexport function solve(input: unknown): unknown {\n  return null;\n}\n",
+      "afterText": "type Family = \"ipv4\" | \"ipv6\";\ntype Result = { failingLayer: string | null; nextProbe: string; safeControl: string };\ntype Failure = { rank: number; order: number; result: Result };\n\nconst PRESERVE = \"preserve-current-path\";\n\nfunction rec(value: unknown): Record<string, unknown> {\n  return value !== null && typeof value === \"object\" && !Array.isArray(value)\n    ? (value as Record<string, unknown>)\n    : {};\n}\nfunction nil(value: unknown): boolean {\n  return value === null || value === undefined;\n}\nfunction dnsKey(f: Family): \"a\" | \"aaaa\" {\n  return f === \"ipv4\" ? \"a\" : \"aaaa\";\n}\nfunction other(f: Family): Family {\n  return f === \"ipv4\" ? \"ipv6\" : \"ipv4\";\n}\n\nexport function solve(input: unknown): unknown {\n  const root = rec(input);\n  const dns = rec(root.dns);\n  const routes = rec(root.routes);\n  const tcp = rec(root.tcp);\n  const tls = rec(root.tls);\n  const http = rec(root.http);\n  const reason = typeof tls.reason === \"string\" && tls.reason.length > 0 ? tls.reason : undefined;\n  const families: Family[] = [\"ipv4\", \"ipv6\"];\n\n  const dnsTrue = (f: Family): boolean => dns[dnsKey(f)] === true;\n  const dnsFalse = (f: Family): boolean => dns[dnsKey(f)] === false;\n  const later = (f: Family): boolean =>\n    !nil(routes[f]) || !nil(tcp[f]) || !nil(tls[f]) || !nil(http[f]);\n\n  if (!families.some(dnsTrue)) {\n    if (families.some(dnsFalse)) {\n      return {\n        failingLayer: \"dns\",\n        nextProbe: \"query-a-and-aaaa-from-failing-resolver\",\n        safeControl: PRESERVE\n      };\n    }\n    return {\n      failingLayer: null,\n      nextProbe: \"collect-missing-observations\",\n      safeControl: PRESERVE\n    };\n  }\n\n  function works(f: Family): boolean {\n    if (!dnsTrue(f)) return false;\n    if (routes[f] === false || tcp[f] === false || tls[f] === false || http[f] === false) return false;\n    return tcp[f] === true;\n  }\n\n  const failures: Failure[] = [];\n  let attempted = false;\n  let missing = false;\n\n  families.forEach((f, order) => {\n    if (!(dnsTrue(f) || (dnsFalse(f) && later(f)))) return;\n    attempted = true;\n\n    if (!dnsTrue(f)) {\n      const o = other(f);\n      failures.push({\n        rank: 0,\n        order,\n        result: {\n          failingLayer: `dns-${f}`,\n          nextProbe: `query-${dnsKey(f)}-from-failing-resolver`,\n          safeControl: works(o) ? `prefer-${o}-temporarily` : PRESERVE\n        }\n      });\n      return;\n    }\n\n    const route = routes[f];\n    if (route === false) {\n      const o = other(f);\n      failures.push({\n        rank: 1,\n        order,\n        result: {\n          failingLayer: `route-${f}`,\n          nextProbe: `compare-${f}-route-source`,\n          safeControl: works(o) ? `prefer-${o}-temporarily` : PRESERVE\n        }\n      });\n      return;\n    }\n\n    const transport = tcp[f];\n    if (transport === false) {\n      const o = other(f);\n      failures.push({\n        rank: 2,\n        order,\n        result: {\n          failingLayer: `tcp-${f}`,\n          nextProbe: `probe-${f}-tcp-handshake`,\n          safeControl: works(o) ? `prefer-${o}-temporarily` : PRESERVE\n        }\n      });\n      return;\n    }\n\n    if (transport === true) {\n      const secure = tls[f];\n      if (secure === false) {\n        if (route === true && reason === \"certificate-name\") {\n          failures.push({\n            rank: 3,\n            order,\n            result: {\n              failingLayer: \"tls-sni-certificate\",\n              nextProbe: \"verify-sni-and-certificate-chain\",\n              safeControl: \"rollback-lb-tls-config\"\n            }\n          });\n        } else {\n          failures.push({\n            rank: 3,\n            order,\n            result: {\n              failingLayer: `tls-${f}`,\n              nextProbe: `inspect-${f}-tls-handshake`,\n              safeControl: PRESERVE\n            }\n          });\n        }\n        return;\n      }\n      if (secure === true) {\n        if (http[f] === false) {\n          failures.push({\n            rank: 4,\n            order,\n            result: {\n              failingLayer: `http-${f}`,\n              nextProbe: `inspect-${f}-http-response`,\n              safeControl: PRESERVE\n            }\n          });\n        } else if (nil(http[f])) {\n          missing = true;\n        }\n        return;\n      }\n      missing = true;\n      return;\n    }\n\n    if (nil(route) || nil(transport)) missing = true;\n  });\n\n  if (failures.length > 0) {\n    failures.sort((a, b) => a.rank - b.rank || a.order - b.order);\n    return failures[0].result;\n  }\n\n  return {\n    failingLayer: null,\n    nextProbe: missing ? \"collect-missing-observations\" : (attempted ? \"none\" : \"collect-missing-observations\"),\n    safeControl: PRESERVE\n  };\n}\n"
+    }
+  ]
+}

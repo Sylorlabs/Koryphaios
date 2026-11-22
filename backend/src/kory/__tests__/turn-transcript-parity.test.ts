@@ -128,6 +128,67 @@ describe('manager turn transcript parity', () => {
     expect(persisted?.reasoningContent).toBe('\nHave the evidence.  ');
   });
 
+  test('narration written before a tool call survives persistence (no vanishing text)', async () => {
+    const narratedToolRound: ProviderEvent[] = [
+      { type: 'thinking_delta', thinking: 'Plan.' },
+      { type: 'content_delta', content: 'Reading a.ts first.' },
+      ...toolRound.slice(2),
+    ];
+    const f = await fixture([narratedToolRound, answerRound]);
+    const { published } = await captureBroker(() => runTurn(f, 'Inspect the file'));
+    const managerStream = published.filter(
+      (m) => m.type.startsWith('stream.') && (m.payload as { agentId?: string }).agentId === MANAGER_AGENT,
+    );
+    const live = reduceTurnEvents(
+      managerStream
+        .map((m) => turnEventFromWSMessage({ type: m.type, payload: m.payload, timestamp: m.timestamp }))
+        .filter((e): e is NonNullable<typeof e> => e !== null),
+    );
+    const persisted = (await f.messages.getContextMessages(f.session.id)).find(
+      (m) => m.role === 'assistant',
+    );
+    expect(live.map((p) => p.kind)).toEqual(['reasoning', 'text', 'tool', 'reasoning', 'text']);
+    expect(persisted?.parts).toEqual(live);
+    expect(persisted?.parts?.find((p) => p.kind === 'text')).toMatchObject({ text: 'Reading a.ts first.' });
+  });
+
+  test('a reused provider tool id in two calls of one turn stays two tool parts, live and persisted', async () => {
+    // Both rounds call the provider's `read` id. App ids keep the calls apart.
+    const secondToolRound: ProviderEvent[] = toolRound.slice(2);
+    const f = await fixture([toolRound, secondToolRound, [{ type: 'content_delta', content: 'Done.' }]]);
+    const { published } = await captureBroker(() => runTurn(f, 'Inspect twice'));
+
+    const managerStream = published.filter(
+      (m) => m.type.startsWith('stream.') && (m.payload as { agentId?: string }).agentId === MANAGER_AGENT,
+    );
+    const live = reduceTurnEvents(
+      managerStream
+        .map((m) => turnEventFromWSMessage({ type: m.type, payload: m.payload, timestamp: m.timestamp }))
+        .filter((e): e is NonNullable<typeof e> => e !== null),
+    );
+    const persisted = (await f.messages.getContextMessages(f.session.id)).find((m) => m.role === 'assistant');
+
+    expect(live.map((p) => p.kind)).toEqual(['reasoning', 'tool', 'tool', 'text']);
+    const tools = live.filter((p): p is Extract<TranscriptPart, { kind: 'tool' }> => p.kind === 'tool');
+    expect(tools[0].callId).not.toBe(tools[1].callId);
+    expect(tools[0].callId).not.toBe('read');
+    expect(tools.map((t) => t.output)).toEqual(['file contents', 'file contents']);
+    expect(persisted?.parts).toEqual(live);
+
+    // Every stamped tool event names an app id, never the provider id.
+    const toolEvents = managerStream.filter((m) => m.type.startsWith('stream.tool_'));
+    for (const event of toolEvents) {
+      const payload = event.payload as { toolCall?: { id: string }; toolResult?: { callId: string } };
+      expect((payload.toolCall?.id ?? payload.toolResult?.callId)).toMatch(/^tc_/);
+    }
+
+    // Provider history still uses the native id on both assistant tool calls and their results.
+    const history = f.requests[2].messages;
+    const sentCallIds = history.flatMap((m) => ((m as { tool_calls?: Array<{ id: string }> }).tool_calls ?? []).map((c) => c.id));
+    expect(sentCallIds).toEqual(['read', 'read']);
+    expect(history.filter((m) => m.role === 'tool').map((m) => (m as { tool_call_id?: string }).tool_call_id)).toEqual(['read', 'read']);
+  });
+
   test('a stored message with parts sends the same provider messages as one without', async () => {
     const nonce = `${Date.now()}-${Math.random()}`;
     const legacyTurn = { role: 'assistant' as const, content: 'Earlier answer', reasoningContent: 'Earlier why', createdAt: 2 };

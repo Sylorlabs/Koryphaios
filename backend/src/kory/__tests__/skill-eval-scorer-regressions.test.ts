@@ -6,13 +6,13 @@ import { join } from 'node:path';
 import {
   CORE_EXECUTION_SKILL_EVAL_MATERIALIZERS,
   CORE_EXECUTION_SKILL_EVAL_SCORERS,
-} from '../skill-eval-core-execution-fixtures';
+} from '../../eval/skills/skill-eval-core-execution-fixtures';
 import {
   candidateBunTestFiles,
   runCandidateBunTests,
   writeFixtureFile,
-} from '../skill-eval-fixture-helpers';
-import { VERIFICATION_CHILD_SKILL_EVAL_SCORERS } from '../skill-eval-verification-children-fixtures';
+} from '../../eval/skills/skill-eval-fixture-helpers';
+import { VERIFICATION_CHILD_SKILL_EVAL_SCORERS } from '../../eval/skills/skill-eval-verification-children-fixtures';
 
 const roots: string[] = [];
 
@@ -149,7 +149,7 @@ test('mutates the owning source', () => {
     debuggingRegression(root);
     const cli = readFileSync(join(root, 'src/cli.ts'), 'utf8');
     writeFixtureFile(root, 'src/cli.ts', `if (process.env.KORY_EVAL_TEST_SECRET) throw new Error('ambient credential inherited');\n${cli}`);
-    const modulePath = new URL('../skill-eval-core-execution-fixtures.ts', import.meta.url).pathname;
+    const modulePath = new URL('../../eval/skills/skill-eval-core-execution-fixtures.ts', import.meta.url).pathname;
     const probe = spawnSync(process.execPath, ['--no-env-file', '-e', `
 import { CORE_EXECUTION_SKILL_EVAL_SCORERS } from ${JSON.stringify(modulePath)};
 const scorer = CORE_EXECUTION_SKILL_EVAL_SCORERS.find(item => item.id === ${JSON.stringify(scorer.id)});

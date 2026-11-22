@@ -1,15 +1,15 @@
 import { afterEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import * as childProcess from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import type { SkillEvalScenarioV3 } from '../skill-eval-harness';
+import type { SkillEvalScenarioV3 } from '../../eval/skills/skill-eval-harness';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
+import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
 import { loadV5SkillPackages } from '../skill-packages';
 import {
   TESTING_ENGINEERING_SKILL_EVAL_MATERIALIZERS,
   TESTING_ENGINEERING_SKILL_EVAL_SCORERS,
-} from '../skill-eval-testing-engineering-fixtures';
+} from '../../eval/skills/skill-eval-testing-engineering-fixtures';
 
 const roots: string[] = [];
 afterEach(() => {

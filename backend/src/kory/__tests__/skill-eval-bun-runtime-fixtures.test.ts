@@ -8,14 +8,14 @@ import {
   BUN_MIGRATION_VERSIONS,
   bunMigrationReadiness,
   scoreBunMigration,
-} from '../skill-eval-bun-runtime-fixtures';
+} from '../../eval/skills/skill-eval-bun-runtime-fixtures';
 import { loadV5SkillPackages } from '../skill-packages';
-import type { SkillEvalScenarioV3 } from '../skill-eval-harness';
-import { auditSkillEvalExecutionReadiness } from '../skill-eval-execution';
+import type { SkillEvalScenarioV3 } from '../../eval/skills/skill-eval-harness';
+import { auditSkillEvalExecutionReadiness } from '../../eval/skills/skill-eval-execution';
 import {
   BUILTIN_SKILL_EVAL_MATERIALIZERS,
   BUILTIN_SKILL_EVAL_SCORERS,
-} from '../skill-eval-fixtures';
+} from '../../eval/skills/skill-eval-fixtures';
 
 const roots: string[] = [];
 afterEach(() => {

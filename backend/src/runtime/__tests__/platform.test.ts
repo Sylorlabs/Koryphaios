@@ -13,6 +13,7 @@ import {
   hasUnexpectedOwner,
   isContainedBy,
   directoryLinkType,
+  windowsPathToWsl,
   isMac,
   isUnix,
   isWindows,
@@ -198,5 +199,21 @@ describe('staged directory link type', () => {
     asHost('win32', () => expect(directoryLinkType()).toBe('junction'));
     asHost('linux', () => expect(directoryLinkType()).toBe('dir'));
     asHost('darwin', () => expect(directoryLinkType()).toBe('dir'));
+  });
+});
+
+describe('Windows paths in the WSL sandbox', () => {
+  it('translates a drive path into the distribution mount the child will see', () => {
+    expect(windowsPathToWsl('C:\\work\\app')).toBe('/mnt/c/work/app');
+    expect(windowsPathToWsl('D:\\')).toBe('/mnt/d');
+    expect(windowsPathToWsl('c:/work/app/')).toBe('/mnt/c/work/app');
+  });
+
+  it('refuses a path the distribution does not see at the same place', () => {
+    // A guessed mount would confine the child to a directory the user never
+    // approved, so an untranslatable grant must abort the launch instead.
+    expect(windowsPathToWsl('\\\\server\\share\\app')).toBeNull();
+    expect(windowsPathToWsl('\\\\?\\C:\\work')).toBeNull();
+    expect(windowsPathToWsl('relative\\path')).toBeNull();
   });
 });

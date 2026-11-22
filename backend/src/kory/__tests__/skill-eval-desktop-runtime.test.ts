@@ -13,15 +13,19 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { writeFixtureFile } from '../skill-eval-fixture-helpers';
+import { createHash } from 'node:crypto';
+import { writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
 import {
   DESKTOP_RUNTIME_SCENARIOS,
   DESKTOP_SKILL_EVAL_MATERIALIZERS,
   DESKTOP_SKILL_EVAL_SCORERS,
+  desktopIsolationBlocker,
   desktopRuntimeReadiness,
+  fixtureBundleIdentifier,
   materializeDesktopFixture,
+  packagedArtifactIdentity,
   runDesktopRuntime,
-} from '../skill-eval-desktop-runtime';
+} from '../../eval/skills/skill-eval-desktop-runtime';
 
 const { electron, tauri } = DESKTOP_RUNTIME_SCENARIOS;
 const roots: string[] = [];
@@ -29,6 +33,7 @@ const originalEnvironment = {
   electron: process.env.KORY_SKILL_EVAL_ELECTRON_BINARY,
   tauriCli: process.env.KORY_SKILL_EVAL_TAURI_CLI,
   tauriDriver: process.env.KORY_SKILL_EVAL_TAURI_NATIVE_DRIVER,
+  vm: process.env.KORY_SKILL_EVAL_DESKTOP_VM,
 };
 const electronBlockers = desktopRuntimeReadiness(electron);
 const tauriBlockers = desktopRuntimeReadiness(tauri);
@@ -48,6 +53,7 @@ afterEach(() => {
   restoreEnvironment('KORY_SKILL_EVAL_ELECTRON_BINARY', originalEnvironment.electron);
   restoreEnvironment('KORY_SKILL_EVAL_TAURI_CLI', originalEnvironment.tauriCli);
   restoreEnvironment('KORY_SKILL_EVAL_TAURI_NATIVE_DRIVER', originalEnvironment.tauriDriver);
+  restoreEnvironment('KORY_SKILL_EVAL_DESKTOP_VM', originalEnvironment.vm);
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -113,6 +119,11 @@ function fakeTauriPrerequisites(): { cli: string; driver: string } {
   chmodSync(driver, 0o700);
   process.env.KORY_SKILL_EVAL_TAURI_CLI = cli;
   process.env.KORY_SKILL_EVAL_TAURI_NATIVE_DRIVER = driver;
+  // These cases assert what the fixture's own source, manifest and toolchain checks say. They never
+  // open a window, and the only execution path they dispatch through is the isolated guest driver,
+  // so the interactive-display refusal written for real desktop runs is answered by declaring that
+  // target. The refusal itself is covered by its own test above.
+  process.env.KORY_SKILL_EVAL_DESKTOP_VM = '1';
   return { cli, driver };
 }
 
@@ -140,6 +151,29 @@ function openSettingsWindow(onSave) {
 module.exports = { openSettingsWindow };
 `;
 
+describe('packaged native artifact identity', () => {
+  test('a canonical path inside the fixture is accepted while a bundle outside it is not', () => {
+    const root = workspace('kory-tauri-identity-');
+    const bundle = join(root, 'src-tauri', 'target', 'release', 'bundle', 'macos', 'app', 'Contents', 'MacOS', 'fixture');
+    writeFixtureFile(root, 'src-tauri/target/release/bundle/macos/app/Contents/MacOS/fixture', 'binary');
+    const digest = createHash('sha256').update(readFileSync(bundle)).digest('hex');
+
+    // The driver reports the canonical `/private/...` form that `resolve` never produces.
+    const canonical = lstatSync(root).isDirectory() ? join('/private', root) : root;
+    expect(packagedArtifactIdentity(root, bundle, digest)).toEqual({ ok: true });
+    expect(packagedArtifactIdentity(root, canonical + '/src-tauri/target/release/bundle/macos/app/Contents/MacOS/fixture', digest))
+      .toEqual({ ok: true });
+
+    writeFixtureFile(root, 'sibling/fixture', 'binary');
+    // A real bundle beside the root, traversed through `..`, is not inside the fixture.
+    expect(packagedArtifactIdentity(root, join(root, '..', 'fixture'), digest).ok).toBe(false);
+    expect(packagedArtifactIdentity(root, join(root, 'sibling', 'fixture'), digest).ok).toBe(true);
+    expect(packagedArtifactIdentity(root, bundle, 'a'.repeat(64)).ok).toBe(false);
+    expect(packagedArtifactIdentity(root, 'src-tauri/target/release/bundle/macos/app/Contents/MacOS/fixture', digest).ok)
+      .toBe(false);
+  });
+});
+
 describe('desktop-electron-tauri native V5 evaluation fixture', () => {
   test('uses the two declared device full-task scenarios without absorbing adjacent skills', () => {
     const first = scenario(electron);
@@ -159,6 +193,22 @@ describe('desktop-electron-tauri native V5 evaluation fixture', () => {
     }
     expect(DESKTOP_SKILL_EVAL_MATERIALIZERS[0]!.matches({ id: tauri } as never)).toBe(false);
     expect(DESKTOP_SKILL_EVAL_MATERIALIZERS[1]!.matches({ id: electron } as never)).toBe(false);
+  });
+
+  test('a desktop scenario never runs on the display someone is working on', () => {
+    const previous = process.env.KORY_SKILL_EVAL_DESKTOP_VM;
+    delete process.env.KORY_SKILL_EVAL_DESKTOP_VM;
+    const refusal = desktopIsolationBlocker();
+    if (process.platform === 'darwin') {
+      // This suite runs on the authoring machine, which is exactly the display that must not be
+      // covered by a fixture window, so the refusal is the expected result here.
+      expect(refusal).toMatch(/interactive display|owns the display/u);
+      expect(desktopRuntimeReadiness(electron)).toContain(refusal!);
+    }
+    process.env.KORY_SKILL_EVAL_DESKTOP_VM = '1';
+    expect(desktopIsolationBlocker()).toBeNull();
+    if (previous === undefined) delete process.env.KORY_SKILL_EVAL_DESKTOP_VM;
+    else process.env.KORY_SKILL_EVAL_DESKTOP_VM = previous;
   });
 
   test('unavailable Electron cannot be materialized or scored green', async () => {
@@ -254,6 +304,16 @@ describe('desktop-electron-tauri native V5 evaluation fixture', () => {
     },
   );
 
+  test('each materialized fixture gets its own bundle identifier', () => {
+    // Two fixtures sharing one identifier make the second instance fail to open a window,
+    // because LaunchServices keys an application by identifier.
+    const first = fixtureBundleIdentifier('/tmp/kory-fixture-a');
+    const second = fixtureBundleIdentifier('/tmp/kory-fixture-b');
+    expect(first).not.toBe(second);
+    expect(first).toMatch(/^dev\.koryphaios\.eval\.ws[0-9a-f]{8}$/u);
+    expect(fixtureBundleIdentifier('/tmp/kory-fixture-a')).toBe(first);
+  });
+
   test.skipIf(!hasExecutableScriptSupport || !cargoReady)(
     'Tauri source provides a real Rust plugin, narrow capability and retargetable filesystem roots',
     async () => {
@@ -274,7 +334,25 @@ describe('desktop-electron-tauri native V5 evaluation fixture', () => {
       expect(capabilities.windows).toEqual(['main']);
       expect(capabilities.permissions).toEqual(['core:default', 'dialog:allow-open']);
       expect(rust).toContain('blocking_pick_folder');
-      expect(rust).toContain('tauri::generate_handler![read_workspace, choose_workspace]');
+      // The exposed surface stays narrow and named. The three verification commands exist so the
+      // native driver can observe the state the person sees and ask the app to open its own dialog;
+      // they read and write only inside the fixture root, and the two application commands stay the
+      // only way to reach a workspace path.
+      const handlers = /tauri::generate_handler!\[([\s\S]*?)\]/u.exec(rust)?.[1]
+        ?.split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+      expect(handlers?.sort()).toEqual([
+        'choose_workspace',
+        'kory_picker_directory',
+        'kory_place_window',
+        'kory_status',
+        'read_workspace',
+      ]);
+      expect(rust).not.toContain('generate_handler![*');
+      const verificationCommands = rust.slice(rust.indexOf('fn kory_status'), rust.indexOf('struct PickerDirectory'));
+      expect(verificationCommands).toContain('std::env::var("KORY_FIXTURE_ROOT")');
+      expect(verificationCommands).not.toContain('Command::new');
       expect(readFileSync(join(root, 'ui/index.html'), 'utf8')).toContain('src="renderer.js"');
       expect(readFileSync(join(root, 'ui/renderer.js'), 'utf8')).toContain("invoke('choose_workspace')");
       const fixtureLink = join(root, 'safe-workspace', 'selected-link');
@@ -285,7 +363,11 @@ describe('desktop-electron-tauri native V5 evaluation fixture', () => {
       const execution = runDesktopRuntime(root, tauri);
       expect(execution.passed).toBe(false);
       expect(execution.nativeVersion).toBeNull();
-      expect(execution.blockers.some((item) => item.includes('Real Tauri package build failed'))).toBe(true);
+      // On the interactive host the stub toolchain fails at the package build; on an isolated target
+      // the same stub fails at the driver, because the guest owns the build. Either way a stub cannot
+      // produce a native run, which is what this case is about.
+      expect(execution.blockers.some((item) => /Real Tauri package build failed|Native Tauri UI driver failed/u.test(item)))
+        .toBe(true);
       expect((await score(root, tauri)).verification).toBe(0);
     },
   );

@@ -36,10 +36,19 @@ export const PROVIDER_SHARE_RISK: Record<string, ProviderShareClassification> = 
   xai: { risk: 'ok', reason: 'Your xAI API key — you pay for their usage.' },
   groq: { risk: 'ok', reason: 'Your Groq API key — you pay for their usage.' },
   openrouter: { risk: 'ok', reason: 'Your OpenRouter key — you pay for their usage.' },
-  agentrouter: { risk: 'ok', reason: 'Your AgentRouter key — you pay for their usage.' },
   unorouter: { risk: 'ok', reason: 'Your UnoRouter key — you pay for their usage.' },
   tokenrouter: { risk: 'ok', reason: 'Your TokenRouter key — you pay for their usage.' },
   experientiallabs: { risk: 'ok', reason: 'Your Experiential Labs key — you pay for their usage.' },
+  hundredmillionseek: { risk: 'ok', reason: 'Your 100MillionSeek key — you pay for their usage.' },
+  numes: { risk: 'ok', reason: 'Your Numes key — you pay for their usage.' },
+  radeon: {
+    risk: 'ok',
+    reason: 'Your AMD Radeon Cloud key — usage draws on your own account allowance.',
+  },
+  runcrate: {
+    risk: 'ok',
+    reason: 'Your Runcrate key — usage draws on your own account balance.',
+  },
   tokenharbor: { risk: 'ok', reason: 'Your Token Harbor key — you pay for their usage.' },
   logfare: { risk: 'ok', reason: 'Your Logfare key — you pay for their usage.' },
   apinex: { risk: 'ok', reason: 'Your APInex key — you pay for their usage.' },
@@ -174,6 +183,18 @@ export interface RemoteInferenceRequestPayload {
   maxTokens?: number;
   temperature?: number;
   reasoningLevel?: string;
+  /** Composer-selected faster serving tier id (from the model's speedTiers). */
+  speedTier?: string;
+  /** Composer Model-settings overrides (from the model's `parameters`). */
+  modelParameters?: Record<string, number | string>;
+  /** Devin Fusion slot selection — only for the `fusion` model. */
+  fusion?: {
+    lead: string;
+    leadEffort: string;
+    leadFast: boolean;
+    sidekick: string;
+    sidekickEffort: string | null;
+  };
   /** Explicit model-capability correction; the host still validates sharing,
    * access tiers, and whether its adapter can transport images. */
   imageInputOverride?: { provider: string; model: string };

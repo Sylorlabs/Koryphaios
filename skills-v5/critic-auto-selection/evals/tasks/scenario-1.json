@@ -1,0 +1,77 @@
+{
+  "id": "critic-auto-selection-full-task-1",
+  "maturity": "individual",
+  "prompt": "Six finished answers from one workspace are supplied in `cases/cases.json`, each with the user request that produced it and the answer text. For each case make the Critic Auto decision: request an independent review or let the answer stand. Record the decision, a reason, and, where you request review, the specific concern the reviewer should attack. Write the record as a file in the workspace. A blanket request and a blanket refusal are both wrong answers.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://critic-auto-selection/decision-matrix",
+    "requirements": [
+      "case set mixes short confirmations and low risk lookups with unobserved results, an authorization claim, and an irreversible migration",
+      "one case where the user merely says to test something, whose correct decision is not to review the finished answer",
+      "one case whose answer is long but low risk and easily verified, so length alone is not a reason to review",
+      "one case where the answer names a result that no run in the transcript supports",
+      "fixture owned case file that must not be edited",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "critic-auto-selection-trivial",
+      "assertion": "The trivial acknowledgement and the readiness check are both left without a review request, with a reason rather than silence."
+    },
+    {
+      "id": "critic-auto-selection-risk",
+      "assertion": "The unobserved-result case and the authorization claim case both request a review, and each request names the specific claim a reviewer should attack."
+    },
+    {
+      "id": "critic-auto-selection-irreversible",
+      "assertion": "The irreversible migration case requests a review and the recorded concern is about the irreversible action rather than about general quality."
+    },
+    {
+      "id": "critic-auto-selection-length-decoy",
+      "assertion": "The long low risk case is left without a review request, so review selection is not driven by answer length."
+    },
+    {
+      "id": "critic-auto-selection-record",
+      "assertion": "Every case records a decision with a non empty reason, and no case is missing from the record."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "critic-auto-selection-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "per case decision matching the risk of the answer",
+        "named concern on each requested review",
+        "reason recorded for both request and skip",
+        "no length or user mention only decisions"
+      ]
+    },
+    {
+      "id": "critic-auto-selection-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "decisions are explained by risk rather than by anxiety",
+        "concerns are specific and actionable",
+        "the record is auditable"
+      ],
+      "blindTo": [
+        "skill-variant",
+        "expected-outcome"
+      ]
+    }
+  ],
+  "requiredEvidence": [
+    "per case decision record",
+    "named concern for each requested review",
+    "reason for each skipped review",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "critic-auto-selection-scenario-1-result",
+    "critic-auto-selection-scenario-1-verification",
+    "critic-auto-selection-scenario-1-paired-evaluation"
+  ]
+}

@@ -48,7 +48,7 @@ import {
 } from '../../kory/skills';
 import { collectProviderEvents } from '../../providers/provider-retry';
 import { RESPONSE_STYLE_SKILL_NAME } from '../../kory/response-style-skill';
-import { createTaskContract } from '../../kory/prompts';
+import { createTaskContract } from '../../kory/prompts/index';
 import {
   listHarnessQualifications,
   saveHarnessQualification,
@@ -1186,6 +1186,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
         const data = await kory.updateAgentControls(body.sessionId, agentId, {
           model: body.model,
           reasoningLevel: body.reasoningLevel,
+          fallbacks: body.fallbacks,
         });
         return { ok: true, data };
       } catch (err: unknown) {
@@ -1198,6 +1199,15 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
         sessionId: t.String(),
         model: t.Optional(t.String()),
         reasoningLevel: t.Optional(t.String()),
+        fallbacks: t.Optional(
+          t.Array(
+            t.Object({
+              model: t.String(),
+              reasoningLevel: t.Optional(t.String()),
+            }),
+            { maxItems: 20 },
+          ),
+        ),
       }),
     },
   )
@@ -1225,7 +1235,15 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const { kory } = getContext();
     const cancelled = kory.cancelWorker(agentId);
-    if (cancelled) await kory.waitForAgentIdle(agentId);
+    if (cancelled) {
+      // The stop is already acknowledged by the abort. Give the owner a short
+      // window to settle, but never hold the HTTP response open for a slow
+      // provider or a long-running tool call.
+      await Promise.race([
+        kory.waitForAgentIdle(agentId, 1_500),
+        new Promise<void>((resolve) => setTimeout(resolve, 1_500)),
+      ]).catch(() => undefined);
+    }
     return {
       ok: true,
       data: { cancelled },

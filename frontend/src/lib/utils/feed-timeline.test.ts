@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import type { FeedEntryLocal } from '$lib/types';
 import {
   finalizeThinkingEntries,
+  insertByChronology,
   mergeFeedTimeline,
   omitArchivedToolDuplicates,
   operationalEntriesForReload,
@@ -149,5 +150,72 @@ describe('feed timeline reconciliation', () => {
 
     expect(finalized.thinkingFinalized).toBe(true);
     expect(finalized.durationMs).toBe(250);
+  });
+
+  test('insertByChronology places a late skill row above the newer tool call', () => {
+    // The reported defect: skills were selected at 04:54, then tool calls ran
+    // at 05:00, but the skill event arrived last, after a restart, and was
+    // appended below the 05:00 rows while still showing 04:54.
+    const skillAt = Date.parse('2026-10-07T16:54:00Z');
+    const toolAt = Date.parse('2026-10-07T17:00:00Z');
+    const lane: FeedEntryLocal[] = [
+      entry('thinking', toolAt, 'thinking'),
+      entry('tool', toolAt, 'tool_result'),
+    ];
+
+    const index = insertByChronology(lane, entry('skill', skillAt, 'skill'));
+
+    expect(index).toBe(0);
+    expect(lane.map((item) => item.id)).toEqual(['skill', 'thinking', 'tool']);
+  });
+
+  test('insertByChronology is stable for rows that happen at the same instant', () => {
+    const at = 500;
+    const lane: FeedEntryLocal[] = [
+      entry('tool-a', at, 'tool_call'),
+      entry('tool-b', at, 'tool_call'),
+    ];
+
+    insertByChronology(lane, entry('tool-c', at, 'tool_call'));
+
+    expect(lane.map((item) => item.id)).toEqual(['tool-a', 'tool-b', 'tool-c']);
+  });
+
+  test('insertByChronology prefers canonical sequence over wall-clock arrival', () => {
+    // Both rows carry backend-assigned order, so a skewed or replayed
+    // timestamp must not outrank the sequence the backend assigned.
+    const lane: FeedEntryLocal[] = [
+      {
+        ...entry('tool', 100, 'tool_result'),
+        metadata: { eventEpoch: 2, sequenceStart: 8 },
+      },
+    ];
+
+    insertByChronology(lane, {
+      ...entry('skill', 3_000, 'skill'),
+      metadata: { eventEpoch: 2, sequenceStart: 7 },
+    });
+
+    expect(lane.map((item) => item.id)).toEqual(['skill', 'tool']);
+  });
+
+  test('insertByChronology keeps a skill row above a whole replayed turn', () => {
+    const skillAt = 1_000;
+    const lane: FeedEntryLocal[] = [
+      entry('user', 1_300, 'user_message'),
+      entry('thinking', 1_400, 'thinking'),
+      entry('tool', 1_500, 'tool_result'),
+      entry('answer', 1_600, 'content'),
+    ];
+
+    insertByChronology(lane, entry('skill', skillAt, 'skill'));
+
+    expect(lane.map((item) => item.id)).toEqual([
+      'skill',
+      'user',
+      'thinking',
+      'tool',
+      'answer',
+    ]);
   });
 });

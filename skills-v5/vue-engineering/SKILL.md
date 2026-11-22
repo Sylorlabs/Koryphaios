@@ -46,6 +46,8 @@ Do not hide mutation between components in module singletons. In SSR environment
 
 With the native History API, `history.pushState()` does not fire `popstate`. Update reactive route state when pushing an entry, handle back and forward through `popstate`, and remove manually installed listeners on unmount. When Vue Router is installed, use its navigation API and reactive route instead of a parallel history listener.
 
+Focus ownership survives a route change. A navigation started from an input leaves that input as the focused element: restore it in `nextTick()` only when it was the active element before the update, and do not move focus to a heading as a side effect of the same load. A completion may move focus only when focus is not already inside a control the user is operating. A heading or retry target takes focus when the load failed, or when the navigation came from outside the form, not when the user submitted from the field they are still using. Focusing every successful load looks correct in isolation and silently steals the caret from the person typing.
+
 ### Nuxt boundary
 
 When the task is Nuxt, distinguish `$fetch` from `useFetch` and `useAsyncData`, which support SSR and hydration. Data fetched on the server that must hydrate without a duplicate browser request needs the Nuxt data utilities. Shared async data keys also share reactive state; key choice and consistent options are part of the contract.

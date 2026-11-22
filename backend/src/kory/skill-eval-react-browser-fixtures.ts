@@ -486,6 +486,8 @@ function artifactsReady(root: string, number: 1 | 2): boolean {
     status?: string;
   }>(root, `verification/scenario-${number}-verification.json`);
   const checks = REACT_BROWSER_CHECKS[number];
+  // A missing or unreadable artifact is a failed check, not a crash in the scorer.
+  if (!result || !verification) return false;
   // The claim must be authored and honest, not inflated. Requiring the single word
   // "verified" punished a careful candidate that observed some behavior and said so.
   return (

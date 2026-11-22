@@ -12,6 +12,7 @@ import {
 } from './cleanup';
 import { getTotalBrokerSubscribers } from '../pubsub';
 import { serverLog } from '../logger';
+import { getOrderedEventLog } from '../ws/ordered-event-log';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -80,6 +81,8 @@ export class BackgroundCleanupService {
       void this.kory.pruneResources(this.config.checkpointRetentionDays).catch((err) => {
         serverLog.warn({ err: err instanceof Error ? err.message : String(err) }, 'Periodic prune failed');
       });
+      // Ordered session event log retention (B7) runs on the same hourly tick.
+      this.pruneEventLog();
     }, this.config.pruneIntervalMs);
 
     serverLog.info(
@@ -90,6 +93,19 @@ export class BackgroundCleanupService {
       },
       'Background cleanup service started',
     );
+  }
+
+  /** Delete event-log rows past the retention window, keeping each session's newest events. */
+  private pruneEventLog(): void {
+    try {
+      const { deleted } = getOrderedEventLog().prune();
+      if (deleted > 0) serverLog.info({ deleted }, 'Pruned ordered session events');
+    } catch (err) {
+      serverLog.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Ordered session event prune failed',
+      );
+    }
   }
 
   /**

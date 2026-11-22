@@ -1,21 +1,48 @@
 {
   "id": "image-generation-practice-full-task-2-individual",
   "maturity": "individual",
-  "prompt": "The evaluation repository asks the agent to \"Apply image generation expertise to this task\". The fixture contains version/runtime ambiguity, a tempting shortcut, a compatibility edge case, and a failure path that distinguishes real expertise from generic completion. The acceptance boundary is image-generation-practice: Translate the intended use into subject, composition, camera/view, lighting, palette, material, typography constraints, aspect ratio, negative constraints, and required fidelity. The adjacent embedded-interface discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "prompt": "The repository is a brand-asset workspace that must ship three renders from one identity: a hero, an avatar, and a bottom-anchored footer card. `brief/brand.json` carries the palette, the identity descriptor and the thresholds; `brief/examples.json` records measurements the author observed from real renders; `generation/spec.json` is what you deliver. The harness renders each asset and measures it. Every prompt must contain the brief's identity descriptor verbatim, every asset must respect the palette and accent rules, the hero must keep its margins clear, the avatar must fill more of the frame while staying centred, and the footer card must put its mark in the lower half. Two variants per asset is the budget; the first conforming variant wins.",
   "environment": {
     "kind": "synthetic",
-    "startingState": "fixture://image-generation-practice/editorial-character-consistency",
+    "startingState": "fixture://image-generation-practice/brand-asset-set",
     "requirements": [
-      "character/bicycle reference board with fixed identity attributes",
-      "four shot briefs with deliberately different camera and lighting conditions",
-      "continuity rubric covering face, jacket, helmet, bicycle geometry, and prohibited logos/text",
-      "explicit capability/uncertainty note for the selected generation runtime",
-      "paired same-model skill/no-skill execution from the identical starting snapshot",
-      "image-generation-practice parent/child/neighbor hierarchy boundary fixture",
-      "domain-specific tempting anti-pattern or shortcut",
-      "representative negative, interruption, compatibility, or recovery path"
+      "live image model reached over the network, with the token bucket and model list recorded in the brief",
+      "palette, identity descriptor and constraint thresholds disclosed in brief/brand.json",
+      "measurements from real renders of example specs shipped in brief/examples.json",
+      "generation spec replayed by the harness, one request per variant, at most two variants per target",
+      "per-image measurements: palette spread, background share, accent share, corner spread, border share, forbidden share"
     ]
   },
+  "falsifiableChecks": [
+    {
+      "id": "image-generation-practice-spec-and-identity-2",
+      "assertion": "The spec names the three required assets, pins distinct seeds within each asset, and states the brief identity descriptor."
+    },
+    {
+      "id": "image-generation-practice-identity-reuse-2",
+      "assertion": "The brief identity descriptor appears verbatim in every prompt that was rendered."
+    },
+    {
+      "id": "image-generation-practice-all-assets-rendered-2",
+      "assertion": "The harness obtained an image for the hero, the avatar and the footer card from the live service."
+    },
+    {
+      "id": "image-generation-practice-palette-coherence-2",
+      "assertion": "Every accepted render uses at most 12 colours to cover 95 percent of its pixels and carries the brief accent in at least 3 percent."
+    },
+    {
+      "id": "image-generation-practice-composition-hero-2",
+      "assertion": "The hero render holds the margins and background share the brief requires."
+    },
+    {
+      "id": "image-generation-practice-composition-avatar-2",
+      "assertion": "The avatar render fills more of the frame than the hero while its subject stays within 0.20 of the frame centre on both axes."
+    },
+    {
+      "id": "image-generation-practice-composition-footer-2",
+      "assertion": "The footer card places its subject centroid in the lower part of the frame with a clear border."
+    }
+  ],
   "scorers": [
     {
       "id": "image-generation-practice-individual-deterministic-2",
@@ -40,48 +67,22 @@
         "independent evaluator record",
         "quality comparison without variant labels"
       ],
-      "blindTo": ["skill-variant", "expected-outcome"]
+      "blindTo": [
+        "skill-variant",
+        "expected-outcome"
+      ]
     }
   ],
   "requiredEvidence": [
-    "image-generation-practice decision and boundary evidence",
-    "Representative verification results or explicit unavailable checks",
-    "Hierarchy boundary and selected specialist rationale",
-    "Representative success, negative-path, and recovery verification",
-    "hierarchy boundary and selected specialist rationale",
-    "representative success plus negative/recovery evidence",
-    "paired skill/no-skill run artifacts",
-    "explicit unavailable, simulated, inferred, or stale evidence labels"
+    "recorded model identity and the exact prompt, seed and canvas per asset variant",
+    "the delivered generation spec with the identity descriptor",
+    "rendered images per asset and their measurements",
+    "evidence that the identity descriptor was reused verbatim in every rendered prompt",
+    "paired skill/no-skill run artifacts"
   ],
   "requiredArtifacts": [
     "image-generation-practice-individual-scenario-2-result",
     "image-generation-practice-individual-scenario-2-verification",
     "image-generation-practice-individual-scenario-2-paired-evaluation"
-  ],
-  "falsifiableChecks": [
-    {
-      "id": "scope-and-hierarchy",
-      "assertion": "The result must establish the actual image-generation-practice boundary and relevant environment before acting, preserve the hierarchy relationship (broader=visual-interface-design; near-neighbor=embedded-interface), and not absorb the near-neighbor responsibility merely because it is adjacent."
-    },
-    {
-      "id": "operating-contract",
-      "assertion": "Translate the intended use into subject, composition, camera/view, lighting, palette, material, typography constraints, aspect ratio, negative constraints, and required fidelity."
-    },
-    {
-      "id": "execution-invariant",
-      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
-    },
-    {
-      "id": "verification-discipline",
-      "assertion": "Inspect output at delivery resolution for anatomy/geometry, text accuracy, edge artifacts, repeated patterns, perspective, brand/style consistency, and task-specific fidelity; compare variants against the intended use rather than prompt literalism."
-    },
-    {
-      "id": "anti-pattern-resistance",
-      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not claim exact likeness or trademark/style fidelity without evidence, hide obvious generation artifacts under effects, or keep expanding prompts when the composition itself is wrong."
-    },
-    {
-      "id": "evidence-and-uncertainty",
-      "assertion": "Every material completion claim must map to observable evidence (image-generation-practice decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
-    }
   ]
 }

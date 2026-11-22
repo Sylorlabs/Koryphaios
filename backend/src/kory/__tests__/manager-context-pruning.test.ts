@@ -7,6 +7,7 @@ import type { ProviderRegistry, ToolRegistry } from '../../providers';
 import type { IMessageStore } from '../../stores/message-store';
 import type { ISessionStore } from '../../stores/session-store';
 import type { InternalMessage } from '../../providers/types';
+import type { AgentSettings } from '../../agent-settings';
 import { KoryManager } from '../manager';
 import { getContextArchive } from '../context-archive';
 
@@ -350,6 +351,73 @@ describe('manager tool message construction', () => {
       expect(JSON.parse(message.content)).toMatchObject({ output: 'small output' });
       expect(message.archiveId).toBe('cx_8');
       expect(message.archiveTurn).toBe(2);
+    } finally {
+      manager.shutdown();
+    }
+  });
+
+  test('a worker hide is thread-local and never touches the chat context', async () => {
+    const dir = createDir();
+    const manager = createManager(dir);
+    try {
+      const build = (
+        manager as unknown as {
+          buildContextualToolMessage(input: Record<string, unknown>): Promise<PrunableMessage>;
+        }
+      ).buildContextualToolMessage.bind(manager);
+      const base = {
+        sessionId: 'thread-scope',
+        tc: { id: 'call-w1', name: 'bash', input: { cmd: 'ls' } },
+        toolResult: { callId: 'call-w1', name: 'bash', output: 'v'.repeat(5_000), isError: false, durationMs: 4 },
+        archiveId: 'cx_w1',
+        turnCount: 1,
+        settings: { toolContextPolicies: {} } as unknown as AgentSettings,
+        provider: {} as never,
+        model: 'test-model',
+        workingDirectory: dir,
+        signal: new AbortController().signal,
+      };
+
+      const workerMessage = await build({ ...base, state: { hidden: new Set(['cx_w1']) } });
+      const workerOutput = (JSON.parse(workerMessage.content) as { output: string }).output;
+      expect(workerOutput).toContain('cx_w1');
+      expect(workerOutput).not.toContain('vvvv');
+
+      // Same archive id, no thread state: the chat keeps its full output.
+      const managerMessage = await build(base);
+      expect((JSON.parse(managerMessage.content) as { output: string }).output).toContain('vvvv');
+    } finally {
+      manager.shutdown();
+    }
+  });
+
+  test("a worker's own per-tool policy applies without changing the chat's policies", async () => {
+    const dir = createDir();
+    const manager = createManager(dir);
+    try {
+      const build = (
+        manager as unknown as {
+          buildContextualToolMessage(input: Record<string, unknown>): Promise<PrunableMessage>;
+        }
+      ).buildContextualToolMessage.bind(manager);
+      const base = {
+        sessionId: 'thread-policy',
+        tc: { id: 'call-w2', name: 'bash', input: { cmd: 'pwd' } },
+        toolResult: { callId: 'call-w2', name: 'bash', output: 'w'.repeat(4_000), isError: false, durationMs: 4 },
+        archiveId: 'cx_w2',
+        turnCount: 1,
+        settings: { toolContextPolicies: {} } as unknown as AgentSettings,
+        provider: {} as never,
+        model: 'test-model',
+        workingDirectory: dir,
+        signal: new AbortController().signal,
+      };
+
+      const hidden = await build({ ...base, state: { overrides: new Map([['bash', 'hidden']]) } });
+      expect((JSON.parse(hidden.content) as { output: string }).output).not.toContain('wwww');
+
+      const full = await build(base);
+      expect((JSON.parse(full.content) as { output: string }).output).toContain('wwww');
     } finally {
       manager.shutdown();
     }

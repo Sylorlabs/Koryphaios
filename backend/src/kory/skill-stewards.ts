@@ -123,6 +123,41 @@ export function isChatGptWebSkillStewardIdentity(provider: string, model: string
   );
 }
 
+/**
+ * Decide whether a blind review's recorded provenance is eligible for promotion
+ * credit, without privileging any provider, model or vendor.
+ *
+ * The only identity a blind review has to prove is independence: a named reviewer
+ * agent, an assignment that was blind to the skill variant and to the expected
+ * outcome, and some evidence that the assignment existed. Which model produced
+ * the judgement is recorded metadata, so a new reviewer can be added without a
+ * gate change and an ineligible one cannot be smuggled in by self-declaring a
+ * favoured name.
+ *
+ * When the record carries a display label, it must still name this skill, so a
+ * label copied from another skill is a provenance defect rather than a credit.
+ * The label is never required to match a vendor prefix, and no label is ever
+ * rewritten to one.
+ */
+export function isEligibleBlindReviewerProvenance(
+  skill: string,
+  provenance: {
+    agentId?: string;
+    displayLabel?: string;
+    blindTo?: readonly string[];
+    evidence?: readonly string[];
+  } | undefined,
+  steward?: { agentId?: string },
+): boolean {
+  if (!provenance?.agentId) return false;
+  if (steward?.agentId && provenance.agentId === steward.agentId) return false;
+  if (!provenance.blindTo?.includes('skill-variant')) return false;
+  if (!provenance.evidence?.length) return false;
+  const label = provenance.displayLabel?.trim();
+  if (label && !label.includes(skill)) return false;
+  return true;
+}
+
 export function assertChatGptWebSkillStewardIdentity(provider: string, model: string): void {
   if (!isChatGptWebSkillStewardIdentity(provider, model)) {
     throw new Error(

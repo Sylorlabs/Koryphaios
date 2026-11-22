@@ -2,6 +2,7 @@
 // Handles connection, reconnection, message routing, user messages, and permissions.
 
 import type {
+  FusionSelection,
   WSMessage,
   StreamDeltaPayload,
   StreamThinkingPayload,
@@ -13,6 +14,7 @@ import type {
   ContextDetectedPayload,
   KoryThoughtPayload,
   KoryRoutingPayload,
+  KorySkillPayload,
   ProviderStatusPayload,
   ChangeSummary,
   KorySessionChangesPayload,
@@ -28,6 +30,7 @@ import type {
   KoryAskUserResolvedPayload,
   CompactionProgressPayload,
   SessionTimelineRewrittenPayload,
+  SessionHistoryPrunedPayload,
   SessionActionableWaitsPayload,
 } from '@koryphaios/shared';
 import {
@@ -80,6 +83,11 @@ import {
   reviewResolutionMatches,
   questionResolutionMatches,
 } from '$lib/utils/review-protocol';
+import { onSessionUnsubscribed } from './session-subscriptions';
+
+// The session store publishes this notification instead of importing this
+// module, so session lifecycle and the websocket stay one-way.
+onSessionUnsubscribed(unsubscribeFromSession);
 
 export type { FeedEntry };
 export { feedStore } from './feed.svelte';
@@ -122,6 +130,11 @@ let reviewResponses = $state<Map<string, ReviewResponse>>(new Map());
 type CancellationKey = string;
 let pendingCancellations = $state<Map<CancellationKey, Promise<void>>>(new Map());
 
+/** A stop must not leave the composer gated forever on a backend that is
+ *  draining a provider stream. The local stop is authoritative immediately;
+ *  this only bounds how long a pending steering send waits for the handoff. */
+const CANCELLATION_REQUEST_TIMEOUT_MS = 8_000;
+
 function sessionCancellationKey(sessionId: string): CancellationKey {
   return `session:${sessionId}`;
 }
@@ -141,34 +154,51 @@ function cancelWithKey(
   subject: string,
   body?: Record<string, string>,
   onAcknowledged?: () => void,
+  onFailed?: () => void,
 ): Promise<void> {
   const existing = pendingCancellations.get(key);
   if (existing) return existing;
 
   let completion!: Promise<void>;
   completion = (async () => {
+    // Stop is a local interruption first. Mark the captured run stopped before
+    // the HTTP handoff, so a slow provider or tool call cannot leave the UI
+    // frozen on "work is running". If the request fails, restore the fence so
+    // the server's authoritative state can take over again.
+    onAcknowledged?.();
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
     try {
-      const response = await apiFetch(apiUrl(path), {
-        method: 'POST',
-        ...(body
-          ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-          : {}),
+      const timeout = new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(
+          () =>
+            reject(
+              new Error(`No stop confirmation within ${CANCELLATION_REQUEST_TIMEOUT_MS / 1000}s`),
+            ),
+          CANCELLATION_REQUEST_TIMEOUT_MS,
+        );
       });
+      const response = await Promise.race([
+        apiFetch(apiUrl(path), {
+          method: 'POST',
+          ...(body
+            ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+            : {}),
+        }),
+        timeout,
+      ]);
       const result = await parseJsonResponse<{ ok?: boolean; error?: string }>(response);
       if (!response.ok || result.ok === false || result.error) {
         throw new Error(
           result.error || `Request failed: ${response.status} ${response.statusText}`,
         );
       }
-      // The HTTP response is the cancellation acknowledgment. Reconcile only
-      // after it succeeds; a rejected stop must leave the live run visible and
-      // retryable.
-      onAcknowledged?.();
     } catch (error) {
+      onFailed?.();
       const failure = cancellationFailure(error, subject);
       toastStore.error(failure.message);
       throw failure;
     } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
       if (pendingCancellations.get(key) === completion) {
         const next = new Map(pendingCancellations);
         next.delete(key);
@@ -205,6 +235,7 @@ function cancelSession(sessionId: string, purpose: 'stop' | 'steer' = 'stop'): P
     'this session',
     purpose === 'steer' ? { purpose } : undefined,
     () => markSessionAgentsStopped(sessionId),
+    () => runStateStore.clearUserStopped(sessionId),
   );
 }
 
@@ -219,6 +250,7 @@ function cancelAgent(sessionId: string, agentId: string): Promise<void> {
       runStateStore.markAgentStopped(sessionId, agentId);
       agentStore.markAgentStopped(sessionId, agentId);
     },
+    () => agentStore.updateAgentStatus(sessionId, agentId, 'streaming'),
   );
 }
 
@@ -360,6 +392,7 @@ function providerDisplayName(provider: string): string {
   if (provider === 'copilot') return 'Copilot';
   if (provider === 'kimicode') return 'Kimi Code';
   if (provider === 'opencode') return 'OpenCode';
+  if (provider === 'beam') return 'Reflection AI';
   return provider.charAt(0).toUpperCase() + provider.slice(1);
 }
 
@@ -448,9 +481,38 @@ function addBackendErrorToSessionFeed(
 
 /** Apply durable session sequencing before any UI reducer sees an event. */
 function ingestRealtimeMessage(msg: WSMessage): void {
+  if (msg.type === 'session.history_pruned') {
+    applyHistoryPruned(msg);
+    return;
+  }
   const result = orderedSessionIngress.ingestWithReplayRequest(msg);
   for (const ordered of result.events) handleMessage(ordered);
   if (result.replayFrom) requestSessionReplay(result.replayFrom);
+}
+
+/** Retention deleted history this client can no longer replay. Jump the
+ * ordered buffer past it (no epoch rotation, no transcript reset). Only a
+ * client that had already applied part of that epoch actually missed events;
+ * it reloads the chat's persisted messages, which are never pruned. */
+function applyHistoryPruned(msg: WSMessage): void {
+  if (!msg.sessionId) return;
+  const sessionId = msg.sessionId;
+  const payload = msg.payload as Partial<SessionHistoryPrunedPayload> | undefined;
+  const epoch = Number(payload?.epoch ?? msg.epoch);
+  const through = Number(payload?.throughSequence);
+  if (!Number.isSafeInteger(epoch) || !Number.isSafeInteger(through)) return;
+  const { events, missed } = orderedSessionIngress.skipPrunedHistory(sessionId, epoch, through);
+  for (const ordered of events) handleMessage(ordered);
+  if (!missed || sessionId !== sessionStore.activeSessionId) return;
+  void (async () => {
+    try {
+      const messages = await sessionStore.fetchMessages(sessionId);
+      if (sessionId !== sessionStore.activeSessionId) return;
+      await loadSessionMessages(sessionId, messages);
+    } catch (error) {
+      console.error('Failed to reload history after pruned events:', error);
+    }
+  })();
 }
 
 // ─── Message Handler ───────────────────────────────────────────────────────
@@ -467,6 +529,10 @@ function handleMessage(msg: WSMessage) {
     }
     return;
   }
+  // The server replays a session's durable log as one fast burst. That is
+  // historic evidence, not a live turn: note it so the feed holds its loading
+  // surface until the burst ends rather than replaying the log on screen.
+  if (msg.replayed && msg.sessionId) feedStore.noteReplayBurst(msg.sessionId);
   const activeSessionId = sessionStore.activeSessionId;
   // The open chat decides only which lane is displayed, never where a write lands.
   const isForActiveSession = !!msg.sessionId && msg.sessionId === activeSessionId;
@@ -638,8 +704,7 @@ function handleMessage(msg: WSMessage) {
     case 'agent.steering_queue': {
       const sm = msg as SessionWSMessage;
       const p = msg.payload as AgentSteeringQueuePayload;
-      if (p?.agentId)
-        agentStore.setAgentSteeringQueue(sm.sessionId, p.agentId, p.commands ?? []);
+      if (p?.agentId) agentStore.setAgentSteeringQueue(sm.sessionId, p.agentId, p.commands ?? []);
       break;
     }
 
@@ -693,7 +758,8 @@ function handleMessage(msg: WSMessage) {
         feedStore.removeAnalyzingThoughtEntries(sm.sessionId);
       }
       if (isForActiveSession) {
-        if (p.status === 'thinking') feedStore.beginThinking(sm.sessionId, p.agentId, msg.timestamp);
+        if (p.status === 'thinking')
+          feedStore.beginThinking(sm.sessionId, p.agentId, msg.timestamp);
         else feedStore.finalizeThinking(sm.sessionId, p.agentId, msg.timestamp);
       }
       // Historical terminal statuses are transcript evidence, not a new turn
@@ -791,7 +857,9 @@ function handleMessage(msg: WSMessage) {
           timestamp: msg.timestamp,
           type: 'error',
           agentId: isSubAgent ? p.agentId! : 'kory-manager',
-          agentName: isSubAgent ? (agentStore.getAgent(sm.sessionId, p.agentId!)?.identity.name ?? 'Worker') : 'Kory',
+          agentName: isSubAgent
+            ? (agentStore.getAgent(sm.sessionId, p.agentId!)?.identity.name ?? 'Worker')
+            : 'Kory',
           glowClass: '',
           text: p.error ?? 'Unknown error',
           metadata: {
@@ -823,7 +891,9 @@ function handleMessage(msg: WSMessage) {
           type: 'content',
           agentId: p.agentId,
           agentName: agentStore.getAgent(sm.sessionId, p.agentId)?.identity.name ?? 'Worker',
-          glowClass: feedStore.resolveGlowClass(agentStore.getAgent(sm.sessionId, p.agentId)?.identity),
+          glowClass: feedStore.resolveGlowClass(
+            agentStore.getAgent(sm.sessionId, p.agentId)?.identity,
+          ),
           text: p.content,
           metadata: { ...orderedEventMetadata(msg), ...(isSubAgent && { isSubAgent: true }) },
         });
@@ -834,7 +904,9 @@ function handleMessage(msg: WSMessage) {
           type: 'content',
           agentId: p.agentId,
           agentName: agentStore.getAgentFeedLabel(sm.sessionId, p.agentId),
-          glowClass: feedStore.resolveGlowClass(agentStore.getAgent(sm.sessionId, p.agentId)?.identity),
+          glowClass: feedStore.resolveGlowClass(
+            agentStore.getAgent(sm.sessionId, p.agentId)?.identity,
+          ),
           text: p.content,
           metadata: { ...orderedEventMetadata(msg), sessionId: sm.sessionId },
         });
@@ -871,7 +943,9 @@ function handleMessage(msg: WSMessage) {
           type: 'thinking',
           agentId: p.agentId,
           agentName: agentStore.getAgent(sm.sessionId, p.agentId)?.identity.name ?? 'Worker',
-          glowClass: feedStore.resolveGlowClass(agentStore.getAgent(sm.sessionId, p.agentId)?.identity),
+          glowClass: feedStore.resolveGlowClass(
+            agentStore.getAgent(sm.sessionId, p.agentId)?.identity,
+          ),
           text: p.thinking,
           thinkingStartedAt: feedStore.getThinkingStart(sm.sessionId, p.agentId, msg.timestamp),
           ...(msg.replayed && { thinkingFinalized: true }),
@@ -888,7 +962,9 @@ function handleMessage(msg: WSMessage) {
           type: 'thinking',
           agentId: p.agentId,
           agentName: agentStore.getAgentFeedLabel(sm.sessionId, p.agentId),
-          glowClass: feedStore.resolveGlowClass(agentStore.getAgent(sm.sessionId, p.agentId)?.identity),
+          glowClass: feedStore.resolveGlowClass(
+            agentStore.getAgent(sm.sessionId, p.agentId)?.identity,
+          ),
           text: p.thinking,
           thinkingStartedAt: feedStore.getThinkingStart(sm.sessionId, p.agentId, msg.timestamp),
           ...(msg.replayed && { thinkingFinalized: true }),
@@ -914,8 +990,12 @@ function handleMessage(msg: WSMessage) {
         ? !feedStore.applyManagerTurnEvent(sm.sessionId, msg)
         : !!sm.sessionId &&
           feedStore.updateToolCall(sm.sessionId, p.toolCall, msg.timestamp, p.agentId);
-      if (!existingToolCall)
-        agentStore.addToolCall(sm.sessionId, p.agentId, p.toolCall.name);
+      if (!existingToolCall) agentStore.addToolCall(sm.sessionId, p.agentId, p.toolCall.name);
+      agentStore.noteAgentToolCall(sm.sessionId, p.agentId, {
+        id: p.toolCall.id,
+        name: p.toolCall.name,
+        input: p.toolCall.input as Record<string, unknown> | undefined,
+      });
       if (!turnEvent) {
         if (!existingToolCall)
           feedStore.addFeedEntryForSession(sm.sessionId, {
@@ -923,7 +1003,9 @@ function handleMessage(msg: WSMessage) {
             type: 'tool_call',
             agentId: p.agentId,
             agentName: agentStore.getAgent(sm.sessionId, p.agentId)?.identity.name ?? 'Worker',
-            glowClass: feedStore.resolveGlowClass(agentStore.getAgent(sm.sessionId, p.agentId)?.identity),
+            glowClass: feedStore.resolveGlowClass(
+              agentStore.getAgent(sm.sessionId, p.agentId)?.identity,
+            ),
             text: `Calling tool: ${p.toolCall.name}`,
             metadata: {
               ...orderedEventMetadata(msg),
@@ -939,7 +1021,9 @@ function handleMessage(msg: WSMessage) {
           type: 'tool_call',
           agentId: p.agentId,
           agentName: agentStore.getAgentFeedLabel(sm.sessionId, p.agentId),
-          glowClass: feedStore.resolveGlowClass(agentStore.getAgent(sm.sessionId, p.agentId)?.identity),
+          glowClass: feedStore.resolveGlowClass(
+            agentStore.getAgent(sm.sessionId, p.agentId)?.identity,
+          ),
           text: `Calling tool: ${p.toolCall.name}`,
           metadata: {
             ...orderedEventMetadata(msg),
@@ -1008,6 +1092,7 @@ function handleMessage(msg: WSMessage) {
     case 'stream.tool_result': {
       const sm = msg as SessionWSMessage;
       const p = msg.payload as StreamToolResultPayload;
+      agentStore.noteAgentToolResult(sm.sessionId, p.agentId, p.toolResult.callId);
       if (isForActiveSession) feedStore.removeAnalyzingThoughtEntries(sm.sessionId);
       feedStore.removeAnalyzingThoughtEntries(sm.sessionId);
       const isSubAgent = isSpawnedSubAgent(sm.sessionId, p.agentId);
@@ -1034,7 +1119,9 @@ function handleMessage(msg: WSMessage) {
             type: 'tool_result',
             agentId: p.agentId,
             agentName: agentStore.getAgent(sm.sessionId, p.agentId)?.identity.name ?? 'Worker',
-            glowClass: feedStore.resolveGlowClass(agentStore.getAgent(sm.sessionId, p.agentId)?.identity),
+            glowClass: feedStore.resolveGlowClass(
+              agentStore.getAgent(sm.sessionId, p.agentId)?.identity,
+            ),
             text: resultText,
             metadata: {
               ...orderedEventMetadata(msg),
@@ -1060,7 +1147,9 @@ function handleMessage(msg: WSMessage) {
             type: 'tool_result',
             agentId: p.agentId,
             agentName: agentStore.getAgentFeedLabel(sm.sessionId, p.agentId),
-            glowClass: feedStore.resolveGlowClass(agentStore.getAgent(sm.sessionId, p.agentId)?.identity),
+            glowClass: feedStore.resolveGlowClass(
+              agentStore.getAgent(sm.sessionId, p.agentId)?.identity,
+            ),
             text: resultText,
             metadata: {
               ...orderedEventMetadata(msg),
@@ -1077,6 +1166,11 @@ function handleMessage(msg: WSMessage) {
       const sm = msg as SessionWSMessage;
       const p = msg.payload as StreamUsagePayload;
       agentStore.updateUsage(sm.sessionId, p.agentId, p);
+      // A turn just reported billable usage. Tell billing consumers so a spend
+      // figure can refresh at the moment it changes instead of on the next tick.
+      window.dispatchEvent(
+        new CustomEvent('kory:usage-changed', { detail: { sessionId: sm.sessionId } }),
+      );
       break;
     }
 
@@ -1155,7 +1249,7 @@ function handleMessage(msg: WSMessage) {
           metadata: {
             ...orderedEventMetadata(msg),
             phase: p.phase,
-            ...({ sessionId: sm.sessionId }),
+            ...{ sessionId: sm.sessionId },
           },
         });
       }
@@ -1185,16 +1279,47 @@ function handleMessage(msg: WSMessage) {
       break;
     }
 
+    case 'kory.skill': {
+      const sm = msg as SessionWSMessage;
+      const p = msg.payload as KorySkillPayload;
+      if (isForActiveSession && Array.isArray(p.skills)) {
+        // One row per skill: the feed reads "Used skill <name>", and a turn
+        // that selects three skills is three distinct facts, not one blob.
+        for (const skill of p.skills) {
+          if (!skill || typeof skill.name !== 'string' || !skill.name) continue;
+          feedStore.addFeedEntryForSession(sm.sessionId, {
+            timestamp: msg.timestamp,
+            type: 'skill',
+            agentId: p.agentId ?? 'kory-manager',
+            agentName: 'Kory',
+            glowClass: 'glow-kory',
+            text: skill.name,
+            metadata: {
+              ...orderedEventMetadata(msg),
+              skillName: skill.name,
+              representation: skill.representation,
+              ...(skill.reason ? { reason: skill.reason } : {}),
+              ...(skill.source ? { skillSource: skill.source } : {}),
+            },
+          });
+        }
+      }
+      break;
+    }
+
     case 'kory.ask_user': {
       const sm = msg as SessionWSMessage;
       const p = msg.payload as KoryAskUserPayload;
       const sid = sm.sessionId ?? activeSessionId;
       if (sid) {
+        const options = Array.isArray(p.options)
+          ? p.options.filter((o): o is string => typeof o === 'string')
+          : [];
         const next = new Map(pendingQuestions);
         next.set(sid, {
           question: p.question,
-          options: p.options,
-          allowOther: p.allowOther,
+          options,
+          allowOther: p.allowOther || options.length === 0,
           allowKeepChatting: p.allowKeepChatting,
           questionId: p.questionId,
         });
@@ -1454,14 +1579,16 @@ function ensureWsPath(url: string): string {
 
 function buildWsCandidates(preferredUrl?: string): string[] {
   const directUrl = getWsUrl();
-  const viteWsUrl = import.meta.env.VITE_BACKEND_WS_URL;
-  const defaultBackendWs = viteWsUrl || 'ws://127.0.0.1:3001/ws';
+  // The baked VITE/localhost default is a dev-server convenience only; in
+  // production builds (incl. the Tauri bundle) the app must not send its
+  // bearer token to whatever happens to listen on the dev port.
+  const viteWsUrl = import.meta.env.DEV ? import.meta.env.VITE_BACKEND_WS_URL : undefined;
+  const defaultBackendWs = viteWsUrl || (import.meta.env.DEV ? 'ws://127.0.0.1:3001/ws' : '');
 
   const candidates: string[] = [];
   if (preferredUrl) candidates.push(ensureWsPath(preferredUrl));
-  if (defaultBackendWs && !candidates.includes(defaultBackendWs)) candidates.push(defaultBackendWs);
   if (directUrl && !candidates.includes(directUrl)) candidates.push(directUrl);
-  if (candidates.length === 0) candidates.push(defaultBackendWs);
+  if (defaultBackendWs && !candidates.includes(defaultBackendWs)) candidates.push(defaultBackendWs);
   return candidates;
 }
 
@@ -1586,7 +1713,10 @@ async function connectAuthenticated(url: string | undefined, generation: number)
         if (!isWSMessageLike(parsed)) {
           if (!hasShownMalformedWsMessage) {
             hasShownMalformedWsMessage = true;
-            feedStore.addClientError(sessionStore.activeSessionId, 'Received malformed realtime update from server.');
+            feedStore.addClientError(
+              sessionStore.activeSessionId,
+              'Received malformed realtime update from server.',
+            );
           }
           if (import.meta.env.DEV) {
             console.warn('Discarded malformed websocket payload', {
@@ -1610,7 +1740,10 @@ async function connectAuthenticated(url: string | undefined, generation: number)
       } catch (error) {
         if (!hasShownMalformedWsMessage) {
           hasShownMalformedWsMessage = true;
-          feedStore.addClientError(sessionStore.activeSessionId, 'Failed to parse realtime update from server.');
+          feedStore.addClientError(
+            sessionStore.activeSessionId,
+            'Failed to parse realtime update from server.',
+          );
         }
         if (import.meta.env.DEV) {
           console.warn('Failed to parse websocket message', {
@@ -1834,8 +1967,11 @@ function subscribeToSession(sessionId: string) {
   if (sessionId === sessionStore.activeSessionId && !feedStore.ownsFeed(sessionId)) return;
   if (sentSessionSubscriptions.has(sessionId)) return;
   sentSessionSubscriptions.add(sessionId);
-  // A fresh renderer has no cursor and must recover the complete transcript.
-  // HTTP message/context history cannot replace reasoning and tool events.
+  // A fresh renderer has no cursor and replays the retained log from zero.
+  // The server suppresses stream events whose turn is already durable as
+  // persisted `parts` — the HTTP projection carries those rows — so replay
+  // delivers only operational state and the in-flight turn
+  // (websocket-handler.ts isReplayCoveredByPersistedParts).
   // An in-app reconnect resumes after the last event actually applied.
   const cursor = orderedSessionIngress.getCursor(sessionId);
   wsConnection.send(
@@ -1883,14 +2019,45 @@ function disconnect() {
 
 export { loadProvidersFromApi };
 
+/** Stable id for one user send. The server's command ledger replays the first
+ *  result for a repeated id, so a send can be retried after a dropped
+ *  connection without posting the message twice or starting a second turn. */
+function newClientMessageId(): string {
+  return `cm_${crypto.randomUUID().replace(/-/g, '')}`;
+}
+
+/** A network failure (no HTTP response) is safe to retry because the request
+ *  carries a clientMessageId; HTTP errors are answers and are not retried. */
+const SEND_NETWORK_RETRIES = 2;
+const SEND_RETRY_BASE_MS = 400;
+
+async function postMessageIdempotently(body: Record<string, unknown>): Promise<Response> {
+  let attempt = 0;
+  for (;;) {
+    try {
+      return await apiFetch(apiUrl('/api/messages'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } catch (error) {
+      if (attempt >= SEND_NETWORK_RETRIES) throw error;
+      attempt += 1;
+      await new Promise((resolve) => setTimeout(resolve, SEND_RETRY_BASE_MS * attempt));
+    }
+  }
+}
+
 async function sendMessage(
   sessionId: string,
   content: string,
   model?: string,
   reasoningLevel?: string,
   attachments?: Array<{ type: string; data: string; name: string; mimeType?: string }>,
-  fastMode?: boolean,
+  speedTier?: string,
   imageInputMode: 'reject' | 'omit' | 'allow' = 'reject',
+  modelParameters?: Record<string, number | string>,
+  fusion?: FusionSelection,
 ): Promise<boolean> {
   // Stop is an HTTP handoff, not a local UI transition. A terminal run.state
   // can arrive before the cancel response, so wait on the captured session's
@@ -1900,18 +2067,17 @@ async function sendMessage(
   runStateStore.startRun(sessionId);
   detectedContext = [];
   try {
-    const res = await apiFetch(apiUrl('/api/messages'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sessionId,
-        content,
-        model,
-        reasoningLevel,
-        attachments,
-        fastMode,
-        imageInputMode,
-      }),
+    const res = await postMessageIdempotently({
+      sessionId,
+      clientMessageId: newClientMessageId(),
+      content,
+      model,
+      reasoningLevel,
+      attachments,
+      speedTier,
+      imageInputMode,
+      modelParameters,
+      fusion,
     });
     const data = await parseJsonResponse<{
       ok?: boolean;
@@ -1941,35 +2107,34 @@ async function sendMessage(
   }
 }
 
-/** Replace the active manager turn with the instruction currently in the
- * composer. Cancellation is deliberately awaited before sendMessage: a
- * provider stream must release its run ownership before the continuation is
- * admitted, otherwise the backend correctly rejects it as a concurrent turn. */
+/** Steer the active manager turn with the instruction currently in the
+ * composer. The backend owns the semantics: the send parks behind the live
+ * run, the running stack finishes its in-flight tool call or provider turn
+ * and yields at a safe boundary, then the message is admitted as the next
+ * turn. No client-side cancel — tearing a turn down mid-edit is exactly what
+ * checkpoint steering exists to avoid. Stop remains the hard kill. */
 async function steerMessage(
   sessionId: string,
   content: string,
   model?: string,
   reasoningLevel?: string,
   attachments?: Array<{ type: string; data: string; name: string; mimeType?: string }>,
-  fastMode?: boolean,
+  speedTier?: string,
   imageInputMode: 'reject' | 'omit' | 'allow' = 'reject',
+  modelParameters?: Record<string, number | string>,
+  fusion?: FusionSelection,
 ): Promise<boolean> {
   if (!sessionId) return false;
-  try {
-    await cancelSession(sessionId, 'steer');
-  } catch {
-    // cancelSession already reports the failure and sendMessage must not
-    // consume the draft or accidentally start a concurrent turn.
-    return false;
-  }
   return sendMessage(
     sessionId,
     content,
     model,
     reasoningLevel,
     attachments,
-    fastMode,
+    speedTier,
     imageInputMode,
+    modelParameters,
+    fusion,
   );
 }
 

@@ -30,11 +30,13 @@ export class AgentSteeringStore {
     const rows = await db
       .select()
       .from(agentSteeringCommands)
-      .where(and(
-        eq(agentSteeringCommands.sessionId, sessionId),
-        eq(agentSteeringCommands.agentId, agentId),
-        inArray(agentSteeringCommands.status, ['queued', 'dispatching', 'running']),
-      ))
+      .where(
+        and(
+          eq(agentSteeringCommands.sessionId, sessionId),
+          eq(agentSteeringCommands.agentId, agentId),
+          inArray(agentSteeringCommands.status, ['queued', 'dispatching', 'running']),
+        ),
+      )
       .orderBy(asc(agentSteeringCommands.position), asc(agentSteeringCommands.createdAt));
     return rows.map(mapRow);
   }
@@ -45,9 +47,12 @@ export class AgentSteeringStore {
     content: string;
     model?: string;
     reasoningLevel?: string;
+    /** Producer-owned id (e.g. a manager steer keyed by sourceCommandId).
+     *  A duplicate insert violates the primary key, making enqueue idempotent. */
+    id?: string;
   }): Promise<AgentSteeringCommand> {
     const now = new Date();
-    const id = nanoid(16);
+    const id = input.id ?? nanoid(16);
     const [row] = await db
       .insert(agentSteeringCommands)
       .values({
@@ -71,11 +76,13 @@ export class AgentSteeringStore {
     const next = await db
       .select()
       .from(agentSteeringCommands)
-      .where(and(
-        eq(agentSteeringCommands.sessionId, sessionId),
-        eq(agentSteeringCommands.agentId, agentId),
-        eq(agentSteeringCommands.status, 'queued'),
-      ))
+      .where(
+        and(
+          eq(agentSteeringCommands.sessionId, sessionId),
+          eq(agentSteeringCommands.agentId, agentId),
+          eq(agentSteeringCommands.status, 'queued'),
+        ),
+      )
       .orderBy(asc(agentSteeringCommands.position), asc(agentSteeringCommands.createdAt))
       .limit(1);
     const row = next[0];
@@ -89,14 +96,20 @@ export class AgentSteeringStore {
     return updated[0] ? mapRow(updated[0]) : null;
   }
 
-  async updateStatus(id: string, status: AgentSteeringStatus, error?: string): Promise<AgentSteeringCommand | null> {
+  async updateStatus(
+    id: string,
+    status: AgentSteeringStatus,
+    error?: string,
+  ): Promise<AgentSteeringCommand | null> {
     const now = new Date();
     const [row] = await db
       .update(agentSteeringCommands)
       .set({
         status,
         updatedAt: now,
-        ...(status === 'completed' || status === 'cancelled' || status === 'failed' ? { finishedAt: now } : {}),
+        ...(status === 'completed' || status === 'cancelled' || status === 'failed'
+          ? { finishedAt: now }
+          : {}),
         ...(error !== undefined ? { error } : {}),
       })
       .where(eq(agentSteeringCommands.id, id))
@@ -104,12 +117,45 @@ export class AgentSteeringStore {
     return row ? mapRow(row) : null;
   }
 
+  /** Read one row regardless of status — terminal rows included. */
+  async getById(id: string): Promise<AgentSteeringCommand | null> {
+    const [row] = await db
+      .select()
+      .from(agentSteeringCommands)
+      .where(eq(agentSteeringCommands.id, id))
+      .limit(1);
+    return row ? mapRow(row) : null;
+  }
+
+  /** A crash mid-dispatch leaves 'dispatching'/'running' rows that claimNext
+   *  can never pick up again. Boot moves them back to 'queued' in position. */
+  async resetInterruptedClaims(): Promise<number> {
+    const updated = await db
+      .update(agentSteeringCommands)
+      .set({ status: 'queued', updatedAt: new Date(), startedAt: null })
+      .where(inArray(agentSteeringCommands.status, ['dispatching', 'running']))
+      .returning({ id: agentSteeringCommands.id });
+    return updated.length;
+  }
+
+  /** Sessions holding commands in any live queue status — used at boot to
+   *  resume drains that died with the previous process. */
+  async listSessionIdsWithActive(): Promise<string[]> {
+    const rows = await db
+      .select({ sessionId: agentSteeringCommands.sessionId })
+      .from(agentSteeringCommands)
+      .where(inArray(agentSteeringCommands.status, ['queued', 'dispatching', 'running']));
+    return [...new Set(rows.map((row) => row.sessionId))];
+  }
+
   async edit(id: string, content: string): Promise<AgentSteeringCommand> {
     const now = new Date();
     const [row] = await db
       .update(agentSteeringCommands)
       .set({ content, updatedAt: now })
-      .where(and(eq(agentSteeringCommands.id, id), inArray(agentSteeringCommands.status, [...editable])))
+      .where(
+        and(eq(agentSteeringCommands.id, id), inArray(agentSteeringCommands.status, [...editable])),
+      )
       .returning();
     if (!row) throw new Error('Only queued steering can be edited');
     return mapRow(row);
@@ -120,22 +166,38 @@ export class AgentSteeringStore {
     const [row] = await db
       .update(agentSteeringCommands)
       .set({ status: 'cancelled', updatedAt: now, finishedAt: now })
-      .where(and(eq(agentSteeringCommands.id, id), inArray(agentSteeringCommands.status, [...editable])))
+      .where(
+        and(eq(agentSteeringCommands.id, id), inArray(agentSteeringCommands.status, [...editable])),
+      )
       .returning();
     if (!row) throw new Error('Only queued steering can be deleted');
     return mapRow(row);
   }
 
   async reorder(id: string, beforeId: string | null): Promise<AgentSteeringCommand[]> {
-    const [target] = await db.select().from(agentSteeringCommands).where(eq(agentSteeringCommands.id, id));
-    if (!target || target.status !== 'queued') throw new Error('Only queued steering can be reordered');
-    const items = (await this.list(target.sessionId, target.agentId)).filter((item) => item.status === 'queued');
+    const [target] = await db
+      .select()
+      .from(agentSteeringCommands)
+      .where(eq(agentSteeringCommands.id, id));
+    if (!target || target.status !== 'queued')
+      throw new Error('Only queued steering can be reordered');
+    const items = (await this.list(target.sessionId, target.agentId)).filter(
+      (item) => item.status === 'queued',
+    );
     const without = items.filter((item) => item.id !== id);
-    const index = beforeId ? Math.max(0, without.findIndex((item) => item.id === beforeId)) : without.length;
+    const index = beforeId
+      ? Math.max(
+          0,
+          without.findIndex((item) => item.id === beforeId),
+        )
+      : without.length;
     without.splice(index < 0 ? without.length : index, 0, mapRow(target));
     const now = new Date();
     for (const [position, item] of without.entries()) {
-      await db.update(agentSteeringCommands).set({ position, updatedAt: now }).where(eq(agentSteeringCommands.id, item.id));
+      await db
+        .update(agentSteeringCommands)
+        .set({ position, updatedAt: now })
+        .where(eq(agentSteeringCommands.id, item.id));
     }
     return this.list(target.sessionId, target.agentId);
   }

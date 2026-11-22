@@ -10,9 +10,11 @@ import type {
   SessionActionableWaitsPayload,
   WSMessage,
 } from '@koryphaios/shared';
+import { turnEventFromWSMessage } from '@koryphaios/shared';
 import type { ServerWebSocket } from 'bun';
 import type { WSManager } from '../ws/ws-manager';
 import type { ISessionStore } from '../stores/session-store';
+import type { IMessageStore } from '../stores/message-store';
 import type { KoryManager } from '../kory/manager';
 import type { ProviderRegistry } from '../providers';
 import { validateSessionId } from '../security';
@@ -41,6 +43,8 @@ export interface WebSocketHandlerDependencies {
   kory: KoryManager;
   providers: ProviderRegistry;
   runs: SessionRunCoordinator;
+  /** Message store consulted to skip replaying turns already durable as `parts`. */
+  messages?: IMessageStore;
 }
 
 function isCurrentQuestion(
@@ -76,6 +80,66 @@ function isCurrentActionableReplay(
     );
   }
   return true;
+}
+
+/**
+ * A fresh renderer already loads the durable message projection over HTTP, and
+ * a persisted turn's `parts` are `reduceTurnParts` folded over exactly the
+ * `stream.*` events stamped with that turn's `messageId` (transcript-integrity
+ * Invariants 1–2). Replaying those events rebuilds rows the projection already
+ * carries — per token, on the main thread — only to have them replaced by id.
+ * So the only events safe to suppress are the ones the fold itself would have
+ * consumed: the predicate below is the shared fold, not a parallel list, so it
+ * can never drift from what `parts` covers.
+ *
+ * Everything else keeps replaying: the in-flight turn (its messageId is not
+ * persisted until completion), worker streams (never stamped), `kory.*` /
+ * `agent.*` operational rows (not in `parts` at all), and stamped-but-unfolded
+ * types like `stream.usage` and `stream.file_*`.
+ */
+function isReplayCoveredByPersistedParts(
+  event: WSMessage,
+  persistedMessageIds: ReadonlySet<string>,
+): boolean {
+  const payload = event.payload as { messageId?: unknown } | null;
+  const messageId = payload && typeof payload === 'object' ? payload.messageId : undefined;
+  if (typeof messageId !== 'string' || !persistedMessageIds.has(messageId)) return false;
+  return (
+    turnEventFromWSMessage({
+      type: event.type,
+      payload: event.payload,
+      timestamp: event.timestamp,
+    }) !== null
+  );
+}
+
+/**
+ * Only turns durable well before the subscribe go into the coverage set. The
+ * renderer's HTTP projection read races this lookup by milliseconds; a turn
+ * that committed inside the margin may be absent from that projection, so its
+ * events must replay. Thirty seconds dwarfs any request skew and costs at most
+ * one recent turn's events.
+ */
+const REPLAY_COVERAGE_MARGIN_MS = 30_000;
+
+/** The coverage set for a fresh renderer, or null when it cannot be read —
+ * an unfiltered replay is always correct, the filter is only an optimization. */
+async function listPersistedMessageIds(
+  messages: IMessageStore | undefined,
+  sessionId: string,
+): Promise<ReadonlySet<string> | null> {
+  if (!messages?.listPersistedIds) return null;
+  try {
+    return new Set(
+      await messages.listPersistedIds(sessionId, Date.now() - REPLAY_COVERAGE_MARGIN_MS),
+    );
+  } catch (err: unknown) {
+    serverLog.warn(
+      { sessionId, error: err instanceof Error ? err.message : String(err) },
+      'Persisted-id lookup for transcript replay filter failed; replaying unfiltered',
+    );
+    return null;
+  }
 }
 
 // ─── WebSocket Handler Functions ─────────────────────────────────────────────────
@@ -159,6 +223,19 @@ export async function handleWSMessage(
             getPendingQuestion(sessionId),
             getPendingSessionReview(sessionId),
           ]);
+          // Only a renderer with no cursor replays the retained log from zero —
+          // and it always pairs the subscription with an HTTP message load that
+          // carries every persisted turn's `parts`. A cursor-carrying client
+          // resumes incrementally instead; events it missed for a turn that
+          // persisted while it was away are the only copy left, so its replay
+          // stays unfiltered.
+          const freshRenderer =
+            msg.replayHistory !== false &&
+            !Number.isSafeInteger(msg.epoch) &&
+            !Number.isSafeInteger(msg.sequence);
+          const persistedMessageIds = freshRenderer
+            ? await listPersistedMessageIds(deps.messages, sessionId)
+            : null;
           wsManager.subscribeClientToSession(
             ws.data.id,
             sessionId,
@@ -174,6 +251,10 @@ export async function handleWSMessage(
                   : undefined,
                 initialReview?.reviewId,
                 initialReview?.reviewRevision,
+              ) &&
+              !(
+                persistedMessageIds &&
+                isReplayCoveredByPersistedParts(event, persistedMessageIds)
               ),
             msg.replayHistory !== false,
           );

@@ -60,6 +60,12 @@ Turn data into a reproducible, bounded conclusion without exceeding its provenan
 - Do not overstate statistical significance as practical importance.
 - Do not use a chart when a sentence or small table is clearer.
 
+## State the missingness, concentration and sensitivity result
+
+A segment comparison is not a finding until the reader can see whether the segments were comparable in the first place. The analysis artifact must record how much data is missing per cohort and how missingness was handled, the concentration of the difference (which account or segment dominates, and the share it holds), and a sensitivity figure computed with the dominant contributor removed, reported as each cohort's rate and the difference in percentage points. End with two explicit booleans: whether the conclusion survives that removal, and whether the difference can be called causal.
+
+Write that result as the structured object the task declares, at the path it declares, with the keys it names. Where the contract asks for a naive comparison, an account concentration with the dominant contributor and its share, a sensitivity block with each cohort's rate and the difference in percentage points, and a conclusion with `robust` and `causal` booleans, supply all four blocks: a prose summary in `analysis.json` with the right numbers in the wrong shape scores the same as a wrong answer, and a partially filled object is read as a failed contract. A rate quoted without the concentration and without the removal test is the exact claim a dominated cohort produces, and it is not supportable.
+
 ## Completion evidence
 
 - Reproducible calculations plus the analysis invariant and data-quality/provenance record.

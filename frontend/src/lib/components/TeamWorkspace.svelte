@@ -26,7 +26,7 @@
       <Users size={18} class="shrink-0 text-[var(--color-accent)]" />
       <div class="min-w-0 flex-1">
         <h2 class="truncate text-sm font-semibold text-[var(--color-text-primary)]">{team.hostName || 'Host'} · {team.sessionName}</h2>
-        <p class="mt-0.5 text-[10px] text-[var(--color-text-muted)]">{team.tierId} access · Hosted workspace</p>
+        <p class="mt-0.5 text-[11px] text-[var(--color-text-muted)]">{team.tierId} access · Hosted workspace</p>
       </div>
       <button type="button" onclick={() => collaborationStore.leaveJoinedSession(team.sessionId)}
         class="rounded-md p-2 text-[var(--color-text-muted)] hover:text-[var(--color-error)]"

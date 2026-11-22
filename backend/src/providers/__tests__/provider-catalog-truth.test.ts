@@ -49,46 +49,32 @@ describe('built-in provider catalog truth', () => {
     });
   });
 
-  it('uses the official AgentRouter OpenAI-compatible gateway contract', () => {
-    expect(PROVIDER_CONFIG_MAP.get('agentrouter')).toMatchObject({
-      baseUrl: 'https://agentrouter.org/v1',
-      authMode: 'api_key',
-      envKeys: ['AGENTROUTER_API_KEY'],
-    });
-  });
-
-  it('exposes AgentRouter through the provider-type list used by Settings', () => {
-    const registry = Object.create(ProviderRegistry.prototype) as ProviderRegistry;
-    Object.assign(registry, { customProviderIds: new Set<ProviderName>() });
-    expect(registry.getAvailableProviderTypes()).toContainEqual({
-      name: 'agentrouter',
-      authMode: 'api_key',
-    });
-  });
-
-  it('reports the canonical AgentRouter endpoint and model catalog URL', () => {
+  it('ignores a persisted provider entry whose built-in name no longer exists', () => {
     const registry = new ProviderRegistry({
-      providers: {},
+      providers: {
+        'retired-provider': {
+          name: 'retired-provider',
+          apiKey: 'stale-key',
+          disabled: false,
+        },
+      },
       server: { port: 3001, host: '127.0.0.1' },
     } as any);
-    const status = registry.getStatus().find((entry) => entry.name === 'agentrouter');
-    expect(status).toMatchObject({
-      endpointUrl: 'https://agentrouter.org/v1',
-      modelCatalogUrl: 'https://agentrouter.org/v1/models',
-    });
+    expect(registry.getStatus().find((entry) => entry.name === 'retired-provider')).toBeUndefined();
+    expect(registry.get('retired-provider' as ProviderName)).toBeUndefined();
   });
 
-  it('preserves the configured AgentRouter origin across registry hydration', () => {
+  it('preserves the configured origin of a custom provider across registry hydration', () => {
     const registry = Object.create(ProviderRegistry.prototype) as ProviderRegistry;
     Object.assign(registry, {
       config: {
         server: { port: 3001, host: '127.0.0.1' },
         providers: {
-          'custom:agentrouter': {
-            name: 'custom:agentrouter',
+          'custom:retired-gateway': {
+            name: 'custom:retired-gateway',
             custom: true,
             kind: 'openai',
-            baseUrl: 'https://agentrouter.org/v1',
+            baseUrl: 'https://gateway.example.com/v1',
             disabled: false,
           },
         },
@@ -100,7 +86,7 @@ describe('built-in provider catalog truth', () => {
       }
     ).buildProviderConfig.bind(registry);
 
-    expect(buildProviderConfig('custom:agentrouter').baseUrl).toBe('https://agentrouter.org/v1');
+    expect(buildProviderConfig('custom:retired-gateway').baseUrl).toBe('https://gateway.example.com/v1');
   });
 
   it('uses the official UnoRouter gateway contract', () => {

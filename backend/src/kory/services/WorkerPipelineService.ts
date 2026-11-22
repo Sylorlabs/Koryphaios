@@ -5,6 +5,7 @@
  */
 
 import type {
+  AgentFallbackStep,
   ChangeSummary,
   KoryphaiosConfig,
   ProviderName,
@@ -26,6 +27,7 @@ import type { ITaskStore } from '../../stores/task-store';
 import { formatMessagesForCritic } from '../critic-util';
 import { classifyTask, createTaskContract, type TaskContract, type TaskKind } from '../prompts';
 import { getProviderHarnessCapabilities } from '../../providers/provider-harness';
+import { waitForProviderRetry } from '../../providers/provider-retry';
 import { computeCostUsd } from '../../pricing';
 import type { CheckpointStore } from '../checkpoint-store';
 import { canonicalizePath } from '../../runtime/platform';
@@ -87,6 +89,22 @@ interface WorkerPipelineResult {
   tokensOut?: number;
 }
 
+/**
+ * Structured pipeline outcome.
+ *
+ * `text` is the human-facing summary; `success` is authoritative. Callers must
+ * branch on this field instead of scanning the summary for words like
+ * "failed" or "rejected": a worker that reported fixing a failing test used to
+ * be classified as a failed delegation, which made a healthy subagent look
+ * broken to the manager.
+ */
+export interface WorkerPipelineOutcome {
+  success: boolean;
+  text: string;
+  model?: string;
+  verification?: 'verified' | 'unverified';
+}
+
 interface ProjectExecutionResources {
   root: string;
   git: GitManager;
@@ -121,6 +139,10 @@ export interface WorkerPipelineHost {
     gateStrictness: 'strict' | 'advisory' | 'off';
     maxCriticIterations: number;
   };
+  /** This chat's worker-isolation preset: 'auto' defers the choice to the
+   *  manager's per-task `worktree` argument, 'always' forces worktrees and
+   *  'never' runs workers directly in the chat checkout. */
+  getWorktreeMode(sessionId: string): 'auto' | 'always' | 'never';
   waitForUserInput(
     sessionId: string,
     question: string,
@@ -163,7 +185,13 @@ export interface WorkerPipelineHost {
     reviewDirectory?: string,
     producerIdentity?: { provider: ProviderName; model: string },
     skillReviewContext?: SkillReviewContext,
-  ): Promise<{ passed: boolean; skipped?: boolean; independent?: boolean; feedback?: string }>;
+  ): Promise<{
+    passed: boolean;
+    skipped?: boolean;
+    independent?: boolean;
+    feedback?: string;
+    criticUnavailable?: boolean;
+  }>;
   runDestinationChecks(
     sessionId: string,
     workingDirectory: string,
@@ -490,7 +518,43 @@ export class WorkerPipelineService {
     reasoningLevel?: string,
     domainHint?: string,
     skillAssignment?: SkillAssignment,
+    signal?: AbortSignal,
+    worktreeOverride?: boolean,
+    fallbackChain?: readonly AgentFallbackStep[],
   ): Promise<string> {
+    return (
+      await this.runWorkerPipelineDetailed(
+        sessionId,
+        task,
+        preferredModel,
+        reasoningLevel,
+        domainHint,
+        skillAssignment,
+        signal,
+        worktreeOverride,
+        fallbackChain,
+      )
+    ).text;
+  }
+
+  /**
+   * Run the worker pipeline and return its authoritative outcome.
+   *
+   * Kept separate from `runWorkerPipeline` so existing string-returning
+   * callers keep their contract while orchestration can branch on `success`
+   * rather than guessing from prose.
+   */
+  async runWorkerPipelineDetailed(
+    sessionId: string,
+    task: string,
+    preferredModel?: string,
+    reasoningLevel?: string,
+    domainHint?: string,
+    skillAssignment?: SkillAssignment,
+    signal?: AbortSignal,
+    worktreeOverride?: boolean,
+    fallbackChain?: readonly AgentFallbackStep[],
+  ): Promise<WorkerPipelineOutcome> {
     this.host.emitThought(
       sessionId,
       'executing',
@@ -506,14 +570,17 @@ export class WorkerPipelineService {
       const reason = err instanceof Error ? err.message : String(err);
       koryLog.warn({ sessionId, err: reason }, 'Worker project resolution failed closed');
       await this.host.updateWorkflowState(sessionId, 'idle');
-      return `Worker was not started because its exact session project could not be resolved: ${reason}`;
+      return {
+        success: false,
+        text: `Worker was not started because its exact session project could not be resolved: ${reason}`,
+      };
     }
 
     const baseline = await this.prepareRecoveryBaseline(sessionId, project);
     if (!baseline.ok) {
       koryLog.warn({ sessionId, project: project.root }, 'Worker recovery baseline failed closed');
       await this.host.updateWorkflowState(sessionId, 'idle');
-      return `Worker was not started. ${baseline.reason}`;
+      return { success: false, text: `Worker was not started. ${baseline.reason}` };
     }
 
     const domainOverride =
@@ -535,18 +602,34 @@ export class WorkerPipelineService {
     }
 
     const workspaceManager = project.workspaceManager;
+    // 'always'/'never' are the user's durable choice and override the tool
+    // argument; 'auto' leaves the per-task decision to the manager, defaulting
+    // to isolation when the call omits it.
+    const worktreeMode = this.host.getWorktreeMode(sessionId);
+    const worktreeIsolated =
+      worktreeMode === 'always'
+        ? true
+        : worktreeMode === 'never'
+          ? false
+          : (worktreeOverride ?? true);
     let workerDir: string;
     try {
-      if (!workspaceManager)
-        throw new Error('Worktree isolation is unavailable or not initialized.');
-      const worktree = await workspaceManager.spawn(taskId, task.slice(0, 60), sessionId);
-      if (!worktree)
-        throw new Error('An isolated worktree could not be created (unavailable or at capacity).');
-      workerDir = await workspaceManager.validateWorktree(taskId, sessionId);
-      if (workerDir === project.root || !this.isWithinProject(project.root, workerDir)) {
-        throw new Error('Worker worktree does not belong to the resolved session project.');
+      if (!worktreeIsolated) {
+        workerDir = project.root;
+        koryLog.info({ taskId, path: workerDir }, 'Worker running directly in the chat checkout');
+      } else {
+        if (!workspaceManager)
+          throw new Error('Worktree isolation is unavailable or not initialized.');
+        const worktree = await workspaceManager.spawn(taskId, task.slice(0, 60), sessionId, {
+          signal,
+        });
+        if (!worktree) throw new Error('An isolated worktree could not be created.');
+        workerDir = await workspaceManager.validateWorktree(taskId, sessionId);
+        if (workerDir === project.root || !this.isWithinProject(project.root, workerDir)) {
+          throw new Error('Worker worktree does not belong to the resolved session project.');
+        }
+        koryLog.info({ taskId, path: workerDir }, 'Worker running in isolated worktree');
       }
-      koryLog.info({ taskId, path: workerDir }, 'Worker running in isolated worktree');
     } catch (err: unknown) {
       const reason = err instanceof Error ? err.message : String(err);
       // A spawn can fail after registering a worktree. Cleanup is best effort;
@@ -559,7 +642,7 @@ export class WorkerPipelineService {
           'Failed spawn cleanup retained for recovery',
         );
       }
-      return this.finishPipeline(sessionId, taskId, {
+      return this.finishPipelineOutcome(sessionId, taskId, {
         success: false,
         verification: 'unverified',
         criticFeedback: `Worker was not started because worktree isolation failed: ${reason}`,
@@ -579,6 +662,8 @@ export class WorkerPipelineService {
         project,
         true,
         normalizeSkillAssignment(skillAssignment),
+        worktreeIsolated,
+        fallbackChain,
       );
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -591,7 +676,7 @@ export class WorkerPipelineService {
     }
 
     let worktreePaths: string[] = [];
-    if (workspaceManager) {
+    if (workspaceManager && worktreeIsolated) {
       try {
         if (result.success) {
           if (typeof workspaceManager.getChangedFiles === 'function') {
@@ -618,7 +703,11 @@ export class WorkerPipelineService {
               workerTranscript: result.workerTranscript,
               criticFeedback: `Worktree reconcile failed: ${reconcileResult.message}`,
             };
-          } else {
+          } else if (reconcileResult.outcome === 'merged') {
+            // Only work that actually landed needs destination verification. A
+            // noop reconcile means the worker changed nothing (typical for a
+            // read-only research agent), and running the repository check suite
+            // for it turned a 10-agent fan-out into ten overlapping test runs.
             const destinationGate = await this.host.runDestinationChecks(sessionId, project.root);
             if (!destinationGate.passed) {
               result = {
@@ -627,7 +716,7 @@ export class WorkerPipelineService {
                 workerTranscript: result.workerTranscript,
                 criticFeedback: `Destination-tree verification failed after reconciliation:\n${destinationGate.output}`,
               };
-              return await this.finishPipeline(sessionId, taskId, result);
+              return await this.finishPipelineOutcome(sessionId, taskId, result);
             }
           }
         } else {
@@ -671,15 +760,17 @@ export class WorkerPipelineService {
     this.reportWorkerUsage(sessionId, result);
     await this.host.updateWorkflowState(sessionId, 'idle');
 
-    if (result.success) {
-      return (
-        result.criticFeedback ??
-        (result.workerTranscript ? 'Worker completed. See transcript.' : 'Done.')
-      );
-    }
-    return result.workerTranscript
-      ? `Worker did not pass review. ${result.criticFeedback ?? ''}`
-      : (result.criticFeedback ?? 'Worker failed.');
+    return {
+      success: result.success,
+      model: result.model,
+      verification: result.verification,
+      text: result.success
+        ? (result.criticFeedback ??
+          (result.workerTranscript ? 'Worker completed. See transcript.' : 'Done.'))
+        : result.workerTranscript
+          ? `Worker did not pass review. ${result.criticFeedback ?? ''}`
+          : (result.criticFeedback ?? 'Worker failed.'),
+    };
   }
 
   /**
@@ -716,11 +807,11 @@ export class WorkerPipelineService {
     }
   }
 
-  private async finishPipeline(
+  private async finishPipelineOutcome(
     sessionId: string,
     taskId: string,
     result: WorkerPipelineResult,
-  ): Promise<string> {
+  ): Promise<WorkerPipelineOutcome> {
     if (this.tasks) {
       await this.tasks.update(taskId, {
         status: result.success ? 'done' : 'failed',
@@ -730,11 +821,16 @@ export class WorkerPipelineService {
     }
     this.reportWorkerUsage(sessionId, result);
     await this.host.updateWorkflowState(sessionId, 'idle');
-    return result.success
-      ? (result.criticFeedback ?? 'Done.')
-      : result.workerTranscript
-        ? `Worker did not pass review. ${result.criticFeedback ?? ''}`
-        : (result.criticFeedback ?? 'Worker failed.');
+    return {
+      success: result.success,
+      model: result.model,
+      verification: result.verification,
+      text: result.success
+        ? (result.criticFeedback ?? 'Done.')
+        : result.workerTranscript
+          ? `Worker did not pass review. ${result.criticFeedback ?? ''}`
+          : (result.criticFeedback ?? 'Worker failed.'),
+    };
   }
 
   private async _routeToWorker(
@@ -748,6 +844,8 @@ export class WorkerPipelineService {
     executionProject?: ProjectExecutionResources,
     recoveryBaselinePrepared = false,
     skillAssignment?: SkillAssignment,
+    worktreeIsolated = true,
+    fallbackChain?: readonly AgentFallbackStep[],
   ): Promise<WorkerPipelineResult> {
     let domain: WorkerDomain;
     if (domainOverride) domain = domainOverride;
@@ -782,22 +880,28 @@ export class WorkerPipelineService {
     const workingDirectory = project.root;
     let effectivePaths: string[];
     try {
-      if (!taskId || !project.workspaceManager) {
-        throw new Error('A managed isolated worktree is required.');
-      }
-      const workerDirectory = await project.workspaceManager.validateWorktree(taskId, sessionId);
       effectivePaths = await Promise.all(
         allowedPaths.map((path, index) =>
           this.canonicalDirectory(path, `Worker filesystem grant ${index + 1}`),
         ),
       );
-      if (
-        effectivePaths.length !== 1 ||
-        effectivePaths[0] !== workerDirectory ||
-        workerDirectory === workingDirectory ||
-        !this.isWithinProject(workingDirectory, workerDirectory)
-      ) {
-        throw new Error('Worker filesystem grants must match its isolated worktree.');
+      if (worktreeIsolated) {
+        if (!taskId || !project.workspaceManager) {
+          throw new Error('A managed isolated worktree is required.');
+        }
+        const workerDirectory = await project.workspaceManager.validateWorktree(taskId, sessionId);
+        if (
+          effectivePaths.length !== 1 ||
+          effectivePaths[0] !== workerDirectory ||
+          workerDirectory === workingDirectory ||
+          !this.isWithinProject(workingDirectory, workerDirectory)
+        ) {
+          throw new Error('Worker filesystem grants must match its isolated worktree.');
+        }
+      } else if (effectivePaths.length !== 1 || effectivePaths[0] !== workingDirectory) {
+        // Direct mode grants exactly the chat checkout — never a parent, a
+        // sibling project, or any unverified path.
+        throw new Error('A direct worker must be granted exactly the chat checkout.');
       }
     } catch (err: unknown) {
       return {
@@ -837,29 +941,52 @@ export class WorkerPipelineService {
     const gateStrictness = resolveGateStrictness(taskKind, configuredPolicy.gateStrictness);
     // Read-only answer/research turns get a single worker attempt — a failed
     // review falls back to advisory reporting instead of forced retries.
-    const maxAttempts = isReadOnlyTaskKind(taskKind)
-      ? 1
-      : Math.max(1, Math.min(10, configuredPolicy.maxCriticIterations));
+    const maxAttempts =
+      (isReadOnlyTaskKind(taskKind)
+        ? 1
+        : Math.max(1, Math.min(10, configuredPolicy.maxCriticIterations))) +
+      (fallbackChain?.length ?? 0);
     let failedReviews = 0;
+    // A fallback step is consumed only after a provider/rate failure. A critic
+    // rejection keeps the same route and asks the same worker to revise.
+    let fallbackIndex = 0;
+    let usingFallback = false;
+    // A transient upstream failure retries the same route before a fallback is
+    // spent. Without this budget, a single 502 ended a delegated turn outright
+    // whenever no fallback route was configured — the common long-horizon case.
+    const maxSameRouteRetries = 2;
+    let sameRouteRetries = 0;
     while (attempts < maxAttempts) {
-      try {
-        if (
-          (await project.workspaceManager!.validateWorktree(taskId!, sessionId)) !==
-          effectivePaths[0]
-        ) {
-          throw new Error('Worker worktree changed between attempts');
+      if (worktreeIsolated) {
+        try {
+          if (
+            (await project.workspaceManager!.validateWorktree(taskId!, sessionId)) !==
+            effectivePaths[0]
+          ) {
+            throw new Error('Worker worktree changed between attempts');
+          }
+        } catch (error) {
+          return {
+            success: false,
+            verification: 'unverified',
+            criticFeedback: `Worker isolation was lost: ${error instanceof Error ? error.message : String(error)}`,
+          };
         }
-      } catch (error) {
-        return {
-          success: false,
-          verification: 'unverified',
-          criticFeedback: `Worker isolation was lost: ${error instanceof Error ? error.message : String(error)}`,
-        };
       }
       attempts++;
-      this.host.emitThought(sessionId, 'delegating', `Delegating to ${domain} worker...`);
+      const fallback = usingFallback ? fallbackChain?.[fallbackIndex] : undefined;
+      if (usingFallback && !fallback) break;
+      const requestedModel = fallback?.model ?? preferredModel;
+      const requestedReasoning = fallback?.reasoningLevel ?? reasoningLevel;
+      this.host.emitThought(
+        sessionId,
+        'delegating',
+        fallback
+          ? `Primary worker route failed; failing over to ${fallback.model}...`
+          : `Delegating to ${domain} worker...`,
+      );
       const routing = this.host.resolveActiveRouting(
-        preferredModel,
+        requestedModel,
         domain,
         false,
         userMessage,
@@ -876,7 +1003,7 @@ export class WorkerPipelineService {
           routing.model,
           workerTask,
           domain,
-          reasoningLevel,
+          requestedReasoning,
           true,
           effectivePaths,
           isSandboxed,
@@ -904,6 +1031,20 @@ export class WorkerPipelineService {
             { provider: alt.name, model: routing.model },
             res.skillReviewContext ?? { taskContract: immutableContract },
           );
+          if (criticResult.criticUnavailable) {
+            // The Critic could not run; this is not a review verdict, so the
+            // worker output ships as unverified and is never re-run on crash text.
+            return {
+              success: true,
+              provider: alt.name,
+              model: routing.model,
+              tokensIn: res.usage?.tokensIn,
+              tokensOut: res.usage?.tokensOut,
+              verification: 'unverified',
+              workerTranscript: formatMessagesForCritic(res.workerMessages ?? []),
+              criticFeedback: `UNVERIFIED: Critic could not run:\n${criticResult.feedback ?? ''}`,
+            };
+          }
           if (criticResult.passed) {
             const harness = getProviderHarnessCapabilities(alt.name);
             return {
@@ -946,7 +1087,7 @@ export class WorkerPipelineService {
         routing.model,
         workerTask,
         domain,
-        reasoningLevel,
+        requestedReasoning,
         true,
         effectivePaths,
         isSandboxed,
@@ -974,6 +1115,18 @@ export class WorkerPipelineService {
           { provider: provider.name, model: routing.model },
           result.skillReviewContext ?? { taskContract: immutableContract },
         );
+        if (criticResult.criticUnavailable) {
+          return {
+            success: true,
+            provider: provider.name,
+            model: routing.model,
+            tokensIn: result.usage?.tokensIn,
+            tokensOut: result.usage?.tokensOut,
+            verification: 'unverified',
+            workerTranscript: formatMessagesForCritic(result.workerMessages ?? []),
+            criticFeedback: `UNVERIFIED: Critic could not run:\n${criticResult.feedback ?? ''}`,
+          };
+        }
         if (criticResult.passed) {
           const harness = getProviderHarnessCapabilities(provider.name);
           return {
@@ -1017,6 +1170,20 @@ export class WorkerPipelineService {
             ).isRetriableProviderError(result.error)
           : false;
       if (!quota && !retriable) return { success: false };
+      // Quota exhaustion does not improve by waiting on the same account, so
+      // only a transient failure (5xx/timeout/stream drop) earns a retry here.
+      if (!quota && sameRouteRetries < maxSameRouteRetries) {
+        sameRouteRetries += 1;
+        koryLog.warn(
+          { sessionId, attempt: attempts, retry: sameRouteRetries },
+          'Worker attempt failed transiently — retrying the same route',
+        );
+        await waitForProviderRetry(sameRouteRetries);
+        continue;
+      }
+      if (usingFallback) fallbackIndex += 1;
+      else usingFallback = true;
+      if (!fallbackChain || fallbackIndex >= fallbackChain.length) return { success: false };
     }
     return { success: false };
   }

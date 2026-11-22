@@ -24,7 +24,7 @@ vi.mock('./run-state.svelte', () => ({
   },
 }));
 
-import { feedStore } from './feed.svelte';
+import { feedStore, getGroupedEntries } from './feed.svelte';
 import { agentStore } from './agents.svelte';
 
 const AGENT = 'kory-manager';
@@ -39,6 +39,27 @@ function content(text: string, timestamp: number, agentId = AGENT) {
     glowClass: '',
     text,
     metadata: { sessionId: SID },
+  };
+}
+
+function managerEvent(type: string, payload: Record<string, unknown>, timestamp: number) {
+  return {
+    type,
+    payload: { ...payload, messageId: 'turn-1' },
+    timestamp,
+    sessionId: SID,
+  } as unknown as Parameters<typeof feedStore.applyManagerTurnEvent>[1];
+}
+
+function skill(name: string, timestamp: number) {
+  return {
+    timestamp,
+    type: 'skill' as const,
+    agentId: AGENT,
+    agentName: 'Kory',
+    glowClass: '',
+    text: name,
+    metadata: { sessionId: SID, skillName: name },
   };
 }
 
@@ -137,6 +158,59 @@ describe('one turn renders as one answer', () => {
 
     const content1 = feedStore.feed.filter((entry) => entry.type === 'content');
     expect(content1.map((entry) => entry.text)).toEqual(['Done.', 'A later continuation.']);
+  });
+
+  it('keeps a skill row between the turn rows it happened between', () => {
+    feedStore.applyManagerTurnEvent(SID, managerEvent('stream.thinking', { thinking: 'plan' }, 100));
+    feedStore.applyManagerTurnEvent(SID, managerEvent('stream.delta', { content: 'answer' }, 500));
+    feedStore.addFeedEntryForSession(feedStore.sessionId, skill('research', 300));
+
+    // A new tool part re-expands the turn. The skill row landed inside the
+    // turn's time range, so it must stay there instead of being pushed below
+    // the tool call that ran later.
+    feedStore.applyManagerTurnEvent(
+      SID,
+      managerEvent('stream.tool_call', { toolCall: { id: 'c1', name: 'bash', input: {} } }, 600),
+    );
+
+    expect(feedStore.feed.map((entry) => entry.type)).toEqual([
+      'thinking',
+      'skill',
+      'content',
+      'tool_call',
+    ]);
+    expect(feedStore.feed.map((entry) => entry.timestamp)).toEqual([100, 300, 500, 600]);
+  });
+
+  it('keeps a grouped worker row at the time of its first step', () => {
+    const grouped = getGroupedEntries([
+      {
+        id: 'worker-1',
+        timestamp: 100,
+        type: 'system',
+        agentId: 'worker-1',
+        agentName: 'Worker',
+        glowClass: '',
+        text: 'step 1',
+        metadata: { isSubAgent: true },
+      },
+      {
+        id: 'worker-2',
+        timestamp: 300,
+        type: 'system',
+        agentId: 'worker-1',
+        agentName: 'Worker',
+        glowClass: '',
+        text: 'step 2',
+        metadata: { isSubAgent: true },
+      },
+    ]);
+
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0].entries).toHaveLength(2);
+    // The group renders at its first step's position; letting its timestamp
+    // follow the newest child made the list show 05:00 above a row at 04:40.
+    expect(grouped[0].timestamp).toBe(100);
   });
 
   it('applies the same rule to agent thread transcripts', () => {

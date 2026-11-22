@@ -66,6 +66,160 @@ describe('displayed review transport', () => {
   });
 });
 
+describe('transcript replay coverage', () => {
+  const MANAGER = 'kory-manager';
+
+  function streamDelta(messageId?: string): WSMessage {
+    return {
+      type: 'stream.delta',
+      sessionId: 'any',
+      timestamp: 1,
+      payload: { agentId: MANAGER, content: 'hi', model: 'm', messageId },
+    };
+  }
+
+  async function captureReplayFilter(options: {
+    cursor?: { epoch: number; sequence: number };
+    persistedIds?: string[];
+    messages?: unknown;
+  }): Promise<(event: WSMessage) => boolean> {
+    const sessions = new SessionStore();
+    const session = await sessions.create('local-user', 'replay coverage', undefined, '/synthetic-project');
+    let filter: ((event: WSMessage) => boolean) | undefined;
+    const dependencies = {
+      sessions,
+      runs: { get: () => undefined },
+      wsManager: {
+        subscribeClientToSession: (
+          _client: string,
+          _session: string,
+          _cursor: unknown,
+          predicate: typeof filter,
+        ) => {
+          filter = predicate;
+        },
+        sendToClientEphemeral: () => {},
+      },
+      messages:
+        'messages' in options
+          ? options.messages
+          : ({ listPersistedIds: async () => options.persistedIds ?? [] } as unknown),
+    } as unknown as Parameters<typeof handleWSMessage>[2];
+    await handleWSMessage(
+      { data: { id: 'coverage-client' } } as ServerWebSocket<WSClientData>,
+      JSON.stringify({
+        type: 'subscribe_session',
+        sessionId: session.id,
+        ...options.cursor,
+      }),
+      dependencies,
+    );
+    expect(filter).toBeDefined();
+    return filter!;
+  }
+
+  test('a fresh renderer skips only stream events already durable as parts', async () => {
+    const filter = await captureReplayFilter({ persistedIds: ['persisted-turn'] });
+    // Folded events for a persisted turn: the HTTP projection carries them.
+    expect(
+      filter({
+        type: 'stream.thinking',
+        sessionId: 's',
+        timestamp: 1,
+        payload: { agentId: MANAGER, thinking: 't', messageId: 'persisted-turn' },
+      }),
+    ).toBe(false);
+    expect(filter(streamDelta('persisted-turn'))).toBe(false);
+    expect(
+      filter({
+        type: 'stream.tool_call',
+        sessionId: 's',
+        timestamp: 1,
+        payload: {
+          agentId: MANAGER,
+          messageId: 'persisted-turn',
+          toolCall: { id: 'c1', name: 'read', input: {} },
+        },
+      }),
+    ).toBe(false);
+    expect(
+      filter({
+        type: 'stream.tool_result',
+        sessionId: 's',
+        timestamp: 1,
+        payload: {
+          agentId: MANAGER,
+          messageId: 'persisted-turn',
+          toolResult: { callId: 'c1', name: 'read', output: 'ok', isError: false, durationMs: 1 },
+        },
+      }),
+    ).toBe(false);
+    expect(
+      filter({
+        type: 'stream.complete',
+        sessionId: 's',
+        timestamp: 1,
+        payload: { agentId: MANAGER, messageId: 'persisted-turn' },
+      }),
+    ).toBe(false);
+
+    // The in-flight turn is not yet durable: its events are the only copy.
+    expect(filter(streamDelta('in-flight-turn'))).toBe(true);
+    // Worker streams are never stamped with a turn messageId.
+    expect(filter(streamDelta())).toBe(true);
+    // Stamped but not folded into `parts` (stream.usage) and operational
+    // events carrying messageId keep replaying — none are in `parts`.
+    expect(
+      filter({
+        type: 'stream.usage',
+        sessionId: 's',
+        timestamp: 1,
+        payload: { agentId: MANAGER, messageId: 'persisted-turn', tokensIn: 1 },
+      }),
+    ).toBe(true);
+    expect(
+      filter({
+        type: 'turn.provider_completed',
+        sessionId: 's',
+        timestamp: 1,
+        payload: { agentId: MANAGER, messageId: 'persisted-turn', completedAt: 1 },
+      }),
+    ).toBe(true);
+    expect(
+      filter({
+        type: 'kory.thought',
+        sessionId: 's',
+        timestamp: 1,
+        payload: { thought: 't', phase: 'route' },
+      }),
+    ).toBe(true);
+  });
+
+  test('a cursor-carrying resume is never filtered', async () => {
+    const filter = await captureReplayFilter({
+      cursor: { epoch: 1, sequence: 3 },
+      persistedIds: ['persisted-turn'],
+    });
+    // The client's projection may predate the persist; the missed events are
+    // the only copy of this turn's tail, so they must replay.
+    expect(filter(streamDelta('persisted-turn'))).toBe(true);
+  });
+
+  test('an unavailable persisted-id lookup leaves replay unfiltered', async () => {
+    const noStore = await captureReplayFilter({ messages: undefined });
+    expect(noStore(streamDelta('persisted-turn'))).toBe(true);
+
+    const failing = await captureReplayFilter({
+      messages: {
+        listPersistedIds: async () => {
+          throw new Error('db gone');
+        },
+      },
+    });
+    expect(failing(streamDelta('persisted-turn'))).toBe(true);
+  });
+});
+
 describe('websocket heartbeat handling', () => {
   test('marks the exact client alive when it answers an application heartbeat', async () => {
     const pongClients: string[] = [];

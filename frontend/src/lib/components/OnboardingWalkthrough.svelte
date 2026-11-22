@@ -15,9 +15,11 @@
   import { cubicOut } from 'svelte/easing';
   import SettingsSwitch from './SettingsSwitch.svelte';
   import ColorPickerModal from './ColorPickerModal.svelte';
+  import ThemeModeEditor from './ThemeModeEditor.svelte';
   import CliChatImportPanel from './CliChatImportPanel.svelte';
+  import { cliChatImportStore } from '$lib/stores/cli-chat-import.svelte';
   import { onboardingStore } from '$lib/stores/onboarding.svelte';
-  import { theme, THEME_PRESETS, type ThemePreset } from '$lib/stores/theme.svelte';
+  import { theme, type ThemeScheme } from '$lib/stores/theme.svelte';
   import { agentSettingsStore, type AgentSettings } from '$lib/stores/agent-settings.svelte';
   import { providersStore } from '$lib/stores/providers.svelte';
   import Settings2 from 'lucide-svelte/icons/settings-2';
@@ -78,6 +80,7 @@
   let dialog = $state<HTMLDivElement | null>(null);
   let accentPickerOpen = $state(false);
   let accentPickerTarget = $state<'primary' | 'secondary'>('primary');
+  let accentPickerScheme = $state<ThemeScheme>('dark');
   let cliImportPanel = $state<CliChatImportPanel | null>(null);
   let portedChatsCount = $state(0);
 
@@ -87,8 +90,6 @@
   const progress = $derived(((index + 1) / steps.length) * 100);
 
   // ── Option catalogs ───────────────────────────────────────────────────────
-
-  const previewPresets = $derived(theme.presets);
 
   const interviewOptions: Array<{
     value: AgentSettings['intentInterview'];
@@ -172,6 +173,9 @@
   onMount(() => {
     if (!agentSettingsStore.settingsLoaded) void agentSettingsStore.loadSettings();
     if (providersStore.statusList.length === 0) void providersStore.loadProvidersFromApi();
+    // Scanning every CLI's chat storage takes seconds; start it on the welcome
+    // step so the Port chats step already has its list when the user reaches it.
+    void cliChatImportStore.prefetch();
   });
 
   const connectedProviders = $derived(
@@ -182,14 +186,27 @@
   );
 
   const summary = $derived.by(() => {
-    const preset = theme.presets.find((entry) => entry.id === theme.preset)?.label ?? theme.preset;
+    const presetLabel = (id: string) =>
+      theme.presets.find((entry) => entry.id === id)?.label ?? id;
+    const modeLabel =
+      theme.mode === 'system'
+        ? 'Adaptive'
+        : theme.mode === 'dark'
+          ? 'Always dark'
+          : 'Always light';
+    const themeSummary =
+      theme.mode === 'system'
+        ? `${modeLabel} · ${presetLabel(theme.dark.preset)} / ${presetLabel(theme.light.preset)}`
+        : theme.mode === 'dark'
+          ? `${modeLabel} · ${presetLabel(theme.dark.preset)}`
+          : `${modeLabel} · ${presetLabel(theme.light.preset)}`;
     const interview = interviewOptions.find((o) => o.value === settings.intentInterview)?.label;
     const plan = planOptions.find((o) => o.value === settings.planApproval)?.label;
     const permission = permissionOptions.find((o) => o.value === settings.permissionMode)?.label;
     return [
       {
         label: 'Theme',
-        value: `${preset} · ${theme.currentAccent.main} · ${theme.currentSecondaryAccent.main}`,
+        value: themeSummary,
       },
       { label: 'Response style', value: `${interview} · ${plan}` },
       {
@@ -252,19 +269,10 @@
     onOpenProviders();
   }
 
-  function openAccentPicker(target: 'primary' | 'secondary') {
+  function openAccentPicker(scheme: ThemeScheme, target: 'primary' | 'secondary') {
+    accentPickerScheme = scheme;
     accentPickerTarget = target;
     accentPickerOpen = true;
-  }
-
-  function swatch(preset: ThemePreset): { bg: string; panel: string; text: string } {
-    const concrete = preset === 'system' ? 'kintsugi' : preset;
-    const palette = THEME_PRESETS[concrete];
-    return {
-      bg: palette['--color-surface-1'],
-      panel: palette['--color-surface-3'],
-      text: palette['--color-text-primary'],
-    };
   }
 
   function handleKeydown(event: KeyboardEvent) {
@@ -350,7 +358,7 @@
           </button>
         {/each}
         <div
-          class="mt-auto px-2 pt-6 text-[10px] leading-relaxed"
+          class="mt-auto px-2 pt-6 text-[11px] leading-relaxed"
           style="color: var(--color-text-muted);"
         >
           ← → to move · Esc to skip
@@ -436,89 +444,7 @@
                   Changes apply instantly. You can revisit them in Settings, Appearance.
                 </p>
                 <div class="mt-5">
-                  <span class="option-heading">Theme</span>
-                </div>
-                <div class="preset-grid mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
-                  {#each previewPresets as preset (preset.id)}
-                    {@const colors = swatch(preset.id)}
-                    {@const active = theme.preset === preset.id}
-                    <button
-                      type="button"
-                      class="preset-choice group relative min-w-0 rounded-lg px-2.5 py-2.5 text-left transition-colors"
-                      class:is-active={active}
-                      onclick={() => theme.setPreset(preset.id)}
-                      aria-pressed={active}
-                    >
-                      <div class="mb-2 flex h-7 items-center gap-1.5" aria-hidden="true">
-                        <span class="h-7 flex-1" style="background: {colors.bg};"></span>
-                        <span class="h-7 w-5" style="background: {colors.panel};"></span>
-                        <span class="h-7 w-2" style="background: {colors.text}; opacity: 0.7;"
-                        ></span>
-                      </div>
-                      <span class="flex items-center justify-between gap-2 text-[11px] font-medium">
-                        <span class="truncate">{preset.label}</span>
-                        {#if active}<Check size={12} class="shrink-0" />{/if}
-                      </span>
-                    </button>
-                  {/each}
-                </div>
-                <div class="mt-7 border-y" style="border-color: var(--color-border);">
-                  <button
-                    type="button"
-                    class="accent-choice flex w-full items-center gap-4 py-3.5 text-left"
-                    onclick={() => openAccentPicker('primary')}
-                    aria-label="Open primary accent picker"
-                  >
-                    <span
-                      class="h-7 w-7 shrink-0 rounded-md border"
-                      style="background: {theme.currentAccent
-                        .main}; border-color: var(--color-border-bright);"
-                    ></span>
-                    <span class="min-w-0 flex-1">
-                      <span
-                        class="block text-xs font-semibold"
-                        style="color: var(--color-text-primary);">Primary accent</span
-                      >
-                      <span class="mt-0.5 block text-[11px]" style="color: var(--color-text-muted);"
-                        >Actions, focus and active controls</span
-                      >
-                    </span>
-                    <span class="font-mono text-[11px]" style="color: var(--color-text-secondary);"
-                      >{theme.currentAccent.main.toUpperCase()}</span
-                    >
-                    <span class="text-[11px] font-medium" style="color: var(--color-accent);"
-                      >Choose</span
-                    >
-                  </button>
-                  <button
-                    type="button"
-                    class="accent-choice flex w-full items-center gap-4 border-t py-3.5 text-left"
-                    style="border-color: var(--color-border);"
-                    onclick={() => openAccentPicker('secondary')}
-                    aria-label="Open secondary accent picker"
-                  >
-                    <span
-                      class="h-7 w-7 shrink-0 rounded-md border"
-                      style="background: {theme.currentSecondaryAccent
-                        .main}; border-color: var(--color-border-bright);"
-                    ></span>
-                    <span class="min-w-0 flex-1">
-                      <span
-                        class="block text-xs font-semibold"
-                        style="color: var(--color-text-primary);">Secondary accent</span
-                      >
-                      <span class="mt-0.5 block text-[11px]" style="color: var(--color-text-muted);"
-                        >Supporting emphasis, charts and detail</span
-                      >
-                    </span>
-                    <span class="font-mono text-[11px]" style="color: var(--color-text-secondary);"
-                      >{theme.currentSecondaryAccent.main.toUpperCase()}</span
-                    >
-                    <span
-                      class="text-[11px] font-medium"
-                      style="color: var(--color-accent-secondary);">Choose</span
-                    >
-                  </button>
+                  <ThemeModeEditor compact onChooseAccent={openAccentPicker} />
                 </div>
               {:else if step.id === 'style'}
                 <h2 id="walkthrough-title" class="slide-title">How should Kory work with you?</h2>
@@ -610,7 +536,7 @@
                       <span class="flex items-baseline justify-between gap-2">
                         <span class="option-label text-sm">{option.label}</span>
                         <span
-                          class="text-[9px] font-semibold uppercase tracking-[0.08em]"
+                          class="text-[10px] font-semibold uppercase tracking-[0.08em]"
                           style="color: {option.recommended
                             ? 'var(--setup-accent)'
                             : 'var(--color-text-muted)'};">{option.tagline}</span
@@ -796,6 +722,7 @@
   <ColorPickerModal
     open={accentPickerOpen}
     target={accentPickerTarget}
+    scheme={accentPickerScheme}
     onClose={() => {
       accentPickerOpen = false;
     }}
@@ -924,34 +851,6 @@
   .welcome-action:hover :global(svg),
   .welcome-action:focus-visible :global(svg) {
     color: var(--setup-accent);
-  }
-
-  .preset-choice {
-    color: var(--color-text-secondary);
-    box-shadow: inset 0 -2px 0 transparent;
-  }
-  .preset-choice:hover,
-  .preset-choice:focus-visible {
-    background: color-mix(in srgb, var(--color-surface-3) 55%, transparent);
-    color: var(--color-text-primary);
-    outline: none;
-  }
-  .preset-choice.is-active {
-    color: var(--color-text-primary);
-    background: color-mix(in srgb, var(--setup-accent) 7%, var(--color-surface-2));
-    box-shadow: inset 0 -2px 0 var(--setup-accent);
-  }
-  .preset-choice.is-active :global(svg) {
-    color: var(--setup-accent);
-  }
-
-  .accent-choice {
-    transition: background 150ms;
-  }
-  .accent-choice:hover,
-  .accent-choice:focus-visible {
-    background: color-mix(in srgb, var(--color-surface-3) 55%, transparent);
-    outline: none;
   }
 
   .option-heading {

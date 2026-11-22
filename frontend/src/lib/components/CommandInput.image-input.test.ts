@@ -145,8 +145,10 @@ describe('composer image capability correction', () => {
       model,
       'medium',
       undefined,
-      false,
+      undefined,
       'allow',
+      undefined,
+      undefined,
     ]);
     expect(hasTrustedImageModel(localStorage, model)).toBe(false);
   });

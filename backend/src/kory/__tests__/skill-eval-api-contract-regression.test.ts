@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import {
   API_CONTRACT_DESIGN_SKILL_EVAL_MATERIALIZERS,
   API_CONTRACT_DESIGN_SKILL_EVAL_SCORERS,
-} from '../skill-eval-api-contract-design-fixtures';
-import { readFixtureText, writeFixtureFile } from '../skill-eval-fixture-helpers';
+} from '../../eval/skills/skill-eval-api-contract-design-fixtures';
+import { readFixtureText, writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
 
 const roots: string[] = [];
 

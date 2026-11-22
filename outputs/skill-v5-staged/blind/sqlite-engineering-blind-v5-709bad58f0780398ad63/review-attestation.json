@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "status": "unimported",
+  "assignmentId": "blind-v5-709bad58f0780398ad63",
+  "skill": "sqlite-engineering",
+  "scenarioId": "sqlite-engineering-full-task-1-individual",
+  "pairId": "sqlite-engineering-full-task-1-individual:f63a65a3-02e7-4f44-ad9c-7810b3607dc1",
+  "reviewerThread": "logfare-stateless-2355f794-9a48-4feb-b068-8237bc2c94d2",
+  "reviewerIdentitySource": "external-reviewer-adapter-output",
+  "reviewerAdapter": "scripts/kory-logfare-stateless-reviewer",
+  "reviewerModel": "deepseek-v4.1-flash-1017",
+  "reviewerModelSource": "configured-provider-model-metadata",
+  "reviewerBaseUrl": "http://127.0.0.1:17841/v1",
+  "promptSha256": "3d246152b2ea6405401248ca6d05eb04396f3c5207ce563e2fa42114dc90ea10",
+  "privateAssignmentSha256": "10a142323fdf7f5139dfaa635630d82cb647b408ce3acb507056d801d3060176",
+  "reviewerEventsSha256": "46837626a4eef25f86ac5f99296a1fc48ab649501cf01602c4cae4543504aef2",
+  "judgeOutputSha256": "e4ac0e41c47e1cd62eff46f51e2747e04b09b7caaa8c01a14b2cfe6c66f36e22",
+  "envelopeSha256": "31dea53485a87e78f2b8b8bc0f8e10ddcee01298961ac73cfd907b6c696e6c2d",
+  "importValidation": {
+    "mode": "validate",
+    "validatedReviews": 1,
+    "persistedReviews": 0
+  },
+  "promptSnapshotPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-AH8ndM/review-task.prompt.txt",
+  "reviewerEventsPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-AH8ndM/reviewer-events.json",
+  "envelopePath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-AH8ndM/import.json"
+}

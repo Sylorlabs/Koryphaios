@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { canonicalizePath, findExecutableOnPath, isUnix } from '../../runtime/platform';
-import { snapshotSkillEvalWorkspace } from '../skill-eval-text-patch';
+import { snapshotSkillEvalWorkspace } from '../../eval/skills/skill-eval-text-patch';
 
 const roots: string[] = [];
 const mkfifoBinary = findExecutableOnPath('mkfifo');
@@ -70,7 +70,7 @@ mock.module('node:fs', () => ({ ...fs,
     return originalReaddir(...args);
   },
 }));
-const { snapshotSkillEvalWorkspace } = await import(${JSON.stringify(resolve(import.meta.dir, '../skill-eval-text-patch.ts'))});
+const { snapshotSkillEvalWorkspace } = await import(${JSON.stringify(resolve(import.meta.dir, '../../eval/skills/skill-eval-text-patch.ts'))});
 process.stdout.write(JSON.stringify({ snapshot: snapshotSkillEvalWorkspace(workspace) }) + '\\n');
 `;
   const child = Bun.spawn([process.execPath, '-e', source], {

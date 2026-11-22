@@ -119,6 +119,14 @@ export interface AutoScrollHandle {
   jumpToBottom: (behavior?: ScrollBehavior) => void;
   /** Manually set follow mode (e.g. when the user wants to pause). */
   setFollow: (v: boolean) => void;
+  /** Suspend or resume every pin this controller performs.
+   *
+   *  A chat that is opening is positioned by the list that owns its measured
+   *  extent, not by this controller. While suspended, `requestPin`,
+   *  `notifyNewEntry` and the observers are inert, so nothing here can write
+   *  `scrollTop` and fight the opening position. Autoscroll is for following a
+   *  live agent, never for placing a transcript that is still loading. */
+  setSuspended: (v: boolean) => void;
   /** Read the current distance from the bottom in pixels. */
   getDistanceFromBottom: () => number;
   /** Attach the scroll/observer listeners to the current container.
@@ -155,6 +163,8 @@ export function createAutoScroll(
   // Number.NEGATIVE_INFINITY so "recent" is false until a gesture happens.
   let readerInputAt = Number.NEGATIVE_INFINITY;
   let settleFrames = 0;
+  // True while a transcript is opening and the list owns the initial position.
+  let suspended = false;
 
   function getEl(): HTMLDivElement | undefined {
     return getContainer();
@@ -187,6 +197,9 @@ export function createAutoScroll(
    *  height-growth sources (streaming tokens, the VirtualList's own
    *  measurement pass, the observers below) into one write. */
   function schedulePin() {
+    // A suspended controller must not queue a pin: the opening position belongs
+    // to the list until it reports that it has landed.
+    if (suspended) return;
     if (rafId !== null) return;
     rafId = requestAnimationFrame(() => {
       rafId = null;
@@ -319,6 +332,7 @@ export function createAutoScroll(
     // effect to re-run when `follow` changes — only when the consumer's
     // own state (e.g. feed length) changes.
     untrack(() => {
+      if (suspended) return;
       updateContentBelow();
       if (!follow) return;
       schedulePin();
@@ -327,6 +341,7 @@ export function createAutoScroll(
 
   function notifyNewEntry() {
     untrack(() => {
+      if (suspended) return;
       updateContentBelow();
       if (!follow) unseenCount++;
     });
@@ -349,6 +364,19 @@ export function createAutoScroll(
   function setFollow(v: boolean) {
     follow = v;
     if (v && unseenCount > 0) unseenCount = 0;
+  }
+
+  function setSuspended(v: boolean) {
+    suspended = v;
+    if (!v) return;
+    // Drop anything already queued so a pin scheduled before the open cannot
+    // land on top of the list's first paint.
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+    settleFrames = 0;
+    pinnedTop = null;
   }
 
   // ---- Observer wiring --------------------------------------------------
@@ -438,6 +466,7 @@ export function createAutoScroll(
     },
     requestPin,
     notifyNewEntry,
+    setSuspended,
     jumpToBottom,
     setFollow,
     getDistanceFromBottom,

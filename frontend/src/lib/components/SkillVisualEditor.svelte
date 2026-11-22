@@ -650,7 +650,7 @@
   {#if lossRisk}
     <section class="locked-source" role="note" aria-labelledby={`${editorId}-locked-title`}>
       <div class="locked-title-row">
-        <span class="warning-icon" aria-hidden="true"><AlertTriangle size={19} /></span>
+        <span class="warning-icon" aria-hidden="true"><AlertTriangle size={18} /></span>
         <div>
           <h3 id={`${editorId}-locked-title`}>Raw source protected</h3>
           <p>{lossRisk.reason} Its original bytes remain unchanged.</p>
@@ -947,13 +947,8 @@
 
   .warning-icon {
     display: inline-flex;
-    width: 34px;
-    height: 34px;
     flex: 0 0 auto;
-    align-items: center;
-    justify-content: center;
-    border-radius: 9px;
-    background: var(--color-surface-1);
+    margin-top: 1px;
     color: var(--color-warning);
   }
 

@@ -1,0 +1,10 @@
+{"provider":"codex","cliVersion":"synthetic-0.0.0","recordedAt":"2026-11-11T09:00:00.000Z","argv":["codex","--ask-for-approval","never","exec","--json","--ephemeral","--skip-git-repo-check","--color","never","--sandbox","read-only","--model","gpt-5-codex","-"],"synthetic":true,"note":"Hand-authored synthetic turn in the exact shape the adapter parses. Replace with a real recording via backend/scripts/record-cli-transcript.ts."}
+{"t":5,"stream":"stdout","data":"{\"type\":\"thread.started\",\"thread_id\":\"synthetic-thread-1\"}\n"}
+{"t":10,"stream":"stdout","data":"{\"type\":\"turn.started\"}\n"}
+{"t":15,"stream":"stdout","data":"{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"reasoning\",\"text\":\"**Planning the listing**\\n\\nI need the contents of src/ before I can summarise main.ts.\"}}\n"}
+{"t":20,"stream":"stdout","data":"{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"ls src\",\"status\":\"in_progress\"}}\n"}
+{"t":25,"stream":"stdout","data":"{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"ls src\",\"aggregated_output\":\"main.ts\\nroutes.ts\\nserver.ts\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n"}
+{"t":30,"stream":"stdout","data":"{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"reasoning\",\"text\":\"**Reading the entry point**\\n\\nmain.ts is the likely entry point, so it is the file to summarise.\"}}\n"}
+{"t":35,"stream":"stdout","data":"{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"agent_message\",\"text\":\"`main.ts` starts the HTTP server and wires in the routes from `routes.ts`.\"}}\n"}
+{"t":40,"stream":"stdout","data":"{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":1840,\"cached_input_tokens\":1024,\"output_tokens\":96}}\n"}
+{"t":42,"stream":"exit","code":0}

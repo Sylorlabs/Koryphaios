@@ -1,0 +1,46 @@
+{"type":"reviewer-status","assignmentId":"blind-v5-00cc97efa37174619862","skill":"factual-research","scenarioId":"factual-research-full-task-1-individual","reason":"preflight","ready":false,"canAttempt":false,"routeVerified":false,"browserBusy":false,"executableAvailable":true,"isolationVerified":false,"stageOnlyAttemptAllowed":true,"detail":"Provider-neutral reviewer executable is available; route and isolation are unverified. Stage-only evidence requires coordinator qualification before ingestion."}
+{"type":"reviewer-status","assignmentId":"blind-v5-00cc97efa37174619862","skill":"factual-research","scenarioId":"factual-research-full-task-1-individual","reason":"reviewer process failure","ready":false,"canAttempt":false,"routeVerified":false,"browserBusy":false,"executableAvailable":true,"isolationVerified":false,"stageOnlyAttemptAllowed":true,"detail":"Provider-neutral reviewer executable is available; route and isolation are unverified. Stage-only evidence requires coordinator qualification before ingestion."}
+{"type":"progress","complete":1,"totalQueued":2,"assignmentId":"blind-v5-00cc97efa37174619862","skill":"factual-research","scenarioId":"factual-research-full-task-1-individual","reviewerThread":"logfare-stateless-498f91b5-418b-4029-8071-0df958389d9c","attempts":2,"persisted":false,"staged":true,"infrastructureFailure":false}
+{"type":"reviewer-status","assignmentId":"blind-v5-db753c206794f33b1f2a","skill":"factual-research","scenarioId":"factual-research-full-task-2-individual","reason":"preflight","ready":false,"canAttempt":false,"routeVerified":false,"browserBusy":false,"executableAvailable":true,"isolationVerified":false,"stageOnlyAttemptAllowed":true,"detail":"Provider-neutral reviewer executable is available; route and isolation are unverified. Stage-only evidence requires coordinator qualification before ingestion."}
+{"type":"reviewer-status","assignmentId":"blind-v5-db753c206794f33b1f2a","skill":"factual-research","scenarioId":"factual-research-full-task-2-individual","reason":"reviewer process failure","ready":false,"canAttempt":false,"routeVerified":false,"browserBusy":false,"executableAvailable":true,"isolationVerified":false,"stageOnlyAttemptAllowed":true,"detail":"Provider-neutral reviewer executable is available; route and isolation are unverified. Stage-only evidence requires coordinator qualification before ingestion."}
+{"type":"progress","complete":2,"totalQueued":2,"assignmentId":"blind-v5-db753c206794f33b1f2a","skill":"factual-research","scenarioId":"factual-research-full-task-2-individual","reviewerThread":"logfare-stateless-bd21d802-9a8c-497a-a5c5-ed1b28a8f251","attempts":2,"persisted":false,"staged":true,"infrastructureFailure":false}
+{
+  "schemaVersion": 1,
+  "dryRun": false,
+  "reviewOnly": true,
+  "reviewerModel": "deepseek-v4.1-flash-1017",
+  "reviewerBaseUrl": "http://127.0.0.1:17841/v1",
+  "reasoningEffort": "low",
+  "concurrency": 1,
+  "maxPerSkill": 2,
+  "retryFailed": true,
+  "maxReviewerAttempts": 3,
+  "reviewerWallClockMs": 180000,
+  "requestedSkills": [
+    "factual-research"
+  ],
+  "skippedExistingReviews": 0,
+  "availableAssignments": 2,
+  "queued": 2,
+  "completed": 2,
+  "notAttempted": 0,
+  "terminalBlocker": null,
+  "persisted": 0,
+  "reviewed": 2,
+  "stagedReviews": [
+    {
+      "assignmentId": "blind-v5-00cc97efa37174619862",
+      "reviewerThread": "logfare-stateless-498f91b5-418b-4029-8071-0df958389d9c",
+      "attestationPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-6vLN2F/review-attestation.json",
+      "envelopePath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-6vLN2F/import.json"
+    },
+    {
+      "assignmentId": "blind-v5-db753c206794f33b1f2a",
+      "reviewerThread": "logfare-stateless-bd21d802-9a8c-497a-a5c5-ed1b28a8f251",
+      "attestationPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-hLd2TG/review-attestation.json",
+      "envelopePath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-hLd2TG/import.json"
+    }
+  ],
+  "infrastructureFailures": 0,
+  "failures": []
+}

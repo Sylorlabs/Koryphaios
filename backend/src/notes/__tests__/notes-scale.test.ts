@@ -17,6 +17,7 @@ const notesScaleDatabaseDir = process.env.DATABASE_URL
 process.env.DATABASE_URL ??= `sqlite:${join(notesScaleDatabaseDir!, 'notes-scale.sqlite')}`;
 
 const { initDb, db } = await import('../../db');
+const { setNoteSearchText } = await import('../note-search-index');
 const { notes } = await import('../../db/schema');
 import { nanoid } from 'nanoid';
 const {
@@ -60,9 +61,13 @@ describe('notes at scale', () => {
       createdAt: now,
       updatedAt: now,
     }));
-    // Insert in chunks (FTS triggers keep the index in sync).
+    // Insert in chunks; FTS maintenance is explicit post-migration (no triggers).
     for (let i = 0; i < rows.length; i += 500) {
-      await db.insert(notes).values(rows.slice(i, i + 500));
+      const chunk = rows.slice(i, i + 500);
+      await db.insert(notes).values(chunk);
+      for (const row of chunk) {
+        setNoteSearchText(row.id, row.title, row.content, row.tags);
+      }
     }
     invalidateNotesCache();
   });

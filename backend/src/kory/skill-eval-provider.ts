@@ -1,4 +1,7 @@
+import { readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Provider, ProviderEvent, StreamRequest } from '../providers/types';
+import type { ProviderContentBlock } from '../providers/types';
 import {
   OmnirushCliProvider,
   resolveOmnirushRuntimeBinding,
@@ -7,7 +10,11 @@ import {
 } from '../providers/omnirush-cli';
 import { OpenAIProvider } from '../providers/openai';
 import { SANDBOX_PRESETS, type ModelDef, type ProviderConfig } from '@koryphaios/shared';
-import type { SkillEvalExecutionObservation, SkillEvalExecutor } from './skill-eval-execution';
+import type {
+  SkillEvalExecutionObservation,
+  SkillEvalExecutor,
+  SkillEvalImageAttachment,
+} from './skill-eval-execution';
 import type { SkillInfrastructureFailure } from './skill-evaluations';
 import {
   applySkillEvalTextPatch,
@@ -29,8 +36,45 @@ export interface ProviderTextPatchExecutorOptions {
   wallClockMs?: number;
 }
 
-function boundedDetail(value: string): string {
-  return value
+/**
+ * Project fixture images into the request as real image content parts.
+ *
+ * A text-only model gets the same parts: the provider adapter is the component that
+ * decides whether it can accept them, so transport is never downgraded silently here.
+ * Every attachment is read from the materialized fixture, which both arms share, so the
+ * bytes a candidate sees are the bytes the fixture recorded.
+ */
+function attachmentBlocks(
+  workingDirectory: string,
+  prompt: string,
+  attachments: readonly SkillEvalImageAttachment[],
+): string | ProviderContentBlock[] {
+  if (attachments.length === 0) return prompt;
+  const blocks: ProviderContentBlock[] = [{ type: 'text', text: prompt }];
+  for (const attachment of attachments) {
+    const path = join(workingDirectory, attachment.relativePath);
+    const stats = statSync(path);
+    if (!stats.isFile()) {
+      throw new Error(`Image attachment ${attachment.relativePath} is not a regular file`);
+    }
+    // Screenshots are bounded so one fixture cannot inflate the request without limit.
+    if (stats.size > 8 * 1024 * 1024) {
+      throw new Error(`Image attachment ${attachment.relativePath} exceeds 8 MiB`);
+    }
+    blocks.push({
+      type: 'text',
+      text: `Attached image: ${attachment.label}`,
+    });
+    blocks.push({
+      type: 'image',
+      imageData: readFileSync(path).toString('base64'),
+      imageMimeType: attachment.mimeType,
+    });
+  }
+  return blocks;
+}
+
+function boundedDetail(value: string): string {  return value
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/giu, 'Bearer [redacted]')
     .replace(/(?:api[_-]?key|token|secret|password)\s*[:=]\s*[^\s,;]+/giu, '$1=[redacted]')
     .trim()
@@ -225,12 +269,14 @@ export function createDirectProviderTextPatchSkillEvalExecutor(
     runtimeIdentity: options.runtimeIdentity,
     tools: [...TEXT_PATCH_TOOLS],
     budget: { wallClockMs },
-    execute: async ({ scenario, workingDirectory, taskPrompt, skillContext }) => {
+    execute: async ({ scenario, workingDirectory, taskPrompt, skillContext, attachments }) => {
       const started = Date.now();
+      const imageAttachments = attachments ?? [];
       if (
-        scenario.environment.kind === 'browser' ||
-        scenario.environment.kind === 'device' ||
-        scenario.environment.kind === 'public-web'
+        imageAttachments.length === 0 &&
+        (scenario.environment.kind === 'browser' ||
+          scenario.environment.kind === 'device' ||
+          scenario.environment.kind === 'public-web')
       ) {
         const detail = `Direct provider text-patch evaluation cannot execute ${scenario.environment.kind} environments; source-patch mode is limited to synthetic, repository, and cli scenarios.`;
         return observationFailure(started, failure('tool', detail, [detail]), [
@@ -293,7 +339,11 @@ export function createDirectProviderTextPatchSkillEvalExecutor(
           messages: [
             {
               role: 'user',
-              content: textPatchPrompt(taskPrompt, skillContext, snapshot),
+              content: attachmentBlocks(
+                workingDirectory,
+                textPatchPrompt(taskPrompt, skillContext, snapshot),
+                imageAttachments,
+              ),
             },
           ],
           systemPrompt: '',
@@ -358,6 +408,13 @@ export function createDirectProviderTextPatchSkillEvalExecutor(
           output: collected.output,
           evidence: [
             ...collected.evidence,
+            ...(imageAttachments.length
+              ? [
+                  `Provider request carried ${String(imageAttachments.length)} image attachment(s) as image content parts: ${imageAttachments
+                    .map((attachment) => `${attachment.relativePath} (${attachment.mimeType}, ${attachment.label})`)
+                    .join('; ')}.`,
+                ]
+              : []),
             'Direct provider text-patch mode produced no test-execution evidence; host checks remain authoritative.',
             `Text-only patch adapter parsed ${parsed.operations.length} operation(s) in ${parsed.format} format.`,
             ...(changedPaths.length

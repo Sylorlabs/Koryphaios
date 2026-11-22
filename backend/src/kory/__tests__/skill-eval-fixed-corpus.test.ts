@@ -13,11 +13,11 @@ import { join } from 'node:path';
 import {
   AUTH_SECRETS_SECURITY_SKILL_EVAL_MATERIALIZERS,
   AUTH_SECRETS_SECURITY_SKILL_EVAL_SCORERS,
-} from '../skill-eval-auth-secrets-security-fixtures';
+} from '../../eval/skills/skill-eval-auth-secrets-security-fixtures';
 import {
   PRIVACY_WEB_DEVICE_SKILL_EVAL_MATERIALIZERS,
   PRIVACY_WEB_DEVICE_SKILL_EVAL_SCORERS,
-} from '../skill-eval-privacy-web-device-fixtures';
+} from '../../eval/skills/skill-eval-privacy-web-device-fixtures';
 
 const roots: string[] = [];
 afterEach(() => {

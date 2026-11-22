@@ -831,19 +831,17 @@
 </script>
 
 <div class="memory-shell flex h-full min-h-0 min-w-0 flex-col bg-[var(--color-surface-0)]">
-  <header
-    class="memory-header flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border)] px-6 py-4"
-  >
-    <div>
-      <div class="flex items-center gap-2">
-        <Brain size={20} class="text-[var(--color-accent)]" />
-        <h3 class="text-xl font-semibold text-[var(--color-text-primary)]">Memory</h3>
-      </div>
-      <p class="mt-0.5 text-sm text-[var(--color-text-muted)]">
+  <header class="memory-header flex shrink-0 flex-wrap items-start justify-between gap-x-6 gap-y-3">
+    <div class="memory-heading min-w-0">
+      <h3 class="memory-title">Memory</h3>
+      <p class="memory-description">
         Keep the facts, preferences, and decisions worth carrying forward.
       </p>
+      <div class="memory-scope">
+        <KnowledgeScope scope={currentScope} description={scopeExplanation()} />
+      </div>
     </div>
-    <div class="flex items-center gap-2">
+    <div class="flex flex-wrap items-center gap-2">
       <span class="hidden text-xs text-[var(--color-text-muted)] sm:inline"
         >{[
           memoryStore.settings?.universalMemoryEnabled,
@@ -878,8 +876,6 @@
       </button>
     </div>
   </header>
-
-  <KnowledgeScope scope={currentScope} description={scopeExplanation()} />
 
   <div
     class="memory-layout relative flex min-h-0 flex-1"
@@ -1273,7 +1269,7 @@
       {:else if !currentFile()?.exists && !selectedCustom}
         <div class="flex flex-1 items-center justify-center p-8">
           <div class="max-w-sm text-center">
-            <Sparkles size={28} class="mx-auto mb-3 text-[var(--color-accent)]" />
+            <Sparkles size={24} class="mx-auto mb-3 text-[var(--color-accent)]" />
             <h5 class="text-base font-semibold text-[var(--color-text-primary)]">
               {isRules ? 'Set your conventions' : 'Start with what matters'}
             </h5>
@@ -1572,7 +1568,7 @@
                 valueText={formatBytes(memoryStore.settings?.maxDocumentBytes ?? 1_000_000)}
                 onchange={(value) => void memoryStore.saveSettings({ maxDocumentBytes: value })}
               />
-              <p class="mt-1.5 text-[10px] leading-4 text-[var(--color-text-muted)]">
+              <p class="mt-1.5 text-[11px] leading-4 text-[var(--color-text-muted)]">
                 Current limit: {formatBytes(memoryStore.settings?.maxDocumentBytes ?? 1_000_000)}.
                 The field accepts exact bytes.
               </p>
@@ -1645,8 +1641,33 @@
     margin: 0 auto;
   }
   .memory-header {
-    border-bottom: 0;
-    padding-bottom: 10px;
+    padding: 28px 32px 16px;
+  }
+  .memory-heading {
+    flex: 1 1 320px;
+  }
+  .memory-title {
+    margin: 0;
+    font-size: 20px;
+    line-height: 1.3;
+    font-weight: 600;
+    color: var(--color-text-primary);
+  }
+  .memory-description {
+    margin: 4px 0 0;
+    max-width: 64ch;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--color-text-muted);
+  }
+  /* Scope picker + its info disclosure sit together under the description
+     instead of the disclosure floating to the far edge of its own row. */
+  .memory-scope {
+    margin-top: 12px;
+  }
+  .memory-scope :global(.knowledge-scope-row) {
+    justify-content: flex-start;
+    padding: 0;
   }
   .memory-library,
   .memory-document-heading {
@@ -1677,7 +1698,9 @@
     .memory-back {
       display: inline-flex;
     }
-    .memory-header,
+    .memory-header {
+      padding: 20px 16px 12px;
+    }
     .memory-document-heading {
       padding: 16px;
     }

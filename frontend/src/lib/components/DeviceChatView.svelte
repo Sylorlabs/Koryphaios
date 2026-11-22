@@ -184,7 +184,7 @@
     font-size: 13px;
   }
   header span {
-    font-size: 10px;
+    font-size: 11px;
     color: var(--color-text-muted);
     overflow: hidden;
     white-space: nowrap;
@@ -235,7 +235,7 @@
     line-height: 1.7;
   }
   .who {
-    font-size: 10px;
+    font-size: 11px;
     color: var(--color-accent);
     display: block;
     margin-bottom: 6px;
@@ -279,7 +279,7 @@
     background: var(--color-surface-2);
   }
   .composer label {
-    font-size: 10px;
+    font-size: 11px;
     color: var(--color-text-muted);
     display: block;
     margin-bottom: 7px;
@@ -303,7 +303,7 @@
     display: grid;
     place-items: center;
     background: var(--color-accent);
-    color: var(--color-text-on-accent);
+    color: var(--color-on-accent);
     border: 0;
     width: 36px;
     height: 36px;
@@ -311,7 +311,7 @@
     flex-shrink: 0;
   }
   .composer > span {
-    font-size: 9px;
+    font-size: 11px;
     color: var(--color-text-muted);
     display: block;
     margin-top: 8px;

@@ -5,14 +5,14 @@ import { join } from 'node:path';
 import {
   C_CPP_NATIVE_FIXTURES,
   C_CPP_SKILL_EVAL_MATERIALIZERS,
-} from '../skill-eval-c-cpp-fixtures';
+} from '../../eval/skills/skill-eval-c-cpp-fixtures';
 import {
   nativeFixturePreflight,
   scoreNativeFixture,
   type NativeFixture,
   type NativeRun,
-} from '../skill-eval-native-runner';
-import { writeFixtureFile } from '../skill-eval-fixture-helpers';
+} from '../../eval/skills/skill-eval-native-runner';
+import { writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
 import { canonicalizePath, isMac } from '../../runtime/platform';
 
 // These solutions calibrate the evaluator only. They must not be copied into

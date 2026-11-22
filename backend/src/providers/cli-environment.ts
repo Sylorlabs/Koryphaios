@@ -79,6 +79,7 @@ const KORY_BRIDGE_ENV_KEYS = [
   'KORY_MCP_BRIDGE_SCRIPT',
   'KORY_MCP_BRIDGE_COMMAND',
   'KORY_HOOK_BRIDGE_SCRIPT',
+  'KORY_HOOK_BRIDGE_COMMAND',
 ] as const;
 
 const PROVIDER_ENV_KEYS: Record<NativeCliProvider, readonly string[]> = {

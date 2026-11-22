@@ -182,4 +182,73 @@ describe('context-window projection', () => {
     expect(chunks.join('\n')).not.toContain('A'.repeat(100));
     expect(chunks.join('\n')).not.toContain('B'.repeat(100));
   });
+
+  test('a single screenshot never exceeds a 1M-token window', () => {
+    // 1.4 MB PNG, base64 expanded, exactly what the composer sends.
+    const imageData = 'A'.repeat(Math.ceil((1_400_000 * 4) / 3));
+    const message: ProjectableContextMessage = {
+      role: 'user',
+      content: [{ type: 'image', imageMimeType: 'image/png', imageData }],
+    };
+    // Clamped image ceiling plus the 7-token role/envelope overhead.
+    const tokens = projectionMessagesTokenUpperBound([message]);
+    expect(tokens).toBe(4_103);
+    expect(tokens).toBeLessThan(1_000_000);
+
+    const plan = planContextWindowProjection({
+      ...params,
+      targetModel: 'gemini-4-argon',
+      targetWindow: 1_000_000,
+      messages: [message],
+    });
+    expect(plan.sourceTokens).toBe(4_103);
+    expect(plan.required).toBe(false);
+  });
+
+  test('rendered image geometry is billed, not the base64 payload', () => {
+    // Identical payload in both, so any difference comes from geometry alone.
+    const payload = 'A'.repeat(1_866_667);
+    const envelope = 7;
+    const small = projectionMessagesTokenUpperBound([
+      {
+        role: 'user',
+        content: [{ type: 'image', imageMimeType: 'image/png', imageData: payload, width: 800, height: 600 }],
+      },
+    ]);
+    const large = projectionMessagesTokenUpperBound([
+      {
+        role: 'user',
+        content: [
+          { type: 'image', imageMimeType: 'image/png', imageData: payload, width: 4000, height: 3000 },
+        ],
+      },
+    ]);
+    // 800x600 -> 480k pixels -> ~640 tokens -> clamped up to the floor.
+    expect(small).toBe(1_024 + envelope);
+    // 4000x3000 -> 12M pixels -> clamped down to the ceiling.
+    expect(large).toBe(4_096 + envelope);
+    expect(large).toBeLessThan(1_000_000);
+  });
+
+  test('a payload-free image block still reserves a full image', () => {
+    const tokens = projectionMessagesTokenUpperBound([
+      { role: 'user', content: [{ type: 'image', imageMimeType: 'image/png' }] },
+    ]);
+    // 4096 ceiling plus the role/envelope overhead; a CLI-harness transcript
+    // reference is still an image the provider will bill for.
+    expect(tokens).toBe(4_103);
+  });
+
+  test('a max-size audio or video attachment cannot trip the window guard alone', () => {
+    // 15 MB (MAX_CHAT_MEDIA_BYTES) base64-expanded: ~20M characters.
+    const mediaData = 'A'.repeat(Math.ceil((15 * 1024 * 1024 * 4) / 3));
+    for (const type of ['audio', 'video'] as const) {
+      const tokens = projectionMessagesTokenUpperBound([
+        { role: 'user', content: [{ type, mediaMimeType: 'video/mp4', mediaData }] },
+      ]);
+      // Clamped to the per-attachment ceiling plus envelope overhead.
+      expect(tokens).toBe(32_768 + 7);
+      expect(tokens).toBeLessThan(1_000_000);
+    }
+  });
 });

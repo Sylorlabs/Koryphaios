@@ -2,8 +2,8 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
-import { writeFixtureFile } from '../skill-eval-fixture-helpers';
+import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
+import { writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
 import {
   DOTNET_DISPOSAL_CONTROL,
   DOTNET_DISPOSAL_SCENARIO,
@@ -12,7 +12,7 @@ import {
   V5_LANGUAGE_HOST_SKILL_EVAL_MATERIALIZERS,
   V5_LANGUAGE_HOST_SKILL_EVAL_SCORERS,
   dotnetHostReadiness,
-} from '../skill-eval-v5-language-host-fixtures';
+} from '../../eval/skills/skill-eval-v5-language-host-fixtures';
 import { loadV5SkillPackages } from '../skill-packages';
 
 const roots: string[] = [];

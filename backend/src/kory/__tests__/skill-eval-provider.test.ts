@@ -7,8 +7,8 @@ import {
   createDirectProviderTextPatchSkillEvalExecutor,
   createOmnirushTextOnlyPatchSkillEvalExecutor,
   createOpenRouterTextOnlyPatchSkillEvalExecutor,
-} from '../skill-eval-provider';
-import type { SkillEvalScenarioV3 } from '../skill-eval-harness';
+} from '../../eval/skills/skill-eval-provider';
+import type { SkillEvalScenarioV3 } from '../../eval/skills/skill-eval-harness';
 
 const workspaceScenario = (
   kind: 'synthetic' | 'repository' | 'cli' | 'browser' | 'public-web' | 'device' = 'synthetic',
@@ -178,7 +178,10 @@ describe('direct provider skill evaluation text patch executor', () => {
       const incomplete = await executor(
         provider([{ type: 'content_delta', content: '<kory-eval-patch>[]</kory-eval-patch>' }]),
       ).execute(input(root));
-      expect(incomplete.taskFailure).toContain('without a complete event');
+      // A stream that ends without its completion event is provider-side
+      // truncation, not a skill failure: it is infrastructure.
+      expect(incomplete.infrastructureFailure?.kind).toBe('provider');
+      expect(incomplete.infrastructureFailure?.detail).toContain('without a complete event');
 
       const tool = await executor(
         provider([{ type: 'tool_use_start', toolName: 'shell' }]),
@@ -414,7 +417,7 @@ describe('direct provider skill evaluation text patch executor', () => {
           `#!${process.execPath}
 import { appendFileSync } from 'node:fs';
 appendFileSync(${JSON.stringify(used)}, '${label}:' + process.argv.slice(2).join(' ') + '\\n');
-if (process.argv.includes('--version')) process.stdout.write('omnirush ${label}\\n');
+if (process.argv.includes('--version')) process.stdout.write('omnirush ${label} 9.9.9\\n');
 else if (process.argv.includes('whoami')) process.stdout.write('verified\\n');
 else if (process.argv.includes('--print')) process.stdout.write(${JSON.stringify(patch)} + '\\n');
 else process.exit(1);
@@ -422,6 +425,16 @@ else process.exit(1);
           { mode: 0o700 },
         );
         chmodSync(launcher, 0o700);
+      }
+      // The sandboxed print-mode request now provisions box helpers from the
+      // probed CLI version; pre-seed the exact helper files so the test never
+      // reaches the registry.
+      for (const architecture of ['arm64', 'x64']) {
+        const helperRoot = join(stateRoot, 'box-helpers', '9.9.9', 'box', `linux-${architecture}`);
+        mkdirSync(helperRoot, { recursive: true, mode: 0o700 });
+        for (const name of ['boxd', 'boxrun', 'boxsh']) {
+          writeFileSync(join(helperRoot, name), '#!/bin/sh\n', { mode: 0o700 });
+        }
       }
 
       process.env.PATH = join(testRoot, 'a');
@@ -469,6 +482,96 @@ else process.exit(1);
       if (previousStateRoot === undefined) delete process.env.OMNIRUSH_DIR;
       else process.env.OMNIRUSH_DIR = previousStateRoot;
       rmSync(testRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('image attachment transport', () => {
+  // A 1x1 PNG. Small enough to inline, real enough to be decoded by any adapter.
+  const PNG = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    'base64',
+  );
+
+  const capturingProvider = (seen: StreamRequest[]): Provider => ({
+    ...provider([
+      {
+        type: 'content_delta',
+        content: '<kory-eval-patch>[{"operation":"write","path":"result.txt","content":"done\\n"}]</kory-eval-patch>',
+      },
+      { type: 'complete', finishReason: 'end_turn' },
+    ]),
+    async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
+      seen.push(request);
+      yield {
+        type: 'content_delta',
+        content: '<kory-eval-patch>[{"operation":"write","path":"result.txt","content":"done\\n"}]</kory-eval-patch>',
+      };
+      yield { type: 'complete', finishReason: 'end_turn' };
+    },
+  });
+
+  test('a device scenario with no visual evidence is still refused', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kory-provider-eval-'));
+    try {
+      writeFileSync(join(root, 'README.md'), 'fixture\n');
+      const result = await executor(provider([])).execute(input(root, workspaceScenario('device')));
+      expect(result.infrastructureFailure?.kind).toBe('tool');
+      expect(result.evidence.join(' ')).toContain('cannot execute device environments');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('fixture images reach the provider as image content parts', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kory-provider-eval-'));
+    try {
+      writeFileSync(join(root, 'README.md'), 'fixture\n');
+      mkdirSync(join(root, 'captures'), { recursive: true });
+      writeFileSync(join(root, 'captures/step-1.png'), PNG);
+      const seen: StreamRequest[] = [];
+      const result = await executor(capturingProvider(seen)).execute({
+        ...input(root, workspaceScenario('device')),
+        attachments: [
+          { relativePath: 'captures/step-1.png', mimeType: 'image/png', label: 'export dialog after authorize' },
+        ],
+      });
+      expect(result.infrastructureFailure).toBeUndefined();
+      expect(seen).toHaveLength(1);
+      const content = seen[0].messages[0].content;
+      expect(Array.isArray(content)).toBe(true);
+      const parts = content as { type: string; imageData?: string; imageMimeType?: string }[];
+      const image = parts.find((part) => part.type === 'image');
+      expect(image?.imageMimeType).toBe('image/png');
+      expect(Buffer.from(image?.imageData ?? '', 'base64').equals(PNG)).toBe(true);
+      expect(parts.some((part) => part.type === 'text' && (part as { text?: string }).text?.includes('export dialog'))).toBe(true);
+      expect(result.evidence.join(' ')).toContain('carried 1 image attachment(s)');
+      expect(result.evidence.join(' ')).toContain('captures/step-1.png');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('an oversized attachment is rejected instead of being silently trimmed', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kory-provider-eval-'));
+    try {
+      writeFileSync(join(root, 'README.md'), 'fixture\n');
+      mkdirSync(join(root, 'captures'), { recursive: true });
+      writeFileSync(join(root, 'captures/huge.png'), Buffer.alloc(9 * 1024 * 1024, 7));
+      let threw = '';
+      try {
+        await executor(capturingProvider([])).execute({
+          ...input(root, workspaceScenario('device')),
+          attachments: [
+            { relativePath: 'captures/huge.png', mimeType: 'image/png', label: 'oversized capture' },
+          ],
+        });
+      } catch (error) {
+        threw = error instanceof Error ? error.message : String(error);
+      }
+      expect(threw).toContain('exceeds 8 MiB');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });

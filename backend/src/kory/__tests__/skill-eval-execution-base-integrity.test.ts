@@ -12,14 +12,16 @@ import {
   type SkillEvalDeterministicScorer,
   type SkillEvalExecutor,
   type SkillEvalFixtureMaterializer,
-} from '../skill-eval-execution';
+} from '../../eval/skills/skill-eval-execution';
 
 const cleanups: Array<() => void> = [];
 afterEach(() => { while (cleanups.length) cleanups.pop()?.(); });
 const skillPackage = loadV5SkillPackages().packages.find(item => item.sidecar.name === 'deterministic-debugging')!;
 const scenario = skillPackage.evaluation.tasks[0]!;
 
-function fixture(mutate: 'executor' | 'scorer' | 'replace-base' | 'fingerprint-collision' | null) {
+function fixture(
+  mutate: 'executor' | 'scorer' | 'replace-base' | 'fingerprint-collision' | 'infrastructure' | null,
+) {
   const projectRoot = canonicalizePath(mkdtempSync(join(tmpdir(), 'kory-base-integrity-')));
   cleanups.push(() => rmSync(projectRoot, { recursive: true, force: true }));
   let executions = 0;
@@ -64,6 +66,21 @@ function fixture(mutate: 'executor' | 'scorer' | 'replace-base' | 'fingerprint-c
         renameSync(observedBase, `${observedBase}-original`);
         mkdirSync(observedBase);
         writeFileSync(join(observedBase, 'state.txt'), 'original\n');
+      }
+      if (mutate === 'infrastructure') {
+        // A provider outage must not become a zero-quality candidate row.
+        return {
+          output: 'provider unavailable',
+          evidence: ['synthetic provider outage'],
+          artifacts: [],
+          durationMs: 0,
+          infrastructureFailure: {
+            kind: 'provider' as const,
+            retryable: true,
+            detail: 'synthetic provider outage',
+            evidence: ['synthetic provider outage'],
+          },
+        };
       }
       writeFileSync(join(workingDirectory, 'state.txt'), `${experiment.variant}\n`);
       return { output: 'Synthetic integrity control only', evidence: [], artifacts: [], durationMs: 0 };
@@ -128,4 +145,51 @@ test('candidate-only edits retain the captured original fingerprint and exact be
     expect(manifest.changes).toEqual([expect.objectContaining({ path: 'state.txt', change: 'modified' })]);
     expect(readFileSync(join(dirname(artifact!.location), 'before-files', 'state.txt'), 'utf8')).toBe('original\n');
   }
+});
+
+test('harness scratch is excluded from the workspace fingerprint while candidate files stay', () => {
+  const clean = mkdtempSync(join(tmpdir(), 'fingerprint-clean-'));
+  const scratchy = mkdtempSync(join(tmpdir(), 'fingerprint-scratch-'));
+  for (const root of [clean, scratchy]) writeFileSync(join(root, 'Sources.swift'), 'candidate\n');
+  mkdirSync(join(scratchy, '.kory-tmp/swift-cache'), { recursive: true });
+  writeFileSync(join(scratchy, '.kory-tmp/swift-cache/Foundation.swiftmodule'), 'derived\n');
+  // Positive control: derived scratch under .kory-tmp cannot change the fingerprint.
+  expect(fingerprintSkillEvalWorkspace(scratchy)).toBe(fingerprintSkillEvalWorkspace(clean));
+  // Negative control: a candidate source change still does.
+  writeFileSync(join(clean, 'Sources.swift'), 'candidate changed\n');
+  expect(fingerprintSkillEvalWorkspace(clean)).not.toBe(fingerprintSkillEvalWorkspace(scratchy));
+});
+
+test('an infrastructure failure is not recorded as a candidate run', async () => {
+  const f = fixture('infrastructure');
+  const result = await f.run();
+  expect(result.withSkill.observation.infrastructureFailure?.kind).toBe('provider');
+  expect(result.withoutSkill.observation.infrastructureFailure?.kind).toBe('provider');
+  expect(listSkillEvaluationRuns(f.projectRoot)).toEqual([]);
+});
+
+test('a Rust build tree is excluded from the fingerprint wherever the crate sits', () => {
+  const root = canonicalizePath(mkdtempSync(join(tmpdir(), 'kory-fingerprint-rust-target-')));
+  cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+  // A desktop shell keeps its crate at `src-tauri`, so its build tree is nested and a name check at
+  // the workspace root never saw it: one arm archived gigabytes of objects and the disk filled.
+  mkdirSync(join(root, 'src-tauri', 'src'), { recursive: true });
+  writeFileSync(join(root, 'src-tauri', 'Cargo.toml'), '[package]\nname = "fixture"\n');
+  writeFileSync(join(root, 'src-tauri', 'src', 'main.rs'), 'fn main() {}\n');
+  // A directory that merely happens to be called `target`, with no crate beside it, is ordinary
+  // content: the exclusion is scoped to build output, not to the word.
+  mkdirSync(join(root, 'assets', 'target'), { recursive: true });
+  writeFileSync(join(root, 'assets', 'target', 'notes.txt'), 'kept\n');
+
+  const base = fingerprintSkillEvalWorkspace(root);
+  mkdirSync(join(root, 'src-tauri', 'target', 'debug', 'deps'), { recursive: true });
+  writeFileSync(join(root, 'src-tauri', 'target', 'debug', 'deps', 'object.o'), 'x'.repeat(64));
+  expect(fingerprintSkillEvalWorkspace(root)).toBe(base);
+
+  writeFileSync(join(root, 'assets', 'target', 'notes.txt'), 'changed\n');
+  expect(fingerprintSkillEvalWorkspace(root)).not.toBe(base);
+
+  const afterAssetEdit = fingerprintSkillEvalWorkspace(root);
+  writeFileSync(join(root, 'src-tauri', 'src', 'main.rs'), 'fn main() { println!("hi"); }\n');
+  expect(fingerprintSkillEvalWorkspace(root)).not.toBe(afterAssetEdit);
 });

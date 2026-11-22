@@ -2,8 +2,8 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
-import { readJsonArtifact, writeFixtureFile } from '../skill-eval-fixture-helpers';
+import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
+import { readJsonArtifact, writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
 import {
   PERFORMANCE_DEBUGGING_HTTP_FIXED_SOURCE,
   PERFORMANCE_DEBUGGING_HTTP_PLAUSIBLE_FAULTY_SOURCE,
@@ -11,7 +11,7 @@ import {
   PERFORMANCE_DEBUGGING_RETENTION_PLAUSIBLE_FAULTY_SOURCE,
   PERFORMANCE_DEBUGGING_SKILL_EVAL_MATERIALIZERS,
   PERFORMANCE_DEBUGGING_SKILL_EVAL_SCORERS,
-} from '../skill-eval-performance-debugging-fixtures';
+} from '../../eval/skills/skill-eval-performance-debugging-fixtures';
 import { loadV5SkillPackages } from '../skill-packages';
 
 const roots: string[] = [];

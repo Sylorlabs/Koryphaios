@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "robotics-control",
-  "version": "5.1.1",
+  "version": "5.2.1",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",

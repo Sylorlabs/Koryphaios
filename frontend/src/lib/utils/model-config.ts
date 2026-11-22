@@ -12,6 +12,12 @@ function formatProviderName(provider: string): string {
   if (provider === 'xai') return 'xAI';
   if (provider === 'openrouter') return 'OpenRouter';
   if (provider === 'unorouter') return 'UnoRouter';
+  if (provider === 'hundredmillionseek') return '100MillionSeek';
+  if (provider === 'numes') return 'Numes';
+  if (provider === 'coarena') return 'Coarena';
+  if (provider === 'crowllm') return 'CrowLLM';
+  if (provider === 'radeon') return 'AMD Radeon Cloud';
+  if (provider === 'runcrate') return 'Runcrate';
   if (provider === 'tokenharbor') return 'Token Harbor';
   if (provider === 'logfare') return 'Logfare';
   if (provider === 'apinex') return 'APInex';
@@ -21,6 +27,7 @@ function formatProviderName(provider: string): string {
   if (provider === 'copilot') return 'Copilot';
   if (provider === 'kimicode') return 'Kimi Code';
   if (provider === 'moonshot') return 'Moonshot AI / Kimi API';
+  if (provider === 'beam') return 'Reflection AI';
   return provider.charAt(0).toUpperCase() + provider.slice(1);
 }
 
@@ -81,10 +88,21 @@ export function isEnabledModelSelection(providers: ProviderInfo[], value?: strin
   );
   if (!provider || !model) return false;
   const selectedProvider = providers.find((item) => item.name === provider);
+  if (!selectedProvider || !canAttemptProvider(selectedProvider)) return false;
+  if (selectedProvider.models.includes(model)) return true;
+  // Superseded ids stay selectable when the catalog records them as aliases:
+  // a chat saved on a collapsed id (e.g. a legacy Devin `fusion-…` pairing
+  // slug) resolves to the current model rather than "no longer available".
+  const catalog = (
+    selectedProvider as { allAvailableModels?: Array<{ id: string; aliases?: string[] }> }
+  ).allAvailableModels;
+  const resolved = catalog?.find((m) => m.id === model || m.aliases?.includes(model));
+  if (!resolved) return false;
+  // An empty enabled list means the provider exposes its whole catalog — the
+  // model picker applies the same rule.
   return (
-    !!selectedProvider &&
-    canAttemptProvider(selectedProvider) &&
-    selectedProvider.models.includes(model)
+    selectedProvider.models.length === 0 ||
+    selectedProvider.models.includes(resolved.id)
   );
 }
 

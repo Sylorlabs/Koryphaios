@@ -11,6 +11,7 @@ import { getDb } from '../db';
 import { ConflictError, NotFoundError } from '../errors/types';
 import { PROJECT_ROOT } from '../runtime/paths';
 import { resolveProjectIdentity } from '../runtime/request-project';
+import { readNoteBody } from './note-document';
 
 const PROJECTION_PAGE_SIZE = 250;
 const PROPERTY_TYPES: readonly NotePropertyType[] = [
@@ -185,13 +186,16 @@ function projectionWarnings(
 
 function storedNote(database: Database, noteId: string, projectRoot: string): StoredNoteRow | null {
   const scope = noteScopeSql(projectRoot);
-  return database
+  const row = database
     .query<StoredNoteRow, [string, string]>(
       `SELECT n.id, n.content, n.revision, n.format, n.project_root
        FROM notes AS n
        WHERE n.id = ? AND ${scope.sql}`,
     )
     .get(noteId, scope.values[0]!) as StoredNoteRow | null;
+  // Properties project the resolved body — the stored column is '' for
+  // file-backed project documents.
+  return row ? { ...row, content: readNoteBody({ id: row.id, content: row.content }) } : null;
 }
 
 function writeProjection(database: Database, row: StoredNoteRow, projectRoot: string): void {

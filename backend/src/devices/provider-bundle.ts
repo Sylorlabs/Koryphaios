@@ -23,7 +23,10 @@ const modelSchema = z.object({
   tier: z.enum(['flagship', 'fast', 'cheap', 'reasoning']).optional(),
 });
 const configSchema = z.object({
-  name: z.string().max(128).regex(/^(?:antigravity|custom:[a-zA-Z0-9_-]+)$/),
+  // A staged entry keeps the provider's own name so the target resolves the
+  // same model string. The entry is still built as a portable adapter, never
+  // as a native CLI or an arbitrary executable.
+  name: z.string().max(64).regex(/^(?:custom:[a-zA-Z0-9_-]+|[a-z0-9][a-z0-9_-]*)$/),
   label: z.string().max(160).optional(),
   baseUrl: z.string().url().max(2048).optional(),
   apiKey: z.string().max(32_768).optional(), authToken: z.string().max(32_768).optional(),
@@ -45,12 +48,13 @@ export function parseDeviceProviderBundle(value: unknown): DeviceProviderBundle 
   const names = result.data.providers.map((entry) => entry.config.name);
   if (new Set(names).size !== names.length) throw new Error('Duplicate device providers.');
   for (const entry of result.data.providers) {
-    if (entry.config.name.startsWith('custom:')) {
-      if (!entry.config.baseUrl) throw new Error('A custom provider needs its endpoint.');
-      const url = new URL(entry.config.baseUrl);
-      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password)
-        throw new Error('Invalid device provider endpoint.');
-    }
+    // Antigravity is the one native adapter staged by name. Everything else is
+    // an HTTP provider, so it must carry the endpoint it is called through.
+    if (entry.config.name === 'antigravity') continue;
+    if (!entry.config.baseUrl) throw new Error('A staged provider needs its endpoint.');
+    const url = new URL(entry.config.baseUrl);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password)
+      throw new Error('Invalid device provider endpoint.');
   }
   return result.data;
 }
@@ -58,10 +62,13 @@ export function parseDeviceProviderBundle(value: unknown): DeviceProviderBundle 
 /** Called only by an authenticated human command on the credential-owning desktop. */
 export async function buildDeviceProviderBundle(registry: ProviderRegistry, model?: string, signal?: AbortSignal): Promise<DeviceProviderBundle> {
   const requested = model && model !== 'auto' ? splitProviderKey(model).provider : undefined;
-  if (requested && requested !== 'antigravity' && !String(requested).startsWith('custom:'))
-    throw new Error(`Target-side credential staging for ${requested} is not available yet. Choose Antigravity or a custom API provider.`);
+  // A user who selected a model explicitly can share that provider for this
+  // run. Without a selection only the portable families are bundled, so a
+  // routine linked chat never sweeps every credential into one grant.
   const providers = registry.getStatus().filter((entry) => entry.enabled && entry.adapterAvailable &&
-    (entry.name === 'antigravity' || String(entry.name).startsWith('custom:'))).flatMap((entry) => {
+    (requested
+      ? entry.name === requested
+      : entry.name === 'antigravity' || String(entry.name).startsWith('custom:'))).flatMap((entry) => {
       const adapter = registry.get(entry.name);
       if (!adapter) return [];
       const models = entry.allAvailableModels.filter((candidate) => entry.models.includes(candidate.id));

@@ -18,6 +18,7 @@ import { setContext, type AppContext } from '../context';
 import { WorkspaceNavigationStore } from '../stores/workspace-navigation-store';
 import { getDb } from '../db';
 import { getOrderedEventLog } from '../ws/ordered-event-log';
+import type { WSMessage } from '@koryphaios/shared';
 import { ControlLinkedDeviceTool, ListLinkedDevicesTool } from '../tools/devices';
 import { toolApprovalQueue } from '../tools/approval-queue';
 import type { ToolContext } from '../tools/registry';
@@ -381,4 +382,70 @@ test('linked mobile workbench is user-only and revocation invalidates the contro
   await expect(
     service.execute(mobile, 'workbench', { path: '/api/appearance' }, 'user', crypto.randomUUID()),
   ).rejects.toThrow('revoked');
+});
+
+test('events replay: a cursor below the prune mark gets the history_pruned marker first and replays from the mark without an epoch change', async () => {
+  const log = getOrderedEventLog();
+  const cursor = spyOn(log, 'getCursor').mockReturnValue({ epoch: 2, latestSequence: 150 });
+  const mark = spyOn(log, 'getPruneMark').mockReturnValue({ epoch: 2, sequence: 100 });
+  const retained = {
+    type: 'stream.delta',
+    sessionId: 'chat-a',
+    epoch: 2,
+    sequence: 101,
+    timestamp: 1,
+    payload: null,
+  } as unknown as WSMessage;
+  const getAfter = spyOn(log, 'getAfter').mockReturnValue([retained]);
+  try {
+    for (const from of [
+      { epoch: 2, sequence: 40 },
+      { epoch: 1, sequence: 500 },
+    ]) {
+      getAfter.mockClear();
+      const result = (await service.execute(
+        peer,
+        'events',
+        { sessionId: 'chat-a', ...from },
+        'user',
+        crypto.randomUUID(),
+      )) as Array<Record<string, unknown>>;
+      expect(getAfter).toHaveBeenCalledWith('chat-a', 2, 100, 100);
+      expect(result).toHaveLength(2);
+      expect(result[0]).toMatchObject({
+        type: 'session.history_pruned',
+        sessionId: 'chat-a',
+        epoch: 2,
+        payload: { epoch: 2, throughSequence: 100 },
+      });
+      expect(result[0]).not.toHaveProperty('sequence');
+      expect(result[1]).toMatchObject({ sequence: 101, epoch: 2, replayed: true });
+    }
+  } finally {
+    cursor.mockRestore();
+    mark.mockRestore();
+    getAfter.mockRestore();
+  }
+});
+
+test('events replay: a cursor at or above the prune mark replays unchanged with no marker', async () => {
+  const log = getOrderedEventLog();
+  const cursor = spyOn(log, 'getCursor').mockReturnValue({ epoch: 2, latestSequence: 150 });
+  const mark = spyOn(log, 'getPruneMark').mockReturnValue({ epoch: 2, sequence: 100 });
+  const getAfter = spyOn(log, 'getAfter').mockReturnValue([]);
+  try {
+    const result = await service.execute(
+      peer,
+      'events',
+      { sessionId: 'chat-a', epoch: 2, sequence: 120 },
+      'user',
+      crypto.randomUUID(),
+    );
+    expect(getAfter).toHaveBeenCalledWith('chat-a', 2, 120, 100);
+    expect(result).toEqual([]);
+  } finally {
+    cursor.mockRestore();
+    mark.mockRestore();
+    getAfter.mockRestore();
+  }
 });

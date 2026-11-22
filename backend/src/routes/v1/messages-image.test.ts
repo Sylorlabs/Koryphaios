@@ -92,8 +92,22 @@ describe('image generation from chat', () => {
     async (imageInputMode) => {
       const stored: Array<Record<string, unknown>> = [];
       const { token } = admission();
-      const reserveSessionTurn = mock(async () => token);
-      const dispatchAdmittedTask = mock(async () => undefined);
+      // A non-image send is a session-turn command: the ledger persists the
+      // input and starts the turn in one call.
+      const startSessionTurn = mock(async (input: Record<string, unknown>) => {
+        stored.push({
+          role: 'user',
+          content: input.userMessage,
+          attachments: input.attachments,
+        });
+        return {
+          accepted: true as const,
+          sessionId: 'session-1',
+          runId: token.runId,
+          userMessageId: 'command-user-screenshot',
+          completion: Promise.resolve(undefined as never),
+        };
+      });
       const attachments = [
         {
           type: 'image',
@@ -104,15 +118,11 @@ describe('image generation from chat', () => {
       ];
       setContext({
         sessions: { get: async () => ({ id: 'session-1', interactionMode: 'act' }) },
-        messages: {
-          add: async (_sessionId: string, message: Record<string, unknown>) => stored.push(message),
-        },
+        messages: {},
         providers: { getConfigs: () => ({}), get: () => undefined },
         kory: {
           generateSessionTitle: async () => undefined,
-          reserveSessionTurn,
-          dispatchAdmittedTask,
-          rejectSessionTurn: async () => undefined,
+          startSessionTurn,
         },
         wsManager: { broadcast: () => undefined, broadcastToSession: () => undefined },
       } as never);
@@ -127,7 +137,6 @@ describe('image generation from chat', () => {
         }),
       );
       expect(response.status).toBe(200);
-      await waitFor(() => dispatchAdmittedTask.mock.calls.length === 1);
 
       expect(stored).toHaveLength(1);
       expect(stored[0]).toMatchObject({
@@ -135,15 +144,17 @@ describe('image generation from chat', () => {
         content: 'What controls are visible in this screenshot?',
         attachments,
       });
-      expect(reserveSessionTurn).toHaveBeenCalledWith('session-1', 'user_turn');
-      expect(dispatchAdmittedTask).toHaveBeenCalledWith(token, {
+      expect(startSessionTurn).toHaveBeenCalledWith({
+        sessionId: 'session-1',
+        source: 'user',
+        sourceCommandId: expect.stringMatching(/^srv_/),
         userMessage: 'What controls are visible in this screenshot?',
         preferredModel: 'codex-account:primary:gpt-5.6-sol',
         reasoningLevel: undefined,
+        contextWindow: undefined,
         attachments,
         interactionMode: 'act',
         fastMode: undefined,
-        inputAlreadyPersisted: true,
         imageInputMode,
       });
       expect((await response.json()).data.runId).toBe(token.runId);
@@ -181,7 +192,7 @@ describe('image generation from chat', () => {
       kory: {
         ...imageReview,
         generateSessionTitle: async () => undefined,
-        reserveSessionTurn,
+        reserveSessionTurnAfterSteer: reserveSessionTurn,
         dispatchAdmittedWork,
         rejectSessionTurn: async () => undefined,
       },
@@ -294,7 +305,7 @@ describe('image generation from chat', () => {
       },
       kory: {
         ...imageReview,
-        reserveSessionTurn,
+        reserveSessionTurnAfterSteer: reserveSessionTurn,
         dispatchAdmittedWork,
         rejectSessionTurn: async () => undefined,
         generateSessionTitle: async () => undefined,
@@ -344,7 +355,7 @@ describe('image generation from chat', () => {
       kory: {
         ...imageReview,
         generateSessionTitle: async () => undefined,
-        reserveSessionTurn: async () => token,
+        reserveSessionTurnAfterSteer: async () => token,
         dispatchAdmittedWork,
         rejectSessionTurn: async () => undefined,
       },
@@ -378,7 +389,9 @@ describe('image generation from chat', () => {
     const events: Array<{ type: string; payload: unknown; sessionId?: string }> = [];
     const { controller, token } = admission(undefined, 'run-image-cancelled');
     let markWorkSettled!: () => void;
-    const workSettled = new Promise<void>((resolve) => { markWorkSettled = resolve; });
+    const workSettled = new Promise<void>((resolve) => {
+      markWorkSettled = resolve;
+    });
     const dispatchAdmittedWork = admittedWorkExecutor(controller, () => markWorkSettled());
     let releaseFetch!: () => void;
     const fetchRelease = new Promise<void>((resolve) => {
@@ -409,7 +422,7 @@ describe('image generation from chat', () => {
       kory: {
         ...imageReview,
         generateSessionTitle: async () => undefined,
-        reserveSessionTurn: async () => token,
+        reserveSessionTurnAfterSteer: async () => token,
         dispatchAdmittedWork,
         rejectSessionTurn: async () => undefined,
       },

@@ -342,7 +342,7 @@
           <Clock3 size={14} aria-hidden="true" />
           Revision history
           <span
-            class="rounded-full bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[9px] tabular-nums text-[var(--color-text-muted)]"
+            class="rounded-full bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[11px] tabular-nums text-[var(--color-text-muted)]"
             >{revisions.length}</span
           >
         </button>
@@ -364,7 +364,7 @@
           <Trash2 size={14} aria-hidden="true" />
           Trash
           <span
-            class="rounded-full bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[9px] tabular-nums text-[var(--color-text-muted)]"
+            class="rounded-full bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[11px] tabular-nums text-[var(--color-text-muted)]"
             >{trash.length}</span
           >
         </button>
@@ -400,7 +400,7 @@
                 <p class="truncate text-xs font-medium text-[var(--color-text-primary)]">
                   {currentNote.title || 'Untitled'}
                 </p>
-                <p class="mt-0.5 text-[10px] text-[var(--color-text-muted)]">
+                <p class="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
                   Current revision {currentNote.revision}
                 </p>
               </div>
@@ -458,23 +458,23 @@
                       </span>
                       {#if current}
                         <span
-                          class="rounded-full bg-[var(--color-accent-transparent)] px-1.5 py-0.5 text-[9px] font-medium text-[var(--color-accent)]"
+                          class="rounded-full bg-[var(--color-accent-transparent)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--color-accent)]"
                           >Current</span
                         >
                       {/if}
                     </span>
-                    <span class="mt-1 block text-[10px] text-[var(--color-text-secondary)]">
+                    <span class="mt-1 block text-[11px] text-[var(--color-text-secondary)]">
                       {operationLabels[revision.operation]}
                     </span>
                     <span
-                      class="mt-1 flex items-center justify-between gap-2 text-[9px] text-[var(--color-text-muted)]"
+                      class="mt-1 flex items-center justify-between gap-2 text-[11px] text-[var(--color-text-muted)]"
                     >
                       <time datetime={dateTime(revision.createdAt)}
                         >{formatDate(revision.createdAt)}</time
                       >
                       <span class="shrink-0">{formatBytes(revision.contentBytes)}</span>
                     </span>
-                    <span class="mt-1 block truncate text-[9px] text-[var(--color-text-muted)]">
+                    <span class="mt-1 block truncate text-[11px] text-[var(--color-text-muted)]">
                       {sourceLabel(revision.sourcePath)} · {formatLabel(revision.format)}
                     </span>
                   </button>
@@ -494,18 +494,18 @@
                       Revision {currentSelectedRevision.revision}
                     </h3>
                     <span
-                      class="rounded bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[9px] text-[var(--color-text-secondary)]"
+                      class="rounded bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[11px] text-[var(--color-text-secondary)]"
                     >
                       {operationLabels[currentSelectedRevision.operation]}
                     </span>
                     {#if selectedIsCurrent}
                       <span
-                        class="rounded bg-[var(--color-accent-transparent)] px-1.5 py-0.5 text-[9px] text-[var(--color-accent)]"
+                        class="rounded bg-[var(--color-accent-transparent)] px-1.5 py-0.5 text-[11px] text-[var(--color-accent)]"
                         >Current</span
                       >
                     {/if}
                   </div>
-                  <p class="mt-1 truncate text-[10px] text-[var(--color-text-muted)]">
+                  <p class="mt-1 truncate text-[11px] text-[var(--color-text-muted)]">
                     {formatDate(currentSelectedRevision.createdAt)} · {formatBytes(
                       currentSelectedRevision.contentBytes,
                     )} · {sourceLabel(currentSelectedRevision.sourcePath)}
@@ -514,7 +514,7 @@
                 {#if !selectedIsCurrent && !confirmation}
                   <button
                     type="button"
-                    class="flex shrink-0 items-center gap-1.5 rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-[11px] font-medium text-[var(--color-accent-foreground)] transition-opacity hover:opacity-90 disabled:opacity-50"
+                    class="flex shrink-0 items-center gap-1.5 rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-[11px] font-medium text-[var(--color-on-accent)] transition-opacity hover:opacity-90 disabled:opacity-50"
                     disabled={loading}
                     onclick={() => (confirmation = selectedSummary)}
                   >
@@ -532,21 +532,21 @@
                   <p class="text-xs font-medium text-[var(--color-text-primary)]">
                     Restore revision {confirmation.revision}?
                   </p>
-                  <p class="mt-1 text-[10px] leading-relaxed text-[var(--color-text-secondary)]">
+                  <p class="mt-1 text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
                     Koryphaios will create a new revision from this snapshot. Newer history remains
                     recoverable.
                   </p>
                   <div class="mt-3 flex flex-wrap justify-end gap-2">
                     <button
                       type="button"
-                      class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-1.5 text-[10px] font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)]"
+                      class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-1.5 text-[11px] font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)]"
                       onclick={() => (confirmation = null)}
                     >
                       Keep current note
                     </button>
                     <button
                       type="button"
-                      class="rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-[10px] font-medium text-[var(--color-accent-foreground)] hover:opacity-90"
+                      class="rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-[11px] font-medium text-[var(--color-on-accent)] hover:opacity-90"
                       onclick={confirmRevisionRestore}
                     >
                       Confirm restore revision {confirmation.revision}
@@ -557,7 +557,7 @@
 
               <div class="min-h-0 flex-1 overflow-auto bg-[var(--color-surface-0)] p-4">
                 <div
-                  class="mb-3 grid grid-cols-2 gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-3 text-[9px] sm:grid-cols-4"
+                  class="mb-3 grid grid-cols-2 gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-3 text-[11px] sm:grid-cols-4"
                 >
                   <div>
                     <p class="uppercase tracking-wider text-[var(--color-text-muted)]">Status</p>
@@ -589,7 +589,7 @@
                   aria-label="Revision content preview">{previewContent ||
                     'This revision is empty.'}</pre>
                 {#if previewIsLimited}
-                  <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
+                  <p class="mt-2 text-[11px] text-[var(--color-text-muted)]">
                     Preview limited to {formatBytes(NOTES_REVISION_PREVIEW_LIMIT)} for responsiveness.
                     Restore still uses the complete saved snapshot.
                   </p>
@@ -638,11 +638,11 @@
                 <h3 class="text-xs font-medium text-[var(--color-text-primary)]">
                   Recoverable notes
                 </h3>
-                <p class="mt-0.5 text-[10px] text-[var(--color-text-muted)]">
+                <p class="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
                   Restoring returns the complete note to the active vault.
                 </p>
               </div>
-              <span class="text-[10px] tabular-nums text-[var(--color-text-muted)]">
+              <span class="text-[11px] tabular-nums text-[var(--color-text-muted)]">
                 {trash.length} note{trash.length === 1 ? '' : 's'}
               </span>
             </div>
@@ -661,12 +661,12 @@
                       <h4 class="truncate text-xs font-medium text-[var(--color-text-primary)]">
                         {note.title || 'Untitled'}
                       </h4>
-                      <p class="mt-0.5 text-[9px] font-medium text-[var(--color-warning)]">
+                      <p class="mt-0.5 text-[11px] font-medium text-[var(--color-warning)]">
                         Recoverable · {trashReasonLabel(note.trashReason)}
                       </p>
                     </div>
                   </div>
-                  <dl class="mt-3 space-y-1.5 text-[9px] text-[var(--color-text-muted)]">
+                  <dl class="mt-3 space-y-1.5 text-[11px] text-[var(--color-text-muted)]">
                     <div class="flex items-center justify-between gap-3">
                       <dt>Trashed</dt>
                       <dd>
@@ -694,7 +694,7 @@
                   </dl>
                   <button
                     type="button"
-                    class="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 py-2 text-[10px] font-medium text-[var(--color-text-primary)] transition-colors hover:border-[var(--color-border-bright)] hover:bg-[var(--color-surface-3)] disabled:opacity-50"
+                    class="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 py-2 text-[11px] font-medium text-[var(--color-text-primary)] transition-colors hover:border-[var(--color-border-bright)] hover:bg-[var(--color-surface-3)] disabled:opacity-50"
                     disabled={loading}
                     aria-label={`Restore ${note.title || 'Untitled'} from Trash`}
                     onclick={() => onRestoreTrash(note)}

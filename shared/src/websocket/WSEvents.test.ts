@@ -25,6 +25,8 @@ describe('session-scoped event types', () => {
       'session.changes',
       'session.timeline_rewritten',
       'run.state',
+      'turn.provider_completed',
+      'run.settled',
       'compaction.progress',
       'kory.ask_user_resolved',
     ] as WSEventType[]) {
@@ -47,7 +49,7 @@ describe('session-scoped event types', () => {
   });
 
   test('every scoped member is a known event type prefix family', () => {
-    const prefixes = ['agent.', 'stream.', 'context.', 'session.', 'run.', 'compaction.', 'kory.', 'permission.'];
+    const prefixes = ['agent.', 'stream.', 'context.', 'session.', 'run.', 'turn.', 'compaction.', 'kory.', 'permission.'];
     for (const type of SESSION_SCOPED_EVENT_TYPES) {
       expect(prefixes.some((prefix) => type.startsWith(prefix))).toBe(true);
     }

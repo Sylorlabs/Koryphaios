@@ -72,13 +72,13 @@ describe('projectStore filesystem reconciliation', () => {
       identity: {
         id: 'design-lab',
         name: '✨ Design Lab',
-        icon: { mode: 'emoji', value: '✨', color: 'purple' },
+        icon: { mode: 'monogram', value: '✨', color: 'purple' },
       },
     });
 
     expect(result.identity.name).toBe('✨ Design Lab');
-    expect(result.identity.icon).toEqual({ mode: 'emoji', value: '✨', color: 'purple' });
-    expect(result.icon).toEqual({ mode: 'emoji', value: '✨', color: 'purple' });
+    expect(result.identity.icon).toEqual({ mode: 'monogram', value: '✨', color: 'purple' });
+    expect(result.icon).toEqual({ mode: 'monogram', value: '✨', color: 'purple' });
   });
 
   test('snapshots without a seq are always applied', () => {

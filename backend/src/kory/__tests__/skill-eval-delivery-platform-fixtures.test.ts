@@ -5,9 +5,9 @@ import { join } from 'node:path';
 import {
   DELIVERY_PLATFORM_SKILL_EVAL_MATERIALIZERS,
   DELIVERY_PLATFORM_SKILL_EVAL_SCORERS,
-} from '../skill-eval-delivery-platform-fixtures';
-import { writeFixtureFile } from '../skill-eval-fixture-helpers';
-import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
+} from '../../eval/skills/skill-eval-delivery-platform-fixtures';
+import { writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
+import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
 import { loadV5SkillPackages } from '../skill-packages';
 
 const roots: string[] = [];

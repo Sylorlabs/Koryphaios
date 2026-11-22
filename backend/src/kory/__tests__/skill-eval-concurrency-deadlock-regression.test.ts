@@ -6,10 +6,10 @@ import { join } from 'node:path';
 import {
   CONTRACT_CONCURRENCY_SKILL_EVAL_MATERIALIZERS,
   CONTRACT_CONCURRENCY_SKILL_EVAL_SCORERS,
-} from '../skill-eval-contract-concurrency-fixtures';
-import { runPairedSkillEvaluationV3 } from '../skill-eval-execution';
-import { writeFixtureFile } from '../skill-eval-fixture-helpers';
-import type { SkillEvalScenarioV3 } from '../skill-eval-harness';
+} from '../../eval/skills/skill-eval-contract-concurrency-fixtures';
+import { runPairedSkillEvaluationV3 } from '../../eval/skills/skill-eval-execution';
+import { writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
+import type { SkillEvalScenarioV3 } from '../../eval/skills/skill-eval-harness';
 import { loadV5SkillPackages } from '../skill-packages';
 
 const roots: string[] = [];

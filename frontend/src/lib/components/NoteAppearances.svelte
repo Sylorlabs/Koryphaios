@@ -83,7 +83,7 @@
       Where this note appears
     </div>
     {#if appearances && totalAppearances > 0}
-      <span class="text-[10px] tabular-nums" style="color: var(--color-text-muted);">
+      <span class="text-[11px] tabular-nums" style="color: var(--color-text-muted);">
         {totalAppearances}
         {totalAppearances === 1 ? 'place' : 'places'}
       </span>
@@ -121,7 +121,7 @@
               <Share2 size={11} style="color: var(--color-text-muted); flex-shrink: 0;" />
               <span class="truncate">{rel.counterpartyTitle}</span>
               <span
-                class="ml-auto flex-shrink-0 rounded px-1.5 py-0.5 text-[10px]"
+                class="ml-auto flex-shrink-0 rounded px-1.5 py-0.5 text-[11px]"
                 style="background: var(--color-surface-3); color: var(--color-text-muted);"
                 >{relationshipLabels[rel.type] ?? rel.type} · {rel.status}{rel.stale
                   ? ' · stale'
@@ -209,7 +209,7 @@
     {/if}
 
     {#if appearances.truncated}
-      <div class="px-3 pb-2 text-[10px]" style="color: var(--color-text-muted);">
+      <div class="px-3 pb-2 text-[11px]" style="color: var(--color-text-muted);">
         Some appearances were skipped at the safety scan limit.
       </div>
     {/if}

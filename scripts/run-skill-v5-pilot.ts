@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
-import { createIsolatedCodexSkillEvalExecutor } from '../backend/src/kory/skill-eval-codex';
-import { runPairedSkillEvaluationV3 } from '../backend/src/kory/skill-eval-execution';
+import { createIsolatedCodexSkillEvalExecutor } from '../backend/src/eval/skills/skill-eval-codex';
+import { runPairedSkillEvaluationV3 } from '../backend/src/eval/skills/skill-eval-execution';
 import {
   CURRENT_SKILL_EVAL_CONTRACT_VERSION,
   listSkillEvaluationRuns,
@@ -9,7 +9,7 @@ import {
 import {
   BUILTIN_SKILL_EVAL_MATERIALIZERS,
   BUILTIN_SKILL_EVAL_SCORERS,
-} from '../backend/src/kory/skill-eval-fixtures';
+} from '../backend/src/eval/skills/skill-eval-fixtures';
 import { loadV5SkillPackages } from '../backend/src/kory/skill-packages';
 import { listSkills } from '../backend/src/kory/skills';
 

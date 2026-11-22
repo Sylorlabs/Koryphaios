@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "reviewerId": "logfare-stateless-78b83f86-014d-4df3-adf5-1e0ccfd6a127",
+  "completed": true,
+  "output": "{\"artifactA\":{\"passed\":true,\"quality\":0.9,\"verification\":0.85,\"integrityFailure\":false,\"evidence\":[\"Replaced onAppear+unstructured Task with `.task(id: LoadKey(id:generation:))`, binding load lifetime to view/id identity and cancelling on id change/disappearance.\",\"Retry bumps a local `generation` and `model.retry`, restarting the task rather than spawning an orphaned second task.\",\"Late-result guard `owns(...)` checks `!Task.isCancelled`, generation match, id match, and `model.currentID`, so a departed id cannot mutate active state; error path also guarded.\",\"`catch is CancellationError` returns without touching state, preserving the newer owner's state.\",\"NavigationStack behavior preserved: `.navigationDestination`/`.id(id)` and NavigationSupport.swift untouched; only DetailFeature.swift modified.\",\"No Android/React state patterns; uses native SwiftUI `.task(id:)` and structured cancellation.\",\"Typecheck evidence: agent ran swiftc -typecheck (exit 0) and -swift-version 6 (exit 0); host later confirmed all native XCUITest phases pass (navigation race, cancel/revisit, offline/retry, lifecycle/restoration, accessibility-large).\",\"Agent explicitly labeled the device/UI/VoiceOver gap as unavailable in its own workspace, not converting it to certainty.\"]},\"artifactB\":{\"passed\":true,\"quality\":0.88,\"verification\":0.85,\"integrityFailure\":false,\"evidence\":[\"Replaced onAppear+detached Task with `.task(id: loadKey)` where loadKey = \\\"\\\\(id)#\\\\(model.retry)\\\", binding task to identity and cancelling on id change/disappearance/retry.\",\"Retry increments `model.retry`, changing the key and restarting the task with cancellation of the previous attempt.\",\"Late-response guard captures generation and requestID and requires `!Task.isCancelled`, `model.generation == generation`, `model.currentID == requestID` before committing; same guard wraps error path.\",\"`catch is CancellationError` returns without touching state.\",\"NavigationStack behavior preserved; only DetailFeature.swift modified, DocumentFeature.swift and evaluator-owned files untouched.\",\"No Android/React state patterns; native SwiftUI `.task(id:)` and structured cancellation.\",\"Typecheck evidence: agent worked around sandbox macro-plugin failure with `-disable-sandbox` and got exit 0; host confirmed all native XCUITest phases pass.\",\"Agent explicitly stated the XCUITest oracle can only run in the injected project, labeling that verification as not executed locally.\"]},\"preference\":\"A\",\"rationale\":[\"Both artifacts correctly fix the core defect: identity-scoped `.task(id:)`, cancellation handling, retry via key/generation change, and a late-result ownership guard preventing a departed id from overwriting the active view.\",\"Both preserve NavigationStack behavior and touch only the owned DetailFeature.swift, avoiding the held-out DocumentFeature.swift and evaluator-owned files.\",\"Artifact A uses a dedicated `LoadKey` struct and a self-contained `generation` @State, keeping the retry token local to the view rather than mutating shared model state; this is slightly cleaner identity scoping.\",\"Artifact B keys on `model.retry` and relies on `model.generation`/`model.currentID` for the guard, which is also correct but couples the load key to shared presentation state.\",\"Both honestly labeled the device/UI/VoiceOver verification as unavailable in their own workspace rather than overstating; host evidence independently confirms the native XCUITest phases pass for both.\",\"Difference is marginal; A's slightly tighter identity scoping and explicit generation ownership give it a small edge.\"]}",
+  "events": [
+    {
+      "type": "review.started",
+      "reviewerId": "logfare-stateless-78b83f86-014d-4df3-adf5-1e0ccfd6a127"
+    },
+    {
+      "type": "review.completed",
+      "reviewerId": "logfare-stateless-78b83f86-014d-4df3-adf5-1e0ccfd6a127",
+      "outputSha256": "9cfb59f06cc1214ed8743240c461e4f2ae0c3f48cedfa84837bcacf2e2cf26e1"
+    }
+  ],
+  "hostReceipt": {
+    "schemaVersion": 1,
+    "stageOnly": true,
+    "identitySource": "host-invocation-uuid",
+    "upstreamSessionObserved": true,
+    "requestedModel": "deepseek-v4.1-flash-1017",
+    "responseModel": "deepseek-v4.1-flash-1017",
+    "promptSha256": "f2f8c642054d622dad931471537b6bbb012163eee17cf8d2ae0d2236da78da59",
+    "requestBytes": 197720,
+    "responseSha256": "30b31799c01bb16f53fc2a3ee2286f64fa35ecf2b761eaeec05b8f4d940c35a0",
+    "outputSha256": "9cfb59f06cc1214ed8743240c461e4f2ae0c3f48cedfa84837bcacf2e2cf26e1",
+    "elapsedMs": 6143,
+    "osIsolationVerified": false,
+    "upstreamIdentityVerified": false,
+    "signed": false
+  }
+}

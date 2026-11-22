@@ -19,6 +19,21 @@ When the report's source records are schema-checked, treat every row as the same
 
 An endpoint that fails is still a row: record its real status and the metadata you did receive rather than dropping it, and never substitute a different endpoint for the one the task named. Keep the raw response bodies you hashed until the report is accepted, so every digest and quotation can be re-derived from them.
 
+The structured report and its prose companions are separate deliverables and every one of them is graded, so satisfy the whole set rather than the one you find interesting:
+
+1. Header: `schemaVersion` 1, the task's own scenario identifier copied exactly, and a current UTC `checkedAt`.
+2. `boundary`: `selectedSkill`, `broaderSkill` and `adjacentSkill` set to the identifiers the task's hierarchy names, a `scope` of at least a full sentence, and a non-empty `exclusions` list in which every entry is a real reason you excluded something.
+3. `sources`: one row per source the task lists, exactly as described above, with no invented endpoint standing in for a listed one.
+4. For a factual task, `findings`: exactly one row per proposition the task enumerates, in the task's own identifiers, each carrying the verified `value`, the authoritative `effectiveDate`, the `sourceIds` that actually support it with no extras and none missing, and an `explanation` of at least a sentence.
+5. For a scholarly task, `searches`: one row per search source carrying the reported total, the eligible identifiers you observed, and concrete exclusions with reasons. Then `studies`: one row per included study with its exact title, publication date and version or status, access level, stable identifier, every source identifier consulted, and a verified abstract excerpt.
+6. The prose report the task asks for must be substantial rather than a stub, must name the hostname of at least one source it used, must speak in terms of source, evidence, citation or provenance, and must state a limitation in its own words. The failure and recovery note must describe the negative control that was rejected and the retry that recovered, with the statuses and attempt counts you observed. Neither file may contain a placeholder marker.
+
+Write each deliverable to the path the task names rather than inventing one, and re-read the structured file before finishing so the keys above exist with concrete values.
+
+Grade-time freshness is a separate obligation from correctness: the report is validated against a fresh refetch, and a row whose timestamp is too old fails even when every recorded byte was right. Do the exploratory fetching first, then re-fetch each source immediately before you write the final rows, so every `retrievedAt` is minutes old at the end of the turn rather than at the beginning. Record each row from that last fetch, and prefer the most stable authoritative document you can find for a value that could change during the turn.
+
+A digest is only comparable when it is the digest of the same bytes the grader will see. Hash the decoded response body exactly as your HTTP client hands it to you as text, in UTF-8, from the same request whose status, headers and URL you record. Do not hash the compressed transfer bytes, a copy saved with rewritten line endings, a re-serialised or pretty-printed JSON document, or a response you filtered down to selected fields: request the URL you intend to cite and record that response unmodified. Copy `Last-Modified` byte-for-byte from the response rather than reformatting the date, and re-request the source immediately before you write the final row so the digest describes a fetch made during the same few minutes the report is graded.
+
 ## Workflow
 
 1. Establish the environment before judging the claim. Record the UTC run time, starting source or URL, access result, jurisdiction, product or runtime version, and any source of record requirement. If a required environment or source is unavailable, record that boundary before continuing.

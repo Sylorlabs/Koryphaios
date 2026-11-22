@@ -7,7 +7,7 @@
     "frontendDist": "../../frontend/build/client",
     "devUrl": "http://127.0.0.1:3003",
     "beforeDevCommand": null,
-    "beforeBuildCommand": "bun run scripts/build-frontend.ts",
+    "beforeBuildCommand": "bun run scripts/before-build.ts",
     "features": null
   },
   "app": {
@@ -33,7 +33,7 @@
       "csp": {
         "default-src": "'self'",
         "connect-src": "'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:* https://koryphaios.com https://challenges.cloudflare.com",
-        "img-src": "'self' data: https:",
+        "img-src": "'self' data: https: blob:",
         "media-src": "'self' data: blob:",
         "style-src": "'self' 'unsafe-inline'",
         "script-src": "'self' 'unsafe-eval' https://challenges.cloudflare.com",
@@ -46,7 +46,7 @@
   },
   "bundle": {
     "active": true,
-    "createUpdaterArtifacts": true,
+    "createUpdaterArtifacts": false,
     "targets": "all",
     "icon": [
       "icons/32x32.png",

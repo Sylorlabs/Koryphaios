@@ -20,14 +20,12 @@ projection, not the final identity authority.
 
 - `ProjectId`: opaque application identity.
 - `ProjectIdentity`: id, display name, and icon specification.
-- `ProjectCheckout`: association between an identity and a checkout root.
-- `ProjectIconSpec`: versionable `automatic`, `emoji`, `monogram`, `color`, or
+- `ProjectIconSpec`: versionable `automatic`, `monogram`, `color`, or
   `image` data.
 
 Rules:
 
 - automatic icons are deterministic for the same id and name;
-- emoji is limited to one Unicode grapheme;
 - monograms are limited to two Unicode graphemes;
 - colors are curated theme tokens, never arbitrary CSS;
 - image references are opaque asset IDs, never paths, URLs, or image bytes;
@@ -68,7 +66,8 @@ stored as a device-local preference.
 ## Icon renderer contract
 
 `ProjectIcon.svelte` is the shared decorative renderer. It may display a
-monogram, emoji, curated-color tile, or server-provided image. It must:
+monogram (letters, emoji, or both), curated-color tile, or server-provided
+image. It must:
 
 - remain decorative inside a named button or next to visible project text;
 - use theme tokens for surfaces and text;

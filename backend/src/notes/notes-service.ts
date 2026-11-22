@@ -93,46 +93,42 @@ import {
   NOTES_HARD_MAX_BYTES,
 } from './notes-settings';
 import { getLocalNotesPrincipalId } from './notes-principal';
+import {
+  DOCUMENT_EXTENSIONS,
+  PROJECT_DOCUMENT_PREFIX,
+  isIgnoredDocumentPathSegment,
+  noteContentFields,
+  noteContentMatches,
+  parseFrontmatter,
+  parseStoredAliases,
+  projectDocumentId,
+  projectDocumentIdentity,
+  readNoteBody,
+  resolveProjectDocument,
+  storedNoteContent,
+} from './note-document';
+import { hardDeleteNoteRows } from './note-cascade';
+import { NOTES_FTS_JOIN, removeNoteSearchText, setNoteSearchText } from './note-search-index';
+import {
+  gcRevisionBlobs,
+  isNoteTracked,
+  readRevisionContent,
+  snapshotNoteRevision,
+  snapshotNoteRowById,
+  type NoteRevisionSnapshot,
+} from './note-revision-store';
+
+export { parseFrontmatter } from './note-document';
+export type { ParsedFrontmatter } from './note-document';
+export { IGNORED_DOCUMENT_DIRS } from './note-document';
 
 // ============================================================================
 // Paths & Helpers
 // ============================================================================
-
-const PROJECT_DOCUMENT_PREFIX = 'project-document:';
-const DOCUMENT_EXTENSIONS = new Set(['.md', '.markdown', '.html', '.htm']);
-export const PROJECT_DOCUMENT_SCAN_LIMIT = 5_000;
-const IGNORED_DOCUMENT_DIRS = new Set([
-  '.git',
-  'node_modules',
-  'dist',
-  'build',
-  'target',
-  '.svelte-kit',
-  '.next',
-  'coverage',
-  '.cache',
-  '.turbo',
-  '.vite',
-  '.yarn',
-  '.pnpm-store',
-  '.venv',
-  'venv',
-  '__pycache__',
-  '.pytest_cache',
-  '.mypy_cache',
-  '.gradle',
-  'vendor',
-  'out',
-  // Koryphaios internal directories — contain thousands of plugin/skill .md
-  // files that are not user notes and must not be synced into the notes graph.
-  // Syncing them caused the backend to crash (Bun VM trap from 3000+ synchronous
-  // SQLite writes blocking the event loop).
-  '.koryphaios',
-  '.claude',
-  '.devin',
-  '.trees',
-  '.agents',
-]);
+/** Soft ceiling for one project-document index pass. Reaching it stops the
+ *  pass and reports how far it got; the caller may continue past it, so this is
+ *  not a hard limit. */
+export const PROJECT_DOCUMENT_SCAN_LIMIT = 50_000;
 const MAX_TITLE_LENGTH = 300;
 const MAX_FOLDER_PATH_LENGTH = 1_000;
 const MAX_TAGS = 100;
@@ -280,44 +276,6 @@ function atomicWrite(path: string, data: string | Buffer): void {
   }
 }
 
-function projectDocumentId(projectRoot: string, sourcePath: string): string {
-  return (
-    PROJECT_DOCUMENT_PREFIX +
-    Buffer.from(JSON.stringify([resolveProjectIdentity(projectRoot), sourcePath])).toString(
-      'base64url',
-    )
-  );
-}
-
-function projectDocumentIdentity(
-  id: string,
-): { projectRoot: string; sourcePath: string } | undefined {
-  if (!id.startsWith(PROJECT_DOCUMENT_PREFIX)) return undefined;
-  try {
-    const [projectRoot, path] = JSON.parse(
-      Buffer.from(id.slice(PROJECT_DOCUMENT_PREFIX.length), 'base64url').toString('utf8'),
-    ) as [string, string];
-    if (!path || path.startsWith('/') || path.split(/[\\/]/).includes('..')) return undefined;
-    if (!projectRoot) return undefined;
-    return { projectRoot: resolveProjectIdentity(projectRoot), sourcePath: path };
-  } catch (err: unknown) {
-    serverLog.debug(
-      { err: err instanceof Error ? err.message : String(err) },
-      'project document identity decode failed — returning undefined',
-    );
-    return undefined;
-  }
-}
-
-function resolveProjectDocument(id: string): string | undefined {
-  const identity = projectDocumentIdentity(id);
-  if (!identity) return undefined;
-  const absolute = resolve(identity.projectRoot, identity.sourcePath);
-  const root = identity.projectRoot;
-  if (absolute !== root && !absolute.startsWith(root + sep)) return undefined;
-  return absolute;
-}
-
 function ensureDir(p: string): void {
   if (!existsSync(p)) mkdirSync(p, { recursive: true });
 }
@@ -429,52 +387,8 @@ export function isInitialSyncComplete(projectRoot: string): boolean {
 }
 
 // ============================================================================
-// Frontmatter & aliases
+// Note references
 // ============================================================================
-
-export interface ParsedFrontmatter {
-  aliases: string[];
-  tags: string[];
-  body: string;
-}
-
-/** Parse a leading YAML frontmatter block for `aliases` and `tags` (the two
- *  Obsidian properties that affect linking/search). Supports inline
- *  `[a, b]` lists and block `- a` lists. Content without frontmatter is
- *  returned unchanged with empty aliases/tags. */
-export function parseFrontmatter(content: string): ParsedFrontmatter {
-  const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(content);
-  if (!m) return { aliases: [], tags: [], body: content };
-  const lines = m[1].split(/\r?\n/);
-  const body = content.slice(m[0].length);
-  const unquote = (s: string) => s.trim().replace(/^["']|["']$/g, '');
-
-  const readList = (key: string): string[] => {
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const head = new RegExp(`^${key}\\s*:(.*)$`, 'i').exec(line);
-      if (!head) continue;
-      const rest = head[1].trim();
-      // inline list: key: [a, b]
-      const inline = /^\[(.*)\]$/.exec(rest);
-      if (inline) return inline[1].split(',').map(unquote).filter(Boolean);
-      // scalar: key: value
-      if (rest) return [unquote(rest)];
-      // block list: subsequent indented "- item" lines
-      const items: string[] = [];
-      for (let j = i + 1; j < lines.length; j++) {
-        const item = /^\s+-\s+(.+)$/.exec(lines[j]);
-        if (!item) break;
-        const v = unquote(item[1]);
-        if (v) items.push(v);
-      }
-      return items;
-    }
-    return [];
-  };
-
-  return { aliases: readList('aliases'), tags: readList('tags'), body };
-}
 
 function normalizeNoteReference(value: string): string | null {
   const trimmed = value.trim().replace(/\\/g, '/');
@@ -502,7 +416,8 @@ function referenceLookupKeys(value: string): string[] {
 function noteReferenceKeys(row: {
   id: string;
   title: string;
-  content: string;
+  /** Frontmatter aliases, precomputed into `notes.aliases` at write/index time. */
+  aliases: string[];
   folderPath: string;
 }): string[] {
   const keys = new Set<string>();
@@ -511,7 +426,7 @@ function noteReferenceKeys(row: {
   };
 
   add(row.title);
-  for (const alias of parseFrontmatter(row.content).aliases) add(alias);
+  for (const alias of row.aliases) add(alias);
 
   const folder = row.folderPath.replace(/^\/+|\/+$/g, '');
   if (folder) add(`${folder}/${row.title}`);
@@ -586,7 +501,9 @@ function extractProjectDocumentLinks(sourcePath: string, content: string): strin
 
 /**
  * Convert a raw DB row to a typed Note object.
- * Handles JSON parsing for tags and boolean coercion.
+ * Handles JSON parsing for tags and boolean coercion. The body comes from the
+ * source file for project documents (the file is authoritative); stored
+ * `content` only carries bodies that exist nowhere else.
  */
 function rowToNote(row: typeof notes.$inferSelect): Note {
   const sourcePath = projectDocumentIdentity(row.id)?.sourcePath;
@@ -594,7 +511,7 @@ function rowToNote(row: typeof notes.$inferSelect): Note {
   return {
     id: row.id,
     title: row.title,
-    content: row.content,
+    content: readNoteBody(row),
     folderPath: row.folderPath,
     tags: publicNoteTags(row.tags),
     pinned: Boolean(row.pinned),
@@ -629,46 +546,36 @@ function rowToTrashedNote(row: typeof notes.$inferSelect): TrashedNote {
   };
 }
 
-function revisionSnapshotSql(
-  noteId: string,
-  operation: NoteRevisionOperation,
-  snapshotAt = Date.now(),
-) {
-  const identity = projectDocumentIdentity(noteId);
-  return sql`
-    INSERT OR IGNORE INTO note_revisions (
-      note_id, revision, project_root, operation, title, content, content_bytes,
-      folder_path, tags, pinned, include_in_context, format, source_path,
-      trashed_at, trash_reason, note_created_at, note_updated_at, created_at
-    )
-    SELECT
-      id, revision, COALESCE(project_root, ${identity?.projectRoot ?? ''}), ${operation},
-      title, content, length(CAST(content AS BLOB)), folder_path, tags, pinned,
-      include_in_context, format, ${identity?.sourcePath ?? null}, trashed_at,
-      trash_reason, created_at, updated_at, ${snapshotAt}
-    FROM notes WHERE id = ${noteId}
-  `;
-}
 
-function revisionBatchSnapshotSql(
-  noteIds: string[],
-  operation: NoteRevisionOperation,
-  snapshotAt = Date.now(),
-) {
-  if (noteIds.length === 0) return sql`SELECT 1`;
-  return sql`
-    INSERT OR IGNORE INTO note_revisions (
-      note_id, revision, project_root, operation, title, content, content_bytes,
-      folder_path, tags, pinned, include_in_context, format, source_path,
-      trashed_at, trash_reason, note_created_at, note_updated_at, created_at
-    )
-    SELECT
-      id, revision, COALESCE(project_root, ''), ${operation}, title, content,
-      length(CAST(content AS BLOB)), folder_path, tags, pinned,
-      include_in_context, format, NULL, trashed_at, trash_reason,
-      created_at, updated_at, ${snapshotAt}
-    FROM notes WHERE ${inArray(notes.id, noteIds)}
-  `;
+
+/** Build a revision snapshot from a stored notes row plus a body the caller
+ * already holds. Column-unit conversions mirror the old `revisionSnapshotSql`
+ * copy: `trashed_at` stays epoch ms, `note_*_at` stay epoch seconds. */
+function noteRevisionSnapshotFromRow(
+  row: typeof notes.$inferSelect,
+  content: string,
+): NoteRevisionSnapshot {
+  const epochMs = (v: unknown): number | null =>
+    v == null ? null : v instanceof Date ? v.getTime() : (v as number);
+  const epochSec = (v: unknown): number =>
+    v instanceof Date ? Math.floor(v.getTime() / 1000) : (v as number);
+  return {
+    noteId: row.id,
+    revision: row.revision,
+    projectRoot: row.projectRoot ?? projectDocumentIdentity(row.id)?.projectRoot ?? '',
+    title: row.title,
+    content,
+    folderPath: row.folderPath,
+    tags: row.tags,
+    pinned: row.pinned,
+    includeInContext: row.includeInContext,
+    format: row.format ?? 'markdown',
+    sourcePath: projectDocumentIdentity(row.id)?.sourcePath ?? null,
+    trashedAt: epochMs(row.trashedAt),
+    trashReason: row.trashReason,
+    noteCreatedAt: epochSec(row.createdAt),
+    noteUpdatedAt: epochSec(row.updatedAt),
+  };
 }
 
 function revisionRowToSummary(row: typeof noteRevisions.$inferSelect): NoteRevisionSummary {
@@ -783,15 +690,17 @@ export async function createNote(
   const content = input.content ?? '';
   assertContentBudget(content, root);
   if (input.tags?.includes('canvas')) validateNoteCanvas(JSON.parse(content));
+  const tagsJson = JSON.stringify(validateTags(input.tags ?? []));
 
   db.transaction((tx) => {
     tx.insert(notes)
       .values({
         id,
         title,
-        content,
+        content: storedNoteContent(id, content),
+        ...noteContentFields(content),
         folderPath: validateFolderPath(input.folderPath ?? '/'),
-        tags: JSON.stringify(validateTags(input.tags ?? [])),
+        tags: tagsJson,
         pinned: input.pinned ? 1 : 0,
         includeInContext: input.includeInContext ? 1 : 0,
         format: input.format ?? 'markdown',
@@ -804,7 +713,9 @@ export async function createNote(
         updatedAt: now,
       })
       .run();
-    tx.run(revisionSnapshotSql(id, 'create', now.getTime()));
+    setNoteSearchText(id, title, content, tagsJson);
+    // DB-native notes are tracked from their create snapshot.
+    snapshotNoteRowById(id, 'create', content, getDb(), now.getTime());
   });
 
   // New title/alias → the resolution index is stale.
@@ -875,6 +786,8 @@ async function updateNoteUnlocked(
 ): Promise<Note> {
   const existing = await getNote(id, projectRoot);
   if (!existing) throw new NotFoundError('Note', id);
+  // Raw stored columns (content_hash, tags JSON) that the Note API type drops.
+  const existingRow = (await getStoredNoteRow(id, projectRoot))!;
   if (input.expectedRevision !== undefined && input.expectedRevision !== existing.revision) {
     throw new ConflictError(
       'This note changed after it was opened. Review the newer version before saving.',
@@ -898,7 +811,7 @@ async function updateNoteUnlocked(
       );
     }
     const diskContent = sourceExists ? readFileSync(sourceFile, 'utf8') : null;
-    if (diskContent !== null && diskContent !== existing.content) {
+    if (diskContent !== null && !noteContentMatches(existingRow, diskContent)) {
       assertContentBudget(diskContent, root);
       const diskStat = statSync(sourceFile);
       const diskRevision = existing.revision + 1;
@@ -906,7 +819,8 @@ async function updateNoteUnlocked(
         const changed = tx
           .update(notes)
           .set({
-            content: diskContent,
+            content: '',
+            ...noteContentFields(diskContent),
             projectRoot: root,
             revision: diskRevision,
             updatedAt: diskStat.mtime,
@@ -917,7 +831,10 @@ async function updateNoteUnlocked(
           .returning({ id: notes.id })
           .all();
         if (changed.length === 1) {
-          tx.run(revisionSnapshotSql(id, 'external_sync'));
+          setNoteSearchText(id, existingRow.title, diskContent, existingRow.tags);
+          if (isNoteTracked(id)) {
+            snapshotNoteRowById(id, 'external_sync', diskContent);
+          }
         }
         return changed;
       });
@@ -946,7 +863,12 @@ async function updateNoteUnlocked(
   };
 
   if (input.title !== undefined) updateData.title = validateTitle(input.title);
-  if (input.content !== undefined) updateData.content = input.content;
+  if (input.content !== undefined) {
+    // The atomicWrite below runs before this transaction commits, so by the
+    // time the row update lands the file backs the body and `content` stays ''.
+    updateData.content = storedNoteContent(id, input.content);
+    Object.assign(updateData, noteContentFields(input.content));
+  }
   if (input.folderPath !== undefined) updateData.folderPath = validateFolderPath(input.folderPath);
   if (input.tags !== undefined) {
     const [rawRow] = await db.select({ tags: notes.tags }).from(notes).where(eq(notes.id, id));
@@ -998,7 +920,32 @@ async function updateNoteUnlocked(
       }
       mutateGraph?.(tx);
       if (graphTargets) replaceDocumentLinks(tx, id, graphTargets, root);
-      tx.run(revisionSnapshotSql(id, 'update'));
+      const body = input.content ?? existing.content;
+      if (
+        input.title !== undefined ||
+        input.content !== undefined ||
+        input.tags !== undefined
+      ) {
+        setNoteSearchText(
+          id,
+          (updateData.title as string) ?? existing.title,
+          body,
+          (updateData.tags as string) ?? existingRow.tags,
+        );
+      }
+      if (isNoteTracked(id)) {
+        snapshotNoteRowById(id, 'update', body);
+      } else {
+        // First Koryphaios edit of a file-backed document: baseline the
+        // pre-edit state, then the new revision. The file was the history
+        // until this point.
+        snapshotNoteRevision(
+          noteRevisionSnapshotFromRow(existingRow, existing.content),
+          'update',
+          getDb(),
+        );
+        snapshotNoteRowById(id, 'update', body);
+      }
     });
   } catch (error) {
     // Compensate our file write on SQLite failure, never overwriting a newer
@@ -1063,6 +1010,20 @@ export async function trashNote(
         },
       );
     }
+    // A missing-source project document keeps its last body in `content` so
+    // restore-from-trash can recreate the file. Rows already emptied by the
+    // file-backed scheme recover the body from their latest revision blob.
+    let retainedContent: string | undefined;
+    const sourceFile = resolveProjectDocument(id);
+    if (sourceFile && !existsSync(sourceFile) && row.content === '') {
+      const latest = getDb()
+        .query<{ content_blob_id: number }, [string]>(
+          `SELECT content_blob_id FROM note_revisions
+           WHERE note_id = ? ORDER BY revision DESC LIMIT 1`,
+        )
+        .get(id);
+      if (latest) retainedContent = readRevisionContent(latest.content_blob_id);
+    }
     const trashedAt = new Date();
     const changedRows = db.transaction((tx) => {
       const changed = tx
@@ -1072,14 +1033,19 @@ export async function trashNote(
           trashReason: reason,
           revision: existing.revision + 1,
           updatedAt: trashedAt,
+          ...(retainedContent !== undefined ? { content: retainedContent } : {}),
         })
         .where(
           and(eq(notes.id, id), eq(notes.revision, existing.revision), isNull(notes.trashedAt)),
         )
         .returning({ id: notes.id })
         .all();
-      if (changed.length === 1) {
-        tx.run(revisionSnapshotSql(id, reason === 'source_removed' ? reason : 'trash'));
+      if (changed.length === 1 && isNoteTracked(id)) {
+        snapshotNoteRowById(
+          id,
+          reason === 'source_removed' ? 'source_removed' : 'trash',
+          readNoteBody(row),
+        );
       }
       return changed;
     });
@@ -1146,7 +1112,9 @@ export async function restoreNote(
       const changed = tx
         .update(notes)
         .set({
-          content,
+          // The file was just recreated/verified above, so it backs the body.
+          content: storedNoteContent(id, content),
+          ...noteContentFields(content),
           trashedAt: null,
           trashReason: null,
           revision: current.revision + 1,
@@ -1158,7 +1126,10 @@ export async function restoreNote(
         )
         .returning({ id: notes.id })
         .all();
-      if (changed.length === 1) tx.run(revisionSnapshotSql(id, 'restore'));
+      if (changed.length === 1) {
+        setNoteSearchText(id, row.title, content, row.tags);
+        if (isNoteTracked(id)) snapshotNoteRowById(id, 'restore', content);
+      }
       return changed;
     });
     if (changedRows.length !== 1) {
@@ -1197,7 +1168,9 @@ export async function getNoteRevision(
     .select()
     .from(noteRevisions)
     .where(and(eq(noteRevisions.noteId, id), eq(noteRevisions.revision, revision)));
-  return rows[0] ? { ...revisionRowToSummary(rows[0]), content: rows[0].content } : null;
+  return rows[0]
+    ? { ...revisionRowToSummary(rows[0]), content: readRevisionContent(rows[0].contentBlobId) }
+    : null;
 }
 
 export async function restoreNoteRevision(
@@ -1224,17 +1197,19 @@ export async function restoreNoteRevision(
       .where(and(eq(noteRevisions.noteId, id), eq(noteRevisions.revision, revision)));
     const target = targetRows[0];
     if (!target) throw new NotFoundError('Note revision', `${id}@${revision}`);
+    const targetContent = readRevisionContent(target.contentBlobId);
     const root = rowProjectRoot(row);
-    assertContentBudget(target.content, root);
+    assertContentBudget(targetContent, root);
     const sourceFile = resolveProjectDocument(id);
-    if (sourceFile) atomicWrite(sourceFile, target.content);
+    if (sourceFile) atomicWrite(sourceFile, targetContent);
     const restoredAt = new Date();
     const changedRows = db.transaction((tx) => {
       const changed = tx
         .update(notes)
         .set({
           title: target.title,
-          content: target.content,
+          content: storedNoteContent(id, targetContent),
+          ...noteContentFields(targetContent),
           folderPath: target.folderPath,
           tags: target.tags,
           pinned: target.pinned,
@@ -1249,14 +1224,17 @@ export async function restoreNoteRevision(
         .where(and(eq(notes.id, id), eq(notes.revision, row.revision)))
         .returning({ id: notes.id })
         .all();
-      if (changed.length === 1) tx.run(revisionSnapshotSql(id, 'revision_restore'));
+      if (changed.length === 1) {
+        setNoteSearchText(id, target.title, targetContent, target.tags);
+        snapshotNoteRowById(id, 'revision_restore', targetContent);
+      }
       return changed;
     });
     if (changedRows.length !== 1) {
       throw new ConflictError('This note changed while its historical revision was restored.');
     }
     invalidateNotesCache();
-    await parseAndSaveLinks(id, target.content, { projectRoot: root });
+    await parseAndSaveLinks(id, targetContent, { projectRoot: root });
     if (target.title !== row.title) {
       await propagateTitleRename(id, row.title, target.title, root);
     }
@@ -1617,7 +1595,7 @@ export async function createVaultExport(projectRoot = PROJECT_ROOT): Promise<Vau
       const key = archiveObjectKey(row.id);
       const extension = row.format === 'html' ? 'html' : 'md';
       const contentPath = `notes/${key}.${extension}`;
-      const content = Buffer.from(row.content, 'utf8');
+      const content = Buffer.from(readNoteBody(row), 'utf8');
       const contentSha256 = writer.addBuffer(contentPath, content);
       manifestNotes.push({
         id: row.id,
@@ -1646,7 +1624,7 @@ export async function createVaultExport(projectRoot = PROJECT_ROOT): Promise<Vau
       const key = archiveObjectKey(row.noteId);
       const extension = row.format === 'html' ? 'html' : 'md';
       const contentPath = `revisions/${key}/${row.revision}.${extension}`;
-      const content = Buffer.from(row.content, 'utf8');
+      const content = Buffer.from(readRevisionContent(row.contentBlobId), 'utf8');
       const contentSha256 = writer.addBuffer(contentPath, content);
       manifestRevisions.push({
         noteId: row.noteId,
@@ -1911,7 +1889,10 @@ export interface ProjectDocumentSyncResult {
 
 type ProjectDocumentSyncRow = {
   id: string;
+  /** Last resort for rows written before file-backed documents — normally ''.
+   * Never used for change detection; `contentHash` is the indexed digest. */
   content: string;
+  contentHash: string | null;
   title: string;
   folderPath: string;
   tags: string;
@@ -1957,7 +1938,9 @@ async function relocateProjectDocumentRow(
         .values({
           id: target.id,
           title: target.title,
-          content: target.content,
+          // The relocated source file exists (the scanner just read it).
+          content: '',
+          ...noteContentFields(target.content),
           folderPath: target.folderPath,
           tags: target.tags,
           pinned: oldRow.pinned,
@@ -1974,16 +1957,18 @@ async function relocateProjectDocumentRow(
         .run();
 
       // Re-key immutable history first; deleting the old row cascades only the
-      // old-key copies after these new-key rows exist.
+      // old-key copies after these new-key rows exist. Blob ids carry over —
+      // revision bodies are shared, deduplicated rows.
       tx.run(sql`
         INSERT OR IGNORE INTO note_revisions (
-          note_id, revision, project_root, operation, title, content, content_bytes,
-          folder_path, tags, pinned, include_in_context, format, source_path,
-          trashed_at, trash_reason, note_created_at, note_updated_at, created_at
+          note_id, revision, project_root, operation, title, content_blob_id,
+          content_bytes, folder_path, tags, pinned, include_in_context, format,
+          source_path, trashed_at, trash_reason, note_created_at,
+          note_updated_at, created_at
         )
         SELECT
-          ${target.id}, revision, ${projectRoot}, operation, title, content, content_bytes,
-          folder_path, tags, pinned, include_in_context, format,
+          ${target.id}, revision, ${projectRoot}, operation, title, content_blob_id,
+          content_bytes, folder_path, tags, pinned, include_in_context, format,
           COALESCE(source_path, ${oldSourcePath}),
           trashed_at, trash_reason, note_created_at, note_updated_at, created_at
         FROM note_revisions WHERE note_id = ${oldRow.id}
@@ -2037,8 +2022,16 @@ async function relocateProjectDocumentRow(
         .set({ noteId: target.id })
         .where(eq(noteAttachments.noteId, oldRow.id))
         .run();
+      removeNoteSearchText(oldRow.id);
       tx.delete(notes).where(eq(notes.id, oldRow.id)).run();
-      tx.run(revisionSnapshotSql(target.id, 'external_sync'));
+      // The cascaded old-key revisions can orphan blobs; re-keyed rows still
+      // reference theirs, so this is usually a no-op.
+      gcRevisionBlobs();
+      const targetBody = readNoteBody(target);
+      setNoteSearchText(target.id, target.title, targetBody, target.tags);
+      if (isNoteTracked(target.id)) {
+        snapshotNoteRowById(target.id, 'external_sync', targetBody);
+      }
     });
   });
 }
@@ -2048,12 +2041,13 @@ async function relocateProjectDocumentRow(
  * through to disk. Generated/vendor directories are intentionally excluded. */
 export async function syncProjectDocuments(
   projectRoot = PROJECT_ROOT,
+  options: { maxFiles?: number } = {},
 ): Promise<ProjectDocumentSyncResult> {
   const root = resolveProjectIdentity(projectRoot);
   const active = projectSyncs.get(root);
   if (active) return active;
   projectSyncStatus.set(root, { state: 'running' });
-  const sync = performProjectDocumentSync(root)
+  const sync = performProjectDocumentSync(root, options.maxFiles)
     .then((result) => {
       initialSyncComplete.set(root, true);
       lastSyncAt.set(root, Date.now());
@@ -2079,7 +2073,10 @@ export async function syncProjectDocuments(
   return sync;
 }
 
-async function performProjectDocumentSync(projectRoot: string): Promise<ProjectDocumentSyncResult> {
+async function performProjectDocumentSync(
+  projectRoot: string,
+  maxFiles?: number,
+): Promise<ProjectDocumentSyncResult> {
   const root = resolveProjectIdentity(projectRoot);
   const files: string[] = [];
   let scanComplete = true;
@@ -2087,10 +2084,17 @@ async function performProjectDocumentSync(projectRoot: string): Promise<ProjectD
   let unreadablePaths = 0;
   let oversizedFiles = 0;
 
-  // Match the graph/catalog envelope. Inserts are batched below and the walk
-  // yields regularly, so real multi-thousand-document vaults do not get stuck
-  // in a permanent partial-index state at the old 1,000-file boundary.
-  const MAX_FILES = PROJECT_DOCUMENT_SCAN_LIMIT;
+  // Inserts are batched below and the walk yields regularly, so large vaults
+  // stay responsive. `maxFiles` is the caller's soft limit (0 = unlimited);
+  // without one the project default applies. It is a stopping point that can
+  // be continued past, never a hard failure.
+  const MAX_FILES =
+    maxFiles === undefined
+      ? PROJECT_DOCUMENT_SCAN_LIMIT
+      : maxFiles === 0
+        ? Number.POSITIVE_INFINITY
+        : maxFiles;
+  const MAX_ROWS = maxFiles === 0 ? -1 : Math.min(MAX_FILES, Number.MAX_SAFE_INTEGER);
 
   // Use async readdir so the event loop stays responsive during the
   // recursive directory walk. The synchronous readdirSync would block
@@ -2128,10 +2132,16 @@ async function performProjectDocumentSync(projectRoot: string): Promise<ProjectD
       }
       if (entry.isSymbolicLink()) continue;
       if (entry.isDirectory()) {
-        if (!IGNORED_DOCUMENT_DIRS.has(entry.name)) await walk(join(directory, entry.name));
+        // Hidden directories are never document sources, alongside the named
+        // generated/vendor checkouts.
+        if (!isIgnoredDocumentPathSegment(entry.name)) await walk(join(directory, entry.name));
         continue;
       }
-      if (entry.isFile() && DOCUMENT_EXTENSIONS.has(extname(entry.name).toLowerCase())) {
+      if (
+        entry.isFile() &&
+        !entry.name.startsWith('.') &&
+        DOCUMENT_EXTENSIONS.has(extname(entry.name).toLowerCase())
+      ) {
         if (/^SKILL\./i.test(entry.name)) continue;
         files.push(join(directory, entry.name));
       }
@@ -2146,6 +2156,7 @@ async function performProjectDocumentSync(projectRoot: string): Promise<ProjectD
   const projectRowSelection = {
     id: notes.id,
     content: notes.content,
+    contentHash: notes.contentHash,
     title: notes.title,
     folderPath: notes.folderPath,
     tags: notes.tags,
@@ -2170,12 +2181,12 @@ async function performProjectDocumentSync(projectRoot: string): Promise<ProjectD
       .select(projectRowSelection)
       .from(notes)
       .where(and(like(notes.id, PROJECT_DOCUMENT_PREFIX + '%'), eq(notes.projectRoot, root)))
-      .limit(PROJECT_DOCUMENT_SCAN_LIMIT),
+      .limit(MAX_ROWS),
     db
       .select(projectRowSelection)
       .from(notes)
       .where(and(like(notes.id, PROJECT_DOCUMENT_PREFIX + '%'), isNull(notes.projectRoot)))
-      .limit(PROJECT_DOCUMENT_SCAN_LIMIT),
+      .limit(MAX_ROWS),
   ]);
   const existingProjectRows = [
     ...scopedProjectRows,
@@ -2197,7 +2208,10 @@ async function performProjectDocumentSync(projectRoot: string): Promise<ProjectD
   const missingRowsByDigest = new Map<string, ProjectDocumentSyncRow[]>();
   for (const row of existingProjectRows) {
     if (discoveredIds.has(row.id) || row.trashReason === 'user') continue;
-    const digest = createHash('sha256').update(row.content, 'utf8').digest('hex');
+    // content_hash is the indexed digest; rows still awaiting the compaction
+    // backfill fall back to hashing their retained body.
+    const digest =
+      row.contentHash ?? createHash('sha256').update(readNoteBody(row), 'utf8').digest('hex');
     const matches = missingRowsByDigest.get(digest);
     if (matches) matches.push(row);
     else missingRowsByDigest.set(digest, [row]);
@@ -2282,7 +2296,9 @@ async function performProjectDocumentSync(projectRoot: string): Promise<ProjectD
     relocationSourceByNewId.set(newIds[0], oldRow);
   }
 
-  const pendingInserts: Array<typeof notes.$inferInsert> = [];
+  // Imported documents are untracked until their first Koryphaios edit, so
+  // inserts write no revision rows — only the contentless index entry.
+  const pendingInserts: Array<{ insert: typeof notes.$inferInsert; body: string }> = [];
   let created = 0;
   let updated = 0;
   let identityRelocations = 0;
@@ -2411,8 +2427,17 @@ async function performProjectDocumentSync(projectRoot: string): Promise<ProjectD
             }
             content = latestContent;
             fileStat = latestStat;
+            const storedContent = getDb()
+              .query<{ content: string; content_hash: string | null }, [string]>(
+                'SELECT content, content_hash FROM notes WHERE id = ?',
+              )
+              .get(id);
             if (
-              current.content !== latestContent ||
+              (storedContent &&
+                !noteContentMatches(
+                  { id, content: storedContent.content, contentHash: storedContent.content_hash },
+                  latestContent,
+                )) ||
               current.title !== title ||
               current.folderPath !== folderPath ||
               JSON.stringify(current.tags) !== tags ||
@@ -2423,7 +2448,9 @@ async function performProjectDocumentSync(projectRoot: string): Promise<ProjectD
                   .update(notes)
                   .set({
                     title,
-                    content: latestContent,
+                    // The file backs the body; the row keeps derived fields only.
+                    content: '',
+                    ...noteContentFields(latestContent),
                     folderPath,
                     tags,
                     format: extension === '.html' || extension === '.htm' ? 'html' : 'markdown',
@@ -2441,7 +2468,12 @@ async function performProjectDocumentSync(projectRoot: string): Promise<ProjectD
                   .returning({ id: notes.id })
                   .all();
                 if (changedRows.length === 1) {
-                  tx.run(revisionSnapshotSql(id, 'external_sync'));
+                  setNoteSearchText(id, title, latestContent, tags);
+                  // File-backed documents accrue history only once tracked;
+                  // a tracked one gains a revision for the external change.
+                  if (isNoteTracked(id)) {
+                    snapshotNoteRowById(id, 'external_sync', latestContent);
+                  }
                 }
                 return changedRows;
               });
@@ -2516,18 +2548,22 @@ async function performProjectDocumentSync(projectRoot: string): Promise<ProjectD
         }
       } else {
         pendingInserts.push({
-          id,
-          title,
-          content,
-          folderPath,
-          tags,
-          pinned: 0,
-          includeInContext: 0,
-          projectRoot: root,
-          revision: 1,
-          userId: null,
-          createdAt: fileStat.birthtime,
-          updatedAt: fileStat.mtime,
+          insert: {
+            id,
+            title,
+            content: '',
+            ...noteContentFields(content),
+            folderPath,
+            tags,
+            pinned: 0,
+            includeInContext: 0,
+            projectRoot: root,
+            revision: 1,
+            userId: null,
+            createdAt: fileStat.birthtime,
+            updatedAt: fileStat.mtime,
+          },
+          body: content,
         });
         synced = true;
         created++;
@@ -2552,26 +2588,36 @@ async function performProjectDocumentSync(projectRoot: string): Promise<ProjectD
     const batch = pendingInserts.slice(i, i + 100);
     try {
       db.transaction((tx) => {
-        tx.insert(notes).values(batch).onConflictDoNothing().run();
-        tx.run(
-          revisionBatchSnapshotSql(
-            batch.map((row) => row.id),
-            'create',
-          ),
-        );
+        tx.insert(notes)
+          .values(batch.map((entry) => entry.insert))
+          .onConflictDoNothing()
+          .run();
+        for (const entry of batch) {
+          setNoteSearchText(
+            entry.insert.id!,
+            entry.insert.title!,
+            entry.body,
+            entry.insert.tags!,
+          );
+        }
       });
     } catch (err) {
       serverLog.error({ err }, 'Bulk note insert failed during project sync; retrying row-by-row');
-      for (const row of batch) {
+      for (const entry of batch) {
         try {
           db.transaction((tx) => {
-            tx.insert(notes).values(row).onConflictDoNothing().run();
-            tx.run(revisionSnapshotSql(row.id, 'create'));
+            tx.insert(notes).values(entry.insert).onConflictDoNothing().run();
+            setNoteSearchText(
+              entry.insert.id!,
+              entry.insert.title!,
+              entry.body,
+              entry.insert.tags!,
+            );
           });
           await yieldBetweenBatches();
         } catch (rowErr) {
           serverLog.error(
-            { err: rowErr, noteId: row.id },
+            { err: rowErr, noteId: entry.insert.id },
             'Failed to insert project document note',
           );
         }
@@ -2580,22 +2626,41 @@ async function performProjectDocumentSync(projectRoot: string): Promise<ProjectD
   }
 
   let removed = 0;
+  const untrackedOrphans: string[] = [];
   for (let idx = 0; scanComplete && idx < existingProjectRows.length; idx++) {
     if (idx > 0 && idx % 50 === 0) await yieldBetweenBatches();
     const row = existingProjectRows[idx];
     if (!foundIds.has(row.id) && !row.trashedAt) {
-      try {
-        await trashNote(row.id, root, row.revision, 'source_removed');
-        const missingSource = resolveProjectDocument(row.id);
-        if (missingSource) {
-          fileMtimeCache.delete(missingSource);
-          fileIdentityCache.delete(missingSource);
+      // Untracked documents hold nothing the file did not already hold, so a
+      // missing source means the row itself is garbage. Tracked documents
+      // keep recoverable trash plus their retained body.
+      if (isNoteTracked(row.id)) {
+        try {
+          await trashNote(row.id, root, row.revision, 'source_removed');
+          removed++;
+        } catch (err) {
+          serverLog.error({ err, noteId: row.id }, 'Failed to trash an orphaned project note');
         }
-        removed++;
-      } catch (err) {
-        serverLog.error({ err, noteId: row.id }, 'Failed to trash an orphaned project note');
+      } else {
+        untrackedOrphans.push(row.id);
+      }
+      const missingSource = resolveProjectDocument(row.id);
+      if (missingSource) {
+        fileMtimeCache.delete(missingSource);
+        fileIdentityCache.delete(missingSource);
       }
     }
+  }
+  // One cascade transaction and one blob GC pass per batch, not per row.
+  for (let i = 0; i < untrackedOrphans.length; i += 200) {
+    const batch = untrackedOrphans.slice(i, i + 200);
+    try {
+      hardDeleteNoteRows(batch);
+      removed += batch.length;
+    } catch (err) {
+      serverLog.error({ err, count: batch.length }, 'Failed to delete orphaned project notes');
+    }
+    if (i + 200 < untrackedOrphans.length) await yieldBetweenBatches();
   }
 
   // Re-resolve links only for files that changed this pass. Build the
@@ -2641,7 +2706,9 @@ async function performProjectDocumentSync(projectRoot: string): Promise<ProjectD
   const issueParts: string[] = [];
   if (scanLimitReached) {
     issueParts.push(
-      `the ${PROJECT_DOCUMENT_SCAN_LIMIT.toLocaleString()}-document scan limit was reached`,
+      Number.isFinite(MAX_FILES)
+        ? `the ${MAX_FILES.toLocaleString()}-document soft limit was reached; continue to index the rest`
+        : 'the document scan stopped early',
     );
   }
   if (unreadablePaths > 0) {
@@ -3167,7 +3234,9 @@ async function mutateNoteRelationship(
     };
     // Reject stale relationship edits before writing a project-backed file.
     db.transaction(assertRelationshipRevision);
-    let content = from.content;
+    // The stored row keeps '' for file-backed documents; edit the real body.
+    const body = readNoteBody(from);
+    let content = body;
     if (options.syncContent !== false) {
       const pattern = new RegExp(
         `!?\\[\\[${escapeRegExp(to.title)}(?:[|#][^\\]]+?)?\\]\\]\\n?`,
@@ -3181,7 +3250,7 @@ async function mutateNoteRelationship(
       fromId,
       {
         expectedRevision: from.revision,
-        ...(content !== from.content ? { content } : {}),
+        ...(content !== body ? { content } : {}),
       },
       root,
       (tx) => {
@@ -3266,10 +3335,11 @@ async function propagateTitleRename(
       .where(and(inArray(notes.id, ids), scopedNotesCondition(projectRoot)))
   ).filter((row) => isVisibleInProject(row, projectRoot));
   for (const row of rows) {
+    const body = readNoteBody(row);
     pattern.lastIndex = 0;
-    if (!pattern.test(row.content)) continue;
+    if (!pattern.test(body)) continue;
     pattern.lastIndex = 0;
-    const updated = row.content.replace(pattern, `$1[[${newTitle}$2]]`);
+    const updated = body.replace(pattern, `$1[[${newTitle}$2]]`);
     try {
       // Use the same CAS, source-file conflict checks, and per-note queue as a
       // direct edit. A simultaneous human save wins instead of being silently
@@ -3504,7 +3574,7 @@ export async function parseAndSaveLinks(
   const source = await getStoredNoteRow(noteId, opts?.projectRoot);
   if (!source || source.trashedAt) throw new NotFoundError('Note', noteId);
   if (
-    source.content !== content ||
+    !noteContentMatches(source, content) ||
     (opts?.expectedRevision !== undefined && source.revision !== opts.expectedRevision)
   ) {
     throw new ConflictError('Cannot replace document links from an outdated note revision.');
@@ -3538,7 +3608,7 @@ export async function parseAndSaveLinks(
       !current ||
       current.trashedAt ||
       current.revision !== source.revision ||
-      current.content !== content
+      !noteContentMatches(current, content)
     ) {
       throw new ConflictError('The note changed while its document links were being resolved.');
     }
@@ -3555,31 +3625,27 @@ async function resolveForwardNoteReferences(root: string, targetIds: Set<string>
   let cursor = '';
   for (;;) {
     const rows = await db
-      .select({ id: notes.id, content: notes.content, revision: notes.revision })
+      .select({
+        id: notes.id,
+        content: notes.content,
+        revision: notes.revision,
+        hasRefs: notes.hasRefs,
+      })
       .from(notes)
-      .where(
-        and(
-          scopedNotesCondition(root),
-          gt(notes.id, cursor),
-          or(
-            like(notes.content, '%[[%'),
-            like(notes.content, '%.md%'),
-            like(notes.content, '%.htm%'),
-          ),
-        ),
-      )
+      .where(and(scopedNotesCondition(root), gt(notes.id, cursor), eq(notes.hasRefs, 1)))
       .orderBy(asc(notes.id))
       .limit(200);
     if (!rows.length) break;
     for (const row of rows) {
+      const body = readNoteBody(row);
       const targets = new Set(
-        extractWikilinks(row.content)
+        extractWikilinks(body)
           .map((ref) => resolveNoteRefFromIndex(ref, index))
           .filter((id): id is string => Boolean(id && id !== row.id && targetIds.has(id))),
       );
       const identity = projectDocumentIdentity(row.id);
       if (identity) {
-        for (const path of extractProjectDocumentLinks(identity.sourcePath, row.content)) {
+        for (const path of extractProjectDocumentLinks(identity.sourcePath, body)) {
           const id = projectDocumentId(root, path);
           if (id !== row.id && targetIds.has(id)) targets.add(id);
         }
@@ -3934,7 +4000,7 @@ export async function getGraphData(projectRoot?: string): Promise<GraphData> {
   const resolveMap = await getResolveIndex(projectRoot);
   const ghostNodes = new Map<string, GraphNode>(); // lowered title -> ghost node
   for (const n of allNotes) {
-    for (const ref of extractWikilinks(n.content)) {
+    for (const ref of n.hasRefs ? extractWikilinks(readNoteBody(n)) : []) {
       const key = normalizeNoteReference(ref);
       if (!key || resolveNoteRefFromIndex(ref, resolveMap)) continue;
       if (edges.length >= MAX_GRAPH_LINKS) {
@@ -4043,64 +4109,38 @@ function ftsMatchExpr(query: string): string {
   return tokens.map((t) => `${t}*`).join(' ');
 }
 
-/** Ranked full-text search over the notes_fts index. Falls back to a bounded
- *  LIKE scan only if the FTS table is somehow unavailable (pre-migration DBs). */
+/** Ranked full-text search over the contentless notes_fts index. The
+ *  note_id ↔ rowid map (notes_fts_rowids) carries identity because a
+ *  contentless index cannot return it. */
 function ftsSearchIds(query: string, limit: number, projectRoot?: string): string[] {
   const match = ftsMatchExpr(query);
   if (!match) return [];
   const raw = getDb();
   const root = resolvedProjectRoot(projectRoot);
   const includeLegacy = root === resolveProjectIdentity(PROJECT_ROOT);
-  try {
-    const rows = (
-      root
-        ? raw
-            .query(
-              `SELECT notes_fts.note_id
-             FROM notes_fts
-             JOIN notes ON notes.id = notes_fts.note_id
+  const rows = (
+    root
+      ? raw
+          .query(
+            `SELECT notes_fts_rowids.note_id
+             ${NOTES_FTS_JOIN}
              WHERE notes_fts MATCH ?
                AND notes.trashed_at IS NULL
                AND ${includeLegacy ? '(notes.project_root = ? OR notes.project_root IS NULL)' : 'notes.project_root = ?'}
              ORDER BY bm25(notes_fts)
              LIMIT ?`,
-            )
-            .all(match, root, limit)
-        : raw
-            .query(
-              `SELECT notes_fts.note_id FROM notes_fts
-               JOIN notes ON notes.id = notes_fts.note_id
-               WHERE notes_fts MATCH ? AND notes.trashed_at IS NULL
-               ORDER BY bm25(notes_fts) LIMIT ?`,
-            )
-            .all(match, limit)
-    ) as Array<{ note_id: string }>;
-    return rows.map((r) => r.note_id);
-  } catch (err: unknown) {
-    serverLog.debug(
-      { err: err instanceof Error ? err.message : String(err) },
-      'FTS5 search unavailable — falling back to bounded LIKE scan',
-    );
-    const term = '%' + query + '%';
-    const rows = (
-      root
-        ? raw
-            .query(
-              `SELECT id FROM notes
-             WHERE (title LIKE ? OR content LIKE ?)
-               AND trashed_at IS NULL
-               AND ${includeLegacy ? '(project_root = ? OR project_root IS NULL)' : 'project_root = ?'}
-             LIMIT ?`,
-            )
-            .all(term, term, root, limit)
-        : raw
-            .query(
-              'SELECT id FROM notes WHERE trashed_at IS NULL AND (title LIKE ? OR content LIKE ?) LIMIT ?',
-            )
-            .all(term, term, limit)
-    ) as Array<{ id: string }>;
-    return rows.map((r) => r.id);
-  }
+          )
+          .all(match, root, limit)
+      : raw
+          .query(
+            `SELECT notes_fts_rowids.note_id
+             ${NOTES_FTS_JOIN}
+             WHERE notes_fts MATCH ? AND notes.trashed_at IS NULL
+             ORDER BY bm25(notes_fts) LIMIT ?`,
+          )
+          .all(match, limit)
+  ) as Array<{ note_id: string }>;
+  return rows.map((r) => r.note_id);
 }
 
 export async function searchNotes(
@@ -4141,7 +4181,7 @@ export async function searchNotes(
             resolveProjectIdentity(projectRoot),
             visible.map((row) => ({
               id: row.id,
-              content: `${row.title}\n\n${row.content}`,
+              content: `${row.title}\n\n${readNoteBody(row)}`,
             })),
             query,
             { client, limit: 51, signal: options.signal, timeoutMs: options.timeoutMs },
@@ -4168,7 +4208,7 @@ export async function searchNotes(
                 return (
                   before &&
                   after &&
-                  before.content === after.content &&
+                  before.contentHash === after.contentHash &&
                   before.title === after.title
                 );
               })
@@ -4225,7 +4265,7 @@ async function getResolveIndex(projectRoot?: string): Promise<NoteResolveIndex> 
       .select({
         id: notes.id,
         title: notes.title,
-        content: notes.content,
+        aliases: notes.aliases,
         folderPath: notes.folderPath,
       })
       .from(notes)
@@ -4236,7 +4276,13 @@ async function getResolveIndex(projectRoot?: string): Promise<NoteResolveIndex> 
     if (rows.length === 0) break;
 
     for (const row of rows) {
-      for (const key of noteReferenceKeys(row)) addResolvableReference(map, key, row.id);
+      for (const key of noteReferenceKeys({
+        id: row.id,
+        title: row.title,
+        aliases: parseStoredAliases(row.aliases),
+        folderPath: row.folderPath,
+      }))
+        addResolvableReference(map, key, row.id);
     }
     lastId = rows[rows.length - 1].id;
     if (rows.length < PAGE_SIZE) break;

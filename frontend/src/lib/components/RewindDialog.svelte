@@ -67,7 +67,7 @@
       <header
         class="flex items-start gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface-2)] px-5 py-4"
       >
-        <div class="mt-0.5 rounded-lg bg-amber-500/15 p-2 text-amber-400">
+        <div class="mt-0.5 rounded-lg bg-[var(--color-warning-bg)] p-2 text-[var(--color-warning)]">
           <GitCompareArrows size={17} />
         </div>
         <div class="min-w-0 flex-1">
@@ -91,7 +91,7 @@
       <div class="overflow-y-auto px-5 py-4">
         <p class="text-xs font-medium text-[var(--color-text-primary)]">{preview.description}</p>
         <dl
-          class="mt-4 grid grid-cols-2 gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3 text-[10px] sm:grid-cols-3"
+          class="mt-4 grid grid-cols-2 gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3 text-[11px] sm:grid-cols-3"
         >
           <div>
             <dt class="uppercase tracking-wider text-[var(--color-text-muted)]">Model</dt>
@@ -132,7 +132,7 @@
                 class="flex items-center gap-3 border-b border-[var(--color-border)] px-3 py-2.5 last:border-b-0"
               >
                 <span
-                  class="rounded bg-[var(--color-surface-3)] px-1.5 py-0.5 font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+                  class="rounded bg-[var(--color-surface-3)] px-1.5 py-0.5 font-mono text-[10px] uppercase text-[var(--color-text-muted)]"
                 >
                   {file.operation}
                 </span>
@@ -140,7 +140,7 @@
                   <p class="truncate font-mono text-xs text-[var(--color-text-primary)]">
                     {fileName(file.path)}
                   </p>
-                  <p class="truncate font-mono text-[10px] text-[var(--color-text-muted)]">
+                  <p class="truncate font-mono text-[11px] text-[var(--color-text-muted)]">
                     {file.path}
                   </p>
                 </div>
@@ -150,7 +150,7 @@
         {/if}
         {#if preview.diff}
           <pre
-            class="mt-4 max-h-40 overflow-auto whitespace-pre-wrap rounded-xl bg-[var(--color-surface-2)] p-3 font-mono text-[10px] leading-relaxed text-[var(--color-text-secondary)]">{preview.diff}</pre>
+            class="mt-4 max-h-40 overflow-auto whitespace-pre-wrap rounded-xl bg-[var(--color-surface-2)] p-3 font-mono text-[11px] leading-relaxed text-[var(--color-text-secondary)]">{preview.diff}</pre>
         {/if}
       </div>
 

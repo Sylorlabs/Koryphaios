@@ -13,7 +13,7 @@
   let pendingQuestion = $derived(wsStore.pendingQuestion);
 
   function select(option: string) {
-    if (option.toLowerCase().includes('other') || option.toLowerCase().includes('something else')) {
+    if (/^\s*(other|something else)\b/i.test(option)) {
       showOther = true;
       return;
     }
@@ -39,7 +39,7 @@
       otherValue = '';
       return;
     }
-    showOther = pendingQuestion.allowOther && pendingQuestion.options.length === 0;
+    showOther = (pendingQuestion.options?.length ?? 0) === 0;
   });
 </script>
 
@@ -56,7 +56,7 @@
         class="px-6 py-5 border-b border-[var(--color-border)] bg-[var(--color-surface-2)] flex items-center gap-3"
       >
         <div
-          class="w-8 h-8 rounded-md bg-amber-500/20 flex items-center justify-center text-amber-500"
+          class="w-8 h-8 rounded-md bg-[var(--color-accent)]/20 flex items-center justify-center text-[var(--color-accent)]"
         >
           <MessageSquare size={18} />
         </div>
@@ -64,7 +64,7 @@
           <h3 class="text-sm font-semibold text-[var(--color-text-primary)]">
             Kory needs guidance
           </h3>
-          <p class="text-[10px] text-[var(--color-text-muted)]">
+          <p class="text-[11px] text-[var(--color-text-muted)]">
             Please select an option to continue
           </p>
         </div>
@@ -79,16 +79,16 @@
           <div class="space-y-2">
             {#each pendingQuestion.options as option}
               <button
-                class="w-full flex items-center justify-between px-4 py-3 text-left text-sm rounded-xl transition-all border border-[var(--color-border)] bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-3)] hover:border-amber-500/50 group"
+                class="w-full flex items-center justify-between px-4 py-3 text-left text-sm rounded-xl transition-all border border-[var(--color-border)] bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-3)] hover:border-[var(--color-accent)]/50 group"
                 onclick={() => select(option)}
               >
                 <span
-                  class="text-[var(--color-text-primary)] group-hover:text-amber-400 transition-colors"
+                  class="text-[var(--color-text-primary)] group-hover:text-[var(--color-accent)] transition-colors"
                   >{option}</span
                 >
                 <ArrowRight
                   size={14}
-                  class="text-[var(--color-text-muted)] group-hover:text-amber-400 group-hover:translate-x-0.5 transition-all"
+                  class="text-[var(--color-text-muted)] group-hover:text-[var(--color-accent)] group-hover:translate-x-0.5 transition-all"
                 />
               </button>
             {/each}
@@ -123,12 +123,12 @@
                 bind:value={otherValue}
                 onkeydown={handleKeydown}
                 placeholder="Type your own answer..."
-                class="w-full pl-10 pr-4 py-3 bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-xl text-sm focus:outline-none focus:border-amber-500 transition-colors"
+                class="w-full pl-10 pr-4 py-3 bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-xl text-sm focus:outline-none focus:border-[var(--color-accent)] transition-colors"
               />
             </div>
             <div class="flex gap-2">
               <button
-                class="flex-1 px-4 py-2.5 text-sm font-medium rounded-xl bg-amber-500 text-black hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                class="flex-1 px-4 py-2.5 text-sm font-medium rounded-xl bg-[var(--color-accent)] text-[var(--color-on-accent)] hover:bg-[var(--color-accent-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 onclick={() => submit(otherValue)}
                 disabled={!otherValue.trim()}
               >

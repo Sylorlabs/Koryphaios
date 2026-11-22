@@ -473,6 +473,22 @@ const BILLING_CREDITS = {
   ],
 };
 
+// The drawer's billing panel fetches the two split endpoints; each subset
+// mirrors the keys the matching real route returns.
+const BILLING_SUMMARY = {
+  ok: BILLING_CREDITS.ok,
+  totalSpendCents: BILLING_CREDITS.totalSpendCents,
+  subscriptionInferenceCents: BILLING_CREDITS.subscriptionInferenceCents,
+  allSpendCents: BILLING_CREDITS.allSpendCents,
+  byProvider: BILLING_CREDITS.byProvider,
+};
+const BILLING_LIVE = {
+  ok: BILLING_CREDITS.ok,
+  remainingCents: BILLING_CREDITS.remainingCents,
+  cliUsage: BILLING_CREDITS.cliUsage,
+  balances: BILLING_CREDITS.balances,
+};
+
 // ─── Response helpers ───────────────────────────────────────────────────────
 
 function json(body: unknown, status = 200): Response {
@@ -688,7 +704,10 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
     });
   }
 
-  // Billing tab (flat shape consumed directly by the drawer).
+  // Billing tab (flat shape consumed directly by the drawer). The split
+  // endpoints are checked before the legacy combined one.
+  if (path.startsWith('/api/billing/summary')) return json(BILLING_SUMMARY);
+  if (path.startsWith('/api/billing/live')) return json(BILLING_LIVE);
   if (path.startsWith('/api/billing/credits')) return json(BILLING_CREDITS);
 
   // Providers (the seeded provider list lives in the store; these cover the

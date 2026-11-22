@@ -11,7 +11,7 @@ import {
   speechAudioFullTaskGaps,
   speechRecognitionErrors,
   SPEECH_AUDIO_SCENARIOS,
-} from '../skill-eval-speech-audio-runtime';
+} from '../../eval/skills/skill-eval-speech-audio-runtime';
 
 const modelPath = process.env.KORY_SPEECH_REAL_ASR_MODEL;
 const realRecordingPath = process.env.KORY_SPEECH_REAL_ASR_FIXTURE;

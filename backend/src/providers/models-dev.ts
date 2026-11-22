@@ -15,6 +15,7 @@
 // entry can never overstate a self-hosted model's trusted context window.
 
 import type { ModelDef } from '@koryphaios/shared';
+import { buildModelParameters } from '@koryphaios/shared';
 import { providerLog } from '../logger';
 
 const MODELS_DEV_URL = 'https://models.dev/api.json';
@@ -140,6 +141,16 @@ const PROVIDER_KEY: Record<string, string> = {
  *  self-hosted model's trusted context window. */
 const GATEWAY_FALLBACK_PROVIDERS = new Set([
   'experientiallabs',
+  // Numes resells many upstream labs under OpenRouter-style `lab/model` ids
+  // and has no models.dev key of its own. Its live catalog is still
+  // authoritative; this only fills limits/efforts the catalog omits.
+  'numes',
+  // AMD Token Factory resells upstream labs (DeepSeek, Qwen, MiniCPM) under
+  // their upstream ids with no models.dev key of its own.
+  'radeon',
+  // Runcrate resells upstream labs under their `org/model` ids and publishes no
+  // models.dev catalog of its own.
+  'runcrate',
   'commandcode',
   'github-models',
   // UnoRouter exposes a first-party catalog for its own models, but also routes
@@ -244,6 +255,8 @@ interface ModelsDevEntry {
   cost?: { input?: number; output?: number; cache_read?: number; cache_write?: number };
   /** Media the lab reports, e.g. modalities: { input: ["text", "image"] }. */
   modalities?: { input?: string[]; output?: string[] };
+  /** True when the lab reports the model accepts a temperature request value. */
+  temperature?: boolean;
 }
 
 let cache: Record<string, { models?: Record<string, ModelsDevEntry> }> | null = null;
@@ -620,6 +633,11 @@ export function applyModelsDevMetadata(
       // Fill-only: a route that states its own output modalities is more
       // authoritative than the lab's catalog row for the same model.
       ...(!m.outputModalities?.length && outputModalities ? { outputModalities } : {}),
+      // models.dev's `temperature: boolean` is the only user-tunable request
+      // key the lab reports. Provider-reported `parameters` always win.
+      ...(!m.parameters?.length && e.temperature === true
+        ? { parameters: buildModelParameters(['temperature']) }
+        : {}),
     };
   });
 }

@@ -8,7 +8,8 @@
  * - Isolation: Each task runs in its own worktree with a dedicated branch
  * - Security: .env files are not copied unless explicitly requested
  * - Cleanup: Automatic worktree/branch removal after changes are reconciled
- * - Resource Guard: Configurable concurrent worktree limit based on system RAM
+ * - Admission: 0 (the default) means no host-imposed limit. A positive
+ *   worktreeLimit queues further spawns in FIFO order instead of failing
  * - Persistence: Worktree metadata survives crashes via .koryphaios/worktrees.json
  * - Lifecycle: shutdown() drains all active worktrees
  *
@@ -46,8 +47,12 @@ export interface WorktreeInfo {
 
 export interface WorktreeStatus {
   active: WorktreeInfo[];
-  availableSlots: number;
-  maxAllowed: number;
+  /** null when no host limit is configured (the default). */
+  availableSlots: number | null;
+  /** null when no host limit is configured (the default). */
+  maxAllowed: number | null;
+  /** Spawns waiting behind an explicitly configured worktreeLimit. */
+  queued: number;
   /** Worktrees whose merge could not land. Their commits are preserved on
    *  `recoveryBranch`; nothing was written to the destination. */
   pendingResolutions: PendingResolution[];
@@ -144,6 +149,21 @@ export function workspaceGitLogMetadata(
   };
 }
 
+interface SlotWaiter {
+  resolve: () => void;
+  reject: (error: Error) => void;
+  signal?: AbortSignal;
+  onAbort?: () => void;
+}
+
+function slotAbortError(signal?: AbortSignal): Error {
+  const reason = signal?.reason;
+  if (reason instanceof Error) return reason;
+  const error = new Error('Worktree spawn was cancelled');
+  error.name = 'AbortError';
+  return error;
+}
+
 export class WorkspaceManager {
   private initialization?: Promise<void>;
   private closing = false;
@@ -168,11 +188,16 @@ export class WorkspaceManager {
   private manifestPath: string;
   /** Cached result of the `git merge-tree --write-tree` capability probe. */
   private mergeTreeSupport?: boolean;
+  /** Slots reserved by admitted spawns that have not created their worktree yet. */
+  private pendingSlots = 0;
+  /** FIFO spawns waiting for a slot when the user configured a positive cap. */
+  private slotWaiters: SlotWaiter[] = [];
 
   constructor(repoRoot: string, config?: KoryphaiosConfig['workspace']) {
     this.repoRoot = resolve(repoRoot);
     this.worktreeDir = config?.worktreeDir ?? '.trees';
-    this.maxConcurrent = config?.worktreeLimit ?? 4;
+    // 0 means unlimited; the hardware is the only ceiling unless the user sets one.
+    this.maxConcurrent = config?.worktreeLimit ?? 0;
     this.copyEnvFiles = config?.copyEnvFiles ?? false;
     this.skipHooks = config?.skipHooks ?? true;
     this.modifyGitignore = config?.modifyGitignore ?? false;
@@ -339,10 +364,13 @@ export class WorkspaceManager {
    * Get current worktree status including available slots
    */
   getStatus(): WorktreeStatus {
+    const limit = this.maxConcurrent > 0 ? this.maxConcurrent : null;
     return {
       active: Array.from(this.worktrees.values()),
-      availableSlots: this.maxConcurrent - this.worktrees.size,
-      maxAllowed: this.maxConcurrent,
+      availableSlots:
+        limit === null ? null : Math.max(0, limit - this.worktrees.size - this.pendingSlots),
+      maxAllowed: limit,
+      queued: this.slotWaiters.length,
       pendingResolutions: this.listPendingResolutions(),
     };
   }
@@ -356,7 +384,61 @@ export class WorkspaceManager {
    * Check if we can spawn a new worktree
    */
   canSpawn(): boolean {
-    return this.worktrees.size < this.maxConcurrent;
+    return !this.closing && this.worktrees.size + this.pendingSlots < this.slotLimit();
+  }
+
+  private slotLimit(): number {
+    return this.maxConcurrent > 0 ? this.maxConcurrent : Number.POSITIVE_INFINITY;
+  }
+
+  private hasAvailableSlot(): boolean {
+    return this.worktrees.size + this.pendingSlots < this.slotLimit();
+  }
+
+  /**
+   * Reserve a spawn slot, waiting in FIFO order when an explicit cap is set.
+   * A waiting spawn is queued work, not a failed task.
+   */
+  private waitForSlot(signal?: AbortSignal): Promise<void> {
+    if (this.closing) {
+      return Promise.reject(new WorkspaceError('WorkspaceManager is shutting down'));
+    }
+    if (this.hasAvailableSlot()) {
+      this.pendingSlots++;
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve, reject) => {
+      const waiter: SlotWaiter = { resolve, reject, signal };
+      const abort = (): void => {
+        const index = this.slotWaiters.indexOf(waiter);
+        if (index >= 0) this.slotWaiters.splice(index, 1);
+        waiter.signal?.removeEventListener('abort', abort);
+        reject(slotAbortError(signal));
+      };
+      waiter.onAbort = abort;
+      if (signal?.aborted) {
+        abort();
+        return;
+      }
+      signal?.addEventListener('abort', abort, { once: true });
+      this.slotWaiters.push(waiter);
+    });
+  }
+
+  private pumpSlotWaiters(): void {
+    while (this.slotWaiters.length > 0 && this.hasAvailableSlot()) {
+      const waiter = this.slotWaiters.shift()!;
+      this.pendingSlots++;
+      if (waiter.signal && waiter.onAbort) {
+        waiter.signal.removeEventListener('abort', waiter.onAbort);
+      }
+      waiter.resolve();
+    }
+  }
+
+  private releaseSlotReservation(): void {
+    if (this.pendingSlots > 0) this.pendingSlots--;
+    this.pumpSlotWaiters();
   }
 
   /**
@@ -366,11 +448,26 @@ export class WorkspaceManager {
    * @param agentId Optional agent/session ID that owns this worktree
    * @returns WorktreeInfo on success, null if at capacity
    */
-  async spawn(taskId: string, taskName: string, agentId?: string): Promise<WorktreeInfo | null> {
+  async spawn(
+    taskId: string,
+    taskName: string,
+    agentId?: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<WorktreeInfo | null> {
     if (this.closing) throw new WorkspaceError('WorkspaceManager is shutting down');
     if (!this.initialization) throw new WorkspaceError('WorkspaceManager is not initialized');
     await this.initialization;
-    return this.exclusive(() => this.spawnWorktree(taskId, taskName, agentId));
+    // Reject a duplicate immediately instead of making it wait behind the queue.
+    if (!/^[a-zA-Z0-9_-]+$/.test(taskId) || this.worktrees.has(taskId)) {
+      throw new WorkspaceError('Invalid or already active worktree task ID');
+    }
+    await this.waitForSlot(options.signal);
+    try {
+      if (options.signal?.aborted) throw slotAbortError(options.signal);
+      return await this.exclusive(() => this.spawnWorktree(taskId, taskName, agentId));
+    } finally {
+      this.releaseSlotReservation();
+    }
   }
 
   private async spawnWorktree(
@@ -385,19 +482,6 @@ export class WorkspaceManager {
     const base = resolve(this.repoRoot, this.worktreeDir);
     if (canonicalizePath(base) !== base)
       throw new WorkspaceError('Worktree directory was redirected');
-    // Resource Guard: Check concurrent limit
-    if (!this.canSpawn()) {
-      koryLog.warn(
-        {
-          taskId,
-          current: this.worktrees.size,
-          max: this.maxConcurrent,
-        },
-        'Cannot spawn worktree: at capacity',
-      );
-      return null;
-    }
-
     // Sanitize task name for branch name — use the full taskId for uniqueness
     const sanitizedTaskName = this.sanitizeBranchName(taskName);
     const branchName = `ai/${sanitizedTaskName}-${taskId}`;
@@ -1300,6 +1384,7 @@ export class WorkspaceManager {
 
     // Remove from tracking
     this.worktrees.delete(taskId);
+    this.pumpSlotWaiters();
     await this.saveManifest();
 
     koryLog.info({ taskId, branch: worktree.branchName }, 'Worktree cleaned up');
@@ -1474,6 +1559,14 @@ export class WorkspaceManager {
    */
   async shutdown(): Promise<void> {
     this.closing = true;
+    // Wake queued spawns so they fail closed instead of hanging shutdown.
+    const queued = this.slotWaiters.splice(0);
+    for (const waiter of queued) {
+      if (waiter.signal && waiter.onAbort) {
+        waiter.signal.removeEventListener('abort', waiter.onAbort);
+      }
+      waiter.reject(new WorkspaceError('WorkspaceManager is shutting down'));
+    }
     await this.initialization?.catch(() => undefined);
     return this.exclusive(() => this.drainWorktrees());
   }

@@ -35,6 +35,7 @@ export function parseArgs(argv: string[]): {
   backendUrl: string;
   authFile: string;
   decisionVocabulary: HookDecisionVocabulary;
+  provider: string;
 } {
   const args: Record<string, string> = {};
   for (let i = 2; i < argv.length; i++) {
@@ -57,6 +58,9 @@ export function parseArgs(argv: string[]): {
     // Default to Claude Code's approve/block vocabulary; `antigravity` selects
     // agy's allow/deny/ask vocabulary, which rejects anything else.
     decisionVocabulary: requested === 'antigravity' ? 'antigravity' : 'claude',
+    // Which CLI harness wrote the hook; the backend uses it to phrase native
+    // tool denials in vocabulary that harness can act on.
+    provider: args['provider'] || args.provider || '',
   };
 }
 
@@ -169,6 +173,39 @@ export function encodeHookDecision(
   return { decision: 'block', reason };
 }
 
+/**
+ * Build the request body for a hook endpoint.
+ *
+ * The body is HMAC-signed here and re-digested on the backend AFTER Elysia
+ * validates it against the route's `t.Object` schema — which normalizes away
+ * every undeclared key. Signing anything beyond the declared fields (an empty
+ * `tool_name: ''` or `tool_input: {}` on non-tool events, `tool_input` on
+ * post-tool) desyncs the digest and the request 401s. Send exactly what each
+ * route declares.
+ */
+export function buildHookBody(
+  endpoint: string,
+  payload: Record<string, unknown>,
+  sessionId: string,
+  provider?: string,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { session_id: sessionId };
+  if (endpoint === 'pre-tool' || endpoint === 'permission') {
+    const call = readToolCall(payload);
+    out.tool_name = call.toolName;
+    out.tool_input = call.toolInput;
+    // Only the pre-tool/permission schemas declare `provider` — sending it on
+    // another endpoint would sign an undeclared key and desync the digest.
+    if (provider) out.provider = provider;
+  } else if (endpoint === 'post-tool') {
+    const call = readToolCall(payload);
+    out.tool_name = call.toolName;
+    const toolResponse = payload.tool_response ?? payload.toolResponse;
+    if (toolResponse !== undefined) out.tool_response = toolResponse;
+  }
+  return out;
+}
+
 export function readBoundedStdin(fd = 0): { text: string; oversized: boolean } {
   try {
     const chunks: Buffer[] = [];
@@ -248,15 +285,7 @@ export async function main(): Promise<void> {
     return;
   }
 
-  const body = (() => {
-    const call = readToolCall(payload);
-    return {
-      session_id: sessionId,
-      tool_name: call.toolName,
-      tool_input: call.toolInput,
-      tool_response: payload.tool_response ?? payload.toolResponse,
-    };
-  })();
+  const body = buildHookBody(endpoint, payload, sessionId, config.provider || undefined);
 
   try {
     if (!activeAuthFile) throw new Error('Bridge grant file is unavailable');

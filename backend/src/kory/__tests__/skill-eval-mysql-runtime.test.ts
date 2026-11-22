@@ -8,7 +8,7 @@ import {
   mysqlRuntimeReadiness,
   runMySqlDeadlockRuntime,
   runMySqlOnlineIndexRuntime,
-} from '../skill-eval-mysql-runtime';
+} from '../../eval/skills/skill-eval-mysql-runtime';
 
 const roots: string[] = [];
 

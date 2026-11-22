@@ -3,12 +3,12 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import type { SkillEvalScenarioV3 } from '../skill-eval-harness';
-import { hasRegressionText } from '../skill-eval-fixture-helpers';
+import type { SkillEvalScenarioV3 } from '../../eval/skills/skill-eval-harness';
+import { hasRegressionText } from '../../eval/skills/skill-eval-fixture-helpers';
 import {
   PILOT_SKILL_EVAL_MATERIALIZERS,
   PILOT_SKILL_EVAL_SCORERS,
-} from '../skill-eval-pilot-fixtures';
+} from '../../eval/skills/skill-eval-pilot-fixtures';
 
 const scenario = { id: 'application-security-full-task-2' } as SkillEvalScenarioV3;
 const materializer = PILOT_SKILL_EVAL_MATERIALIZERS.find((item) => item.matches(scenario))!;

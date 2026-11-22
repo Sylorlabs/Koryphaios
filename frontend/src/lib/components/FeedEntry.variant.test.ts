@@ -257,7 +257,9 @@ describe('FeedEntry response variant actions', () => {
 
     const forkBtn = screen.getByTestId('fork-chat');
     expect(forkBtn).toBeDefined();
-    expect(forkBtn.getAttribute('title')).toBe('Fork');
+    expect(forkBtn.getAttribute('title')).toBe(
+      'Start a new chat that continues from this point, leaving this chat unchanged',
+    );
     expect(forkBtn.getAttribute('aria-label')).toBe('Fork');
     expect(forkBtn.textContent?.trim()).toBe('Fork');
 

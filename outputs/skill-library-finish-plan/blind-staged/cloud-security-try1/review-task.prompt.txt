@@ -1,0 +1,208 @@
+SNAPSHOT HASH DOMAINS: beforeSha256/afterSha256 identify complete workspace entries, using SHA256("file\0" + original file bytes), or SHA256("symlink\0" + link target). Scorer artifactSHA and durable artifact hashes use SHA256(raw bytes), without that tag. These different hash domains must not be compared as if identical. Visible beforeText/afterText may be bounded or privacy-scrubbed; they are not the original complete bytes to hash.
+
+You are an independent blind semantic evaluator.
+Two anonymous agents attempted the same task. You are not told which agent received any extra guidance, and you must not infer or speculate about that hidden condition.
+Judge each artifact independently against the task contract. Do not reward matching wording, verbosity, or references to a skill. Focus on behavioral correctness, scope discipline, evidence quality, preservation of required facts, negative paths, recovery behavior, and whether completion claims are actually supported.
+The artifact bundle may include harness captured execution evidence and before and after file snapshots. Treat that as observed evidence, not as an agent claim.
+PUBLIC CANDIDATE CONTRACT SNAPSHOT is the exact task prompt and allowlisted README.md/contract.json bytes visible to the candidate before execution. Hashes are verified by the harness. If an entry says UNAVAILABLE, do not reconstruct it from the current repository or treat current files as historical proof.
+executionEvidence is supplied by the host after the agent attempt, including deterministic scorer observations. An agent can truthfully report that it could not run a check even when the host subsequently runs that check successfully. Those observations have different owners and times; that difference alone is not an integrity failure.
+Attribute a completion claim to its actual source. Penalize an agent for fabricated or overstated verification only when its finalOutput or authored file content makes that unsupported claim. Do not attribute a host scorer statement to the agent, require the agent to predict later host results, or treat an honest statement of limited access as contradicting later host verification.
+Host evidence is not infallible. If a scorer result conflicts with concrete artifact behavior, identify the disputed check and evidence as a possible verifier defect. Keep instrument uncertainty separate from an agent integrity finding; a score label alone does not prove the task succeeded.
+Treat afterText JSON strings as literal source bytes. Before claiming a URL or origin is malformed or Markdown-formatted, inspect and quote the exact JSON value. Do not transform plain URL strings into Markdown hyperlinks and then mistake that display formatting for the original value.
+The PAIR EXECUTION EVIDENCE section is evaluator owned evidence. It certifies that Artifact A and Artifact B are the two randomized arms of one matched same model comparison for this exact scenario and evaluation contract.
+When REQUIRED EVIDENCE or REQUIRED ARTIFACTS asks for paired skill and no skill run artifacts, paired evaluation evidence, or an equivalent pair label, the anonymous A and B bundle plus PAIR EXECUTION EVIDENCE satisfies the existence and provenance of that pair. Do not require either agent output to claim, create, or narrate evaluator owned pair evidence.
+The REQUIRED ARTIFACTS entries below are evaluation evidence labels for the overall harness. They are not literal filenames the agent was instructed to create unless the task itself says so. Judge whether the bundle substantively supplies the required evidence; do not require those exact label strings to appear.
+Routing and hierarchy selection are evaluated independently by the harness. Do not require the agent to narrate which skill was selected or provide meta level specialist selection rationale when the artifact itself respects the requested scope and neighboring responsibility boundaries.
+Never lower passed, quality, verification, or integrity because an artifact omits hierarchy narration, specialist selection rationale, skill names, or evaluator owned paired A/B evidence. If a draft criticism relies on one of those omissions, remove that criticism and score only the concrete task behavior and evidence.
+If a REQUIRED EVIDENCE or REQUIRED ARTIFACTS label describes routing, hierarchy selection, specialist selection, or paired skill versus no skill provenance, treat that meta level requirement as evaluator owned. The harness evidence in this prompt is authoritative for those concerns.
+When choosing preference A, B, or tie, compare concrete task behavior and evidence only. Evaluator-owned hierarchy or specialist narration, skill-guidance scope, filenames, and paired-run provenance must not affect the preference comparison.
+Treat genuinely missing task evidence as missing. Do not assume unshown commands or tests passed.
+Return JSON only, with this exact shape:
+{"artifactA":{"passed":true,"quality":0.0,"verification":0.0,"integrityFailure":false,"evidence":["..."]},"artifactB":{"passed":true,"quality":0.0,"verification":0.0,"integrityFailure":false,"evidence":["..."]},"preference":"A","rationale":["..."]}
+
+TASK
+Review cloud security for an AWS organization with prod and non-prod accounts. Engineers currently have IAM users with long-lived keys, an EKS workload uses the node role, a cross-account analytics role trusts the whole source account, one S3 bucket policy grants broad read to that role, KMS grants are undocumented, and CloudTrail is account-local. Redesign human federation and emergency access, workload-specific temporary identity, cross-account trust conditions and resource scope, S3/KMS permissions, organization guardrails, public-access posture, and centralized protected audit logs. Show how to verify the effective allow/deny paths with actual IAM/resource-policy analysis and safe test calls. Pod/container privilege itself belongs to infrastructure-security.
+
+FALSIFIABLE CHECKS
+[
+  {
+    "id": "cloud-security-human-identity-1",
+    "assertion": "Standing human IAM access keys are replaced by federated/temporary access where feasible, root/emergency access is separately protected, and privileged paths are explicitly audited."
+  },
+  {
+    "id": "cloud-security-workload-identity-1",
+    "assertion": "The EKS workload uses a workload-specific role/identity rather than inheriting the broader node role, with only the service actions/resources it needs."
+  },
+  {
+    "id": "cloud-security-cross-account-1",
+    "assertion": "Cross-account role trust and S3/KMS resource permissions are constrained to the intended principal/actions/resources/conditions rather than trusting an entire account plus broad bucket/key access."
+  },
+  {
+    "id": "cloud-security-guardrails-1",
+    "assertion": "Organization/account guardrails and public-access policy are explicit, preventive where appropriate, and tested against a representative prohibited configuration."
+  },
+  {
+    "id": "cloud-security-audit-1",
+    "assertion": "Cloud control-plane and relevant resource-policy changes are centrally logged to a protected destination with evidence that workload/account admins cannot silently erase the primary audit trail."
+  },
+  {
+    "id": "cloud-security-effective-access-1",
+    "assertion": "The review verifies both intended allowed calls and representative cross-account/public/escalation denials using provider policy analysis and/or safe non-production calls."
+  }
+]
+
+REQUIRED EVIDENCE
+[
+  "account/org identity map",
+  "cross-account IAM/resource/KMS policy",
+  "public/guardrail controls",
+  "central audit evidence",
+  "effective allow/deny tests",
+  "paired skill/no-skill run artifacts"
+]
+
+REQUIRED ARTIFACTS
+[
+  "cloud-security-scenario-1-result",
+  "cloud-security-scenario-1-verification",
+  "cloud-security-scenario-1-paired-evaluation"
+]
+
+PUBLIC CANDIDATE CONTRACT SNAPSHOT
+{
+  "taskPrompt": {
+    "available": true,
+    "sha256": "b192c727812de9d49c33811e3cbd906ebd28625051f410ac7066899793b18b03",
+    "byteLength": 772,
+    "text": "Review cloud security for an AWS organization with prod and non-prod accounts. Engineers currently have IAM users with long-lived keys, an EKS workload uses the node role, a cross-account analytics role trusts the whole source account, one S3 bucket policy grants broad read to that role, KMS grants are undocumented, and CloudTrail is account-local. Redesign human federation and emergency access, workload-specific temporary identity, cross-account trust conditions and resource scope, S3/KMS permissions, organization guardrails, public-access posture, and centralized protected audit logs. Show how to verify the effective allow/deny paths with actual IAM/resource-policy analysis and safe test calls. Pod/container privilege itself belongs to infrastructure-security."
+  },
+  "fixtureFiles": {
+    "README.md": {
+      "available": true,
+      "sha256": "667b39b3c36db4256266d9c8ba54819572d96cd3616d372ae40660e58ee60d04",
+      "byteLength": 1121,
+      "text": "# Synthetic AWS cloud-security policy review\n\nPreserve `evidence/aws-state.json` and `src/cloud-security-spec.ts`; the state is synthetic provider-policy evidence, not a live AWS account. Write `.kory-eval/cloud-security-aws.json` using the exported `AwsCloudSecuritySpec` shape so the remediated effective policy and representative allow/deny analysis are explicit.\n\nRequired design: federated short-lived human access; separately protected/audited emergency path; EKS workload-specific temporary identity instead of node-role inheritance; principal/action/resource/condition-scoped cross-account trust; coordinated S3 and KMS permissions; preventive organization/account guardrails including public-access posture; centralized protected audit logs whose primary copy cannot be silently erased by workload/account admins.\n\nInclude representative intended allows and cross-account/public/escalation denials based on synthetic IAM/resource-policy analysis or safe-test-call simulation. Set `liveProviderVerified: false` and label the evidence synthetic. Keep pod/container privilege assigned to `infrastructure-security`.\n"
+    },
+    "contract.json": {
+      "available": false,
+      "sha256": null,
+      "byteLength": 0,
+      "text": null,
+      "reason": "not-present"
+    }
+  }
+}
+
+PAIR EXECUTION EVIDENCE
+{
+  "matchedPair": true,
+  "sameScenario": true,
+  "sameProviderModel": true,
+  "sameHarness": true,
+  "sameEvaluationContract": true,
+  "sameMaterializer": true,
+  "sameDeterministicScorer": true,
+  "randomizedArmIdentity": true,
+  "evidenceOwner": "evaluation-harness"
+}
+
+ARTIFACT A
+{
+  "finalOutput": "Created [.kory-eval/target-guidance-aws.json](<redacted-path>).\n\nIt covers:\n\n- Federated short-lived human access and protected break-glass access\n- EKS workload-specific temporary identity\n- Scoped cross-account trust, S3, and KMS permissions\n- SCP guardrails and S3 public-access blocking\n- Centralized, retention-protected audit logs\n- Effective allow/deny evaluation and safe test commands\n- Infrastructure-security ownership of container privilege\n\nVerification:\n\n- JSON parsed and all required contract assertions passed.\n- `jq` policy assertions returned `true`.\n- `bun test` found no fixture tests.\n- TypeScript compilation could not run because Bun was denied temporary-directory writes; the supplied source files were unchanged.\n- `liveProviderVerified` remains `false`, with evidence explicitly labeled synthetic.",
+  "executionEvidence": [
+    "Codex CLI completed successfully in 81558ms",
+    "AWS effective-policy design checks: pass",
+    "synthetic provider state/spec preserved: yes",
+    "provider-evidence boundary: bounded",
+    "Evaluator integrity: unchanged. Hidden test completion: observed. Public tests: passed or absent.\nbun test v1.3.14 (d1632b29)\nKORY_EVAL_COMPLETED_838ac20c60cf4665afefa93a56395412\n\n\n../kory-skill-eval-pair-N9hyYn/workspace/tests/__kory_hidden_eval_838ac20c60cf4665afefa93a56395412.test.ts:\n(pass) hidden: human/workload/cross-account identities are temporary and scoped [0.45ms]\n(pass) hidden: guardrail/audit/effective-access design includes both allows and denials [0.04ms]\n\n 2 pass\n 0 fail\n 20 expect() calls\nRan 2 tests across 1 file. [33.00ms]\n"
+  ],
+  "publicContract": {
+    "taskPrompt": {
+      "available": true,
+      "sha256": "b192c727812de9d49c33811e3cbd906ebd28625051f410ac7066899793b18b03",
+      "byteLength": 772,
+      "text": "Review cloud security for an AWS organization with prod and non-prod accounts. Engineers currently have IAM users with long-lived keys, an EKS workload uses the node role, a cross-account analytics role trusts the whole source account, one S3 bucket policy grants broad read to that role, KMS grants are undocumented, and CloudTrail is account-local. Redesign human federation and emergency access, workload-specific temporary identity, cross-account trust conditions and resource scope, S3/KMS permissions, organization guardrails, public-access posture, and centralized protected audit logs. Show how to verify the effective allow/deny paths with actual IAM/resource-policy analysis and safe test calls. Pod/container privilege itself belongs to infrastructure-security."
+    },
+    "fixtureFiles": {
+      "README.md": {
+        "available": true,
+        "sha256": "667b39b3c36db4256266d9c8ba54819572d96cd3616d372ae40660e58ee60d04",
+        "byteLength": 1121,
+        "text": "# Synthetic AWS cloud-security policy review\n\nPreserve `evidence/aws-state.json` and `src/cloud-security-spec.ts`; the state is synthetic provider-policy evidence, not a live AWS account. Write `.kory-eval/cloud-security-aws.json` using the exported `AwsCloudSecuritySpec` shape so the remediated effective policy and representative allow/deny analysis are explicit.\n\nRequired design: federated short-lived human access; separately protected/audited emergency path; EKS workload-specific temporary identity instead of node-role inheritance; principal/action/resource/condition-scoped cross-account trust; coordinated S3 and KMS permissions; preventive organization/account guardrails including public-access posture; centralized protected audit logs whose primary copy cannot be silently erased by workload/account admins.\n\nInclude representative intended allows and cross-account/public/escalation denials based on synthetic IAM/resource-policy analysis or safe-test-call simulation. Set `liveProviderVerified: false` and label the evidence synthetic. Keep pod/container privilege assigned to `infrastructure-security`.\n"
+      },
+      "contract.json": {
+        "available": false,
+        "sha256": null,
+        "byteLength": 0,
+        "text": null,
+        "reason": "not-present"
+      }
+    }
+  },
+  "changes": [
+    {
+      "path": ".kory-eval/target-guidance-aws.json",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "7df304d6c28abdd97455b879eb79e186f061465e1fe165008f119aeae01eae84",
+      "afterText": "{\n  \"humanIdentity\": {\n    \"federatedTemporary\": true,\n    \"longLivedKeysRetired\": true,\n    \"breakGlassProtectedAndAudited\": true\n  },\n  \"workload\": {\n    \"workloadSpecificIdentity\": true,\n    \"inheritsNodeRole\": false\n  },\n  \"crossAccount\": {\n    \"trustsWholeSourceAccount\": false,\n    \"principalScoped\": true,\n    \"resourceScoped\": true,\n    \"conditions\": [\n      \"Trust only the source account's dedicated analytics-api workload role ARN, not account root; require sts:ExternalId where a third party supplies the caller and aws:PrincipalOrgID for organization membership.\",\n      \"Use EKS Pod Identity or IRSA so only the analytics-api service account in its exact cluster namespace can obtain the source workload role; restrict sts:AssumeRole to the single destination analytics-reader role.\",\n      \"Require aws:SourceVpce on data-bucket access when all supported clients use the approved S3 VPC endpoint, and require s3:TlsVersion >= 1.2 plus aws:SecureTransport=true.\",\n      \"Restrict the destination session with the source role ARN and, where operationally stable, sts:SourceIdentity; monitor role chaining and session names rather than treating session-name text as primary authorization.\"\n    ],\n    \"kmsExplicit\": true\n  },\n  \"guardrails\": {\n    \"publicAccessBlocked\": true,\n    \"preventiveOrganizationPolicy\": true,\n    \"prohibitedConfigurationTestDenied\": true\n  },\n  \"audit\": {\n    \"centralized\": true,\n    \"primaryCopyProtectedFromWorkloadAdmins\": true,\n    \"retentionProtected\": true\n  },\n  \"verification\": {\n    \"allowed\": [\n      \"SYNTHETIC IAM/resource-policy analysis: an Identity Center permission-set session may perform only its job role in the assigned prod or non-prod account; IAM users alice and bob have no active access keys after staged migration, last-used review, disablement, monitoring, and deletion.\",\n      \"SYNTHETIC emergency-path analysis: a separately controlled break-glass role requires phishing-resistant MFA, short duration, named incident/change reference, independent alerting, and post-use review; credentials are stored and rotated outside normal SSO administration, and the role has no routine use.\",\n      \"SYNTHETIC workload analysis: only the analytics-api Kubernetes service account can receive its short-lived EKS Pod Identity/IRSA credentials and assume the dedicated source role; node-role credentials are blocked from pods and the node role loses s3:*, kms:*, and general sts:AssumeRole.\",\n      \"SYNTHETIC cross-account effective allow: source analytics-api role -> destination analytics-reader role is allowed only when the identity policy permits sts:AssumeRole on that exact role and the destination trust names that exact source role and satisfies the listed conditions.\",\n      \"SYNTHETIC S3/KMS effective allow: the analytics-reader session can s3:ListBucket only on arn:aws:s3:::prod-analytics with an s3:prefix limited to the approved analytics prefix, s3:GetObject only on arn:aws:s3:::prod-analytics/approved/*, and kms:Decrypt only on the named CMK when kms:ViaService is S3 in the bucket Region and the encryption context equals arn:aws:s3:::prod-analytics/approved/*; the bucket policy and KMS key policy name the role explicitly.\",\n      \"SAFE TEST PLAN (read-only/simulated): run aws iam simulate-principal-policy for the source workload role's sts:AssumeRole and the destination role's S3/KMS actions against exact ARNs with context entries; run aws accessanalyzer validate-policy on identity, trust, bucket, key, and SCP JSON and create-access-preview in a test analyzer; use aws sts assume-role --dry-run only where the API supports DryRun (STS does not), otherwise assume a disposable test role and call aws s3api head-object or get-object --range bytes=0-0 plus aws kms decrypt on disposable ciphertext in non-prod, recording CloudTrail request IDs.\",\n      \"SYNTHETIC audit design: an organization trail covers all current and future accounts and Regions, including management events, S3 data events for protected buckets, EKS audit/control-plane logs, IAM Identity Center sign-ins, and KMS events; it delivers to a dedicated log-archive account with log-file validation, SSE-KMS, least-privilege CloudTrail delivery policies, monitoring/alerting, and an independently administered read path.\"\n    ],\n    \"denied\": [\n      \"SYNTHETIC cross-account denial: source account root, another source role, a principal outside the organization, or a caller missing required trust conditions cannot assume analytics-reader; either the caller identity policy or role trust lacks an Allow, so effective access is denied.\",\n      \"SYNTHETIC resource-scope denial: analytics-reader cannot list arbitrary prefixes, read objects outside approved/*, write/delete S3 data, use another bucket, or invoke the CMK directly/outside S3; identity, bucket, and key policies contain no matching Allow and explicit transport/endpoint Denies override any Allow.\",\n      \"SYNTHETIC public-access denial: S3 Block Public Access is enabled at organization/account and bucket levels; bucket policies explicitly deny insecure transport, and an SCP denies disabling account-level block-public-access or creating public bucket/access-point policies, subject to tightly governed deployment exceptions.\",\n      \"SYNTHETIC escalation denial: SCPs deny member accounts leaving the organization; disabling or altering organization CloudTrail, Config, GuardDuty/Security Hub delegated administration, log delivery, and security KMS keys; deleting protected logs; creating access keys for human principals; and unauthorized IAM privilege-escalation paths. SCPs are guardrails, so matching identity/resource policies are still required for intended actions.\",\n      \"SYNTHETIC prohibited-configuration test: aws iam simulate-custom-policy with the applicable SCP plus a broad identity Allow returns explicitDeny for s3:PutAccountPublicAccessBlock that disables controls, cloudtrail:StopLogging/DeleteTrail, organizations:LeaveOrganization, and destructive log-bucket/KMS operations; validate in an isolated non-prod OU because IAM simulation does not evaluate every policy type or service-specific enforcement nuance.\",\n      \"SAFE NEGATIVE CALLS: using disposable non-prod sessions, call aws sts assume-role from the wrong role and expect AccessDenied; call aws s3api head-object on an out-of-prefix canary and with the wrong endpoint and expect 403; call aws kms decrypt with mismatched encryption context and expect AccessDeniedException; attempt a public-policy or guardrail change only against a disposable test bucket/account and expect SCP/BPA denial. Never probe production by changing controls or reading real data.\",\n      \"SYNTHETIC effective-policy rule: evaluate explicit Deny first across SCP, permissions boundary, session policy, identity policy, resource policy, VPC endpoint policy, and KMS key policy; then require an applicable Allow. KMS cross-account use requires both the key policy and caller IAM policy. Record principal ARN, action, resource, context, decision, matched statements, request ID, and CloudTrail event for every test.\",\n      \"SYNTHETIC log-protection denial: workload and member-account admins cannot delete, overwrite, change retention, disable delivery to, or decrypt the primary archive; the log-archive bucket uses Object Lock compliance retention/versioning where required, a dedicated CMK and restrictive bucket/key policies, and SCP denial. A separate security/audit role—not workload administrators—controls retention and recovery.\"\n    ]\n  },\n  \"liveProviderVerified\": false,\n  \"containerPrivilegeOwnedBy\": \"infrastructure-security\"\n}\n"
+    },
+    {
+      "path": ".kory-tmp/.b8ffd4ffcf79ee9f-00000000.hm",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "665b9b46b49bbf8a926dd2b17751fa203125e3efaf20830f005b29e5cc268ee5"
+    },
+    {
+      "path": ".kory-tmp/bunx-501-typescript@latest/package.json",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "44cd25e5e25eb5077f83058d6219572e4eaac9ceac6765ec336fc5767986f964",
+      "afterText": "{}\n"
+    }
+  ]
+}
+
+ARTIFACT B
+{
+  "finalOutput": "Completed [.kory-eval/target-guidance-aws.json](<redacted-path>).\n\nIt covers federation and break-glass access, workload identity, scoped cross-account S3/KMS access, organization guardrails, public-access blocking, protected centralized audit logs, and synthetic allow/deny verification plans.\n\nValidation passed:\n\n- Exact TypeScript interface shape confirmed\n- 3 intended-allow and 9 representative-denial checks\n- `liveProviderVerified: false` with synthetic/unavailable evidence labels\n- Container privilege assigned to `infrastructure-security`\n- Evidence and specification inputs remained unchanged; SHA-1 hashes recorded during verification",
+  "executionEvidence": [
+    "Codex CLI completed successfully in 56388ms",
+    "AWS effective-policy design checks: pass",
+    "synthetic provider state/spec preserved: yes",
+    "provider-evidence boundary: bounded",
+    "Evaluator integrity: unchanged. Hidden test completion: observed. Public tests: passed or absent.\nbun test v1.3.14 (d1632b29)\nKORY_EVAL_COMPLETED_127d4b4876b94503a958a3d2c55512c9\n\n\n../kory-skill-eval-pair-N9hyYn/workspace/tests/__kory_hidden_eval_127d4b4876b94503a958a3d2c55512c9.test.ts:\n(pass) hidden: human/workload/cross-account identities are temporary and scoped [0.44ms]\n(pass) hidden: guardrail/audit/effective-access design includes both allows and denials [0.03ms]\n\n 2 pass\n 0 fail\n 20 expect() calls\nRan 2 tests across 1 file. [42.00ms]\n"
+  ],
+  "publicContract": {
+    "taskPrompt": {
+      "available": true,
+      "sha256": "b192c727812de9d49c33811e3cbd906ebd28625051f410ac7066899793b18b03",
+      "byteLength": 772,
+      "text": "Review cloud security for an AWS organization with prod and non-prod accounts. Engineers currently have IAM users with long-lived keys, an EKS workload uses the node role, a cross-account analytics role trusts the whole source account, one S3 bucket policy grants broad read to that role, KMS grants are undocumented, and CloudTrail is account-local. Redesign human federation and emergency access, workload-specific temporary identity, cross-account trust conditions and resource scope, S3/KMS permissions, organization guardrails, public-access posture, and centralized protected audit logs. Show how to verify the effective allow/deny paths with actual IAM/resource-policy analysis and safe test calls. Pod/container privilege itself belongs to infrastructure-security."
+    },
+    "fixtureFiles": {
+      "README.md": {
+        "available": true,
+        "sha256": "667b39b3c36db4256266d9c8ba54819572d96cd3616d372ae40660e58ee60d04",
+        "byteLength": 1121,
+        "text": "# Synthetic AWS cloud-security policy review\n\nPreserve `evidence/aws-state.json` and `src/cloud-security-spec.ts`; the state is synthetic provider-policy evidence, not a live AWS account. Write `.kory-eval/cloud-security-aws.json` using the exported `AwsCloudSecuritySpec` shape so the remediated effective policy and representative allow/deny analysis are explicit.\n\nRequired design: federated short-lived human access; separately protected/audited emergency path; EKS workload-specific temporary identity instead of node-role inheritance; principal/action/resource/condition-scoped cross-account trust; coordinated S3 and KMS permissions; preventive organization/account guardrails including public-access posture; centralized protected audit logs whose primary copy cannot be silently erased by workload/account admins.\n\nInclude representative intended allows and cross-account/public/escalation denials based on synthetic IAM/resource-policy analysis or safe-test-call simulation. Set `liveProviderVerified: false` and label the evidence synthetic. Keep pod/container privilege assigned to `infrastructure-security`.\n"
+      },
+      "contract.json": {
+        "available": false,
+        "sha256": null,
+        "byteLength": 0,
+        "text": null,
+        "reason": "not-present"
+      }
+    }
+  },
+  "changes": [
+    {
+      "path": ".kory-eval/target-guidance-aws.json",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "9104d0654964c54dc2f75ac94d16d8ce556901ef10f8816fab1769b37c2790d7",
+      "afterText": "{\n  \"humanIdentity\": {\n    \"federatedTemporary\": true,\n    \"longLivedKeysRetired\": true,\n    \"breakGlassProtectedAndAudited\": true\n  },\n  \"workload\": {\n    \"workloadSpecificIdentity\": true,\n    \"inheritsNodeRole\": false\n  },\n  \"crossAccount\": {\n    \"trustsWholeSourceAccount\": false,\n    \"principalScoped\": true,\n    \"resourceScoped\": true,\n    \"conditions\": [\n      \"synthetic: analytics-reader trust names only the source analytics-api workload role; aws:PrincipalArn must equal that role ARN\",\n      \"synthetic: sts:ExternalId must equal the dedicated analytics integration identifier\",\n      \"synthetic: sts:RoleSessionName must match analytics-api-* and sts:DurationSeconds is limited to 3600\",\n      \"synthetic: S3 permits s3:ListBucket only with s3:prefix=exports/approved/* and s3:GetObject only on arn:aws:s3:::prod-analytics/exports/approved/*\",\n      \"synthetic: S3 and KMS require aws:SecureTransport=true; S3 also requires the approved KMS key for writes if writes are added later\",\n      \"synthetic: KMS decrypt requires kms:ViaService=s3.<region>.amazonaws.com and kms:EncryptionContext:aws:s3:arn matching arn:aws:s3:::prod-analytics/exports/approved/*\"\n    ],\n    \"kmsExplicit\": true\n  },\n  \"guardrails\": {\n    \"publicAccessBlocked\": true,\n    \"preventiveOrganizationPolicy\": true,\n    \"prohibitedConfigurationTestDenied\": true\n  },\n  \"audit\": {\n    \"centralized\": true,\n    \"primaryCopyProtectedFromWorkloadAdmins\": true,\n    \"retentionProtected\": true\n  },\n  \"verification\": {\n    \"allowed\": [\n      \"synthetic simulated effective-policy analysis: source analytics-api workload role -> sts:AssumeRole analytics-reader with the required ExternalId/session name/duration; trust policy Allow applies and no identity policy, permissions boundary, session policy, or SCP explicit Deny applies; expected Allow\",\n      \"synthetic simulated effective-policy analysis: assumed analytics-reader session -> s3:ListBucket prod-analytics with prefix exports/approved/ and s3:GetObject arn:aws:s3:::prod-analytics/exports/approved/report.parquet over TLS; role policy and bucket policy agree, organization guardrails do not deny, and KMS key policy permits constrained decrypt via S3; expected Allow\",\n      \"synthetic unavailable live proof: in non-prod, call aws sts assume-role with the approved workload session and conditions, then aws s3api head-object for exports/approved/test-object using the returned temporary credentials; record request IDs and CloudTrail events; not run because no live provider is connected\"\n    ],\n    \"denied\": [\n      \"synthetic simulated trust-policy analysis: any other principal in the source account -> sts:AssumeRole analytics-reader; named principal/aws:PrincipalArn condition does not match, so no trust Allow; expected implicit Deny\",\n      \"synthetic simulated trust-policy analysis: approved workload role with missing or incorrect ExternalId, nonmatching session name, or requested duration over 3600 -> sts:AssumeRole; trust conditions fail; expected implicit Deny\",\n      \"synthetic simulated IAM/resource-policy analysis: analytics-reader -> s3:GetObject arn:aws:s3:::prod-analytics/private/payroll.csv; scoped role and bucket policies contain no Allow for that resource; expected implicit Deny\",\n      \"synthetic simulated public/resource-policy analysis: anonymous or arbitrary external principal -> s3:GetObject on prod-analytics; account and bucket Block Public Access plus no public bucket-policy Allow deny exposure; expected Deny\",\n      \"synthetic simulated KMS key-policy analysis: analytics-reader -> kms:Decrypt directly, against another key, or with a nonmatching S3 encryption context; key policy conditions fail and no matching explicit Allow exists; expected implicit Deny\",\n      \"synthetic simulated escalation analysis: analytics-api workload or analytics-reader -> iam:PassRole, iam:CreatePolicyVersion, sts:AssumeRole to any unapproved role, cloudtrail:StopLogging, s3:DeleteBucket on the central log archive, or kms:ScheduleKeyDeletion for its log key; least-privilege policies omit the actions and organization/log-archive guardrails explicitly deny them; expected explicit Deny where guarded and implicit Deny otherwise\",\n      \"synthetic safe negative-call plan: in non-prod, use aws iam simulate-principal-policy for identity-policy decisions on s3:GetObject outside the approved prefix, kms:Decrypt, iam:PassRole, and cloudtrail:StopLogging; separately evaluate trust, bucket, key, boundary, session, and SCP/resource-control policies because the identity simulator alone is not proof of their combined effect; expected Deny\",\n      \"synthetic safe negative-call plan: with approved temporary credentials run aws s3api head-object for an existing canary outside exports/approved/ and aws kms decrypt on a non-sensitive test ciphertext without the required S3 context; require AccessDenied, capture request IDs and CloudTrail records, and make no mutating calls; not run because no live provider is connected\",\n      \"synthetic preventive-control test plan: in an isolated non-prod deployment test, attempt to attach a public S3 bucket policy and disable organization CloudTrail/log-retention controls; deployment/API must be rejected by Block Public Access and organization policies; expected explicit Deny, but unavailable without a live provider\"\n    ]\n  },\n  \"liveProviderVerified\": false,\n  \"containerPrivilegeOwnedBy\": \"infrastructure-security\"\n}\n"
+    }
+  ]
+}

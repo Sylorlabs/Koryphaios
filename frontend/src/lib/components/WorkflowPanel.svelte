@@ -239,7 +239,7 @@
                 ><button
                   type="button"
                   disabled={!evidence.trim()}
-                  class="rounded-lg bg-[var(--color-accent)] px-3 py-2 text-xs font-medium text-white disabled:opacity-40"
+                  class="rounded-lg bg-[var(--color-accent)] px-3 py-2 text-xs font-medium text-[var(--color-on-accent)] disabled:opacity-40"
                   onclick={() => void advance(false)}>Record & continue</button
                 >
               </div>
@@ -262,7 +262,7 @@
           <button
             type="button"
             disabled={!task.trim() || loading}
-            class="mt-3 inline-flex items-center gap-2 rounded-lg bg-[var(--color-accent)] px-3 py-2 text-xs font-medium text-white disabled:opacity-40"
+            class="mt-3 inline-flex items-center gap-2 rounded-lg bg-[var(--color-accent)] px-3 py-2 text-xs font-medium text-[var(--color-on-accent)] disabled:opacity-40"
             onclick={() => void start()}
             ><Play size={14} fill="currentColor" /> Start workflow</button
           >

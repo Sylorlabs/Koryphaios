@@ -1,0 +1,250 @@
+SNAPSHOT HASH DOMAINS: beforeSha256/afterSha256 identify complete workspace entries, using SHA256("file\0" + original file bytes), or SHA256("symlink\0" + link target). Scorer artifactSHA and durable artifact hashes use SHA256(raw bytes), without that tag. These different hash domains must not be compared as if identical. Visible beforeText/afterText may be bounded or privacy-scrubbed; they are not the original complete bytes to hash.
+
+You are an independent blind semantic evaluator.
+Two anonymous agents attempted the same task. You are not told which agent received any extra guidance, and you must not infer or speculate about that hidden condition.
+Judge each artifact independently against the task contract. Do not reward matching wording, verbosity, or references to a skill. Focus on behavioral correctness, scope discipline, evidence quality, preservation of required facts, negative paths, recovery behavior, and whether completion claims are actually supported.
+The artifact bundle may include harness captured execution evidence and before and after file snapshots. Treat that as observed evidence, not as an agent claim.
+PUBLIC CANDIDATE CONTRACT SNAPSHOT is the exact task prompt and allowlisted README.md/contract.json bytes visible to the candidate before execution. Hashes are verified by the harness. If an entry says UNAVAILABLE, do not reconstruct it from the current repository or treat current files as historical proof.
+executionEvidence is supplied by the host after the agent attempt, including deterministic scorer observations. An agent can truthfully report that it could not run a check even when the host subsequently runs that check successfully. Those observations have different owners and times; that difference alone is not an integrity failure.
+Attribute a completion claim to its actual source. Penalize an agent for fabricated or overstated verification only when its finalOutput or authored file content makes that unsupported claim. Do not attribute a host scorer statement to the agent, require the agent to predict later host results, or treat an honest statement of limited access as contradicting later host verification.
+Host evidence is not infallible. If a scorer result conflicts with concrete artifact behavior, identify the disputed check and evidence as a possible verifier defect. Keep instrument uncertainty separate from an agent integrity finding; a score label alone does not prove the task succeeded.
+Treat afterText JSON strings as literal source bytes. Before claiming a URL or origin is malformed or Markdown-formatted, inspect and quote the exact JSON value. Do not transform plain URL strings into Markdown hyperlinks and then mistake that display formatting for the original value.
+The PAIR EXECUTION EVIDENCE section is evaluator owned evidence. It certifies that Artifact A and Artifact B are the two randomized arms of one matched same model comparison for this exact scenario and evaluation contract.
+When REQUIRED EVIDENCE or REQUIRED ARTIFACTS asks for paired skill and no skill run artifacts, paired evaluation evidence, or an equivalent pair label, the anonymous A and B bundle plus PAIR EXECUTION EVIDENCE satisfies the existence and provenance of that pair. Do not require either agent output to claim, create, or narrate evaluator owned pair evidence.
+The REQUIRED ARTIFACTS entries below are evaluation evidence labels for the overall harness. They are not literal filenames the agent was instructed to create unless the task itself says so. Judge whether the bundle substantively supplies the required evidence; do not require those exact label strings to appear.
+Routing and hierarchy selection are evaluated independently by the harness. Do not require the agent to narrate which skill was selected or provide meta level specialist selection rationale when the artifact itself respects the requested scope and neighboring responsibility boundaries.
+Never lower passed, quality, verification, or integrity because an artifact omits hierarchy narration, specialist selection rationale, skill names, or evaluator owned paired A/B evidence. If a draft criticism relies on one of those omissions, remove that criticism and score only the concrete task behavior and evidence.
+If a REQUIRED EVIDENCE or REQUIRED ARTIFACTS label describes routing, hierarchy selection, specialist selection, or paired skill versus no skill provenance, treat that meta level requirement as evaluator owned. The harness evidence in this prompt is authoritative for those concerns.
+When choosing preference A, B, or tie, compare concrete task behavior and evidence only. Evaluator-owned hierarchy or specialist narration, skill-guidance scope, filenames, and paired-run provenance must not affect the preference comparison.
+Treat genuinely missing task evidence as missing. Do not assume unshown commands or tests passed.
+Return JSON only, with this exact shape:
+{"artifactA":{"passed":true,"quality":0.0,"verification":0.0,"integrityFailure":false,"evidence":["..."]},"artifactB":{"passed":true,"quality":0.0,"verification":0.0,"integrityFailure":false,"evidence":["..."]},"preference":"A","rationale":["..."]}
+
+TASK
+The evaluation repository asks the agent to "Apply computer vision expertise to this task". The fixture contains a plausible happy path, an adjacent-skill decoy, one invalid or partial state, and a recovery condition that must be demonstrated rather than assumed. The acceptance boundary is computer-vision: Define task, labels, camera/image formation, resolution, geometry, lighting, occlusion, populations, deployment hardware, and acceptable error tradeoffs. The adjacent embedding-systems discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.
+
+FALSIFIABLE CHECKS
+[
+  {
+    "id": "scope-and-hierarchy",
+    "assertion": "The result must establish the actual computer-vision boundary and relevant environment before acting, preserve the hierarchy relationship (broader=implementation; near-neighbor=embedding-systems), and not absorb the near-neighbor responsibility merely because it is adjacent."
+  },
+  {
+    "id": "operating-contract",
+    "assertion": "Define task, labels, camera/image formation, resolution, geometry, lighting, occlusion, populations, deployment hardware, and acceptable error tradeoffs."
+  },
+  {
+    "id": "execution-invariant",
+    "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+  },
+  {
+    "id": "verification-discipline",
+    "assertion": "Evaluate held-out slices across lighting, scale, occlusion, background, device, demographic or environmental factors where relevant, plus latency/memory on target hardware and confidence calibration."
+  },
+  {
+    "id": "anti-pattern-resistance",
+    "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not let random image splits leak near-duplicates, use augmentation that changes labels, generalize studio benchmarks to field conditions, or hide systematic slice failures in aggregate accuracy."
+  },
+  {
+    "id": "evidence-and-uncertainty",
+    "assertion": "Every material completion claim must map to observable evidence (Camera/image-formation, label ontology, spatial geometry and transform identity; Leakage-safe grouped splits plus task-correct vision metrics and deployment slices; Model/preprocess/postprocess/calibration identity with visual or machine-readable failure evidence; Target-runtime latency/memory/throughput plus reproducible promotion and rollback artifacts), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+  }
+]
+
+REQUIRED EVIDENCE
+[
+  "Camera/image-formation, label ontology, spatial geometry and transform identity",
+  "Leakage-safe grouped splits plus task-correct vision metrics and deployment slices",
+  "Model/preprocess/postprocess/calibration identity with visual or machine-readable failure evidence",
+  "Target-runtime latency/memory/throughput plus reproducible promotion and rollback artifacts",
+  "Hierarchy boundary and selected specialist rationale",
+  "Representative success, negative-path, and recovery verification",
+  "hierarchy boundary and selected specialist rationale",
+  "representative success plus negative/recovery evidence",
+  "paired skill/no-skill run artifacts",
+  "explicit unavailable, simulated, inferred, or stale evidence labels"
+]
+
+REQUIRED ARTIFACTS
+[
+  "computer-vision-individual-scenario-1-result",
+  "computer-vision-individual-scenario-1-verification",
+  "computer-vision-individual-scenario-1-paired-evaluation"
+]
+
+PUBLIC CANDIDATE CONTRACT SNAPSHOT
+{
+  "taskPrompt": {
+    "available": true,
+    "sha256": "a68faf084f4461ea7731a5b7bb0132073132a122948fc1d7fab03c3e04cc3493",
+    "byteLength": 784,
+    "text": "The evaluation repository asks the agent to \"Apply computer vision expertise to this task\". The fixture contains a plausible happy path, an adjacent-skill decoy, one invalid or partial state, and a recovery condition that must be demonstrated rather than assumed. The acceptance boundary is computer-vision: Define task, labels, camera/image formation, resolution, geometry, lighting, occlusion, populations, deployment hardware, and acceptable error tradeoffs. The adjacent embedding-systems discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient."
+  },
+  "fixtureFiles": {
+    "README.md": {
+      "available": true,
+      "sha256": "79b60ae26e736ee62c578fded895df84bc499b25d3dd10793966a804d7d9fbc4",
+      "byteLength": 1264,
+      "text": "# computer-vision: transferable behavior exercise\n\nFilter evaluation leakage before metrics. A sample leaks when group appears in trainGroups or duplicateOf references any sample id in the same corpus; keep only the first member of a duplicate family, treating duplicateOf!=null as leakage. Return eligibleIds/leakageIds in input order. Derive TP, FP, and FN from the eligible samples' boolean truth and predicted fields, then return precision=TP/(TP+FP) and recall=TP/(TP+FN), zero for an empty denominator, rounded to three decimals. runtimeReady requires latencyMs<=latencyBudgetMs and memoryMb<=memoryBudgetMb. Do not let near-duplicate burst frames cross evaluation boundaries. Return exactly {eligibleIds,leakageIds,precision,recall,runtimeReady} with no extra fields; tp, fp and fn are intermediate counts and are not part of the result.\n\nImplement the pure solve(input) export in candidate.ts. Return JSON data; no network, subprocesses, or real account access is needed. Inputs vary identifiers, values, ordering, and failure paths. Score the supplied evidence; do not claim a real model, device, browser, codec, or permission sandbox ran.\n\nThe subject is an explicitly synthetic trace corpus. This tests evaluation logic, not the safety of a live model.\n"
+    },
+    "contract.json": {
+      "available": true,
+      "sha256": "cef149f439afec4f0277f725511312933228796e6646322c565b78256eb79604",
+      "byteLength": 114,
+      "text": "{\n  \"scenarioId\": \"computer-vision-full-task-1-individual\",\n  \"evidence\": \"synthetic\",\n  \"fullTaskBlockers\": []\n}\n"
+    }
+  }
+}
+
+PAIR EXECUTION EVIDENCE
+{
+  "matchedPair": true,
+  "sameScenario": true,
+  "sameProviderModel": true,
+  "sameHarness": true,
+  "sameEvaluationContract": true,
+  "sameMaterializer": true,
+  "sameDeterministicScorer": true,
+  "randomizedArmIdentity": true,
+  "evidenceOwner": "evaluation-harness"
+}
+
+ARTIFACT A
+{
+  "finalOutput": "Implemented [candidate.ts](<redacted-path>).\n\nIt now:\n\n- Filters training-group and duplicate leakage in input order.\n- Computes precision and recall, rounded to three decimals.\n- Enforces latency and memory budgets inclusively.\n- Returns exactly the five required fields.\n- Safely recovers from malformed or partial inputs.\n\nVerification evidence:\n\n- Happy path passed: correct eligible/leakage IDs, metrics, and boundary runtime readiness.\n- Failure path passed: all-leaking samples and exceeded latency produce zero metrics and `runtimeReady: false`.\n- Partial-state recovery passed without throwing.\n- Node successfully imported and executed the TypeScript module.\n- `bun test` found no repository tests; strict `tsc` verification was blocked by Bun’s temp-directory sandbox.",
+  "executionEvidence": [
+    "Codex CLI completed successfully in 79266ms",
+    "Synthetic behavioral vectors: 2/2; full-task coverage: synthetic evaluation protocol."
+  ],
+  "publicContract": {
+    "taskPrompt": {
+      "available": true,
+      "sha256": "a68faf084f4461ea7731a5b7bb0132073132a122948fc1d7fab03c3e04cc3493",
+      "byteLength": 784,
+      "text": "The evaluation repository asks the agent to \"Apply computer vision expertise to this task\". The fixture contains a plausible happy path, an adjacent-skill decoy, one invalid or partial state, and a recovery condition that must be demonstrated rather than assumed. The acceptance boundary is computer-vision: Define task, labels, camera/image formation, resolution, geometry, lighting, occlusion, populations, deployment hardware, and acceptable error tradeoffs. The adjacent embedding-systems discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient."
+    },
+    "fixtureFiles": {
+      "README.md": {
+        "available": true,
+        "sha256": "79b60ae26e736ee62c578fded895df84bc499b25d3dd10793966a804d7d9fbc4",
+        "byteLength": 1264,
+        "text": "# computer-vision: transferable behavior exercise\n\nFilter evaluation leakage before metrics. A sample leaks when group appears in trainGroups or duplicateOf references any sample id in the same corpus; keep only the first member of a duplicate family, treating duplicateOf!=null as leakage. Return eligibleIds/leakageIds in input order. Derive TP, FP, and FN from the eligible samples' boolean truth and predicted fields, then return precision=TP/(TP+FP) and recall=TP/(TP+FN), zero for an empty denominator, rounded to three decimals. runtimeReady requires latencyMs<=latencyBudgetMs and memoryMb<=memoryBudgetMb. Do not let near-duplicate burst frames cross evaluation boundaries. Return exactly {eligibleIds,leakageIds,precision,recall,runtimeReady} with no extra fields; tp, fp and fn are intermediate counts and are not part of the result.\n\nImplement the pure solve(input) export in candidate.ts. Return JSON data; no network, subprocesses, or real account access is needed. Inputs vary identifiers, values, ordering, and failure paths. Score the supplied evidence; do not claim a real model, device, browser, codec, or permission sandbox ran.\n\nThe subject is an explicitly synthetic trace corpus. This tests evaluation logic, not the safety of a live model.\n"
+      },
+      "contract.json": {
+        "available": true,
+        "sha256": "cef149f439afec4f0277f725511312933228796e6646322c565b78256eb79604",
+        "byteLength": 114,
+        "text": "{\n  \"scenarioId\": \"computer-vision-full-task-1-individual\",\n  \"evidence\": \"synthetic\",\n  \"fullTaskBlockers\": []\n}\n"
+      }
+    }
+  },
+  "changes": [
+    {
+      "path": ".kory-tmp/.3ae775b7feeecf7b-00000000.hm",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "665b9b46b49bbf8a926dd2b17751fa203125e3efaf20830f005b29e5cc268ee5"
+    },
+    {
+      "path": ".kory-tmp/.9effb7bf05fecbf2-00000000.hm",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "665b9b46b49bbf8a926dd2b17751fa203125e3efaf20830f005b29e5cc268ee5"
+    },
+    {
+      "path": ".kory-tmp/bunx-501-typescript@latest/package.json",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "44cd25e5e25eb5077f83058d6219572e4eaac9ceac6765ec336fc5767986f964",
+      "afterText": "{}\n"
+    },
+    {
+      "path": "candidate.ts",
+      "change": "modified",
+      "beforeSha256": "ae926a5325a88321d95c1364eed088ceb8a3d57eaad30bd5d2548f54a6274a72",
+      "afterSha256": "c4236e777ae5a88ba322631adcde5f92f1d17b0d269c0ef0a16d6650beebe9bc",
+      "beforeText": "// Implement the contract in README.md. Architecture and internal representation are yours.\nexport function solve(input: unknown): unknown {\n  return null;\n}\n",
+      "afterText": "type Sample = {\n  id: unknown;\n  group?: unknown;\n  duplicateOf?: unknown;\n  truth?: unknown;\n  predicted?: unknown;\n};\n\ntype Input = {\n  samples?: unknown;\n  trainGroups?: unknown;\n  latencyMs?: unknown;\n  latencyBudgetMs?: unknown;\n  memoryMb?: unknown;\n  memoryBudgetMb?: unknown;\n};\n\ntype Result = {\n  eligibleIds: unknown[];\n  leakageIds: unknown[];\n  precision: number;\n  recall: number;\n  runtimeReady: boolean;\n};\n\nfunction finiteNumber(value: unknown): number | undefined {\n  return typeof value === \"number\" && Number.isFinite(value) ? value : undefined;\n}\n\nfunction roundedRatio(numerator: number, denominator: number): number {\n  return denominator === 0 ? 0 : Math.round((numerator / denominator) * 1000) / 1000;\n}\n\n// Evaluate only complete, non-leaking samples. Invalid/partial inputs recover to an\n// empty evaluation and a conservative runtimeReady=false rather than throwing.\nexport function solve(input: unknown): Result {\n  const value: Input = input !== null && typeof input === \"object\" ? input : {};\n  const samples: Sample[] = Array.isArray(value.samples)\n    ? value.samples.filter(\n        (sample): sample is Sample =>\n          sample !== null && typeof sample === \"object\" && \"id\" in sample,\n      )\n    : [];\n  const trainGroups = new Set(Array.isArray(value.trainGroups) ? value.trainGroups : []);\n  const eligibleIds: unknown[] = [];\n  const leakageIds: unknown[] = [];\n  let tp = 0;\n  let fp = 0;\n  let fn = 0;\n\n  for (const sample of samples) {\n    const hasDuplicateReference = sample.duplicateOf !== null && sample.duplicateOf !== undefined;\n    const leaks = trainGroups.has(sample.group) || hasDuplicateReference;\n\n    if (leaks) {\n      leakageIds.push(sample.id);\n      continue;\n    }\n\n    eligibleIds.push(sample.id);\n\n    if (sample.truth === true && sample.predicted === true) tp += 1;\n    else if (sample.truth === false && sample.predicted === true) fp += 1;\n    else if (sample.truth === true && sample.predicted === false) fn += 1;\n  }\n\n  const latencyMs = finiteNumber(value.latencyMs);\n  const latencyBudgetMs = finiteNumber(value.latencyBudgetMs);\n  const memoryMb = finiteNumber(value.memoryMb);\n  const memoryBudgetMb = finiteNumber(value.memoryBudgetMb);\n\n  return {\n    eligibleIds,\n    leakageIds,\n    precision: roundedRatio(tp, tp + fp),\n    recall: roundedRatio(tp, tp + fn),\n    runtimeReady:\n      latencyMs !== undefined &&\n      latencyBudgetMs !== undefined &&\n      memoryMb !== undefined &&\n      memoryBudgetMb !== undefined &&\n      latencyMs <= latencyBudgetMs &&\n      memoryMb <= memoryBudgetMb,\n  };\n}\n"
+    }
+  ]
+}
+
+ARTIFACT B
+{
+  "finalOutput": "Implemented [candidate.ts](<redacted-path>).\n\nIt now:\n\n- Filters train-group and duplicate leakage before scoring.\n- Preserves input ordering.\n- Computes precision/recall with three-decimal rounding and zero-denominator handling.\n- Enforces both latency and memory budgets.\n- Returns exactly the required fields.\n\nVerification:\n\n- `bun build candidate.ts`: succeeded.\n- Local behavioral tests: 2 passed, 0 failed.\n- Tests demonstrated both runtime failure and recovery at the exact budget boundary.\n- Repository `bun test` had no supplied tests; the verification harness remains under `.kory-tmp`.",
+  "executionEvidence": [
+    "Codex CLI completed successfully in 78069ms",
+    "Synthetic behavioral vectors: 2/2; full-task coverage: synthetic evaluation protocol."
+  ],
+  "publicContract": {
+    "taskPrompt": {
+      "available": true,
+      "sha256": "a68faf084f4461ea7731a5b7bb0132073132a122948fc1d7fab03c3e04cc3493",
+      "byteLength": 784,
+      "text": "The evaluation repository asks the agent to \"Apply computer vision expertise to this task\". The fixture contains a plausible happy path, an adjacent-skill decoy, one invalid or partial state, and a recovery condition that must be demonstrated rather than assumed. The acceptance boundary is computer-vision: Define task, labels, camera/image formation, resolution, geometry, lighting, occlusion, populations, deployment hardware, and acceptable error tradeoffs. The adjacent embedding-systems discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient."
+    },
+    "fixtureFiles": {
+      "README.md": {
+        "available": true,
+        "sha256": "79b60ae26e736ee62c578fded895df84bc499b25d3dd10793966a804d7d9fbc4",
+        "byteLength": 1264,
+        "text": "# computer-vision: transferable behavior exercise\n\nFilter evaluation leakage before metrics. A sample leaks when group appears in trainGroups or duplicateOf references any sample id in the same corpus; keep only the first member of a duplicate family, treating duplicateOf!=null as leakage. Return eligibleIds/leakageIds in input order. Derive TP, FP, and FN from the eligible samples' boolean truth and predicted fields, then return precision=TP/(TP+FP) and recall=TP/(TP+FN), zero for an empty denominator, rounded to three decimals. runtimeReady requires latencyMs<=latencyBudgetMs and memoryMb<=memoryBudgetMb. Do not let near-duplicate burst frames cross evaluation boundaries. Return exactly {eligibleIds,leakageIds,precision,recall,runtimeReady} with no extra fields; tp, fp and fn are intermediate counts and are not part of the result.\n\nImplement the pure solve(input) export in candidate.ts. Return JSON data; no network, subprocesses, or real account access is needed. Inputs vary identifiers, values, ordering, and failure paths. Score the supplied evidence; do not claim a real model, device, browser, codec, or permission sandbox ran.\n\nThe subject is an explicitly synthetic trace corpus. This tests evaluation logic, not the safety of a live model.\n"
+      },
+      "contract.json": {
+        "available": true,
+        "sha256": "cef149f439afec4f0277f725511312933228796e6646322c565b78256eb79604",
+        "byteLength": 114,
+        "text": "{\n  \"scenarioId\": \"computer-vision-full-task-1-individual\",\n  \"evidence\": \"synthetic\",\n  \"fullTaskBlockers\": []\n}\n"
+      }
+    }
+  },
+  "changes": [
+    {
+      "path": ".kory-tmp/.5de73faffffbbff5-00000000.hm",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "665b9b46b49bbf8a926dd2b17751fa203125e3efaf20830f005b29e5cc268ee5"
+    },
+    {
+      "path": ".kory-tmp/.7cef3fb6e796cfe8-00000000.hm",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "665b9b46b49bbf8a926dd2b17751fa203125e3efaf20830f005b29e5cc268ee5"
+    },
+    {
+      "path": ".kory-tmp/build/candidate.js",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "457c360f23c36793bcb1cc27df67fd74309bb3bb6194ee08f708fb332c06d7c5",
+      "afterText": "// @bun\n// candidate.ts\nfunction metric(numerator, denominator) {\n  if (denominator === 0)\n    return 0;\n  return Math.round(numerator / denominator * 1000) / 1000;\n}\nfunction solve(input) {\n  const value = input !== null && typeof input === \"object\" ? input : {};\n  const samples = Array.isArray(value.samples) ? value.samples : [];\n  const trainGroups = new Set(Array.isArray(value.trainGroups) ? value.trainGroups : []);\n  const sampleIds = new Set(samples.filter((sample) => sample !== null && typeof sample === \"object\").map((sample) => sample.id));\n  const eligibleIds = [];\n  const leakageIds = [];\n  let tp = 0;\n  let fp = 0;\n  let fn = 0;\n  for (const candidate of samples) {\n    if (candidate === null || typeof candidate !== \"object\")\n      continue;\n    const sample = candidate;\n    const leaks = trainGroups.has(sample.group) || sample.duplicateOf != null && sampleIds.has(sample.duplicateOf);\n    if (leaks) {\n      leakageIds.push(sample.id);\n      continue;\n    }\n    eligibleIds.push(sample.id);\n    if (sample.truth === true && sample.predicted === true)\n      tp++;\n    else if (sample.truth === false && sample.predicted === true)\n      fp++;\n    else if (sample.truth === true && sample.predicted === false)\n      fn++;\n  }\n  return {\n    eligibleIds,\n    leakageIds,\n    precision: metric(tp, tp + fp),\n    recall: metric(tp, tp + fn),\n    runtimeReady: typeof value.latencyMs === \"number\" && typeof value.latencyBudgetMs === \"number\" && typeof value.memoryMb === \"number\" && typeof value.memoryBudgetMb === \"number\" && value.latencyMs <= value.latencyBudgetMs && value.memoryMb <= value.memoryBudgetMb\n  };\n}\nexport {\n  solve\n};\n"
+    },
+    {
+      "path": ".kory-tmp/bunx-501-typescript@latest/package.json",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "44cd25e5e25eb5077f83058d6219572e4eaac9ceac6765ec336fc5767986f964",
+      "afterText": "{}\n"
+    },
+    {
+      "path": ".kory-tmp/candidate.verify.test.ts",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "752c757c73dfdc88a74007615e0649718121e94ccda0afaed5ed88492a6daf07",
+      "afterText": "import { expect, test } from \"bun:test\";\nimport { solve } from \"../candidate\";\n\ntest(\"filters group and duplicate leakage before scoring, preserving order\", () => {\n  expect(solve({\n    samples: [\n      { id: \"tp\", group: \"field-a\", duplicateOf: null, truth: true, predicted: true },\n      { id: \"train-leak\", group: \"train-camera\", duplicateOf: null, truth: false, predicted: true },\n      { id: \"fp\", group: \"field-b\", duplicateOf: null, truth: false, predicted: true },\n      { id: \"fn\", group: \"field-c\", duplicateOf: null, truth: true, predicted: false },\n      { id: \"duplicate-leak\", group: \"field-d\", duplicateOf: \"tp\", truth: true, predicted: true },\n      { id: \"tp-2\", group: \"field-e\", duplicateOf: null, truth: true, predicted: true },\n    ],\n    trainGroups: [\"train-camera\"],\n    latencyMs: 20,\n    latencyBudgetMs: 20,\n    memoryMb: 128,\n    memoryBudgetMb: 128,\n  })).toEqual({\n    eligibleIds: [\"tp\", \"fp\", \"fn\", \"tp-2\"],\n    leakageIds: [\"train-leak\", \"duplicate-leak\"],\n    precision: 0.667,\n    recall: 0.667,\n    runtimeReady: true,\n  });\n});\n\ntest(\"shows failed runtime and recovery while keeping empty metrics defined\", () => {\n  const base = {\n    samples: [{ id: 7, group: \"train\", duplicateOf: null, truth: true, predicted: true }],\n    trainGroups: [\"train\"],\n    latencyBudgetMs: 10,\n    memoryBudgetMb: 64,\n  };\n  expect(solve({ ...base, latencyMs: 11, memoryMb: 64 })).toEqual({\n    eligibleIds: [], leakageIds: [7], precision: 0, recall: 0, runtimeReady: false,\n  });\n  expect(solve({ ...base, latencyMs: 10, memoryMb: 64 })).toEqual({\n    eligibleIds: [], leakageIds: [7], precision: 0, recall: 0, runtimeReady: true,\n  });\n});\n"
+    },
+    {
+      "path": ".kory-tmp/xcrun_db",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "51232a857dab4956b56ca364661d6a3208e4b5204b905c0d221deb1b21a77577"
+    },
+    {
+      "path": "candidate.ts",
+      "change": "modified",
+      "beforeSha256": "ae926a5325a88321d95c1364eed088ceb8a3d57eaad30bd5d2548f54a6274a72",
+      "afterSha256": "1a79da33eaf17d20ba42194a160b5264b79687e5b1649e2a1489240f3e8323f1",
+      "beforeText": "// Implement the contract in README.md. Architecture and internal representation are yours.\nexport function solve(input: unknown): unknown {\n  return null;\n}\n",
+      "afterText": "type Sample = {\n  id: unknown;\n  group: unknown;\n  duplicateOf: unknown;\n  truth: unknown;\n  predicted: unknown;\n};\n\ntype Input = {\n  samples?: unknown;\n  trainGroups?: unknown;\n  latencyMs?: unknown;\n  latencyBudgetMs?: unknown;\n  memoryMb?: unknown;\n  memoryBudgetMb?: unknown;\n};\n\nfunction metric(numerator: number, denominator: number): number {\n  if (denominator === 0) return 0;\n  return Math.round((numerator / denominator) * 1000) / 1000;\n}\n\n// Reduce the supplied synthetic evaluation trace without performing any I/O.\nexport function solve(input: unknown): unknown {\n  const value = (input !== null && typeof input === \"object\" ? input : {}) as Input;\n  const samples = Array.isArray(value.samples) ? value.samples : [];\n  const trainGroups = new Set(\n    Array.isArray(value.trainGroups) ? value.trainGroups : [],\n  );\n  const sampleIds = new Set(\n    samples\n      .filter((sample): sample is Sample => sample !== null && typeof sample === \"object\")\n      .map((sample) => sample.id),\n  );\n\n  const eligibleIds: unknown[] = [];\n  const leakageIds: unknown[] = [];\n  let tp = 0;\n  let fp = 0;\n  let fn = 0;\n\n  for (const candidate of samples) {\n    if (candidate === null || typeof candidate !== \"object\") continue;\n    const sample = candidate as Sample;\n    const leaks =\n      trainGroups.has(sample.group) ||\n      (sample.duplicateOf != null && sampleIds.has(sample.duplicateOf));\n\n    if (leaks) {\n      leakageIds.push(sample.id);\n      continue;\n    }\n\n    eligibleIds.push(sample.id);\n    if (sample.truth === true && sample.predicted === true) tp++;\n    else if (sample.truth === false && sample.predicted === true) fp++;\n    else if (sample.truth === true && sample.predicted === false) fn++;\n  }\n\n  return {\n    eligibleIds,\n    leakageIds,\n    precision: metric(tp, tp + fp),\n    recall: metric(tp, tp + fn),\n    runtimeReady:\n      typeof value.latencyMs === \"number\" &&\n      typeof value.latencyBudgetMs === \"number\" &&\n      typeof value.memoryMb === \"number\" &&\n      typeof value.memoryBudgetMb === \"number\" &&\n      value.latencyMs <= value.latencyBudgetMs &&\n      value.memoryMb <= value.memoryBudgetMb,\n  };\n}\n"
+    }
+  ]
+}

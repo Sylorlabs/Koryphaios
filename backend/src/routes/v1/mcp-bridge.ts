@@ -61,6 +61,35 @@ import {
   isAntigravityInternalReadPath,
 } from '../../providers/antigravity-permissions';
 
+/** Denial text a CLI harness can act on: names the managed-call spelling that
+ *  reaches the kory server. Unknown providers get the generic phrasing. */
+function nativeToolRedirectReason(
+  nativeTool: string,
+  koryTool: string,
+  provider?: string,
+): string {
+  const n = JSON.stringify(nativeTool);
+  const k = JSON.stringify(koryTool);
+  if (provider === 'antigravity') return antigravityNativeToolRedirectReason(nativeTool, koryTool);
+  if (provider === 'devin')
+    return (
+      `Native tool ${n} is denied and must not be retried. Call mcp_call_tool with ` +
+      `server_name="kory", tool_name=${k}, and arguments containing the equivalent operation. ` +
+      'Koryphaios owns host tool execution and permission checks.'
+    );
+  if (provider === 'claude')
+    return (
+      `Native tool ${n} is disabled and must not be retried. Call the kory MCP tool ${k} ` +
+      `(exposed to you as mcp__kory__${koryTool}) with the equivalent arguments. ` +
+      'Koryphaios owns host tool execution and permission checks.'
+    );
+  return (
+    `Native tool ${n} is denied and must not be retried. Call the ${k} tool on the kory ` +
+    'MCP server with the equivalent arguments. ' +
+    'Koryphaios owns host tool execution and permission checks.'
+  );
+}
+
 const NATIVE_TO_KORY: Record<string, string> = {
   read: 'kory__read_file',
   edit: 'kory__edit_file',
@@ -79,6 +108,19 @@ const NATIVE_TO_KORY: Record<string, string> = {
   codex_command: 'kory__bash',
   antigravity_exec: 'kory__bash',
   cursor_tool: 'kory__bash',
+  // Devin's hook-visible names are lowercase (`exec`, `glob`, `grep`, …).
+  bash: 'kory__bash',
+  ls: 'kory__ls',
+  glob: 'kory__glob',
+  grep: 'kory__grep',
+  find_file_by_name: 'kory__glob',
+  multi_edit: 'kory__batch_edit',
+  apply_patch: 'kory__edit_file',
+  patch: 'kory__edit_file',
+  webfetch: 'kory__web_fetch',
+  web_fetch: 'kory__web_fetch',
+  web_search: 'kory__web_search',
+  read_page_content: 'kory__web_fetch',
 };
 
 /** Native tools that only mutate the CLI's own bookkeeping and therefore carry
@@ -92,16 +134,28 @@ const SAFE_NATIVE_CONTROL_TOOLS = new Set([
   'generate_image',
   'generateimage',
   'image_gen',
+  // Devin bookkeeping: plan-mode exit plus MCP catalog discovery calls the
+  // model legitimately makes to learn the kory__ tool names.
+  'exit_plan_mode',
+  'mcp_list_tools',
+  'mcp_list_servers',
 ]);
 
 export function managedNativeToolDecision(
   toolName: string,
   toolInput: Record<string, unknown> = {},
+  provider?: string,
 ):
   | { decision: 'approve'; reason: string }
   | { decision: 'block'; reason: string; koryEquivalent?: string } {
   const name = toolName.toLowerCase();
-  if (name === 'call_mcp_tool') {
+  // Devin names its MCP dispatch tool `mcp_call_tool` and — unlike agy — also
+  // exposes each configured server's tools as `mcp__<server>__<tool>` names.
+  // Either spelling is only legitimate when it reaches the kory server: that
+  // bridge holds the signed grant and enforces session, role and permission
+  // policy per call, so the hook can approve it. Any other MCP server would
+  // bypass the role-scoped catalog entirely.
+  if (name === 'call_mcp_tool' || name === 'mcp_call_tool') {
     const server = toolInput.ServerName ?? toolInput.serverName ?? toolInput.server_name;
     const tool = toolInput.ToolName ?? toolInput.toolName ?? toolInput.tool_name;
     if (server === 'kory' && typeof tool === 'string' && /^kory__[a-z][a-z0-9_-]*$/.test(tool))
@@ -115,6 +169,29 @@ export function managedNativeToolDecision(
       reason: 'Managed MCP calls must target a kory__ tool on the kory server.',
     };
   }
+  // Direct namespaced MCP calls (Devin emits `mcp__kory__kory__read_file`,
+  // i.e. `mcp__` + server + `__` + tool). Only the kory server is a managed
+  // surface — the signed stdio bridge does the real authorization — so approve
+  // that namespace and refuse every other server's namespaced tools.
+  if (name.startsWith('mcp__kory__'))
+    return {
+      decision: 'approve',
+      reason:
+        'Kory MCP dispatch; the signed bridge enforces tool role, session and permission policy.',
+    };
+  if (name.startsWith('mcp__'))
+    return {
+      decision: 'block',
+      reason: 'Managed MCP calls must target a kory__ tool on the kory server.',
+    };
+  // Devin's scope-escalation tool would let the child grant itself host access
+  // Koryphaios never issued; scope is fixed by the turn's jail/workspace.
+  if (name === 'request_scope')
+    return {
+      decision: 'block',
+      reason:
+        'Scope escalation is owned by Koryphaios. The managed turn already runs with the granted workspace scope.',
+    };
   if (
     (name === 'view_file' || name === 'read_file') &&
     isAntigravityInternalReadPath(
@@ -147,7 +224,7 @@ export function managedNativeToolDecision(
     return {
       decision: 'block',
       koryEquivalent: antigravity.kory,
-      reason: antigravityNativeToolRedirectReason(toolName, antigravity.kory),
+      reason: nativeToolRedirectReason(toolName, antigravity.kory, provider),
     };
   }
   const koryEquivalent = NATIVE_TO_KORY[toolName] ?? NATIVE_TO_KORY[name];
@@ -155,9 +232,16 @@ export function managedNativeToolDecision(
     return {
       decision: 'block',
       koryEquivalent,
-      reason: antigravityNativeToolRedirectReason(toolName, koryEquivalent),
+      reason: nativeToolRedirectReason(toolName, koryEquivalent, provider),
     };
-  if (toolName === 'run_subagent' || toolName === 'Task' || toolName === 'Agent')
+  if (
+    toolName === 'run_subagent' ||
+    toolName === 'read_subagent' ||
+    toolName === 'Task' ||
+    toolName === 'Agent' ||
+    name === 'task' ||
+    name === 'spawn'
+  )
     return {
       decision: 'block',
       reason: 'Use kory__delegate_to_worker; Koryphaios owns orchestration.',
@@ -438,6 +522,8 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
           sandboxOptions: resolveSandboxOptions(mcpSettings, mcpNaturalSandboxed),
           permissionPolicy,
           approvedToolCallIds: new Set(),
+          workspaceRebindPending: kory.isWorkspaceRebindPending(sessionId),
+          noteWorkspaceMutation: () => kory.markWorkspaceMutatedThisTurn(sessionId),
           ...(normalizedRole === 'manager'
             ? {
                 renameSession: (title: string) => kory.renameSession(sessionId, title),
@@ -447,6 +533,7 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
                   skills?: import('../../kory/skill-assignment').SkillAssignment,
                   workerModel?: string,
                   reasoningLevel?: string,
+                  workerWorktree?: boolean,
                 ) =>
                   kory.runWorkerPipeline(
                     sessionId,
@@ -456,6 +543,8 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
                     domain,
                     skills,
                     workerModel,
+                    undefined,
+                    workerWorktree,
                   ),
               }
             : {}),
@@ -505,10 +594,11 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
     async ({ request, body, set }) => {
       const auth = authenticateBridgeRoute(request, set, body, 'hook');
       if (!auth) throw new AuthenticationError('Unauthorized');
-      const { session_id, tool_name, tool_input } = body as {
+      const { session_id, tool_name, tool_input, provider } = body as {
         session_id: string;
         tool_name: string;
         tool_input: Record<string, unknown>;
+        provider?: string;
       };
       try {
         const { kory, sessions } = getContext();
@@ -525,7 +615,7 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
             decision: 'block' as const,
             reason: 'CLI capability is not scoped to this session',
           };
-        const decision = managedNativeToolDecision(tool_name, tool_input);
+        const decision = managedNativeToolDecision(tool_name, tool_input, provider);
         // Route native CLI tool calls through Kory's permission system.
         // If the tool is one Kory can handle (read, write, exec, etc.), block
         // the native call and tell the CLI to use the kory__ equivalent instead.
@@ -564,6 +654,7 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
         session_id: t.String(),
         tool_name: t.String(),
         tool_input: t.Record(t.String(), t.Unknown()),
+        provider: t.Optional(t.String()),
       }),
     },
   )
@@ -610,10 +701,11 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
     async ({ request, body, set }) => {
       const auth = authenticateBridgeRoute(request, set, body, 'hook');
       if (!auth) return { ok: false, error: 'Unauthorized' };
-      const { session_id, tool_name, tool_input } = body as {
+      const { session_id, tool_name, tool_input, provider } = body as {
         session_id: string;
         tool_name: string;
         tool_input: Record<string, unknown>;
+        provider?: string;
       };
       const { sessions } = getContext();
       const session = await sessions.getActive(session_id);
@@ -629,13 +721,14 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
           decision: 'block' as const,
           reason: 'CLI capability is not scoped to this session',
         };
-      return managedNativeToolDecision(tool_name, tool_input);
+      return managedNativeToolDecision(tool_name, tool_input, provider);
     },
     {
       body: t.Object({
         session_id: t.String(),
         tool_name: t.String(),
         tool_input: t.Record(t.String(), t.Unknown()),
+        provider: t.Optional(t.String()),
       }),
     },
   )

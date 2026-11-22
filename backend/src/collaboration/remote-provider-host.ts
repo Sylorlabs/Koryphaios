@@ -236,6 +236,9 @@ export function toRemoteStreamRequest(
     maxTokens: payload.maxTokens,
     temperature: payload.temperature,
     reasoningLevel: payload.reasoningLevel,
+    speedTier: payload.speedTier,
+    modelParameters: payload.modelParameters,
+    fusion: payload.fusion,
     ...(payload.imageInputOverride?.provider === payload.provider &&
       payload.imageInputOverride.model === payload.model && {
         imageInputOverride: { provider: payload.provider, model: payload.model },

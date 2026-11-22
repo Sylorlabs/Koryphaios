@@ -4,7 +4,7 @@ import { getSessionMcpToolRegistry } from '$lib/stores/mcp-tool-registry.svelte'
 import { resolveRegisteredMcpTool } from './mcp-tool-identity';
 import type { ComputerUseReceipt } from '@koryphaios/shared';
 
-export type ToolIcon = WorkspaceIcon | 'file-read' | 'file-create' | 'file-edit' | 'file-delete' | 'file-move' | 'command' | 'search' | 'folder' | 'web' | 'fetch' | 'checklist' | 'critic' | 'agent' | 'session' | 'git' | 'context' | 'tool';
+export type ToolIcon = WorkspaceIcon | 'file-read' | 'file-create' | 'file-edit' | 'file-delete' | 'file-move' | 'command' | 'search' | 'folder' | 'web' | 'fetch' | 'checklist' | 'critic' | 'agent' | 'session' | 'git' | 'context' | 'skill' | 'tool';
 
 function withoutToolNamespace(name: string): string {
   return name.replace(/^freebuff_sandbox__/, '').replace(/^mcp__.+?__/, '').replace(/^.*kory__/, '').split(/[./]/).pop() ?? '';
@@ -190,6 +190,12 @@ export function toolPresentation(entry: FeedEntryLocal) {
     };
     action = actions[text(input.action)]?.[complete ? 1 : 0] ?? 'Managing MCP servers';
     target = text(input.name) || 'MCP servers';
+  } else if (name === 'load_skill_detail') {
+    // A skill is guidance, not a file or a note: it gets its own mark and
+    // names the skill that was loaded instead of the tool that read it.
+    action = complete ? 'Used skill' : 'Using skill';
+    icon = 'skill';
+    target = text(input.name) ? `“${text(input.name)}”` : 'skill';
   } else if (name === 'fetch_context') {
     action = complete ? 'Fetched context' : 'Fetching context';
     target = text(input.query) || 'conversation context';

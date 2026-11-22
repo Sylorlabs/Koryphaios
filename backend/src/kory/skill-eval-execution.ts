@@ -52,6 +52,25 @@ export interface SkillEvalFixtureMaterializer {
   /** Trusted fixture-owned execution on the original source, before either arm is cloned/dispatched. */
   captureBeforeCandidateDispatch?: (destination: string, scenario: SkillEvalScenarioV3) =>
     { relativePath: string; text: string } | Promise<{ relativePath: string; text: string }>;
+  /**
+   * Ordered images the fixture hands to the candidate as model input, for scenarios whose
+   * evidence is visual (a real desktop session, a rendered page). Paths are resolved against
+   * the materialized fixture so both arms receive byte-identical images. An executor that
+   * cannot transport images must refuse the scenario rather than silently drop them.
+   */
+  imageAttachments?: (
+    destination: string,
+    scenario: SkillEvalScenarioV3,
+  ) => readonly SkillEvalImageAttachment[];
+}
+
+/** One image handed to the candidate, recorded so a run can prove what it was shown. */
+export interface SkillEvalImageAttachment {
+  /** Path inside the materialized fixture directory. */
+  readonly relativePath: string;
+  readonly mimeType: 'image/png' | 'image/jpeg' | 'image/webp';
+  /** What the image depicts, in the fixture's own words. */
+  readonly label: string;
 }
 
 /** Sealed separately from the editable candidate-visible receipt. */
@@ -201,6 +220,8 @@ export interface SkillEvalExecutor {
     taskPrompt: string;
     /** Portable target skill text. Null means the no-skill baseline. */
     skillContext: string | null;
+    /** Fixture-provided images. Empty when the scenario hands the candidate no visual evidence. */
+    attachments?: readonly SkillEvalImageAttachment[];
   }) => Promise<SkillEvalExecutionObservation>;
 }
 
@@ -331,7 +352,16 @@ function workspaceEntries(root: string, current = root): string[] {
   if (stat.isSymbolicLink() || stat.isFile()) return [current];
   if (!stat.isDirectory()) return [];
   return readdirSync(current)
-    .filter((name) => name !== '.git')
+    // Installed dependencies and framework build output are derived state, not candidate
+    // source, and snapshotting them made blind review impossible: the artifact reader
+    // requires a bounded regular file and a Next fixture produced 368 MB of them.
+    .filter((name) =>
+      name !== '.git' &&
+      name !== 'node_modules' &&
+      name !== '.next' &&
+      name !== '.turbo' &&
+      !(name === 'target' && existsSync(join(current, 'Cargo.toml')))
+    )
     .sort()
     .flatMap((name) => workspaceEntries(root, join(current, name)));
 }
@@ -736,6 +766,7 @@ export async function runPairedSkillEvaluationV3(input: {
           workingDirectory,
           taskPrompt: scenario.prompt,
           skillContext,
+          attachments: materializer.imageAttachments?.(baseRoot, scenario) ?? [],
         });
       } catch (error: unknown) {
         observation = infrastructureObservation(
@@ -781,6 +812,11 @@ export async function runPairedSkillEvaluationV3(input: {
           observation,
           score,
         });
+        // An arm with no score did not produce candidate evidence. Persisting it as a zero-quality
+        // run made a provider outage or a host socket failure indistinguishable from a model that
+        // solved nothing, and it stayed in the pass rate forever. The artifacts above are still
+        // archived for diagnosis; only the evidence row is withheld.
+        if (score)
         recordSkillEvaluationRun(input.projectRoot, {
           id: experiment.id,
           skill: input.skillPackage.sidecar.name,

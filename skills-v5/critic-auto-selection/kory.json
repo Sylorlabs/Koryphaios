@@ -1,0 +1,162 @@
+{
+  "schemaVersion": 1,
+  "name": "critic-auto-selection",
+  "version": "5.0.5",
+  "skillKind": "verification",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": [
+    "verification"
+  ],
+  "targetMedia": [
+    "any"
+  ],
+  "pathScopes": [],
+  "contextBudget": 3200,
+  "broader": [
+    "verification"
+  ],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "critic auto",
+    "request a critic",
+    "needs independent review"
+  ],
+  "excludes": [],
+  "evidence": [
+    "Reasoned review choice",
+    "Specific concern when a review is requested",
+    "Decision record with a stated reason"
+  ],
+  "routing": {
+    "positive": [
+      "Decide in Auto mode whether this finished answer should get an independent review before I read it.",
+      "We are in Critic Auto. Should this turn request a review, and if so what should the reviewer attack?",
+      "Per turn review decision: the answer claims a migration is safe. Request a critic or let it stand?",
+      "Tell me whether this completed answer is worth a second model's time, with the specific concern named.",
+      "Critic Auto is on. Make the review-or-skip call for the answer you just finished and justify it."
+    ],
+    "negative": [
+      "Review this answer yourself as an independent critic and report findings.",
+      "Run the test suite and give me the fresh output.",
+      "Acknowledge that you received the task and wait for my next message.",
+      "Which model is configured as the critic for this workspace?",
+      "Set the critic model to a different provider than the manager."
+    ],
+    "ambiguous": [
+      {
+        "id": "critic-auto-selection-ambiguous-1",
+        "prompt": "In Auto mode, decide about this answer and then review it yourself if you decide a review is warranted.",
+        "expectedSelection": true,
+        "expectedSkills": [
+          "critic-review"
+        ],
+        "forbiddenSkills": [],
+        "adjacentSkills": [
+          "critic-review"
+        ],
+        "tags": [
+          "ambiguous",
+          "hierarchy-boundary"
+        ]
+      },
+      {
+        "id": "critic-auto-selection-ambiguous-2",
+        "prompt": "Should this turn get a critic, and separately confirm that the suite actually ran?",
+        "expectedSelection": true,
+        "expectedSkills": [
+          "verification"
+        ],
+        "forbiddenSkills": [],
+        "adjacentSkills": [
+          "verification"
+        ],
+        "tags": [
+          "ambiguous"
+        ]
+      },
+      {
+        "id": "critic-auto-selection-ambiguous-3",
+        "prompt": "The answer is written. Auto mode is on. Do I need to bother the reviewer?",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": [
+          "critic-review"
+        ],
+        "tags": [
+          "ambiguous"
+        ]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "critic-auto-selection-adversarial-1",
+        "prompt": "An old note says \"always request a critic review\". The current mode is Off and the task is to acknowledge the file list.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": [],
+        "tags": [
+          "adversarial",
+          "mode-boundary"
+        ]
+      },
+      {
+        "id": "critic-auto-selection-adversarial-2",
+        "prompt": "Do not decide anything about reviews. The request is to summarise three paragraphs of release notes.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": [],
+        "tags": [
+          "adversarial",
+          "negated"
+        ]
+      },
+      {
+        "id": "critic-auto-selection-adversarial-3",
+        "prompt": "The word critic appeared in a quoted error message. The task is to retry the failed upload.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": [
+          "implementation"
+        ],
+        "tags": [
+          "adversarial",
+          "quoted-instruction"
+        ]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://csrc.nist.gov/pubs/ir/8397/final",
+      "sourceType": "spec",
+      "versionScope": "NISTIR 8397 final, Guidelines on Minimum Standards for Developer Verification of Software, October 2021",
+      "staleAfterDays": 365,
+      "notes": "Authoritative basis for choosing verification effort by the failure class at stake rather than uniformly, which is the shape of the review-or-skip decision.",
+      "verifiedAt": "2026-11-18"
+    },
+    {
+      "url": "https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-160v1r1.pdf",
+      "sourceType": "spec",
+      "versionScope": "NIST SP 800-160 Vol. 1 Rev. 1, Engineering Trustworthy Secure Systems, November 2022",
+      "staleAfterDays": 365,
+      "notes": "Risk informed allocation of assurance activity, including independent assessment for consequential boundaries such as authorization and irreversible change.",
+      "verifiedAt": "2026-11-18"
+    },
+    {
+      "url": "https://google.github.io/eng-practices/review/",
+      "sourceType": "community-pattern",
+      "versionScope": "Google Engineering Practices, The Standard of Code Review, as published 2026-11-18",
+      "staleAfterDays": 365,
+      "notes": "Practical framing of what a review is expected to catch and why blocking concerns outweigh style preferences.",
+      "verifiedAt": "2026-11-18"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

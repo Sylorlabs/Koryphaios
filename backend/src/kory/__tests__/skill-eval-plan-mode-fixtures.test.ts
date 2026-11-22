@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import {
   PLAN_MODE_SKILL_EVAL_MATERIALIZERS,
   PLAN_MODE_SKILL_EVAL_SCORERS,
-} from '../skill-eval-plan-mode-fixtures';
-import type { SkillEvalScenarioV3 } from '../skill-eval-harness';
+} from '../../eval/skills/skill-eval-plan-mode-fixtures';
+import type { SkillEvalScenarioV3 } from '../../eval/skills/skill-eval-harness';
 
 const roots: string[] = [];
 afterEach(() => {

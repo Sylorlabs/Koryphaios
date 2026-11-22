@@ -386,7 +386,7 @@
           class="min-w-0 flex-1 border-none bg-transparent text-sm text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-muted)]"
         />
         <kbd
-          class="hidden rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)] sm:block"
+          class="hidden rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)] px-1.5 py-0.5 text-[11px] text-[var(--color-text-muted)] sm:block"
           >{formatKey('Esc')}</kbd
         >
         <button
@@ -505,7 +505,7 @@
                   </span>
                 </span>
                 <kbd
-                  class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]"
+                  class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)] px-1.5 py-0.5 text-[11px] text-[var(--color-text-muted)]"
                   >{formatShortcut('Mod+Enter')}</kbd
                 >
               </button>
@@ -515,7 +515,7 @@
       </div>
 
       <div
-        class="flex items-center justify-between gap-4 border-t border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-2 text-[10px] text-[var(--color-text-muted)]"
+        class="flex items-center justify-between gap-4 border-t border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-2 text-[11px] text-[var(--color-text-muted)]"
       >
         <span>
           <kbd>{formatChord('ArrowUp', 'ArrowDown')}</kbd> move · <kbd>{formatKey('Enter')}</kbd>

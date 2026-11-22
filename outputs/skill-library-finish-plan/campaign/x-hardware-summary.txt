@@ -1,0 +1,10 @@
+hw 1: hardware-runtime-debugging insufficient-evidence  cand=16 pass=16 ft=0/0 ftPairs=0 regr=0
+hw 2: hardware-runtime-debugging insufficient-evidence  cand=16 pass=16 ft=0/0 ftPairs=0 regr=0
+hw 3: hardware-runtime-debugging insufficient-evidence  cand=16 pass=16 ft=0/0 ftPairs=0 regr=0
+hw 4: hardware-runtime-debugging insufficient-evidence  cand=16 pass=16 ft=0/0 ftPairs=0 regr=0
+hw 1: hardware-runtime-debugging blocked                cand=18 pass=17 ft=1/2 ftPairs=2 regr=1
+hw 2: hardware-runtime-debugging insufficient-evidence  cand=20 pass=18 ft=2/4 ftPairs=4 regr=0
+review attempt 1 failed:  review attempt 1 failed: 
+review attempt 2 failed:  review attempt 2 failed: 
+review attempt 3 failed:  review attempt 3 failed: 
+staged on attempt 4

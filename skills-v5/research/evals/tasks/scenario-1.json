@@ -6,8 +6,8 @@
     "kind": "synthetic",
     "startingState": "fixture://research/portable-agent-skills-2026-09-04",
     "requirements": [
-      "snapshot of https://agentskills.io/specification retrieved 2026-09-04",
-      "snapshot of https://cursor.com/docs/skills retrieved 2026-09-04",
+      "snapshot of https://agentskills.io/specification captured 2026-09-01, the nearest genuine archive capture inside the 2026-09-04 cutoff",
+      "snapshot of https://cursor.com/docs/skills captured 2026-09-02, the nearest genuine archive capture inside the 2026-09-04 cutoff",
       "community example that incorrectly labels Cursor-specific fields as universal",
       "stale internal note predating Cursor Agent Skills support",
       "paired same-model skill/no-skill execution with clean context",

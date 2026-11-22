@@ -2,6 +2,8 @@ import { expect, test } from 'bun:test';
 import { ProviderRegistry } from '../providers/registry';
 import { currentProviderExecutionScope, withProviderExecutionScope, withSessionProviderExecutionScope } from '../providers/execution-scope';
 import { parseDeviceProviderBundle, stageDeviceProviders } from './provider-bundle';
+import { makeDeviceIdentity } from '@koryphaios/shared/src/device-client';
+import { openDeviceMessage, sealDeviceMessage } from '@koryphaios/shared/src/devices';
 import { ensureManagedCliDirectory } from '../providers/managed-cli-storage';
 import { stageAntigravityCredential } from '../providers/antigravity-credentials';
 import { join } from 'node:path';
@@ -38,6 +40,33 @@ test('credential scopes reject other sessions and revoked links before contactin
     expect(() => withProviderExecutionScope(staged.scope, () => provider.listModels())).toThrow('revoked');
   } finally { staged.cleanup(); }
 });
+test('a selected provider is staged under its own name with its endpoint', () => {
+  const parsed = parseDeviceProviderBundle({
+    version: 1,
+    providers: [{
+      config: { name: 'logfare', label: 'Logfare', baseUrl: 'https://logfare.ai/v1', apiKey: 'synthetic' },
+      models: [{ id: 'deepseek-v4.1-flash-1017', name: 'DeepSeek', contextWindow: 128000, maxOutputTokens: 8192 }],
+    }],
+  });
+  const staged = stageDeviceProviders(parsed, 'shared-chat', () => {});
+  try {
+    expect(staged.scope.providers.has('logfare')).toBe(true);
+    expect(staged.scope.providers.get('logfare')?.listModels()[0]?.provider).toBe('logfare');
+  } finally { staged.cleanup(); }
+});
+
+test('credential grants are sealed to the target identity and refuse another device', async () => {
+  const source = await makeDeviceIdentity('source', 'macOS', 'desktop');
+  const target = await makeDeviceIdentity('target', 'Linux', 'desktop');
+  const other = await makeDeviceIdentity('other', 'Linux', 'desktop');
+  const envelope = await sealDeviceMessage(source.privateKey, target.identity, source.identity.id, bundle('grant'));
+  const opened = await openDeviceMessage(target.privateKey, source.identity, target.identity.id, envelope) as any;
+  expect(opened.providers[0].config.apiKey).toBe('synthetic-grant');
+  await expect(
+    openDeviceMessage(target.privateKey, other.identity, target.identity.id, envelope),
+  ).rejects.toThrow();
+});
+
 test('portable configuration cannot install hooks, local paths or unknown providers', () => {
   expect(parseDeviceProviderBundle(bundle('safe')).providers[0]!.config).not.toHaveProperty('hooks');
   expect(() => parseDeviceProviderBundle({ ...bundle('safe'), providers: [{ config: { name: 'codex' }, models: [] }] })).toThrow('Invalid device');

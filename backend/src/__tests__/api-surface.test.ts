@@ -221,6 +221,8 @@ const protectedRoutes: RouteCheck[] = [
     body: { sessionId: 's1', estimatedCostCents: 1 },
   },
   { method: 'GET', path: '/api/billing/credits' },
+  { method: 'GET', path: '/api/billing/summary' },
+  { method: 'GET', path: '/api/billing/live' },
   { method: 'GET', path: '/api/appearance' },
   {
     method: 'PUT',

@@ -3,7 +3,6 @@
   import Copy from 'lucide-svelte/icons/copy';
   import Download from 'lucide-svelte/icons/download';
   import Eye from 'lucide-svelte/icons/eye';
-  import Image from 'lucide-svelte/icons/image';
   import ImagePlus from 'lucide-svelte/icons/image-plus';
   import RefreshCw from 'lucide-svelte/icons/refresh-cw';
   import Sparkles from 'lucide-svelte/icons/sparkles';
@@ -19,6 +18,7 @@
     saveRecoverableImageJob,
   } from '$lib/utils/image-job-recovery';
   import KorySelect from './KorySelect.svelte';
+  import SettingsPage from './settings/SettingsPage.svelte';
 
   type ImageModelInfo = {
     id: string;
@@ -506,33 +506,25 @@
   });
 </script>
 
-<div class="mx-auto w-full max-w-5xl space-y-6 p-6">
-  <header class="flex flex-wrap items-start justify-between gap-3">
-    <div class="flex items-start gap-3">
-      <div class="rounded-xl bg-[var(--color-surface-3)] p-2 text-[var(--color-accent)]">
-        <Image size={20} />
-      </div>
-      <div>
-        <h3 class="text-lg font-semibold text-[var(--color-text-primary)]">Images</h3>
-        <p class="mt-1 max-w-3xl text-sm text-[var(--color-text-muted)]">
-          Generate images with your connected providers, apply a visual treatment, and download the
-          original result.
-        </p>
-      </div>
-    </div>
+<SettingsPage
+  title="Images"
+  description="Generate images with your connected providers, apply a visual treatment, and download the original result."
+  width="wide"
+>
+  {#snippet actions()}
     <button type="button" class="btn" onclick={() => void loadProviders()} disabled={loading}>
       <RefreshCw size={14} class={loading ? 'animate-spin' : ''} /> Refresh
     </button>
-  </header>
+  {/snippet}
 
-  <section
-    class="settings-panel overflow-visible rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)]"
-  >
-    <div class="grid gap-0 overflow-visible lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
-      <div class="space-y-5 p-5">
+  <!-- Studio and preview are separated by the column gap and the preview's own
+       surface only — no divider line on top of both. -->
+  <section>
+    <div class="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
+      <div class="min-w-0 space-y-5">
         <div class="flex items-center justify-between gap-3">
           <div>
-            <h4 class="font-medium text-[var(--color-text-primary)]">Image studio</h4>
+            <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Image studio</h4>
             <p class="mt-1 text-xs text-[var(--color-text-muted)]">
               {#if activeProvider && activeModel}
                 {activeProvider.label} · {activeModel.label}
@@ -543,7 +535,7 @@
           </div>
           {#if activeProvider}
             <span
-              class="rounded-full px-2.5 py-1 text-[10px] font-medium {activeProvider.configured
+              class="rounded-full px-2.5 py-1 text-[11px] font-medium {activeProvider.configured
                 ? 'bg-[var(--color-success-bg)] text-[var(--color-success)]'
                 : 'bg-[var(--color-warning-bg)] text-[var(--color-warning)]'}"
             >
@@ -706,7 +698,7 @@
       </div>
 
       <div
-        class="relative flex min-h-96 items-center justify-center overflow-hidden border-t border-[var(--color-border)] bg-[var(--color-surface-1)] p-5 lg:border-l lg:border-t-0"
+        class="relative flex min-h-96 items-center justify-center overflow-hidden rounded-2xl bg-[var(--color-surface-1)] p-5"
       >
         <div class="pointer-events-none absolute inset-0 opacity-40 image-atmosphere"></div>
         {#if generated}
@@ -717,7 +709,7 @@
               class="mx-auto max-h-[34rem] w-full rounded-xl object-contain shadow-2xl"
             />
             <div class="flex items-center justify-between gap-3">
-              <p class="min-w-0 truncate text-[10px] text-[var(--color-text-muted)]">
+              <p class="min-w-0 truncate text-[11px] text-[var(--color-text-muted)]">
                 {generated.provider} · {generated.model}
               </p>
               <div class="flex shrink-0 gap-2">
@@ -734,11 +726,7 @@
           </div>
         {:else}
           <div class="relative max-w-xs text-center text-[var(--color-text-muted)]">
-            <div
-              class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-accent)]"
-            >
-              <Sparkles size={28} />
-            </div>
+            <Sparkles size={20} class="mx-auto mb-3 text-[var(--color-accent)]" aria-hidden="true" />
             <p class="text-sm font-medium text-[var(--color-text-secondary)]">
               Your generated image appears here
             </p>
@@ -752,11 +740,9 @@
   </section>
 
   {#if history.length > 0}
-    <section
-      class="settings-panel rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5"
-    >
+    <section>
       <div class="flex items-center justify-between gap-3">
-        <h4 class="font-medium text-[var(--color-text-primary)]">Recent images</h4>
+        <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Recent images</h4>
         <button type="button" class="btn" onclick={() => void loadHistory()}>
           <RefreshCw size={14} /> Refresh
         </button>
@@ -779,7 +765,7 @@
                 role="button"
                 tabindex="0"
                 aria-label="Delete image from history"
-                class="shrink-0 text-[var(--color-text-muted)] opacity-0 transition-opacity group-hover:opacity-100 hover:text-[var(--color-danger, #e5484d)] focus:opacity-100"
+                class="shrink-0 text-[var(--color-text-muted)] opacity-0 transition-opacity group-hover:opacity-100 hover:text-[var(--color-error)] focus:opacity-100"
                 onclick={(event) => {
                   event.stopPropagation();
                   void removeHistoryEntry(entry.id);
@@ -795,7 +781,7 @@
                 <Trash2 size={13} />
               </span>
             </div>
-            <p class="mt-2 truncate text-[10px] text-[var(--color-text-muted)]">
+            <p class="mt-2 truncate text-[11px] text-[var(--color-text-muted)]">
               {entry.mode === 'edit' ? 'Edit · ' : ''}{entry.provider} · {entry.model} · {new Date(
                 entry.ts,
               ).toLocaleTimeString()}
@@ -806,19 +792,17 @@
     </section>
   {/if}
 
-  <section
-    class="settings-panel flex items-start gap-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5"
-  >
-    <Eye size={18} class="mt-0.5 shrink-0 text-[var(--color-text-secondary)]" />
+  <section class="flex items-start gap-2.5">
+    <Eye size={16} class="mt-0.5 shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" />
     <div>
-      <h4 class="font-medium text-[var(--color-text-primary)]">Image input is enabled</h4>
+      <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Image input is enabled</h4>
       <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
         Paste or attach images in chat, and agents can inspect workspace images with the scoped
         image viewer.
       </p>
     </div>
   </section>
-</div>
+</SettingsPage>
 
 <style>
   .image-atmosphere {

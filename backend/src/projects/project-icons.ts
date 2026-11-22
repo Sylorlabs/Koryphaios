@@ -2,6 +2,7 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { constants } from 'node:fs';
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
+import type { ProjectIdentity } from '@koryphaios/shared';
 import { PROJECT_ROOT } from '../runtime/paths';
 import { ensureSecureDir } from '../security/fs-permissions';
 
@@ -103,4 +104,15 @@ export async function deleteProjectIcon(projectId: string, assetId: string): Pro
   await rename(directory, tombstone);
   await rm(tombstone, { recursive: true, force: true });
   return true;
+}
+
+/** Release an icon asset that a spec change just orphaned. */
+export async function releaseReplacedProjectIcon(
+  before: Pick<ProjectIdentity, 'id' | 'icon'>,
+  after: Pick<ProjectIdentity, 'icon'>,
+): Promise<void> {
+  if (before.icon.mode !== 'image') return;
+  if (after.icon.mode === 'image' && after.icon.assetId === before.icon.assetId) return;
+  // The spec change is already committed; a failed cleanup must not fail it.
+  await deleteProjectIcon(before.id, before.icon.assetId).catch(() => false);
 }

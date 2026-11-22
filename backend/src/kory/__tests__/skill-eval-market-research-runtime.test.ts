@@ -3,14 +3,14 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { writeFixtureFile } from '../skill-eval-fixture-helpers';
-import { buildSkillEvalSuiteV3, type SkillEvalScenarioV3 } from '../skill-eval-harness';
+import { writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
+import { buildSkillEvalSuiteV3, type SkillEvalScenarioV3 } from '../../eval/skills/skill-eval-harness';
 import {
   MARKET_RESEARCH_CASES,
   MARKET_RESEARCH_SKILL_EVAL_MATERIALIZERS,
   MARKET_RESEARCH_SKILL_EVAL_SCORERS,
   scoreMarketResearchRuntime,
-} from '../skill-eval-market-research-runtime';
+} from '../../eval/skills/skill-eval-market-research-runtime';
 import { loadV5SkillPackages } from '../skill-packages';
 
 // All response bodies in this file are CONTROLLED TEST FIXTURES. Injected

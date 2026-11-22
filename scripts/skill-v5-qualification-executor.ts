@@ -2,23 +2,33 @@ import {
   createIsolatedCodexSkillEvalExecutor,
   isCodexSkillEvalAvailable,
   createTextOnlyPatchSkillEvalExecutor,
-} from '../backend/src/kory/skill-eval-codex';
-import { createOmnirushTextOnlyPatchSkillEvalExecutor } from '../backend/src/kory/skill-eval-provider';
-import { createOpenRouterTextOnlyPatchSkillEvalExecutor } from '../backend/src/kory/skill-eval-provider';
-import { createLogfareTextOnlyPatchSkillEvalExecutor } from '../backend/src/kory/skill-eval-provider';
-import { createOpenCodeTextOnlyPatchSkillEvalExecutor } from '../backend/src/kory/skill-eval-opencode';
-import { createOpenCodeStatelessTextPatchSkillEvalExecutor } from '../backend/src/kory/skill-eval-opencode-stateless';
-import { createNativeStatelessTextPatchSkillEvalExecutor } from '../backend/src/kory/skill-eval-native-stateless';
-import { createLocalLlamaTextPatchSkillEvalExecutor } from '../backend/src/kory/skill-eval-local-llama';
+} from '../backend/src/eval/skills/skill-eval-codex';
+import { createOmnirushTextOnlyPatchSkillEvalExecutor } from '../backend/src/eval/skills/skill-eval-provider';
+import { createOpenRouterTextOnlyPatchSkillEvalExecutor } from '../backend/src/eval/skills/skill-eval-provider';
+import { createLogfareTextOnlyPatchSkillEvalExecutor } from '../backend/src/eval/skills/skill-eval-provider';
+import { createOpenCodeTextOnlyPatchSkillEvalExecutor } from '../backend/src/eval/skills/skill-eval-opencode';
+import { createOpenCodeStatelessTextPatchSkillEvalExecutor } from '../backend/src/eval/skills/skill-eval-opencode-stateless';
+import { createNativeStatelessTextPatchSkillEvalExecutor } from '../backend/src/eval/skills/skill-eval-native-stateless';
+import {
+  createOpenCodeLogfareAgenticExecutor,
+  opencodeBinary,
+  readLogfareProviderFromOperatorConfig,
+} from '../backend/src/eval/skills/skill-eval-opencode-agentic';
+import { createLocalLlamaTextPatchSkillEvalExecutor } from '../backend/src/eval/skills/skill-eval-local-llama';
+import {
+  assertApprovedKoryCliModel,
+  createKoryCliAgenticExecutor,
+} from '../backend/src/eval/skills/skill-eval-kory-cli';
 import {
   LOCAL_LLAMA_TEXT_PATCH_QUARANTINE_REASON,
   OPENCODE_STATELESS_QUARANTINE_REASON,
   OPENCODE_TEXT_PATCH_QUARANTINE_REASON,
-} from '../backend/src/kory/skill-eval-eligibility';
+} from '../backend/src/eval/skills/skill-eval-eligibility';
 import type {
   SkillEvalExecutor,
   SkillEvalExecutionReadiness,
-} from '../backend/src/kory/skill-eval-execution';
+  SkillEvalFixtureMaterializer,
+} from '../backend/src/eval/skills/skill-eval-execution';
 import type { V5EvalEnvironmentKind } from '../backend/src/kory/skill-packages';
 
 export type SkillEvalExecutorMode =
@@ -31,7 +41,9 @@ export type SkillEvalExecutorMode =
   | 'opencode-text-patch'
   | 'opencode-stateless-text-patch'
   | 'local-llama-text-patch'
-  | 'native-stateless-text-patch';
+  | 'native-stateless-text-patch'
+  | 'opencode-logfare-agentic'
+  | 'kory-cli-agentic';
 
 export interface SkillEvalExecutorDescriptor {
   mode: Exclude<SkillEvalExecutorMode, 'auto'>;
@@ -70,10 +82,12 @@ export function parseSkillEvalExecutorMode(
     requested !== 'opencode-text-patch' &&
     requested !== 'opencode-stateless-text-patch' &&
     requested !== 'local-llama-text-patch' &&
-    requested !== 'native-stateless-text-patch'
+    requested !== 'native-stateless-text-patch' &&
+    requested !== 'kory-cli-agentic' &&
+    requested !== 'opencode-logfare-agentic'
   ) {
     throw new Error(
-      `Invalid skill evaluation executor ${JSON.stringify(requested)}; expected auto|codex|codex-text-patch|omnirush-text-patch|openrouter-text-patch|opencode-text-patch|opencode-stateless-text-patch|local-llama-text-patch|native-stateless-text-patch`,
+      `Invalid skill evaluation executor ${JSON.stringify(requested)}; expected auto|codex|codex-text-patch|omnirush-text-patch|openrouter-text-patch|opencode-text-patch|opencode-stateless-text-patch|local-llama-text-patch|native-stateless-text-patch|opencode-logfare-agentic|kory-cli-agentic`,
     );
   }
   return requested;
@@ -86,6 +100,21 @@ export function skillEvalExecutorModel(
 ): string {
   if (explicitModel?.trim()) return explicitModel.trim();
   if (mode === 'native-stateless-text-patch') return 'gpt-6.1-sol';
+  if (mode === 'opencode-logfare-agentic') {
+    // Pinned, not `auto`. The router alias answers each request with whichever backend it
+    // chooses, so two arms of one pair can be different models and the same case passes and
+    // then fails with no change to the skill. A declared id keeps one evidence identity.
+    // `KORY_SKILL_EVAL_MODEL` is the provider-neutral name, since the executor can now run
+    // against any provider block the operator has configured.
+    return env.KORY_SKILL_EVAL_MODEL?.trim() ||
+      env.KORY_SKILL_EVAL_LOGFARE_MODEL?.trim() ||
+      'deepseek-v4.1-flash-1017';
+  }
+  if (mode === 'kory-cli-agentic') {
+    // The operator named one primary subject and one fallback. Pinning it here keeps the
+    // recorded identity equal to the model that actually answered.
+    return env.KORY_SKILL_EVAL_KORY_CLI_MODEL?.trim() || 'logfare/deepseek-v4.1-flash-1017';
+  }
   if (mode === 'local-llama-text-patch') return 'qwen2.5-coder-14b-instruct-q4_k_m';
   if (mode === 'omnirush-text-patch') {
     return env.KORY_SKILL_EVAL_OMNIRUSH_MODEL?.trim() || 'gpt-6-astra';
@@ -168,7 +197,18 @@ export function selectSkillEvalExecutor(
                 ? 'local-llama'
               : mode === 'native-stateless-text-patch'
                 ? 'native-cli'
-                : 'codex';
+                : mode === 'opencode-logfare-agentic'
+                  // The agentic OpenCode path is provider-neutral: it stages whichever
+                  // provider block the operator selected, so the recorded provider is that
+                  // block's key rather than a channel name baked into this table.
+                  ? (dependencies.env.KORY_SKILL_EVAL_OPENCODE_PROVIDER?.trim() || 'logfare')
+                  : mode === 'kory-cli-agentic'
+                    // The Kory CLI subject is whatever provider/model the operator named; the
+                    // prefix of that id is the provider the run is recorded against.
+                    ? model.includes('/')
+                      ? model.slice(0, model.indexOf('/'))
+                      : 'logfare'
+                    : 'codex';
       if (executor.provider !== expectedProvider || executor.model !== model) {
         throw new Error(
           `Skill evaluation executor factory returned a different provider/model for ${mode}.`,
@@ -277,6 +317,7 @@ export function applySkillEvalExecutorReadiness(
   readiness: readonly SkillEvalExecutionReadiness[],
   scenarios: readonly { skill: string; id: string; environmentKind: V5EvalEnvironmentKind }[],
   selection: SkillEvalExecutorSelection,
+  materializers: readonly SkillEvalFixtureMaterializer[] = [],
 ): SkillEvalExecutionReadiness[] {
   const environments = new Map(
     scenarios.map((scenario) => [
@@ -299,7 +340,20 @@ export function applySkillEvalExecutorReadiness(
       reasons.push(LOCAL_LLAMA_TEXT_PATCH_QUARANTINE_REASON);
     } else if (selection.descriptor.mode.endsWith('text-patch')) {
       const kind = environments.get(`${row.skill}\u0000${row.scenarioId}`);
-      if (!kind || !['synthetic', 'repository', 'cli'].includes(kind)) {
+      // A text-patch subject can assess a recorded device or browser session when the
+      // fixture delivers it as image attachments: that is observation, not live control.
+      // The executor still refuses at run time if the attachments are absent, so this
+      // only removes the up-front refusal for fixtures that actually ship them.
+      const deliversRecordedEvidence =
+        Boolean(row.materializerId) &&
+        materializers.some(
+          (materializer) =>
+            materializer.id === row.materializerId && typeof materializer.imageAttachments === 'function',
+        );
+      if (
+        !deliversRecordedEvidence &&
+        (!kind || !['synthetic', 'repository', 'cli'].includes(kind))
+      ) {
         reasons.push(
           `${selection.descriptor.mode} cannot execute ${kind ?? 'unknown'} environments; text-patch mode supports only synthetic, repository, and cli scenarios.`,
         );
@@ -377,6 +431,23 @@ export function createExecutor(options: {
   if (options.mode === 'local-llama-text-patch') {
     return createLocalLlamaTextPatchSkillEvalExecutor({
       model: options.model,
+      wallClockMs: options.wallClockMs,
+    });
+  }
+  if (options.mode === 'opencode-logfare-agentic') {
+    return createOpenCodeLogfareAgenticExecutor({
+      modelName: options.model,
+      wallClockMs: options.wallClockMs,
+    });
+  }
+  if (options.mode === 'kory-cli-agentic') {
+    // The operator named the approved subjects explicitly; a typo must fail loudly
+    // instead of evaluating a model nobody asked for.
+    const model = options.model.includes('/') ? options.model : `logfare/${options.model}`;
+    assertApprovedKoryCliModel(model);
+    return createKoryCliAgenticExecutor({
+      model,
+      reasoning: options.reasoningEffort ?? 'high',
       wallClockMs: options.wallClockMs,
     });
   }

@@ -1,0 +1,12 @@
+{"attempt":1,"skill":"integration-fault-testing","exit":1,"seconds":9764,"at":"2026-11-21T10:24:36Z"}
+{"attempt":2,"skill":"integration-fault-testing","exit":1,"seconds":12275,"at":"2026-11-21T13:49:31Z"}
+{"attempt":3,"skill":"integration-fault-testing","exit":1,"seconds":8138,"at":"2026-11-21T16:05:29Z"}
+{"attempt":4,"skill":"integration-fault-testing","exit":1,"seconds":12375,"at":"2026-11-21T19:32:04Z"}
+{"attempt":5,"skill":"integration-fault-testing","exit":1,"seconds":6,"at":"2026-11-21T19:32:30Z"}
+{"attempt":6,"skill":"integration-fault-testing","exit":1,"seconds":6,"at":"2026-11-21T19:32:56Z"}
+{"attempt":7,"skill":"integration-fault-testing","exit":1,"seconds":6,"at":"2026-11-21T19:33:22Z"}
+{"attempt":8,"skill":"integration-fault-testing","exit":1,"seconds":6,"at":"2026-11-21T19:33:48Z"}
+{"attempt":9,"skill":"integration-fault-testing","exit":1,"seconds":6,"at":"2026-11-21T19:34:14Z"}
+{"attempt":10,"skill":"integration-fault-testing","exit":1,"seconds":6,"at":"2026-11-21T19:34:40Z"}
+{"attempt":11,"skill":"integration-fault-testing","exit":1,"seconds":6,"at":"2026-11-21T19:35:06Z"}
+{"attempt":12,"skill":"integration-fault-testing","exit":1,"seconds":6,"at":"2026-11-21T19:35:32Z"}

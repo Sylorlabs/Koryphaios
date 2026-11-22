@@ -32,7 +32,7 @@ function sse(chunks: unknown[]) {
     'data: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } });
 }
 
-describe('Beam chat contract', () => {
+describe('Reflection AI chat contract', () => {
   it('discovers real limits and exact reasoning efforts without guessing image support', async () => {
     const requests: Request[] = [];
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {

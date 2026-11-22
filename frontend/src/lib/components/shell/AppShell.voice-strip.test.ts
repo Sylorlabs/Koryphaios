@@ -92,6 +92,21 @@ describe('the voice waveform strip sits above the context bar in flow', () => {
     unmount();
   });
 
+  it('shows the live transcript as the speech is transcribed', () => {
+    const { unmount } = shell();
+    voiceRecorder.begin('recording', fakeAnalyser(), 4_000);
+    voiceRecorder.setPartialText('the quick brown fox');
+    flushSync();
+    expect(screen.getByTestId('voice-live-transcript')).toHaveTextContent('the quick brown fox');
+    // The screen reader hears the live words, not just the recording state.
+    expect(strip()).toHaveTextContent('the quick brown fox');
+
+    voiceRecorder.end();
+    flushSync();
+    expect(strip().textContent?.trim()).toBe('');
+    unmount();
+  });
+
   it('ignores an elapsed tick that arrives after the capture ended', () => {
     voiceRecorder.begin('recording', fakeAnalyser(), 0);
     voiceRecorder.end();

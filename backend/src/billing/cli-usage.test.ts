@@ -6,6 +6,7 @@ import {
   CLI_API_PROVIDER_MAP,
   type CliUsageReport,
   type UsageSample,
+  devinAtifFinalMetricsTokens,
 } from './cli-usage';
 import { SUBSCRIPTION_PROVIDERS } from '../pricing';
 import { parseOpenRouterPricingCatalog } from '../providers/openrouter-pricing';
@@ -209,5 +210,38 @@ describe('OpenRouter equivalent valuation', () => {
     expect(report.apiValueMaxUsd).toBeCloseTo(0.07125, 10);
     expect(report.apiCacheAdjustedValueUsd).toBeCloseTo(0.0465, 10);
     expect(report.cacheAccounting).toBe('provider-reported');
+  });
+});
+
+// ── Devin ATIF final_metrics ──────────────────────────────────────────────────
+
+describe('devinAtifFinalMetricsTokens', () => {
+  // Real (anonymised) ATIF-v1.7 final_metrics from local exports. On every
+  // agent step cached_tokens < prompt_tokens, so cached is a SUBSET of prompt
+  // — adding it again billed cache-read tokens twice.
+  test('cached tokens are not added on top of prompt tokens', () => {
+    expect(
+      devinAtifFinalMetricsTokens({
+        total_prompt_tokens: 1_822_621,
+        total_completion_tokens: 11_571,
+        total_cached_tokens: 1_740_260,
+      }),
+    ).toEqual({ tokensIn: 1_822_621, tokensOut: 11_571, cacheRead: 1_740_260 });
+
+    expect(
+      devinAtifFinalMetricsTokens({
+        total_prompt_tokens: 54_834_901,
+        total_completion_tokens: 164_713,
+        total_cached_tokens: 51_560_074,
+      }),
+    ).toEqual({ tokensIn: 54_834_901, tokensOut: 164_713, cacheRead: 51_560_074 });
+  });
+
+  test('missing metrics default to zero', () => {
+    expect(devinAtifFinalMetricsTokens({})).toEqual({
+      tokensIn: 0,
+      tokensOut: 0,
+      cacheRead: 0,
+    });
   });
 });

@@ -14,6 +14,7 @@ import {
 } from '../note-semantic-index';
 import { saveNotesAgentPermissions } from '../notes-settings';
 import { retrieveNoteContext } from '../note-context';
+import { setNoteSearchText } from '../note-search-index';
 
 let database: Database, root: string, path: string, client: EmbeddingClient;
 let sent: string[];
@@ -25,7 +26,9 @@ beforeEach(() => {
   database.exec(`CREATE TABLE notes(id TEXT PRIMARY KEY,title TEXT,content TEXT,revision INTEGER DEFAULT 1,project_root TEXT,trashed_at INTEGER,tags TEXT DEFAULT '[]',updated_at INTEGER DEFAULT 1,pinned INTEGER DEFAULT 0);
  CREATE TABLE note_links(from_note_id TEXT,to_note_id TEXT);
  CREATE TABLE note_relationships(from_note_id TEXT,to_note_id TEXT,project_root TEXT,provenance TEXT DEFAULT 'user',evidence TEXT DEFAULT '',weight REAL DEFAULT 1,revision INTEGER DEFAULT 1,source_revision INTEGER DEFAULT 1,target_revision INTEGER DEFAULT 1,type TEXT DEFAULT 'related_to',status TEXT DEFAULT 'accepted');
- ${NOTE_SEMANTIC_INDEX_DDL}`);
+ ${NOTE_SEMANTIC_INDEX_DDL}
+ CREATE VIRTUAL TABLE notes_fts USING fts5(title, content, tags, content='', contentless_delete=1, detail='column', tokenize='porter unicode61');
+ CREATE TABLE notes_fts_rowids (fts_rowid INTEGER PRIMARY KEY, note_id TEXT NOT NULL UNIQUE);`);
   sent = [];
   during = undefined;
   client = makeClient();
@@ -54,6 +57,7 @@ function note(id: string, content = 'automobile', projectRoot = root) {
   database
     .query('INSERT INTO notes(id,title,content,project_root) VALUES(?,?,?,?)')
     .run(id, id, content, projectRoot);
+  setNoteSearchText(id, id, content, '[]', database);
 }
 const opts = () => ({ database, client });
 

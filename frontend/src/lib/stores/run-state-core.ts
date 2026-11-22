@@ -29,6 +29,9 @@ export type RunPhase =
   | 'streaming'
   | 'tool_calling'
   | 'compacting'
+  // The model finished its answer; follow-up work (critic, checkpoint,
+  // persistence) is still settling the run. Stop still works.
+  | 'finalizing'
   | 'waiting_terminal' // parked on a background shell
   | 'waiting_user' // asked the user a question
   | 'done'
@@ -61,6 +64,9 @@ export interface SessionRunState {
   runId?: string | null;
   revision?: number;
   terminalReason?: string | null;
+  /** Run whose final provider call has ended (`turn.provider_completed`).
+   *  While its run.state is still active, the run is shown as finalizing. */
+  providerCompletedRunId?: string | null;
 }
 
 // ─── Phase predicates ───────────────────────────────────────────────────────
@@ -72,7 +78,8 @@ export function isActivePhase(phase: RunPhase): boolean {
     phase === 'thinking' ||
     phase === 'streaming' ||
     phase === 'tool_calling' ||
-    phase === 'compacting'
+    phase === 'compacting' ||
+    phase === 'finalizing'
   );
 }
 
@@ -167,6 +174,8 @@ export function phaseToAgentStatus(phase: RunPhase): AgentStatus {
       return 'tool_calling';
     case 'compacting':
       return 'compacting';
+    case 'finalizing':
+      return 'verifying';
     case 'waiting_terminal':
       return 'waiting';
     case 'waiting_user':
@@ -190,9 +199,10 @@ export function phaseToAgentStatus(phase: RunPhase): AgentStatus {
  *   steer    — a run is alive and the composer has input; replace it with a
  *              continuation after cancellation settles.
  *   stop     — a run is alive and the composer is empty; click cancels it.
- *   waiting  — parked on something external; click cancels the wait. Typed
- *              text remains in the composer but cannot bypass durable wait
- *              ownership as a second turn.
+ *   waiting  — parked on something external and the composer is empty; click
+ *              cancels the wait. Typed text produces `steer`: the send
+ *              supersedes the parked wait as the new turn, never a second
+ *              concurrent one.
  *   send     — nothing running, message ready to go.
  *   disabled — nothing running and nothing to send.
  */
@@ -205,7 +215,7 @@ export function deriveButtonState(
     return { mode: canSend ? 'steer' : 'stop', waitingReason: '', phase };
   }
   if (isWaitingPhase(phase)) {
-    return { mode: 'waiting', waitingReason, phase };
+    return { mode: canSend ? 'steer' : 'waiting', waitingReason, phase };
   }
   return canSend
     ? { mode: 'send', waitingReason: '', phase }
@@ -271,6 +281,8 @@ export interface RunStateEngine {
   resetSession: (sessionId: string) => void;
   clearAll: () => void;
   getPhase: (sessionId: string | null | undefined) => RunPhase;
+  getTerminalReason: (sessionId: string | null | undefined) => string | null;
+  getRunId: (sessionId: string | null | undefined) => string | null;
   isRunning: (sessionId: string | null | undefined) => boolean;
   isWaiting: (sessionId: string | null | undefined) => boolean;
   isBusy: (sessionId: string | null | undefined) => boolean;
@@ -365,6 +377,13 @@ export function createRunStateEngine(
     // Global control messages have no run-state ownership, so they remain
     // available to their downstream handlers.
     if (!sid) return true;
+    // A replayed event is durable history, not a live callback. Rendering it is
+    // correct (the feed must rebuild the transcript), but it must never drive
+    // the live run phase: a replayed `agent.status: tool_calling` from an old
+    // turn otherwise lights the sidebar's tool icon while a chat is merely
+    // opening. The durable `run.state` snapshot is the one replayed message
+    // that carries current liveness, so it is still applied below.
+    if (msg.replayed === true && msg.type !== 'run.state') return true;
     const states = getStates();
     const s = states.get(sid);
 
@@ -391,6 +410,15 @@ export function createRunStateEngine(
       target.revision = snapshot.revision;
       target.terminalReason = snapshot.terminalReason;
       target.phase = snapshot.phase;
+      // The model already finished this run; an active snapshot during its
+      // follow-up work must not flip the composer back to "writing".
+      if (
+        target.providerCompletedRunId &&
+        target.providerCompletedRunId === snapshot.runId &&
+        isActivePhase(snapshot.phase as RunPhase)
+      ) {
+        target.phase = 'finalizing';
+      }
       target.waitingReason = snapshot.waitingReason;
       // Preserve the local stop fence through a terminal reconciliation. The
       // next admitted user message clears it in startRun; an older stream event
@@ -418,6 +446,27 @@ export function createRunStateEngine(
     // new live reasoning row after the run is already closed.
     if (s && isTerminalPhase(s.phase) && isResurrectingEvent(msg)) {
       return permitHistoricalReplay(msg);
+    }
+
+    // Server milestones for the active run (B8). Handled before the
+    // authoritative bypass: they come from the same backend as run.state and
+    // only refine an active phase, never resurrect or terminate one early.
+    if (msg.type === 'turn.provider_completed') {
+      const runId = (msg.payload as { runId?: string }).runId ?? null;
+      if (!s || s.stoppedByUser || !isActivePhase(s.phase)) return true;
+      if (runId && s.runId && runId !== s.runId) return true;
+      s.providerCompletedRunId = runId ?? s.runId ?? null;
+      setPhase(sid, 'finalizing');
+      return true;
+    }
+    if (msg.type === 'run.settled') {
+      if (!s || s.phase !== 'finalizing') return true;
+      const outcome = (msg.payload as { outcome?: string }).outcome;
+      setPhase(
+        sid,
+        outcome === 'completed' ? 'done' : outcome === 'cancelled' ? 'cancelled' : 'error',
+      );
+      return true;
     }
 
     // Compatibility events still feed transcript/agent reducers, but after a
@@ -518,9 +567,7 @@ export function createRunStateEngine(
           removeActiveAgent(sid, p.agentId);
           const statusPayload = p as AgentStatusPayload & { detail?: string };
           const detail =
-            typeof statusPayload.detail === 'string'
-              ? statusPayload.detail.trim()
-              : '';
+            typeof statusPayload.detail === 'string' ? statusPayload.detail.trim() : '';
           setPhase(
             sid,
             p.status === 'waiting_user' ? 'waiting_user' : 'waiting_terminal',
@@ -595,6 +642,7 @@ export function createRunStateEngine(
   function startRun(sessionId: string): void {
     const s = ensureState(sessionId);
     s.stoppedByUser = false;
+    s.providerCompletedRunId = null;
     s.activeAgents.add('kory-manager');
     // Sending proves only that Koryphaios is preparing a request. Do not show
     // streaming or thinking until a backend/provider event proves that phase.
@@ -674,6 +722,19 @@ export function createRunStateEngine(
     return getStates().get(sessionId)?.waitingReason ?? '';
   }
 
+  /** Why the session's last run ended, as reported by the authoritative
+   *  run.state snapshot (for example `backend_restarted_during_active_run`). */
+  function getTerminalReason(sessionId: string | null | undefined): string | null {
+    if (!sessionId) return null;
+    return getStates().get(sessionId)?.terminalReason ?? null;
+  }
+
+  /** Run id of the session's latest authoritative snapshot. */
+  function getRunId(sessionId: string | null | undefined): string | null {
+    if (!sessionId) return null;
+    return getStates().get(sessionId)?.runId ?? null;
+  }
+
   function getButtonState(sessionId: string | null | undefined, canSend: boolean): ButtonState {
     const phase = getPhase(sessionId);
     const reason = getWaitingReason(sessionId);
@@ -689,6 +750,8 @@ export function createRunStateEngine(
     resetSession,
     clearAll,
     getPhase,
+    getTerminalReason,
+    getRunId,
     isRunning,
     isWaiting,
     isBusy,

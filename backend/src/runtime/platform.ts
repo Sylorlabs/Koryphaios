@@ -218,6 +218,30 @@ export function canonicalizePath(target: string): string {
 }
 
 /**
+ * Translate a Windows path into the form a WSL distribution sees.
+ *
+ * Windows has no kernel sandbox Koryphaios can bind directly, so confinement on
+ * that host runs through WSL and bubblewrap. That only works if every grant and
+ * the working directory are translated the same way: `C:\work\app` is
+ * `/mnt/c/work/app` inside the distribution, and a path that cannot be
+ * translated must return null so the caller refuses instead of binding the
+ * wrong directory.
+ *
+ * UNC and device paths (`\\?\`, `\\wsl$\`) are deliberately not translated: the
+ * distribution does not see them at the same location, and guessing would put a
+ * grant somewhere the user never approved.
+ */
+export function windowsPathToWsl(target: string): string | null {
+  const drive = /^([A-Za-z]):(?:[\\/](.*))?$/.exec(target);
+  if (drive) {
+    const rest = (drive[2] ?? '').replace(/\\/g, '/').replace(/\/+$/, '');
+    return `/mnt/${drive[1].toLowerCase()}${rest ? `/${rest}` : ''}`;
+  }
+  if (target.startsWith('\\') || target.startsWith('/')) return null;
+  return null;
+}
+
+/**
  * The link type to use when staging a directory.
  *
  * `symlinkSync`'s `dir` type is refused for privileged callers on Windows, so

@@ -11,7 +11,7 @@ Chats opened directly in a local folder work **in place** in that folder. A chat
 - Non-Git and unborn projects are used directly; opening them does not scan or copy their contents.
 - Chats without a selected project receive an empty private repository on first execution, rather than copying the backend's data directory.
 - Dependencies and environment files are not symlinked back to the source. Install dependencies in the isolated checkout as needed.
-- Explicit revision chats do not carry source remotes into their copy. Publishing/merging back is an explicit human action. Ordinary in-place chats use the folder's existing Git state.
+- Explicit revision chats do not carry source remotes into their copy. Publishing/merging back is an explicit human action for revision-picker chats; chats that isolated themselves with `isolate_chat` merge back through `merge_chat_back` under the approval rule described below. Ordinary in-place chats use the folder's existing Git state.
 
 The Git panel, file mentions, chat-relative images, native tool bridge, checkpoints and worker recovery APIs resolve the active session checkout. The new-chat revision picker intentionally reads the source project. Project policy/preferences remain source-owned, not controlled by a copied `koryphaios.json`.
 
@@ -38,3 +38,27 @@ Delegated workers still use temporary worktrees, now within their parent chat's 
 Chat repositories are preserved across shutdown and session deletion for manual recovery; they are not disposable worker worktrees. Remove them only after saving/publishing their work.
 
 If a worker's recovery commit fails at shutdown, its dirty checkout and manifest entry are retained. A later resolution retries the recovery commit before removing the checkout or merging its branch. If that retry fails, no working files are removed.
+
+## Agent visibility across chats
+
+Isolation is a write boundary, not a visibility boundary. Agents (managers and sub-agents alike) can list non-archived chats with `list_sessions` and read any chat's transcript by id with `read_session`, including archived chats; both tools are read-only. `send_agent_message` accepts an exact chat id via `toSessionId`, and `toProject` also resolves a pasted chat id; ambiguous project names now error with the matching chat ids so the agent can retry by id. Messages to another chat's manager are push-delivered — including chats sharing the same folder — while messages addressed to a sub-agent in another chat and same-session mail stay pull-based through `list_agent_messages`.
+
+Whether an agent may message *other* chats is governed by the **sender** chat's permission mode, separately for managers and sub-agents; messaging inside the same chat is always allowed. Any agent may target any chat's manager or a named sub-agent there. Defaults:
+
+| mode | manager | sub-agents |
+|---|---|---|
+| yolo | allow | allow |
+| guarded | allow | ask |
+| edits | ask | ask |
+| ask | ask | ask |
+| custom | ask | ask |
+
+`ask` holds the message as `pending_approval` in the messages panel; `block` refuses the send. Users can tune each cell per permission mode under Agent settings → Inter-agent messaging (`messagingPermissionsByTier`).
+
+## Worktree Auto and other chats
+
+Worktree Auto/On/Off governs whether *delegated workers* get temporary worktrees; a folder chat itself normally runs in place. When a chat shares its folder with other chats — the same folder, or one containing the other — the manager sees them each turn: who is busy, when they last updated, and which files they recently edited. The agent then decides, before editing, whether its work can collide: isolation may be obviously needed (a sibling is busy in, or recently edited, files it will touch), obviously not needed (everyone idle on disjoint work), or worth asking the user about — including whether there is any real conflict at all. Coordinating with `read_session`/`send_agent_message` or `ask_user` is always available.
+
+When `isolate_chat` runs, the chat moves into an independent repository copy cloned from the folder's **last commit** — the same repository shape revision-picker chats get (no remotes, hooks disabled). Uncommitted changes in the folder stay in the folder and are deliberately not carried into the copy, so isolation never strands in-progress work and never refuses a dirty source. The rest of that turn is denied further mutations and the host automatically continues the task in the copy. The copy records its source folder, branch and head so the chat can return.
+
+`merge_chat_back` brings the work home: it commits any uncommitted work in the copy first, verifies the folder is still on the recorded branch, fetches the copy's branch into a temporary ref and merges with `--no-ff`. In YOLO permission mode it merges automatically; in every other mode (guarded, edits, ask, custom) the user approves the merge first, and Plan mode denies it. If the folder moved to another branch the call refuses; if the merge conflicts the merge is aborted, the conflicted files are reported, and the chat stays isolated so a human or a coordinated retry can resolve it. On success the chat binds back to the folder; the copy is preserved on disk like every chat repository.

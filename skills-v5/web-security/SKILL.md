@@ -31,7 +31,6 @@ Write the deliverable only at the path the task names, in the shape its reader e
 
 When the review calls for a source to sink entry for a cookie authenticated mutation, that entry belongs in the inventory even if every other vector already passes, because the inventory is the artifact under judgement.
 
-When the review calls for a source to sink entry for a cookie authenticated mutation, that entry belongs in the inventory even if every other vector already passes, because the inventory is the artifact under judgement.
 
 Write that entry as a structured record with source, transform, sink and control. The source names the session or cookie authentication that makes the request privileged, the sink names the state change, and the control names the CSRF token, its session binding, the server side validation and what the server rejects. Prose next to the record is not read as the record.
 

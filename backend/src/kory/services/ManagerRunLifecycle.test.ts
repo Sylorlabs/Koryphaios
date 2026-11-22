@@ -267,6 +267,44 @@ describe('ManagerRunLifecycle', () => {
     });
   });
 
+  test('ignores provider phase writes while a question wait owns the run', async () => {
+    const lifecycle = new ManagerRunLifecycle(coordinator);
+    const handle = await lifecycle.begin(SESSION_ID, 'user_turn');
+    const question = await lifecycle.waitForQuestion(handle, QUESTION);
+    const parked = coordinator.get(SESSION_ID);
+    expect(parked).toMatchObject({
+      runId: handle.runId,
+      phase: 'waiting_user',
+      status: 'waiting',
+    });
+
+    // A provider stream event arriving during the park must not un-park or
+    // throw — the durable wait state and its continuation belong to the run.
+    await lifecycle.phase(handle, 'tool_calling');
+    await lifecycle.phase(handle, 'streaming', 'provider_content', ['worker-1']);
+    expect(coordinator.get(SESSION_ID)).toMatchObject({
+      runId: handle.runId,
+      phase: 'waiting_user',
+      status: 'waiting',
+      continuationId: parked?.continuationId,
+    });
+
+    // Answering still resumes through the parked run's exact continuation.
+    const answered = await lifecycle.answerQuestion(
+      SESSION_ID,
+      'Desktop',
+      question.questionId,
+      true,
+    );
+    expect(answered?.handle).toMatchObject({ sessionId: SESSION_ID, runId: handle.runId });
+    expect(coordinator.get(SESSION_ID)).toMatchObject({
+      runId: handle.runId,
+      phase: 'analyzing',
+      status: 'active',
+    });
+    await lifecycle.finish(answered!.handle!, 'complete', 'question_answered');
+  });
+
   test('cancels the durable current run without an in-memory lease', async () => {
     const original = new ManagerRunLifecycle(coordinator);
     const handle = await original.begin(SESSION_ID, 'user_turn');
@@ -402,6 +440,26 @@ describe('ManagerRunLifecycle', () => {
       status: 'terminal',
       terminalReason: 'run_b_completed',
     });
+  });
+
+  test('handleForSession mints a lease-valid handle for out-of-band callers', async () => {
+    const lifecycle = new ManagerRunLifecycle(coordinator);
+    expect(lifecycle.handleForSession(SESSION_ID)).toBeNull();
+
+    const handle = await lifecycle.begin(SESSION_ID, 'turn');
+    const minted = lifecycle.handleForSession(SESSION_ID);
+    expect(minted).not.toBeNull();
+    expect(minted!.sessionId).toBe(SESSION_ID);
+    expect(minted!.runId).toBe(handle.runId);
+
+    // The minted handle is lease-valid: a bridge-side waitForQuestion binds it.
+    const questionWait = lifecycle.waitForQuestion(minted!, QUESTION);
+    await Bun.sleep(10);
+    await lifecycle.answerQuestion(SESSION_ID, 'Desktop', undefined, true);
+    await expect(questionWait).resolves.toMatchObject({ question: 'Which runtime?' });
+
+    await lifecycle.finish(minted!, 'complete', 'done');
+    expect(lifecycle.handleForSession(SESSION_ID)).toBeNull();
   });
 
   test('keeps a generation handle when no durable coordinator is installed', async () => {

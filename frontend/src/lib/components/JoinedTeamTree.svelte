@@ -18,7 +18,7 @@
   {@const folders = team.sharedFolders ?? []}
   {@const active = collaborationStore.activeJoinedSession?.sessionId === team.sessionId}
   <div class="mx-1 mb-1">
-    <div class="group flex items-center gap-1 rounded-md border border-transparent px-1 transition-colors hover:border-[var(--color-border-bright)] focus-within:border-[var(--color-border-bright)]">
+    <div class="group flex items-center gap-1 rounded-md px-1 transition-colors hover:bg-[var(--color-surface-2)]">
       <button type="button" onclick={() => toggle(team.sessionId)}
         aria-label={`${collapsed.has(team.sessionId) ? 'Expand' : 'Collapse'} ${team.hostName || 'Host'} shared folders`}
         aria-expanded={!collapsed.has(team.sessionId)}
@@ -31,7 +31,7 @@
         <Users size={15} class="shrink-0 text-[var(--color-accent)]" />
         <span class="min-w-0">
           <span class="block truncate text-xs font-semibold text-[var(--color-text-primary)]">{team.hostName || 'Host'}</span>
-          <span class="block truncate text-[10px] text-[var(--color-text-muted)]">{team.sessionName} · {team.tierId}</span>
+          <span class="block truncate text-[11px] text-[var(--color-text-muted)]">{team.sessionName} · {team.tierId}</span>
         </span>
       </button>
       <button type="button" onclick={() => collaborationStore.leaveJoinedSession(team.sessionId)}
@@ -47,13 +47,13 @@
             aria-label={`Open shared folder ${folder.name} from ${team.hostName || 'Host'}`}
             aria-current={active && collaborationStore.activeJoinedFolder?.id === folder.id ? 'page' : undefined}
             title={`${team.hostName || 'Host'} / ${folder.name} · Hosted folder`}
-            class="flex min-h-8 w-full items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left text-xs text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-border-bright)] hover:bg-[var(--color-surface-2)] focus-visible:outline-none focus-visible:border-[var(--color-accent)]">
+            class="flex min-h-8 w-full items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-2)] focus-visible:outline-none focus-visible:border-[var(--color-accent)]">
             <FolderOpen size={14} class="shrink-0 text-[var(--color-accent)]" />
             <span class="min-w-0 flex-1 truncate">{folder.name}</span>
-            <span class="text-[9px] text-[var(--color-text-muted)]">Shared</span>
+            <span class="text-[11px] text-[var(--color-text-muted)]">Shared</span>
           </button>
         {:else}
-          <p class="px-2 py-2 text-[10px] text-[var(--color-text-muted)]">No shared folder reported by the host.</p>
+          <p class="px-2 py-2 text-[11px] text-[var(--color-text-muted)]">No shared folder reported by the host.</p>
         {/each}
       </div>
     {/if}

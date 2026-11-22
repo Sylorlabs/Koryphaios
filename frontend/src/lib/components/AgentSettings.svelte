@@ -7,8 +7,24 @@
   } from '$lib/stores/agent-settings.svelte';
   import SettingsSwitch from './SettingsSwitch.svelte';
   import SettingsScopeBar from './settings/SettingsScopeBar.svelte';
+  import SettingsPage from './settings/SettingsPage.svelte';
   import ComputerUseSettings from './ComputerUseSettings.svelte';
-  import { defaultComputerUseSettings } from '@koryphaios/shared';
+  import SettingRow from './agent-settings/SettingRow.svelte';
+  import SettingGroup from './agent-settings/SettingGroup.svelte';
+  import SegmentedChoice from './agent-settings/SegmentedChoice.svelte';
+  import PatternListEditor from './agent-settings/PatternListEditor.svelte';
+  import {
+    defaultComputerUseSettings,
+    MESSAGING_TIERS,
+    type MessagingPermissionLevel,
+    type MessagingTierKey,
+  } from '@koryphaios/shared';
+  import {
+    messagingCellState,
+    messagingTierOverridden,
+    withMessagingCell,
+    withoutMessagingTier,
+  } from '../utils/messaging-permissions';
   import SettingsToggle from './SettingsToggle.svelte';
   import { providersStore } from '$lib/stores/providers.svelte';
   import NumberStepper from './NumberStepper.svelte';
@@ -38,7 +54,6 @@
   import Globe from 'lucide-svelte/icons/globe';
   import ChevronRight from 'lucide-svelte/icons/chevron-right';
   import StickyNote from 'lucide-svelte/icons/sticky-note';
-  import Wrench from 'lucide-svelte/icons/wrench';
   import LockKeyhole from 'lucide-svelte/icons/lock-keyhole';
   import GitBranch from 'lucide-svelte/icons/git-branch';
   import Brain from 'lucide-svelte/icons/brain';
@@ -64,50 +79,60 @@
   }: Props = $props();
 
   type AgentTab = 'settings' | 'preferences' | 'skills';
-  type ControlSection = 'permissions' | 'quality' | 'workflow' | 'context' | 'research' | 'routing';
-  let expandedSections = $state<Record<ControlSection, boolean>>({
-    permissions: true,
-    quality: false,
+  type AdvancedGroup = 'safety' | 'agents' | 'workflow' | 'quality' | 'context' | 'research';
+  const GROUP_STORAGE_KEY = 'kory.agentSettings.expandedGroups';
+  const COLLAPSED_GROUPS: Record<AdvancedGroup, boolean> = {
+    safety: false,
+    agents: false,
     workflow: false,
+    quality: false,
     context: false,
     research: false,
-    routing: false,
-  });
-  let currentSection = $state<ControlSection>('permissions');
-  let criticAdvancedOpen = $state(false);
-  // Sections the user has manually expanded/collapsed via the section header.
-  // Picker (quick-jump) navigation auto-collapses every other expanded section
-  // except these, so a user working somewhere is never force-collapsed.
-  let manualSections = $state<Record<ControlSection, boolean>>({
-    permissions: false,
-    quality: false,
-    workflow: false,
-    context: false,
-    research: false,
-    routing: false,
-  });
-  function toggleSection(id: ControlSection) {
-    currentSection = id;
-    manualSections = { ...manualSections, [id]: true };
-    expandedSections = { ...expandedSections, [id]: !expandedSections[id] };
+  };
+  function loadExpandedGroups(): Record<AdvancedGroup, boolean> {
+    try {
+      const raw = typeof localStorage === 'undefined' ? null : localStorage.getItem(GROUP_STORAGE_KEY);
+      const parsed = raw ? (JSON.parse(raw) as Partial<Record<AdvancedGroup, unknown>>) : {};
+      const next = { ...COLLAPSED_GROUPS };
+      for (const key of Object.keys(next) as AdvancedGroup[]) next[key] = parsed[key] === true;
+      return next;
+    } catch {
+      return { ...COLLAPSED_GROUPS };
+    }
+  }
+  let expandedGroups = $state<Record<AdvancedGroup, boolean>>(loadExpandedGroups());
+  function persistExpandedGroups() {
+    try {
+      localStorage.setItem(GROUP_STORAGE_KEY, JSON.stringify(expandedGroups));
+    } catch {
+      // Storage can be unavailable (private mode); the layout still works.
+    }
+  }
+  function toggleGroup(id: AdvancedGroup) {
+    expandedGroups = { ...expandedGroups, [id]: !expandedGroups[id] };
+    persistExpandedGroups();
   }
 
-  async function navigateToSection(id: ControlSection) {
-    currentSection = id;
-    const next = { ...expandedSections };
-    for (const key of Object.keys(next) as ControlSection[]) {
-      if (key !== id && !manualSections[key]) {
-        next[key] = false;
-      }
+  /** Earlier builds addressed this page by section; keep those ids working. */
+  const LEGACY_SECTION_GROUPS: Record<string, AdvancedGroup | 'essentials'> = {
+    permissions: 'essentials',
+    workflow: 'workflow',
+    context: 'context',
+    quality: 'quality',
+    routing: 'agents',
+    research: 'research',
+  };
+
+  async function openGroup(id: AdvancedGroup | 'essentials' | string, anchorId?: string) {
+    const group = (LEGACY_SECTION_GROUPS[id] ?? id) as AdvancedGroup | 'essentials';
+    if (group !== 'essentials' && group in expandedGroups && !expandedGroups[group]) {
+      expandedGroups = { ...expandedGroups, [group]: true };
+      persistExpandedGroups();
     }
-    next[id] = true;
-    expandedSections = next;
     await tick();
-    const header = document
-      .getElementById(`agent-section-${id}`)
-      ?.querySelector<HTMLButtonElement>('button');
-    header?.focus({ preventScroll: true });
-    header?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    const target = document.getElementById(anchorId ?? `agent-group-${group}`);
+    target?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    target?.querySelector<HTMLElement>('button, [tabindex]')?.focus({ preventScroll: true });
   }
 
   const AGENT_TABS: readonly { id: AgentTab; label: string; icon: typeof Bot }[] = [
@@ -115,55 +140,76 @@
     { id: 'preferences', label: 'Preferences', icon: FileText },
   ];
 
-  const CONTROL_SECTIONS = [
+  const ADVANCED_GROUPS: readonly {
+    id: AdvancedGroup;
+    title: string;
+    description: string;
+    icon: typeof Bot;
+  }[] = [
     {
-      id: 'permissions',
-      label: 'Permissions & autonomy',
-      shortLabel: 'Permissions',
-      description: 'Approvals and change limits',
+      id: 'safety',
+      title: 'Permissions & safety',
+      description: 'Change limits, sandbox checks, shell command lists, per-tool access and computer use.',
       icon: LockKeyhole,
     },
     {
+      id: 'agents',
+      title: 'Agents & coordination',
+      description: 'Messaging between chats, which models each kind of sub-agent may use, and notes for the manager.',
+      icon: Users,
+    },
+    {
       id: 'workflow',
-      label: 'Workflow',
-      shortLabel: 'Workflow',
-      description: 'Planning and learning',
+      title: 'Workflow & planning',
+      description: 'Clarifying questions, single or multi-agent execution, goal planning and skill learning.',
       icon: GitBranch,
     },
     {
-      id: 'context',
-      label: 'Context & memory',
-      shortLabel: 'Context',
-      description: 'Context and persistence',
-      icon: Brain,
-    },
-    {
       id: 'quality',
-      label: 'Quality & Critic',
-      shortLabel: 'Quality',
-      description: 'Review and verification',
+      title: 'Quality & Critic',
+      description: 'What happens when the Critic finds a problem and how many repair rounds it gets.',
       icon: Gavel,
     },
     {
-      id: 'routing',
-      label: 'Routing & guidance',
-      shortLabel: 'Routing',
-      description: 'Models and manager notes',
-      icon: Route,
+      id: 'context',
+      title: 'Context & memory',
+      description: 'Prompt cache, tool output, compaction, skills in context, file access and memory.',
+      icon: Brain,
     },
     {
       id: 'research',
-      label: 'Research',
-      shortLabel: 'Research',
-      description: 'Search and source policy',
+      title: 'Research',
+      description: 'Web search behaviour and multi-source research.',
       icon: Search,
     },
-  ] as const;
+  ];
+
+  const APPROVAL_PRESET_OPTIONS = [
+    { value: 'guarded', label: 'Guarded', description: 'File edits run automatically; Kory asks only before risky actions.' },
+    { value: 'edits', label: 'Accept edits', description: 'File edits run automatically; every other action that changes something asks first.' },
+    { value: 'ask', label: 'Ask', description: 'Reads run automatically; file edits and anything that changes state ask for approval.' },
+    { value: 'custom', label: 'Custom', description: 'Use your own rules, set right below.' },
+    { value: 'yolo', label: 'YOLO', description: 'No Kory approval prompts. Explicit blocks, hard safety floors and native failures still apply.' },
+  ];
+  const SANDBOX_OPTIONS = [
+    { value: 'auto', label: 'Auto', description: 'Sandbox planning, Critic and sub-agent commands; the manager runs unconfined.' },
+    { value: 'always', label: 'Always', description: 'Sandbox every agent shell command, including the manager’s.' },
+    { value: 'off', label: 'Off', description: 'No sandbox. Catastrophic-command checks and approval prompts still apply.' },
+  ];
+  const SUB_AGENT_APPROVAL_OPTIONS = [
+    { value: 'manager', label: 'Manager decides', description: 'In Guarded the manager reviews sub-agent actions; other presets ask you as usual.' },
+    { value: 'user', label: 'I decide', description: 'Sub-agents read and search freely; every edit, shell command and risky action asks you.' },
+    { value: 'auto', label: 'Auto-approve', description: 'Sub-agents never prompt. Sandbox settings and hard safety floors still apply.' },
+  ];
+  const WORKTREE_OPTIONS = [
+    { value: 'auto', label: 'Auto', description: 'The manager decides per task, and checks other chats working in the same folder before editing.' },
+    { value: 'always', label: 'On', description: 'Every sub-agent works in its own git worktree, merged back when it finishes.' },
+    { value: 'never', label: 'Off', description: 'Sub-agents edit the chat’s folder directly; parallel sub-agents can collide.' },
+  ];
 
   $effect(() => {
-    if (!focusPermissions) return;
-    currentSection = 'permissions';
-    expandedSections = { ...expandedSections, permissions: true };
+    if (!focusPermissions || !active) return;
+    void openGroup('essentials');
   });
 
   // Local state for preferences editing
@@ -598,8 +644,55 @@
     await agentSettingsStore.saveSettings({ subAgentApproval: mode }, { quietSuccess: true });
   }
 
-  async function setAgentMessaging(mode: 'open' | 'approval-cross-project' | 'off') {
-    await agentSettingsStore.saveSettings({ agentMessaging: mode }, { quietSuccess: true });
+  const MESSAGING_ROLES = ['manager', 'subAgents'] as const;
+
+  const MESSAGING_TIER_LABELS: Record<MessagingTierKey, string> = {
+    yolo: 'YOLO',
+    guarded: 'Guarded',
+    edits: 'Accept edits',
+    ask: 'Ask',
+    custom: 'Custom',
+  };
+
+  function messagingCell(
+    tier: MessagingTierKey,
+    role: 'manager' | 'subAgents',
+  ): MessagingPermissionLevel {
+    return messagingCellState(agentSettingsStore.settings.messagingPermissionsByTier, tier, role);
+  }
+
+  function messagingTierHasOverride(tier: MessagingTierKey): boolean {
+    return messagingTierOverridden(agentSettingsStore.settings.messagingPermissionsByTier, tier);
+  }
+
+  async function setMessagingCell(
+    tier: MessagingTierKey,
+    role: 'manager' | 'subAgents',
+    level: MessagingPermissionLevel,
+  ) {
+    await agentSettingsStore.saveSettings(
+      {
+        messagingPermissionsByTier: withMessagingCell(
+          agentSettingsStore.settings.messagingPermissionsByTier,
+          tier,
+          role,
+          level,
+        ),
+      },
+      { quietSuccess: true },
+    );
+  }
+
+  async function resetMessagingTier(tier: MessagingTierKey) {
+    await agentSettingsStore.saveSettings(
+      {
+        messagingPermissionsByTier: withoutMessagingTier(
+          agentSettingsStore.settings.messagingPermissionsByTier,
+          tier,
+        ),
+      },
+      { quietSuccess: true },
+    );
   }
 
   // Tool catalog grouped by category for the allowlist/blocklist UI.
@@ -675,6 +768,7 @@
         { name: 'update_workflow', label: 'Update workflow' },
         { name: 'create_workflow_draft', label: 'Create workflow draft' },
         { name: 'prune_context', label: 'Prune context' },
+        { name: 'manage_context', label: 'Manage context' },
       ],
     },
     {
@@ -792,7 +886,7 @@
     return PERMISSION_TIER_BASE;
   });
 
-  function sectionSummary(id: ControlSection): string {
+  function sectionSummary(id: 'permissions' | 'workflow' | 'context' | 'quality' | 'routing' | 'research'): string {
     const settings = agentSettingsStore.settings;
     switch (id) {
       case 'permissions': {
@@ -826,6 +920,23 @@
       }
       case 'research':
         return `Local search ${settings.localWebSearch ?? 'fallback'} · Multi-source ${settings.multiSourceResearch ? 'on' : 'off'}`;
+    }
+  }
+
+  function groupSummary(id: AdvancedGroup): string {
+    const settings = agentSettingsStore.settings;
+    switch (id) {
+      case 'safety': {
+        const allow = settings.bashCommandAllowlist?.length ?? 0;
+        const block = settings.bashCommandBlocklist?.length ?? 0;
+        return `Autonomy limits ${settings.autonomyLimitsEnabled ? 'on' : 'off'} · Sandbox ${settings.sandbox?.mode ?? 'auto'} · ${allow} allowed / ${block} blocked commands · Computer use ${settings.computerUse?.enabled ? 'on' : 'off'}`;
+      }
+      case 'agents': {
+        const customized = Object.keys(settings.messagingPermissionsByTier ?? {}).length;
+        return `Messaging ${customized ? `customized for ${customized} mode${customized === 1 ? '' : 's'}` : 'defaults'} · ${sectionSummary('routing')}`;
+      }
+      default:
+        return sectionSummary(id);
     }
   }
 
@@ -867,6 +978,27 @@
     return PERMISSION_TIER_BASE;
   });
 
+  // Per-tool agent-context policy. The transcript keeps every tool output;
+  // this only decides how much of it enters the agent's context window.
+  let toolContextTarget = $state<string>('bash');
+  const toolContextOptions = $derived.by(() =>
+    TOOL_CATALOG.flatMap((group) =>
+      group.tools.map((tool) => ({ value: tool.name, label: `${tool.label} · ${tool.name}` })),
+    ),
+  );
+  const toolContextMode = $derived.by(
+    () => agentSettingsStore.settings.toolContextPolicies?.[toolContextTarget] ?? 'full',
+  );
+  async function setToolContextMode(mode: 'full' | 'summary' | 'hidden') {
+    const next = { ...(agentSettingsStore.settings.toolContextPolicies ?? {}) };
+    if (mode === 'full') delete next[toolContextTarget];
+    else next[toolContextTarget] = mode;
+    await agentSettingsStore.saveSettings(
+      { toolContextPolicies: next },
+      { quietSuccess: true },
+    );
+  }
+
   const READ_ONLY = new Set([
     'read_file',
     'grep',
@@ -906,6 +1038,24 @@
       return READ_ONLY.has(toolName) || FILE_EDIT.has(toolName) ? 'allow' : 'default';
     if (tier === 'ask') return READ_ONLY.has(toolName) ? 'allow' : 'default';
     return null;
+  }
+
+  let openToolCategories = $state(new Set<string>());
+  function toggleToolCategory(category: string) {
+    const next = new Set(openToolCategories);
+    if (next.has(category)) next.delete(category);
+    else next.add(category);
+    openToolCategories = next;
+  }
+  function toolCategoryCounts(tools: readonly { name: string }[], tier: string) {
+    const counts = { allow: 0, ask: 0, block: 0 };
+    for (const tool of tools) {
+      const state = getToolAccessStateForTier(tool.name, tier);
+      if (state === 'allow') counts.allow += 1;
+      else if (state === 'block') counts.block += 1;
+      else counts.ask += 1;
+    }
+    return counts;
   }
 
   function getToolAccessStateForTier(toolName: string, tier: string): ToolAccessState {
@@ -974,11 +1124,18 @@
   }
 </script>
 
+{#snippet projectScope()}
+  <SettingsScopeBar compact contextLabel="Scope:" projectLabel="Project" projectSelector="current" />
+{/snippet}
+
 <div class="agent-settings-shell flex h-full min-h-0 min-w-0 flex-col">
+  <!-- The tab strip spans the pane but its tabs sit on the page column's left
+       edge, so tabs, title and content all share one edge. -->
   <nav
-    class="flex h-11 shrink-0 items-end gap-6 border-b border-[var(--color-border)] bg-[var(--color-surface-1)] px-6"
+    class="agent-gutter shrink-0 border-b border-[var(--color-border)] bg-[var(--color-surface-1)]"
     aria-label="Agent behavior sections"
   >
+    <div class="agent-column flex h-11 items-end gap-6">
     {#each AGENT_TABS as tab (tab.id)}
       <button
         type="button"
@@ -996,8 +1153,6 @@
         {tab.label}
       </button>
     {/each}
-    <div class="ml-auto hidden self-center md:block">
-      <SettingsScopeBar compact projectLabel="Project" projectSelector="current" />
     </div>
   </nav>
 
@@ -1022,12 +1177,12 @@
           <p class="mt-2 text-xs leading-relaxed text-[var(--color-text-muted)]">
             {agentSettingsStore.settingsError}
           </p>
-          <p class="mt-2 text-[10px] leading-relaxed text-[var(--color-text-muted)]">
+          <p class="mt-2 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
             Koryphaios has not substituted defaults for the current project.
           </p>
           <button
             type="button"
-            class="mt-4 rounded-xl bg-[var(--color-accent)] px-4 py-2 text-xs font-semibold text-[var(--color-surface-0)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/70"
+            class="mt-4 rounded-xl bg-[var(--color-accent)] px-4 py-2 text-xs font-semibold text-[var(--color-on-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/70"
             onclick={() => void agentSettingsStore.loadAll()}>Retry</button
           >
         </div>
@@ -1035,43 +1190,57 @@
     {:else if agentSettingsStore.activeTab === 'settings'}
       <div class="flex h-full min-h-0 flex-col overflow-hidden">
         {#if agentSettingsStore.settingsError}
+          <div class="agent-gutter shrink-0">
+          <div class="agent-column mt-3">
           <div
-            class="mx-4 mt-3 flex items-start justify-between gap-3 rounded-xl border border-[var(--color-error)]/35 bg-[var(--color-error)]/10 px-4 py-3 sm:mx-6"
+            class="flex items-start justify-between gap-3 rounded-xl border border-[var(--color-error)]/35 bg-[var(--color-error)]/10 px-4 py-3"
             role="alert"
           >
             <div>
               <div class="text-xs font-semibold text-[var(--color-error)]">
                 Setting was not saved
               </div>
-              <div class="mt-1 text-[10px] text-[var(--color-text-secondary)]">
+              <div class="mt-1 text-[11px] text-[var(--color-text-secondary)]">
                 {agentSettingsStore.settingsError} The last server-confirmed value was restored.
               </div>
             </div>
             <button
               type="button"
-              class="shrink-0 rounded-lg border border-[var(--color-border)] px-2.5 py-1.5 text-[10px] text-[var(--color-text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+              class="shrink-0 rounded-lg border border-[var(--color-border)] px-2.5 py-1.5 text-[11px] text-[var(--color-text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
               onclick={() => void agentSettingsStore.loadSettings()}>Reload</button
             >
           </div>
+          </div>
+          </div>
         {/if}
-        <div class="agent-settings-content h-full min-h-0 overflow-y-auto p-4 sm:p-6">
-          <div class="agent-settings-page mx-auto max-w-5xl space-y-3">
-            <header class="agent-page-header">
-              <div>
-                <h2>Agent behavior</h2>
-                <p>Set the workspace defaults for how Kory plans, acts, verifies, and remembers.</p>
-              </div>
-              <div class="agent-page-actions">
+        <div class="agent-settings-content h-full min-h-0 overflow-y-auto">
+          <SettingsPage
+            title="Agent behavior"
+            description="Set the workspace defaults for how Kory plans, acts, verifies, and remembers."
+            width="wide"
+          >
+            {#snippet meta()}
                 <div class="agent-page-summary" aria-label="Current agent posture">
-                  <span>{permissionModeValue}</span>
-                  <span>Critic {resolveCriticMode(agentSettingsStore.settings)}</span>
-                  <span>Sandbox: {agentSettingsStore.settings.sandbox?.mode ?? 'auto'}</span>
-                  <span
-                    >Computer: {agentSettingsStore.settings.computerUse?.enabled
-                      ? 'On'
-                      : 'Off'}</span
+                  <button type="button" title="Approval preset" onclick={() => void openGroup('essentials')}
+                    >{permissionTierOptions.find((option) => option.value === permissionModeValue)?.label ??
+                      permissionModeValue}</button
+                  >
+                  <button type="button" title="Critic quality gate" onclick={() => void openGroup('quality')}
+                    >Critic {resolveCriticMode(agentSettingsStore.settings)}</button
+                  >
+                  <button type="button" title="Execution sandbox" onclick={() => void openGroup('safety')}
+                    >Sandbox: {agentSettingsStore.settings.sandbox?.mode ?? 'auto'}</button
+                  >
+                  <button
+                    type="button"
+                    title="Computer use"
+                    onclick={() => void openGroup('safety', 'agent-computer-use')}
+                    >Computer: {agentSettingsStore.settings.computerUse?.enabled ? 'On' : 'Off'}</button
                   >
                 </div>
+                {@render projectScope()}
+            {/snippet}
+            {#snippet actions()}
                 <button
                   type="button"
                   class="agent-reset-action"
@@ -1079,121 +1248,31 @@
                 >
                   <RotateCcw size={14} /> Reset agent settings
                 </button>
+            {/snippet}
+            <section class="agent-essentials" id="agent-group-essentials" aria-labelledby="agent-essentials-title">
+              <div class="agent-block-heading">
+                <h3 id="agent-essentials-title">Essentials</h3>
+                <p>The defaults every new chat starts from. Approval, Critic and Worktree can still be changed per chat from the composer.</p>
               </div>
-            </header>
-            <nav class="agent-section-index" aria-label="Behavior section index">
-              {#each CONTROL_SECTIONS as section (section.id)}
-                <button
-                  type="button"
-                  aria-label={section.label}
-                  aria-current={currentSection === section.id ? 'location' : undefined}
-                  title={`Jump to ${section.label}`}
-                  onclick={() => void navigateToSection(section.id)}>{section.shortLabel}</button
+              <div class="agent-card">
+                <SettingRow
+                  label="Approval preset"
+                  description="How often Kory pauses to ask you before acting."
                 >
-              {/each}
-            </nav>
-            {#each CONTROL_SECTIONS as section (section.id)}
-              <div
-                id={`agent-section-${section.id}`}
-                class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] overflow-hidden"
-                onfocusin={() => (currentSection = section.id)}
-              >
-                <button
-                  type="button"
-                  class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--color-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/60"
-                  onclick={() => toggleSection(section.id)}
-                  aria-expanded={expandedSections[section.id]}
-                  aria-controls={expandedSections[section.id]
-                    ? `agent-panel-${section.id}`
-                    : undefined}
-                >
-                  <span class="flex items-center gap-3">
-                    <span
-                      class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text-secondary)]"
-                      ><section.icon size={15} /></span
-                    >
-                    <span>
-                      <span class="block text-sm font-medium text-[var(--color-text-primary)]"
-                        >{section.label}</span
-                      >
-                      <span class="block mt-0.5 text-[11px] text-[var(--color-text-muted)]"
-                        >{sectionSummary(section.id)}</span
-                      >
-                    </span>
-                  </span>
-                  <ChevronRight
-                    size={16}
-                    class="shrink-0 text-[var(--color-text-muted)] transition-transform {expandedSections[
-                      section.id
-                    ]
-                      ? 'rotate-90'
-                      : ''}"
+                  <SegmentedChoice
+                    label="Approval preset"
+                    value={agentSettingsStore.settings.permissionMode ?? 'guarded'}
+                    options={APPROVAL_PRESET_OPTIONS}
+                    onchange={(value) => handlePermissionTierChange(value)}
                   />
-                </button>
-                {#if section.id === 'permissions' && expandedSections.permissions}
-                  <div id="agent-panel-permissions" class="border-t border-[var(--color-border)]">
-                    <section class="space-y-5 p-5">
-                      <div>
-                        <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
-                          Approval preset
-                        </h4>
-                        <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
-                          Choose a preset or build a custom approval policy for this workspace. This
-                          is the default for new chats; the composer's permission pill overrides it
-                          per chat.
-                        </p>
-                      </div>
-
-                      <ChoiceCardGroup
-                        label="Permission mode"
-                        value={agentSettingsStore.settings.permissionMode ?? 'guarded'}
-                        columns="sm:grid-cols-2 xl:grid-cols-5"
-                        options={[
-                          {
-                            value: 'guarded',
-                            label: 'Guarded',
-                            description: 'All edits automatic. Ask only for risky actions',
-                          },
-                          {
-                            value: 'edits',
-                            label: 'Accept edits',
-                            description: 'Apply edits. Ask for other actions',
-                          },
-                          {
-                            value: 'ask',
-                            label: 'Ask',
-                            description:
-                              'Reads run automatically. File edits and actions that change state ask for approval',
-                          },
-                          {
-                            value: 'custom',
-                            label: 'Custom',
-                            description: 'Use the rules below',
-                          },
-                          {
-                            value: 'yolo',
-                            label: 'YOLO',
-                            description:
-                              'Skip Kory approvals for allowed computer actions; explicit blocks and native failures still apply',
-                          },
-                        ]}
-                        onchange={(value) =>
-                          agentSettingsStore.saveSettings(
-                            {
-                              permissionMode: value as
-                                'yolo' | 'guarded' | 'edits' | 'ask' | 'custom',
-                            },
-                            { quietSuccess: true },
-                          )}
-                      />
-
-                      {#if agentSettingsStore.settings.permissionMode === 'custom'}
-                        <div class="space-y-3 border-t border-[var(--color-border)] pt-4">
+                  {#snippet below()}
+{#if agentSettingsStore.settings.permissionMode === 'custom'}
+                        <div class="space-y-3 rounded-xl bg-[var(--color-surface-2)] p-3">
                           <div>
                             <h5 class="text-xs font-semibold text-[var(--color-text-primary)]">
                               Custom approval rules
                             </h5>
-                            <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">
+                            <p class="mt-1 text-[11px] text-[var(--color-text-muted)]">
                               Fine-tune when Kory continues and when it pauses for you.
                             </p>
                           </div>
@@ -1219,213 +1298,30 @@
                           </div>
                         </div>
                       {/if}
-                    </section>
-
-                    <section class="space-y-5 border-t border-[var(--color-border)] p-5">
-                      <div class="space-y-1">
-                        <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
-                          Autonomy limits
-                        </h4>
-                        <p class="text-xs text-[var(--color-text-muted)]">
-                          Keep thresholds ready, then explicitly turn them on for runs that need an
-                          approval boundary.
-                        </p>
-                      </div>
-
-                      <SettingsSwitch
-                        checked={agentSettingsStore.settings.autonomyLimitsEnabled}
-                        label="Enable autonomy limits"
-                        description={agentSettingsStore.settings.autonomyLimitsEnabled
-                          ? agentSettingsStore.settings.permissionMode === 'guarded'
-                            ? 'Active for risky non-edit actions. Guarded always applies file edits automatically.'
-                            : `Active: approval is required before edits exceeding ${agentSettingsStore.settings.approvalThresholdFiles} files or ${agentSettingsStore.settings.approvalThresholdLines} lines.`
-                          : 'Off by default. The values below are saved but do not constrain runs until you enable this switch.'}
-                        onchange={() => toggleSetting('autonomyLimitsEnabled')}
-                      />
-
-                      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <div
-                          class="divide-y divide-[var(--color-border)] overflow-hidden rounded-xl bg-[var(--color-surface-2)]"
-                        >
-                          <div class="flex items-center justify-between gap-4 px-3 py-2.5">
-                            <label
-                              for="max-files"
-                              class="text-xs font-medium text-[var(--color-text-secondary)]"
-                              >Max files changed</label
-                            >
-                            <div class="w-32 shrink-0">
-                              <NumberStepper
-                                value={agentSettingsStore.settings.approvalThresholdFiles}
-                                min={1}
-                                max={50}
-                                compact
-                                quiet
-                                label="Maximum files changed"
-                                onchange={(value) =>
-                                  agentSettingsStore.saveSettings(
-                                    { approvalThresholdFiles: value },
-                                    { quietSuccess: true },
-                                  )}
-                              />
-                            </div>
-                          </div>
-
-                          <div class="flex items-center justify-between gap-4 px-3 py-2.5">
-                            <label
-                              for="max-lines"
-                              class="text-xs font-medium text-[var(--color-text-secondary)]"
-                              >Max lines changed</label
-                            >
-                            <div class="w-32 shrink-0">
-                              <NumberStepper
-                                value={agentSettingsStore.settings.approvalThresholdLines}
-                                min={10}
-                                max={1000}
-                                step={10}
-                                compact
-                                quiet
-                                label="Maximum lines changed"
-                                onchange={(value) =>
-                                  agentSettingsStore.saveSettings(
-                                    { approvalThresholdLines: value },
-                                    { quietSuccess: true },
-                                  )}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </section>
-
-                    <section class="space-y-5 border-t border-[var(--color-border)] p-5">
-                      <div class="space-y-1">
-                        <h4
-                          class="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]"
-                        >
-                          <Boxes size={16} class="text-[var(--color-info)]" />
-                          Execution sandbox
-                        </h4>
-                        <p class="text-xs text-[var(--color-text-muted)]">
-                          Control how strictly agent shell commands are confined. Granular toggles
-                          only apply while the sandbox is active.
-                        </p>
-                      </div>
-
-                      <ChoiceCardGroup
-                        label="Execution sandbox mode"
-                        value={agentSettingsStore.settings.sandbox?.mode ?? 'auto'}
-                        columns="sm:grid-cols-3"
-                        options={[
-                          {
-                            value: 'auto',
-                            label: 'Auto',
-                            description: 'Sandbox plan, critic, and worker execution only.',
-                          },
-                          {
-                            value: 'always',
-                            label: 'Always',
-                            description:
-                              'Sandbox every agent bash call, including the direct manager.',
-                          },
-                          {
-                            value: 'off',
-                            label: 'Off',
-                            description:
-                              'No sandbox. Catastrophic-command and approval prompts still apply.',
-                          },
-                        ]}
-                        onchange={(value) => setSandboxMode(value as 'auto' | 'always' | 'off')}
-                      />
-
-                      {#if (agentSettingsStore.settings.sandbox?.mode ?? 'auto') !== 'off'}
-                        <div class="space-y-3 border-t border-[var(--color-border)] pt-4">
-                          <div>
-                            <h5 class="text-xs font-semibold text-[var(--color-text-primary)]">
-                              Sandbox enforces
-                            </h5>
-                            <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">
-                              Turn a toggle off to relax that specific check while sandboxed.
-                            </p>
-                          </div>
-                          <div class="grid gap-3 sm:grid-cols-2">
-                            <SettingsSwitch
-                              checked={agentSettingsStore.settings.sandbox?.commandWhitelist ??
-                                true}
-                              label="Command whitelist"
-                              description="Only allow safe development commands (git, npm, bun, cargo, etc.)."
-                              onchange={() => toggleSandboxFlag('commandWhitelist')}
-                            />
-                            <SettingsSwitch
-                              checked={agentSettingsStore.settings.sandbox?.metacharacters ?? true}
-                              label="Block shell metacharacters"
-                              description="Block pipes, command substitution, and chaining. Disabling lets commands like `git add && git commit` run."
-                              onchange={() => toggleSandboxFlag('metacharacters')}
-                            />
-                            <SettingsSwitch
-                              checked={agentSettingsStore.settings.sandbox?.pathConfinement ?? true}
-                              label="Project path confinement"
-                              description="Block commands whose working directory is outside the project root."
-                              onchange={() => toggleSandboxFlag('pathConfinement')}
-                            />
-                            <SettingsSwitch
-                              checked={agentSettingsStore.settings.sandbox?.network ?? true}
-                              label="Block network commands"
-                              description="Block curl, wget, and other network tools while sandboxed."
-                              onchange={() => toggleSandboxFlag('network')}
-                            />
-                            <SettingsSwitch
-                              checked={agentSettingsStore.settings.sandbox?.containerTools ?? true}
-                              label="Block container tools"
-                              description="Block docker, podman, and similar container tools while sandboxed."
-                              onchange={() => toggleSandboxFlag('containerTools')}
-                            />
-                          </div>
-                        </div>
-                      {/if}
-                    </section>
-
-                    <section class="space-y-5 border-t border-[var(--color-border)] p-5">
-                      <div class="space-y-1">
-                        <h4
-                          class="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]"
-                        >
-                          <Users size={16} class="text-[var(--color-accent)]" />
-                          Sub-agent approval
-                        </h4>
-                        <p class="text-xs text-[var(--color-text-muted)]">
-                          Control how worker sub-agents (specialist workers spawned by the manager)
-                          are gated when they run tools.
-                        </p>
-                      </div>
-
-                      <ChoiceCardGroup
-                        label="Sub-agent approval"
-                        value={agentSettingsStore.settings.subAgentApproval ?? 'manager'}
-                        columns="sm:grid-cols-3"
-                        options={[
-                          {
-                            value: 'manager',
-                            label: 'Manager decides',
-                            description:
-                              'In Guarded mode, the manager reviews worker actions. Other presets use their normal user-facing approval behavior.',
-                          },
-                          {
-                            value: 'user',
-                            label: 'I decide',
-                            description:
-                              'Workers can read and search freely, but every file edit, bash command, and risky action prompts you before running.',
-                          },
-                          {
-                            value: 'auto',
-                            label: 'Auto-approve',
-                            description:
-                              'Workers run with no approval prompts. Workspace sandbox settings still apply, and catastrophic-command hard floors remain.',
-                          },
-                        ]}
-                        onchange={(value) =>
-                          setSubAgentApproval(value as 'manager' | 'user' | 'auto')}
-                      />
-
+                  {/snippet}
+                </SettingRow>
+                <SettingRow
+                  label="Execution sandbox"
+                  description="How strictly agent shell commands are confined. Fine-grained checks are under Permissions & safety."
+                >
+                  <SegmentedChoice
+                    label="Execution sandbox mode"
+                    value={agentSettingsStore.settings.sandbox?.mode ?? 'auto'}
+                    options={SANDBOX_OPTIONS}
+                    onchange={(value) => setSandboxMode(value as 'auto' | 'always' | 'off')}
+                  />
+                </SettingRow>
+                <SettingRow
+                  label="Sub-agent approval"
+                  description="Who approves the tools that sub-agents (specialist workers the manager starts) run."
+                >
+                  <SegmentedChoice
+                    label="Sub-agent approval"
+                    value={agentSettingsStore.settings.subAgentApproval ?? 'manager'}
+                    options={SUB_AGENT_APPROVAL_OPTIONS}
+                    onchange={(value) => setSubAgentApproval(value as 'manager' | 'user' | 'auto')}
+                  />
+                  {#snippet below()}
                       {#if (agentSettingsStore.settings.subAgentApproval ?? 'manager') === 'auto'}
                         <div
                           class="flex gap-2 rounded-xl border border-[var(--color-warning)] bg-[var(--color-warning-bg)] p-3 text-[11px] text-[var(--color-warning)]"
@@ -1451,54 +1347,213 @@
                           >
                         </div>
                       {/if}
-                    </section>
+                  {/snippet}
+                </SettingRow>
+                <SettingRow
+                  label="Worktree for new chats"
+                  description="Whether sub-agents work in isolated git worktrees. Each chat can override this from the composer's Worktree pill."
+                >
+                  <SegmentedChoice
+                    label="Worktree for new chats"
+                    value={agentSettingsStore.settings.worktreeMode ?? 'auto'}
+                    options={WORKTREE_OPTIONS}
+                    onchange={(value) =>
+                      agentSettingsStore.saveSettings(
+                        { worktreeMode: value as 'auto' | 'always' | 'never' },
+                        { quietSuccess: true },
+                      )}
+                  />
+                </SettingRow>
+                <SettingRow
+                  label="Critic quality gate"
+                  description="A second agent checks that work is really done before Kory delivers it. Review details are under Quality & Critic."
+                >
+                  <div class="w-48">
+                    <CriticModeSelect
+                      compact
+                      value={resolveCriticMode(agentSettingsStore.settings)}
+                      onchange={(criticMode) =>
+                        agentSettingsStore.saveSettings(
+                          { criticMode, criticGateEnabled: criticMode !== 'off' },
+                          { quietSuccess: true },
+                        )}
+                    />
+                  </div>
+                </SettingRow>
+                <SettingRow
+                  label="Computer use"
+                  description="Let agents see and control apps on this computer, within the per-app rules you set."
+                >
+                  <div class="flex items-center gap-3">
+                    <span class="agent-status-pill" data-on={agentSettingsStore.settings.computerUse?.enabled ? 'true' : 'false'}
+                      >{agentSettingsStore.settings.computerUse?.enabled ? 'On' : 'Off'}</span
+                    >
+                    <button
+                      type="button"
+                      class="agent-text-button"
+                      onclick={() => void openGroup('safety', 'agent-computer-use')}>Configure</button
+                    >
+                  </div>
+                </SettingRow>
+              </div>
+            </section>
 
-                    <section class="space-y-5 border-t border-[var(--color-border)] p-5">
-                      <div class="space-y-1">
-                        <h4
-                          class="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]"
-                        >
-                          <Shield size={16} class="text-[var(--color-accent)]" />
-                          Inter-agent messaging
-                        </h4>
-                        <p class="text-xs text-[var(--color-text-muted)]">
-                          Agents can message other agents within this project, and managers can
-                          message the manager of another open project. Sub-agents always route
-                          through their own manager.
-                        </p>
-                      </div>
-
-                      <ChoiceCardGroup
-                        label="Inter-agent messaging"
-                        value={agentSettingsStore.settings.agentMessaging ?? 'open'}
-                        columns="sm:grid-cols-3"
-                        options={[
-                          {
-                            value: 'open',
-                            label: 'Open',
-                            description:
-                              'Messages are delivered automatically with no approval prompt. A full audit log stays in the messages panel.',
-                          },
-                          {
-                            value: 'approval-cross-project',
-                            label: 'Approve cross project',
-                            description:
-                              'Messages within the same project flow freely. Messages to another project manager wait for your approval first.',
-                          },
-                          {
-                            value: 'off',
-                            label: 'Off',
-                            description:
-                              'Disable the agent mailbox entirely. Agents keep their normal manager and worker delegation.',
-                          },
-                        ]}
-                        onchange={(value) =>
-                          setAgentMessaging(value as 'open' | 'approval-cross-project' | 'off')}
-                      />
-                    </section>
-
+            <section class="agent-advanced" aria-labelledby="agent-advanced-title">
+              <div class="agent-block-heading">
+                <h3 id="agent-advanced-title">Advanced</h3>
+                <p>Every other control, grouped by what it affects. Collapsed groups show their current state.</p>
+              </div>
+              <div class="space-y-2">
+                {#each ADVANCED_GROUPS as group (group.id)}
+                  <SettingGroup
+                    id={group.id}
+                    title={group.title}
+                    description={group.description}
+                    summary={groupSummary(group.id)}
+                    icon={group.icon}
+                    expanded={expandedGroups[group.id]}
+                    ontoggle={() => toggleGroup(group.id)}
+                  >
+                    {#if group.id === 'safety'}
+                    <div class="agent-subgroup">
+                      <div class="agent-subheading">Change limits</div>
+                      <SettingRow
+                        label="Autonomy limits"
+                        description={agentSettingsStore.settings.autonomyLimitsEnabled
+                          ? agentSettingsStore.settings.permissionMode === 'guarded'
+                            ? 'On: risky non-edit actions past these limits ask first. Guarded still applies file edits automatically.'
+                            : `On: Kory asks before an edit that touches more than ${agentSettingsStore.settings.approvalThresholdFiles} files or ${agentSettingsStore.settings.approvalThresholdLines} lines.`
+                          : 'Off: the limits below are saved but not enforced. Turn this on to make Kory ask before large changes.'}
+                      >
+                        <SettingsToggle
+                          label="Autonomy limits"
+                          checked={agentSettingsStore.settings.autonomyLimitsEnabled}
+                          onchange={() => toggleSetting('autonomyLimitsEnabled')}
+                        />
+                      </SettingRow>
+                      <SettingRow label="Most files per change" description="Edits touching more files than this ask first.">
+                        <div class="w-40">
+                          <NumberStepper
+                            compact
+                            value={agentSettingsStore.settings.approvalThresholdFiles}
+                            min={1}
+                            max={50}
+                            label="Maximum files changed"
+                            onchange={(value) =>
+                              agentSettingsStore.saveSettings(
+                                { approvalThresholdFiles: value },
+                                { quietSuccess: true },
+                              )}
+                          />
+                        </div>
+                      </SettingRow>
+                      <SettingRow label="Most lines per change" description="Edits changing more lines than this ask first.">
+                        <div class="w-40">
+                          <NumberStepper
+                            compact
+                            value={agentSettingsStore.settings.approvalThresholdLines}
+                            min={10}
+                            max={1000}
+                            step={10}
+                            label="Maximum lines changed"
+                            onchange={(value) =>
+                              agentSettingsStore.saveSettings(
+                                { approvalThresholdLines: value },
+                                { quietSuccess: true },
+                              )}
+                          />
+                        </div>
+                      </SettingRow>
+                    </div>
+                    <div class="agent-subgroup">
+                      <div class="agent-subheading">Sandbox checks</div>
+                      <p class="agent-subnote">
+                        {(agentSettingsStore.settings.sandbox?.mode ?? 'auto') === 'off'
+                          ? 'The execution sandbox is Off (see Essentials), so these checks are saved but not applied.'
+                          : 'What the sandbox enforces while it is active. Turn one off to relax just that rule.'}
+                      </p>
+                      <SettingRow label="Only known development commands" description="Allow only common development tools (git, npm, bun, cargo and similar).">
+                        <SettingsToggle
+                          label="Only known development commands"
+                          disabled={(agentSettingsStore.settings.sandbox?.mode ?? 'auto') === 'off'}
+                          checked={agentSettingsStore.settings.sandbox?.commandWhitelist ?? true}
+                          onchange={() => toggleSandboxFlag('commandWhitelist')}
+                        />
+                      </SettingRow>
+                      <SettingRow label="Block shell chaining" description="Block pipes, command substitution and chaining. Turn off to allow commands like git add && git commit.">
+                        <SettingsToggle
+                          label="Block shell chaining"
+                          disabled={(agentSettingsStore.settings.sandbox?.mode ?? 'auto') === 'off'}
+                          checked={agentSettingsStore.settings.sandbox?.metacharacters ?? true}
+                          onchange={() => toggleSandboxFlag('metacharacters')}
+                        />
+                      </SettingRow>
+                      <SettingRow label="Stay inside the project" description="Block commands whose working directory is outside the project folder.">
+                        <SettingsToggle
+                          label="Stay inside the project"
+                          disabled={(agentSettingsStore.settings.sandbox?.mode ?? 'auto') === 'off'}
+                          checked={agentSettingsStore.settings.sandbox?.pathConfinement ?? true}
+                          onchange={() => toggleSandboxFlag('pathConfinement')}
+                        />
+                      </SettingRow>
+                      <SettingRow label="Block network tools" description="Block curl, wget and other network commands.">
+                        <SettingsToggle
+                          label="Block network tools"
+                          disabled={(agentSettingsStore.settings.sandbox?.mode ?? 'auto') === 'off'}
+                          checked={agentSettingsStore.settings.sandbox?.network ?? true}
+                          onchange={() => toggleSandboxFlag('network')}
+                        />
+                      </SettingRow>
+                      <SettingRow label="Block container tools" description="Block docker, podman and similar tools.">
+                        <SettingsToggle
+                          label="Block container tools"
+                          disabled={(agentSettingsStore.settings.sandbox?.mode ?? 'auto') === 'off'}
+                          checked={agentSettingsStore.settings.sandbox?.containerTools ?? true}
+                          onchange={() => toggleSandboxFlag('containerTools')}
+                        />
+                      </SettingRow>
+                    </div>
+                      <section class="space-y-4 p-5">
+                        <div class="space-y-1">
+                          <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Shell command lists</h4>
+                          <p class="text-xs text-[var(--color-text-muted)]">
+                            Glob patterns matched against a command's base name (for example <code>git*</code>). Allowed commands skip the shell safety prompt; blocked commands are refused without asking. The safety prompt's "add to list" choices land here too.
+                          </p>
+                        </div>
+                        <div class="grid gap-4 md:grid-cols-2">
+                          <div class="space-y-2">
+                            <div class="text-xs font-semibold text-[var(--color-text-secondary)]">Always allow</div>
+                            <PatternListEditor
+                              label="Always-allowed shell commands"
+                              tone="allow"
+                              patterns={agentSettingsStore.settings.bashCommandAllowlist ?? []}
+                              emptyText="No always-allowed commands."
+                              onchange={(patterns) =>
+                                agentSettingsStore.saveSettings(
+                                  { bashCommandAllowlist: patterns },
+                                  { quietSuccess: true },
+                                )}
+                            />
+                          </div>
+                          <div class="space-y-2">
+                            <div class="text-xs font-semibold text-[var(--color-text-secondary)]">Always block</div>
+                            <PatternListEditor
+                              label="Always-blocked shell commands"
+                              tone="block"
+                              placeholder="e.g. rm*"
+                              patterns={agentSettingsStore.settings.bashCommandBlocklist ?? []}
+                              emptyText="No always-blocked commands."
+                              onchange={(patterns) =>
+                                agentSettingsStore.saveSettings(
+                                  { bashCommandBlocklist: patterns },
+                                  { quietSuccess: true },
+                                )}
+                            />
+                          </div>
+                        </div>
+                      </section>
                     <section
-                      class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+                      class="space-y-4 p-5"
                     >
                       <div class="space-y-1">
                         <h4
@@ -1525,16 +1580,33 @@
                       />
 
                       <div class="space-y-3">
-                        {#each TOOL_CATALOG as group}
+                        {#each TOOL_CATALOG as group (group.category)}
+                          {@const counts = toolCategoryCounts(group.tools, toolAccessTier)}
+                          {@const open = openToolCategories.has(group.category)}
                           <div
-                            class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3"
+                            class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)]"
                           >
-                            <h5
-                              class="mb-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]"
+                            <button
+                              type="button"
+                              class="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left hover:bg-[var(--color-surface-3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/60"
+                              aria-expanded={open}
+                              onclick={() => toggleToolCategory(group.category)}
                             >
-                              {group.category}
-                            </h5>
-                            <div class="grid gap-1.5 sm:grid-cols-2">
+                              <span
+                                class="text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]"
+                                >{group.category}</span
+                              >
+                              <span class="flex items-center gap-2 text-[11px] text-[var(--color-text-muted)]">
+                                <span
+                                  >{group.tools.length} tools · {counts.allow} allow · {counts.ask} ask{counts.block
+                                    ? ` · ${counts.block} blocked`
+                                    : ''}</span
+                                >
+                                <ChevronRight size={13} class="transition-transform {open ? 'rotate-90' : ''}" />
+                              </span>
+                            </button>
+                            {#if open}
+                            <div class="grid gap-1.5 px-3 pb-3 sm:grid-cols-2">
                               {#each group.tools as tool (tool.name)}
                                 {@const state = getToolAccessStateForTier(
                                   tool.name,
@@ -1578,6 +1650,7 @@
                                 </div>
                               {/each}
                             </div>
+                            {/if}
                           </div>
                         {/each}
                       </div>
@@ -1586,7 +1659,7 @@
                         <div
                           class="flex items-center justify-between border-t border-[var(--color-border)] pt-3"
                         >
-                          <span class="text-[10px] text-[var(--color-text-muted)]">
+                          <span class="text-[11px] text-[var(--color-text-muted)]">
                             {(agentSettingsStore.settings as any).toolPermissionsByTier?.[
                               toolAccessTier
                             ]?.allow.length ?? 0} allowed · {(agentSettingsStore.settings as any)
@@ -1596,7 +1669,7 @@
                           </span>
                           <button
                             type="button"
-                            class="text-[10px] text-[var(--color-text-muted)] underline hover:text-[var(--color-text-secondary)]"
+                            class="text-[11px] text-[var(--color-text-muted)] underline hover:text-[var(--color-text-secondary)]"
                             onclick={async () => {
                               const next = {
                                 ...((agentSettingsStore.settings as any).toolPermissionsByTier ??
@@ -1620,7 +1693,7 @@
                         </div>
                       {/if}
                     </section>
-                  </div>
+                      <div id="agent-computer-use" class="p-5">
                   {#key editorDraftScope}
                     <ComputerUseSettings
                       settings={agentSettingsStore.settings.computerUse ??
@@ -1631,535 +1704,93 @@
                         agentSettingsStore.saveSettings({ computerUse }, { quietSuccess: true })}
                     />
                   {/key}
-                {:else if section.id === 'quality' && expandedSections.quality}
-                  <div id="agent-panel-quality" class="quality-content">
-                    <section class="quality-primary">
-                      <div class="quality-copy">
-                        <div class="quality-title-row">
+                      </div>
+                    {:else if group.id === 'agents'}
+                    <section class="space-y-5 border-t border-[var(--color-border)] p-5">
+                      <div class="space-y-1">
+                        <h4
+                          class="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]"
+                        >
                           <Shield size={16} class="text-[var(--color-accent)]" />
-                          <div>
-                            <h4>Critic quality gate</h4>
-                            <p>
-                              Have a second agent verify completion claims before Kory delivers the
-                              result. The chat-level Critic control can override this workspace
-                              default.
-                            </p>
-                          </div>
-                        </div>
-                        <CriticModeSelect
-                          value={resolveCriticMode(agentSettingsStore.settings)}
-                          onchange={(criticMode) =>
-                            agentSettingsStore.saveSettings(
-                              { criticMode, criticGateEnabled: criticMode !== 'off' },
-                              { quietSuccess: true },
-                            )}
-                        />
-                      </div>
-                    </section>
-
-                    <div class="quality-advanced-toggle">
-                      <div>
-                        <strong>Advanced review settings</strong>
-                        <span>
-                          {agentSettingsStore.settings.gateStrictness === 'advisory'
-                            ? 'Report issues and deliver'
-                            : 'Hold delivery until resolved'}
-                          · {agentSettingsStore.settings.maxCriticIterations ?? 3} passes max
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        class="text-action"
-                        disabled={!agentSettingsStore.settings.criticGateEnabled}
-                        aria-expanded={criticAdvancedOpen}
-                        onclick={() => (criticAdvancedOpen = !criticAdvancedOpen)}
-                        >{criticAdvancedOpen ? 'Hide' : 'Customize'}</button
-                      >
-                    </div>
-
-                    {#if criticAdvancedOpen}
-                      <div class="quality-advanced">
-                        <KorySelect
-                          label="When Critic finds an issue"
-                          value={agentSettingsStore.settings.gateStrictness ?? 'strict'}
-                          disabled={!agentSettingsStore.settings.criticGateEnabled}
-                          options={[
-                            { value: 'strict', label: 'Hold delivery · fix first' },
-                            { value: 'advisory', label: 'Deliver with notes' },
-                            { value: 'off', label: 'Off · mark work unverified' },
-                          ]}
-                          onchange={(value) =>
-                            agentSettingsStore.saveSettings(
-                              { gateStrictness: value as 'strict' | 'advisory' | 'off' },
-                              { quietSuccess: true },
-                            )}
-                        />
-                        <div class="quality-passes">
-                          <div>
-                            <div class="text-xs font-medium text-[var(--color-text-secondary)]">
-                              Maximum repair passes
-                            </div>
-                            <p>
-                              Limits delegated repair attempts; it does not invent a passing
-                              verdict.
-                            </p>
-                          </div>
-                          <NumberStepper
-                            compact
-                            value={agentSettingsStore.settings.maxCriticIterations ?? 3}
-                            min={1}
-                            max={10}
-                            label="Maximum Critic passes"
-                            disabled={!agentSettingsStore.settings.criticGateEnabled}
-                            onchange={(value) =>
-                              agentSettingsStore.saveSettings(
-                                { maxCriticIterations: value },
-                                { quietSuccess: true },
-                              )}
-                          />
-                        </div>
-                      </div>
-                    {/if}
-                  </div>
-                {:else if section.id === 'workflow' && expandedSections.workflow}
-                  <div
-                    id="agent-panel-workflow"
-                    class="border-t border-[var(--color-border)] divide-y divide-[var(--color-border)]"
-                  >
-                    <section class="space-y-4 p-5">
-                      <div class="space-y-1">
-                        <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
-                          Workflow
+                          Inter-agent messaging
                         </h4>
                         <p class="text-xs text-[var(--color-text-muted)]">
-                          Control real task clarification, orchestration, Goal planning, and
-                          reversible skill learning.
-                        </p>
-                      </div>
-                      <div class="grid gap-3 sm:grid-cols-2">
-                        <KorySelect
-                          label="Intent interview"
-                          description="How many clarifying questions Kory asks before starting work."
-                          value={agentSettingsStore.settings.intentInterview ?? 'adaptive'}
-                          options={[
-                            {
-                              value: 'off',
-                              label: 'Off',
-                              description: 'Start working immediately without follow-up questions.',
-                            },
-                            {
-                              value: 'adaptive',
-                              label: 'Adaptive',
-                              description:
-                                'Ask a few targeted questions when the task is vague or complex.',
-                            },
-                            {
-                              value: 'deep',
-                              label: 'Deep',
-                              description:
-                                'Conduct a thorough Q&A to fully define the request before acting.',
-                            },
-                          ]}
-                          onchange={(value) =>
-                            agentSettingsStore.saveSettings(
-                              { intentInterview: value as 'off' | 'adaptive' | 'deep' },
-                              { quietSuccess: true },
-                            )}
-                        />
-                        <KorySelect
-                          label="Execution strategy"
-                          description="How Kory distributes work across one or many agents. This is the workspace default; the composer's Agent Mode pill overrides it per chat."
-                          value={agentSettingsStore.settings.agentExecutionMode ?? 'auto'}
-                          options={[
-                            {
-                              value: 'auto',
-                              label: 'Auto · choose for the task',
-                              description:
-                                'Let Kory decide when a single agent or multiple agents fit best.',
-                            },
-                            {
-                              value: 'single',
-                              label: 'Single agent',
-                              description: 'Run the entire task through one agent.',
-                            },
-                            {
-                              value: 'multi',
-                              label: 'Multi-agent when available',
-                              description:
-                                'Use multiple agents in parallel whenever the task allows it.',
-                            },
-                          ]}
-                          onchange={(value) =>
-                            agentSettingsStore.saveSettings(
-                              { agentExecutionMode: value as 'auto' | 'single' | 'multi' },
-                              { quietSuccess: true },
-                            )}
-                        />
-                        <KorySelect
-                          label="Goal planning"
-                          description="How Kory breaks tasks into tracked goals before acting."
-                          value={agentSettingsStore.settings.goalPlanningDepth ?? 'adaptive'}
-                          options={[
-                            {
-                              value: 'minimal',
-                              label: 'Minimal',
-                              description: 'Use goals only when the task is large or complex.',
-                            },
-                            {
-                              value: 'adaptive',
-                              label: 'Adaptive',
-                              description: 'Plan goals based on task size and uncertainty.',
-                            },
-                            {
-                              value: 'structured',
-                              label: 'Structured',
-                              description:
-                                'Always create a step-by-step goal plan before starting work.',
-                            },
-                          ]}
-                          onchange={(value) =>
-                            agentSettingsStore.saveSettings(
-                              {
-                                goalPlanningDepth: value as 'minimal' | 'adaptive' | 'structured',
-                              },
-                              { quietSuccess: true },
-                            )}
-                        />
-                        <KorySelect
-                          label="Skill learning"
-                          description="How Kory may create or install new skills from your sessions."
-                          value={agentSettingsStore.settings.skillLearningMode ??
-                            'propose-then-verify'}
-                          options={[
-                            {
-                              value: 'human-only',
-                              label: 'Human only',
-                              description:
-                                'Never create or install a skill without your explicit approval.',
-                            },
-                            {
-                              value: 'propose-then-verify',
-                              label: 'Propose then verify',
-                              description:
-                                'Suggest new skills and wait for your approval before installing.',
-                            },
-                            {
-                              value: 'automatic',
-                              label: 'Automatic, reversible',
-                              description:
-                                'Create skills automatically. You can undo or remove them later.',
-                            },
-                          ]}
-                          onchange={(value) =>
-                            agentSettingsStore.saveSettings(
-                              {
-                                skillLearningMode: value as
-                                  'human-only' | 'propose-then-verify' | 'automatic',
-                              },
-                              { quietSuccess: true },
-                            )}
-                        />
-                      </div>
-                      <SettingsSwitch
-                        checked={goalDisplayStore.composer}
-                        label="Show Goal Mode in composer"
-                        description="Keep goal quick controls and full goal detail in the bubble above the chat."
-                        onchange={() =>
-                          goalDisplayStore.update({ composer: !goalDisplayStore.composer })}
-                      />
-                    </section>
-                  </div>
-                {:else if section.id === 'context' && expandedSections.context}
-                  <div
-                    id="agent-panel-context"
-                    class="border-t border-[var(--color-border)] divide-y divide-[var(--color-border)]"
-                  >
-                    <section class="space-y-4 p-5">
-                      <div class="space-y-1">
-                        <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
-                          Context & memory
-                        </h4>
-                        <p class="text-xs text-[var(--color-text-muted)]">
-                          Everything the agent does is archived locally; stale tool outputs are
-                          collapsed out of its context and stay recoverable via fetch_context.
-                          Nothing is ever lost.
+                          Who may message other chats, per permission mode. Every agent can always
+                          read other chats and message agents in its own chat. Ask holds the
+                          message for your approval in the messages panel.
                         </p>
                       </div>
 
-                      <div class="grid gap-3 sm:grid-cols-2">
-                        <KorySelect
-                          label="Prompt Cache Keepalive"
-                          value={agentSettingsStore.settings.promptCacheKeepaliveMode ?? 'economic'}
-                          description="Economic refreshes only when expected cache savings exceed the replay cost. Always keeps eligible lanes armed. Off disables unattended refreshes."
-                          options={[
-                            { value: 'economic', label: 'Economic · positive value only' },
-                            { value: 'always', label: 'Always · keep eligible lanes armed' },
-                            { value: 'off', label: 'Off · no unattended refresh' },
-                          ]}
-                          onchange={(value) =>
-                            agentSettingsStore.saveSettings(
-                              { promptCacheKeepaliveMode: value as 'economic' | 'always' | 'off' },
-                              { quietSuccess: true },
-                            )}
-                        />
-
-                        <SettingsSwitch
-                          checked={agentSettingsStore.settings.contextPruningEnabled ?? true}
-                          label="Auto-Collapse Old Tool Output"
-                          description="Stub stale file reads, terminal output, and search results while keeping them recoverable."
-                          onchange={() => toggleSetting('contextPruningEnabled')}
-                        />
-
-                        <SettingsSwitch
-                          checked={agentSettingsStore.settings.promptCacheColdPrewarmEnabled ??
-                            false}
-                          label="Cold Prompt Prewarm"
-                          description="While typing before a cache lane exists, optionally warm the provider prefix. This can reduce first-turn latency but may create an extra billable cache write. Warm lane refreshes stay automatic and economics gated."
-                          onchange={() => toggleSetting('promptCacheColdPrewarmEnabled')}
-                        />
-
-                        <SettingsSwitch
-                          checked={agentSettingsStore.settings.allowExternalPaths ?? false}
-                          label="External File Access"
-                          description="Let the chat image renderer and viewers serve files outside your home folder (external drives, mounts)."
-                          onchange={() => toggleSetting('allowExternalPaths')}
-                        />
-                        <SettingsSwitch
-                          checked={agentSettingsStore.settings.contextSelfAwareness ?? true}
-                          label="Agent Context Awareness"
-                          description="Give the agent a live window-usage report so it can prune or compact deliberately."
-                          onchange={() => toggleSetting('contextSelfAwareness')}
-                        />
-
-                        <SettingsSwitch
-                          checked={agentSettingsStore.settings.autoCompactEnabled ?? true}
-                          label="Automatic Compaction"
-                          description={`After a completed turn reaches ${agentSettingsStore.settings.autoCompactThreshold ?? 80}% context pressure, schedule recoverable compaction. Warm standing prompts get a bounded allowance; room for the next reply stays protected.`}
-                          onchange={() => toggleSetting('autoCompactEnabled')}
-                        />
-
-                        <SettingsSwitch
-                          checked={agentSettingsStore.settings.reasoningExpandedByDefault ?? false}
-                          label="Expand Full Reasoning by Default"
-                          description="Show reasoning automatically while keeping every block individually collapsible."
-                          onchange={() => toggleSetting('reasoningExpandedByDefault')}
-                        />
-
+                      <div class="space-y-2">
                         <div
-                          class="agent-subpanel rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4"
+                          class="grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-3 gap-y-2"
                         >
-                          <SettingsSwitch
-                            checked={(agentSettingsStore.settings.skillContextBudget ?? null) !==
-                              null}
-                            label="Limit Skill Context"
-                            description="Off by default for normal users. Turn this on for cost-sensitive setups to cap injected skill characters per turn; guidance is never blocked."
-                            onchange={() => {
-                              void agentSettingsStore.saveSettings(
-                                {
-                                  skillContextBudget:
-                                    (agentSettingsStore.settings.skillContextBudget ?? null) !==
-                                    null
-                                      ? null
-                                      : 30000,
-                                },
-                                { quietSuccess: true },
-                              );
-                            }}
-                          />
-                          <div class="mt-3">
-                            <NumberStepper
-                              value={agentSettingsStore.settings.skillContextBudget ?? 30000}
-                              min={4000}
-                              max={400000}
-                              step={1000}
-                              unit="chars"
-                              label="Maximum injected skill characters per turn"
-                              disabled={(agentSettingsStore.settings.skillContextBudget ?? null) ===
-                                null}
-                              onchange={(value) =>
-                                agentSettingsStore.saveSettings(
-                                  { skillContextBudget: value },
-                                  { quietSuccess: true },
-                                )}
-                            />
-                          </div>
-                          <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
-                            Individual skills carry their own advisory <code>contextBudget</code> in frontmatter.
-                            Those are authoring metadata only and never block a turn.
-                          </p>
-                        </div>
-
-                        <div
-                          class="agent-subpanel rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4"
-                        >
-                          <label
-                            for="ctx-compact-threshold"
-                            class="mb-2 block text-xs font-medium text-[var(--color-text-secondary)]"
-                            >Compaction Trigger</label
+                          <span></span>
+                          <span
+                            class="text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]"
+                            >Managers</span
                           >
-                          <NumberStepper
-                            value={agentSettingsStore.settings.autoCompactThreshold ?? 80}
-                            min={10}
-                            max={99}
-                            step={1}
-                            unit="%"
-                            label="Context window percentage that triggers compaction"
-                            disabled={!(agentSettingsStore.settings.autoCompactEnabled ?? true)}
-                            onchange={(value) =>
-                              agentSettingsStore.saveSettings(
-                                { autoCompactThreshold: value },
-                                { quietSuccess: true },
-                              )}
-                          />
-                          <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
-                            Uses the session's context budget. Cached standing instructions can
-                            defer this trigger by at most 10 percentage points; cached chat and tool
-                            history still count. Real occupancy near the limit can trigger earlier
-                            to leave room for the next reply. Approximate CLI usage never triggers
-                            compaction.
-                          </p>
-                        </div>
-
-                        <div
-                          class="agent-subpanel rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4"
-                        >
-                          <label
-                            for="ctx-keep-turns"
-                            class="mb-2 block text-xs font-medium text-[var(--color-text-secondary)]"
-                            >Keep Recent Turns Full</label
+                          <span
+                            class="text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]"
+                            >Sub-agents</span
                           >
-                          <NumberStepper
-                            value={agentSettingsStore.settings.contextKeepRecentTurns ?? 8}
-                            min={1}
-                            max={10}
-                            label="Recent turns kept full"
-                            onchange={(value) =>
-                              agentSettingsStore.saveSettings(
-                                { contextKeepRecentTurns: value },
-                                { quietSuccess: true },
-                              )}
-                          />
-                          <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
-                            Tool outputs from this many recent turns are never collapsed.
-                          </p>
-                        </div>
-
-                        <div
-                          class="agent-subpanel rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4"
-                        >
-                          <label
-                            for="ctx-min-chars"
-                            class="mb-2 block text-xs font-medium text-[var(--color-text-secondary)]"
-                            >Minimum Size to Collapse</label
-                          >
-                          <NumberStepper
-                            value={agentSettingsStore.settings.contextPruneMinChars ?? 2000}
-                            min={100}
-                            max={10000}
-                            step={100}
-                            label="Minimum output size to collapse"
-                            onchange={(value) =>
-                              agentSettingsStore.saveSettings(
-                                { contextPruneMinChars: value },
-                                { quietSuccess: true },
-                              )}
-                          />
-                          <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
-                            Outputs smaller than this (characters) stay in context. It is not worth
-                            collapsing.
-                          </p>
-                        </div>
-                      </div>
-                    </section>
-
-                    <section class="space-y-4 p-5">
-                      <div class="space-y-1">
-                        <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
-                          Memory policy
-                        </h4>
-                        <p class="text-xs text-[var(--color-text-muted)]">
-                          Control whether the agent can persist what it learns.
-                        </p>
-                      </div>
-
-                      <div class="space-y-3">
-                        <SettingsSwitch
-                          checked={agentSettingsStore.settings.agentCanUpdatePreferences}
-                          label="Remember explicit requests"
-                          description="Persist only requests that explicitly say remember or always. Ordinary conversation never writes project preferences."
-                          onchange={() => toggleSetting('agentCanUpdatePreferences')}
-                        />
-                      </div>
-                    </section>
-                  </div>
-                {:else if section.id === 'research' && expandedSections.research}
-                  <div
-                    id="agent-panel-research"
-                    class="border-t border-[var(--color-border)] divide-y divide-[var(--color-border)]"
-                  >
-                    <section class="space-y-4 p-5">
-                      <div class="flex items-center gap-2 text-[var(--color-warning)]">
-                        <FlaskConical size={16} />
-                        <h4 class="text-sm font-semibold">Research</h4>
-                      </div>
-
-                      <div class="space-y-3">
-                        <div
-                          class="agent-subpanel rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4"
-                        >
-                          <div class="flex items-start justify-between gap-4">
-                            <div class="flex items-center gap-2">
-                              <Globe size={14} class="mt-0.5 text-[var(--color-text-muted)]" />
-                              <div>
-                                <div class="text-sm font-medium text-[var(--color-text-primary)]">
-                                  Local Web Search
-                                </div>
-                                <div class="mt-1 text-[10px] text-[var(--color-text-muted)]">
-                                  Use DuckDuckGo fallback for web search.
-                                </div>
-                              </div>
-                            </div>
-                            <div
-                              class="flex shrink-0 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)] p-0.5"
-                              role="group"
-                              aria-label="Local web search mode"
+                          <span></span>
+                          {#each MESSAGING_TIERS as tier (tier)}
+                            <span class="text-xs text-[var(--color-text-primary)]"
+                              >{MESSAGING_TIER_LABELS[tier]}</span
                             >
-                              {#each [{ value: 'off', label: 'Off' }, { value: 'fallback', label: 'Fallback' }, { value: 'on', label: 'On' }] as option (option.value)}
+                            {#each MESSAGING_ROLES as msgRole (msgRole)}
+                              {@const state = messagingCell(tier, msgRole)}
+                              {@const overridden =
+                                agentSettingsStore.settings.messagingPermissionsByTier?.[tier]?.[
+                                  msgRole
+                                ] !== undefined}
+                              <div
+                                class="flex shrink-0 gap-0.5 rounded-lg bg-[var(--color-surface-3)] p-0.5 {overridden
+                                  ? 'ring-1 ring-[var(--color-accent)]/50'
+                                  : ''}"
+                              >
+                                {#each ['allow', 'ask', 'block'] as opt (opt)}
+                                  {@const isActive = state === opt}
+                                  <button
+                                    type="button"
+                                    onclick={() =>
+                                      setMessagingCell(
+                                        tier,
+                                        msgRole,
+                                        opt as MessagingPermissionLevel,
+                                      )}
+                                    class="rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors duration-150 {isActive
+                                      ? opt === 'allow'
+                                        ? 'bg-[var(--color-success-bg)] text-[var(--color-success)]'
+                                        : opt === 'block'
+                                          ? 'bg-[var(--color-error-bg)] text-[var(--color-error)]'
+                                          : 'bg-[var(--color-surface-1)] text-[var(--color-text-primary)]'
+                                      : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface-1)]/60 hover:text-[var(--color-text-secondary)]'}"
+                                  >
+                                    {opt === 'allow' ? 'Allow' : opt === 'block' ? 'Block' : 'Ask'}
+                                  </button>
+                                {/each}
+                              </div>
+                            {/each}
+                            <span class="w-14 text-right">
+                              {#if messagingTierHasOverride(tier)}
                                 <button
                                   type="button"
-                                  aria-pressed={agentSettingsStore.settings.localWebSearch ===
-                                    option.value}
-                                  onclick={() =>
-                                    agentSettingsStore.saveSettings({
-                                      localWebSearch: option.value as 'off' | 'on' | 'fallback',
-                                    })}
-                                  class="rounded-md px-2 py-1 text-[10px] font-medium transition-all {agentSettingsStore
-                                    .settings.localWebSearch === option.value
-                                    ? 'bg-[var(--color-accent)] text-white shadow-sm'
-                                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'}"
+                                  onclick={() => resetMessagingTier(tier)}
+                                  class="text-[11px] font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+                                  >Reset</button
                                 >
-                                  {option.label}
-                                </button>
-                              {/each}
-                            </div>
-                          </div>
+                              {/if}
+                            </span>
+                          {/each}
                         </div>
-
-                        <SettingsSwitch
-                          compact
-                          checked={agentSettingsStore.settings.multiSourceResearch}
-                          label="Multi-Source Research"
-                          description="Require verification across 3 to 5 sources for research tasks."
-                          onchange={() => toggleSetting('multiSourceResearch')}
-                        />
+                        <p class="text-[11px] text-[var(--color-text-muted)]">
+                          Outlined cells override the preset default; Reset restores both columns
+                          for that mode.
+                        </p>
                       </div>
                     </section>
-                  </div>
-                {:else if section.id === 'routing' && expandedSections.routing}
-                  <div
-                    id="agent-panel-routing"
-                    class="border-t border-[var(--color-border)] divide-y divide-[var(--color-border)]"
-                  >
                     <section class="p-5">
                       <div class="routing-explainer">
                         <div class="routing-explainer-title">How Kory chooses a sub-agent</div>
@@ -2214,7 +1845,7 @@
                                 >{cat.label}</span
                               >
                               {#if availableModels.length === 0}
-                                <span class="text-[10px] text-[var(--color-text-muted)] italic"
+                                <span class="text-[11px] text-[var(--color-text-muted)] italic"
                                   >No enabled models available</span
                                 >
                               {:else}
@@ -2234,7 +1865,7 @@
                                       >
                                         <span class="block truncate font-mono">{m.model}</span>
                                         <span
-                                          class="mt-0.5 block truncate text-[10px] text-[var(--color-text-muted)]"
+                                          class="mt-0.5 block truncate text-[11px] text-[var(--color-text-muted)]"
                                           >{m.provider}</span
                                         >
                                       </span>
@@ -2281,15 +1912,15 @@
                                 <div class="flex items-center gap-2">
                                   {#if draft.dirty}
                                     <span
-                                      class="rounded-full px-2 py-0.5 text-[10px] font-medium"
-                                      style="background: var(--color-accent); color: var(--color-surface-0);"
+                                      class="rounded-full px-2 py-0.5 text-[11px] font-medium"
+                                      style="background: var(--color-accent); color: var(--color-on-accent);"
                                       >unsaved</span
                                     >
                                   {/if}
                                   {#if hasGroupNotes(cat.id)}
                                     <span
-                                      class="rounded-full px-2 py-0.5 text-[10px]"
-                                      style="background: var(--color-success); color: var(--color-surface-0);"
+                                      class="rounded-full px-2 py-0.5 text-[11px]"
+                                      style="background: var(--color-success); color: var(--color-on-success);"
                                       >has notes</span
                                     >
                                   {/if}
@@ -2336,11 +1967,451 @@
                         </div>
                       </div>
                     </section>
-                  </div>
-                {/if}
+                    {:else if group.id === 'workflow'}
+                    <div class="agent-subgroup">
+                      <SettingRow
+                        label="Clarifying questions"
+                        description="How much Kory asks before it starts working on a request."
+                      >
+                        <SegmentedChoice
+                          label="Clarifying questions"
+                          value={agentSettingsStore.settings.intentInterview ?? 'adaptive'}
+                          options={[
+                            { value: 'off', label: 'Off', description: 'Start right away, no follow-up questions.' },
+                            { value: 'adaptive', label: 'Adaptive', description: 'Ask a few targeted questions when the task is vague or complex.' },
+                            { value: 'deep', label: 'Deep', description: 'Talk the request through fully before acting.' },
+                          ]}
+                          onchange={(value) =>
+                            agentSettingsStore.saveSettings(
+                              { intentInterview: value as 'off' | 'adaptive' | 'deep' },
+                              { quietSuccess: true },
+                            )}
+                        />
+                      </SettingRow>
+                      <SettingRow
+                        label="Single or multi-agent"
+                        description="Whether Kory works alone or splits work across sub-agents. Each chat can override this from the composer's Agent Mode pill."
+                      >
+                        <SegmentedChoice
+                          label="Execution strategy"
+                          value={agentSettingsStore.settings.agentExecutionMode ?? 'auto'}
+                          options={[
+                            { value: 'auto', label: 'Auto', description: 'Kory decides per task whether sub-agents help.' },
+                            { value: 'single', label: 'Single agent', description: 'One agent does the whole task; no sub-agents.' },
+                            { value: 'multi', label: 'Multi-agent', description: 'Use parallel sub-agents whenever the task allows it.' },
+                          ]}
+                          onchange={(value) =>
+                            agentSettingsStore.saveSettings(
+                              { agentExecutionMode: value as 'auto' | 'single' | 'multi' },
+                              { quietSuccess: true },
+                            )}
+                        />
+                      </SettingRow>
+                    </div>
+                    <div class="agent-subgroup">
+                      <div class="agent-subheading">Goals</div>
+                      <SettingRow
+                        label="Goal planning"
+                        description="How much Kory breaks a task into a tracked checklist before acting."
+                      >
+                        <SegmentedChoice
+                          label="Goal planning"
+                          value={agentSettingsStore.settings.goalPlanningDepth ?? 'adaptive'}
+                          options={[
+                            { value: 'minimal', label: 'Minimal', description: 'Plan only large or complex tasks.' },
+                            { value: 'adaptive', label: 'Adaptive', description: 'Plan as much as the task size and uncertainty need.' },
+                            { value: 'structured', label: 'Structured', description: 'Always write a step-by-step plan before starting.' },
+                          ]}
+                          onchange={(value) =>
+                            agentSettingsStore.saveSettings(
+                              { goalPlanningDepth: value as 'minimal' | 'adaptive' | 'structured' },
+                              { quietSuccess: true },
+                            )}
+                        />
+                      </SettingRow>
+                      <SettingRow
+                        label="Start goals automatically"
+                        description="Begin a new goal right away with the composer's model and keep going until it is done, paused, stopped or blocked. Off: goals wait until you press Start."
+                      >
+                        <SettingsToggle
+                          label="Start goals automatically"
+                          checked={agentSettingsStore.settings.automaticGoalDriving ?? true}
+                          onchange={() => toggleSetting('automaticGoalDriving')}
+                        />
+                      </SettingRow>
+                      <SettingRow
+                        label="Show Goal Mode in the composer"
+                        description="Keep goal quick controls and goal details in the bubble above the chat."
+                      >
+                        <SettingsToggle
+                          label="Show Goal Mode in the composer"
+                          checked={goalDisplayStore.composer}
+                          onchange={() => goalDisplayStore.update({ composer: !goalDisplayStore.composer })}
+                        />
+                      </SettingRow>
+                    </div>
+                    <div class="agent-subgroup">
+                      <div class="agent-subheading">Skills</div>
+                      <SettingRow
+                        label="Skill learning"
+                        description="Whether Kory may turn what it learns in your sessions into reusable skills."
+                      >
+                        <SegmentedChoice
+                          label="Skill learning"
+                          value={agentSettingsStore.settings.skillLearningMode ?? 'propose-then-verify'}
+                          options={[
+                            { value: 'human-only', label: 'Only me', description: 'Never create or install a skill without your explicit approval.' },
+                            { value: 'propose-then-verify', label: 'Propose', description: 'Suggest new skills and wait for your approval before installing.' },
+                            { value: 'automatic', label: 'Automatic', description: 'Create skills automatically; you can undo or remove them later.' },
+                          ]}
+                          onchange={(value) =>
+                            agentSettingsStore.saveSettings(
+                              { skillLearningMode: value as 'human-only' | 'propose-then-verify' | 'automatic' },
+                              { quietSuccess: true },
+                            )}
+                        />
+                      </SettingRow>
+                    </div>
+                    {:else if group.id === 'quality'}
+                    <div class="agent-subgroup">
+                      {#if !agentSettingsStore.settings.criticGateEnabled}
+                        <p class="agent-subnote pt-3">
+                          The Critic is Off (see Essentials), so these settings are saved but not used.
+                        </p>
+                      {/if}
+                      <SettingRow
+                        label="When the Critic finds a problem"
+                        description="What Kory does with a result the Critic could not verify."
+                      >
+                        <SegmentedChoice
+                          label="When Critic finds an issue"
+                          disabled={!agentSettingsStore.settings.criticGateEnabled}
+                          value={agentSettingsStore.settings.gateStrictness ?? 'strict'}
+                          options={[
+                            { value: 'strict', label: 'Hold & fix', description: 'Hold delivery and repair the work until the Critic passes it.' },
+                            { value: 'advisory', label: 'Deliver with notes', description: 'Deliver anyway, with the Critic’s findings attached.' },
+                            { value: 'off', label: 'Mark unverified', description: 'Deliver without holding; the work is marked unverified.' },
+                          ]}
+                          onchange={(value) =>
+                            agentSettingsStore.saveSettings(
+                              { gateStrictness: value as 'strict' | 'advisory' | 'off' },
+                              { quietSuccess: true },
+                            )}
+                        />
+                      </SettingRow>
+                      <SettingRow
+                        label="Maximum repair rounds"
+                        description="How many times Kory may try to fix work the Critic rejects. Running out never counts as a pass."
+                      >
+                        <div class="w-40">
+                          <NumberStepper
+                            compact
+                            value={agentSettingsStore.settings.maxCriticIterations ?? 3}
+                            min={1}
+                            max={10}
+                            label="Maximum Critic passes"
+                            disabled={!agentSettingsStore.settings.criticGateEnabled}
+                            onchange={(value) =>
+                              agentSettingsStore.saveSettings(
+                                { maxCriticIterations: value },
+                                { quietSuccess: true },
+                              )}
+                          />
+                        </div>
+                      </SettingRow>
+                    </div>
+                    {:else if group.id === 'context'}
+                    <div class="agent-subgroup">
+                      <div class="agent-subheading">Prompt cache</div>
+                      <SettingRow
+                        label="Cache keepalive"
+                        description="Keeps the provider's prompt cache warm between turns so long chats stay cheap. Economic refreshes only when the expected savings beat the refresh cost; Always keeps every eligible cache warm; Off never refreshes on its own."
+                      >
+                        <div class="w-64">
+                          <KorySelect
+                            label="Cache keepalive"
+                            value={agentSettingsStore.settings.promptCacheKeepaliveMode ?? 'economic'}
+                            options={[
+                              { value: 'economic', label: 'Economic' },
+                              { value: 'always', label: 'Always' },
+                              { value: 'off', label: 'Off' },
+                            ]}
+                            onchange={(value) =>
+                              agentSettingsStore.saveSettings(
+                                { promptCacheKeepaliveMode: value as 'economic' | 'always' | 'off' },
+                                { quietSuccess: true },
+                              )}
+                          />
+                        </div>
+                      </SettingRow>
+                      <SettingRow
+                        label="Warm the cache while you type"
+                        description="Before the first turn, prepare the provider's prompt cache while you are still typing. Faster first replies; may add one extra billable cache write."
+                      >
+                        <SettingsToggle
+                          label="Warm the cache while you type"
+                          checked={agentSettingsStore.settings.promptCacheColdPrewarmEnabled ?? false}
+                          onchange={() => toggleSetting('promptCacheColdPrewarmEnabled')}
+                        />
+                      </SettingRow>
+                    </div>
+
+                    <div class="agent-subgroup">
+                      <div class="agent-subheading">Tool output</div>
+                      <SettingRow
+                        label="Collapse old tool output"
+                        description="Replace stale file reads, terminal output and search results in the agent's context with short stubs. The full output stays in the transcript and the agent can fetch it back."
+                      >
+                        <SettingsToggle
+                          label="Collapse old tool output"
+                          checked={agentSettingsStore.settings.contextPruningEnabled ?? true}
+                          onchange={() => toggleSetting('contextPruningEnabled')}
+                        />
+                      </SettingRow>
+                      <SettingRow
+                        label="Recent turns kept in full"
+                        description="Tool output from this many of the latest turns is never collapsed."
+                      >
+                        <div class="w-40">
+                          <NumberStepper
+                            compact
+                            value={agentSettingsStore.settings.contextKeepRecentTurns ?? 8}
+                            min={1}
+                            max={10}
+                            label="Recent turns kept full"
+                            onchange={(value) =>
+                              agentSettingsStore.saveSettings(
+                                { contextKeepRecentTurns: value },
+                                { quietSuccess: true },
+                              )}
+                          />
+                        </div>
+                      </SettingRow>
+                      <SettingRow
+                        label="Smallest output worth collapsing"
+                        description="Outputs shorter than this many characters always stay in context."
+                      >
+                        <div class="w-40">
+                          <NumberStepper
+                            compact
+                            value={agentSettingsStore.settings.contextPruneMinChars ?? 2000}
+                            min={100}
+                            max={10000}
+                            step={100}
+                            label="Minimum output size to collapse"
+                            onchange={(value) =>
+                              agentSettingsStore.saveSettings(
+                                { contextPruneMinChars: value },
+                                { quietSuccess: true },
+                              )}
+                          />
+                        </div>
+                      </SettingRow>
+                      <SettingRow
+                        label="What the agent sees from each tool"
+                        description="Per tool: the full result, a model-written summary, or only the tool name, time and size. The transcript always keeps the full output, and an agent can change this for its own chat."
+                        stacked
+                      >
+                        <div class="grid gap-3 sm:grid-cols-2">
+                            <KorySelect
+                              label="Tool"
+                              value={toolContextTarget}
+                              options={toolContextOptions}
+                              onchange={(value) => (toolContextTarget = value)}
+                            />
+                            <KorySelect
+                              label="Agent sees"
+                              value={toolContextMode}
+                              options={[
+                                {
+                                  value: 'full',
+                                  label: 'Full output',
+                                  description:
+                                    'The bounded result enters the agent context (subject to auto-collapse).',
+                                },
+                                {
+                                  value: 'summary',
+                                  label: 'Summary only',
+                                  description:
+                                    'A model compresses the result before the agent sees it. Full text stays in the transcript.',
+                                },
+                                {
+                                  value: 'hidden',
+                                  label: 'Name, time and size only',
+                                  description:
+                                    'The agent sees that the tool ran and when, never the output, unless it fetches it.',
+                                },
+                              ]}
+                              onchange={(value) =>
+                                setToolContextMode(value as 'full' | 'summary' | 'hidden')}
+                            />
+                          </div>
+                      </SettingRow>
+                    </div>
+
+                    <div class="agent-subgroup">
+                      <div class="agent-subheading">Compaction</div>
+                      <SettingRow
+                        label="Automatic compaction"
+                        description="When a finished turn leaves the context window fuller than the trigger below, summarise older history so the chat can keep going. Nothing is deleted; it stays recoverable."
+                      >
+                        <SettingsToggle
+                          label="Automatic compaction"
+                          checked={agentSettingsStore.settings.autoCompactEnabled ?? true}
+                          onchange={() => toggleSetting('autoCompactEnabled')}
+                        />
+                      </SettingRow>
+                      <SettingRow
+                        label="Compaction trigger"
+                        description="How full the context window may get before compaction runs. Cached standing instructions can push this back by at most 10 points; it can also run earlier to leave room for the next reply."
+                      >
+                        <div class="w-40">
+                          <NumberStepper
+                            compact
+                            value={agentSettingsStore.settings.autoCompactThreshold ?? 80}
+                            min={10}
+                            max={99}
+                            unit="%"
+                            label="Context window percentage that triggers compaction"
+                            disabled={!(agentSettingsStore.settings.autoCompactEnabled ?? true)}
+                            onchange={(value) =>
+                              agentSettingsStore.saveSettings(
+                                { autoCompactThreshold: value },
+                                { quietSuccess: true },
+                              )}
+                          />
+                        </div>
+                      </SettingRow>
+                    </div>
+
+                    <div class="agent-subgroup">
+                      <div class="agent-subheading">Skills in context</div>
+                      <SettingRow
+                        label="Limit skill context"
+                        description="Cap how many characters of skill instructions are added to each turn. Off for most people; useful for cost-sensitive setups. Guidance is shortened, never blocked."
+                      >
+                        <div class="flex items-center gap-3">
+                          <div class="w-44">
+                            <NumberStepper
+                              compact
+                              value={agentSettingsStore.settings.skillContextBudget ?? 30000}
+                              min={4000}
+                              max={400000}
+                              step={1000}
+                              unit="chars"
+                              label="Maximum injected skill characters per turn"
+                              disabled={(agentSettingsStore.settings.skillContextBudget ?? null) === null}
+                              onchange={(value) =>
+                                agentSettingsStore.saveSettings(
+                                  { skillContextBudget: value },
+                                  { quietSuccess: true },
+                                )}
+                            />
+                          </div>
+                          <SettingsToggle
+                            label="Limit skill context"
+                            checked={(agentSettingsStore.settings.skillContextBudget ?? null) !== null}
+                            onchange={() => {
+                              void agentSettingsStore.saveSettings(
+                                {
+                                  skillContextBudget:
+                                    (agentSettingsStore.settings.skillContextBudget ?? null) !== null
+                                      ? null
+                                      : 30000,
+                                },
+                                { quietSuccess: true },
+                              );
+                            }}
+                          />
+                        </div>
+                      </SettingRow>
+                    </div>
+
+                    <div class="agent-subgroup">
+                      <div class="agent-subheading">Visibility & files</div>
+                      <SettingRow
+                        label="Context awareness"
+                        description="Give the agent a live report of how full its context window is, so it can tidy up or compact deliberately."
+                      >
+                        <SettingsToggle
+                          label="Context awareness"
+                          checked={agentSettingsStore.settings.contextSelfAwareness ?? true}
+                          onchange={() => toggleSetting('contextSelfAwareness')}
+                        />
+                      </SettingRow>
+                      <SettingRow
+                        label="Expand reasoning by default"
+                        description="Show the agent's reasoning open in the chat. Each block can still be collapsed."
+                      >
+                        <SettingsToggle
+                          label="Expand reasoning by default"
+                          checked={agentSettingsStore.settings.reasoningExpandedByDefault ?? false}
+                          onchange={() => toggleSetting('reasoningExpandedByDefault')}
+                        />
+                      </SettingRow>
+                      <SettingRow
+                        label="Files outside your home folder"
+                        description="Let chat image previews and file viewers open files on external drives and mounts."
+                      >
+                        <SettingsToggle
+                          label="Files outside your home folder"
+                          checked={agentSettingsStore.settings.allowExternalPaths ?? false}
+                          onchange={() => toggleSetting('allowExternalPaths')}
+                        />
+                      </SettingRow>
+                    </div>
+
+                    <div class="agent-subgroup">
+                      <div class="agent-subheading">Memory</div>
+                      <SettingRow
+                        label="Remember explicit requests"
+                        description="Save a request to project preferences only when you say remember or always. Ordinary conversation never writes preferences. Agent memory files are managed under Memory."
+                      >
+                        <SettingsToggle
+                          label="Remember explicit requests"
+                          checked={agentSettingsStore.settings.agentCanUpdatePreferences}
+                          onchange={() => toggleSetting('agentCanUpdatePreferences')}
+                        />
+                      </SettingRow>
+                    </div>
+                    {:else if group.id === 'research'}
+                    <div class="agent-subgroup">
+                      <SettingRow
+                        label="Local web search"
+                        description="Experimental. Today only Off has an effect: it turns off web search for providers that honour this setting (currently Grok Build). Fallback and On currently behave the same."
+                      >
+                        <SegmentedChoice
+                          label="Local web search mode"
+                          value={agentSettingsStore.settings.localWebSearch ?? 'fallback'}
+                          options={[
+                            { value: 'off', label: 'Off', description: 'Turn off web search where the provider honours this setting.' },
+                            { value: 'fallback', label: 'Fallback', description: 'Default. Web search stays available.' },
+                            { value: 'on', label: 'On', description: 'Web search stays available.' },
+                          ]}
+                          onchange={(value) =>
+                            agentSettingsStore.saveSettings(
+                              { localWebSearch: value as 'off' | 'on' | 'fallback' },
+                              { quietSuccess: true },
+                            )}
+                        />
+                      </SettingRow>
+                      <SettingRow
+                        label="Multi-source research"
+                        description="For research tasks, check at least 3 to 5 different sources and note where they agree or disagree."
+                      >
+                        <SettingsToggle
+                          label="Multi-source research"
+                          checked={agentSettingsStore.settings.multiSourceResearch}
+                          onchange={() => toggleSetting('multiSourceResearch')}
+                        />
+                      </SettingRow>
+                    </div>
+                    {/if}
+                  </SettingGroup>
+                {/each}
               </div>
-            {/each}
-          </div>
+            </section>
+          </SettingsPage>
         </div>
       </div>
     {:else if agentSettingsStore.activeTab === 'skills'}
@@ -2367,7 +2438,7 @@
                 onclick={() => (showSkillCreator = !showSkillCreator)}
                 aria-expanded={showSkillCreator}
                 aria-label="Create a new skill"
-                class="inline-flex items-center gap-1.5 rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90"
+                class="inline-flex items-center gap-1.5 rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-xs font-semibold text-[var(--color-on-accent)] hover:opacity-90"
               >
                 <Plus size={14} strokeWidth={2.5} />
                 New skill
@@ -2383,7 +2454,7 @@
                   <h4 class="text-xs font-semibold text-[var(--color-text-primary)]">
                     Create a skill draft
                   </h4>
-                  <p class="mt-1 text-[10px] leading-relaxed text-[var(--color-text-muted)]">
+                  <p class="mt-1 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
                     {skillCreatorMode === 'template'
                       ? 'Start with concrete triggers, non-triggers, a real workflow, and evidence. The draft stays inactive until its trigger tests pass and you activate it.'
                       : 'Write the skill in your own words without completing the routing template. You can edit its generated metadata before activation.'}
@@ -2395,19 +2466,19 @@
                     onclick={() =>
                       (skillCreatorMode =
                         skillCreatorMode === 'template' ? 'freeform' : 'template')}
-                    class="rounded-md border border-[var(--color-border)] px-2.5 py-1 text-[10px] font-medium text-[var(--color-text-secondary)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+                    class="rounded-md border border-[var(--color-border)] px-2.5 py-1 text-[11px] font-medium text-[var(--color-text-secondary)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
                     >{skillCreatorMode === 'template' ? 'Skip template' : 'Use template'}</button
                   >
                   <button
                     type="button"
                     onclick={() => (showSkillCreator = false)}
-                    class="rounded-md px-2 py-1 text-[10px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]"
+                    class="rounded-md px-2 py-1 text-[11px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]"
                     >Close</button
                   >
                 </div>
               </div>
               <div class="grid gap-3 lg:grid-cols-2">
-                <label class="text-[10px] font-medium text-[var(--color-text-secondary)]">
+                <label class="text-[11px] font-medium text-[var(--color-text-secondary)]">
                   Skill name
                   <input
                     value={newSkillName}
@@ -2417,7 +2488,7 @@
                     class="mt-1 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)] px-3 py-2 text-xs text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none"
                   />
                 </label>
-                <div class="text-[10px] font-medium text-[var(--color-text-secondary)]">
+                <div class="text-[11px] font-medium text-[var(--color-text-secondary)]">
                   Save for
                   <div
                     class="mt-1 flex rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)] p-1"
@@ -2428,7 +2499,7 @@
                         onclick={() => (newSkillSource = source as 'personal' | 'project')}
                         class="flex-1 rounded-md px-3 py-1.5 text-xs capitalize transition-colors {newSkillSource ===
                         source
-                          ? 'bg-[var(--color-accent)] text-white'
+                          ? 'bg-[var(--color-accent)] text-[var(--color-on-accent)]'
                           : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]'}"
                         >{source}</button
                       >
@@ -2436,7 +2507,7 @@
                   </div>
                 </div>
                 <label
-                  class="text-[10px] font-medium text-[var(--color-text-secondary)] lg:col-span-2"
+                  class="text-[11px] font-medium text-[var(--color-text-secondary)] lg:col-span-2"
                 >
                   What it does and when to use it
                   <input
@@ -2445,7 +2516,7 @@
                     class="mt-1 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)] px-3 py-2 text-xs text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none"
                   />
                 </label>
-                <label class="text-[10px] font-medium text-[var(--color-text-secondary)]">
+                <label class="text-[11px] font-medium text-[var(--color-text-secondary)]">
                   Trigger phrases <span class="font-normal text-[var(--color-text-muted)]"
                     >· one per line</span
                   >
@@ -2456,7 +2527,7 @@
                     class="mt-1 w-full resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)] px-3 py-2 text-xs text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none"
                   ></textarea>
                 </label>
-                <label class="text-[10px] font-medium text-[var(--color-text-secondary)]">
+                <label class="text-[11px] font-medium text-[var(--color-text-secondary)]">
                   Domains <span class="font-normal text-[var(--color-text-muted)]"
                     >· one per line</span
                   >
@@ -2471,10 +2542,10 @@
                   class="space-y-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3 lg:col-span-2"
                 >
                   <div>
-                    <h5 class="text-[10px] font-semibold text-[var(--color-text-primary)]">
+                    <h5 class="text-[11px] font-semibold text-[var(--color-text-primary)]">
                       Professional relationships
                     </h5>
-                    <p class="mt-1 text-[10px] leading-relaxed text-[var(--color-text-muted)]">
+                    <p class="mt-1 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
                       Broader concepts form the hierarchy. Facets add cross-cutting practice;
                       requirements are mandatory dependencies; conflicts cannot be selected
                       together.
@@ -2482,7 +2553,7 @@
                   </div>
                   <div class="grid gap-3 lg:grid-cols-2">
                     <div class="space-y-1.5">
-                      <span class="text-[10px] font-medium text-[var(--color-text-secondary)]"
+                      <span class="text-[11px] font-medium text-[var(--color-text-secondary)]"
                         >Broader concepts</span
                       >
                       <KorySelect
@@ -2502,14 +2573,14 @@
                             type="button"
                             aria-label={`Remove broader concept ${relation}`}
                             onclick={() => removeBroader(relation)}
-                            class="inline-flex items-center gap-1 rounded-md bg-[var(--color-accent)]/10 px-2 py-1 text-[10px] text-[var(--color-accent)]"
+                            class="inline-flex items-center gap-1 rounded-md bg-[var(--color-accent)]/10 px-2 py-1 text-[11px] text-[var(--color-accent)]"
                             >{relation}<XCircle size={11} /></button
                           >
                         {/each}
                       </div>
                     </div>
                     <div class="space-y-1.5">
-                      <span class="text-[10px] font-medium text-[var(--color-text-secondary)]"
+                      <span class="text-[11px] font-medium text-[var(--color-text-secondary)]"
                         >Cross-cutting facets</span
                       >
                       <KorySelect
@@ -2534,14 +2605,14 @@
                             aria-label={`Remove facet ${relation}`}
                             onclick={() =>
                               (newSkillFacets = newSkillFacets.filter((name) => name !== relation))}
-                            class="inline-flex items-center gap-1 rounded-md bg-[var(--color-surface-3)] px-2 py-1 text-[10px] text-[var(--color-text-secondary)]"
+                            class="inline-flex items-center gap-1 rounded-md bg-[var(--color-surface-3)] px-2 py-1 text-[11px] text-[var(--color-text-secondary)]"
                             >{relation}<XCircle size={11} /></button
                           >
                         {/each}
                       </div>
                     </div>
                     <div class="space-y-1.5">
-                      <span class="text-[10px] font-medium text-[var(--color-text-secondary)]"
+                      <span class="text-[11px] font-medium text-[var(--color-text-secondary)]"
                         >Required skills</span
                       >
                       <KorySelect
@@ -2568,14 +2639,14 @@
                               (newSkillRequires = newSkillRequires.filter(
                                 (name) => name !== relation,
                               ))}
-                            class="inline-flex items-center gap-1 rounded-md bg-[var(--color-surface-3)] px-2 py-1 text-[10px] text-[var(--color-text-secondary)]"
+                            class="inline-flex items-center gap-1 rounded-md bg-[var(--color-surface-3)] px-2 py-1 text-[11px] text-[var(--color-text-secondary)]"
                             >{relation}<XCircle size={11} /></button
                           >
                         {/each}
                       </div>
                     </div>
                     <div class="space-y-1.5">
-                      <span class="text-[10px] font-medium text-[var(--color-text-secondary)]"
+                      <span class="text-[11px] font-medium text-[var(--color-text-secondary)]"
                         >Conflicting skills</span
                       >
                       <KorySelect
@@ -2602,7 +2673,7 @@
                               (newSkillConflicts = newSkillConflicts.filter(
                                 (name) => name !== relation,
                               ))}
-                            class="inline-flex items-center gap-1 rounded-md bg-[var(--color-warning)]/10 px-2 py-1 text-[10px] text-[var(--color-warning)]"
+                            class="inline-flex items-center gap-1 rounded-md bg-[var(--color-warning)]/10 px-2 py-1 text-[11px] text-[var(--color-warning)]"
                             >{relation}<XCircle size={11} /></button
                           >
                         {/each}
@@ -2611,7 +2682,7 @@
                   </div>
                 </div>
                 <div class="space-y-1.5">
-                  <span class="text-[10px] font-medium text-[var(--color-text-secondary)]"
+                  <span class="text-[11px] font-medium text-[var(--color-text-secondary)]"
                     >Target media</span
                   >
                   <KorySelect
@@ -2644,13 +2715,13 @@
                           (newSkillTargetMedia = newSkillTargetMedia.filter(
                             (value) => value !== medium,
                           ))}
-                        class="inline-flex items-center gap-1 rounded-md bg-[var(--color-surface-3)] px-2 py-1 text-[10px] text-[var(--color-text-secondary)] disabled:cursor-not-allowed disabled:opacity-50"
+                        class="inline-flex items-center gap-1 rounded-md bg-[var(--color-surface-3)] px-2 py-1 text-[11px] text-[var(--color-text-secondary)] disabled:cursor-not-allowed disabled:opacity-50"
                         >{medium}<XCircle size={11} /></button
                       >
                     {/each}
                   </div>
                 </div>
-                <label class="text-[10px] font-medium text-[var(--color-text-secondary)]">
+                <label class="text-[11px] font-medium text-[var(--color-text-secondary)]">
                   Exclusion phrases <span class="font-normal text-[var(--color-text-muted)]"
                     >· one per line</span
                   >
@@ -2665,7 +2736,7 @@
                   class="grid gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3 lg:col-span-2 sm:grid-cols-2"
                 >
                   <div>
-                    <div class="mb-2 text-[10px] font-medium text-[var(--color-text-secondary)]">
+                    <div class="mb-2 text-[11px] font-medium text-[var(--color-text-secondary)]">
                       Hierarchy depth
                     </div>
                     <NumberStepper
@@ -2676,12 +2747,12 @@
                       label="Skill hierarchy depth"
                       onchange={(value) => (newSkillDepth = value)}
                     />
-                    <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">
+                    <p class="mt-1 text-[11px] text-[var(--color-text-muted)]">
                       Updated from broader concepts and verified server-side against the graph.
                     </p>
                   </div>
                   <div>
-                    <div class="mb-2 text-[10px] font-medium text-[var(--color-text-secondary)]">
+                    <div class="mb-2 text-[11px] font-medium text-[var(--color-text-secondary)]">
                       Context budget
                     </div>
                     <NumberStepper
@@ -2693,12 +2764,12 @@
                       label="Skill context budget"
                       onchange={(value) => (newSkillContextBudget = value)}
                     />
-                    <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">
+                    <p class="mt-1 text-[11px] text-[var(--color-text-muted)]">
                       Maximum injected characters for this skill, including its prompt header.
                     </p>
                   </div>
                 </div>
-                <label class="text-[10px] font-medium text-[var(--color-text-secondary)]">
+                <label class="text-[11px] font-medium text-[var(--color-text-secondary)]">
                   Should trigger <span class="font-normal text-[var(--color-text-muted)]"
                     >· at least two, one per line</span
                   >
@@ -2709,7 +2780,7 @@
                     class="mt-1 w-full resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)] px-3 py-2 text-xs text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none"
                   ></textarea>
                 </label>
-                <label class="text-[10px] font-medium text-[var(--color-text-secondary)]">
+                <label class="text-[11px] font-medium text-[var(--color-text-secondary)]">
                   Should not trigger <span class="font-normal text-[var(--color-text-muted)]"
                     >· at least two, one per line</span
                   >
@@ -2721,7 +2792,7 @@
                   ></textarea>
                 </label>
                 <label
-                  class="text-[10px] font-medium text-[var(--color-text-secondary)] lg:col-span-2"
+                  class="text-[11px] font-medium text-[var(--color-text-secondary)] lg:col-span-2"
                 >
                   Instructions
                   <textarea
@@ -2732,7 +2803,7 @@
                   ></textarea>
                 </label>
                 <label
-                  class="text-[10px] font-medium text-[var(--color-text-secondary)] lg:col-span-2"
+                  class="text-[11px] font-medium text-[var(--color-text-secondary)] lg:col-span-2"
                 >
                   Completion evidence <span class="font-normal text-[var(--color-text-muted)]"
                     >· one item per line</span
@@ -2746,7 +2817,7 @@
                 </label>
               </div>
               <div class="mt-3 flex items-center justify-between gap-3">
-                <p class="text-[10px] text-[var(--color-text-muted)]">
+                <p class="text-[11px] text-[var(--color-text-muted)]">
                   Personal skills follow you. Project skills live with this workspace.
                 </p>
                 <button
@@ -2760,7 +2831,7 @@
                     splitSkillLines(newSkillPositiveExample).length < 2 ||
                     splitSkillLines(newSkillNegativeExample).length < 2 ||
                     splitSkillLines(newSkillEvidence).length < 1}
-                  class="rounded-lg bg-[var(--color-accent)] px-4 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+                  class="rounded-lg bg-[var(--color-accent)] px-4 py-2 text-xs font-semibold text-[var(--color-on-accent)] disabled:cursor-not-allowed disabled:bg-[var(--color-surface-3)] disabled:text-[var(--color-text-muted)] disabled:shadow-none"
                   >Create draft</button
                 >
               </div>
@@ -2778,19 +2849,19 @@
               type="button"
               onclick={() => void runSkillPreview()}
               disabled={!skillPreviewPrompt.trim()}
-              class="rounded-lg bg-[var(--color-accent)] px-3 py-2 text-xs font-medium text-white disabled:opacity-40"
+              class="rounded-lg bg-[var(--color-accent)] px-3 py-2 text-xs font-medium text-[var(--color-on-accent)] disabled:cursor-not-allowed disabled:bg-[var(--color-surface-3)] disabled:text-[var(--color-text-muted)] disabled:shadow-none"
               >Preview routing plan</button
             >
           </div>
           {#if agentSettingsStore.skillResolutionPreview}
             {@const preview = agentSettingsStore.skillResolutionPreview!}
-            <div class="mt-2 text-[10px] text-[var(--color-text-muted)]">
+            <div class="mt-2 text-[11px] text-[var(--color-text-muted)]">
               Planning-only routing preview · {preview.selected.length} selected ·
               {preview.totalContextCost}/{preview.contextBudget} context characters ({preview.contextOverheadCost}
               manifest/header) ·
               {preview.blocked ? 'routing blocked pending a decision' : 'routing valid'}
             </div>
-            <p class="mt-1 text-[10px] leading-relaxed text-[var(--color-text-muted)]">
+            <p class="mt-1 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
               {preview.planningLimit} This preview never claims that the current manager turn will fit.
             </p>
             {#if preview.selected.length}
@@ -2798,7 +2869,7 @@
                 {#each preview.selected as item (item.skill.hash)}
                   <span
                     title={`${item.reason}${item.representation === 'full' ? '' : ` · ${item.omittedDetailChars} detailed characters omitted to fit context`}`}
-                    class="rounded px-2 py-1 text-[10px] {item.representation === 'full'
+                    class="rounded px-2 py-1 text-[11px] {item.representation === 'full'
                       ? 'bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
                       : 'bg-[var(--color-warning)]/10 text-[var(--color-warning)]'}"
                     >{item.skill.name} · {item.representation} · {item.contextCost}</span
@@ -2808,7 +2879,7 @@
             {/if}
             {#if preview.compressedByBudget.length}
               <div
-                class="mt-2 rounded-lg border border-[var(--color-warning)]/30 bg-[var(--color-warning)]/5 p-2 text-[10px] leading-relaxed text-[var(--color-text-secondary)]"
+                class="mt-2 rounded-lg border border-[var(--color-warning)]/30 bg-[var(--color-warning)]/5 p-2 text-[11px] leading-relaxed text-[var(--color-text-secondary)]"
               >
                 Context-aware compression is active. Koryphaios retained each affected skill’s
                 operating contract, safety boundaries, and completion evidence while omitting
@@ -2823,7 +2894,7 @@
             {/if}
             {#if preview.rejectedCandidates.length}
               <details
-                class="mt-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] p-2 text-[10px]"
+                class="mt-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] p-2 text-[11px]"
               >
                 <summary class="cursor-pointer text-[var(--color-text-secondary)]">
                   Why {preview.rejectedCandidateCount} other skill candidates were not selected
@@ -2845,7 +2916,7 @@
             {/if}
             {#each preview.collisions as collision (collision.name)}
               <div
-                class="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-[var(--color-warning)]/40 bg-[var(--color-warning)]/5 p-2 text-[10px]"
+                class="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-[var(--color-warning)]/40 bg-[var(--color-warning)]/5 p-2 text-[11px]"
               >
                 <span class="text-[var(--color-text-secondary)]"
                   >Choose {collision.name} for this preview:</span
@@ -2861,7 +2932,7 @@
                       void runSkillPreview();
                     }}
                     class="rounded px-2 py-1 {skillCollisionChoices[collision.name] === source
-                      ? 'bg-[var(--color-accent)] text-white'
+                      ? 'bg-[var(--color-accent)] text-[var(--color-on-accent)]'
                       : 'bg-[var(--color-surface-3)] text-[var(--color-text-secondary)]'}"
                     >Use {source}</button
                   >
@@ -2869,7 +2940,7 @@
               </div>
             {/each}
             {#if preview.selectionConflicts.length || preview.hierarchyErrors.length || preview.omittedByBudget.length}
-              <div class="mt-2 text-[10px] text-[var(--color-error)]">
+              <div class="mt-2 text-[11px] text-[var(--color-error)]">
                 {[
                   ...preview.selectionConflicts.map(
                     (item) => `${item.left} conflicts with ${item.right}`,
@@ -2920,20 +2991,20 @@
                   <div class="flex shrink-0 items-center gap-1">
                     {#if skill.bundledUpdateAvailable}
                       <span
-                        class="rounded bg-[var(--color-accent)]/15 px-1.5 py-0.5 text-[9px] text-[var(--color-accent)]"
+                        class="rounded bg-[var(--color-accent)]/15 px-1.5 py-0.5 text-[11px] text-[var(--color-accent)]"
                         title="A newer bundled version is available. Use Compare to review and merge."
                         >update</span
                       >
                     {/if}
                     <span
-                      class="rounded px-1.5 py-0.5 text-[9px] {skill.state === 'active'
+                      class="rounded px-1.5 py-0.5 text-[11px] {skill.state === 'active'
                         ? 'bg-[var(--color-success)]/15 text-[var(--color-success)]'
                         : 'bg-[var(--color-warning)]/15 text-[var(--color-warning)]'}"
                       >{skill.state}</span
                     >
                   </div>
                 </div>
-                <div class="mt-1 text-[10px] text-[var(--color-text-muted)]">
+                <div class="mt-1 text-[11px] text-[var(--color-text-muted)]">
                   {skill.source} · v{skill.metadata.version}
                 </div>
               </button>
@@ -2948,7 +3019,7 @@
                   <div class="text-sm font-semibold text-[var(--color-text-primary)]">
                     {selectedSkill.name}
                   </div>
-                  <div class="truncate text-[10px] text-[var(--color-text-muted)]">
+                  <div class="truncate text-[11px] text-[var(--color-text-muted)]">
                     {selectedSkill.description} · base {selectedSkill.metadata.baseVersion} · budget {selectedSkill
                       .metadata.contextBudget}
                   </div>
@@ -2966,18 +3037,18 @@
                   <button
                     onclick={() => void saveSelectedSkillDraft()}
                     disabled={!skillDraftDirty}
-                    class="rounded-md bg-[var(--color-accent)] px-2 py-1 text-xs text-white disabled:opacity-40"
+                    class="rounded-md bg-[var(--color-accent)] px-2 py-1 text-xs text-[var(--color-on-accent)] disabled:cursor-not-allowed disabled:bg-[var(--color-surface-3)] disabled:text-[var(--color-text-muted)] disabled:shadow-none"
                     >Save draft</button
                   >
                   {#if selectedSkill.state === 'draft'}<button
                       onclick={() => agentSettingsStore.testAndActivateSkill(selectedSkill)}
-                      class="rounded-md bg-[var(--color-success)] px-2 py-1 text-xs text-white"
+                      class="rounded-md bg-[var(--color-success)] px-2 py-1 text-xs text-[var(--color-on-success)]"
                       >Test & activate</button
                     >{/if}
                 </div>
               </div>
               <div
-                class="flex flex-wrap gap-1.5 border-b border-[var(--color-border)] px-4 py-2 text-[10px] text-[var(--color-text-muted)]"
+                class="flex flex-wrap gap-1.5 border-b border-[var(--color-border)] px-4 py-2 text-[11px] text-[var(--color-text-muted)]"
               >
                 {#each selectedSkill.metadata.broader as broader (broader)}<span
                     class="rounded bg-[var(--color-accent)]/10 px-1.5 py-0.5 text-[var(--color-accent)]"
@@ -3010,7 +3081,7 @@
                   >{/if}
               </div>
               <div
-                class="border-b border-[var(--color-border)] px-4 py-2 text-[10px] text-[var(--color-text-muted)]"
+                class="border-b border-[var(--color-border)] px-4 py-2 text-[11px] text-[var(--color-text-muted)]"
               >
                 {#if selectedSkillQualifications.length}
                   <span class="font-semibold text-[var(--color-text-secondary)]"
@@ -3028,7 +3099,7 @@
                 {/if}
               </div>
               <div
-                class="border-b border-[var(--color-border)] px-4 py-2 text-[10px] text-[var(--color-text-muted)]"
+                class="border-b border-[var(--color-border)] px-4 py-2 text-[11px] text-[var(--color-text-muted)]"
               >
                 {#if selectedSkillEvaluation}
                   {@const gate = selectedSkillEvaluation!.gate}
@@ -3070,48 +3141,49 @@
     {:else if agentSettingsStore.activeTab === 'preferences'}
       {@const prefs = agentSettingsStore.preferences}
       <div class="preferences-settings-scroll h-full min-h-0 overflow-y-auto">
-        <div class="preferences-settings-page">
-          <header class="preferences-page-header">
-            <div>
-              <h2>Workflow preferences</h2>
-              <p>Plain-language rules and standards Kory should follow in this project.</p>
-              {#if prefs?.exists}
-                <span class="preferences-file-meta"><CheckCircle size={13} /> {prefs.path}</span>
-              {:else}
-                <span class="preferences-file-meta warning"
-                  ><AlertTriangle size={13} /> Not initialized</span
-                >
-              {/if}
-            </div>
-            <div class="preferences-page-actions">
-              {#if !prefs?.exists}
-                <button
-                  type="button"
-                  class="preferences-primary-action"
-                  onclick={() => agentSettingsStore.initializePreferences()}
-                >
-                  <Plus size={14} /> Initialize preferences
-                </button>
-              {:else}
-                <button
-                  type="button"
-                  class="preferences-text-action"
-                  onclick={handleResetPreferences}
-                  disabled={!preferencesDirty}
-                >
-                  <RotateCcw size={14} /> Reset
-                </button>
-                <button
-                  type="button"
-                  class="preferences-primary-action"
-                  onclick={handleSavePreferences}
-                  disabled={!preferencesDirty}
-                >
-                  <Save size={14} /> Save changes
-                </button>
-              {/if}
-            </div>
-          </header>
+        <SettingsPage
+          title="Workflow preferences"
+          description="Plain-language rules and standards Kory should follow in this project."
+          width="wide"
+        >
+          {#snippet meta()}
+            {#if prefs?.exists}
+              <span class="preferences-file-meta"><CheckCircle size={13} /> {prefs.path}</span>
+            {:else}
+              <span class="preferences-file-meta warning"
+                ><AlertTriangle size={13} /> Not initialized</span
+              >
+            {/if}
+            {@render projectScope()}
+          {/snippet}
+          {#snippet actions()}
+            {#if !prefs?.exists}
+              <button
+                type="button"
+                class="preferences-primary-action"
+                onclick={() => agentSettingsStore.initializePreferences()}
+              >
+                <Plus size={14} /> Initialize preferences
+              </button>
+            {:else}
+              <button
+                type="button"
+                class="preferences-text-action"
+                onclick={handleResetPreferences}
+                disabled={!preferencesDirty}
+              >
+                <RotateCcw size={14} /> Reset
+              </button>
+              <button
+                type="button"
+                class="preferences-primary-action"
+                onclick={handleSavePreferences}
+                disabled={!preferencesDirty}
+              >
+                <Save size={14} /> Save changes
+              </button>
+            {/if}
+          {/snippet}
 
           <section class="preferences-editor-section" aria-labelledby="preferences-editor-title">
             <div class="preferences-section-heading">
@@ -3128,9 +3200,11 @@
             </div>
             {#if !prefs?.exists}
               <div class="preferences-empty-state">
-                <FileText size={32} />
-                <strong>No preferences file yet</strong>
-                <span>Initialize a thoughtful starter template, then make it yours.</span>
+                <FileText size={18} />
+                <div>
+                  <strong>No preferences file yet</strong>
+                  <span>Initialize a thoughtful starter template, then make it yours.</span>
+                </div>
               </div>
             {:else}
               <textarea
@@ -3141,14 +3215,14 @@
                 spellcheck="false"
               ></textarea>
             {/if}
-          </section>
 
-          <footer class="preferences-page-footer">
-            <span>Stored locally in this project. Changes apply to future agent work.</span>
-            {#if prefs?.exists}<span class="preferences-path" title={prefs.path}>{prefs.path}</span
-              >{/if}
-          </footer>
-        </div>
+            <footer class="preferences-page-footer">
+              <span>Stored locally in this project. Changes apply to future agent work.</span>
+              {#if prefs?.exists}<span class="preferences-path" title={prefs.path}>{prefs.path}</span
+                >{/if}
+            </footer>
+          </section>
+        </SettingsPage>
       </div>
     {/if}
   </div>
@@ -3173,68 +3247,52 @@
     background: var(--color-surface-1);
   }
 
-  .agent-settings-content {
+  .agent-settings-content,
+  .preferences-settings-scroll,
+  .agent-gutter {
     scrollbar-gutter: stable;
   }
 
-  .agent-settings-page,
-  .preferences-settings-page {
-    width: min(100%, 980px);
-    padding: 22px 0 52px;
-    color: var(--color-text-primary);
+  /* Non-scrolling strips (tabs, save errors) reserve the same scrollbar
+     gutter as the scrolling page so their column lines up with it. */
+  .agent-gutter {
+    overflow: hidden;
   }
 
-  .agent-page-header,
-  .preferences-page-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 24px;
-    margin: 0 0 26px;
-    padding: 8px 0 4px;
+  /* Mirrors SettingsPage width="wide": same max width, centering and inline
+     padding, so the tab strip shares the page's left edge. */
+  .agent-column {
+    width: 100%;
+    max-width: calc(1080px + 64px);
+    margin-inline: auto;
+    padding-inline: 32px;
   }
 
-  .agent-page-actions {
-    display: flex;
-    flex-shrink: 0;
-    align-items: flex-end;
-    gap: 12px;
-  }
-
-  .agent-page-header h2,
-  .preferences-page-header h2 {
-    margin: 0;
-    font-size: 26px;
-    font-weight: 600;
-    letter-spacing: -0.04em;
-    line-height: 1.15;
-  }
-
-  .agent-page-header p,
-  .preferences-page-header p {
-    max-width: 68ch;
-    margin: 9px 0 0;
-    color: var(--color-text-secondary);
-    font-size: 13px;
-    line-height: 1.65;
+  @media (max-width: 640px) {
+    .agent-column {
+      padding-inline: 16px;
+    }
   }
 
   .agent-page-summary {
     display: flex;
     flex-wrap: wrap;
-    justify-content: flex-end;
     gap: 8px;
-    max-width: 360px;
-    padding-top: 2px;
   }
 
-  .agent-page-summary span {
+  .agent-page-summary button {
     padding: 5px 9px;
     border-radius: 6px;
     background: var(--color-surface-2);
     color: var(--color-text-secondary);
     font-size: 11px;
     white-space: nowrap;
+    transition: background-color 150ms ease-out;
+  }
+
+  .agent-page-summary button:hover {
+    background: var(--color-surface-3);
+    color: var(--color-text-primary);
   }
 
   .agent-reset-action {
@@ -3249,8 +3307,7 @@
     white-space: nowrap;
   }
 
-  .agent-reset-action:focus-visible,
-  .agent-section-index button:focus-visible {
+  .agent-reset-action:focus-visible {
     outline: 2px solid color-mix(in srgb, var(--color-accent) 70%, transparent);
     outline-offset: 1px;
   }
@@ -3260,43 +3317,79 @@
     color: var(--color-error);
   }
 
-  .agent-section-index {
-    position: sticky;
-    z-index: 2;
-    top: 0;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    min-height: 42px;
-    margin: 0 0 4px;
-    padding: 4px;
-    overflow-x: auto;
-    border: 1px solid color-mix(in srgb, var(--color-text-muted) 15%, transparent);
-    border-radius: 9px;
-    background: color-mix(in srgb, var(--color-surface-1) 94%, transparent);
-    box-shadow: 0 5px 14px color-mix(in srgb, var(--color-surface-0) 18%, transparent);
-    backdrop-filter: blur(10px);
+  .agent-subheading {
+    padding: 14px 20px 2px;
+    color: var(--color-text-muted);
+    font-size: 10px;
+    font-weight: 650;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
   }
 
-  .agent-section-index button {
-    flex: 0 0 auto;
-    min-height: 30px;
-    border-radius: 6px;
-    padding: 0 9px;
+  .agent-subnote {
+    margin: 2px 20px 4px;
     color: var(--color-text-muted);
     font-size: 11px;
-    font-weight: 550;
-    white-space: nowrap;
   }
 
-  .agent-section-index button:hover,
-  .agent-section-index button[aria-current='location'] {
-    background: var(--color-surface-3);
+  .agent-block-heading {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 0 0 12px;
+  }
+
+  .agent-block-heading h3 {
+    margin: 0;
     color: var(--color-text-primary);
+    font-size: 14px;
+    font-weight: 600;
   }
 
-  .agent-section-index button[aria-current='location'] {
+  .agent-block-heading p {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: 12px;
+    line-height: 1.55;
+  }
+
+  .agent-card {
+    overflow: hidden;
+    border: 1px solid var(--color-border);
+    border-radius: 1rem;
+    background: var(--color-surface-1);
+  }
+
+  .agent-status-pill {
+    border-radius: 999px;
+    padding: 2px 9px;
+    background: var(--color-surface-3);
+    color: var(--color-text-muted);
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .agent-status-pill[data-on='true'] {
+    background: var(--color-success-bg);
+    color: var(--color-success);
+  }
+
+  .agent-text-button {
+    border-radius: 6px;
+    padding: 3px 8px;
     color: var(--color-accent);
+    font-size: 12px;
+    font-weight: 550;
+  }
+
+  .agent-text-button:hover {
+    background: var(--color-surface-2);
+  }
+
+  .agent-text-button:focus-visible,
+  .agent-page-summary button:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-accent) 70%, transparent);
+    outline-offset: 1px;
   }
 
   .routing-explainer {
@@ -3339,10 +3432,6 @@
     box-shadow: none !important;
   }
 
-  :global(.agent-settings-page > .rounded-2xl.border:first-of-type) {
-    border-top: 0 !important;
-  }
-
   .agent-settings-content :global(.rounded-2xl.border > button) {
     min-height: 58px;
     padding-inline: 0;
@@ -3380,7 +3469,7 @@
     border-color: transparent !important;
   }
 
-  .agent-settings-content :global(button[role='switch']:not(.flat)) {
+  .agent-settings-content :global(button[role='switch']:not(.flat):not(.kory-toggle)) {
     border-color: transparent !important;
     border-radius: 0 !important;
     background: transparent !important;
@@ -3395,137 +3484,17 @@
     box-shadow: none !important;
   }
 
-  .quality-content {
-    border-top: 1px solid color-mix(in srgb, var(--color-text-muted) 15%, transparent);
-  }
-
-  .quality-primary {
-    padding: 22px 0 18px;
-  }
-
-  .quality-copy {
-    max-width: 760px;
-  }
-
-  .quality-title-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-  }
-
-  .quality-title-row h4 {
-    margin: 0;
-    font-size: 14px;
-    font-weight: 600;
-  }
-
-  .quality-title-row p {
-    max-width: 68ch;
-    margin: 5px 0 0;
-    color: var(--color-text-muted);
-    font-size: 12px;
-    line-height: 1.6;
-  }
-
-  .quality-primary :global(button[role='switch']) {
-    margin-top: 14px;
-    padding: 10px 0;
-  }
-
-  .quality-advanced-toggle {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    border-top: 1px solid color-mix(in srgb, var(--color-text-muted) 12%, transparent);
-    padding: 14px 0;
-  }
-
-  .quality-advanced-toggle > div {
-    display: flex;
-    min-width: 0;
-    flex-direction: column;
-    gap: 3px;
-  }
-
-  .quality-advanced-toggle strong {
-    color: var(--color-text-secondary);
-    font-size: 12px;
-    font-weight: 550;
-  }
-
-  .quality-advanced-toggle span {
-    color: var(--color-text-muted);
-    font-size: 11px;
-  }
-
-  .text-action {
-    flex: 0 0 auto;
-    border-radius: 6px;
-    padding: 5px 8px;
-    color: var(--color-accent);
-    font-size: 11px;
-    font-weight: 550;
-  }
-
-  .text-action:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--color-accent) 10%, transparent);
-  }
-
-  .text-action:disabled {
-    cursor: not-allowed;
-    opacity: 0.4;
-  }
-
-  .quality-advanced {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 18px;
-    border-top: 1px solid color-mix(in srgb, var(--color-text-muted) 12%, transparent);
-    padding: 18px 0 6px;
-  }
-
-  .quality-passes {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 18px;
-    min-width: 0;
-  }
-
-  .quality-passes p {
-    max-width: 34ch;
-    margin: 5px 0 0;
-    color: var(--color-text-muted);
-    font-size: 10px;
-    line-height: 1.5;
-  }
-
-  @media (max-width: 640px) {
-    .quality-advanced {
-      grid-template-columns: minmax(0, 1fr);
-    }
-  }
-
   .preferences-file-meta {
     display: inline-flex;
+    min-width: 0;
     align-items: center;
     gap: 6px;
-    margin-top: 14px;
     color: var(--color-success);
     font-size: 11px;
   }
 
   .preferences-file-meta.warning {
     color: var(--color-warning);
-  }
-
-  .preferences-page-actions {
-    display: flex;
-    flex-shrink: 0;
-    align-items: center;
-    gap: 10px;
-    padding-top: 2px;
   }
 
   .preferences-primary-action,
@@ -3546,7 +3515,7 @@
 
   .preferences-primary-action {
     background: var(--color-accent);
-    color: var(--color-surface-0);
+    color: var(--color-on-accent);
   }
 
   .preferences-primary-action:hover:not(:disabled) {
@@ -3562,15 +3531,20 @@
     color: var(--color-text-primary);
   }
 
-  .preferences-primary-action:disabled,
+  .preferences-primary-action:disabled {
+    cursor: not-allowed;
+    background: var(--color-surface-3);
+    color: var(--color-text-muted);
+    box-shadow: none;
+  }
+
   .preferences-text-action:disabled {
     cursor: not-allowed;
     opacity: 0.42;
   }
 
   .preferences-editor-section {
-    border-top: 1px solid color-mix(in srgb, var(--color-text-muted) 15%, transparent);
-    padding-top: 22px;
+    min-width: 0;
   }
 
   .preferences-section-heading {
@@ -3583,12 +3557,13 @@
 
   .preferences-section-heading h3 {
     margin: 0;
-    font-size: 15px;
+    color: var(--color-text-primary);
+    font-size: 14px;
     font-weight: 600;
   }
 
   .preferences-section-heading p {
-    margin: 5px 0 0;
+    margin: 4px 0 0;
     color: var(--color-text-muted);
     font-size: 12px;
     line-height: 1.6;
@@ -3623,29 +3598,30 @@
 
   .preferences-empty-state {
     display: flex;
-    min-height: 360px;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 9px;
+    align-items: flex-start;
+    gap: 12px;
     border-radius: 8px;
-    background: var(--color-surface-0);
+    padding: 14px 16px;
+    background: var(--color-surface-2);
     color: var(--color-text-muted);
-    outline: 1px solid color-mix(in srgb, var(--color-text-muted) 12%, transparent);
-    text-align: center;
   }
 
-  :global(.preferences-empty-state svg) {
-    margin-bottom: 5px;
+  .preferences-empty-state :global(svg) {
+    flex-shrink: 0;
+    margin-top: 1px;
     color: var(--color-text-muted);
   }
 
   .preferences-empty-state strong {
+    display: block;
     color: var(--color-text-primary);
     font-size: 13px;
+    font-weight: 600;
   }
 
   .preferences-empty-state span {
+    display: block;
+    margin-top: 2px;
     font-size: 12px;
   }
 
@@ -3666,35 +3642,6 @@
   }
 
   @media (max-width: 720px) {
-    .agent-page-header,
-    .preferences-page-header {
-      flex-direction: column;
-      gap: 14px;
-    }
-
-    .agent-page-summary {
-      justify-content: flex-start;
-      max-width: none;
-    }
-
-    .agent-page-actions {
-      width: 100%;
-      flex-wrap: wrap;
-      align-items: flex-start;
-    }
-
-    .agent-reset-action {
-      margin-left: auto;
-    }
-
-    .preferences-page-actions {
-      width: 100%;
-    }
-
-    .preferences-page-actions > *:last-child {
-      margin-left: auto;
-    }
-
     .preferences-page-footer {
       flex-direction: column;
       gap: 5px;

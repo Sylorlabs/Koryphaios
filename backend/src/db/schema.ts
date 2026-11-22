@@ -8,6 +8,7 @@ import {
   text,
   integer,
   real,
+  blob,
   primaryKey,
   unique,
   index,
@@ -90,7 +91,7 @@ export const sessionTurnCommands = sqliteTable(
     sessionId: text('session_id')
       .notNull()
       .references(() => sessions.id, { onDelete: 'cascade' }),
-    source: text('source', { enum: ['goal', 'collaboration', 'internal'] }).notNull(),
+    source: text('source', { enum: ['goal', 'collaboration', 'internal', 'user'] }).notNull(),
     sourceCommandId: text('source_command_id').notNull(),
     inputHash: text('input_hash').notNull(),
     userMessageId: text('user_message_id').notNull(),
@@ -120,7 +121,7 @@ export const sessionTurnCommands = sqliteTable(
     ),
     check(
       'ck_session_turn_commands_source',
-      sql`${table.source} IN ('goal', 'collaboration', 'internal')`,
+      sql`${table.source} IN ('goal', 'collaboration', 'internal', 'user')`,
     ),
     check(
       'ck_session_turn_commands_status',
@@ -854,7 +855,16 @@ export const providerEndpointOverride = sqliteTable('provider_endpoint_override'
 export const notes = sqliteTable('notes', {
   id: text('id').primaryKey(),
   title: text('title').notNull(),
+  /** Project documents keep '' here while their source file exists; the file
+   * is authoritative. Missing-source and DB-native notes store the body. */
   content: text('content').notNull().default(''),
+  /** sha256 of the body the DB last indexed (file text for project docs). */
+  contentHash: text('content_hash'),
+  contentBytes: integer('content_bytes'),
+  /** JSON array of frontmatter aliases, precomputed at every write/index. */
+  aliases: text('aliases').notNull().default('[]'),
+  /** 1 when the body can contain [[wikilinks]] or .md/.htm path references. */
+  hasRefs: integer('has_refs').notNull().default(0),
   folderPath: text('folder_path').notNull().default('/'),
   tags: text('tags').notNull().default('[]'), // JSON string array
   pinned: integer('pinned').notNull().default(0), // boolean 0/1
@@ -871,6 +881,16 @@ export const notes = sqliteTable('notes', {
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 });
 
+/** Compressed, hash-deduplicated revision bodies. Identical text is stored
+ * once and shared by every snapshot that produced it. */
+export const noteRevisionBlobs = sqliteTable('note_revision_blobs', {
+  id: integer('id').primaryKey(),
+  hash: text('hash').notNull().unique(),
+  codec: text('codec').notNull(),
+  rawBytes: integer('raw_bytes').notNull(),
+  data: blob('data', { mode: 'buffer' }).notNull(),
+});
+
 /** Immutable full-state snapshots. The current row remains the fast read model;
  * this table is the recovery/history source of truth. */
 export const noteRevisions = sqliteTable(
@@ -883,7 +903,10 @@ export const noteRevisions = sqliteTable(
     projectRoot: text('project_root').notNull(),
     operation: text('operation').notNull(),
     title: text('title').notNull(),
-    content: text('content').notNull(),
+    /** The revision body lives exactly once in note_revision_blobs. */
+    contentBlobId: integer('content_blob_id')
+      .notNull()
+      .references(() => noteRevisionBlobs.id),
     contentBytes: integer('content_bytes').notNull(),
     folderPath: text('folder_path').notNull(),
     tags: text('tags').notNull(),

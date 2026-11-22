@@ -13,25 +13,27 @@ import {
 import {
   auditSkillEvalExecutionReadiness,
   runPairedSkillEvaluationV3,
-} from '../backend/src/kory/skill-eval-execution';
+} from '../backend/src/eval/skills/skill-eval-execution';
 import {
   BUILTIN_SKILL_EVAL_MATERIALIZERS,
   BUILTIN_SKILL_EVAL_SCORERS,
-} from '../backend/src/kory/skill-eval-fixtures';
+} from '../backend/src/eval/skills/skill-eval-fixtures';
 import {
   CURRENT_SKILL_EVAL_CONTRACT_VERSION,
   listOpenSkillRegressionSources,
   listSkillEvaluationRuns,
 } from '../backend/src/kory/skill-evaluations';
-import { hasCompleteCurrentSkillPair } from '../backend/src/kory/skill-eval-campaign-resume';
-import { skillEvaluationV5ContractHash } from '../backend/src/kory/skill-eval-contract-hash';
+import { hasCompleteCurrentSkillPair } from '../backend/src/eval/skills/skill-eval-campaign-resume';
+import { assertPackagedEvalBackend } from './eval-backend-guard';
+import { applyPermissionMode, isEvalPermissionMode, restorePermissionMode } from './eval-permission';
+import { skillEvaluationV5ContractHash } from '../backend/src/eval/skills/skill-eval-contract-hash';
 import {
   loadV5SkillPackages,
   type V5CompiledSkillPackage,
   type V5FullTaskFixture,
 } from '../backend/src/kory/skill-packages';
 import { listSkills, type SkillRevision } from '../backend/src/kory/skills';
-import type { SkillEvalScenarioV3 } from '../backend/src/kory/skill-eval-harness';
+import type { SkillEvalScenarioV3 } from '../backend/src/eval/skills/skill-eval-harness';
 
 const projectRoot = resolve(import.meta.dir, '..');
 const evaluationContractVersion = CURRENT_SKILL_EVAL_CONTRACT_VERSION;
@@ -54,6 +56,15 @@ const requestedScenarios = new Set(
     .map((argument) => argument.slice('--scenario='.length).trim())
     .filter(Boolean),
 );
+const requestedPermissionMode = process.argv
+  .find((argument) => argument.startsWith('--permission-mode='))
+  ?.slice('--permission-mode='.length)
+  .trim();
+if (requestedPermissionMode && !isEvalPermissionMode(requestedPermissionMode)) {
+  throw new Error(
+    `Invalid --permission-mode=${requestedPermissionMode}; expected one of ${['yolo', 'guarded', 'edits', 'ask', 'custom'].join(', ')}`,
+  );
+}
 const force = process.argv.includes('--force');
 const openRegressionsOnly = process.argv.includes('--open-regressions');
 const dryRun = process.argv.includes('--dry-run');
@@ -120,6 +131,28 @@ const selectedPackages = requestedSkills.size
     })
   : packages;
 
+// Refuse to spend provider calls against a source watcher: a restart mid turn kills
+// the arm and scores it as a candidate failure. `bun run eval:backend` starts the
+// packaged bundle with the same config, credentials and data directory.
+if (!process.argv.includes('--allow-watcher-backend')) {
+  const watcherWarning = process.env.KORY_SKILL_EVAL_ALLOW_WATCHER_BACKEND?.trim();
+  if (!watcherWarning) await assertPackagedEvalBackend();
+}
+
+// The guarded preset refuses the shell a build and render fixture needs, and the
+// backend records SHELL_METACHARACTERS or EXECUTABLE_NOT_ALLOWED instead of the
+// subject's turn. The preset is project scoped, so it is set for the run and put
+// back when the run ends, whatever the outcome.
+let restoreEvaluatedPermissionMode: string | undefined;
+let permissionModeApplied = false;
+if (requestedPermissionMode && !dryRun) {
+  restoreEvaluatedPermissionMode = await applyPermissionMode(requestedPermissionMode);
+  permissionModeApplied = true;
+  console.log(
+    `[eval-permission] preset ${JSON.stringify(restoreEvaluatedPermissionMode ?? 'default')} -> ${JSON.stringify(requestedPermissionMode)}`,
+  );
+}
+
 const fixtureReadiness = auditSkillEvalExecutionReadiness(
   selectedPackages,
   BUILTIN_SKILL_EVAL_MATERIALIZERS,
@@ -135,6 +168,7 @@ const readiness = applySkillEvalExecutorReadiness(
     })),
   ),
   executorSelection,
+  BUILTIN_SKILL_EVAL_MATERIALIZERS,
 );
 const readinessByScenario = new Map(readiness.map((row) => [row.scenarioId, row]));
 function contractHash(skillPackage: V5CompiledSkillPackage, task: V5FullTaskFixture): string {
@@ -318,16 +352,17 @@ async function runWorker(): Promise<void> {
         run.variant === 'with-skill' &&
         Boolean(run.comparisonId),
     ).length;
-    try {
-      const result = await runPairedSkillEvaluationV3({
+    // A backend that has just started answers the first turn with a terminal session and no
+    // assistant message, which is a cold provider registry rather than anything about the arm.
+    // Retry that signature once, and only that signature: the retry is a re-measurement, and a
+    // second identical outcome still fails the pair as infrastructure.
+    const runPair = () =>
+      runPairedSkillEvaluationV3({
         projectRoot,
         skillPackage,
         scenarioId: task.id,
         skillRevisionHash: revision.hash,
-        harnessVersion: campaignHarnessVersion(
-          evaluationContractHash,
-          dispatchExecutorDescriptor,
-        ),
+        harnessVersion: campaignHarnessVersion(evaluationContractHash, dispatchExecutorDescriptor),
         evaluationContractHash,
         evaluationContractVersion,
         regressionId,
@@ -337,6 +372,27 @@ async function runWorker(): Promise<void> {
         persist: true,
         executionOrder: priorPairCount % 2 === 0 ? 'without-skill-first' : 'with-skill-first',
       });
+    const isColdBackendSignature = (value: Awaited<ReturnType<typeof runPair>>): boolean => {
+      const failures = [
+        value.withSkill.observation.infrastructureFailure,
+        value.withoutSkill.observation.infrastructureFailure,
+      ].filter((failure): failure is NonNullable<typeof failure> => Boolean(failure));
+      if (!failures.length) return false;
+      return failures.every(
+        (failure) =>
+          failure.kind === 'setup' &&
+          /produced no assistant message|withheld the turn/iu.test(failure.detail),
+      );
+    };
+    try {
+      let result = await runPair();
+      if (isColdBackendSignature(result)) {
+        console.warn(
+          `[campaign] ${skillPackage.sidecar.name}/${task.id}: backend produced no assistant message, retrying the pair once after it warms`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20_000));
+        result = await runPair();
+      }
       try {
         dispatch.observe([
           result.withSkill.observation.infrastructureFailure,
@@ -471,6 +527,14 @@ console.log(
     2,
   ),
 );
+
+if (permissionModeApplied) {
+  permissionModeApplied = false;
+  await restorePermissionMode(restoreEvaluatedPermissionMode);
+  console.log(
+    `[eval-permission] preset restored to ${JSON.stringify(restoreEvaluatedPermissionMode ?? 'default')}`,
+  );
+}
 
 // The summary must be flushed before the one-shot process exits. Provider
 // adapters are responsible for closing their own resources; forcing exit here

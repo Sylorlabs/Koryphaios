@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "svelte-engineering",
-  "version": "5.1.2",
+  "version": "5.1.4",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",

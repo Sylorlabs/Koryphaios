@@ -4,7 +4,8 @@
   let { icon, size = 16 }: { icon?: NoteIcon; size?: number } = $props();
 </script>
 
-<span class="note-icon" style:width={`${size}px`} style:height={`${size}px`} style:font-size={`${size}px`} aria-hidden="true">
+<span class="note-icon" style:width={`${size}px`} style:height={`${size}px`} style:font-size={`${size}px`}
+  title={icon?.label ?? undefined} aria-label={icon?.label ?? undefined} aria-hidden={icon?.label ? undefined : true}>
   {#if icon && isNoteIcon(icon)}
     {#if icon.kind === 'image'}<img src={icon.value} alt="" />{:else}{icon.value}{/if}
   {:else}<FileText {size} />{/if}

@@ -72,6 +72,88 @@ Legacy rows without `parts` render as `[reasoning(reasoningContent)?, text(conte
 `SessionRuntimeRegistry`. Deleting or erasing a session disposes the whole
 runtime in one call. Do not add a new `Map<sessionId, …>` field to the manager.
 
+## Replay never rebuilds a persisted turn
+
+A fresh renderer (no durable cursor) subscribes and loads the HTTP message
+projection in parallel. Since a persisted turn's `parts` are the fold of exactly
+its `stream.*` events, replaying those events would rebuild rows the projection
+already carries — per token, only to be replaced by id. The subscription's
+replay filter therefore suppresses an event only when **both** hold:
+
+- `payload.messageId` names a message already durable well before the subscribe
+  (a recency margin keeps a just-committed turn replaying — it may have raced
+  the renderer's projection read), and
+- `turnEventFromWSMessage(event)` is non-null — i.e. the shared fold itself
+  would have consumed the event. The predicate is the fold, not a parallel
+  list, so it cannot drift from what `parts` covers.
+
+Everything else keeps replaying: the in-flight turn (unpersisted messageId),
+worker/critic streams (never stamped), `kory.*`/`agent.*` operational rows (not
+in `parts`), and stamped-but-unfolded types like `stream.usage`. A
+cursor-carrying resume is never filtered: events missed for a turn that
+persisted while the client was away are the only copy left.
+
+## Turn start is one durable write path
+
+A user turn starts through `KoryManager.startSessionTurn()`. Every non-image
+send from `POST /api/messages` does, including sends with no `clientMessageId`,
+which get a server-minted `srv_` source id. The rules below are what that path
+guarantees.
+
+- **The ledger is the intent record.** The `session_turn_commands` row is written
+  before the user input, and it names the input (`user_message_id`) and the
+  response (`response_message_id`). A crash cannot leave a message that no command
+  explains.
+- **Input is idempotent.** The input is written with `messages.addIdempotent`, so
+  the same command can never persist its message twice.
+- **Receipts replay.** A command that was already admitted returns its stored
+  receipt (`replay`, `runId`, `userMessageId`) instead of starting a second turn.
+  A different payload under the same id is a 409, never a replay.
+- **A never-persisted input can be reclaimed.** If admission failed before the
+  input was written, no side effect happened. The same id and the same canonical
+  input reclaim the command and run it once. Any other input is still a conflict.
+- **A persisted but interrupted turn is never replayed automatically.** Once the
+  input is durable and its run is lost (for example to a restart), the receipt
+  reports `command_execution_was_interrupted; explicit retry required`, and
+  nothing re-runs the provider on its own. When the run's terminal reason is
+  `backend_restarted_during_active_run`, the composer shows a one-click **Resume**
+  row that sends an explicit continuation as a new command. No verified CLI can
+  resume a provider conversation across a restart (`docs/architecture/provider-lifecycle.md`),
+  so the explicit continuation is the honest behavior.
+- **A user send never bounces off recoverable work.** `startSessionTurn` for
+  `source: 'user'` never returns `session_busy` while the blocker is
+  recoverable. A stale aborted claim or an orphaned durable run is
+  terminalized and reclaimed; cancellable local work whose snapshot is
+  `waiting` (a parked question or process wait) is cancelled first. The send
+  then runs as a new command. A durable mutation barrier (Time Travel,
+  erasure) is never superseded, and non-user producers (`goal`,
+  `collaboration`, `internal`) keep the strict reject-on-busy contract.
+- **A live run is steered at a checkpoint, not cancelled mid-flight.** When a
+  genuinely live local run holds the session, a user send is parked behind
+  it: the message persists eagerly, a durable `usrsteer_<sourceCommandId>`
+  row is enqueued in `agent_steering_commands` under the manager identity,
+  and the turn loop samples the park at the same checkpoints a stop uses —
+  after the current tool call or provider turn, never mid-edit or
+  mid-stream. The run then settles `steered_by_user`, unexecuted tool calls
+  in its last batch receive synthetic "skipped" results so no `tool_call` is
+  left dangling, and `drainManagerSteeringQueue` admits the parked send as
+  the next turn through the normal command-ledger path. The parked row id is
+  deterministic, so a retry replays the same receipt; a restart drains the
+  row from its durable content. Explicit **Stop** still aborts immediately
+  and cancels parked rows, so a stop cannot resurrect a queued send.
+- **Superseded turns are silent.** When an old run loses ownership to a newer
+  one (`TurnOwnershipLostError`), its stack publishes no terminal decision and
+  no `system.error`; only the owning run may report state.
+- **Image turns and regeneration steer too.** `processImageMessage` and the
+  regenerate routes reserve through `reserveSessionTurnAfterSteer`, which
+  supersedes cancellable work before reserving. Image generation itself is
+  not a provider chat loop and has no ledger-backed dispatch yet, so it keeps
+  the admitted path (`reserveSessionTurn` plus `messages.add`) after the
+  steer.
+
+New producers of user turns call `startSessionTurn`; never write a user message
+and dispatch separately.
+
 ## Enforcement
 
 - `shared/src/transcript/*.test.ts` — reducer ordering rules.

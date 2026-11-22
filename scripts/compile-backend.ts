@@ -46,7 +46,7 @@ export async function compileBackendForCI(
   const staged = join(scratch, basename(outfile));
   try {
     await compileEmbeddedBackend({
-      entrypoint: resolve(import.meta.dir, '../backend/src/server.ts'),
+      entrypoint: resolve(import.meta.dir, '../backend/src/packaged-entry.ts'),
       outfile: staged,
       bunTarget,
       relayUrl,

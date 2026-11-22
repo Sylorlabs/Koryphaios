@@ -7,15 +7,19 @@
 // Platform support:
 //   - Linux: bubblewrap mount/PID/network namespaces.
 //   - macOS: sandbox-exec profile generated from allowed roots.
-//   - Windows / unsupported: unavailable. Sandbox-required callers must
-//     reject the command instead of silently running it without confinement.
+//   - Windows: WSL plus bubblewrap. Windows has no unprivileged kernel sandbox
+//     a Node child can bind directly, so confinement runs inside the installed
+//     distribution and every grant and the working directory are translated to
+//     their WSL paths. Without WSL and bwrap the host has no engine and
+//     sandbox-required callers reject the command rather than running it
+//     unconfined.
 //
 // Set KORYPHAIOS_OS_SANDBOX=0 to force-disable confinement process-wide.
 // A concrete, executable platform engine is always required; this module fails
 // closed otherwise. Whether a given call *requires* confinement is decided by
 // `workspace.sandbox` in the permission policy, not by an environment variable.
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve, isAbsolute } from 'node:path';
@@ -27,6 +31,8 @@ import {
   isContainedBy,
   isLinux,
   isMac,
+  isWindows,
+  windowsPathToWsl,
 } from '../runtime/platform';
 
 export interface OsSandboxOptions {
@@ -50,12 +56,22 @@ export interface OsSandboxOptions {
   stdin?: 'ignore' | 'pipe';
   /** Host-owned process group for bounded Git/helper teardown. */
   detached?: boolean;
+  /**
+   * Permit this child to launch and read a window, which the host grants only when the session's
+   * permission policy allows computer use. It adds only the Launch Services allowance that
+   * `(deny default)` otherwise withholds. Window server access and the private temp root the
+   * capture is staged in are already available to every sandboxed child, so this grants no
+   * additional filesystem reach.
+   */
+  allowWindowCapture?: boolean;
 }
 
 export interface OsSandboxAvailability {
   landlock: boolean;
   seccomp: boolean;
   sandboxExec: boolean;
+  /** Windows only: WSL is installed and the distribution provides bwrap. */
+  wslBwrap: boolean;
 }
 
 let availabilityCache: OsSandboxAvailability | undefined;
@@ -81,7 +97,12 @@ export function detectOsSandbox(): OsSandboxAvailability {
 
   const sandboxExec = isMac() && existsSync('/usr/bin/sandbox-exec');
 
-  availabilityCache = { landlock, seccomp, sandboxExec };
+  // The Windows probe is one short process, cached for the life of the process,
+  // because it answers a configuration question (is there a distribution with
+  // bwrap?) rather than a per-command one.
+  const wslBwrap = isWindows() && wslBwrapAvailable();
+
+  availabilityCache = { landlock, seccomp, sandboxExec, wslBwrap };
   return availabilityCache;
 }
 
@@ -90,7 +111,25 @@ export function detectOsSandbox(): OsSandboxAvailability {
 export function osSandboxAvailable(): boolean {
   if (isLinux()) return findExecutableOnPath('bwrap') !== null;
   if (isMac()) return detectOsSandbox().sandboxExec;
+  if (isWindows()) return detectOsSandbox().wslBwrap;
   return false;
+}
+
+/** True when a WSL distribution provides a bwrap Koryphaios can bind with.
+ *  A distribution that answers but has no bwrap is not an engine: accepting it
+ *  would report confinement the host cannot provide. */
+function wslBwrapAvailable(): boolean {
+  const wsl = findExecutableOnPath(process.env.KORYPHAIOS_WSL ?? 'wsl.exe');
+  if (!wsl) return false;
+  try {
+    const probe = spawnSync(wsl, ['-e', 'sh', '-lc', 'command -v bwrap'], {
+      encoding: 'utf8',
+      timeout: 15000,
+    });
+    return probe.status === 0 && (probe.stdout ?? '').trim().length > 0;
+  } catch {
+    return false;
+  }
 }
 
 /** True when a sandbox-required call can actually be confined. A concrete
@@ -143,7 +182,7 @@ export function spawnSandboxed(
   }
   if (!osSandboxEnabled()) {
     throw new Error(
-      'OS sandbox enforcement is unavailable. Install bubblewrap on Linux, or use macOS, which provides sandbox-exec. Set workspace.sandbox to "off" to run commands without kernel confinement.',
+      'OS sandbox enforcement is unavailable. Install bubblewrap on Linux, or use macOS, which provides sandbox-exec, or install WSL with bubblewrap on Windows. Set workspace.sandbox to "off" to run commands without kernel confinement.',
     );
   }
 
@@ -221,6 +260,16 @@ export function spawnSandboxed(
     }
   }
 
+  // ─── Windows: WSL plus bubblewrap ────────────────────────────────────
+  if (isWindows() && osSandboxEnabled()) {
+    try {
+      return attachScratchCleanup(spawnWindowsSandbox(argv, opts, roots, readOnlyRoots, env, cwd));
+    } catch (error) {
+      rmSync(scratch, { recursive: true, force: true });
+      throw error;
+    }
+  }
+
   // ─── macOS: sandbox-exec ─────────────────────────────────────────────
   if (isMac() && osSandboxEnabled()) {
     try {
@@ -275,6 +324,7 @@ function spawnBwrap(
   readOnlyRoots: string[],
   env: NodeJS.ProcessEnv,
   cwd: string,
+  launch: { command: string; prefix: string[] } = { command: bwrap, prefix: [] },
 ): { proc: ReturnType<typeof spawn>; cleanup: () => void } {
   // Build the bwrap argument list. We create new mount and PID namespaces,
   // bind each allowed root read-write, create private /dev and /proc mounts,
@@ -383,12 +433,70 @@ function spawnBwrap(
 
   serverLog.debug({ bwrap, roots, blockNetwork: opts.blockNetwork }, 'spawning bwrap sandbox');
 
-  const proc = spawn(bwrap, args, {
+  const proc = spawn(launch.command, [...launch.prefix, ...args], {
     detached: opts.detached ?? false,
     stdio: [opts.stdin ?? 'ignore', 'pipe', 'pipe'],
     shell: false,
   });
   return { proc, cleanup: () => {} };
+}
+
+// ─── Windows: WSL plus bubblewrap ─────────────────────────────────────
+//
+// Windows has no unprivileged kernel sandbox that a Node child can bind
+// directly, so the boundary is the installed WSL distribution: the same bwrap
+// arguments are used, with every grant, the working directory and the program
+// translated to its `/mnt/<drive>/...` form. A path that cannot be translated
+// aborts the launch — binding a guessed path would confine the child to
+// somewhere the user never approved.
+
+function spawnWindowsSandbox(
+  argv: string[],
+  opts: OsSandboxOptions,
+  roots: string[],
+  readOnlyRoots: string[],
+  env: NodeJS.ProcessEnv,
+  cwd: string,
+): { proc: ReturnType<typeof spawn>; cleanup: () => void } {
+  const wsl = findExecutableOnPath(process.env.KORYPHAIOS_WSL ?? 'wsl.exe');
+  if (!wsl) throw new Error('WSL is required for Windows path confinement');
+
+  const translate = (label: string, value: string): string => {
+    const translated = windowsPathToWsl(value);
+    if (!translated) {
+      throw new Error(`The Windows sandbox cannot translate ${label} ${value} into a WSL path`);
+    }
+    return translated;
+  };
+
+  const translatedRoots = roots.map((root) => translate('a writable grant', root));
+  const translatedReadOnly = readOnlyRoots.map((root) => translate('a read grant', root));
+  const translatedCwd = translate('the working directory', cwd);
+  const translatedArgv = argv.map((part, index) => {
+    // Only the program is translated; arguments may legitimately be flags,
+    // relative paths or text, and rewriting those would change the command.
+    if (index === 0 && !part.startsWith('/')) {
+      const absolute = findExecutableOnPath(part);
+      return absolute ? translate('the program', absolute) : part;
+    }
+    return index === 0 ? translate('the program', part) : part;
+  });
+  const translatedEnv: NodeJS.ProcessEnv = { ...env };
+  for (const key of ['HOME', 'TMPDIR', 'TMP', 'TEMP']) {
+    const value = translatedEnv[key];
+    if (value && !value.startsWith('/')) translatedEnv[key] = translate(key, value);
+  }
+
+  return spawnBwrap(
+    'bwrap',
+    translatedArgv,
+    opts,
+    translatedRoots,
+    translatedReadOnly,
+    translatedEnv,
+    translatedCwd,
+    { command: wsl, prefix: ['-e', 'bwrap'] },
+  );
 }
 
 // ─── macOS: sandbox-exec ──────────────────────────────────────────────
@@ -490,6 +598,17 @@ function spawnMacSandbox(
     profileLines.push('(deny network*)');
   } else {
     profileLines.push('(allow network*)');
+  }
+
+  // The computer-use tool may need to look at a window the user showed it.
+  // Launch Services performs that launch on the child's behalf, which is denied
+  // by `(deny default)` unless allowed explicitly. Nothing else is added: the
+  // capture is staged in the child's private scratch root, and that root is
+  // already writable through the per-root allows above. Granting the host's
+  // TMPDIR here instead would widen writes outside the sandbox. Skipped for
+  // every other command, so the strict profile is unchanged elsewhere.
+  if (opts.allowWindowCapture) {
+    profileLines.push('(allow lsopen)');
   }
 
   const profile = profileLines.join('\n');

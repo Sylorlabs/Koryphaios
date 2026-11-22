@@ -22,6 +22,7 @@ import { setApiHalted } from '$lib/api.svelte';
 
 export type BackendHealthStatus =
   | 'unknown' // haven't checked yet (initial)
+  | 'starting' // backend not listening yet but reporting live startup progress
   | 'healthy' // last check ok and contract matched
   | 'unhealthy' // last N checks failed
   | 'recovering' // backend was unhealthy but is attempting to reconnect
@@ -67,6 +68,14 @@ export interface BackendHealthSnapshot {
   backendCurrentFrontend: string | null;
   backendBundleHash: string | null;
   consecutiveFailures: number;
+  /** Current backend startup phase while status === 'starting' (e.g.
+   *  'database-migrations', 'database-vacuum'). */
+  startupPhase: string | null;
+  /** Human-readable detail for the current startup phase, when the backend
+   *  supplied one (e.g. 'Applying migration 0059: …'). */
+  startupDetail: string | null;
+  /** Backend-reported startup elapsed time in ms, while 'starting'. */
+  startupElapsedMs: number | null;
 }
 
 // ─── Compile-time frontend identity (Vite define; see app.d.ts) ─────────────
@@ -113,6 +122,9 @@ let _backendMinFrontend = $state<string | null>(null);
 let _backendCurrentFrontend = $state<string | null>(null);
 let _backendBundleHash = $state<string | null>(null);
 let _consecutiveFailures = $state(0);
+let _startupPhase = $state<string | null>(null);
+let _startupDetail = $state<string | null>(null);
+let _startupElapsedMs = $state<number | null>(null);
 
 // ─── Tunables ───────────────────────────────────────────────────────────────
 
@@ -266,6 +278,49 @@ function evaluate(
   return { status: 'healthy', reason: null };
 }
 
+/** Payload of the Tauri `get_backend_startup_status` command / the
+ *  `backend://starting` supervisor event. */
+type TauriStartupStatus = {
+  phase: string;
+  detail: string | null;
+  elapsedMs: number | null;
+  startedAt?: number;
+};
+
+/** Ask the desktop shell whether a not-yet-listening backend is mid-boot.
+ * Returns null in a plain browser, in dev mode, and against a shell old
+ * enough not to know the command — the caller then falls back to the
+ * ordinary unhealthy path. */
+async function probeTauriStartupStatus(): Promise<TauriStartupStatus | null> {
+  if (!browser) return null;
+  if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return null;
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    const result = await invoke<TauriStartupStatus | null>('get_backend_startup_status');
+    return result ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Record that the backend is alive and still booting. 'starting' is not a
+ * failure: it halts API traffic like 'unhealthy' but never increments the
+ * failure counter, so the unhealthy threshold does not fire underneath it. */
+function publishStarting(startup: {
+  phase: string;
+  detail: string | null;
+  elapsedMs: number | null;
+}): void {
+  _lastCheckedAt = Date.now();
+  _startupPhase = startup.phase;
+  _startupDetail = startup.detail;
+  _startupElapsedMs = startup.elapsedMs;
+  _failureDetail = null;
+  _status = 'starting';
+  _reason = null;
+  setApiHalted(true);
+}
+
 function publish(
   outcome: CheckOutcome,
   body: HealthResponse | null,
@@ -277,6 +332,10 @@ function publish(
   } = {},
 ) {
   _lastCheckedAt = Date.now();
+  // Any decided outcome (healthy or failed) ends the 'starting' picture.
+  _startupPhase = null;
+  _startupDetail = null;
+  _startupElapsedMs = null;
   _backendVersion = body?.data?.version ?? _backendVersion;
   _backendPid = body?.data?.pid ?? _backendPid;
   _backendMinFrontend = body?.data?.compat?.minFrontend ?? _backendMinFrontend;
@@ -372,7 +431,17 @@ async function tick() {
     await refreshUrls();
   }
   const result = await fetchHealth();
-  publish(evaluate(result.body, result.reason), result.body, result.detail, {
+  const outcome = evaluate(result.body, result.reason);
+  // A refused port plus a live startup marker means "still booting", not
+  // "down" — the fixed readiness deadline must not count it as a failure.
+  if (outcome.status === 'unhealthy') {
+    const starting = await probeTauriStartupStatus();
+    if (starting) {
+      publishStarting(starting);
+      return;
+    }
+  }
+  publish(outcome, result.body, result.detail, {
     healthUrl: result.healthUrl,
     httpStatus: result.httpStatus,
     networkError: result.networkError,
@@ -404,6 +473,9 @@ async function attachTauriListeners() {
       _consecutiveFailures++;
       _status = 'unhealthy';
       _reason = 'supervisor';
+      _startupPhase = null;
+      _startupDetail = null;
+      _startupElapsedMs = null;
       _supervisorReason = payload?.reason ?? null;
       _supervisorMessage = payload?.message ?? null;
       _failureDetail = payload?.message ?? null;
@@ -422,7 +494,26 @@ async function attachTauriListeners() {
       console.info('[Koryphaios] Supervisor reported backend ready — re-checking health');
       void refreshUrls().then(() => tick());
     });
-    tauriUnlistens.push(unDown, unReady);
+    // Payload mirror of BackendStartingEvent in desktop/src-tauri/src/lib.rs.
+    type BackendStartingPayload = {
+      phase: string;
+      detail: string | null;
+      elapsedMs: number;
+    };
+    const unStarting = await listen<BackendStartingPayload>(
+      'backend://starting',
+      (event) => {
+        // A healthy poll that raced a stale progress event must not regress.
+        if (_status === 'healthy') return;
+        const payload = event.payload;
+        publishStarting({
+          phase: payload?.phase ?? 'starting',
+          detail: payload?.detail ?? null,
+          elapsedMs: typeof payload?.elapsedMs === 'number' ? payload.elapsedMs : null,
+        });
+      },
+    );
+    tauriUnlistens.push(unDown, unReady, unStarting);
   } catch (err: unknown) {
     // Not in Tauri or event plugin unavailable — fall back to polling only.
     console.debug(
@@ -477,17 +568,35 @@ export function recheckBackendHealth(): void {
  * Startup gate: resolve only after the backend has passed its health and
  * compatibility checks. The app must not render a partially initialized UI.
  */
-export async function waitForBackendHealthy(timeoutMs = 10_000): Promise<void> {
+export async function waitForBackendHealthy(timeoutMs = 120_000): Promise<void> {
   if (!browser) return;
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+  // `timeoutMs` bounds silence, not startup: time spent in a reported startup
+  // phase (migrations, a one-time vacuum) is progress, so the no-signal
+  // deadline resets while 'starting' persists. An absolute ceiling still
+  // bounds a marker that never goes away.
+  const ABSOLUTE_CEILING_MS = 30 * 60 * 1000;
+  const beganAt = Date.now();
+  let noSignalDeadline = beganAt + timeoutMs;
+  while (Date.now() < noSignalDeadline && Date.now() - beganAt < ABSOLUTE_CEILING_MS) {
     const result = await fetchHealth();
     const outcome = evaluate(result.body, result.reason);
+    if (outcome.status === 'unhealthy') {
+      const starting = await probeTauriStartupStatus();
+      if (starting) {
+        publishStarting(starting);
+        noSignalDeadline = Date.now() + timeoutMs;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        continue;
+      }
+    }
     publish(outcome, result.body, result.detail);
     if (outcome.status === 'healthy') return;
     if (outcome.status === 'mismatch') {
       throw new Error('Frontend and backend are incompatible. Restart Koryphaios.');
     }
+    // A supervisor 'backend://starting' event can land between probes — count
+    // that time as progress too.
+    if (_status === 'starting') noSignalDeadline = Date.now() + timeoutMs;
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   throw new Error('The Koryphaios backend did not become ready in time.');
@@ -542,6 +651,15 @@ export const backendHealth = {
   get consecutiveFailures() {
     return _consecutiveFailures;
   },
+  get startupPhase() {
+    return _startupPhase;
+  },
+  get startupDetail() {
+    return _startupDetail;
+  },
+  get startupElapsedMs() {
+    return _startupElapsedMs;
+  },
   get frontendVersion() {
     return frontendVersion();
   },
@@ -566,6 +684,9 @@ export const backendHealth = {
       backendCurrentFrontend: _backendCurrentFrontend,
       backendBundleHash: _backendBundleHash,
       consecutiveFailures: _consecutiveFailures,
+      startupPhase: _startupPhase,
+      startupDetail: _startupDetail,
+      startupElapsedMs: _startupElapsedMs,
     };
   },
 };

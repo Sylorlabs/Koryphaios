@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "status": "unimported",
+  "assignmentId": "blind-v5-c07fdeb0ad75c3132f07",
+  "skill": "gcp-cloud",
+  "scenarioId": "gcp-cloud-full-task-1-individual",
+  "pairId": "gcp-cloud-full-task-1-individual:9f1a0c78-2395-4afd-8d42-97e48fc25baa",
+  "reviewerThread": "opencode:ses-eb73fd996ffe2a6sLU5AQRrZel",
+  "reviewerIdentitySource": "external-reviewer-adapter-output",
+  "reviewerAdapter": "/Users/Shared/micah/Documents/koryphaios/scripts/kory-opencode-reviewer",
+  "reviewerModel": "unorouter/claude-sonnet-5",
+  "reviewerModelSource": "configured-provider-model-metadata",
+  "reviewerBaseUrl": "http://127.0.0.1:17841/v1",
+  "promptSha256": "440af5ea1e985f31dbb82f741bcc2607b1e187900582c9b3ca1eb40d2c3eb637",
+  "privateAssignmentSha256": "73452a4741af5a941d38df7882858376bcff016a3f87a624d760b6e190b16172",
+  "reviewerEventsSha256": "8f190ef859dec4034f892b5008dec70b29f681226f48c02183e7f9cdc8869a04",
+  "judgeOutputSha256": "90b0b2c6bdc64927bdaa576b17dce724f0cd7924d24ecfd126e0e52d450bb96a",
+  "envelopeSha256": "47ee4d8131c4c3548770706e351993cf895446d76ac2437725d5b7efa3e8d093",
+  "importValidation": {
+    "mode": "validate",
+    "validatedReviews": 1,
+    "persistedReviews": 0
+  },
+  "promptSnapshotPath": "/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-NlXisp/review-task.prompt.txt",
+  "reviewerEventsPath": "/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-NlXisp/reviewer-events.json",
+  "envelopePath": "/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-NlXisp/import.json"
+}

@@ -2,8 +2,8 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
-import { writeFixtureFile } from '../skill-eval-fixture-helpers';
+import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
+import { writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
 import {
   KOTLIN_COROUTINE_CONTROL,
   KOTLIN_COROUTINE_SCENARIO,
@@ -12,7 +12,7 @@ import {
   V5_KOTLIN_HOST_SKILL_EVAL_MATERIALIZERS,
   V5_KOTLIN_HOST_SKILL_EVAL_SCORERS,
   kotlinHostReadiness,
-} from '../skill-eval-v5-kotlin-host-fixtures';
+} from '../../eval/skills/skill-eval-v5-kotlin-host-fixtures';
 import { loadV5SkillPackages } from '../skill-packages';
 
 const roots: string[] = [];

@@ -12,6 +12,7 @@ import {
   type OutputLoopDetection,
 } from '../output-loop-detector';
 import { TurnOwnershipLostError, TurnStreamFailure } from './TurnRuntime.types';
+import { TurnUsageFold } from './turn-usage-fold';
 import type {
   CompletedToolCall,
   TurnRuntimeDependencies,
@@ -148,9 +149,10 @@ export class TurnRuntime {
     };
     let usageKnown = false;
     let unexpectedCacheMissReported = false;
-    // Sticky: once any sample in this turn is approximate (cumulative
-    // harness total), the turn's occupancy stays estimated.
+    // True while the turn's occupancy is a cumulative harness total rather
+    // than a per-request context snapshot.
     let usageEstimated = false;
+    const usageFold = new TurnUsageFold();
 
     const snapshot = (): TurnStreamResult => ({
       content: assistantContent,
@@ -225,15 +227,19 @@ export class TurnRuntime {
             assertActive();
             if (!thinkingPhaseAnnounced) {
               await this.dependencies.lifecycle.phase(handle, 'thinking', 'provider_reasoning');
+              // A status change is a durable transition, not a per-token event —
+              // just like the lifecycle phase above. Re-emitting it for every
+              // reasoning chunk produced ~95k identical rows in one run, flooded
+              // WS broadcasts, and starved /api/health under load.
+              effects.emit('agent.status', {
+                agentId,
+                status: 'thinking',
+                detail: 'Provider reported reasoning activity',
+              });
               thinkingPhaseAnnounced = true;
             }
             assertActive();
             effects.heartbeat('thinking');
-            effects.emit('agent.status', {
-              agentId,
-              status: 'thinking',
-              detail: 'Provider reported reasoning activity',
-            });
             effects.emit('stream.thinking', {
               agentId,
               thinking: (event.thinking ?? '').slice(0, checked.accepted),
@@ -369,22 +375,14 @@ export class TurnRuntime {
             },
           });
         } else if (event.type === 'usage_update') {
-          // Cached prompt tokens still occupy the context window — fold them in
-          // so the context bar reflects real occupancy, not just billed input.
-          if (typeof event.tokensIn === 'number')
-            tokensIn = Math.max(tokensIn, event.tokensIn + (event.tokensCache ?? 0));
-          if (typeof event.tokensOut === 'number') tokensOut = Math.max(tokensOut, event.tokensOut);
-          if (typeof event.tokensCacheRead === 'number') {
-            cachedInputTokens = Math.max(cachedInputTokens, event.tokensCacheRead);
-          }
-          if (typeof event.tokensCacheWrite === 'number') {
-            cacheWriteInputTokens = Math.max(cacheWriteInputTokens, event.tokensCacheWrite);
-          }
-          // Agentic harnesses (Codex) report cumulative turn totals, not live
-          // occupancy — keep that flag sticky for the whole turn so the
-          // meter clamps it and auto-compact withholds it.
-          if (event.estimated === true) usageEstimated = true;
-          usageKnown = true;
+          // Cached prompt tokens still occupy the context window, and a CLI
+          // turn is many internal requests: the fold keeps the latest
+          // per-request snapshot and lets a cumulative receipt stand in only
+          // when no snapshot exists (flagged estimated). See turn-usage-fold.ts.
+          usageFold.apply(event);
+          ({ tokensIn, tokensOut, cachedInputTokens, cacheWriteInputTokens, usageKnown } =
+            usageFold);
+          usageEstimated = usageFold.estimated;
           if (event.cacheUnexpectedMiss === true && !unexpectedCacheMissReported) {
             unexpectedCacheMissReported = true;
             const lane =

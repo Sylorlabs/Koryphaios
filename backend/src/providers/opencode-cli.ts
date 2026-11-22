@@ -47,7 +47,7 @@
 // of the user's machine exposed.
 
 import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
@@ -57,9 +57,11 @@ import {
   wrapCommand,
 } from '../collaboration/sandbox-runner';
 import {
+  type LifecycleCapabilities,
   type Provider,
   type ProviderContentBlock,
   type ProviderEvent,
+  type ProviderLifecycle,
   type ProviderMessage,
   type StreamRequest,
 } from './types';
@@ -68,6 +70,10 @@ import { whichBinary } from './cli-detection';
 import { providerLog } from '../logger';
 import { isModelListCacheFresh } from './model-list-cache';
 import { getCliBridge, KORY_HARNESS_NOTE } from './cli-bridges';
+import {
+  koryBridgeUnavailableError,
+  resolveKoryBridgeScript,
+} from './kory-cli-mcp-config';
 import { createKoryBridgeGrantLease } from './bridge-grant';
 import { recordProviderModelPricing } from '../pricing';
 import {
@@ -108,8 +114,46 @@ export class OpenCodeCliProvider implements Provider {
   readonly name = 'opencode' as const;
   /** ACP sessions are created fresh per request; stale transcripts never resume. */
   readonly supportsFreshConversation = true;
+  /**
+   * Lifecycle evidence (verified against this file and opencode-acp.ts):
+   * - interrupt: true. `onAbort` (~line 542) and the timeout (~line 551) call `client.cancel`,
+   *   which sends the ACP `session/cancel` notification (opencode-acp.ts `cancel()`). The
+   *   prompt response then carries the stop reason, which is captured in `acpStopReason`.
+   *   Caveat: on abort the generator returns without a yield (~line 580), so the interrupted
+   *   outcome is not emitted as a stream event. The caller's own abort is the signal.
+   * - resume / resumeAfterRestart: false. `client.newSession` runs on every turn (~line 350).
+   *   The ACP `loadSession` capability is advertised by opencode, but `session/load` is never
+   *   sent (grep finds no use), so nothing resumes a prior session.
+   * - steerInFlight: false. The only in-turn input is the `session/prompt` call; there is no
+   *   steer path.
+   * - rollback: true. Each turn builds its prompt from request.messages (`buildPrompt`,
+   *   ~line 240), and the ACP session is fresh, so no provider-side history outlives a turn.
+   *   This is the same guarantee as the `supportsFreshConversation = true` declaration above.
+   * - fork: false. ACP `session/fork` is not used.
+   * - terminalStatusQuality: strong. The `session/prompt` JSON-RPC response is the terminal
+   *   signal, and a failed request becomes `promptError`.
+   * - resumeHandle: null. The ACP session id is held only in a local variable and is never
+   *   stored, because nothing reads it while resume is false.
+   */
+  readonly lifecycle: ProviderLifecycle = {
+    capabilities: (): LifecycleCapabilities => ({
+      version: 1,
+      interrupt: true,
+      resume: false,
+      resumeAfterRestart: false,
+      steerInFlight: false,
+      rollback: true,
+      fork: false,
+      terminalStatusQuality: 'strong',
+    }),
+    resumeHandle: () => null,
+  };
 
-  constructor(readonly config: ProviderConfig) {}
+  // spawnChild is the process seam for the ACP child; replay tests inject a transcript.
+  constructor(
+    readonly config: ProviderConfig,
+    private readonly spawnChild: typeof spawn = spawn,
+  ) {}
 
   isAvailable(): boolean {
     if (this.config.disabled) return false;
@@ -228,6 +272,18 @@ export class OpenCodeCliProvider implements Provider {
     const mcpServers: AcpStdioMcpServer[] = wireKoryMcp
       ? (bridge?.buildMcpConfig(bridgeCtx) ?? [])
       : [];
+    // Fail closed: a session-scoped turn expecting the bridge that cannot
+    // resolve its script must not spawn the CLI silently tool-less.
+    if (
+      wireKoryMcp &&
+      request.sessionId &&
+      mcpServers.length === 0 &&
+      !resolveKoryBridgeScript()
+    ) {
+      bridgeGrantLease?.cleanup();
+      yield { type: 'error', error: koryBridgeUnavailableError('opencode') };
+      return;
+    }
 
     // ── Environment and sandbox ─────────────────────────────────────────────
     const realHome = homedir();
@@ -278,6 +334,7 @@ export class OpenCodeCliProvider implements Provider {
       args: spawnArgs,
       cwd: sessionCwd,
       env: spawnEnv,
+      spawnChild: this.spawnChild,
     });
 
     // ── ACP handshake ───────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 {
   "id": "planning-full-task-2-individual",
   "maturity": "individual",
-  "prompt": "Create a phased plan for extracting notification delivery from a monolith into an independently deployable service while preserving existing transactional email behavior. Map callers/data ownership, decide transitional contracts, sequence dual-read/write or outbox changes where justified, include shadowing/reconciliation, capacity/operability/security dependencies, rollback at each phase, and define what evidence would allow cutover. Do not turn the plan into speculative microservice code.",
+  "prompt": "Create a phased plan for extracting notification delivery from a monolith into an independently deployable service while preserving existing transactional email behavior. Map callers/data ownership, decide transitional contracts, sequence dual-read/write or outbox changes where justified, include shadowing/reconciliation, capacity/operability/security dependencies, rollback at each phase, and define what evidence would allow cutover. Do not turn the plan into speculative microservice code. Write `plan.json` as {phases:[{id,owners:[...],dependsOn:[...],gate,rollback}],openQuestions:[...],cutoverEvidence:[...]}: every phase carries a nonempty owners array, an explicit dependsOn array of earlier phase ids (empty only for the first inventory phase), a gate that is one sentence naming the evidence required to advance, and a rollback that is one sentence describing the recovery. Gate and rollback are strings, not objects. Write the reasoning as `plan.md`.",
   "environment": {
     "kind": "repository",
     "startingState": "fixture://planning/monolith-module-extraction-plan",
@@ -36,7 +36,10 @@
         "independent evaluator record",
         "quality comparison without variant labels"
       ],
-      "blindTo": ["skill-variant", "expected-outcome"]
+      "blindTo": [
+        "skill-variant",
+        "expected-outcome"
+      ]
     }
   ],
   "requiredEvidence": [

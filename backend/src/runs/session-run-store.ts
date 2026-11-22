@@ -128,7 +128,7 @@ export interface StoredRunTransition {
   publishRequired: boolean;
 }
 
-export type SessionTurnCommandSource = 'goal' | 'collaboration' | 'internal';
+export type SessionTurnCommandSource = 'goal' | 'collaboration' | 'internal' | 'user';
 export type SessionTurnCommandStatus = 'active' | 'completed' | 'failed' | 'cancelled' | 'waiting';
 export type SessionTurnCommandTerminalStatus = Extract<
   SessionTurnCommandStatus,
@@ -157,11 +157,30 @@ export interface SessionTurnCommandRecord extends SessionTurnCommandIdentity {
   finishedAt: number | null;
 }
 
+/**
+ * Terminal reason recorded only when a command failed before its user input was
+ * durably written. Such a command had no provider side effect, so a retry with
+ * the same canonical input may reclaim the receipt instead of replaying the failure.
+ */
+export const SESSION_TURN_INPUT_NOT_PERSISTED_REASON = 'command_input_persistence_failed';
+
+export function isSessionTurnInputNotPersistedFailure(command: SessionTurnCommandRecord): boolean {
+  return (
+    command.status === 'failed' &&
+    command.terminalReason === SESSION_TURN_INPUT_NOT_PERSISTED_REASON
+  );
+}
+
 export interface BeginSessionTurnCommandInput extends SessionTurnCommandSourceIdentity {
   /** SHA-256 of every input field that can affect execution. */
   inputHash: string;
   reason?: string;
   activeAgentIds?: string[];
+  /**
+   * Caller has verified that no user input was persisted for a failed receipt.
+   * Only then may an input-not-persisted failure be reclaimed as a new run.
+   */
+  reclaimInputNotPersisted?: boolean;
 }
 
 export interface BeginSessionTurnCommandResult {
@@ -348,7 +367,7 @@ export function deriveSessionTurnCommandIdentity(
     'Session turn source command id',
     512,
   );
-  if (!['goal', 'collaboration', 'internal'].includes(input.source)) {
+  if (!['goal', 'collaboration', 'internal', 'user'].includes(input.source)) {
     throw new Error(`Unsupported session turn command source: ${String(input.source)}`);
   }
   const commandKey = createHash('sha256')
@@ -688,6 +707,7 @@ export class SessionRunStore {
       }
 
       const existing = byKey ?? bySource;
+      let reclaimed = false;
       if (existing) {
         if (
           existing.commandKey !== identity.commandKey ||
@@ -708,7 +728,10 @@ export class SessionRunStore {
             'INPUT_HASH_MISMATCH',
           );
         }
-        return { disposition: 'existing', command: existing, runTransition: null };
+        if (!(input.reclaimInputNotPersisted && isSessionTurnInputNotPersistedFailure(existing))) {
+          return { disposition: 'existing', command: existing, runTransition: null };
+        }
+        reclaimed = true;
       }
 
       const runId = crypto.randomUUID();
@@ -722,6 +745,32 @@ export class SessionRunStore {
         },
         now,
         (sqlite) => {
+          if (reclaimed) {
+            // Same identity and input hash; only the execution generation changes.
+            const updated = sqlite
+              .query(
+                `UPDATE session_turn_commands
+                 SET run_id = ?, status = 'active', terminal_reason = NULL,
+                     updated_at = ?, finished_at = NULL
+                 WHERE command_key = ? AND session_id = ? AND status = 'failed'
+                   AND terminal_reason = ? AND input_hash = ?`,
+              )
+              .run(
+                runId,
+                now,
+                identity.commandKey,
+                identity.sessionId,
+                SESSION_TURN_INPUT_NOT_PERSISTED_REASON,
+                inputHash,
+              );
+            if (updated.changes !== 1) {
+              throw new SessionTurnCommandConflictError(
+                `Session turn command ${identity.commandKey} changed before it could be reclaimed`,
+                'TERMINAL_MISMATCH',
+              );
+            }
+            return;
+          }
           sqlite
             .query(
               `INSERT INTO session_turn_commands (

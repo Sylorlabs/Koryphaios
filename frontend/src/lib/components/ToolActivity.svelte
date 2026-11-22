@@ -3,10 +3,11 @@
   import ChevronUp from 'lucide-svelte/icons/chevron-up';
   import Copy from 'lucide-svelte/icons/copy';
   import Check from 'lucide-svelte/icons/check';
-  import Pencil from 'lucide-svelte/icons/pencil';
   import ToolActivity from './ToolActivity.svelte';
   import ToolActivityIcon from './ToolActivityIcon.svelte';
+  import SubagentSection from './SubagentSection.svelte';
   import type { FeedEntryLocal } from '$lib/types';
+  import type { SubagentTranscript } from '@koryphaios/shared';
   import { toolPresentation } from '$lib/utils/tool-presentation';
   import { copyText } from '$lib/utils/clipboard';
   import { sessionStore } from '$lib/stores/sessions.svelte';
@@ -17,6 +18,7 @@
   import { apiFetch } from '$lib/api.svelte';
   import { apiUrl } from '$lib/utils/api-url';
   import { formatShortcut } from '$lib/utils/platform';
+  import { narrateToolGroup } from '$lib/utils/tool-narration';
   let { entry, open = $bindable(false), transcript, showIcon = true } = $props<{
     entry: FeedEntryLocal;
     open?: boolean;
@@ -44,25 +46,31 @@
   // still contain the dispatcher/server identity from an archived event.
   const inputPreview = $derived(!tool.internalBridge && typeof entry.metadata?.toolInputPreview === 'string' ? entry.metadata.toolInputPreview : '');
   const durationMs = $derived((entry.metadata?.toolResult as { durationMs?: number } | undefined)?.durationMs);
+  // The source never recorded how long this call took (imported chats): show no
+  // duration at all rather than a ticking clock or "0 ms".
+  const durationUnknown = $derived(isDurationUnknown(entry));
+  const subagent = $derived(subagentOf(entry));
+  const subagentSessionId = $derived(typeof entry.metadata?.sessionId === 'string' ? entry.metadata.sessionId : '');
   const toolComplete = $derived(tool.complete || (grouped && steps.length > 0 && steps.every((s) => s.type === 'tool_result')));
   let now = $state(Date.now());
   $effect(() => {
-    if (toolComplete) return;
+    if (toolComplete || (!grouped && durationUnknown)) return;
     now = Date.now();
     const timer = setInterval(() => (now = Date.now()), 100);
     return () => clearInterval(timer);
   });
   const MAX_LIVE_TOOL_MS = 15 * 60 * 1000;
   const liveDurationMs = $derived(
-    !toolComplete ? Math.min(Math.max(0, now - (entry.timestamp ?? now)), MAX_LIVE_TOOL_MS) : 0,
+    !toolComplete && !durationUnknown ? Math.min(Math.max(0, now - (entry.timestamp ?? now)), MAX_LIVE_TOOL_MS) : 0,
   );
-  const resolvedDurationMs = $derived(toolComplete ? (durationMs ?? 0) : liveDurationMs);
+  const resolvedDurationMs = $derived(durationUnknown ? 0 : toolComplete ? (durationMs ?? 0) : liveDurationMs);
   // Grouped operations (e.g. "Explored") run multiple tool calls. Show the sum
   // of their durations, ticking continuously across all children instead of
   // stopping when the first one finishes.
   const groupDurationMs = $derived.by(() => {
     if (!grouped || !steps.length) return resolvedDurationMs;
     return steps.reduce((sum, child) => {
+      if (isDurationUnknown(child)) return sum;
       const childResult = child.metadata?.toolResult as { durationMs?: number } | undefined;
       const childDuration = childResult?.durationMs;
       if (typeof childDuration === 'number' && Number.isFinite(childDuration) && childDuration > 0) {
@@ -85,6 +93,16 @@
       : '',
   );
   const groupAction = $derived(steps.some((step) => step.type === 'tool_call') ? 'Exploring' : 'Explored');
+  // The collapsed group narrates what the agent did, in order ("Read a.ts and
+  // b.ts → searched “x”"); the verb keeps the action styling, the rest is the
+  // clickable target. Falls back to the plain count when there is nothing to say.
+  const groupNarration = $derived.by(() => {
+    if (!grouped) return null;
+    const line = narrateToolGroup(steps);
+    const space = line.indexOf(' ');
+    if (!line || space < 0) return null;
+    return { verb: line.slice(0, space), rest: line.slice(space + 1) };
+  });
   const body = $derived(transcript ?? (separatedDetails || tool.failed ? tool.output : tool.changes || tool.content || tool.output));
   const displayBody = $derived.by(() => {
     if (!tool.workspace || !body.trim().match(/^[{[]/)) return body;
@@ -122,6 +140,17 @@
       screenshotUrl = '';
     };
   });
+
+  function isDurationUnknown(row: FeedEntryLocal): boolean {
+    return row.durationUnknown === true ||
+      (row.metadata?.toolResult as { timeUnknown?: boolean } | undefined)?.timeUnknown === true;
+  }
+
+  function subagentOf(row: FeedEntryLocal): SubagentTranscript | null {
+    const value = row.metadata?.subagent as SubagentTranscript | undefined;
+    if (!value || typeof value !== 'object' || typeof value.name !== 'string' || !Array.isArray(value.turns)) return null;
+    return value;
+  }
 
   function formatDuration(ms: number): string {
     if (!Number.isFinite(ms) || ms < 0) return '';
@@ -224,6 +253,9 @@
       <span class="target">Open {tool.target} chat</span>
     {:else if transcript !== undefined}
       <span class="action">Completed</span><span class="target">background task</span>
+    {:else if grouped && groupNarration}
+      <span class="action">{groupNarration.verb}</span>
+      <span class="target narration">{groupNarration.rest}</span>
     {:else if grouped}
       <span class="action">{groupAction}</span>
       <span class="target">{steps.length} {steps.length === 1 ? 'operation' : 'operations'}</span>
@@ -242,6 +274,10 @@
     {/if}
     <ChevronRight size={12} class={`disclosure ${open ? 'expanded' : ''}`} />
   </button>
+
+  {#if subagent && !grouped}
+    <SubagentSection {subagent} sessionId={subagentSessionId} ownerId={entry.id} />
+  {/if}
 
   {#if open}
     <section id={id} class="tool-detail" aria-label="Tool details" aria-hidden={!open} inert={!open} transition:detailTransition>
@@ -306,7 +342,7 @@
           <section class="command-panel" class:output-failed={tool.failed} aria-label={commandDetails ? 'Command output' : 'Tool response'}>
             <div class="panel-heading">
               <span>Output</span>
-              <small class:output-status-failed={tool.failed}>{tool.failed ? 'Failed' : tool.complete ? 'Completed' : 'Running'}{durationLabel ? ` · ${durationLabel}` : ''}</small>
+              <small class:output-status-failed={tool.failed}>{tool.failed ? 'Failed' : tool.complete ? 'Completed' : 'Running'}{durationLabel ? ` · ${durationLabel}` : durationUnknown && !grouped ? ' · time unknown' : ''}</small>
               {#if body}
                 <button type="button" onclick={copyOutput} aria-label="Copy output" title="Copy output">
                   {#if copied}<Check size={13} />{:else}<Copy size={13} />{/if}
@@ -333,7 +369,7 @@
           {#if computerReceipt.delta !== undefined}<div><dt>Scroll delta</dt><dd>{computerReceipt.delta}</dd></div>{/if}
           {#if computerReceipt.ms !== undefined}<div><dt>Wait</dt><dd>{computerReceipt.ms} ms</dd></div>{/if}
           {#if computerReceipt.textLength !== undefined}<div><dt>Text</dt><dd>{computerReceipt.textLength} characters · content hidden</dd></div>{/if}
-          <div><dt>Status</dt><dd>{computerReceipt.status === 'failed' ? 'Failed' : 'Completed'}{durationLabel ? ` · ${durationLabel}` : ''}</dd></div>
+          <div><dt>Status</dt><dd>{computerReceipt.status === 'failed' ? 'Failed' : 'Completed'}{durationLabel ? ` · ${durationLabel}` : durationUnknown ? ' · time unknown' : ''}</dd></div>
           <div><dt>Result</dt><dd class:receipt-failed={computerReceipt.status === 'failed'}>{computerReceipt.message}</dd></div>
         </dl>
         {#if computerReceipt.targets}
@@ -345,14 +381,7 @@
         {#if screenshotUrl}<img class="computer-screenshot" src={screenshotUrl} alt="Authorized computer-use observation" onerror={() => { screenshotUrl = ''; screenshotState = 'unavailable'; }} />
         {:else if computerReceipt.screenshot}<p class="empty">{screenshotState === 'loading' ? 'Loading screenshot…' : 'Screenshot expired or unavailable. Previews are kept for up to 10 minutes.'}</p>{/if}
       {:else}
-        {#if tool.paths.length && (tool.changes || tool.icon === 'file-edit' || tool.icon === 'file-create')}
-          <!-- The pencil marks the edit, but an expanded diff is unreadable
-               without knowing which file it belongs to: show the real path. -->
-          <div class="minimal-file-indicator">
-            <Pencil size={14} class="pencil-icon" />
-            <span class="file-paths">{#each tool.paths as path}<span>{path}</span>{/each}</span>
-          </div>
-        {:else if tool.paths.length}
+        {#if tool.paths.length}
           <div class="file-paths">{#each tool.paths as path}<span>{path}</span>{/each}</div>
         {:else if tool.workingDirectory}
           <div class="file-paths">{tool.workingDirectory}</div>
@@ -396,6 +425,8 @@
   .action { flex-shrink: 0; color: var(--color-text-muted); }
   .target { min-width: 0; color: var(--color-text-secondary); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--color-text-secondary) 25%, transparent); text-underline-offset: 3px; overflow-wrap: anywhere; }
   .mono { font-family: var(--font-mono); font-size: 12px; }
+  /* One line: the newest clauses are already kept by the narrator. */
+  .narration { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; }
   .tool-name { min-width: 0; font: 11px/1.6 var(--font-mono); color: var(--color-text-muted); overflow-wrap: anywhere; }
   .tool-duration { flex-shrink: 0; font-size: 11px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
   .mcp-identity { margin: 0 0 10px; font: 11px/1.6 var(--font-mono); color: var(--color-text-muted); overflow-wrap: anywhere; }
@@ -412,12 +443,6 @@
   .detail-actions button:hover { color: var(--color-text-primary); background: var(--color-surface-3); }
   button:focus-visible, [tabindex]:focus-visible, summary:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; border-radius: var(--radius-sm); }
   .file-paths { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; font: 11px/1.6 var(--font-mono); color: var(--color-text-muted); overflow-wrap: anywhere; }
-  .minimal-file-indicator { display: flex; align-items: center; justify-content: flex-start; gap: 8px; margin-bottom: 10px; }
-  :global(.pencil-icon) { color: var(--color-accent); animation: scribble 0.3s ease-in-out infinite alternate; }
-  @keyframes scribble {
-    0% { transform: translateX(-2px) rotate(-10deg); }
-    100% { transform: translateX(2px) rotate(10deg); }
-  }
   .command, pre { margin: 0; padding: 0; font: 12px/1.65 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--color-text-secondary); scrollbar-width: thin; }
   .command { max-height: 10rem; overflow: auto; color: var(--color-text-primary); }
   .command span { color: var(--color-text-muted); }
@@ -440,11 +465,11 @@
   .command-panel { min-width: 0; overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-1); }
   .panel-heading { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 5px 12px; border-bottom: 1px solid var(--color-border); background: color-mix(in srgb, var(--color-surface-2) 65%, transparent); }
   .panel-heading > span { font-size: 11px; font-weight: 600; color: var(--color-text-secondary); }
-  .panel-heading small { font-size: 10px; color: var(--color-text-muted); }
+  .panel-heading small { font-size: 11px; color: var(--color-text-muted); }
   .panel-heading button { display: grid; place-items: center; width: 26px; height: 26px; margin-left: auto; border-radius: var(--radius-sm); color: var(--color-text-muted); }
   .panel-heading button:hover { color: var(--color-text-primary); background: var(--color-surface-3); }
   .command-panel .panel-body { padding: 12px; }
-  .command-directory { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 10px 12px 0; font-size: 10px; color: var(--color-text-muted); }
+  .command-directory { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 10px 12px 0; font-size: 11px; color: var(--color-text-muted); }
   .command-directory code { font: 10px/1.6 var(--font-mono); overflow-wrap: anywhere; color: var(--color-text-secondary); }
   .command-arguments { margin: 0; padding: 0 12px 12px; }
   .output-failed { border-color: color-mix(in srgb, var(--color-error) 35%, var(--color-border)); }

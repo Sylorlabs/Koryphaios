@@ -82,6 +82,31 @@ describe('desktop exit choices', () => {
     expect(screen.queryByRole('alertdialog')).toBeNull();
   });
 
+  it('ignores linked-computer work and closes without a local warning', async () => {
+    native.runStates.clear();
+    native.runStates.set('linked-linux-chat', {
+      phase: 'streaming',
+      activeAgents: new Set(['kory-manager']),
+    });
+    native.invoke.mockImplementation(async (command: string) =>
+      command === 'get_desktop_exit_request' ? null : undefined,
+    );
+    render(DesktopExitDialog);
+    await waitFor(() => expect(native.listeners.has('desktop://exit-requested')).toBe(true));
+
+    native.listeners.get('desktop://exit-requested')?.({
+      payload: { id: 8, reason: 'close' },
+    });
+
+    await waitFor(() =>
+      expect(native.invoke).toHaveBeenCalledWith('resolve_desktop_exit', {
+        id: 8,
+        choice: 'proceed',
+      }),
+    );
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
   it('keeps the prompt when a worker is active even if the manager phase is terminal', async () => {
     native.runStates.set('worker-session', {
       phase: 'done',

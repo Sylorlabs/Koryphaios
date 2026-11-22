@@ -51,6 +51,17 @@ const schema = z.object({
   maxTokens: z.number().int().min(1).max(65_536).optional(),
   temperature: z.number().min(0).max(2).optional(),
   reasoningLevel: z.string().max(64).optional(),
+  speedTier: z.string().max(64).optional(),
+  modelParameters: z.record(z.string(), z.union([z.number(), z.string()])).optional(),
+  fusion: z
+    .strictObject({
+      lead: z.string().max(256),
+      leadEffort: z.string().max(32),
+      leadFast: z.boolean(),
+      sidekick: z.string().max(256),
+      sidekickEffort: z.string().max(32).nullable(),
+    })
+    .optional(),
   forceFreshConversation: z.boolean().optional(),
   imageInputOverride: z
     .object({ provider: z.string().max(128), model: z.string().max(512) })

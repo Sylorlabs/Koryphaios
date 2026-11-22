@@ -14,6 +14,8 @@
     description?: string;
     disabled?: boolean;
     provider?: string;
+    /** Shown on the trigger instead of `label` when the toolbar collapses it. */
+    shortLabel?: string;
   }
   interface Props {
     id?: string;
@@ -62,6 +64,7 @@
   let query = $state('');
   const listboxId = `kory-select-${++nextKorySelectId}`;
   const selected = $derived(options.find((option) => option.value === value));
+  const triggerShortLabel = $derived(selected?.shortLabel);
   const visibleOptions = $derived(
     searchable && query.trim()
       ? options.filter((option) =>
@@ -211,6 +214,7 @@
     aria-activedescendant={open && visibleOptions[activeIndex]
       ? `${listboxId}-option-${activeIndex}`
       : undefined}
+    title={triggerShortLabel ? selected?.label : undefined}
     onkeydown={handleKeydown}
     onclick={toggleOpen}
     class="flex w-full items-center justify-between gap-3 border {flat ? 'border-transparent bg-transparent hover:bg-[var(--color-surface-3)]' : 'border-[var(--color-border)] bg-[var(--color-surface-1)] hover:border-[var(--color-accent)]/50'} text-left text-[var(--color-text-primary)] outline-none transition-all focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-1)] disabled:opacity-50 {dense
@@ -225,11 +229,19 @@
   >
     <span class="flex min-w-0 flex-1 items-center gap-2">
       {@render leading?.(selected)}
-      <span class="min-w-0 truncate">{selected?.label ?? (allowCustom && value ? value : placeholder)}</span>
+      {#if triggerShortLabel}
+        <span class="min-w-0 truncate"
+          ><span class="kory-select-label-full">{selected?.label}</span><span
+            class="kory-select-label-short">{triggerShortLabel}</span
+          ></span
+        >
+      {:else}
+        <span class="min-w-0 truncate">{selected?.label ?? (allowCustom && value ? value : placeholder)}</span>
+      {/if}
     </span>
     <ChevronDown
       size={15}
-      class="shrink-0 text-[var(--color-text-muted)] transition-transform {open
+      class="kory-select-chevron shrink-0 text-[var(--color-text-muted)] transition-transform {open
         ? 'rotate-180'
         : ''}"
     />
@@ -298,7 +310,7 @@
             ><span class="block truncate text-xs font-medium text-[var(--color-text-primary)]"
               >{option.label}</span
             >{#if option.description}<span
-                class="mt-0.5 block text-[10px] leading-relaxed text-[var(--color-text-muted)]"
+                class="mt-0.5 block text-[11px] leading-relaxed text-[var(--color-text-muted)]"
                 >{option.description}</span
               >{/if}</span
           >
@@ -327,7 +339,7 @@
                 type="button"
                 disabled={!customValue.trim()}
                 onclick={submitCustom}
-                class="rounded-lg bg-[var(--color-accent)] px-2.5 py-2 text-xs font-medium text-white disabled:opacity-40"
+                class="rounded-lg bg-[var(--color-accent)] px-2.5 py-2 text-xs font-medium text-[var(--color-on-accent)] disabled:opacity-40"
                 >Add</button
               >
             </div>
@@ -344,3 +356,10 @@
     </div>
   {/if}
 </div>
+
+<style>
+  /* Hidden until a toolbar collapses the trigger label (CommandInput sets it). */
+  .kory-select-label-short {
+    display: none;
+  }
+</style>

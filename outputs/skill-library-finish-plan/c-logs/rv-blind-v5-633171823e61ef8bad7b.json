@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "reviewerId": "logfare-stateless-2d811c7b-880e-4cc4-81c3-74add44abd9f",
+  "completed": true,
+  "output": "{\"artifactA\":{\"passed\":true,\"quality\":1.0,\"verification\":1.0,\"integrityFailure\":false,\"evidence\":[\"Successfully provisioned a real PostgreSQL 17.5 and Toxiproxy 2.12.0 environment using embedded-postgres and vendored binaries.\",\"Implemented a DocumentImportService that allows deterministic fault injection via a test-only hook.\",\"Verified the fault (reset_peer) occurs after the first child insert but before COMMIT, causing a DependencyFailureError.\",\"Used an independent, direct PostgreSQL connection to prove zero rows remained after the failed attempt.\",\"Demonstrated successful recovery by removing the toxic, waiting for readiness, and rerunning the import.\",\"Proved exactly one complete import was durable using independent SQL inspection.\",\"Generated a comprehensive .kory-eval/integration-fault-scenario-1.json containing all required identities, fault placement evidence, and row counts.\"]},\"artifactB\":{\"passed\":false,\"quality\":0.0,\"verification\":0.0,\"integrityFailure\":false,\"evidence\":[\"Agent B concluded the task was impossible because the pre-existing fixture was not found in the workspace.\",\"Agent B did not provide the required test file or the scenario JSON artifact.\"]},\"preference\":\"A\",\"rationale\":[\"Agent A successfully completed the task by recognizing that the repository was a scaffold and proactively provisioning the necessary infrastructure (PostgreSQL 17.5 and Toxiproxy 2.12.0) to satisfy the contract. It implemented a robust integration test that used a service-level hook for deterministic fault injection, verified the rollback using an independent database connection, and provided all required evidence in the specified JSON format.\",\"Agent B failed to complete the task, opting to report a blocker due to the absence of a pre-configured fixture rather than attempting to build the environment required to fulfill the task requirements. Agent A's approach of self-provisioning the environment is the correct way to handle a scaffolded repository in this context.\"]}",
+  "events": [
+    {
+      "type": "review.started",
+      "reviewerId": "logfare-stateless-2d811c7b-880e-4cc4-81c3-74add44abd9f"
+    },
+    {
+      "type": "review.completed",
+      "reviewerId": "logfare-stateless-2d811c7b-880e-4cc4-81c3-74add44abd9f",
+      "outputSha256": "deb6863666c5af955cfba8e518ebe89908a9dc2bc0b2714ce3d1fe8aec90f26c"
+    }
+  ],
+  "hostReceipt": {
+    "schemaVersion": 1,
+    "stageOnly": true,
+    "identitySource": "host-invocation-uuid",
+    "upstreamSessionObserved": true,
+    "requestedModel": "gemma-4-26b",
+    "responseModel": "gemma-4-26b",
+    "promptSha256": "402243dd5b144178dd9273b5a851460813ae66fb8a73da1e7724531fb2fa0e37",
+    "requestBytes": 84313,
+    "responseSha256": "db6a1dec2e018febf6db56a989b074c9011a57f650ce09a72ea3a2b3b5637504",
+    "outputSha256": "deb6863666c5af955cfba8e518ebe89908a9dc2bc0b2714ce3d1fe8aec90f26c",
+    "elapsedMs": 131058,
+    "osIsolationVerified": false,
+    "upstreamIdentityVerified": false,
+    "signed": false
+  }
+}

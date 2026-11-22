@@ -62,3 +62,102 @@ describe('Devin CLI provider', () => {
     ]);
   });
 });
+
+import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { DevinCliBridge } from '../devin-bridge';
+import type { CliBridgeContext } from '../cli-bridge';
+
+const ctx = (sandbox?: Parameters<DevinCliBridge['buildPermissionScopes']>[0]['sandbox']) =>
+  ({
+    provider: 'devin',
+    role: 'manager',
+    sandbox,
+    workingDirectory: '/workspace',
+    systemPrompt: '',
+    tools: [],
+  }) as CliBridgeContext;
+
+describe('writeManagedUserConfig', () => {
+  // Managed CLI storage refuses writes outside ~/.koryphaios — the test home
+  // must live inside that root to exercise the real writer.
+  const home = () => mkdtempSync(join(homedir(), '.koryphaios', 'devin-home-test-'));
+  const readConfig = (dir: string) =>
+    JSON.parse(readFileSync(join(dir, 'devin', 'config.json'), 'utf8'));
+
+  test('writes hooks, permissions, subagent kill and import isolation', () => {
+    const dir = home();
+    const bridge = new DevinCliBridge();
+    bridge.writeManagedUserConfig(
+      ctx(),
+      [{ events: ['PreToolUse'], command: 'node hook.js --event PreToolUse', matcher: '' }],
+      dir,
+    );
+    const config = readConfig(dir);
+    expect(config.hooks.PreToolUse[0].hooks[0].command).toContain('hook.js');
+    expect(config.permissions.allow).toContain('mcp__kory__*');
+    for (const tool of ['exec', 'read', 'write', 'edit', 'request_scope', 'run_subagent']) {
+      expect(config.permissions.deny).toContain(tool);
+    }
+    expect(config.subagents_enabled).toBe(false);
+    expect(config.read_config_from.claude).toBe(false);
+    expect(config.read_config_from.cloud).toBe(false);
+    // The repo's own AGENTS.md is still honored.
+    expect(config.read_config_from.agents_standard).toBe(true);
+    expect(config.auto_update).toBe(false);
+  });
+
+  test('merges sandbox scopes into permission rules', () => {
+    const dir = home();
+    const bridge = new DevinCliBridge();
+    bridge.writeManagedUserConfig(
+      ctx({
+        preset: 'custom',
+        filesystemIsolation: false,
+        allowNetwork: true,
+        allowEdits: false,
+        allowShell: false,
+        allowWebSearch: false,
+        commandBlocklist: ['rm', 'sudo'],
+        maxRuntimeSeconds: 0,
+      }),
+      [],
+      dir,
+    );
+    const deny = readConfig(dir).permissions.deny as string[];
+    expect(deny).toContain('Write(**)');
+    expect(deny).toContain('Exec(*)');
+    expect(deny).toContain('Fetch(*)');
+    expect(deny).toContain('Exec(rm)');
+  });
+
+  test('removes stale hooks when no hooks are supplied', () => {
+    const dir = home();
+    mkdirSync(join(dir, 'devin'), { recursive: true });
+    writeFileSync(
+      join(dir, 'devin', 'config.json'),
+      JSON.stringify({ hooks: { PreToolUse: [{ matcher: '', hooks: [] }] }, theme_mode: 'dark' }),
+    );
+    new DevinCliBridge().writeManagedUserConfig(ctx(), [], dir);
+    const config = readConfig(dir);
+    expect(config.hooks).toBeUndefined();
+    expect(config.theme_mode).toBe('dark');
+  });
+});
+
+describe('buildMcpConfig', () => {
+  test('emits the kory server without a capability probe', () => {
+    // Regression: gating the kory server on the `devin mcp` subcommand probe
+    // left managed turns with native tools denied and no mcp_config.json —
+    // Devin could only talk. The config-file contract stands on its own.
+    const bridge = new DevinCliBridge();
+    const servers = bridge.buildMcpConfig({ ...ctx(), sessionId: 'devin-mcp-test' });
+    expect(servers?.map((s) => s.name)).toEqual(['kory']);
+  });
+
+  test('still requires a session id', () => {
+    const bridge = new DevinCliBridge();
+    expect(bridge.buildMcpConfig(ctx())).toBeNull();
+  });
+});

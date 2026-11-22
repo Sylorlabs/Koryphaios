@@ -1,0 +1,289 @@
+SNAPSHOT HASH DOMAINS: beforeSha256/afterSha256 identify complete workspace entries, using SHA256("file\0" + original file bytes), or SHA256("symlink\0" + link target). Scorer artifactSHA and durable artifact hashes use SHA256(raw bytes), without that tag. These different hash domains must not be compared as if identical. Visible beforeText/afterText may be bounded or privacy-scrubbed; they are not the original complete bytes to hash.
+
+You are an independent blind semantic evaluator.
+Two anonymous agents attempted the same task. You are not told which agent received any extra guidance, and you must not infer or speculate about that hidden condition.
+Judge each artifact independently against the task contract. Do not reward matching wording, verbosity, or references to a skill. Focus on behavioral correctness, scope discipline, evidence quality, preservation of required facts, negative paths, recovery behavior, and whether completion claims are actually supported.
+The artifact bundle may include harness captured execution evidence and before and after file snapshots. Treat that as observed evidence, not as an agent claim.
+PUBLIC CANDIDATE CONTRACT SNAPSHOT is the exact task prompt and allowlisted README.md/contract.json bytes visible to the candidate before execution. Hashes are verified by the harness. If an entry says UNAVAILABLE, do not reconstruct it from the current repository or treat current files as historical proof.
+executionEvidence is supplied by the host after the agent attempt, including deterministic scorer observations. An agent can truthfully report that it could not run a check even when the host subsequently runs that check successfully. Those observations have different owners and times; that difference alone is not an integrity failure.
+Attribute a completion claim to its actual source. Penalize an agent for fabricated or overstated verification only when its finalOutput or authored file content makes that unsupported claim. Do not attribute a host scorer statement to the agent, require the agent to predict later host results, or treat an honest statement of limited access as contradicting later host verification.
+Host evidence is not infallible. If a scorer result conflicts with concrete artifact behavior, identify the disputed check and evidence as a possible verifier defect. Keep instrument uncertainty separate from an agent integrity finding; a score label alone does not prove the task succeeded.
+Treat afterText JSON strings as literal source bytes. Before claiming a URL or origin is malformed or Markdown-formatted, inspect and quote the exact JSON value. Do not transform plain URL strings into Markdown hyperlinks and then mistake that display formatting for the original value.
+The PAIR EXECUTION EVIDENCE section is evaluator owned evidence. It certifies that Artifact A and Artifact B are the two randomized arms of one matched same model comparison for this exact scenario and evaluation contract.
+When REQUIRED EVIDENCE or REQUIRED ARTIFACTS asks for paired skill and no skill run artifacts, paired evaluation evidence, or an equivalent pair label, the anonymous A and B bundle plus PAIR EXECUTION EVIDENCE satisfies the existence and provenance of that pair. Do not require either agent output to claim, create, or narrate evaluator owned pair evidence.
+The REQUIRED ARTIFACTS entries below are evaluation evidence labels for the overall harness. They are not literal filenames the agent was instructed to create unless the task itself says so. Judge whether the bundle substantively supplies the required evidence; do not require those exact label strings to appear.
+Routing and hierarchy selection are evaluated independently by the harness. Do not require the agent to narrate which skill was selected or provide meta level specialist selection rationale when the artifact itself respects the requested scope and neighboring responsibility boundaries.
+Never lower passed, quality, verification, or integrity because an artifact omits hierarchy narration, specialist selection rationale, skill names, or evaluator owned paired A/B evidence. If a draft criticism relies on one of those omissions, remove that criticism and score only the concrete task behavior and evidence.
+If a REQUIRED EVIDENCE or REQUIRED ARTIFACTS label describes routing, hierarchy selection, specialist selection, or paired skill versus no skill provenance, treat that meta level requirement as evaluator owned. The harness evidence in this prompt is authoritative for those concerns.
+When choosing preference A, B, or tie, compare concrete task behavior and evidence only. Evaluator-owned hierarchy or specialist narration, skill-guidance scope, filenames, and paired-run provenance must not affect the preference comparison.
+Treat genuinely missing task evidence as missing. Do not assume unshown commands or tests passed.
+Return JSON only, with this exact shape:
+{"artifactA":{"passed":true,"quality":0.0,"verification":0.0,"integrityFailure":false,"evidence":["..."]},"artifactB":{"passed":true,"quality":0.0,"verification":0.0,"integrityFailure":false,"evidence":["..."]},"preference":"A","rationale":["..."]}
+
+TASK
+Evolve a protobuf request used by old and new clients to replace a boolean `urgent` flag with a richer priority enum. Preserve wire compatibility, reserve/deprecate fields correctly, define unknown-enum behavior, and provide a staged server/client migration with generated-code and binary round-trip tests. Do not reuse field numbers or require lockstep deployment.
+
+FALSIFIABLE CHECKS
+[
+  {
+    "id": "scope-and-hierarchy",
+    "assertion": "The result must establish the actual grpc-protobuf boundary and relevant environment before acting, preserve the hierarchy relationship (broader=api-contract-design; near-neighbor=graphql-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+  },
+  {
+    "id": "operating-contract",
+    "assertion": "Treat field numbers, wire types, fully qualified declaration names, and field presence as durable compatibility, and define precedence between legacy and replacement fields.",
+    "source": "https://protobuf.dev/programming-guides/proto3/"
+  },
+  {
+    "id": "descriptor-identity",
+    "assertion": "Schema revisions made in place retain the same package, message, service, request, and response full names; an intentional identity fork is labeled as a parallel route with migration evidence.",
+    "source": "https://protobuf.dev/programming-guides/proto3/"
+  },
+  {
+    "id": "migration-precedence",
+    "assertion": "The staged migration distinguishes absent values from explicit defaults, defines legacy and replacement precedence and dual-write behavior, and supports mixed old and new clients without lockstep deployment.",
+    "source": "https://protobuf.dev/programming-guides/encoding/"
+  },
+  {
+    "id": "execution-invariant",
+    "assertion": "Wire field numbers/types remain compatible and unknown fields/enum values survive or fail according to the documented protobuf/runtime contract without lockstep rollout.",
+    "source": "https://protobuf.dev/programming-guides/enum/"
+  },
+  {
+    "id": "verification-discipline",
+    "assertion": "For this protobuf field-evolution task, run old/new cross-version binary compatibility, descriptor full-name and field reservation checks, presence and precedence checks, and unknown-enum and unknown-field tests through the normal application decode and encode path. Separate binary evidence from ProtoJSON evidence and label unavailable protoc or generated-client checks explicitly. Do not require unrelated streaming, deadline, cancellation, or retry behavior that this scenario does not exercise.",
+    "source": "https://protobuf.dev/programming-guides/encoding/"
+  },
+  {
+    "id": "anti-pattern-resistance",
+    "assertion": "Do not reuse removed field numbers or names, silently coerce unknown enum numerics to known business values, copy raw bytes around a serializer that loses decoded unknown values, change the meaning or wire type of field 2 during overlap, or require lockstep deployment.",
+    "source": "https://protobuf.dev/programming-guides/enum/"
+  },
+  {
+    "id": "evidence-and-uncertainty",
+    "assertion": "Every material completion claim must map to observable evidence (grpc-protobuf decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+  }
+]
+
+REQUIRED EVIDENCE
+[
+  "proto-field-evolution scenario evidence",
+  "grpc-protobuf decision and boundary evidence",
+  "Hierarchy boundary and selected specialist rationale",
+  "descriptor full-name, field reservation, and wire-type evidence",
+  "application codec unknown-enum and unknown-field round-trip evidence",
+  "hierarchy boundary and selected specialist rationale",
+  "paired skill/no-skill run artifacts",
+  "explicit unavailable, simulated, inferred, or stale evidence labels"
+]
+
+REQUIRED ARTIFACTS
+[
+  "grpc-protobuf-individual-scenario-1-result",
+  "grpc-protobuf-individual-scenario-1-verification",
+  "grpc-protobuf-individual-scenario-1-paired-evaluation"
+]
+
+PUBLIC CANDIDATE CONTRACT SNAPSHOT
+{
+  "taskPrompt": {
+    "available": true,
+    "sha256": "17df29d7bf111fc18c7677626e1f1bf5edb0ff840feadf876eeedfcb37c18e64",
+    "byteLength": 365,
+    "text": "Evolve a protobuf request used by old and new clients to replace a boolean `urgent` flag with a richer priority enum. Preserve wire compatibility, reserve/deprecate fields correctly, define unknown-enum behavior, and provide a staged server/client migration with generated-code and binary round-trip tests. Do not reuse field numbers or require lockstep deployment."
+  },
+  "fixtureFiles": {
+    "README.md": {
+      "available": true,
+      "sha256": "5a7308d5d3d5562fec262cda4ed2df408ed5e617aadb784667ca284a84deb3e9",
+      "byteLength": 338,
+      "text": "# Protobuf field-evolution fixture\n\nEvolve `proto/job.proto` and the small reference wire codec in `src/wire.ts` according to the compatibility contract. Add a post-window schema artifact showing the required reservation after field 2 is removed. Expand tests for old/new cross-version binary behavior and an unknown future enum numeric.\n"
+    },
+    "contract.json": {
+      "available": false,
+      "sha256": null,
+      "byteLength": 0,
+      "text": null,
+      "reason": "not-present"
+    }
+  }
+}
+
+PAIR EXECUTION EVIDENCE
+{
+  "matchedPair": true,
+  "sameScenario": true,
+  "sameProviderModel": true,
+  "sameHarness": true,
+  "sameEvaluationContract": true,
+  "sameMaterializer": true,
+  "sameDeterministicScorer": true,
+  "randomizedArmIdentity": true,
+  "evidenceOwner": "evaluation-harness"
+}
+
+ARTIFACT A
+{
+  "finalOutput": "Implemented the protobuf priority migration:\n\n- Added `Priority` enum on field `3`.\n- Kept `urgent = 2` deprecated during migration.\n- Added post-window schema reserving field number `2` and name `urgent`.\n- Implemented dual-writing and old/new reader compatibility.\n- Preserved unknown enum numerics and unknown wire fields.\n- Documented staged, non-lockstep rollout and generated-code expectations.\n- Added binary cross-version and round-trip tests.\n\nVerification:\n\n- `bun test`: 6 passed, 0 failed.\n- Both protobuf schemas compiled successfully with `protoc`.",
+  "executionEvidence": [
+    "Codex CLI completed successfully in 189444ms",
+    "live message identity: pass",
+    "live compatibility schema: pass",
+    "post-window message identity: fail",
+    "post-window reservation schema: fail",
+    "hidden old/new/unknown-enum wire behavior: pass",
+    "representative compatibility tests with executable assertions: present",
+    "Evaluator integrity: unchanged. Hidden test completion: observed. Public tests: passed or absent.\nbun test v1.3.14 (d1632b29)\nKORY_EVAL_COMPLETED_44e9d22fd9f0488eba38bae9c307435a\n\n\n../kory-skill-eval-pair-rlQA6O/workspace/tests/__kory_hidden_eval_44e9d22fd9f0488eba38bae9c307435a.test.ts:\n(pass) hidden: old binary remains readable by new reader [0.70ms]\n(pass) hidden: new writer remains meaningful to old server during compatibility window [0.18ms]\n(pass) hidden: recognized priority field 3 wins over legacy field 2 [0.03ms]\n(pass) hidden: unknown future enum numeric survives round trip [0.03ms]\n(pass) hidden: multibyte unknown enum numeric survives decode and re-encode [0.04ms]\n(pass) hidden: unrelated unknown fields survive the normal codec path [0.09ms]\n\n 6 pass\n 0 fail\n 16 expect() calls\nRan 6 tests across 1 file. [14.00ms]\nbun test v1.3.14 (d1632b29)\n\n\n../kory-skill-eval-pair-rlQA6O/workspace/tests/wire.test.ts:\n(pass) new reader falls back to old urgent field [0.50ms]\n(pass) new reader prefers recognized priority over conflicting urgent [0.02ms]\n(pass) new HIGH writer dual-writes for old readers [0.08ms]\n(pass) new NORMAL writer works with old and new readers [0.04ms]\n(pass) unknown enum numeric remains distinguishable and survives re-encode [0.03ms]\n(pass) unrecognized fields survive binary decode/re-encode [0.14ms]\n\n 6 pass\n 0 fail\n 11 expect() calls\nRan 6 tests across 1 file. [7.00ms]"
+  ],
+  "publicContract": {
+    "taskPrompt": {
+      "available": true,
+      "sha256": "17df29d7bf111fc18c7677626e1f1bf5edb0ff840feadf876eeedfcb37c18e64",
+      "byteLength": 365,
+      "text": "Evolve a protobuf request used by old and new clients to replace a boolean `urgent` flag with a richer priority enum. Preserve wire compatibility, reserve/deprecate fields correctly, define unknown-enum behavior, and provide a staged server/client migration with generated-code and binary round-trip tests. Do not reuse field numbers or require lockstep deployment."
+    },
+    "fixtureFiles": {
+      "README.md": {
+        "available": true,
+        "sha256": "5a7308d5d3d5562fec262cda4ed2df408ed5e617aadb784667ca284a84deb3e9",
+        "byteLength": 338,
+        "text": "# Protobuf field-evolution fixture\n\nEvolve `proto/job.proto` and the small reference wire codec in `src/wire.ts` according to the compatibility contract. Add a post-window schema artifact showing the required reservation after field 2 is removed. Expand tests for old/new cross-version binary behavior and an unknown future enum numeric.\n"
+      },
+      "contract.json": {
+        "available": false,
+        "sha256": null,
+        "byteLength": 0,
+        "text": null,
+        "reason": "not-present"
+      }
+    }
+  },
+  "changes": [
+    {
+      "path": "compatibility-contract.md",
+      "change": "modified",
+      "beforeSha256": "1a03674b4fbf92d4b6cbbba36afa9cf55ebcbe3abd640a659e9477caad6a5cb7",
+      "afterSha256": "9511079150938d717a4a1329da10c84d58108d3ef1e09a100b1c51ffebfdd3a9",
+      "beforeText": "# Protobuf migration contract\n\n- Existing wire contract is `name = 1`, `urgent = 2` (bool). Field 2 cannot change wire meaning while old clients/servers exist.\n- During the compatibility window keep `urgent = 2` as a deprecated bool and add `priority = 3` using enum `Priority` with 0=UNSPECIFIED, 1=NORMAL, 2=HIGH.\n- New writers send field 3 and also populate deprecated field 2 consistently (HIGH => true, NORMAL => false) while old servers remain supported.\n- New readers prefer a present recognized field 3; when absent, derive priority from legacy field 2.\n- Unknown future enum numerics on field 3 must remain distinguishable from known values and survive decode/re-encode; never silently coerce them to NORMAL/HIGH.\n- After the compatibility window, a documented future schema may remove `urgent` and must reserve field number 2 and name `urgent`; field 3 remains priority. Do not reserve field 2 in the live compatibility schema while it is still present.\n- Preserve unknown fields across decode/re-encode where this reference codec exposes them.\n",
+      "afterText": "# Protobuf migration contract\n\n- Existing wire contract is `name = 1`, `urgent = 2` (bool). Field 2 cannot change wire meaning while old clients/servers exist.\n- During the compatibility window keep `urgent = 2` as a deprecated bool and add `priority = 3` using enum `Priority` with 0=UNSPECIFIED, 1=NORMAL, 2=HIGH.\n- New writers send field 3 and also populate deprecated field 2 consistently (HIGH => true, NORMAL => false) while old servers remain supported.\n- New readers prefer a present recognized field 3; when absent, derive priority from legacy field 2.\n- Unknown future enum numerics on field 3 must remain distinguishable from known values and survive decode/re-encode; never silently coerce them to NORMAL/HIGH.\n- After the compatibility window, a documented future schema may remove `urgent` and must reserve field number 2 and name `urgent`; field 3 remains priority. Do not reserve field 2 in the live compatibility schema while it is still present.\n- Preserve unknown fields across decode/re-encode where this reference codec exposes them.\n\n## Staged rollout\n\n1. Deploy readers/servers that understand field 3 but still accept field 2. Keep\n   old writers unchanged. A recognized, present priority wins; otherwise derive\n   `HIGH` from `urgent=true` and `NORMAL` from `urgent=false`.\n2. Deploy new clients that dual-write field 3 and the compatible deprecated bool\n   (`HIGH=true`; current non-HIGH values=false). These clients still work with old\n   servers, while upgraded servers use the richer field.\n3. After all supported readers understand field 3, stop dual-writing field 2.\n4. Only after the compatibility window, remove `urgent` and adopt\n   `job_post_window.proto`. Never reuse number 2 or name `urgent`.\n\nProto3 runtimes retain unknown enum numerics in the enum field. Application code\nmust branch on known values and treat every other numeric as unknown—not coerce it\nto NORMAL or HIGH. Proxies must preserve unknown fields. Regenerate checked-in\nlanguage bindings after each schema phase and run cross-version binary tests\nbefore releasing the generated artifacts.\n"
+    },
+    {
+      "path": "proto/job.proto",
+      "change": "modified",
+      "beforeSha256": "b7817c049bc854f325f1af439593c0609217ff660caf8268de9fcaf2e64496ca",
+      "afterSha256": "5ccd87a6fbb8e691e5bb0a4667aa8e468ceeb67972757d56de5c12036a82b02a",
+      "beforeText": "syntax = \"proto3\";\n\npackage kory.jobs.v1;\n\nmessage StartJobRequest {\n  string name = 1;\n  bool urgent = 2;\n}\n",
+      "afterText": "syntax = \"proto3\";\n\npackage kory.jobs.v1;\n\nenum Priority {\n  PRIORITY_UNSPECIFIED = 0;\n  PRIORITY_NORMAL = 1;\n  PRIORITY_HIGH = 2;\n}\n\nmessage StartJobRequest {\n  string name = 1;\n  // Compatibility bridge for clients and servers that predate priority.\n  bool urgent = 2 [deprecated = true];\n  Priority priority = 3;\n}\n"
+    },
+    {
+      "path": "proto/job_post_window.proto",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "fd7bed9aae143b2216db64e795fe4c29bcc6a8c63c63a41c7f55a709537593f4",
+      "afterText": "syntax = \"proto3\";\n\npackage kory.jobs.v2;\n\nenum Priority {\n  PRIORITY_UNSPECIFIED = 0;\n  PRIORITY_NORMAL = 1;\n  PRIORITY_HIGH = 2;\n}\n\n// Schema after every supported peer understands field 3.\nmessage StartJobRequest {\n  reserved 2;\n  reserved \"urgent\";\n\n  string name = 1;\n  Priority priority = 3;\n}\n"
+    },
+    {
+      "path": "src/wire.ts",
+      "change": "modified",
+      "beforeSha256": "f6f829dbc4d73e5e6990cf77c99d5d5cd566ce629f97e2e462755691e5272639",
+      "afterSha256": "8dda61335534a4adf822e3ae68a88982e0ed58ae02837d6fb8bce8ea130d264e",
+      "beforeText": "export interface OldRequest {\n  name: string;\n  urgent: boolean;\n}\n\nexport interface NewRequest {\n  name: string;\n  priority: 'NORMAL' | 'HIGH' | null;\n  priorityNumeric: number;\n  unknownFields: Uint8Array[];\n}\n\nfunction field(tag: number, value: number): number[] {\n  return [(tag << 3) | 0, value];\n}\n\nexport function encodeOld(value: OldRequest): Uint8Array {\n  const name = new TextEncoder().encode(value.name);\n  return Uint8Array.from([(1 << 3) | 2, name.length, ...name, ...field(2, value.urgent ? 1 : 0)]);\n}\n\nexport function decodeOld(bytes: Uint8Array): OldRequest {\n  let name = '';\n  let urgent = false;\n  for (let i = 0; i < bytes.length;) {\n    const key = bytes[i++]!;\n    const tag = key >> 3;\n    const wire = key & 7;\n    if (wire === 2) {\n      const len = bytes[i++]!;\n      const data = bytes.slice(i, i + len);\n      i += len;\n      if (tag === 1) name = new TextDecoder().decode(data);\n    } else if (wire === 0) {\n      const value = bytes[i++]!;\n      if (tag === 2) urgent = value !== 0;\n    } else throw new Error('unsupported wire type');\n  }\n  return { name, urgent };\n}\n\nexport function encodeNew(value: NewRequest): Uint8Array {\n  // BUG: replaces field 2 in-place with enum numeric value, breaking old bool semantics.\n  const name = new TextEncoder().encode(value.name);\n  const priority = value.priority === 'HIGH' ? 2 : 1;\n  return Uint8Array.from([(1 << 3) | 2, name.length, ...name, ...field(2, priority)]);\n}\n\nexport function decodeNew(bytes: Uint8Array): NewRequest {\n  const old = decodeOld(bytes);\n  return {\n    name: old.name,\n    priority: old.urgent ? 'HIGH' : 'NORMAL',\n    priorityNumeric: old.urgent ? 2 : 1,\n    unknownFields: [],\n  };\n}\n",
+      "afterText": "export interface OldRequest { name: string; urgent: boolean }\nexport type Priority = 'UNSPECIFIED' | 'NORMAL' | 'HIGH' | null;\nexport interface NewRequest {\n  name: string;\n  priority: Priority;\n  /** Exact field-3 numeric, including values unknown to this version. */\n  priorityNumeric: number;\n  /** Complete encoded fields not understood by this codec. */\n  unknownFields: Uint8Array[];\n}\n\nfunction encodeVarint(value: number): number[] {\n  if (!Number.isSafeInteger(value) || value < 0) throw new Error('invalid varint');\n  const result: number[] = [];\n  do {\n    const byte = value % 128;\n    value = Math.floor(value / 128);\n    result.push(byte | (value ? 0x80 : 0));\n  } while (value);\n  return result;\n}\n\nfunction readVarint(bytes: Uint8Array, offset: number): [number, number] {\n  let value = 0;\n  let multiplier = 1;\n  for (let count = 0; count < 10 && offset < bytes.length; count++) {\n    const byte = bytes[offset++]!;\n    value += (byte & 0x7f) * multiplier;\n    if (!(byte & 0x80)) {\n      if (!Number.isSafeInteger(value)) throw new Error('varint exceeds safe integer');\n      return [value, offset];\n    }\n    multiplier *= 128;\n  }\n  throw new Error('invalid or truncated varint');\n}\n\nfunction scalarField(tag: number, value: number): number[] {\n  return [...encodeVarint(tag << 3), ...encodeVarint(value)];\n}\n\nfunction nameField(name: string): number[] {\n  const data = new TextEncoder().encode(name);\n  return [...encodeVarint(10), ...encodeVarint(data.length), ...data];\n}\n\nfunction skipField(bytes: Uint8Array, offset: number, wire: number): number {\n  if (wire === 0) return readVarint(bytes, offset)[1];\n  if (wire === 1) {\n    if (offset + 8 > bytes.length) throw new Error('truncated fixed64');\n    return offset + 8;\n  }\n  if (wire === 2) {\n    const [length, start] = readVarint(bytes, offset);\n    if (start + length > bytes.length) throw new Error('truncated bytes');\n    return start + length;\n  }\n  if (wire === 5) {\n    if (offset + 4 > bytes.length) throw new Error('truncated fixed32');\n    return offset + 4;\n  }\n  throw new Error(`unsupported wire type ${wire}`);\n}\n\ninterface Parsed {\n  name: string;\n  urgent: boolean;\n  priorityNumeric: number | null;\n  unknownFields: Uint8Array[];\n}\n\nfunction parse(bytes: Uint8Array): Parsed {\n  let name = '';\n  let urgent = false;\n  let priorityNumeric: number | null = null;\n  const unknownFields: Uint8Array[] = [];\n  for (let offset = 0; offset < bytes.length;) {\n    const fieldStart = offset;\n    const [key, valueStart] = readVarint(bytes, offset);\n    offset = valueStart;\n    const tag = Math.floor(key / 8);\n    const wire = key & 7;\n    if (tag === 0) throw new Error('invalid field number 0');\n    if (tag === 1 && wire === 2) {\n      const [length, start] = readVarint(bytes, offset);\n      const end = start + length;\n      if (end > bytes.length) throw new Error('truncated name');\n      name = new TextDecoder().decode(bytes.slice(start, end));\n      offset = end;\n    } else if (tag === 2 && wire === 0) {\n      const [value, end] = readVarint(bytes, offset);\n      urgent = value !== 0;\n      offset = end;\n    } else if (tag === 3 && wire === 0) {\n      [priorityNumeric, offset] = readVarint(bytes, offset);\n    } else {\n      offset = skipField(bytes, offset, wire);\n      unknownFields.push(bytes.slice(fieldStart, offset));\n    }\n  }\n  return { name, urgent, priorityNumeric, unknownFields };\n}\n\nexport function encodeOld(value: OldRequest): Uint8Array {\n  return Uint8Array.from([...nameField(value.name), ...(value.urgent ? scalarField(2, 1) : [])]);\n}\n\nexport function decodeOld(bytes: Uint8Array): OldRequest {\n  const value = parse(bytes);\n  return { name: value.name, urgent: value.urgent };\n}\n\nfunction priorityName(value: number): Priority {\n  if (value === 0) return 'UNSPECIFIED';\n  if (value === 1) return 'NORMAL';\n  if (value === 2) return 'HIGH';\n  return null;\n}\n\nexport function encodeNew(value: NewRequest): Uint8Array {\n  // Dual-write during migration. Unknown values have no faithful bool mapping.\n  return Uint8Array.from([\n    ...nameField(value.name),\n    ...(value.priorityNumeric === 2 ? scalarField(2, 1) : []),\n    ...scalarField(3, value.priorityNumeric),\n    ...value.unknownFields.flatMap(field => [...field]),\n  ]);\n}\n\nexport function decodeNew(bytes: Uint8Array): NewRequest {\n  const value = parse(bytes);\n  const numeric = value.priorityNumeric ?? (value.urgent ? 2 : 1);\n  return {\n    name: value.name,\n    priority: priorityName(numeric),\n    priorityNumeric: numeric,\n    unknownFields: value.unknownFields,\n  };\n}\n"
+    },
+    {
+      "path": "tests/wire.test.ts",
+      "change": "modified",
+      "beforeSha256": "05fcd834091436d4b374cd232859aabd4d1b81340d61badb530ccee825617b7f",
+      "afterSha256": "deb23828ca4087ac52bae2048595bb29984bff1efb46a954f37ef283c219101e",
+      "beforeText": "import { expect, test } from 'bun:test';\nimport { decodeNew, encodeOld } from '../src/wire';\n\ntest('new reader accepts old urgent=true message', () => {\n  expect(decodeNew(encodeOld({ name: 'a', urgent: true })).priority).toBe('HIGH');\n});\n",
+      "afterText": "import { expect, test } from 'bun:test';\nimport { decodeNew, decodeOld, encodeNew, encodeOld, type NewRequest } from '../src/wire';\n\nfunction request(priority: NewRequest['priority'], numeric: number): NewRequest {\n  return { name: 'a', priority, priorityNumeric: numeric, unknownFields: [] };\n}\n\ntest('new reader falls back to old urgent field', () => {\n  expect(decodeNew(encodeOld({ name: 'a', urgent: true }))).toMatchObject({ priority: 'HIGH', priorityNumeric: 2 });\n  expect(decodeNew(encodeOld({ name: 'a', urgent: false }))).toMatchObject({ priority: 'NORMAL', priorityNumeric: 1 });\n});\n\ntest('new reader prefers recognized priority over conflicting urgent', () => {\n  expect(decodeNew(Uint8Array.from([10, 1, 97, 16, 1, 24, 1])).priority).toBe('NORMAL');\n});\n\ntest('new HIGH writer dual-writes for old readers', () => {\n  const bytes = encodeNew(request('HIGH', 2));\n  expect(decodeOld(bytes)).toEqual({ name: 'a', urgent: true });\n  expect(decodeNew(bytes)).toMatchObject({ priority: 'HIGH', priorityNumeric: 2 });\n});\n\ntest('new NORMAL writer works with old and new readers', () => {\n  const bytes = encodeNew(request('NORMAL', 1));\n  expect(decodeOld(bytes)).toEqual({ name: 'a', urgent: false });\n  expect(decodeNew(bytes)).toMatchObject({ priority: 'NORMAL', priorityNumeric: 1 });\n});\n\ntest('unknown enum numeric remains distinguishable and survives re-encode', () => {\n  const decoded = decodeNew(Uint8Array.from([10, 1, 97, 24, 150, 1]));\n  expect(decoded).toMatchObject({ priority: null, priorityNumeric: 150 });\n  expect(decodeNew(encodeNew(decoded))).toMatchObject({ priority: null, priorityNumeric: 150 });\n});\n\ntest('unrecognized fields survive binary decode/re-encode', () => {\n  const decoded = decodeNew(Uint8Array.from([10, 1, 97, 24, 2, 74, 3, 1, 2, 3]));\n  expect(decoded.unknownFields).toHaveLength(1);\n  expect(Array.from(encodeNew(decoded)).slice(-5)).toEqual([74, 3, 1, 2, 3]);\n});\n"
+    }
+  ]
+}
+
+ARTIFACT B
+{
+  "finalOutput": "Implemented the protobuf priority migration.\n\nKey changes:\n\n- Added `Priority` enum at field `3`.\n- Retained `urgent = 2` as deprecated during migration.\n- Added post-window schema reserving field number `2` and name `urgent`.\n- Implemented dual-write compatibility for known priorities.\n- Added replacement-field precedence and explicit-zero handling.\n- Preserved unknown enum numerics and unknown fields through decode/re-encode.\n- Documented staged server/client rollout without lockstep deployment.\n- Added old/new binary interoperability tests.\n\nVerification:\n\n- `bun test`: 7 passed, 0 failed.\n- Both schemas compile with `protoc`.\n- Descriptor inspection confirms stable `kory.jobs.v1.StartJobRequest` identity, correct field numbers/types, deprecation, and post-window reservations.\n- TypeScript compiler was not locally installed, so a separate static type-check was unavailable.",
+  "executionEvidence": [
+    "Codex CLI completed successfully in 174972ms",
+    "live message identity: pass",
+    "live compatibility schema: pass",
+    "post-window message identity: pass",
+    "post-window reservation schema: pass",
+    "hidden old/new/unknown-enum wire behavior: pass",
+    "representative compatibility tests with executable assertions: present",
+    "Evaluator integrity: unchanged. Hidden test completion: observed. Public tests: passed or absent.\nbun test v1.3.14 (d1632b29)\nKORY_EVAL_COMPLETED_274aa0c979fe42659697c4b60b89b95d\n\n\n../kory-skill-eval-pair-rlQA6O/workspace/tests/__kory_hidden_eval_274aa0c979fe42659697c4b60b89b95d.test.ts:\n(pass) hidden: old binary remains readable by new reader [0.66ms]\n(pass) hidden: new writer remains meaningful to old server during compatibility window [0.20ms]\n(pass) hidden: recognized priority field 3 wins over legacy field 2 [0.04ms]\n(pass) hidden: unknown future enum numeric survives round trip [0.04ms]\n(pass) hidden: multibyte unknown enum numeric survives decode and re-encode [0.05ms]\n(pass) hidden: unrelated unknown fields survive the normal codec path [0.07ms]\n\n 6 pass\n 0 fail\n 16 expect() calls\nRan 6 tests across 1 file. [17.00ms]\nbun test v1.3.14 (d1632b29)\n\n\n../kory-skill-eval-pair-rlQA6O/workspace/tests/wire.test.ts:\n(pass) new reader maps old urgent=true to a complete HIGH representation [0.54ms]\n(pass) new reader maps absent old urgent=false to NORMAL [0.03ms]\n(pass) compatibility writer dual-writes HIGH for an old reader [0.13ms]\n(pass) compatibility writer dual-writes NORMAL for an old reader [0.06ms]\n(pass) present priority takes precedence over conflicting legacy urgent [0.02ms]\n(pass) unknown future priority survives application decode and re-encode [0.11ms]\n(pass) explicit UNSPECIFIED is distinct from absent priority fallback [0.01ms]\n\n 7 pass\n 0 fail\n 20 expect() calls\nRan 7 tests across 1 file. [8.00ms]"
+  ],
+  "publicContract": {
+    "taskPrompt": {
+      "available": true,
+      "sha256": "17df29d7bf111fc18c7677626e1f1bf5edb0ff840feadf876eeedfcb37c18e64",
+      "byteLength": 365,
+      "text": "Evolve a protobuf request used by old and new clients to replace a boolean `urgent` flag with a richer priority enum. Preserve wire compatibility, reserve/deprecate fields correctly, define unknown-enum behavior, and provide a staged server/client migration with generated-code and binary round-trip tests. Do not reuse field numbers or require lockstep deployment."
+    },
+    "fixtureFiles": {
+      "README.md": {
+        "available": true,
+        "sha256": "5a7308d5d3d5562fec262cda4ed2df408ed5e617aadb784667ca284a84deb3e9",
+        "byteLength": 338,
+        "text": "# Protobuf field-evolution fixture\n\nEvolve `proto/job.proto` and the small reference wire codec in `src/wire.ts` according to the compatibility contract. Add a post-window schema artifact showing the required reservation after field 2 is removed. Expand tests for old/new cross-version binary behavior and an unknown future enum numeric.\n"
+      },
+      "contract.json": {
+        "available": false,
+        "sha256": null,
+        "byteLength": 0,
+        "text": null,
+        "reason": "not-present"
+      }
+    }
+  },
+  "changes": [
+    {
+      "path": "README.md",
+      "change": "modified",
+      "beforeSha256": "8a722ff6b8bc3a21d13d9ce03e3a65f4e7b4e2fd37a4096e3d79a61979058471",
+      "afterSha256": "55f264f1574ce201d69f8652c67c8552633d69fa0346e3532dd083b0edc0b212",
+      "beforeText": "# Protobuf field-evolution fixture\n\nEvolve `proto/job.proto` and the small reference wire codec in `src/wire.ts` according to the compatibility contract. Add a post-window schema artifact showing the required reservation after field 2 is removed. Expand tests for old/new cross-version binary behavior and an unknown future enum numeric.\n",
+      "afterText": "# Protobuf field-evolution fixture\n\nEvolve `proto/job.proto` and the small reference wire codec in `src/wire.ts` according to the compatibility contract. Add a post-window schema artifact showing the required reservation after field 2 is removed. Expand tests for old/new cross-version binary behavior and an unknown future enum numeric.\n\nThe active compatibility schema is `proto/job.proto`; do not deploy the\n`proto/post-window/job.proto` artifact until the overlap window has ended. Run\n`bun test` for executable old/new binary interoperability coverage.\n"
+    },
+    {
+      "path": "compatibility-contract.md",
+      "change": "modified",
+      "beforeSha256": "1a03674b4fbf92d4b6cbbba36afa9cf55ebcbe3abd640a659e9477caad6a5cb7",
+      "afterSha256": "deb12d1cb7d9648f2a148955c8a341b4839a9d37665b05defedacd64f760d170",
+      "beforeText": "# Protobuf migration contract\n\n- Existing wire contract is `name = 1`, `urgent = 2` (bool). Field 2 cannot change wire meaning while old clients/servers exist.\n- During the compatibility window keep `urgent = 2` as a deprecated bool and add `priority = 3` using enum `Priority` with 0=UNSPECIFIED, 1=NORMAL, 2=HIGH.\n- New writers send field 3 and also populate deprecated field 2 consistently (HIGH => true, NORMAL => false) while old servers remain supported.\n- New readers prefer a present recognized field 3; when absent, derive priority from legacy field 2.\n- Unknown future enum numerics on field 3 must remain distinguishable from known values and survive decode/re-encode; never silently coerce them to NORMAL/HIGH.\n- After the compatibility window, a documented future schema may remove `urgent` and must reserve field number 2 and name `urgent`; field 3 remains priority. Do not reserve field 2 in the live compatibility schema while it is still present.\n- Preserve unknown fields across decode/re-encode where this reference codec exposes them.\n",
+      "afterText": "# Protobuf migration contract\n\n- Existing wire contract is `name = 1`, `urgent = 2` (bool). Field 2 cannot change wire meaning while old clients/servers exist.\n- During the compatibility window keep `urgent = 2` as a deprecated bool and add `priority = 3` using enum `Priority` with 0=UNSPECIFIED, 1=NORMAL, 2=HIGH.\n- New writers send field 3 and also populate deprecated field 2 consistently (HIGH => true, NORMAL => false) while old servers remain supported.\n- New readers prefer a present recognized field 3; when absent, derive priority from legacy field 2.\n- Unknown future enum numerics on field 3 must remain distinguishable from known values and survive decode/re-encode; never silently coerce them to NORMAL/HIGH.\n- After the compatibility window, a documented future schema may remove `urgent` and must reserve field number 2 and name `urgent`; field 3 remains priority. Do not reserve field 2 in the live compatibility schema while it is still present.\n- Preserve unknown fields across decode/re-encode where this reference codec exposes them.\n\n## Staged rollout\n\n1. Deploy readers/servers that accept both fields. They prefer a present field 3\n   (including zero or an unknown numeric) and derive NORMAL/HIGH from field 2 only\n   when field 3 is absent. Keep the RPC, package, and message identities unchanged.\n2. Deploy new clients as compatibility writers. For known NORMAL/HIGH values they\n   write field 3 and the matching deprecated field 2 value so old servers retain\n   their behavior. UNSPECIFIED maps to legacy false; an unknown future numeric is\n   relayed in field 3 without inventing an urgent value.\n3. Once telemetry shows that no supported client or server depends on `urgent`,\n   stop dual-writing field 2 and use `proto/post-window/job.proto`: field 2 and the\n   name `urgent` are reserved permanently. Regenerate every supported language,\n   but releases need not be simultaneous because field 3 never changes identity.\n\nUnknown enum numerics are valid forward-compatible wire values. Application code\nmust expose their exact number and relays must re-emit it. Business handlers may\nreject an unsupported priority at their validation boundary, but must not silently\ncoerce it. Binary compatibility does not imply ProtoJSON compatibility: enum names\nand unknown numeric handling in JSON must be tested separately before JSON peers\nare included in this rollout.\n"
+    },
+    {
+      "path": "proto/job.proto",
+      "change": "modified",
+      "beforeSha256": "b7817c049bc854f325f1af439593c0609217ff660caf8268de9fcaf2e64496ca",
+      "afterSha256": "06d158cecd9b47b193204e131efbab76208c76b3a530afaed457226d63c339a6",
+      "beforeText": "syntax = \"proto3\";\n\npackage kory.jobs.v1;\n\nmessage StartJobRequest {\n  string name = 1;\n  bool urgent = 2;\n}\n",
+      "afterText": "syntax = \"proto3\";\n\npackage kory.jobs.v1;\n\nenum Priority {\n  PRIORITY_UNSPECIFIED = 0;\n  PRIORITY_NORMAL = 1;\n  PRIORITY_HIGH = 2;\n}\n\nmessage StartJobRequest {\n  string name = 1;\n  bool urgent = 2 [deprecated = true];\n  Priority priority = 3;\n}\n"
+    },
+    {
+      "path": "proto/post-window/job.proto",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "0d886ba08fdc1a1361a8078af281af621cc89f6c4073d7f3ae056350644e7011",
+      "afterText": "syntax = \"proto3\";\n\npackage kory.jobs.v1;\n\nenum Priority {\n  PRIORITY_UNSPECIFIED = 0;\n  PRIORITY_NORMAL = 1;\n  PRIORITY_HIGH = 2;\n}\n\n// Future artifact for use only after every supported peer understands priority.\nmessage StartJobRequest {\n  reserved 2;\n  reserved \"urgent\";\n\n  string name = 1;\n  Priority priority = 3;\n}\n"
+    },
+    {
+      "path": "src/wire.ts",
+      "change": "modified",
+      "beforeSha256": "f6f829dbc4d73e5e6990cf77c99d5d5cd566ce629f97e2e462755691e5272639",
+      "afterSha256": "8d66bc8db58187518c87982ac272efd1a9040d3ea74a68e80db370cff51edb7f",
+      "beforeText": "export interface OldRequest {\n  name: string;\n  urgent: boolean;\n}\n\nexport interface NewRequest {\n  name: string;\n  priority: 'NORMAL' | 'HIGH' | null;\n  priorityNumeric: number;\n  unknownFields: Uint8Array[];\n}\n\nfunction field(tag: number, value: number): number[] {\n  return [(tag << 3) | 0, value];\n}\n\nexport function encodeOld(value: OldRequest): Uint8Array {\n  const name = new TextEncoder().encode(value.name);\n  return Uint8Array.from([(1 << 3) | 2, name.length, ...name, ...field(2, value.urgent ? 1 : 0)]);\n}\n\nexport function decodeOld(bytes: Uint8Array): OldRequest {\n  let name = '';\n  let urgent = false;\n  for (let i = 0; i < bytes.length;) {\n    const key = bytes[i++]!;\n    const tag = key >> 3;\n    const wire = key & 7;\n    if (wire === 2) {\n      const len = bytes[i++]!;\n      const data = bytes.slice(i, i + len);\n      i += len;\n      if (tag === 1) name = new TextDecoder().decode(data);\n    } else if (wire === 0) {\n      const value = bytes[i++]!;\n      if (tag === 2) urgent = value !== 0;\n    } else throw new Error('unsupported wire type');\n  }\n  return { name, urgent };\n}\n\nexport function encodeNew(value: NewRequest): Uint8Array {\n  // BUG: replaces field 2 in-place with enum numeric value, breaking old bool semantics.\n  const name = new TextEncoder().encode(value.name);\n  const priority = value.priority === 'HIGH' ? 2 : 1;\n  return Uint8Array.from([(1 << 3) | 2, name.length, ...name, ...field(2, priority)]);\n}\n\nexport function decodeNew(bytes: Uint8Array): NewRequest {\n  const old = decodeOld(bytes);\n  return {\n    name: old.name,\n    priority: old.urgent ? 'HIGH' : 'NORMAL',\n    priorityNumeric: old.urgent ? 2 : 1,\n    unknownFields: [],\n  };\n}\n",
+      "afterText": "export interface OldRequest {\n  name: string;\n  urgent: boolean;\n}\n\nexport type Priority = 'PRIORITY_UNSPECIFIED' | 'NORMAL' | 'HIGH' | null;\n\nexport interface NewRequest {\n  name: string;\n  priority: Priority;\n  /** Exact field-3 value, including unknown future enum numerics. */\n  priorityNumeric: number;\n  /** Complete encoded fields not understood by this codec. */\n  unknownFields: Uint8Array[];\n}\n\nconst PRIORITY_UNSPECIFIED = 0;\nconst NORMAL = 1;\nconst HIGH = 2;\n\nfunction encodeVarint(value: number): number[] {\n  if (!Number.isSafeInteger(value) || value < 0) throw new Error('invalid varint');\n  const result: number[] = [];\n  do {\n    let byte = value % 128;\n    value = Math.floor(value / 128);\n    if (value !== 0) byte |= 0x80;\n    result.push(byte);\n  } while (value !== 0);\n  return result;\n}\n\nfunction decodeVarint(bytes: Uint8Array, offset: number): [number, number] {\n  let value = 0;\n  let multiplier = 1;\n  for (let i = offset; i < bytes.length && i < offset + 10; i++) {\n    const byte = bytes[i]!;\n    value += (byte & 0x7f) * multiplier;\n    if (!Number.isSafeInteger(value)) throw new Error('varint exceeds safe integer range');\n    if ((byte & 0x80) === 0) return [value, i + 1];\n    multiplier *= 128;\n  }\n  throw new Error('truncated or oversized varint');\n}\n\nfunction scalarField(tag: number, value: number): number[] {\n  return [...encodeVarint(tag << 3), ...encodeVarint(value)];\n}\n\nfunction bytesField(tag: number, value: Uint8Array): number[] {\n  return [...encodeVarint((tag << 3) | 2), ...encodeVarint(value.length), ...value];\n}\n\nfunction fieldEnd(bytes: Uint8Array, offset: number, wire: number): number {\n  if (wire === 0) return decodeVarint(bytes, offset)[1];\n  if (wire === 1) {\n    if (offset + 8 > bytes.length) throw new Error('truncated fixed64');\n    return offset + 8;\n  }\n  if (wire === 2) {\n    const [length, start] = decodeVarint(bytes, offset);\n    if (start + length > bytes.length) throw new Error('truncated length-delimited field');\n    return start + length;\n  }\n  if (wire === 5) {\n    if (offset + 4 > bytes.length) throw new Error('truncated fixed32');\n    return offset + 4;\n  }\n  throw new Error(`unsupported wire type ${wire}`);\n}\n\nexport function encodeOld(value: OldRequest): Uint8Array {\n  const name = new TextEncoder().encode(value.name);\n  const result = [...bytesField(1, name)];\n  // Proto3 omits scalar defaults. urgent=false is therefore absent on the wire.\n  if (value.urgent) result.push(...scalarField(2, 1));\n  return Uint8Array.from(result);\n}\n\nexport function decodeOld(bytes: Uint8Array): OldRequest {\n  let name = '';\n  let urgent = false;\n  for (let offset = 0; offset < bytes.length;) {\n    const [key, valueStart] = decodeVarint(bytes, offset);\n    const tag = Math.floor(key / 8);\n    const wire = key & 7;\n    const end = fieldEnd(bytes, valueStart, wire);\n    if (tag === 1 && wire === 2) {\n      const [length, start] = decodeVarint(bytes, valueStart);\n      name = new TextDecoder().decode(bytes.slice(start, start + length));\n    } else if (tag === 2 && wire === 0) {\n      urgent = decodeVarint(bytes, valueStart)[0] !== 0;\n    }\n    // Old generated readers ignore fields they do not know, including priority=3.\n    offset = end;\n  }\n  return { name, urgent };\n}\n\n/** Compatibility-window writer with legacy dual-write where representable. */\nexport function encodeNew(value: NewRequest): Uint8Array {\n  const name = new TextEncoder().encode(value.name);\n  const result = [...bytesField(1, name)];\n\n  if (value.priorityNumeric === HIGH) result.push(...scalarField(2, 1));\n  // NORMAL and UNSPECIFIED both have the faithful proto3 legacy value false,\n  // which is omitted. Unknown values deliberately get no invented bool meaning.\n  result.push(...scalarField(3, value.priorityNumeric));\n  for (const unknown of value.unknownFields) result.push(...unknown);\n  return Uint8Array.from(result);\n}\n\nexport function decodeNew(bytes: Uint8Array): NewRequest {\n  let name = '';\n  let urgent = false;\n  let priorityNumeric: number | undefined;\n  const unknownFields: Uint8Array[] = [];\n\n  for (let offset = 0; offset < bytes.length;) {\n    const fieldStart = offset;\n    const [key, valueStart] = decodeVarint(bytes, offset);\n    const tag = Math.floor(key / 8);\n    const wire = key & 7;\n    const end = fieldEnd(bytes, valueStart, wire);\n\n    if (tag === 1 && wire === 2) {\n      const [length, start] = decodeVarint(bytes, valueStart);\n      name = new TextDecoder().decode(bytes.slice(start, start + length));\n    } else if (tag === 2 && wire === 0) {\n      urgent = decodeVarint(bytes, valueStart)[0] !== 0;\n    } else if (tag === 3 && wire === 0) {\n      priorityNumeric = decodeVarint(bytes, valueStart)[0];\n    } else {\n      unknownFields.push(bytes.slice(fieldStart, end));\n    }\n    offset = end;\n  }\n\n  // Presence wins over legacy fallback, including explicit zero and unknowns.\n  const numeric = priorityNumeric ?? (urgent ? HIGH : NORMAL);\n  const priority: Priority = numeric === PRIORITY_UNSPECIFIED\n    ? 'PRIORITY_UNSPECIFIED'\n    : numeric === NORMAL\n      ? 'NORMAL'\n      : numeric === HIGH\n        ? 'HIGH'\n        : null;\n\n  return { name, priority, priorityNumeric: numeric, unknownFields };\n}\n"
+    },
+    {
+      "path": "tests/wire.test.ts",
+      "change": "modified",
+      "beforeSha256": "05fcd834091436d4b374cd232859aabd4d1b81340d61badb530ccee825617b7f",
+      "afterSha256": "f1148f7365591be651f1e61f1df7203a4fe91d96d39bb8d5b13c7f0479c7a26d",
+      "beforeText": "import { expect, test } from 'bun:test';\nimport { decodeNew, encodeOld } from '../src/wire';\n\ntest('new reader accepts old urgent=true message', () => {\n  expect(decodeNew(encodeOld({ name: 'a', urgent: true })).priority).toBe('HIGH');\n});\n",
+      "afterText": "import { expect, test } from 'bun:test';\nimport { decodeNew, decodeOld, encodeNew, encodeOld, type NewRequest } from '../src/wire';\n\nfunction request(priority: NewRequest['priority'], priorityNumeric: number): NewRequest {\n  return { name: 'a', priority, priorityNumeric, unknownFields: [] };\n}\n\ntest('new reader maps old urgent=true to a complete HIGH representation', () => {\n  expect(decodeNew(encodeOld({ name: 'a', urgent: true }))).toEqual({\n    name: 'a', priority: 'HIGH', priorityNumeric: 2, unknownFields: [],\n  });\n});\n\ntest('new reader maps absent old urgent=false to NORMAL', () => {\n  const decoded = decodeNew(encodeOld({ name: 'a', urgent: false }));\n  expect(decoded.priority).toBe('NORMAL');\n  expect(decoded.priorityNumeric).toBe(1);\n});\n\ntest('compatibility writer dual-writes HIGH for an old reader', () => {\n  const bytes = encodeNew(request('HIGH', 2));\n  expect(Array.from(bytes)).toContain((3 << 3) | 0);\n  expect(decodeOld(bytes)).toEqual({ name: 'a', urgent: true });\n  expect(decodeNew(bytes).priority).toBe('HIGH');\n});\n\ntest('compatibility writer dual-writes NORMAL for an old reader', () => {\n  const bytes = encodeNew(request('NORMAL', 1));\n  expect(Array.from(bytes)).toContain((3 << 3) | 0);\n  expect(decodeOld(bytes)).toEqual({ name: 'a', urgent: false });\n  expect(decodeNew(bytes).priority).toBe('NORMAL');\n});\n\ntest('present priority takes precedence over conflicting legacy urgent', () => {\n  const decoded = decodeNew(Uint8Array.from([10, 1, 97, 16, 1, 24, 1]));\n  expect(decoded.priority).toBe('NORMAL');\n  expect(decoded.priorityNumeric).toBe(1);\n});\n\ntest('unknown future priority survives application decode and re-encode', () => {\n  const future = Uint8Array.from([10, 1, 97, 24, 172, 2, 34, 2, 9, 8]);\n  const decoded = decodeNew(future);\n  expect(decoded.priority).toBeNull();\n  expect(decoded.priorityNumeric).toBe(300);\n  expect(decoded.unknownFields.map((field) => Array.from(field))).toEqual([[34, 2, 9, 8]]);\n\n  const roundTripped = decodeNew(encodeNew(decoded));\n  expect(roundTripped.priority).toBeNull();\n  expect(roundTripped.priorityNumeric).toBe(300);\n  expect(roundTripped.unknownFields.map((field) => Array.from(field))).toEqual([[34, 2, 9, 8]]);\n  expect(decodeOld(encodeNew(decoded)).urgent).toBe(false);\n});\n\ntest('explicit UNSPECIFIED is distinct from absent priority fallback', () => {\n  const decoded = decodeNew(Uint8Array.from([10, 1, 97, 16, 1, 24, 0]));\n  expect(decoded.priority).toBe('PRIORITY_UNSPECIFIED');\n  expect(decoded.priorityNumeric).toBe(0);\n});\n"
+    }
+  ]
+}

@@ -380,10 +380,10 @@ export const CLI_ADAPTER_COMPATIBILITY = [
     versionBoundary: {
       kind: 'source-reference',
       detail:
-        'AGENTS.md and adapter comments reference the qualified native 0.2.16 build; docs/freebuff-cli.md records the separate opt-in live probe. This diagnostic catalog does not probe an installed CLI. Fixture versions 9.8.7 and 10.0.0 are synthetic and are not support claims.',
+        'Kory auto-tracks the latest Freebuff release the way the official launcher does (npm latest tag + codebuff.com download), building versioned runtime images with a recipe rev; the qualified floor is native 0.2.36 and the live probes in docs/freebuff-cli.md qualify TUI/log shapes per runtime. This diagnostic catalog does not probe an installed CLI. Fixture versions 9.8.7 and 10.0.0 are synthetic and are not support claims.',
     },
     evidence: [
-      source('freebuff-cli', '0.2.16', 'Version-sensitive TUI/log assumptions recorded in source.'),
+      source('freebuff-cli', '0.2.36', 'Version-sensitive TUI/log assumptions recorded in source; minimum supported runtime version.'),
       fixture(
         'freebuff-codebuff-contract',
         'discovers picker models and image capabilities from the installed-binary shape',

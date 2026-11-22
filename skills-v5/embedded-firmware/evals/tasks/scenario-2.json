@@ -1,15 +1,16 @@
 {
   "id": "embedded-firmware-full-task-2-individual",
   "maturity": "individual",
-  "prompt": "A UART ISR writes bytes into a lock-free ring buffer consumed by the main loop. Under burst traffic, the producer index wraps and occasionally makes an overrun look like an empty buffer, dropping framing bytes silently. Correct the fixed-width index/full-empty contract without allocating or blocking in the ISR, define an explicit overflow policy, and verify wraparound, sustained bursts, consumer lag, reset, and memory-order assumptions for the target MCU/compiler.",
+  "prompt": "A Cortex-M4 board runs a SysTick interrupt producer that pushes bytes from a compiled-in burst corpus into a fixed 32-byte ring while the main loop pops bytes and decodes 0x02 <length> <payload> <xor checksum> 0x03 frames. The shipped ring.c detects a full ring and drops the byte without counting it, so when the consumer falls behind, the decoder loses framing and nothing in the run explains the loss. Implement ring_init/ring_push/ring_pop/ring_overflows in ring.c so the ring stays consistent across 30 wraps of the index, every byte is either delivered or rejected and counted (pushed - popped == overruns), a fresh boot starts from a clean ring, and the interrupt handler stays inside its cycle budget. The harness sets two knobs before each boot: rate.txt is the bytes pushed per interrupt and slow.txt is a busy-wait the consumer runs between drains; the interrupt duration is clocked from the SysTick current-value register.",
   "environment": {
     "kind": "repository",
     "startingState": "fixture://embedded-firmware/isr-ring-buffer-overrun",
     "requirements": [
-      "fixed-capacity ring buffer with small integer indices to force wrap quickly",
-      "ISR-producer/main-loop-consumer timing simulator and burst corpus",
-      "target compiler/MCU atomicity constraints for index-width accesses",
-      "framing-level expected byte sequence plus explicit overflow telemetry requirement",
+      "real SysTick interrupt producer on an emulated Cortex-M4 with a compiled-in 120-frame burst corpus",
+      "fixed 32-byte ring forcing about 30 index wraps across the corpus",
+      "rate knob (bytes per interrupt) and a consumer slow-down knob that provably overflows the ring",
+      "framed byte stream with a checksum the guest recomputes, plus explicit overrun telemetry (pushed, popped, overruns)",
+      "interrupt duration measured from the SysTick current-value register against a 400-cycle budget",
       "paired same-model skill/no-skill execution from the identical starting snapshot"
     ]
   },
@@ -37,7 +38,10 @@
         "independent evaluator record",
         "quality comparison without variant labels"
       ],
-      "blindTo": ["skill-variant", "expected-outcome"]
+      "blindTo": [
+        "skill-variant",
+        "expected-outcome"
+      ]
     }
   ],
   "requiredEvidence": [

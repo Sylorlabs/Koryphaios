@@ -6,6 +6,7 @@ export type FeedEntryType =
   | 'tool_call'
   | 'tool_result'
   | 'routing'
+  | 'skill'
   | 'error'
   | 'system'
   | 'compaction'
@@ -32,6 +33,12 @@ export interface FeedEntryLocal {
   userHidden?: boolean;
   /** Stubbed out of the agent's context (user still sees it). */
   agentHidden?: boolean;
+  /** The row's source recorded no clock time (imported chats). `timestamp` then
+   *  only orders the row; the UI shows "Time unknown", never a clock time. */
+  timeUnknown?: true;
+  /** The source recorded no duration for this reasoning block / tool call.
+   *  The UI must never render a duration (and never "0.0s") for it. */
+  durationUnknown?: true;
 }
 
 /** Alias used by store modules */

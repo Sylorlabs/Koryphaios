@@ -18,9 +18,9 @@ import {
   isReactBrowserScenario,
   startReactBrowserBroker,
   type ReactBrowserBroker,
-} from '../skill-eval-react-browser-broker';
-import { reactBrowserReadiness } from '../skill-eval-react-browser-fixtures';
-import { chromiumLaunchOptions } from '../skill-eval-real-web-runtime';
+} from '../../eval/skills/skill-eval-react-browser-broker';
+import { reactBrowserReadiness } from '../../eval/skills/skill-eval-react-browser-fixtures';
+import { chromiumLaunchOptions } from '../../eval/skills/skill-eval-real-web-runtime';
 import { browserControlTest } from './browser-runtime-test-policy';
 
 const roots: string[] = [];

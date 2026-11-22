@@ -23,9 +23,11 @@ afterAll(() => {
 
 describe('config/compat', () => {
   const originalEnv = process.env.KORYPHAIOS_FRONTEND_BUNDLE_HASH;
+  const originalBuildEnv = process.env.KORYPHAIOS_BACKEND_BUILD_HASH;
 
   beforeEach(() => {
     delete process.env.KORYPHAIOS_FRONTEND_BUNDLE_HASH;
+    delete process.env.KORYPHAIOS_BACKEND_BUILD_HASH;
   });
 
   afterEach(() => {
@@ -33,6 +35,11 @@ describe('config/compat', () => {
       delete process.env.KORYPHAIOS_FRONTEND_BUNDLE_HASH;
     } else {
       process.env.KORYPHAIOS_FRONTEND_BUNDLE_HASH = originalEnv;
+    }
+    if (originalBuildEnv === undefined) {
+      delete process.env.KORYPHAIOS_BACKEND_BUILD_HASH;
+    } else {
+      process.env.KORYPHAIOS_BACKEND_BUILD_HASH = originalBuildEnv;
     }
   });
 
@@ -66,6 +73,21 @@ describe('config/compat', () => {
     const { resolveBundleHash, isBundleHashEnforced } = await importFresh();
     expect(resolveBundleHash()).toBe('15314e1');
     expect(isBundleHashEnforced()).toBe(true);
+  });
+
+  test('the compiled-in build hash wins over the shell env stamp', async () => {
+    process.env.KORYPHAIOS_BACKEND_BUILD_HASH = 'build-hash-1';
+    process.env.KORYPHAIOS_FRONTEND_BUNDLE_HASH = 'env-hash-2';
+    const { resolveBundleHash, isBundleHashEnforced } = await importFresh();
+    expect(resolveBundleHash()).toBe('build-hash-1');
+    expect(isBundleHashEnforced()).toBe(true);
+  });
+
+  test('a dev build hash is ignored and falls through to the env stamp', async () => {
+    process.env.KORYPHAIOS_BACKEND_BUILD_HASH = 'dev';
+    process.env.KORYPHAIOS_FRONTEND_BUNDLE_HASH = 'env-hash-3';
+    const { resolveBundleHash } = await importFresh();
+    expect(resolveBundleHash()).toBe('env-hash-3');
   });
 });
 

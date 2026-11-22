@@ -40,11 +40,11 @@ describe('shared model configuration', () => {
           },
           {
             id: 'codebuddy-deepseek-v4.1-flash-sg',
-            name: 'Deepseek-V4.1-Flash (x0.03 credits)',
+            name: 'Deepseek-V4.1-Flash (0.03x)',
             apiModelId: 'deepseek-v4.1-flash-sg',
             contextWindow: 1_000_000,
             contextVerified: true,
-            creditsLabel: 'x0.03 credits',
+            creditsLabel: '0.03x',
           },
         ],
         selectedModels: [],
@@ -55,10 +55,14 @@ describe('shared model configuration', () => {
 
     expect(
       screen.getByText(
-        'deepseek-v4.1-flash · 1M context · 128K output · vision · reasoning · free',
+        'deepseek-v4.1-flash · 1M context · 128K output · vision · reasoning',
       ),
     ).toBeTruthy();
-    expect(screen.getByText('deepseek-v4.1-flash-sg · 1M context · x0.03 credits')).toBeTruthy();
+    expect(screen.getByText('deepseek-v4.1-flash-sg · 1M context')).toBeTruthy();
+    // The credit multiplier is a badge on every row, not a truncatable suffix.
+    expect(
+      screen.getAllByTestId('model-credit-badge').map((el) => el.textContent?.trim()),
+    ).toEqual(['free', '0.03x']);
     // The accessible name stays the model name, so existing selection tests
     // and assistive-tech labels remain stable.
     expect(screen.getByRole('checkbox', { name: 'Deepseek-V4.1-Flash (free)' })).toBeTruthy();

@@ -283,14 +283,21 @@ function makeDatabase(): Database {
     PRAGMA foreign_keys = ON;
     CREATE TABLE notes (
       id TEXT PRIMARY KEY, title TEXT NOT NULL, content TEXT NOT NULL,
+      content_hash TEXT, content_bytes INTEGER,
+      aliases TEXT NOT NULL DEFAULT '[]', has_refs INTEGER NOT NULL DEFAULT 0,
       folder_path TEXT NOT NULL, tags TEXT NOT NULL, pinned INTEGER NOT NULL,
       include_in_context INTEGER NOT NULL, format TEXT NOT NULL,
       project_root TEXT, revision INTEGER NOT NULL, trashed_at INTEGER,
       trash_reason TEXT, user_id TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
     );
+    CREATE TABLE note_revision_blobs (
+      id INTEGER PRIMARY KEY, hash TEXT NOT NULL UNIQUE,
+      codec TEXT NOT NULL, raw_bytes INTEGER NOT NULL, data BLOB NOT NULL
+    );
     CREATE TABLE note_revisions (
       note_id TEXT NOT NULL, revision INTEGER NOT NULL, project_root TEXT NOT NULL,
-      operation TEXT NOT NULL, title TEXT NOT NULL, content TEXT NOT NULL,
+      operation TEXT NOT NULL, title TEXT NOT NULL,
+      content_blob_id INTEGER NOT NULL REFERENCES note_revision_blobs(id),
       content_bytes INTEGER NOT NULL, folder_path TEXT NOT NULL, tags TEXT NOT NULL,
       pinned INTEGER NOT NULL, include_in_context INTEGER NOT NULL, format TEXT NOT NULL,
       source_path TEXT, trashed_at INTEGER, trash_reason TEXT,
@@ -298,6 +305,8 @@ function makeDatabase(): Database {
       created_at INTEGER NOT NULL, PRIMARY KEY(note_id, revision),
       FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE CASCADE
     );
+    CREATE VIRTUAL TABLE notes_fts USING fts5(title, content, tags, content='', contentless_delete=1, detail='column', tokenize='porter unicode61');
+    CREATE TABLE notes_fts_rowids (fts_rowid INTEGER PRIMARY KEY, note_id TEXT NOT NULL UNIQUE);
     CREATE TABLE note_links (
       from_note_id TEXT NOT NULL, to_note_id TEXT NOT NULL,
       PRIMARY KEY(from_note_id, to_note_id),

@@ -1,11 +1,36 @@
 // Clean Provider Registry - Only real providers with proper circuit breaker
 
+import { createHash } from 'node:crypto';
 import type {
+  ModelDef,
   ProviderAuthMode,
   ProviderConfig,
   ProviderName,
   KoryphaiosConfig,
 } from '@koryphaios/shared';
+
+/** Filter each catalog entry's user-tunable `parameters` down to the keys the
+ * provider's adapter actually forwards. A provider without a forwarding set
+ * (CLI harnesses, inert adapters) gets everything stripped, so the composer
+ * only ever sees settings that would reach the wire. */
+export function gateModelParametersToForwarded(
+  provider: Provider | undefined,
+  models: ModelDef[],
+): ModelDef[] {
+  const forwarded = provider?.forwardedModelParameters?.();
+  return models.map((model) => {
+    if (!model.parameters?.length) return model;
+    const filtered = forwarded
+      ? model.parameters.filter((def) => forwarded.has(def.key))
+      : [];
+    if (filtered.length === model.parameters.length) return model;
+    const next = { ...model };
+    if (filtered.length > 0) next.parameters = filtered;
+    else delete next.parameters;
+    return next;
+  });
+}
+
 import { providerLog, serverLog } from '../logger';
 import {
   buildAuthHeaders,
@@ -23,7 +48,6 @@ import {
   OpenAIProvider,
   GroqProvider,
   OpenRouterProvider,
-  AgentRouterProvider,
   UnoRouterProvider,
   ExperientialLabsProvider,
   VyceAIProvider,
@@ -55,6 +79,10 @@ import {
 } from './workbuddy-desktop-runtime';
 import { FreebuffProvider } from './freebuff-cli';
 import { OmnirushCliProvider } from './omnirush-cli';
+import {
+  isModelEnabledInCatalog,
+  resolveEnabledModelIds,
+} from './model-availability';
 import { OpenCodeCliProvider } from './opencode-cli';
 import { FREEBUFF_CLI_DEFAULT_MODEL_ID } from './freebuff-bundled-catalog';
 import { ensureFreebuffRuntimeReady } from './freebuff-runtime';
@@ -63,11 +91,18 @@ import { AntigravityProvider } from './antigravity';
 import { CursorProvider } from './cursor';
 import { DevinProvider } from './devin';
 import { ClineProvider } from './cline';
+import { HundredMillionSeekProvider } from './hundredmillionseek';
+import { NumesProvider } from './numes';
+import { CoarenaProvider } from './coarena';
+import { CrowLLMProvider } from './crowllm';
+import { RadeonProvider } from './radeon';
+import { RuncrateProvider } from './runcrate';
+import { TokenHarborProvider } from './tokenharbor';
 import { KiloCodeProvider } from './kilo-cli';
 import { CommandCodeProvider } from './command-code';
 import { HopliteProvider } from './hoplite';
 import { BedrockProvider } from './bedrock';
-import { hasAwsCredentialSource } from './aws-credential-scan';
+import { hasAwsCredentialSource, scanAwsCredentialSources } from './aws-credential-scan';
 import { GitLabProvider, normalizeGitLabBaseUrl, verifyGitLabDuoAccess } from './gitlab';
 import { SapAiProvider, verifySapAiConnection } from './sapai';
 import {
@@ -106,6 +141,8 @@ import {
   resolveModel,
   isLegacyModel,
   registerLiveModelResolver,
+  lifecycleCapabilities,
+  type LifecycleCapabilities,
   type StreamRequest,
   type ProviderEvent,
   type ProviderMessage,
@@ -139,6 +176,13 @@ import { verifyRuntimeCompletion } from './runtime-verification';
 import { catalogRefreshTier, getCatalogRefreshScheduler } from './catalog-refresh';
 import { PROJECT_ROOT } from '../runtime/paths';
 import { syncProviderConfigsToConfig } from '../runtime/config';
+import { hydrateProviderEnvFromLoginShell } from '../runtime/login-shell-env';
+import {
+  envVarMaterial,
+  isProviderAutodetectDisabled,
+  localServerCandidate,
+  providerEnvNamesForHydration,
+} from './provider-autodetect';
 import { enforceChatProviderIsolation } from './chat-isolation';
 import { withBridgeWorkspace } from './bridge-grant';
 import { currentProviderExecutionScope } from './execution-scope';
@@ -391,6 +435,11 @@ function generateProviderLabel(name: string): string {
     openrouter: 'OpenRouter',
     unorouter: 'UnoRouter',
     experientiallabs: 'Experiential Labs',
+    hundredmillionseek: '100MillionSeek',
+    numes: 'Numes',
+    crowllm: 'CrowLLM',
+    radeon: 'AMD Radeon Cloud',
+    runcrate: 'Runcrate',
     google: 'Google',
     copilot: 'GitHub Copilot',
     azure: 'Azure OpenAI',
@@ -522,6 +571,24 @@ const PROVIDER_FACTORIES: Partial<Record<ProviderName, ProviderFactory>> = {
   devin: (c) => new DevinProvider(c),
   // Cline's hosted API — OpenAI-compatible Chat Completions on one API key.
   cline: (c) => (c.apiKey || c.authToken ? new ClineProvider(c) : null),
+  // 100MillionSeek — OpenAI-compatible host; catalog owns limits and quota labels.
+  hundredmillionseek: (c) =>
+    c.apiKey || c.authToken ? new HundredMillionSeekProvider(c) : null,
+  // Numes — OpenRouter-shaped gateway; catalog owns pricing, limits and efforts.
+  numes: (c) => (c.apiKey || c.authToken ? new NumesProvider(c) : null),
+  // Coarena — OpenAI-compatible Model API; public catalog, key-based usage.
+  coarena: (c) => (c.apiKey || c.authToken ? new CoarenaProvider(c) : null),
+  // CrowLLM — OpenAI-compatible gateway; public catalog, exact ids and variants.
+  crowllm: (c) => (c.apiKey || c.authToken ? new CrowLLMProvider(c) : null),
+  // AMD Radeon Cloud Token Factory — OpenAI-compatible; one rc-… key covers
+  // every model and the authenticated /v1/models catalog owns the list.
+  radeon: (c) => (c.apiKey || c.authToken ? new RadeonProvider(c) : null),
+  // Runcrate — OpenAI-compatible inference; its public catalog owns the model
+  // list, limits, modalities and USD prices.
+  runcrate: (c) => (c.apiKey || c.authToken ? new RuncrateProvider(c) : null),
+  // Token Harbor — OpenAI-compatible gateway; its catalog owns USD prices,
+  // context limits and the reasoning_effort ladder.
+  tokenharbor: (c) => (c.apiKey || c.authToken ? new TokenHarborProvider(c) : null),
   // Freebuff — real TUI driven through a sandboxed tmux PTY + Kory MCP.
   freebuff: (c) => new FreebuffProvider(c),
   // Omnirush — official local CLI harness; the CLI owns auth and model metadata.
@@ -541,7 +608,6 @@ const PROVIDER_FACTORIES: Partial<Record<ProviderName, ProviderFactory>> = {
   hoplite: (c) => (c.apiKey ? new HopliteProvider(c) : null),
   kimicode: (c) => new KimiCodeProvider(c),
   openrouter: (c) => new OpenRouterProvider(c),
-  agentrouter: (c) => new AgentRouterProvider(c),
   // UnoRouter — open-source OpenAI-compatible gateway (Bearer auth, /v1/models).
   unorouter: (c) => new UnoRouterProvider(c),
   // Experiential Labs — open-source AI gateway (Bearer auth, /v1/models).
@@ -615,6 +681,17 @@ class ProviderRegistry {
   private verificationRecords = new Map<ProviderName, ProviderVerificationRecord>();
   private cliAutoConnectInFlight: Promise<void> | null = null;
   private cliAutoConnectCheckedAt = 0;
+  /** Where each auto-detected connection's material came from (env var name,
+   *  AWS source, local server URL). Powers the status badge; never persisted. */
+  private autoDetectedSources = new Map<ProviderName, string>();
+  /** Providers the user disconnected this session; autodetect never revives them. */
+  private userDisconnected = new Set<ProviderName>();
+  /** Last autodetect attempt per provider, keyed by a hash of the material so a
+   *  changed credential re-probes while an unchanged failure backs off. */
+  private autoDetectAttempts = new Map<
+    ProviderName,
+    { fingerprint: string; at: number; success: boolean }
+  >();
   private modelCatalogRefreshInFlight: Promise<void> | null = null;
 
   /** Per-provider guard for the user-facing Refresh button, so repeated clicks
@@ -843,7 +920,9 @@ class ProviderRegistry {
         verificationChanged ||= providerConfig?.lastVerifiedAt !== before;
       }),
     )
-      .then(() => {
+      .then(() => this.autoDetectProviders(force))
+      .then((autoDetected) => {
+        verificationChanged ||= autoDetected;
         if (verificationChanged && process.env.NODE_ENV !== 'test') {
           syncProviderConfigsToConfig(PROJECT_ROOT, this.getConfigs());
         }
@@ -854,6 +933,119 @@ class ProviderRegistry {
       });
 
     return this.cliAutoConnectInFlight;
+  }
+
+  /**
+   * Connect built-in providers whose connection material already exists on
+   * this machine — env API keys/auth tokens, AWS credentials for Bedrock, and
+   * running local model servers — but only after each provider's real
+   * verification probe succeeds. Material is runtime-only: it is never
+   * persisted, so a removed env var or a stopped server simply isn't
+   * connected next launch. An in-session Disconnect or a persisted
+   * `disabled: true` always wins. Opt out with
+   * KORY_DISABLE_PROVIDER_AUTODETECT=1 (KORY_DISABLE_CLI_AUTODETECT=1 gates it
+   * too). Returns whether anything got enabled.
+   */
+  async autoDetectProviders(force = false): Promise<boolean> {
+    if (isProviderAutodetectDisabled()) return false;
+    // Packaged/background launches inherit no shell rc exports; adopt the
+    // allowlisted provider vars from the login shell before scanning.
+    await hydrateProviderEnvFromLoginShell(providerEnvNamesForHydration());
+
+    interface AutoDetectCandidate {
+      name: ProviderName;
+      creds: { authToken?: string; baseUrl?: string };
+      fingerprint: string;
+      label: string;
+    }
+    const candidates: AutoDetectCandidate[] = [];
+
+    for (const name of Object.keys(PROVIDER_AUTH_MODE) as ProviderName[]) {
+      if (CLI_HARNESS_PROVIDERS.has(name) || MANAGED_CLI_PROVIDERS.has(name)) continue;
+      if (this.customProviderIds.has(name) || String(name).startsWith('custom:')) continue;
+      if (UNSUPPORTED_CHAT_PROVIDER_NAMES.has(name)) continue;
+      if (unavailableProviderReason(name)) continue;
+      if (this.userDisconnected.has(name)) continue;
+      if (this.providerConfigs.get(name)?.disabled !== true) continue;
+      if (this.config?.providers?.[name]?.disabled === true) continue;
+
+      const authMode = this.authModeFor(name);
+      let creds: AutoDetectCandidate['creds'] | null = null;
+      let material: string | null = null;
+      let label: string | null = null;
+      // Failed local-server probes cool down fast (a server can start any
+      // moment); failed credential probes back off for much longer.
+      let retryCooldownMs = 10 * 60_000;
+
+      if (authMode === 'env_auth') {
+        if (this.hasBedrockEnvironment()) {
+          creds = {};
+          material = scanAwsCredentialSources().description || 'aws';
+          label = 'AWS credentials';
+        }
+      } else if (authMode === 'base_url_only') {
+        const url = localServerCandidate(name);
+        if (url) {
+          creds = { baseUrl: url };
+          material = url;
+          label = `Local server · ${url}`;
+          retryCooldownMs = 60_000;
+        }
+      } else {
+        const key =
+          authMode === 'api_key' || authMode === 'api_key_or_auth'
+            ? envVarMaterial(name, 'apiKey')
+            : null;
+        const token =
+          authMode === 'auth_only' || authMode === 'api_key_or_auth'
+            ? envVarMaterial(name, 'authToken')
+            : null;
+        if (key) {
+          // The apiKey slot stays empty: setCredentials resolves it from the
+          // env itself, so a failed probe retains nothing.
+          creds = {};
+          material = key.value;
+          label = key.envVar;
+        } else if (token) {
+          creds = { authToken: token.value };
+          material = token.value;
+          label = token.envVar;
+        }
+      }
+      if (!creds || !material || !label) continue;
+
+      // Only the fingerprint is stored — never the raw credential material.
+      const fingerprint = createHash('sha256').update(`${name}\0${material}`).digest('hex');
+      const attempt = this.autoDetectAttempts.get(name);
+      if (attempt?.fingerprint === fingerprint) {
+        // Identical material already connected; do not churn re-probes.
+        if (attempt.success) continue;
+        if (!force && Date.now() - attempt.at < retryCooldownMs) continue;
+      }
+      candidates.push({ name, creds, fingerprint, label });
+    }
+
+    let enabledAny = false;
+    let index = 0;
+    const workers = Array.from({ length: Math.min(4, candidates.length) }, async () => {
+      while (index < candidates.length) {
+        const candidate = candidates[index++];
+        const result = await this.setCredentials(candidate.name, candidate.creds, {
+          autoDetected: true,
+        });
+        this.autoDetectAttempts.set(candidate.name, {
+          fingerprint: candidate.fingerprint,
+          at: Date.now(),
+          success: result.success,
+        });
+        if (result.success) {
+          this.autoDetectedSources.set(candidate.name, candidate.label);
+          enabledAny = true;
+        }
+      }
+    });
+    await Promise.all(workers);
+    return enabledAny;
   }
 
   /** Get explicit detection, verification, availability, and model status for every provider. */
@@ -880,6 +1072,8 @@ class ProviderRegistry {
     contextWindow?: number;
     /** Real context tiers reported by this provider's live model catalog. */
     contextWindowOptions: number[];
+    /** Where auto-detected connection material came from (env var, AWS, local URL). */
+    autoDetectedSource?: string;
     authMode: ProviderAuthMode;
     supportsApiKey: boolean;
     supportsAuthToken: boolean;
@@ -899,6 +1093,8 @@ class ProviderRegistry {
     customIcon?: ProviderConfig['customIcon'];
     deployment?: 'cloud' | 'api' | 'local' | 'hybrid';
     execution?: ProviderExecutionCapabilities;
+    /** Read-only lifecycle contract (interrupt, resume, rollback...). Conservative default when the adapter declares none. */
+    lifecycle?: LifecycleCapabilities;
     description?: string;
     credentialUrl?: string;
   }> {
@@ -912,7 +1108,7 @@ class ProviderRegistry {
         credentialDetected: true,
         connectionState: provider.isAvailable() ? ('verified' as const) : ('unavailable' as const),
         models: provider.listModels().map((model) => model.id),
-        allAvailableModels: provider.listModels(),
+        allAvailableModels: gateModelParametersToForwarded(provider, provider.listModels()),
         selectedModels: provider.listModels().map((model) => model.id),
         hideModelSelector: false,
         contextWindowOptions: Array.from(
@@ -952,6 +1148,7 @@ class ProviderRegistry {
       hideModelSelector: boolean;
       contextWindow?: number;
       contextWindowOptions: number[];
+      autoDetectedSource?: string;
       authMode: ProviderAuthMode;
       supportsApiKey: boolean;
       supportsAuthToken: boolean;
@@ -969,6 +1166,7 @@ class ProviderRegistry {
       customIcon?: ProviderConfig['customIcon'];
       deployment?: 'cloud' | 'api' | 'local' | 'hybrid';
       execution?: ProviderExecutionCapabilities;
+      lifecycle?: LifecycleCapabilities;
       description?: string;
       credentialUrl?: string;
     }> = [];
@@ -1034,16 +1232,9 @@ class ProviderRegistry {
             'No models were reported by this configured provider. Refresh discovery or check its account and CLI/API authentication.')
           : undefined);
 
-      const enabledModels =
-        selectedModels.length > 0
-          ? allModels
-              .filter(
-                (model) =>
-                  selectedModels.includes(model.id) ||
-                  model.aliases?.some((alias) => selectedModels.includes(alias)),
-              )
-              .map((model) => model.id)
-          : allModels.map((model) => model.id);
+      // All-stale selections resolve to zero live entries → unfiltered,
+      // matching the picker rule that an empty enabled list means "all".
+      const enabledModels = resolveEnabledModelIds(allModels, selectedModels);
 
       const blocksChatConfiguration = !!providerUnavailableReason;
       const connectionState = blocksChatConfiguration
@@ -1123,7 +1314,7 @@ class ProviderRegistry {
           modelDiscoveryHttpStatus: discoveryStatus.getModelDiscoveryHttpStatus(),
         }),
         models: enabledModels,
-        allAvailableModels: allModels,
+        allAvailableModels: gateModelParametersToForwarded(provider, allModels),
         ...(provider?.isModelCatalogAuthoritative?.() === true
           ? { modelCatalogAuthoritative: true }
           : {}),
@@ -1131,6 +1322,9 @@ class ProviderRegistry {
         hideModelSelector,
         ...(config?.contextWindow !== undefined ? { contextWindow: config.contextWindow } : {}),
         contextWindowOptions,
+        ...(this.autoDetectedSources.has(name) && {
+          autoDetectedSource: this.autoDetectedSources.get(name),
+        }),
         authMode,
         supportsApiKey:
           !blocksChatConfiguration &&
@@ -1164,6 +1358,7 @@ class ProviderRegistry {
         ...(display?.iconPath && { iconPath: display.iconPath }),
         deployment: inferredDeployment,
         execution: providerExecutionCapabilities(String(name), inferredDeployment),
+        ...(provider && { lifecycle: lifecycleCapabilities(provider) }),
         ...(display?.credentialUrl && { credentialUrl: display.credentialUrl }),
         ...(baseUrlPlaceholder && { baseUrlPlaceholder }),
         // Remote providers (served by another machine) carry an agentic flag so
@@ -2895,7 +3090,7 @@ class ProviderRegistry {
       hideModelSelector?: boolean;
       contextWindow?: number;
     },
-    options: { fullCheck?: boolean; preferenceOnly?: boolean } = {},
+    options: { fullCheck?: boolean; preferenceOnly?: boolean; autoDetected?: boolean } = {},
   ): Promise<{ success: boolean; error?: string; credentialsRetained?: boolean }> {
     try {
       if (!this.getVisibleProviderNames().includes(name)) {
@@ -2906,6 +3101,19 @@ class ProviderRegistry {
 
       const existing = this.providerConfigs.get(name);
       const isEnvAuth = this.authModeFor(name) === 'env_auth';
+
+      // Material the caller passed explicitly marks a user-owned connection;
+      // autoDetectProviders passes nothing it did not find on the machine.
+      const userSuppliedMaterial = !!(
+        credentials.apiKey?.trim() ||
+        credentials.authToken?.trim() ||
+        credentials.baseUrl?.trim()
+      );
+      if (options.autoDetected !== true && userSuppliedMaterial) {
+        this.autoDetectedSources.delete(name);
+      }
+      const nextAutoDetected =
+        options.autoDetected === true ? true : userSuppliedMaterial ? undefined : existing?.autoDetected;
 
       // Auto-detect if blank. env_auth providers (Bedrock) never auto-bake
       // machine-level AWS credentials into the persisted config — the AWS SDK
@@ -3029,6 +3237,7 @@ class ProviderRegistry {
             deployment: resolvedDeployment,
             awsRegion: resolvedAwsRegion,
             awsSessionToken: resolvedAwsSessionToken,
+            autoDetected: nextAutoDetected,
             lastVerifiedAt: undefined,
             lastVerificationScope: undefined,
             lastVerificationState: undefined,
@@ -3084,6 +3293,7 @@ class ProviderRegistry {
         lastVerifiedAt: verifiedAt,
         lastVerificationScope: verificationScope,
         lastVerificationState: verificationState,
+        autoDetected: nextAutoDetected,
         disabled: false, // Explicitly enable on setCredentials
         headers: existing?.headers,
       };
@@ -3135,6 +3345,7 @@ class ProviderRegistry {
           checkedAt: verifiedAt ?? Date.now(),
           scope: acceptedScope ?? verificationScope ?? this.verificationScopeFor(name),
         });
+        if (options.autoDetected !== true) this.userDisconnected.delete(name);
         providerLog.info({ provider: name }, 'Provider configured');
         return { success: true };
       }
@@ -3145,6 +3356,7 @@ class ProviderRegistry {
           checkedAt: verifiedAt ?? Date.now(),
           scope: acceptedScope ?? verificationScope ?? this.verificationScopeFor(name),
         });
+        if (options.autoDetected !== true) this.userDisconnected.delete(name);
         providerLog.info({ provider: name }, 'Dedicated capability provider configured');
         return { success: true };
       }
@@ -3280,6 +3492,7 @@ class ProviderRegistry {
     if (config) {
       config.apiKey = undefined;
       config.authToken = undefined;
+      config.autoDetected = undefined;
       config.lastVerifiedAt = undefined;
       config.lastVerificationScope = undefined;
       config.lastVerificationState = undefined;
@@ -3289,6 +3502,10 @@ class ProviderRegistry {
     this.providers.delete(name);
     this.circuitStates.delete(name);
     this.verificationRecords.delete(name);
+    // Disconnect is user intent: autodetect must not silently reconnect the
+    // same material later in this session.
+    this.userDisconnected.add(name);
+    this.autoDetectedSources.delete(name);
     providerLog.info({ provider: name }, 'Provider disconnected');
   }
 
@@ -3378,10 +3595,12 @@ class ProviderRegistry {
   private buildProviderConfig(name: ProviderName): ProviderConfig {
     const userConfig = this.config?.providers?.[name];
 
-    // Default to disabled to prevent "auto-authing" from environment variables without user intent.
-    // Explicit opt-in (via UI "Connect" or config) is required — EXCEPT for providers backed by
-    // an agent CLI the user has installed + logged in, which we treat as intent and auto-enable
-    // (Claude Code, Codex, Grok Build). Opt out with KORY_DISABLE_CLI_AUTODETECT=1.
+    // Default to disabled so startup never "auto-auths" from environment variables.
+    // Env/local connection material found on this machine is connected asynchronously by
+    // autoDetectProviders, and only after that provider's real verification probe succeeds.
+    // Explicit opt-in (via UI "Connect" or config) is otherwise required — EXCEPT for providers
+    // backed by an agent CLI the user has installed + logged in, which we treat as intent and
+    // auto-enable (Claude Code, Codex, Grok Build). Opt out with KORY_DISABLE_CLI_AUTODETECT=1.
     const defaultDisabled = true;
     const autoCli = userConfig?.disabled === true ? null : cliAutoEnableCreds(name);
     const hasStoredCredential = !!(
@@ -3496,25 +3715,11 @@ class ProviderRegistry {
   }
 
   private detectEnvKey(name: ProviderName): string | null {
-    const envVars = ENV_API_KEY_MAP[name] ?? [];
-    for (const envVar of envVars) {
-      const val = process.env[envVar];
-      if (!val) continue;
-      if (val.startsWith('env:') || val.startsWith('enc:')) return null;
-      return val;
-    }
-    return null;
+    return envVarMaterial(name, 'apiKey')?.value ?? null;
   }
 
   private detectEnvAuthToken(name: ProviderName): string | null {
-    const envVars = ENV_AUTH_TOKEN_MAP[name] ?? [];
-    for (const envVar of envVars) {
-      const val = process.env[envVar];
-      if (!val) continue;
-      if (val.startsWith('env:') || val.startsWith('enc:')) return null;
-      return val;
-    }
-    return null;
+    return envVarMaterial(name, 'authToken')?.value ?? null;
   }
 
   /** Resolve envelope-encrypted credentials after encryption is initialized. */

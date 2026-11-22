@@ -1,16 +1,17 @@
 // AgentMailService — routes inter-agent messages between sessions/projects.
 //
 // Delivery model:
-// - Cross-project messages to another session's manager are queued; a retry
+// - Messages to another chat's manager are queued then push-delivered: a retry
 //   loop injects them as a session turn (via startSessionTurn) once the
 //   target manager's session is idle.
-// - Same-session messages (worker → manager, worker → worker) are pulled by
+// - Same-session messages and messages addressed to a sub-agent are pulled by
 //   the target agent through the list_agent_messages tool.
-// - Workers may only ever address their own session. Reaching another
-//   project's manager requires the manager to forward via request_manager_relay.
+// - Whether an agent may message *other* chats is governed by the sender
+//   chat's permission mode via messagingPermissionsByTier (agent settings).
 
 import { basename, resolve } from 'node:path';
 import type { AgentMessage, AgentMessageStatus } from '@koryphaios/shared';
+import { resolveMessagingPermission, type MessagingRole } from '@koryphaios/shared';
 import { serverLog } from '../../logger';
 import {
   insertAgentMessage,
@@ -19,11 +20,8 @@ import {
   getAgentMessage,
   updateAgentMessageStatus,
 } from '../../stores/agent-message-store';
-import { loadAgentSettings } from '../../agent-settings';
 import type { SessionStore } from '../../stores/session-store';
 import type { KoryManager } from '../manager';
-
-export type AgentMessagingPolicy = 'open' | 'approval-cross-project' | 'off';
 
 const MAX_BODY_LENGTH = 20_000;
 const MAX_SUBJECT_LENGTH = 200;
@@ -32,8 +30,8 @@ const DELIVERY_RETRY_AFTER_MS = 3_000;
 const MAX_DELIVERY_ATTEMPTS = 60;
 
 export class AgentMessagingDisabledError extends Error {
-  constructor() {
-    super('Inter-agent messaging is disabled in agent settings');
+  constructor(message = 'Inter-agent messaging is disabled in agent settings') {
+    super(message);
     this.name = 'AgentMessagingDisabledError';
   }
 }
@@ -110,6 +108,7 @@ function sanitize(value: string, max: number, field: string): string {
 }
 
 async function resolveTargetSession(input: {
+  fromSessionId: string;
   toSessionId?: string;
   toProject?: string;
 }): Promise<{ id: string; title: string; workingDirectory?: string }> {
@@ -117,25 +116,42 @@ async function resolveTargetSession(input: {
   const active = await sessions.listActive();
   if (input.toSessionId) {
     const direct = active.find((session) => session.id === input.toSessionId);
-    if (!direct) throw new AgentMessageTargetError(`No active session '${input.toSessionId}'`);
-    return direct;
+    if (direct) return direct;
+    const stored = await sessions.get(input.toSessionId);
+    if (stored) {
+      throw new AgentMessageTargetError(
+        `Chat '${input.toSessionId}' is archived and cannot receive messages. Restore it or choose another chat.`,
+      );
+    }
+    throw new AgentMessageTargetError(`No active session '${input.toSessionId}'`);
   }
   const query = (input.toProject ?? '').trim();
   if (!query) throw new AgentMessageTargetError('A target project or session is required');
+  // An exact chat id resolves as-is, so a pasted id reaches that chat even
+  // when no name or folder would match it.
+  const byId = active.find((session) => session.id === query);
+  if (byId) return byId;
   const normalized = query.toLowerCase();
-  const match = active.find((session) => {
+  const matches = active.filter((session) => {
+    if (session.id === input.fromSessionId) return false;
     if (session.workingDirectory) {
       const dir = resolve(session.workingDirectory).toLowerCase();
       if (dir === normalized || basename(dir) === basename(normalized)) return true;
     }
     return session.title.toLowerCase() === normalized;
   });
-  if (!match) {
+  if (matches.length === 0) {
     throw new AgentMessageTargetError(
       `No active session found for project '${query}'. Cross-project messaging targets the manager session of another open project.`,
     );
   }
-  return match;
+  if (matches.length > 1) {
+    const candidates = matches.map((session) => `${session.id} — ${session.title}`).join('\n  ');
+    throw new AgentMessageTargetError(
+      `'${query}' matches multiple chats:\n  ${candidates}\nPass the exact chat id via toSessionId.`,
+    );
+  }
+  return matches[0];
 }
 
 export async function sendAgentMessage(input: SendAgentMessageInput): Promise<AgentMessage> {
@@ -150,6 +166,7 @@ export async function sendAgentMessage(input: SendAgentMessageInput): Promise<Ag
     throw new AgentMessageTargetError(`Sender session '${input.fromSessionId}' is not active`);
   }
   const target = await resolveTargetSession({
+    fromSessionId: input.fromSessionId,
     toSessionId: input.toSessionId ?? (input.toProject ? undefined : input.fromSessionId),
     toProject: input.toProject,
   });
@@ -160,33 +177,63 @@ export async function sendAgentMessage(input: SendAgentMessageInput): Promise<Ag
   const targetDir = target.workingDirectory ? resolve(target.workingDirectory) : undefined;
   const crossProject = Boolean(senderDir && targetDir && senderDir !== targetDir);
 
-  // Authority rules: workers stay inside their own project; cross-project
-  // contact is strictly manager-to-manager. Fail closed.
-  if (input.fromRole === 'worker' && crossProject) {
-    throw new AgentMessageTargetError(
-      'Workers cannot message other projects. Ask your manager (kory__request_manager_relay) to forward this request.',
-    );
-  }
-  if (crossProject && input.toAgent && input.toAgent.role !== 'manager') {
-    throw new AgentMessageTargetError('Cross-project messages may only target the project manager');
-  }
-
-  const settings = loadAgentSettings(senderDir ?? process.cwd());
-  const policy: AgentMessagingPolicy = settings.agentMessaging ?? 'open';
-  if (policy === 'off') throw new AgentMessagingDisabledError();
-
   const targetIsManager = !input.toAgent || input.toAgent.role === 'manager';
-  const toLabel = targetIsManager
-    ? `(${projectLabelForSession(target)}) manager`
-    : input.toAgent && 'label' in input.toAgent && input.toAgent.label
-      ? input.toAgent.label
-      : 'worker agent';
 
+  // A sub-agent in another chat is addressed by label; resolve it against that
+  // chat's live workers so the message carries a concrete agent id.
+  let toAgentId: string | undefined;
+  let toLabel: string;
+  if (targetIsManager) {
+    toLabel = `(${projectLabelForSession(target)}) manager`;
+  } else {
+    const workerSpec = input.toAgent as { role: 'worker'; agentId?: string; label?: string };
+    if (workerSpec.agentId) {
+      toAgentId = workerSpec.agentId;
+      toLabel = workerSpec.label ?? 'worker agent';
+    } else if (target.id === input.fromSessionId) {
+      // Same-chat agents address each other loosely by label; no live lookup.
+      toLabel = workerSpec.label ?? 'worker agent';
+    } else {
+      const workers = kory.agentControlSnapshots(target.id).filter((s) => s.role !== 'manager');
+      const wanted = (workerSpec.label ?? '').trim().toLowerCase();
+      const matched = wanted
+        ? workers.find(
+            (s) => s.name.toLowerCase() === wanted || s.agentId.toLowerCase() === wanted,
+          )
+        : undefined;
+      if (!matched) {
+        throw new AgentMessageTargetError(
+          workers.length === 0
+            ? 'That chat has no running sub-agents; target its manager or a chat id with list_sessions.'
+            : `No sub-agent '${workerSpec.label ?? ''}' in that chat. Live sub-agents: ${workers
+                .map((s) => s.name)
+                .join(', ')}.`,
+        );
+      }
+      toAgentId = matched.agentId;
+      toLabel = matched.name;
+    }
+  }
+
+  // Messaging other chats is governed by the *sender* chat's permission mode,
+  // per role. Mail inside the same chat always flows freely.
   let status: AgentMessageStatus = 'queued';
   let statusReason: string | undefined;
-  if (policy === 'approval-cross-project' && crossProject) {
-    status = 'pending_approval';
-    statusReason = 'Cross-project messaging requires user approval in the current policy';
+  if (target.id !== input.fromSessionId) {
+    const settings = kory.settingsForSession(input.fromSessionId);
+    const senderKind: MessagingRole = input.fromRole === 'manager' ? 'manager' : 'subAgent';
+    const decision = resolveMessagingPermission(settings, senderKind);
+    const modeLabel =
+      settings.permissionMode.charAt(0).toUpperCase() + settings.permissionMode.slice(1);
+    if (decision === 'block') {
+      throw new AgentMessagingDisabledError(
+        `Messaging other chats is blocked for ${senderKind === 'manager' ? 'managers' : 'sub-agents'} in ${modeLabel} mode. Change it in Agent settings → Inter-agent messaging.`,
+      );
+    }
+    if (decision === 'ask') {
+      status = 'pending_approval';
+      statusReason = `Needs your approval (${modeLabel} mode)`;
+    }
   }
 
   const message = await insertAgentMessage({
@@ -195,11 +242,7 @@ export async function sendAgentMessage(input: SendAgentMessageInput): Promise<Ag
     fromRole: input.fromRole,
     fromLabel: input.fromLabel,
     toSessionId: target.id,
-    toAgentId: targetIsManager
-      ? undefined
-      : input.toAgent && 'agentId' in input.toAgent
-        ? input.toAgent.agentId
-        : undefined,
+    toAgentId,
     toRole: targetIsManager ? 'manager' : 'worker',
     toLabel,
     crossProject,
@@ -224,9 +267,14 @@ export async function sendAgentMessage(input: SendAgentMessageInput): Promise<Ag
   kory.emitAgentMessageEvent(input.fromSessionId, message);
   kory.emitAgentMessageEvent(target.id, message);
 
-  if (status === 'queued' && crossProject) {
-    // Push delivery across sessions; the retry loop covers busy targets.
-    // Same-session mail (worker ↔ manager/worker) is pulled via the inbox tool.
+  if (
+    status === 'queued' &&
+    message.toSessionId !== message.fromSessionId &&
+    message.toRole === 'manager'
+  ) {
+    // Push delivery to another chat's manager, in any folder; the retry loop
+    // covers busy targets. Same-session mail (worker ↔ manager/worker) and
+    // worker-addressed messages are pulled via the inbox tool.
     await attemptDelivery(message).catch((err: unknown) => {
       serverLog.warn(
         { err: err instanceof Error ? err.message : String(err), messageId: message.id },
@@ -259,13 +307,16 @@ export async function attemptDelivery(message: AgentMessage): Promise<AgentMessa
     sourceCommandId: `agent-msg-${message.id}`,
     userMessage: renderAgentMessageEnvelope(message),
   });
-  if (submission.accepted) {
+  if (submission.accepted === true) {
     void submission.completion.catch(() => undefined);
     deliveryAttempts.delete(message.id);
     const updated = await updateAgentMessageStatus(message.id, 'delivered');
     requireConfig().kory.emitAgentMessageEvent(message.toSessionId, updated ?? message);
     return 'delivered';
   }
+  // Internal sends cannot be parked for steering; treat an unexpected queued
+  // submission as a busy session and let the retry window redeliver.
+  if (submission.accepted === 'queued') return 'queued';
   const attempts = (deliveryAttempts.get(message.id) ?? 0) + 1;
   deliveryAttempts.set(message.id, attempts);
   if (submission.result.status === 'rejected' && attempts < MAX_DELIVERY_ATTEMPTS) {
@@ -356,8 +407,13 @@ export async function approveAgentMessage(
   }
   const queued = await updateAgentMessageStatus(id, 'queued');
   if (!queued) return null;
-  const finalStatus = await attemptDelivery(queued);
-  return (await getAgentMessage(id)) ?? { ...queued, status: finalStatus };
+  // Manager targets are push-delivered; worker-addressed mail stays queued
+  // until that agent pulls its inbox.
+  if (queued.toRole === 'manager') {
+    const finalStatus = await attemptDelivery(queued);
+    return (await getAgentMessage(id)) ?? { ...queued, status: finalStatus };
+  }
+  return queued;
 }
 
 /** Pull-based inbox for an agent in the target session. Same-session and
@@ -370,7 +426,11 @@ export async function drainInbox(sessionId: string, agentId?: string): Promise<A
     const addressedToAgent = message.toAgentId ? message.toAgentId === agentId : true;
     const sameSession = message.toSessionId === sessionId && message.fromSessionId === sessionId;
     if (!addressedToAgent && message.status !== 'delivered') continue;
-    if (message.status === 'queued' && sameSession) {
+    // Reading the inbox delivers pull mail: everything sent within this chat,
+    // plus cross-chat messages addressed to the reading agent's id.
+    const pullDelivered =
+      sameSession || (agentId !== undefined && message.toAgentId === agentId);
+    if (message.status === 'queued' && pullDelivered) {
       const delivered = await updateAgentMessageStatus(message.id, 'delivered');
       if (delivered) kory.emitAgentMessageEvent(sessionId, delivered);
       visible.push(delivered ?? message);

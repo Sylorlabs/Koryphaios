@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "research-full-task-2-individual",
+  "verifiedAt": "2026-11-15T10:05:19.644Z",
+  "sources": [
+    {
+      "id": "protocol-spec",
+      "sha256": "b327e576f4c96b34e92f338f8ffefc35e13d0e953ab76bdb3aab342d104c8e53"
+    },
+    {
+      "id": "official-migration",
+      "sha256": "4022ac26bea9d3849ed054a260f4c0f89269819e82f615056aa6dc2fb5d6696e"
+    },
+    {
+      "id": "legacy-vendor-tutorial",
+      "sha256": "037a489ae4eb8a8b2658c36859162147cfc46c8e83374fc21dffcc337b141483"
+    },
+    {
+      "id": "current-vendor-compatibility",
+      "sha256": "b7bf2e514e9751a6b6af2eac0ed21b0067e9a2f648ae553d9bd87a11cd335bad"
+    },
+    {
+      "id": "contradictory-forum-answer",
+      "sha256": "845534bde480a2932938c649a1767e6dbce9b2e1a5ef325ce24694ed48928b34"
+    }
+  ]
+}

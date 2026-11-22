@@ -25,10 +25,13 @@ export * from './computer-use';
 export * from './git-workspace';
 export * from './chat-git';
 export * from './provider-execution';
+export * from './provider-permission-enforcement';
 export * from './desktop-ui-settings';
 export * from './notes/NoteIcons';
 export * from './project-identity';
 export * from './remote-target';
+export * from './compute-delegation';
+export * from './agent-controls';
 export * from './run/RunRefs';
 export * from './transcript';
 export * from './source-control';
@@ -54,6 +57,7 @@ export type {
 export type {
   Session,
   SessionAgentOverrides,
+  SessionManagerControl,
   SessionStatus,
   SessionMetadata,
   SessionSnapshot,
@@ -74,6 +78,8 @@ export type {
   AgentMessageEventPayload,
 } from './types/MessagingTypes';
 
+export * from './messaging-permissions';
+
 // ============== Process Supervision ==============
 export type {
   ProcessClassification,
@@ -85,15 +91,40 @@ export type {
 export { isAgentBackgroundProcess } from './types/ProcessTypes';
 
 // ============== Provider & Model Definitions ==============
-export { ProviderName } from './providers/ProviderNames';
+export { ProviderName, isValidProvider } from './providers/ProviderNames';
 
 export type {
   ModelTier,
   ModelDef,
+  ModelSpeedTier,
   ModelQuota,
   ProviderConfig,
   ProviderStatus,
 } from './providers/ModelDefs';
+export type { ModelParameterKey, ModelParameterDef, ModelParameterValues } from './providers/model-parameters';
+export {
+  MODEL_PARAMETER_SPECS,
+  HARNESS_OWNED_PARAMETER_KEYS,
+  buildModelParameters,
+  sanitizeModelParameterValues,
+} from './providers/model-parameters';
+export type {
+  FusionCatalog,
+  FusionPairingMeta,
+  FusionSelection,
+  FusionSlotOption,
+} from './providers/ModelDefs';
+export {
+  splitFusionSlug,
+  fusionPairingKey,
+  resolveFusionSlug,
+  fusionSidekickSpeedLabel,
+  isFusionPairingAvailable,
+  availableSidekicks,
+  leadFastAvailable,
+  adjustFusionSelection,
+  parseFusionSlug,
+} from './providers/fusion';
 export type {
   CollaborationRole,
   CollaborationJoinMode,
@@ -202,6 +233,7 @@ export type {
   SessionUpdatedPayload,
   SessionIdlePayload,
   SessionTimelineRewrittenPayload,
+  SessionHistoryPrunedPayload,
   ChangeSummary,
   ChangeSummaryPayload,
   KorySessionChangesPayload,
@@ -219,6 +251,8 @@ export type {
   NotificationPayload,
   KoryThoughtPayload,
   KoryRoutingPayload,
+  KorySkillPayload,
+  KorySkillUse,
   KoryTaskBreakdownPayload,
   KoryAskUserPayload,
   KoryVerificationPayload,
@@ -227,6 +261,9 @@ export type {
   RateLimitPayload,
   NativeCommandPayload,
   StreamCompletePayload,
+  TurnProviderCompletedPayload,
+  RunSettledPayload,
+  RunSettledOutcome,
 } from './websocket/WSPayloads';
 
 // ============== REST API Types ==============
@@ -335,5 +372,12 @@ export { MAX_CHAT_MEDIA_BYTES, chatMediaMimeType, chatMediaKind } from './media'
 // ─────────────────────────────────────────────────────────────────────────────
 // The following exports maintain backward compatibility with the original monolithic index.ts.
 // New code should import directly from the specific modules above.
-export { hasOpaqueContextHarness, reconcileContextBreakdown } from './context-accounting';
+export {
+  hasOpaqueContextHarness,
+  reconcileContextBreakdown,
+  boundOpaqueCumulativeOccupancy,
+  CLI_HARNESS_ESTIMATE_FLOOR_TOKENS,
+  CLI_HARNESS_ESTIMATE_CEILING_TOKENS,
+  type BoundedOpaqueOccupancy,
+} from './context-accounting';
 export type { FreebuffBalance, FreebuffAccountSnapshot } from './freebuff-billing';

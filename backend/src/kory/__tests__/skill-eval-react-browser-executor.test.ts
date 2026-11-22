@@ -3,8 +3,8 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isWindows } from '../../runtime/platform';
-import { createIsolatedCodexSkillEvalExecutor } from '../skill-eval-codex';
-import { reactBrowserReadiness } from '../skill-eval-react-browser-fixtures';
+import { createIsolatedCodexSkillEvalExecutor } from '../../eval/skills/skill-eval-codex';
+import { reactBrowserReadiness } from '../../eval/skills/skill-eval-react-browser-fixtures';
 import { browserControlTest } from './browser-runtime-test-policy';
 
 const browserTest = isWindows() ? test.skip : browserControlTest('React executor', reactBrowserReadiness());

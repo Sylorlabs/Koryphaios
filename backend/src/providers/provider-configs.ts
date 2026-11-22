@@ -58,15 +58,6 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     authMode: 'api_key',
     envKeys: ['OPENROUTER_API_KEY'],
   },
-  // AgentRouter — OpenAI-compatible catalog/chat at /v1; Claude Messages use
-  // the same selected host with the Anthropic-compatible protocol.
-  // https://co.agentrouter.org/portal/guide
-  {
-    name: 'agentrouter',
-    baseUrl: 'https://agentrouter.org/v1',
-    authMode: 'api_key',
-    envKeys: ['AGENTROUTER_API_KEY'],
-  },
   // UnoRouter — open-source OpenRouter alternative; one key for 200+ models.
   // OpenAI-compatible Chat Completions at /v1 (docs: unorouter.com/en/docs).
   // Verification probes GET /v1/models with `Authorization: Bearer <key>`.
@@ -93,6 +84,67 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     baseUrl: 'https://api.experientiallabs.ai/v1',
     authMode: 'api_key',
     envKeys: ['EXPERIENTIALLABS_API_KEY', 'EXPLABS_API_KEY'],
+  },
+  // 100MillionSeek — OpenAI-compatible Chat Completions and an authenticated
+  // /v1/models catalog that reports real context/output limits plus the
+  // vendor's own price label and quota multiplier.
+  // https://100milionseek.top
+  {
+    name: 'hundredmillionseek',
+    baseUrl: 'https://100milionseek.top/v1',
+    authMode: 'api_key',
+    envKeys: ['HUNDREDMILLIONSEEK_API_KEY'],
+  },
+  // Numes — multi-model OpenAI-compatible gateway on the OpenRouter wire
+  // shape. Its /api/v1/models catalog carries per-token USD pricing, context
+  // and output limits, reasoning effort ladders and modalities.
+  // https://numes.ai
+  {
+    name: 'numes',
+    baseUrl: 'https://api.numes.ai/api/v1',
+    authMode: 'api_key',
+    envKeys: ['NUMES_API_KEY'],
+  },
+  // Coarena — OpenAI-compatible Model API on one key. The public /models
+  // catalog carries real context/output limits, vision/tools/reasoning flags
+  // and the provider's reasoning_effort ladder; /credits and /limits expose
+  // the account's real balance and daily usage.
+  // https://coarena.ai/docs
+  {
+    name: 'coarena',
+    baseUrl: 'https://coarena.ai/api/v1',
+    authMode: 'api_key',
+    envKeys: ['COARENA_API_KEY'],
+  },
+  // CrowLLM — OpenAI-compatible gateway on one key, with Anthropic- and
+  // Gemini-shaped surfaces on the same host. The public /v1/models catalog
+  // carries the exact ids, publishers and :free/-thinking variants.
+  // https://crowllm.com/docs
+  {
+    name: 'crowllm',
+    baseUrl: 'https://crowllm.com/v1',
+    authMode: 'api_key',
+    envKeys: ['CROWLLM_API_KEY'],
+  },
+  // AMD Radeon Cloud — Token Factory serves a platform-chosen open-model
+  // catalog on Radeon GPUs through an OpenAI-compatible /v1 surface. One rc-…
+  // key covers every model and GET /v1/models is the catalog. China site only.
+  // https://developer.amd.com.cn/radeon/tokenfactory
+  {
+    name: 'radeon',
+    baseUrl: 'https://developer.amd.com.cn/radeon/api/v1',
+    authMode: 'api_key',
+    envKeys: ['RADEON_API_KEY', 'AMD_API_KEY'],
+  },
+  // Runcrate — OpenAI-compatible inference on one `rc_live_…` key, alongside a
+  // GPU infrastructure API on the same account. GET /v1/models is public and
+  // carries real context/output limits, modalities, features and USD prices.
+  // https://www.runcrate.ai/docs/models/overview
+  {
+    name: 'runcrate',
+    baseUrl: 'https://api.runcrate.ai/v1',
+    authMode: 'api_key',
+    envKeys: ['RUNCRATE_API_KEY'],
   },
   // Token Harbor — OpenAI-compatible (and Anthropic-compatible) gateway on one
   // `thk_live_…` key. Verification probes GET /v1/models with Bearer auth.

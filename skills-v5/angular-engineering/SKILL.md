@@ -42,7 +42,7 @@ Finish every requested verification artifact as carefully as the implementation.
  Treat that artifact as a five key checklist and verify it one key at a time after the runtime work, because a single missing key fails the whole task while every other check passes:
 
 1. `status`, set to the contract's verified value only when the browser or compiler checks you ran actually passed.
-2. `angularVersion`, copied from the pinned toolchain in `package.json`, never from memory or the latest release you know of.
+2. `angularVersion`, the exact version string the pin states, copied as a bare version such as `20.3.16` with no caret, tilde, range or `latest` marker, never from memory or the newest release you know of.
 3. `broaderSkill`, this skill's declared broader skill taken from the hierarchy at the top of this document (`frontend-engineering`), never the active skill's own name.
 4. `nearNeighbor`, the adjacent skill identifier the task itself names, which differs between scenarios.
 5. `recovery`, a full sentence describing how the failing or interrupted state was recovered, not a word or a placeholder.

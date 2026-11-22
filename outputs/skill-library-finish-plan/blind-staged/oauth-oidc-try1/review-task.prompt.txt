@@ -1,0 +1,2589 @@
+SNAPSHOT HASH DOMAINS: beforeSha256/afterSha256 identify complete workspace entries, using SHA256("file\0" + original file bytes), or SHA256("symlink\0" + link target). Scorer artifactSHA and durable artifact hashes use SHA256(raw bytes), without that tag. These different hash domains must not be compared as if identical. Visible beforeText/afterText may be bounded or privacy-scrubbed; they are not the original complete bytes to hash.
+
+You are an independent blind semantic evaluator.
+Two anonymous agents attempted the same task. You are not told which agent received any extra guidance, and you must not infer or speculate about that hidden condition.
+Judge each artifact independently against the task contract. Do not reward matching wording, verbosity, or references to a skill. Focus on behavioral correctness, scope discipline, evidence quality, preservation of required facts, negative paths, recovery behavior, and whether completion claims are actually supported.
+The artifact bundle may include harness captured execution evidence and before and after file snapshots. Treat that as observed evidence, not as an agent claim.
+PUBLIC CANDIDATE CONTRACT SNAPSHOT is the exact task prompt and allowlisted README.md/contract.json bytes visible to the candidate before execution. Hashes are verified by the harness. If an entry says UNAVAILABLE, do not reconstruct it from the current repository or treat current files as historical proof.
+executionEvidence is supplied by the host after the agent attempt, including deterministic scorer observations. An agent can truthfully report that it could not run a check even when the host subsequently runs that check successfully. Those observations have different owners and times; that difference alone is not an integrity failure.
+Attribute a completion claim to its actual source. Penalize an agent for fabricated or overstated verification only when its finalOutput or authored file content makes that unsupported claim. Do not attribute a host scorer statement to the agent, require the agent to predict later host results, or treat an honest statement of limited access as contradicting later host verification.
+Host evidence is not infallible. If a scorer result conflicts with concrete artifact behavior, identify the disputed check and evidence as a possible verifier defect. Keep instrument uncertainty separate from an agent integrity finding; a score label alone does not prove the task succeeded.
+Treat afterText JSON strings as literal source bytes. Before claiming a URL or origin is malformed or Markdown-formatted, inspect and quote the exact JSON value. Do not transform plain URL strings into Markdown hyperlinks and then mistake that display formatting for the original value.
+The PAIR EXECUTION EVIDENCE section is evaluator owned evidence. It certifies that Artifact A and Artifact B are the two randomized arms of one matched same model comparison for this exact scenario and evaluation contract.
+When REQUIRED EVIDENCE or REQUIRED ARTIFACTS asks for paired skill and no skill run artifacts, paired evaluation evidence, or an equivalent pair label, the anonymous A and B bundle plus PAIR EXECUTION EVIDENCE satisfies the existence and provenance of that pair. Do not require either agent output to claim, create, or narrate evaluator owned pair evidence.
+The REQUIRED ARTIFACTS entries below are evaluation evidence labels for the overall harness. They are not literal filenames the agent was instructed to create unless the task itself says so. Judge whether the bundle substantively supplies the required evidence; do not require those exact label strings to appear.
+Routing and hierarchy selection are evaluated independently by the harness. Do not require the agent to narrate which skill was selected or provide meta level specialist selection rationale when the artifact itself respects the requested scope and neighboring responsibility boundaries.
+Never lower passed, quality, verification, or integrity because an artifact omits hierarchy narration, specialist selection rationale, skill names, or evaluator owned paired A/B evidence. If a draft criticism relies on one of those omissions, remove that criticism and score only the concrete task behavior and evidence.
+If a REQUIRED EVIDENCE or REQUIRED ARTIFACTS label describes routing, hierarchy selection, specialist selection, or paired skill versus no skill provenance, treat that meta level requirement as evaluator owned. The harness evidence in this prompt is authoritative for those concerns.
+When choosing preference A, B, or tie, compare concrete task behavior and evidence only. Evaluator-owned hierarchy or specialist narration, skill-guidance scope, filenames, and paired-run provenance must not affect the preference comparison.
+Treat genuinely missing task evidence as missing. Do not assume unshown commands or tests passed.
+Return JSON only, with this exact shape:
+{"artifactA":{"passed":true,"quality":0.0,"verification":0.0,"integrityFailure":false,"evidence":["..."]},"artifactB":{"passed":true,"quality":0.0,"verification":0.0,"integrityFailure":false,"evidence":["..."]},"preference":"A","rationale":["..."]}
+
+TASK
+Design OAuth for a native public client that calls a document API. Use the system browser and authorization code flow with PKCE S256. The fixture includes legitimate and malicious redirect variants, missing/downgraded PKCE, intercepted/replayed codes, mismatched state, access tokens for the wrong API audience, refresh-token replay, and a custom-scheme competitor app. Define exact redirect registration/validation appropriate to the native-client redirect choice, state/session correlation, code-verifier lifecycle, one-time redemption, token audience/scope validation at the resource server, secure token persistence, and refresh-token rotation or sender constraint. If a custom scheme is retained, explicitly address app-claim/interception risk rather than treating PKCE as optional. Keep document-level permissions in authorization-security.
+
+FALSIFIABLE CHECKS
+[
+  {
+    "id": "oauth-oidc-pkce-1",
+    "assertion": "Every authorization request uses a fresh high-entropy verifier with S256 challenge, the token endpoint enforces the verifier/challenge binding, and missing/downgraded PKCE cannot redeem the code."
+  },
+  {
+    "id": "oauth-oidc-redirect-state-1",
+    "assertion": "Redirect validation uses the registered native-client rules without wildcard/prefix broadening, and the authorization response is bound to the initiating client session through a one-time state correlation."
+  },
+  {
+    "id": "oauth-oidc-code-token-1",
+    "assertion": "Authorization codes are single-use and client/redirect-bound as applicable, while the resource server independently rejects access tokens with incorrect audience, expired validity, or insufficient scope."
+  },
+  {
+    "id": "oauth-oidc-refresh-1",
+    "assertion": "Public-client refresh credentials are rotated or sender-constrained per the design, replay is detectable, and compromise response revokes or invalidates the affected token family/authorization."
+  },
+  {
+    "id": "oauth-oidc-token-storage-1",
+    "assertion": "Codes/access/refresh tokens are kept out of ordinary logs, analytics, crash artifacts, and unintended URL/referrer surfaces, with persistence matched to the native platform's protected-storage boundary."
+  }
+]
+
+REQUIRED EVIDENCE
+[
+  "actor/client/redirect registration map",
+  "PKCE/state/code lifecycle",
+  "resource-server token validation rules",
+  "refresh replay and compromise response",
+  "token storage/logging boundaries",
+  "paired skill/no-skill run artifacts"
+]
+
+REQUIRED ARTIFACTS
+[
+  "oauth-oidc-scenario-1-result",
+  "oauth-oidc-scenario-1-verification",
+  "oauth-oidc-scenario-1-paired-evaluation"
+]
+
+PUBLIC CANDIDATE CONTRACT SNAPSHOT
+{
+  "taskPrompt": {
+    "available": true,
+    "sha256": "2a13d55fec67dcad4ebcbe534cbad58ae6d04e00cca54cca6c04e26537b015bd",
+    "byteLength": 846,
+    "text": "Design OAuth for a native public client that calls a document API. Use the system browser and authorization code flow with PKCE S256. The fixture includes legitimate and malicious redirect variants, missing/downgraded PKCE, intercepted/replayed codes, mismatched state, access tokens for the wrong API audience, refresh-token replay, and a custom-scheme competitor app. Define exact redirect registration/validation appropriate to the native-client redirect choice, state/session correlation, code-verifier lifecycle, one-time redemption, token audience/scope validation at the resource server, secure token persistence, and refresh-token rotation or sender constraint. If a custom scheme is retained, explicitly address app-claim/interception risk rather than treating PKCE as optional. Keep document-level permissions in authorization-security."
+  },
+  "fixtureFiles": {
+    "README.md": {
+      "available": true,
+      "sha256": "bf94ff4ceeecaca2d48db4965362aa165ceb8a636d2bd020692383fbe5f94d55",
+      "byteLength": 965,
+      "text": "# Native public-client OAuth fixture\n\nPreserve evaluator/corpus and write `.kory-eval/native-oauth.json` as `NativeOAuthSpec`. Use system-browser Authorization Code with mandatory PKCE S256; fresh verifier entropy is at least 256 bits and plain/missing PKCE never redeems. Redirect matching is exact; if retaining the supplied custom scheme, explicitly model competitor-app interception and rely on PKCE as mandatory mitigation rather than treating the scheme as proof of app identity. State is one-time/session-bound and code is one-time/client/redirect-bound.\n\nThe resource server independently rejects wrong audience, expired and missing-scope tokens. Public refresh credentials rotate or are sender-constrained; this fixture requires replay detection and token-family revocation on replay. Tokens never enter logs/analytics/crash artifacts/URL/referrer and persist only in platform protected storage. Document-level permission remains `authorization-security`.\n"
+    },
+    "contract.json": {
+      "available": false,
+      "sha256": null,
+      "byteLength": 0,
+      "text": null,
+      "reason": "not-present"
+    }
+  }
+}
+
+PAIR EXECUTION EVIDENCE
+{
+  "matchedPair": true,
+  "sameScenario": true,
+  "sameProviderModel": true,
+  "sameHarness": true,
+  "sameEvaluationContract": true,
+  "sameMaterializer": true,
+  "sameDeterministicScorer": true,
+  "randomizedArmIdentity": true,
+  "evidenceOwner": "evaluation-harness"
+}
+
+ARTIFACT A
+{
+  "finalOutput": "Created [.kory-eval/native-oauth.json](<redacted-path>).\n\nIt specifies:\n\n- System-browser authorization code flow with mandatory PKCE S256\n- Exact custom-scheme redirect matching and interception-risk handling\n- One-time, session-bound state and single-use bound codes\n- Audience, scope, and expiration enforcement\n- Protected token storage and leakage prevention\n- Refresh-token rotation, replay detection, and family revocation\n- Document authorization ownership by `authorization-security`\n\nVerification accepted the legitimate flow and rejected all 12 modeled attack variants; all 24 contract invariants passed. `npm test` found no test files, so Bun exited with “No tests found.”",
+  "executionEvidence": [
+    "Codex CLI completed successfully in 38870ms",
+    "native OAuth attack corpus: pass",
+    "fixed evaluator/corpus preserved: yes",
+    "Evaluator integrity: unchanged. Hidden test completion: observed. Public tests: passed or absent.\nbun test v1.3.14 (d1632b29)\nKORY_EVAL_COMPLETED_6b3b60424e8a4ad691bff225a5e51d87\n\n\n../kory-skill-eval-pair-Nfwygl/workspace/tests/__kory_hidden_eval_6b3b60424e8a4ad691bff225a5e51d87.test.ts:\n(pass) hidden: exact redirect/state/code/PKCE/resource boundary [0.51ms]\n(pass) hidden: replay/storage/custom-scheme boundaries are explicit [0.03ms]\n\n 2 pass\n 0 fail\n 25 expect() calls\nRan 2 tests across 1 file. [12.00ms]\n"
+  ],
+  "publicContract": {
+    "taskPrompt": {
+      "available": true,
+      "sha256": "2a13d55fec67dcad4ebcbe534cbad58ae6d04e00cca54cca6c04e26537b015bd",
+      "byteLength": 846,
+      "text": "Design OAuth for a native public client that calls a document API. Use the system browser and authorization code flow with PKCE S256. The fixture includes legitimate and malicious redirect variants, missing/downgraded PKCE, intercepted/replayed codes, mismatched state, access tokens for the wrong API audience, refresh-token replay, and a custom-scheme competitor app. Define exact redirect registration/validation appropriate to the native-client redirect choice, state/session correlation, code-verifier lifecycle, one-time redemption, token audience/scope validation at the resource server, secure token persistence, and refresh-token rotation or sender constraint. If a custom scheme is retained, explicitly address app-claim/interception risk rather than treating PKCE as optional. Keep document-level permissions in authorization-security."
+    },
+    "fixtureFiles": {
+      "README.md": {
+        "available": true,
+        "sha256": "bf94ff4ceeecaca2d48db4965362aa165ceb8a636d2bd020692383fbe5f94d55",
+        "byteLength": 965,
+        "text": "# Native public-client OAuth fixture\n\nPreserve evaluator/corpus and write `.kory-eval/native-oauth.json` as `NativeOAuthSpec`. Use system-browser Authorization Code with mandatory PKCE S256; fresh verifier entropy is at least 256 bits and plain/missing PKCE never redeems. Redirect matching is exact; if retaining the supplied custom scheme, explicitly model competitor-app interception and rely on PKCE as mandatory mitigation rather than treating the scheme as proof of app identity. State is one-time/session-bound and code is one-time/client/redirect-bound.\n\nThe resource server independently rejects wrong audience, expired and missing-scope tokens. Public refresh credentials rotate or are sender-constrained; this fixture requires replay detection and token-family revocation on replay. Tokens never enter logs/analytics/crash artifacts/URL/referrer and persist only in platform protected storage. Document-level permission remains `authorization-security`.\n"
+      },
+      "contract.json": {
+        "available": false,
+        "sha256": null,
+        "byteLength": 0,
+        "text": null,
+        "reason": "not-present"
+      }
+    }
+  },
+  "changes": [
+    {
+      "path": ".kory-eval/native-oauth.json",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8c614897bde47527295cd07bb06d0ba81514e80582c45820f73c2be308133b1c",
+      "afterText": "{\n  \"systemBrowser\": true,\n  \"flow\": \"authorization-code\",\n  \"pkceMethod\": \"S256\",\n  \"verifierEntropyBits\": 256,\n  \"pkceRequired\": true,\n  \"plainPkceAccepted\": false,\n  \"redirect\": {\n    \"registered\": [\n      \"com.example.docs:/oauth2redirect\"\n    ],\n    \"wildcardOrPrefixMatching\": false,\n    \"customSchemeRetained\": true,\n    \"customSchemeInterceptionAddressed\": true\n  },\n  \"state\": {\n    \"oneTime\": true,\n    \"sessionBound\": true\n  },\n  \"code\": {\n    \"singleUse\": true,\n    \"clientBound\": true,\n    \"redirectBound\": true\n  },\n  \"resourceServer\": {\n    \"audience\": \"https://api.example.test/documents\",\n    \"requiredScope\": \"documents.read\",\n    \"rejectExpired\": true\n  },\n  \"refresh\": {\n    \"rotated\": true,\n    \"senderConstrained\": false,\n    \"replayDetected\": true,\n    \"familyRevokedOnReplay\": true\n  },\n  \"storage\": {\n    \"platformProtected\": true,\n    \"logs\": false,\n    \"analytics\": false,\n    \"crashArtifacts\": false,\n    \"urlOrReferrer\": false\n  },\n  \"objectAuthorizationOwnedBy\": \"authorization-security\"\n}\n"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/00227073",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "d0a0bc1388245f2664ea77f31c74bc9e76aadc7a356c6ab3de2356044fde4979"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/0184e755",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "bf3125b16dd99489f7a3cc90d893d03affeebd0cea2d386eaa78f08124c9da46"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/03671678",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "c344486508739e96aef098bd1a39dbaba05e1569a587aa12eb4e1b47a0d2c9ed"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/0379cd99",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "9367e87960ecb66af06821a7c498accca8ee24a9b8b8b7dab3ef87e3d323a3c6"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/03bfd87b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "561ef4954e61f348a24b420d750d67e2e6412f10cb376c82c6739635a1f67608"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/04946afc",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8d644868d6663895d965a5339ae60aa29aed12298c0963d20c937d35606e7ee3"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/04e720e3",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "3baff43a7141348e8d297855ac7ac6c17b618a837daf663ed1579fc927b00db1"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/0655ecda",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "ec5dc257ac2cb53915269dd61ad827cfdddf80a4496303f6b6277fdef17726c1"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/06a47d00",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "c8fab662ba22a00f89ec622d4cc3f8ea1d9b08d110f2d0bafcef625d6d7ad0cf"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/06c32d23",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "7f3dc3f4f1b0f29a5a591100ce04bb4011e4a1fea734f863ced2d4e43d909b1a"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/06d71de3",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "e5d0da9487ccb15fad57364937cff08c9301bed49811e43953445ab7f645dbe0"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/077122c4",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "e503b4df94993fd6ef10f7006b00529edbba39bbd58a42d5f0a696a9933e5c0f"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/0795c3bd",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "52c2a6c2f763c5658d8eb018dd24c234e9887c5af950af14d7e8466bf4ee6a7d"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/08e8ee11",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "7b0d29b18bfe12e720893fd8f7a3c2c46cc21da54d9941fd9ce61f864607f049"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/0a99ba18",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "6096e6352d142ff44c713d9107cac1303966ac5aa3bfa6633fd8fe883c66a615"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/0aeaa2d9",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "c3827fdf41208b7bc3212ceeba8b60f69b42dccacd8fd86c99040595fb87298f"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/0c2b1886",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "cdc63c4beb7b64e0f2586f322e34a43fa0c332ab17943226c186d574faf1f085"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/0dd2df79",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "a0b4c8e74ba900a78c2903a1803bd0173d72c9cd0c4a09e6ade809262270e7f0"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/0dfc1d4d",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8ea4388fb0cf2499a46b59937e015a38b4a1c92ad60207be4fa356a83c8bf0d3"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/0e52def1",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "fd7ee5c471effa93177156e495d16f476c32af1ce10d9e4a5ed6c20d02ef1caf"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/0f14fc4d",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "c7e1d7cc092f339d8eb8715e02067fb12777b6ab2dd62522eab5ca966e04968c"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/0f88073a",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "0675c6f70e7dba798bb05e81d127ab488869f837a3ade4a28af8d57ea4ff2842"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/112811a2",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "644e539a88dda560b61b0193ced1ac5a6ace736e4f83e3cf8df37f277436dbb6"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/114bfe2d",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "0e206ffcd3d0eb86fce41d99773b24b9652ca0c03578ca77eb31df27b466d279"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/12621965",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "2a4b198b7e9f080b5b1ebf313965b112015dabf02e47147c143ec058bb584a5f"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/13db0b85",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "9fbdc0003b9391513a4e29409a989e9dbdb36a87fa06581b2fae49327ba2d1c6"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/141e8c2b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "c898e3b23c64d9f08e47e41db4e50b2abd0e201bc275374b36031a530620cc75"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/144ef0dd",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "dde2a8319cdfae44dbf0e999e33c2ccbac49dce5bdbd727ca38dca541ad4f205"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/14569866",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8fb2f6b1e8cbf19aebc81540655aa73185efcbbe142b35f39bc41a32e8dc5e6b"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/150f4755",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "a47f763406a73d3c7f3653fb193834a1b0fdee9059f4d910dc1d1d3669ea6484"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/15ae574e",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "bc1b74815288e49e7d01d79fad1306d240c301cddb83aa83fef74313f3a4cc82"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/1640165a",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "6ff5fe918f39c68690935854c78a5d067651b63acd1801a541b2d9415e2700ac"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/166d9515",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "748a0de2dc3df60a15d2e8563e08af818f6d9a7eb31c8eba349f95e54a99cd70"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/16906026",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "4eb839c930b458a3198ab730a9a2eb3229fb4dfe320a9f5e9ea8c77374cdb26c"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/17297682",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "5e1cc7fa02ba54705b60c33b887891bedc3502bd014354ac2d5d693e584ca5e2"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/17cb9c1d",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "599a02fe3d659e75c952a68d34e0ae05636c7e47395c3bb1f85f1ff3cb098ce6"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/18306539",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "e07a64f757e735b6a77b292cbc7ae7eecc8ca2feb521ebfd4b4d24b79ef1eaff"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/1880532b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "03fd1b19ff5dec97ca8b6ab55930cbe97e1e99447251a3ddca44d38fdff43e41"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/19f11bee",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "63a69694c0742ebd11e3cb7b760bd28b6449e0fd88793376f20b72e3fb001ec2"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/1a424851",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8bff830920323af149fba9567b7ce261c3217e2b4eea8f419ce3613f604b4e35"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/1aa13f8d",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "d5f5d31cc74ed3c86a283bc87d2932ee42a3d7ccb0f2faac3a0f782ba3953d14"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/1afa333f",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "ad09297b328820ea40817e1fbb2eb8e626048942a41a6a1d8966ef2d9c6dbabb"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/1b12bd1e",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "f2b6252be866411da428d30807da665b9cd6088fb97df386245765f48b4358a1"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/1b6c267b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "ccc48b2b5b1bfda5d9f542ab83346497178c44ce1212ab50a01321a63af4c6d6"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/1b6cfceb",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "7214b55c1730e2c6803f59d7f74417e79cdf6a48b6b40f1d9e65180320e04321"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/1b7280db",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "469b77a776789c8de533581d8f3c5f5b19318c70e39de800e674bcd6964de3ab"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/1b77dcb3",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "e5d2ce9aaa12852b596b6b4be211617f20038cfa3f60b030ed7cb69f0c45094e"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/1bdbcaf3",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "d9a20259bd0aa9fd40f949bea8a3e81cecac84e14bd7e5760d02733845481c30"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/1c192005",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "e0eb5718557ad843bae125ee55cc141613228e495fb0c6c7f014aacdc9318a21"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/1c295500",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "f264ec5d032e5a9990cf6addf741daff20b4a87e4968843b751bdb33bd2e29aa"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/1c891b4e",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "5c5a5bfb7682cfd06efe8e62f989207e2bbd6dbc403763dbe7c1a666dd42582b"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/1cf2efb3",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "be0a99409d17da5c4b8e3c608d27142280ef86802b44d619d53f01173b89eb78"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/1d487e72",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "0645d0b15038dac3413bb64ae4c552208c2443e079ca76e87459865f2c7ec015"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/1da9c989",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "da9215c4cb91c965e67e318c2cdafd8c8a0e501734170b78534b750241ff6dc1"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/1db833d4",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "ef92051c4cc522a2cc2f4e97dfcfd58e2970a97dce37cdada3919d5a1602b48c"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/1e4e8195",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "51deff2278594703509b69a51f1dd460497f7ebec4084431af5706f965ff50b1"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/1ec23870",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "0787c64080a2b5cce95bcfddbc68986b6848ec23db63ef7b4d93623bb64438e9"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/1f8a4c20",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "852db279087bc5a04ae0eb0a21848c9961d18e970997f838d37527ac9988bb6e"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/205a5d1a",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "746d511517752d53c9e747b5c53204b5ce85e0858c4d39530c3f9400089b1b8e"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/213eef2e",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "e7fc5404e27d1d17315b0347125ea9e60b2ead12282af96141f044029948f1ca"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/2181da31",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "7657e9f99e97d1bc8a3f3e75b53a84a9a7acf683cb8b62c81a8f3bcc0cfe0db6"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/2197f9ec",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "99bda432722786f3910c81acd091b0eec02a46b694f837080ed31d40b860be67"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/223fc457",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "4aa101a7db5cc6d3553ec3f7d027d645424cc9e3132ae61e828a4d7aa03e1ffe"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/225d11c9",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "28f872a51a7901c4de155341833fccddac9f6edabf32e4c9bbbe8cbbfce4f89b"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/22ae4292",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "aa782fe6941229bd6c099541d4af4bacb92d802da0d1edaf62484b157862bf70"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/23fc221b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "4a919505e597fab777b7f238d9a611799e4920f7bf4763b79026b3d83455acdf"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/2411af24",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "2c16f1eced87d217f0941992f8e635c21f8e70c02ffef775045c6d8b67ae5611"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/246a8652",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "54b40d568c15147e045b1fb1dd23d5cb0abb48c0824287b7c24d8a4ff764cdec"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/248ff18b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "49edb370aee2c2f76f1c3234a7cb58daadaa20cc1c7377267ece73d52c7922f8"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/25c6f63f",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "baa103e652411d1f81c19e24cf9d464a4fd3dcc73e33eda625d5b3357d85bffd"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/26d7b246",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "77a05efaa2a4e043e21cfb341fd0c91b470f253c93fff6ae057098321ee39d43"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/26f68ea5",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "2faa8dc9a15cf604b2e94cff047046bdcc3d36987ab2120ba4333a2f2b546774"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/27af5ff4",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "ee5f045d667997af2a5d78fb2d6d4fea04902160702b005b562721ccec47c488"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/27beab80",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "0a6472586c1b0326a75e65e3267a803214e90a031c74468456d040a88980ab98"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/280b464c",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "7dd2d9571dc5397cd8cbe3b5bb41ad8e6881d8e5f6242464b5b0d584275b7585"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/28bebca8",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "90bb62b8b61ba99a2bba60b93df36b319483e1d3e974e306e3d3a33220364ca8"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/28f0e502",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "05effeee887d2d8c12af3568a46567155fc7b492891f07d1bc8589e2e11e3bc0"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/29598173",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "d865505dafe7ed0412c7f5be9c34a95521acc65aac6758261d15143680b435a8"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/2a4f47d8",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "f57fd917417582c7a9412ea6b3a743b14f565433aefcb782561edb42f56485d9"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/2b5b41e0",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "1b03e5c5ebb447ae514cb0d15648fc04401708a08aa2d80ac901b6d019e0a291"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/2baa6322",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "ba97778d1c008dcc3e51efa8958e5760c3b88a6bfd6e592a821c1d63275c8537"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/2c21ab85",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "b29de4ee9c54f66a7775c249c9c4d35cd47e674fcd9caa6b32e68468f6c15275"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/2c8b3167",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "befb3ca7990617f3a112105a1bf0a0ea7d4abd3d13a85f9d5532e735854fb550"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/2c943337",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "ad0d935cc801f7c1ad130b3aa48ce16112f05d4db2294c005a8ec42cbe2244dd"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/2e0543b2",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "49ad80ca566a9ec3165f610ac3f22b45f2f97845b8081039a0e0c13d6f647b2b"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/2eb108b5",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "1e225db620be8453ba051244a0cfbe6f5ea9dd0366a737e18d1891506f39337c"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/306554cb",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "c6dc1780104466bd7a3b8c915ad8933775584eea7e25bdc78331bc00473b2f64"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/30e7a919",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "4e2b48f6f11ae0f4e810766ebb3a05be56efefb0d0697bdb9cf0ce36e5a86ea1"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/315ae287",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "c47eb2bd68123a0988ed9f134cebcacd8194c1dc3f6fa23aec745fa62f26c79e"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/31b67916",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8545967587cdd31f6e44604e207eeefe4976dab21e74148e26057b3ebcfbcad5"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/31bc4b51",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "31312d13c1dbe84d217246ff40551efaec4a815b88be43740ca7270d883f10b0"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/35a4f597",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "d518528994b4cfcaeaee1e2374aba3656fb977c20aa9326b76bb6279709d9075"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/36091831",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "5351cbd8da6ec623af16b55a7c9a1afb6935a8744d15e91578446f160d870d6e"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/36a5744b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "989e11e6283a29d37c716c8410215c756fd46c9941e95c7754bff8683942a3c3"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/36e1f196",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "ec7b420fd926b5b389b3ae659296422b4fcdf7cce637f66e86d445811763ce4a"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/37dbed22",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "2d06f31601e39fca8826a3fc2b168bb66070bbecbac309c53b045243152e47d5"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/3843819a",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "01b61454450e7594f06af1b48de327f1d50738dce1f6ae206550148190f4e830"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/398eb1ef",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "c1219a8b390920f312f6adb83e9b2db7d048397411dca9cbfc468437d31a3bf9"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/3998ea18",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "ec14b2de79b0e4c9991ce82dfb00520c76d58603d160c1b232599d3ea2c0f7ff"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/3c0678d2",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "ada61beb823ed8478efba802987e0e36020f72b8ab6e023fc9637dc5563fa8d7"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/3c0c3f33",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "d1f24d8b3dfa1114e6d6bc96fecf0afaf3e91bdbaa2d95b0fe6cacbe49b6bcfa"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/3c85b32d",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "aa2bc589224915ae235d9d1e9a6960743f24199b24d6d39ddbbc79b8360ce533"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/3cef0917",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "cf23628dd4313a1956640f5429e0f6dc02a304acb5c019c4fc21e7d27d4436d3"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/3dad37f2",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "c41da9e12f70c671f65a865fe5be927c0de1cba4c6a9b63171dda2a6b4b61fea"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/3e9780bd",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "42916cdeb14008315406c5d52c80f4e41c040cb68a0a0f6884e75fc1d4e7d731"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/3ea75d30",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "545132f608d810c138dc8699f842629402eab3f29d19d07a201d607863f628f4"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/3eecffc1",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "93a19936cc26575cbbe8cbf01119587ea6bda2deedaef869b37c21e28d80c727"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/3f8b7688",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "23a97a67939168a76b60ae49cbd52a55368409ee7ae17318350b83ebd970b01e"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/4094f891",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "99451eef2972ea4cfe8f5676d0be8f649fb4a0cf75a6bab0bda035eb3afc8248"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/40a98633",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "677f6e4397839b14dec2264c5fc287f3cef423720f94e79d7a1b47f54b97327c"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/420bf231",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "88c00c7933e4c677f621a9d0882dfcf543f10fba1fed9c3e9dc432f0965e4105"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/42607470",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "4ee031b6e4d8fca9f2533962f5b2fa56e40210fbfa3b36cf03aa9e42f25c2813"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/42ccb68f",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "6aa24e81ae49e29623abc1f9f4b964be1f28384fd989951501a6a46fa2c17fc5"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/44ad8ce2",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "9609453db8789db04f8ea3d93b78c5d39a032619cc09a7d217ded2c9681eeb5c"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/454c08be",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "f56efbd0bd41f8201cf6813f70e806b8236deee67c2414c7baaab1038f4851c4"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/454d0c5a",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "266d32e30c4991999af5aa130dac0dd34c1b5471fb48f0c4205c05fd9f402b58"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/460f05dc",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "7fa1892b1c33be639b7662e1e774cf7f53cbb21de0084d699366ddf924d10977"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/47041e08",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "e64a45cf9654b49119a0739cd0882000dd98f06e96ecd94a122ce087912065ec"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/476f0808",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "dbbc45dd05ded07e95fa01b02ce1b1ab9121dd695319d7ec7ae524a11f882694"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/47aacdbc",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "74b0769981d32e4803d76c8a1c00db2a8d899b8490448761ea90b36a070f4ee5"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/4863e321",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "7013d09e99e3a66c3632b03193e94f34b1fd34982f8af3745ba371f4590176c0"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/487752f8",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8621b40ab7bd3eedcab351b1ca4607b6a4bb7e9ed58b65be9e9de1d73c215fa9"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/48b9a2e3",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8b8d8918ef84b430023ca5986d97072686cf755d92f5f8fc048bffaebebbd5f7"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/49a62087",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "12aca1e687ab9d307701cadc2438ff338a195d902454fab9a7b846ba0d90a192"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/4c9de148",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "4141b72209af920a684ec4f00753db6c0386c0d1380fb64133e2f31de56f9a53"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/4dbcb496",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "e242e85d107e4d01f466a3502ecfd62cb7a835cf5e7ea27a1a961b4d37a7c97f"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/4dc9cdda",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "3dd4c746589e85c9df5aaf7d4b451344ba195c13db71d3d866e9f0bd93769d71"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/4de8c1bf",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "0552d65266fc806dd1321a0ef1d597a6307b49d8d99ab4a1ae4be547a7edc406"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/4ed65fe7",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "e79d28120f576f9787a44a0a2fa40f0296b061a00b3776a0da5bc01bcbe94653"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/50668334",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "e1e9c5a20787dd6b75eb7fbbe9f7ebcfb35b4790df5bc57a3486c214dc7a5526"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/51078357",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "77f8879357cdd3606ccf3391d1e0b6f3484f49952cc4ca058d7188a750fd0efe"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/51265810",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8eb1e5574cfba3c9b202a3d6d14228308b200023a479c4e658341dcf44ebcdf2"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/518825bf",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "0fb03a5ac05d82f1240e1fc4f09fd9cc5ee8d5e06c6e78ccc929ee118f9767ca"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/51bd3af0",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "bca020641f07c6c767d156a404a341a0bbf592202a95ef70b0d3aa89cafe2c69"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/51de04f0",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "0fcfb6a9ef835fabb2e4b81d037dd3febec3d4145afd4830e24c2089647c7c50"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/537307b2",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "186881c11c6af72a8e2019969c3d5aa033c51b626988f3017dda8764b4ef4f30"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/55cce99e",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "a7031cbcba0f6a172ec44258be1c629ae6940c8e0c83ca296646ee3e62380c19"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/59f39376",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "2963c6f497d5dff886f38cae8ca7fbc83ad61a63acb82afed7d322c4f8ab0c56"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/5b9dce1b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "b0ff7f090ae604ff10d85e2ff8d6e13d7208112a75c8625a645449c5202fabc8"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/5c10ae94",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "c29d3c69bac9f4438e6ee930c5c1cef16c8b093dac182eaab9f7bd562527f1e3"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/5c9623a4",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "0089bad834ed6eb477e8633e7d9bfd2b8d78fabe5f0651a7ca099acaf6b20347"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/5ce3c97b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "ac1ebb42c0d97e3a46ecc62f2ed642c7f39a222173b1453fffb04e3821b2e329"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/5cebb2d0",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "6324e519c2431857d4839901c2c595c9d26e69517f49f2d5e77390d208d53301"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/5d572a5b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "55307acd703e975e7acc6c0d414d26779eb3784fa6c09262dddbd5f4fd4365fb"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/5d95a9e0",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "3ffe2ab9eb8def3fbb961f4ad0aab6de58a31dabd425439bf93066d026340cc9"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/5db4d748",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "dd1705daaa542ea65f2a0ff9c17ad4bcd29e9537cb19a2ede2e90f2c9c8b0cf9"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/5e1de351",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "a830ab007a63559eaffe946734fb6cac3a35763b9c964bfc8d4febf7c7adb9cb"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/5e2acf8d",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "7cf00e08fa789de51ad97bc2ca37c4953096ebc864dbfdfde844ff496111dbbd"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/5ea069c0",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "40fff020ca22b266f17e25a476f9ecba8d3a32579ccb3fb7e03e588281e2721b"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/5ed9710f",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "b678bb2ef2eb7b19d46ae2bea63c14c865157ad4c5b0e9ec344bd8b9b73c1771"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/5f44ed0b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "44eac46bee4ac74e8e2d48efe360c5829485e07855b3359a35eaed280b1f77e4"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/5f6bab65",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "63a50f5ab262f3659b9e184dfbcc2b0d28a8022bb3ad0bb86e127ebbaef108b1"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/5fafc597",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "265abb705c2b3a5fdad9c6e481d8a6c2cf01d55a713fb2c0e964e32ae2352913"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/5ff6331e",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "0ce2cbbe6ce17cdd2ba4a3dc33d2e3a559a3834000a5ba2c493207de32997960"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/603670b6",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "133c236e83a99db3d0596044ef5cde870db67e79cf4b56252ac76708eb3efe71"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/606d2446",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "46772f72c5201ef8bd2848d3618844132c28e57572d41146ba54af9e2cf0be62"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/607402dd",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "b6039f832374972243f01a6681a740569bb0f39af0f218a51666708291466e56"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/60a736c7",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "0bfd1a5336dd6ca62ae460530d6e825693fd4ac828e53712b13020181e7c1f7b"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/60a7eab6",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "083e050b01322e1c2d9a9e34d0164e4e25e35f33e8a24b7e863358e75d7ab271"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/60dc4a2c",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "56baf52294c0c0eba1ff2c513fd1887a86ccd93fffbf3b44836335fb8fe1d944"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/611c8b8a",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8a833c5f57f4b2a24d0c54b140635891923bf7f288b4067a0affabe9756713ed"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/647d5589",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "86b4bb15ea0a1b4fb114d0329b33708c25512b51a5e82cff9c7254e4fc95e61c"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/657d5112",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "4fcfe239af22a18beae5cf49acdda1bd2f16b7bb0c54b548c6bfb64753f67f94"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/663e7968",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "f659c6fcaebe5b5f7e9b49c882ba0ba65918dec2ad4ac2f3e2c3a6cea0dbcf7e"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/6670fd87",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "9ad0bef21c6664ded30f1b1e4c8b53c1d80fa4691d656f6e42f21f83bfec738f"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/66afddc1",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "17e2089de33bea7203c6c511d08f3dba5e31b22157029a1b9649a2809417f28c"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/66fd46a2",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "db81fa71cd97845b732bad5ef03077d2e0fd4506ccb78f09b2b87d8f9d650ec9"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/6717a571",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "ead1bd034a615db16d4d681a5cea8fbd64fa8c2d624781864c841efbfa966fb1"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/67221b6d",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "2c4d162f1b50c4a21a31e50a7454e96d48e176a773ef900882b1e62c887f856e"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/67504d90",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "73e9c35aa1ad07a7d404c5392a796adf00a23f0d44ed48fa4e6a1d536dca4488"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/689d0fc9",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "f48e16ff006d099cd63cbbd567c12d62404529850629471c1b9f4c692ef76e5a"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/696da38d",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "5d34d154eafa697f5045a8c5213b618c4dab2db2f196d48d9e3ce8b9d29ea2ef"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/69f73f49",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "c475eeeacedc06c1b5ef5aa042bff6684acfff63f7f3a15dd142db070a5c413b"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/6a04989b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "3b790e07ba300c5d01ea6500415ebdd3f1db7b2125dd8b558191f8096d8f4ca1"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/6a91236c",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "a796071c9bd7ab9c0dd4f43d5ea9b1be210f034cb132941f95d427c0ba561c00"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/6a98ed19",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "e21f6a168b7a37c7ac5bd52b3f1b4791a7975258ee99d4e16c54f05ed652da9a"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/6cc0e32a",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "e29f5124ab82e3e7d662ccd36e4da9fd11293aff0c07cebb6a48bccab4d1089f"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/6ce020bb",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "a86d6f6c1c850f4100995f69c825f6bb07ffe9a3b993243390bee22c2031cdad"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/6ce4eb85",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "5182a09b8f1e5deb8afb84973aebb3ff677f3c61a66cffc0f7f5392f38b4a372"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/6cecfe6e",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "4eaa89100d99f2bd29b71a734782a4d86e1af6a63d44ce84c312e7beb42a19c2"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/6e4966db",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "1cfe1fa78c370ba34318a809d257554a5617b08b8333184b489e9c08deb3077c"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/6f7ba10d",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "ef5ec4a7484a95b22913608600bc90af781feee9e135b079351e5d7b6f9eebeb"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/718e1354",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "ab68e4e619854bf464a6426da3b7e626d764e9326ee2bf53b758873d40179cbb"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/71dee96c",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "4440b3286b59fb74ffa21b6d722c88beeb6865662218a8f6333e9c3f2b6644e3"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/7238a5b4",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "9697142d0d95134fb6418e9d69c328dd70b8eea1c99aa26b86cbd7ff1f451247"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/73fb521b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "a5e41451e940adb1b5dc72ac615e5afa7d8d42556ab90c3625624026d33108bd"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/7492db49",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "ea0b9190c9beaa9044005ef38a4252681b85cabf698130a7258b4322d05efd7b"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/75407596",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "203f2324f7479f939cf0da69c3cafba2cbdfacd74007c1e75f015323aba1437d"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/75bea498",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "d25cd5f5d59b9b4b73a088af33a8299915fec771cd694b1b26065ac5d86b3bba"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/76880813",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "52e6748c1fcab1962f90a61d9184c3afddfb047ea7c17be7f987e52c3e6987e9"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/769599cd",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "e4def9d8002eedf80ce9b7c256ec69d8fad5c27306c6419bbe9507bd2b41bbde"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/77d2ac2b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "47d9042f00cf1cf589c782e65287ff022e51a0fa5aa82da37a7fdc6cec7dd301"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/797af0e3",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "7bbd40c2a3e6d55713b971a2b37054ff4160ded629128316720a24e370d23b8d"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/79ac60e1",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "32978f370b47d035bf4ab56353eaaceec45ed60e4e00e0f466e818165730b719"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/79bc75c8",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "4f87b396d3a6f238750c91fd355a8b9a7de79fd47073bdcba1f3530a915778c5"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/79e848b4",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "793bae29fadf1c99ab3917f182c89a508700695947b455196f77f00d66ee254f"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/7a03d2a1",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "5c99b774ff02376436f62d6e8e793fe0f168510b43e905ddfeacbf6ebbaa8d4d"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/7b03696f",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "747c6841b0f4860d4478ced52411dddb03ccba8603e108af8433a15a99b80980"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/7b7014ad",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "a59defb9771f40ca41c2b9bb87570930654799a4058a9b829ee6d229cea4a7ff"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/7be7ee68",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8764e7986edfa1b048ee9f85c2bc8d150d8882bc1f2b39bdd01f12b486e0ebc4"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/7da2b0d7",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "a98e3cd4d4f9d6174ed89989143a2c52fab4430bf694bde056b563fbe5e43e5f"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/7e28d11c",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "d45f0fc98a6be48463e1ec2c90848181445e5b1a06d2798b3b36b1076a192bb8"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/7e348abd",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "41a711ecc2d6f5c82d8698f45d70e06b92bf7d51c2e9667a684956e5d096eb68"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/7f6cca1d",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "b6f1f9d60be7d354f7fd23a5bd24a7a2bd774a14ee3cc57ba7c052515788426d"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/8072d8e0",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "145ddecb4f10d2d5c00e566dbb24dd50bc3b744aa6f20c58fc83e9cdd0edca19"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/80df3365",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "2442d4fe1c2e419fcf7bcfdca5c6ac29033b1cd5417bdaf2644a2dd2b0b14393"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/8105f31a",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "a32823eab5f13785231f965bc489ba5a0ce159ecfbc5af6a7e19a491e9cf30a8"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/8187990a",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "199b8732331304600c952c99e0984df9ae6259f5a28b51162e13130b06fa91a2"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/833dc8b2",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "3c4cc6d87888f13e6fc36cb5d26c78767eea71b76e9e96ff65165c0b85d05c24"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/83c7e61f",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "eff788949904949de9cda4391398632fcfaee0b1b56d0c173e8c16ea395cc2c1"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/83efe9dc",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "baa9a188cd268da1a2ad2e375becc95395c2a804d68bac69a5727374c45032e4"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/840a4bee",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "2081a642434b0f042c5f099ff3187da5e50b1c1ad2a899ed3d88685791f32727"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/846e3204",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "4fcf6030a42b51c9a8396233c74927aa4fe42c62971afe3818ebedcd06e78487"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/847afa15",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "1bcf4e9a769e8b987253605f41d41a379e159a79412cd2c5e6af493e5bd8d806"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/84a4e920",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8c4031d584afd86ee4ad4169a0fdaf17f85eb67341c2346988fc1eb637911871"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/84d4083b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "fa9fea0dcc4984516c3d029a0865760debba6c94e0810551b0f6dae5a4395d28"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/86d463bc",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "6e8eee7662b450da47a2d03b1a3826dbe069511221c5a75148764d5aeb385ae9"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/86f463e1",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "6b88e57837e92ee58672ea04a6f2b9faca22080f242784ab93d0a70043d2f685"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/87763330",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "253fcd392259594146ba84fa7d8318781128580e6b53c46c866a02b341408b9f"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/87c45736",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8c311bd5c0e038ca249f2878c70958c5e9b1b0f63450f78aae6ad974f6b69a73"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/88070829",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "7aa7b027a3c3d34b6e5313c70347ce30861ab26e6edb147fdf59193047c8720d"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/8809960f",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "46b6f9061a131e92edac6106279f859399b171e57a7ef38ddaf51823812bb781"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/895bf355",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "5126f7eeb7fb45052ad9f9549255ae42448007364b2817a3b2ab0e94f18d343f"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/898e640b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "e060fb1a801e479259c91d06f256c939ce25faba6f386cffc1841fd1024d37bf"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/8a2756a9",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "d079209383b8abbb73bb1f88d541465d6baa6b3932f9ea0bb98a008cadd238bf"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/8a47dca4",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "4714c22cc06f949726597177b23aa5502ef73c05cf12d047dfd376318db2e619"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/8aaabc00",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "5f0fde81dee2913636a6db30824ca7f50ad4b1849ee68366ab2fd0abeb5ba044"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/8b37215e",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8ed8ce5ce5c3d4bab6ce324212794a4a1e93a5441ff93ece58993a00f5fb68a3"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/8b39ebf7",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "7deaee88b9da2c0453cfa97adfb244d98be532fd58ce1ab3f309e711d5670535"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/8b95ef82",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "784f05e8860b7c716f5688a99aef5718982b8c88130e3b79826f6e66d4fd1c36"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/8dccc939",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "ccb0f3b37e5d25a4865204b669ca7f23fff83db991117c9605fd5952f3f7af2b"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/8df7bcf9",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "95d51ad19f1f1d923b8deb77b757b630c924f1aeca82e0fb50dbfc07ac0bbf3a"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/8e31f510",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "41c840c67ef446e3f88cc2bdff338602b18c201dd7bf8a2f409cfc498ba218d8"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/8fe23731",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "13422117c6fc82f73bc043e68f3103a724bcd3ea668733420ada8434fbfd6296"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/91e31aaf",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "131aebb1d64e35ba8abcef1e3defe979ef8f0eb39392d1c5b3ad698cde468bdd"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/920a4535",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "fe989236c8bc962594cd3b88f4af6088c4007aef09b4c9e3389d55b26f01b89e"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/92fb3339",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "e324b594a17dbf927e195ae4d7f7036eb6c31b65ff5d4dc321a370442d334cb3"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/9331617b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "66e753ebdcc92189542ef49ebb01b64fc0185751725b26934a1e8d70be04a24a"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/935511b6",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8434cd1645b15791ed79eb24398eea2bf319145f1d92ce3c360c11aec81ce5d2"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/935952c1",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "b53d4b131851617263188588872152be5fd06a1b14d4be8c1381b8b335b697ad"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/9380e95f",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "e74c112a3e022a89562b72f8a1f661c7c065a181733ef488252b112f27e99258"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/93827747",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "1fbed0bf7b094bdc95f9b76a9d12c57493e4d48c1bf774e319f4cc8d268b4427"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/93d1f8e9",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "e44c50b6b0e246a2a92a45f20ca5257511239985871ca8e7e349cbf739031168"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/947874a3",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "19f004b8f1adb500923535854d3100eb800d157190d595c391458f998ccc4ca7"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/949b5c94",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "f4ed5a3c1c24cc751ed37707e46272a9b678aefbb0be535a5c100c06dea5a1d0"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/94b8b374",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "f887f99dead890cf6a1086c0c265743d1c3c3a58b961738f4407905e5eb7b929"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/94e5c0f6",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "c5b0463f0fd649c6cd4f087ac15dd6a2fa2de70eff0a9853b0d031f1d714d872"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/959a3c83",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "48c617c1cbc9d46341db4f537707ed62031427a21576612568d751a82f429fe3"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/980f2fcd",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "493e4c0703dacbe020cd118f183a1c9c91718e113dc11eff8ac02836d8e4ed82"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/984d6db8",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "a06c195eee0dcaa5a96c29d097a6ad25e05e1800cfec6a3aa275ffdf5692add7"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/9a7e9664",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "76108376e3becee8a5fb135a6a13f3067425552884840f02480ef4d317245a6c"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/9addeb73",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "5c478232dbf696275a6f61cc91544caf9301c9d6a4e1d5eee8a598a2ff20d1d3"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/9ca6a38d",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "603989b38dd5e89a849905c00e2e040576cc4e122908044d49d2938fc6ca9de9"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/9cf1fb69",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "b1b7487d78b04141d8d83db088984cfc9d9b98f64a4ccc8bb7028fc52fb5ee27"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/9cfcce10",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "86a29a0f0365a5a0193a42d8f13990a9636d439afcce49f3a44c0ca87846d41a"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/9d67cbab",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "20adb6620451b4c50242ed6c013b385019a34a4066323c45ff87c7e96048eff3"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/9dbc92c2",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "3c2e0e15e796b4a1f2759ab26b64af9bc4ce5ee81fd2caf2119380330de476e2"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/9edc30e0",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "cb32f2b6cb059a3b07f7217cb58edd67999b2916d7c9e0110c7dee3e59d46f25"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/a0277bba",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "39c4b6cd7ed8c6aae92a516896dd07e3cea03e012492329645e8322029ba94eb"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/a1fd7dcb",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "af82d008174210b2ec5980c23b486d20775b47f4e000123e9408a89083bc259a"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/a2281496",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "c5ec9d26e5ebc9e3be3ff86e6ec3bd69bcbf7a94d8b00a3ed42a3d29b1704195"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/a30ad51d",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "c89155597e8a884d4ccbe08b9cbf087a34ef80a2ac6beed7c520b953b53cbc4f"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/a361e2d9",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "56fecb839bc97f076ff9f38d667011a71dde3fb44103d7537183535838e29186"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/a39eb04b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "7461b3110bb42d147ddad6441832e5d91d000d692127e2313a47dfef6b8639fc"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/a467f165",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "4910065ce03e966458f0dc0324a091d7fb86ff88e12d2da62518c8d2ca473eb4"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/a51cffd0",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "22fb36eec69786543eaa1c1c68d32c757a128848fd8cc7fbd91e538dcbe97234"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/a5532277",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "a04ddd13a06a684c08238475fe3318946cd3c4a8bebc627e1c38e89b2b7e3cae"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/a62a7123",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "10a344715cb4a4b505d9f87788e6c571d8091c2795bab385c9ca1e993a06625b"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/a967a5bb",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "c0930e4f6de2ae33c42d534a2c9af82c0e0615d805eef215be5fd92be876b49d"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/aa96b89e",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "5436401d723c7130696447f48315f6257277d9961b5cc0cd2d8d0c7dc0efc704"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/aae01ffb",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "c72f6bf48293785fbbd8da89daa42c30f8ce78686f623e90f31de4d434b3c59b"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/ab08a360",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "222766b8e580124ece5353c574bddfc515c49b94d208381411c66164ba3c3233"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/ab6c4841",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "e98c1cf18c41bc5e4fa814f1b573e0023ed892b3d7fbb4a490472e02efadef86"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/abaa1d54",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "340d0f9209132521b9bec5c02914748c7bf6c8c9d008b547e7e985696ce5503e"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/ac2ec81d",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "2a0ba8f5af40fa7d9e82d994857c6ce5d0087c94b91fbe6b0f6c568828a76b67"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/ac357bf1",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "a71401022bb1a916fffcc806efcfe69741d21721935b0b224c2370cd35217b14"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/ade01d16",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "1e73e31e41f0733ba37f0853a723ac0e5b2c79156e1533e312184890386de899"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/aea292f4",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "7d9c0b5dd584eb4bd408c1d66d017eb875002909886c6c3ab6fb8eaae541422f"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/afc3f028",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "481553f497b5c42dd8f7b36ab6b28efef3948bde14ec546d7b9005e935be0ffc"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/b0489781",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "0994b9f5f60bbc80653f64e2f2deb333a8de4dd7962ba4d1bbea13cb6f75cedf"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/b2098749",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "1d9239ffe542291c909f8d1f7329bb00f2f42644e6702122f18d66c907213fe8"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/b30d51dc",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "338b807641d944432812cf9e25fbe4bdebb163aeb213d109f9fd5ebdf2565d98"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/b3f287da",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "21dc7dbb7aa797bc6c9535f694ae85b3e5787e94f9b9795313a2e1604af4b5c2"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/b49b5c7f",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "c47abf82db2873e87b3db385ab04cd65f6bb46e91ce8212a2d1f137a78aea4c2"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/b526a8ca",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "e720af95267314c21a5a95e19ff6cc3600e543ea4526998b2047c63f921066d0"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/b5c6c25b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "b2424d80bd9b8fecea837e4eb995638d46d280512d5704798099983e3d47bfa3"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/b5de5b73",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "ef8f511ad400fc7c1f6c4cd76f1b4817c106540b15a8d45e725a38c5fe0789c3"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/b624a7b7",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "6ad6eb6daee53ff7cc4935675ff26fdd245f29e719e74e9921fb1518dee2cb1e"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/b6b1b90b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "bc7ed4b0a3e2e0335b4530ef6389367d30a9d1c93c52209d93049fbb52a0f8d4"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/b6d0e37a",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "62b49f09f0637c912d7fd33388cffcde77cb5ffbd735eb621166e6cb006a63c0"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/b787bd8d",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "9cd208167740a9e0a978b328ecadfc731903b6accca6265479e593abd4ccc9be"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/b8783e05",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "68066669c97e1581a23d7a73ef231039c5d716ab312be6311adb14bfde1de7ab"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/b966b136",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "c61d9510cbdcb050b1f3d4dc430214f6cbed4ef921b6d7f28f7f3220a3db1e2c"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/b9de8cec",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "c9fadaf931554d6ca728f9bfaa06fcbbc637ae359a9fb23bea471826de864b52"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/ba36f561",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "42bbdcd55b1ad52f3e8da2ae9142905f18dfedb62cfe1ae2ea1de666abbbf768"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/bac93428",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "9ccede9e3e835765cdb3b38dc11541b51b164fe9fecf85e074eee6238bb2b0b5"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/bb414cd1",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "22ccdfe8fcce709421a8dfe6cd7f2736d88dcb4b88d5f6fa1407b01d641821b7"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/bb9dd290",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "27fcb0333440a1b0d27eb41a8b48345afa6b86849fb6c174e52d586483ae7753"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/bc03c5af",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "481a60be288e1fb8e8d8b7f43efd64ec2ee4c4ca6d987a55b7a83e783ed85503"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/bc2232fe",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "72e62aaaf7f5d5946ce894e5b719b5e18dba22c81a9af8d01e98e33fc5059477"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/bc2df5c6",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "a9ce5153c3c994374bc79746f63c52707475504e99e008bd9f945890cfc51cd1"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/bc44ed33",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "ee7f68c799a1e8bb84bb005770e559bde7b2d3685f91d68b3e35577f2944fa1c"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/bc6a473f",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "95262fc313fb8382cae8dc8e0eea8bae7643e2e84d604b88bac1e7e3048211de"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/bd650fd7",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "afe0e771f0dec6e68f36fd9c3eff33edb36fd1b64d1fd6ae3f742111152d84fc"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/c040c782",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "980af7579e3d9ea856d714ce62cbdac0c911e1c4a68e802329efdf54bafc84d2"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/c0bc7eaf",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "1e51d8ac3ad40d2411e4404191c979661c7a87bbf4bf68de92166c8bbe8e9773"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/c16ce4d7",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "0e0cc429a2616683675eb27a6d3d618f5c59cf02a3a91b60daad8cabf644179a"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/c19c9bc4",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "ada54d31bbc3eaf41a67945d5693361891e644b3102f63333c070e58cdb256c2"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/c1e284b4",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "cf840e74b52b6a2121ae47d3aa50fc6aac76a2f04cc5bdd2e1eac091069e4f29"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/c2f83f3e",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "64c9eb5df586947658f887ea45d7d133942adb24c004bda967806d789f04d551"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/c3891229",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "47766a25eb3eca53b9bef46733b277b4fb6b5e98ec6d87cd635d4c13cb0b2e26"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/c454eecc",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "1d1b40b654821835e7f0f7b43c84592968f488ecc6bb9bc278e64146f5900b9c"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/c50e0e6c",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "fb09e9f4ae640db837624680f87323b59230f04f88ef559763539e710198651c"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/c6989507",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "0ccfed3a0a4bb49aad8a6398ed9203981d342afa36273c451a78781b6a0a99b6"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/c7863487",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8e441a5e194fd3ab7c8bfeff305b52733bc61b7516caa40e49fb98891cd2e96d"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/c889005c",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "b7cd3d68c4fa0521c553c2aff036cd4281782f2f3980c18ed9dcc8b51f3f065f"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/c9349a6b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "dad58fa1646b44c3e3048733365c8bd596ef56acfb95229b9ac0a7a51c1d7eb2"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/c9c5bc1e",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "efe6174d8d309a2c93137cc07f98560079f5da22209f782c5213634197f923a6"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/ca3822a1",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8fce9c0c1015d23faf85de4aeaf4ce8fa3617f84e41c475558459d151ec73861"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/ca928eff",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "dc302e2034415e0feeccb0af45d381f8e03bd0bdb4c65b99f3ad2c866add5099"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/cb8b2ac6",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "606817eee3d7158808eb4dfbd839ad33cffa7ac53dc3119de3e8fc145b686139"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/cd52242a",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "f6a947db6479e4564999f6eb246adb913a69148f724fba65c579e81244e8f615"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/cdc8e383",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "97393ad7d104c027147ef3bfaa129df486d752c90d4d36dfe3b433fe5196d988"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/ce6e929b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "053c2726d60f1929223098e30ad1dfd01e42a92ad335cd20d59181391090c803"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/ce9646a8",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "82af98d0adea538777180e4091dedf4353766e404fc1dbad43738ebc39d9fe9b"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/ceefbcb8",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "29200c64b157884d435724153fdec8d81036a3cf20c0d69592a0fcc8273c81f7"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/d061059c",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "e458e09ad247d29fd9a321f0681a55ca673e4a61becf4f548b03a557c5302f92"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/d0a1782e",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "7d2d081277e8fb26cc08939992dea652392791f8fcfdb8be1d02ed9f51b572df"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/d12d9b36",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "15e3bf855fa9840fdf5b2a747e7e4bd19fad0e1f8c22c41932395590be0b092b"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/d1367827",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "e454925ef9af8f4fa122540df7fac38b99589a8e36c92867dabc10902c43bae3"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/d14fe743",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "ccf70a367dd56435e1d577699f00db558bc167c2d04d01bfe818d91a2007edca"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/d2031953",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "52a333619a21bbe4e687c540ffd1f9a2ee94f11d13b650968934c3a4cd00d26d"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/d381c602",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "5abdb1abc89a71f6a1ac763350db82ac6e82869a75f0ba7ac21b7c4ed79aae3e"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/d57e6bd1",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "bd0719603d9a6788e0faba01fe12b622db1e2a8846d9c37e923b8012b16cabe4"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/d5c7279b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "7795026625ba1948fd0c8b7f43a72255c9e174d87bfd8825d417ef8a6ed384b2"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/d6457bf5",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8371b2fc1bcdd5c3745463797b537c43fb19a3b436a48ff25a8a178664673ad8"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/d6727fa1",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "71fa2da0137aa4c0ee98790981edc503a9c82549aacd5b06dc7c5a177c43ff37"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/d68d97f0",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "77d95342ff8ac8eb71678cd5ba001a3356139f51f64bc8e8465644afef2f1069"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/d7799536",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "89eb08fe5d44a0c604c42eb164fee8aadd8f7244b7a621010c86ef18da2d4a72"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/d7988491",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "2ee3bc6039166652434eb6f4e4f9baf8681e09a5b8871b7502c43ae061340e5b"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/d7c9e36e",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8afeaeb3a0a404ac89068e5e53889f5ebfb455a781190b489516533be82d3284"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/d8427ddd",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "87418906a442118a27287282e3a111f2caed198bd7499687e0a495763b261e79"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/d85e0ffd",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "0b6cc909e74e5838601cef0629fc296bd8ed5c3e84fb78c80b3d46f8f81159c2"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/d89e0176",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "0aa3e05ddf81c8fb63147a0eee75ece81780ca2bbe55a042ad8ae797ebfe6b9f"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/d8a082a6",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "cf37d36c0091eb33325b322ed8bb42a0298f01a7cff67d8c580770ec8ae9dba2"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/d8a4c814",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "fc2f622eb8be09c2dca09feedbfca175b3d62469b5f446f5f85515a6f40f3b9d"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/d933b665",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "356865e3b765ef50104479366f0824ba6abaea2e46b11a8a4c197839a46b60e1"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/da65bf22",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "35b2b4e227fb2e565ac95a097ab97a8d22ccfebc5b3772a2531b2bdb303ea9d9"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/dbe0308b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "f72a87bd4b392222fa240333544fcbd595d2b3b650a497da1b8d0cf8aaf23a88"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/dc6f7e03",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "a64c5a44635330d8b42c272db14b9d0930690bcaf39695da2c80f174caf15119"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/dd4616f8",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "ff64d89ed798f95487db4ca6be0ac9a186a26421f81379282f39fb6d530a7123"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/dddb64a0",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "9575f73b34dd88b13df26654e289edad75154b34cf09123ed7a166cbf8b7fa24"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/ddf68e75",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "66243927399112fa75dc816f516f290022e7b9a5734293ad5e8f347bb3614060"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/de47619a",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8802efc49cb93fef57dd28ad153bcd3a2047bc874e06ee6263315c45f7ae3da7"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/de9c2094",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "0ca72e727c7b8eaba725843401bc1989c94f2234ac16ebf0d57413b210007d55"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/dea5df01",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "6ca2a4bdb3c6a26739d0729042b286a70485d92d52b73fc0e8bf49d3d2143a76"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/df44eb30",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8c788a2c63cfb1d4912e024bf89e959643ea9f3213f2102e12d6481a84321e09"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/df704faf",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "a9818f8f8fc85c71238f9af7c0fcef244efcd0f688815d9a0b00301341ae249c"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/e01d3b4f",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8e2d77f4f86321169884d74c67457d014c8d9a31df0d27deceabd252b608c6f4"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/e0b861b1",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "b257d70d376f9d6fdb468718ac581dc2e72e60a2d991c8188e411be83bc42695"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/e0d6b9e1",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "c663b4fce20d31659e69dd3a68ccdd60b12d09c1d6be84010941239ffe183472"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/e21e283a",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "b5a8e15c0f475cbaef2b542d5cbbafe6bd0a621387f9ad613a0a3bbc4b9fe507"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/e3ba2914",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "9f2d5522c2981273a9aa09c25cb3c2a0b07c748d2dbe19336f84a312189383aa"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/e6df2836",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "c5a0fe117c9eab3e51fa84c19c9ed5abc92b93d1707d40bd993e12c2bed2702b"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/e71300ea",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "fcb5b88c9b1402442a1605c880dd1517c10320620c06af993b12d3b0827551f9"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/e762a747",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "0aa21370557b3ba845c986d6491e228cecb00f5637dd28f2c8c97b8e7f0baf95"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/e82516de",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "a88096a2ab0bb1f19408f61500e72240b1d0e2d0f3904fd27a8201b254d7134e"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/e82805fc",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "cab767c7519298c740eacf04c080bd40456558654c3b4721b8bf7eafb98312aa"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/e8ef3d12",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "f5ee99794c2ac5b8e488a41736c6702b6810a75807f5a22ebb8514b27dadc331"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/ea511aa0",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "352d2b1ee5769504e04b7c94642e3f964bb3b2d93ef011786102a5ec441651c4"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/eb2270d5",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "a071f7cdad539b2087c751afcacd8b4d926ff1c32ae450fd36b0dec142b1d25d"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/eb2f36e3",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "da9ed03fa2de65208577e8732de824091fa1a58ea6a89202abe3bc93fc19e927"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/ec4f4d1b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "b989a4e8c8b8b9aa00bef90e8b8b2d7bd82a69b246eb9afdec5bd301d3117b49"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/ed3dcdad",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "121483b905a71bf48bf561c0839bc34fba9889e4172f1cd8d27551738a9285e7"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/ed95d8d6",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "4008871223b53584203ff4e7f475bce0b12ecd5a4c6a51b78483f6a294724dbd"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/ee7a38e0",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "af408e1e826b590fca142255350e80d567170bfbd103c130fbd8687aeac3a576"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/eea756eb",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "54756909c24c4e0d9af3d81775a4c7c1f672a162035708ee3048ab1d31cad864"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/eec35fdd",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "6e8e6dd33e6d2f7ae43c7b0ba4c0f27f94acf273b55f30e7ad04fd62fe927711"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/efa2f0f6",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "752870e9f9f067f4093e79a2a327ec4d3a0f251fc6614da0914e13d3f2b27c27"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/f015c2c7",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "7464db2bb61caac6157fb91b368c3a0b5ab79fc39cb8e06354f13a2dcab87f3e"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/f19c60bb",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "e3e5d0c3f46beacd9d677d5296960908e7251dfee04b18d0b8ffe680435059c3"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/f1d93e0d",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "eca0589983c69d0901d38b1fe53aaca1f43aad05aecdb7488d34c415dea4dc29"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/f207c936",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8fae578d3dc354ed36800e6e9a9d7d7f14c56cd73cd7a7d3837a7a308bc50bca"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/f208167f",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "d521c98b2e41bc540d70075e04a40293e22a54bbcd53aa5265b4adf054019001"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/f340fd6f",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "b04c232a0e83748238714b79bede5d05e2f951d88f975dc9e8cfa2818dff2860"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/f3e92294",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "f98b32643f19f29b821def23c44a14011ab7930381979aea5c76a57ed55db1fd"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/f53066ae",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "c9d1dd4ad9ceb43d111d1b1f1f5533ceade63e92a8085d89933bbfa39baef9aa"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/f668e72d",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "2b66b353a36d665084be5e7ead16102a79b78ced1dd9a8d0348692d91f7d2767"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/f6c6bf67",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "0805a885d4ef5486c238160dda7af13a139ba98a165f52a3e983b030a19cab00"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/f75fa65c",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "b4b8505f8b00849b3bec961e4b1b785462fe798ebf3976a6624f128ae1602826"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/f7b19e10",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "eae05f9ea044b5c5742f8eb234847dbbc2812981786cde168a65e7c458aa5062"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/f8b2ba63",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "a8e966334c38517399414fa2491fb79dd44f36050b8cf8c79a581869d09c82c7"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/f9f3b48b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "484c7f05f22695ff7bcbbd78f9e28a32e862c86eb62211225c3f3e1a146e6634"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/fa379cd8",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "f565b5e47fae29e87f03dc696068f1869bfe7a55c27d2b332e59ee6e2ebb49aa"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/fa64bb03",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "1238d6d0f5ce38c381687fd907912090d2ec170f5b9729851b50e656f813c194"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/fad27246",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "0556671501c24e6f970036da688533b6f4c8e41eb579d311f83bfa445b2a3b07"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/fb3e4d6d",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "5a8bd3ef885eb5dc2dfaf43855e37e9fb551ce457eecfae11853dff77a1e8375"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/ffef673a",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "1cc38b57e8db247a3015d00fed8668d1667db395c6a574d83e9ee999ef0c3380"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/fff0133b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "70ee29ca7d6da3b5aaab33e3ef08e80c0b25b5c18936c65a8b4828145c0a801f"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/fff243ad",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "9a5a28b8ddb404f9910bf8e570e057941af4dcadbcfd729ebf87669bf94ee20e"
+    }
+  ]
+}
+
+ARTIFACT B
+{
+  "finalOutput": "Created [.kory-eval/native-oauth.json](<redacted-path>).\n\nIt defines:\n\n- System-browser authorization code flow with mandatory PKCE S256\n- Exact custom-scheme redirect matching and interception mitigation\n- One-time, session-bound state and code redemption\n- Audience, scope, and expiry enforcement\n- Rotating refresh tokens with replay-triggered family revocation\n- Platform-protected token storage and artifact/log exclusions\n- Document authorization owned by `authorization-security`\n\nVerification: JSON parsed successfully and all corpus-driven contract assertions passed. `bun test` found no fixture tests.",
+  "executionEvidence": [
+    "Codex CLI completed successfully in 36354ms",
+    "native OAuth attack corpus: pass",
+    "fixed evaluator/corpus preserved: yes",
+    "Evaluator integrity: unchanged. Hidden test completion: observed. Public tests: passed or absent.\nbun test v1.3.14 (d1632b29)\nKORY_EVAL_COMPLETED_1f2b9c91038345bb911315bd01526844\n\n\n../kory-skill-eval-pair-Nfwygl/workspace/tests/__kory_hidden_eval_1f2b9c91038345bb911315bd01526844.test.ts:\n(pass) hidden: exact redirect/state/code/PKCE/resource boundary [0.45ms]\n(pass) hidden: replay/storage/custom-scheme boundaries are explicit [0.03ms]\n\n 2 pass\n 0 fail\n 25 expect() calls\nRan 2 tests across 1 file. [13.00ms]\n"
+  ],
+  "publicContract": {
+    "taskPrompt": {
+      "available": true,
+      "sha256": "2a13d55fec67dcad4ebcbe534cbad58ae6d04e00cca54cca6c04e26537b015bd",
+      "byteLength": 846,
+      "text": "Design OAuth for a native public client that calls a document API. Use the system browser and authorization code flow with PKCE S256. The fixture includes legitimate and malicious redirect variants, missing/downgraded PKCE, intercepted/replayed codes, mismatched state, access tokens for the wrong API audience, refresh-token replay, and a custom-scheme competitor app. Define exact redirect registration/validation appropriate to the native-client redirect choice, state/session correlation, code-verifier lifecycle, one-time redemption, token audience/scope validation at the resource server, secure token persistence, and refresh-token rotation or sender constraint. If a custom scheme is retained, explicitly address app-claim/interception risk rather than treating PKCE as optional. Keep document-level permissions in authorization-security."
+    },
+    "fixtureFiles": {
+      "README.md": {
+        "available": true,
+        "sha256": "bf94ff4ceeecaca2d48db4965362aa165ceb8a636d2bd020692383fbe5f94d55",
+        "byteLength": 965,
+        "text": "# Native public-client OAuth fixture\n\nPreserve evaluator/corpus and write `.kory-eval/native-oauth.json` as `NativeOAuthSpec`. Use system-browser Authorization Code with mandatory PKCE S256; fresh verifier entropy is at least 256 bits and plain/missing PKCE never redeems. Redirect matching is exact; if retaining the supplied custom scheme, explicitly model competitor-app interception and rely on PKCE as mandatory mitigation rather than treating the scheme as proof of app identity. State is one-time/session-bound and code is one-time/client/redirect-bound.\n\nThe resource server independently rejects wrong audience, expired and missing-scope tokens. Public refresh credentials rotate or are sender-constrained; this fixture requires replay detection and token-family revocation on replay. Tokens never enter logs/analytics/crash artifacts/URL/referrer and persist only in platform protected storage. Document-level permission remains `authorization-security`.\n"
+      },
+      "contract.json": {
+        "available": false,
+        "sha256": null,
+        "byteLength": 0,
+        "text": null,
+        "reason": "not-present"
+      }
+    }
+  },
+  "changes": [
+    {
+      "path": ".kory-eval/native-oauth.json",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8c614897bde47527295cd07bb06d0ba81514e80582c45820f73c2be308133b1c",
+      "afterText": "{\n  \"systemBrowser\": true,\n  \"flow\": \"authorization-code\",\n  \"pkceMethod\": \"S256\",\n  \"verifierEntropyBits\": 256,\n  \"pkceRequired\": true,\n  \"plainPkceAccepted\": false,\n  \"redirect\": {\n    \"registered\": [\n      \"com.example.docs:/oauth2redirect\"\n    ],\n    \"wildcardOrPrefixMatching\": false,\n    \"customSchemeRetained\": true,\n    \"customSchemeInterceptionAddressed\": true\n  },\n  \"state\": {\n    \"oneTime\": true,\n    \"sessionBound\": true\n  },\n  \"code\": {\n    \"singleUse\": true,\n    \"clientBound\": true,\n    \"redirectBound\": true\n  },\n  \"resourceServer\": {\n    \"audience\": \"https://api.example.test/documents\",\n    \"requiredScope\": \"documents.read\",\n    \"rejectExpired\": true\n  },\n  \"refresh\": {\n    \"rotated\": true,\n    \"senderConstrained\": false,\n    \"replayDetected\": true,\n    \"familyRevokedOnReplay\": true\n  },\n  \"storage\": {\n    \"platformProtected\": true,\n    \"logs\": false,\n    \"analytics\": false,\n    \"crashArtifacts\": false,\n    \"urlOrReferrer\": false\n  },\n  \"objectAuthorizationOwnedBy\": \"authorization-security\"\n}\n"
+    }
+  ]
+}

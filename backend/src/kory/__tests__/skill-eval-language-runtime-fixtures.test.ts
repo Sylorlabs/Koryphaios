@@ -3,12 +3,12 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
-import { writeFixtureFile } from '../skill-eval-fixture-helpers';
+import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
+import { writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
 import {
   LANGUAGE_RUNTIME_SKILL_EVAL_MATERIALIZERS,
   LANGUAGE_RUNTIME_SKILL_EVAL_SCORERS,
-} from '../skill-eval-language-runtime-fixtures';
+} from '../../eval/skills/skill-eval-language-runtime-fixtures';
 import { loadV5SkillPackages } from '../skill-packages';
 
 const roots: string[] = [];

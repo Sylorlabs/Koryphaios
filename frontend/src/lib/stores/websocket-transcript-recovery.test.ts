@@ -425,7 +425,7 @@ describe('transcript recovery after reload and reconnect', () => {
     });
   });
 
-  it('does not restore a startup snapshot for a different selected provider', async () => {
+  it('restores a startup snapshot for a different selected provider only as an estimate', async () => {
     wsStore.activateSessionFeed(state.activeSessionId);
     wsStore.clearManagerContextPreview(state.activeSessionId);
     state.lastUsage = {
@@ -437,12 +437,17 @@ describe('transcript recovery after reload and reconnect', () => {
     };
     await wsStore.loadSessionMessages(state.activeSessionId, history());
     wsStore.beginManagerContextPreview(state.activeSessionId, 'anthropic', 'model-2', 100_000);
+    // Not exact for the selected route, but the same conversation: shown as a
+    // labelled estimate against the new window rather than an empty bar.
     expect(agentStore.getContextUsage()).toMatchObject({
-      used: 0,
+      used: 70_000,
       max: 100_000,
-      isReliable: false,
+      isReliable: true,
+      estimated: true,
+      carried: true,
       provider: 'anthropic',
     });
+    expect(agentStore.getContextUsage().cachedInputTokens).toBeUndefined();
   });
 
   it('invalidates old occupancy when authoritative history proves the branch changed', async () => {

@@ -235,7 +235,7 @@
                   >
                     <span class="truncate">{project.title}</span>
                     <span
-                      class="shrink-0 text-[10px] truncate max-w-[120px]"
+                      class="shrink-0 text-[11px] truncate max-w-[120px]"
                       style="color: var(--color-text-muted);"
                       >{project.path ||
                         project.fileName ||
@@ -421,7 +421,7 @@
           title="Feedback"
           onclick={sendFeedback}
         >
-          <Flag size={14} class="transition-colors group-hover:text-red-400" />
+          <Flag size={14} class="transition-colors group-hover:text-[var(--color-error)]" />
           <span class="titlebar-wide-label text-xs font-medium">Feedback</span>
         </button>
         <button
@@ -460,7 +460,7 @@
           onclick={() => action('toggle_agents')}
           data-tauri-drag-region="false"
         >
-          <Activity size={12} class="text-emerald-400" />
+          <Activity size={12} class="text-[var(--color-success)]" />
           <span
             class="text-xs font-medium leading-none whitespace-nowrap"
             style="color: var(--color-text-secondary);"

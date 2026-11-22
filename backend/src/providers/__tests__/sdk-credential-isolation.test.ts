@@ -8,7 +8,7 @@ mock.module('../cache-capability-store', () => ({
   readProviderReasoningCacheProbe: () => undefined,
 }));
 const { AnthropicProvider } = await import('../anthropic');
-const { AgentRouterProvider, AzureProvider, OpenAIProvider, OpenRouterProvider } =
+const { AzureProvider, OpenAIProvider, OpenRouterProvider } =
   await import('../openai');
 
 // Exercise the installed SDKs and their real header construction, with every
@@ -81,7 +81,7 @@ function outgoingHeaders(): Headers {
 }
 
 describe('outgoing SDK credential isolation', () => {
-  for (const name of ['anthropic', 'custom:credential-isolation', 'agentrouter'] as const) {
+  for (const name of ['anthropic', 'custom:credential-isolation'] as const) {
     for (const credential of ['apiKey', 'authToken'] as const) {
       test(`Anthropic ${name} uses only the selected ${credential}`, async () => {
         const config: ProviderConfig = {
@@ -218,67 +218,4 @@ describe('outgoing SDK credential isolation', () => {
     });
   }
 
-  test.each(['https://agentrouter.org', 'https://co.agentrouter.org'])(
-    'AgentRouter Claude delegation keeps its key on the selected %s origin',
-    async (origin) => {
-      // Skip unrelated catalog refresh; keep delegation, SDK construction and
-      // streaming real. The fetch stub never calls the original implementation.
-      const catalog = spyOn(AnthropicProvider.prototype, 'listModels').mockReturnValue([]);
-      try {
-        globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-          requests.push(new Request(input, init));
-          const events = [
-            {
-              type: 'message_start',
-              message: {
-                id: 'synthetic-message',
-                type: 'message',
-                role: 'assistant',
-                model: 'claude-fixture',
-                content: [],
-                stop_reason: null,
-                stop_sequence: null,
-                usage: { input_tokens: 0, output_tokens: 0 },
-              },
-            },
-            {
-              type: 'message_delta',
-              delta: { stop_reason: 'end_turn', stop_sequence: null },
-              usage: { output_tokens: 0 },
-            },
-            { type: 'message_stop' },
-          ];
-          return new Response(
-            events
-              .map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
-              .join(''),
-            { headers: { 'content-type': 'text/event-stream' } },
-          );
-        }) as typeof fetch;
-        const provider = new AgentRouterProvider({
-          name: 'agentrouter',
-          apiKey: 'synthetic-agentrouter-key',
-          baseUrl: `${origin}/v1`,
-        });
-        const events: ProviderEvent[] = [];
-        for await (const event of provider.streamResponse({
-          model: 'claude-fixture',
-          systemPrompt: '',
-          tools: [],
-          messages: [{ role: 'user', content: 'synthetic prompt' }],
-        }))
-          events.push(event);
-        expect(events.some((event) => event.type === 'error')).toBe(false);
-        expect(events.some((event) => event.type === 'complete')).toBe(true);
-        const headers = outgoingHeaders();
-        expect(requests[0]!.url).toBe(`${origin}/v1/messages`);
-        expect(headers.get('authorization')).toBe('Bearer synthetic-agentrouter-key');
-        expect(headers.get('x-api-key')).toBeNull();
-        expect(headers.get('user-agent')).not.toContain('claude-cli');
-        expect(headers.get('x-app')).toBeNull();
-      } finally {
-        catalog.mockRestore();
-      }
-    },
-  );
 });

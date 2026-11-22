@@ -88,3 +88,7 @@ PW_AGENTIC_DELETE*
 .keys
 desktop/src-tauri/sidecar/
 koryphaios.json
+
+# Crash dumps and scratch build output (not source)
+/outputs/skill-library-finish-plan/at-runtime/core
+/.kory-tmp/**/target/

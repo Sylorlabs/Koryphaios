@@ -1,0 +1,3 @@
+r1 robotics-control blocked pass 0.952 q 0.976 v 1.000 blind 1 regr 1
+r2 robotics-control ready pass 1.000 q 1.000 v 1.000 blind 1 regr 0
+done

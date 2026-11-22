@@ -13,7 +13,7 @@ import {
 import type {
   SkillEvalExecutor,
   SkillEvalExecutionReadiness,
-} from '../backend/src/kory/skill-eval-execution';
+} from '../backend/src/eval/skills/skill-eval-execution';
 import type { V5EvalEnvironmentKind } from '../backend/src/kory/skill-packages';
 
 test('qualification executor parsing supports explicit modes and the legacy alias', () => {

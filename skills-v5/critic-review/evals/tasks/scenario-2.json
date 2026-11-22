@@ -1,0 +1,74 @@
+{
+  "id": "critic-review-full-task-2",
+  "maturity": "individual",
+  "prompt": "A reviewer is about to approve a permission change. The draft approval says the change is behaviour preserving, that the authorization tests pass, and that no endpoint gained access. Review the approval against the diff and the evidence. The workspace is read only. Decide which statements the diff contradicts, what the approval omits about the endpoint it did not test, and whether approval may stand. Record findings with the diff path and the hunk they describe, and end with one bounded verdict.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://critic-review/permission-approval",
+    "requirements": [
+      "diff removes a role check on one endpoint while the approval calls the change behaviour preserving",
+      "authorization tests that pass cover a different endpoint than the one the diff changes",
+      "approval states no endpoint gained access although the diff grants an anonymous path",
+      "the diff also contains one genuinely harmless refactor so not every hunk is a finding",
+      "fixture owned evidence that must not be edited",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "critic-review-permission-diff",
+      "assertion": "The review identifies that the role check removal grants unauthenticated access and contradicts the behaviour-preserving claim, citing the diff."
+    },
+    {
+      "id": "critic-review-permission-coverage",
+      "assertion": "The review reports that the passing authorization tests do not exercise the changed endpoint, so the passing result does not support the approval."
+    },
+    {
+      "id": "critic-review-permission-harmless",
+      "assertion": "The review does not flag the harmless refactor hunk as a defect, so blocking findings stay discriminating."
+    },
+    {
+      "id": "critic-review-permission-verdict",
+      "assertion": "The review refuses approval with one bounded verdict and states what evidence would be required to approve."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "critic-review-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "diff-grounded authorization finding",
+        "test-coverage gap finding",
+        "harmless hunk left unflagged",
+        "bounded refusal with required evidence"
+      ]
+    },
+    {
+      "id": "critic-review-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "severity distinguishes the blocking authorization defect from advisory notes",
+        "findings are actionable",
+        "no fabricated evidence pointer"
+      ],
+      "blindTo": [
+        "skill-variant",
+        "expected-outcome"
+      ]
+    }
+  ],
+  "requiredEvidence": [
+    "request-to-evidence assessment",
+    "per-claim verdicts with evidence paths",
+    "omission finding tied to the request",
+    "bounded verdict",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "critic-review-scenario-2-result",
+    "critic-review-scenario-2-verification",
+    "critic-review-scenario-2-paired-evaluation"
+  ]
+}

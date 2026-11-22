@@ -1,5 +1,9 @@
-import type { Session as SharedSession, SessionAgentOverrides } from '@koryphaios/shared';
-import { isCriticMode } from '@koryphaios/shared';
+import type {
+  Session as SharedSession,
+  SessionAgentOverrides,
+  SessionManagerControl,
+} from '@koryphaios/shared';
+import { isCriticMode, isValidProvider } from '@koryphaios/shared';
 import { nanoid } from 'nanoid';
 import { ID, SESSION } from '../constants';
 import { db, sessions, type Session as DbSession } from '../db';
@@ -8,6 +12,48 @@ import { serverLog } from '../logger';
 
 const PERMISSION_MODES = ['yolo', 'guarded', 'edits', 'ask', 'custom'] as const;
 const AGENT_EXECUTION_MODES = ['auto', 'single', 'multi'] as const;
+const MAX_MANAGER_CONTROLS = 32;
+const MAX_MANAGER_FALLBACKS = 20;
+
+function sanitizeManagerControls(
+  value: unknown,
+): Record<string, SessionManagerControl> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const controls: Record<string, SessionManagerControl> = {};
+  for (const [rawManagerId, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (Object.keys(controls).length >= MAX_MANAGER_CONTROLS) break;
+    const managerId = rawManagerId.trim();
+    if (!managerId || !raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+    const control = raw as Record<string, unknown>;
+    if (typeof control.model !== 'string' || !control.model.trim()) continue;
+    const fallbacks: SessionManagerControl['fallbacks'] = [];
+    if (Array.isArray(control.fallbacks)) {
+      for (const step of control.fallbacks.slice(0, MAX_MANAGER_FALLBACKS)) {
+        if (!step || typeof step !== 'object' || Array.isArray(step)) continue;
+        const candidate = step as Record<string, unknown>;
+        if (typeof candidate.model !== 'string' || !candidate.model.trim()) continue;
+        fallbacks.push({
+          model: candidate.model.trim(),
+          ...(typeof candidate.reasoningLevel === 'string' && candidate.reasoningLevel
+            ? { reasoningLevel: candidate.reasoningLevel }
+            : {}),
+        });
+      }
+    }
+    controls[managerId] = {
+      model: control.model.trim(),
+      ...(typeof control.provider === 'string' &&
+      (isValidProvider(control.provider) || control.provider.startsWith('custom:'))
+        ? { provider: control.provider }
+        : {}),
+      ...(typeof control.reasoningLevel === 'string' && control.reasoningLevel
+        ? { reasoningLevel: control.reasoningLevel }
+        : {}),
+      fallbacks,
+    };
+  }
+  return Object.keys(controls).length > 0 ? controls : undefined;
+}
 
 /** Keep only known, well-typed override fields so a hand-edited metadata blob
  *  can never widen this chat's approval posture with an unrecognized value. */
@@ -32,6 +78,28 @@ export function sanitizeSessionAgentOverrides(value: unknown): SessionAgentOverr
   if (typeof raw.criticGateEnabled === 'boolean') {
     overrides.criticGateEnabled = raw.criticGateEnabled;
   }
+  if (
+    raw.worktreeMode === 'auto' ||
+    raw.worktreeMode === 'always' ||
+    raw.worktreeMode === 'never'
+  ) {
+    overrides.worktreeMode = raw.worktreeMode;
+  } else if (typeof raw.worktreeIsolation === 'boolean') {
+    overrides.worktreeMode = raw.worktreeIsolation ? 'auto' : 'never';
+  }
+  const managerControls = sanitizeManagerControls(raw.managerControls);
+  if (managerControls) overrides.managerControls = managerControls;
+  if (Array.isArray(raw.blockedSkillFeeds)) {
+    const blocked = [
+      ...new Set(
+        raw.blockedSkillFeeds
+          .filter((name): name is string => typeof name === 'string')
+          .map((name) => name.trim())
+          .filter((name) => name.length > 0 && name.length <= 128),
+      ),
+    ].sort();
+    if (blocked.length > 0) overrides.blockedSkillFeeds = blocked;
+  }
   return Object.keys(overrides).length > 0 ? overrides : undefined;
 }
 
@@ -55,7 +123,11 @@ export interface ISessionStore {
   getForUser(id: string, userId: string): Promise<SharedSession | undefined>;
   update(
     id: string,
-    updates: Partial<SharedSession>,
+    /** `gitWorkspace: null` removes the binding (merge_chat_back returns the
+     *  chat to its folder); `undefined` leaves it untouched. */
+    updates: Omit<Partial<SharedSession>, 'gitWorkspace'> & {
+      gitWorkspace?: SharedSession['gitWorkspace'] | null;
+    },
     expectedVersion?: number,
   ): Promise<SharedSession | undefined>;
   updateWithCurrentVersion(
@@ -202,7 +274,11 @@ export class SessionStore implements ISessionStore {
 
   async update(
     id: string,
-    updates: Partial<SharedSession>,
+    /** `gitWorkspace: null` removes the binding (merge_chat_back returns the
+     *  chat to its folder); `undefined` leaves it untouched. */
+    updates: Omit<Partial<SharedSession>, 'gitWorkspace'> & {
+      gitWorkspace?: SharedSession['gitWorkspace'] | null;
+    },
     expectedVersion?: number,
   ): Promise<SharedSession | undefined> {
     const drizzleUpdates: Record<string, unknown> = {
@@ -233,7 +309,10 @@ export class SessionStore implements ISessionStore {
       if (updates.planNoteId !== undefined)
         metadata = sql`json_set(${metadata}, '$.planNoteId', ${updates.planNoteId})`;
       if (updates.gitWorkspace !== undefined)
-        metadata = sql`json_set(${metadata}, '$.gitWorkspace', json(${JSON.stringify(updates.gitWorkspace)}))`;
+        metadata =
+          updates.gitWorkspace === null
+            ? sql`json_remove(${metadata}, '$.gitWorkspace')`
+            : sql`json_set(${metadata}, '$.gitWorkspace', json(${JSON.stringify(updates.gitWorkspace)}))`;
       if (updates.agentOverrides !== undefined) {
         const sanitized = sanitizeSessionAgentOverrides(updates.agentOverrides);
         // An empty patch clears the per-chat overrides so the chat falls back

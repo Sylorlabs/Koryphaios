@@ -70,6 +70,29 @@ describe('desktop embedded backend build', () => {
     expect(embeddedBackendBuildConfig({ ...options, relayUrl: undefined }).define).toBeUndefined();
   });
 
+  test('bakes the backend build hash define only when a bundle hash is given', () => {
+    const options = {
+      entrypoint: join(PROJECT_ROOT, 'backend/src/server.ts'),
+      outfile: join(tmpdir(), 'unused-embedded-backend'),
+      bunTarget: detectHostTarget().bunTarget,
+      relayUrl: 'https://relay.example.test',
+      bundleHash: 'abc123def456',
+    };
+    expect(embeddedBackendBuildConfig(options).define).toEqual({
+      'process.env.RELAY_URL': JSON.stringify(options.relayUrl),
+      'process.env.KORYPHAIOS_BACKEND_BUILD_HASH': JSON.stringify(options.bundleHash),
+    });
+    // No relay URL still carries the build hash on its own.
+    expect(
+      embeddedBackendBuildConfig({ ...options, relayUrl: undefined }).define,
+    ).toEqual({
+      'process.env.KORYPHAIOS_BACKEND_BUILD_HASH': JSON.stringify(options.bundleHash),
+    });
+    expect(
+      embeddedBackendBuildConfig({ ...options, bundleHash: undefined }).define,
+    ).toEqual({ 'process.env.RELAY_URL': JSON.stringify(options.relayUrl) });
+  });
+
   test('genuine host compile embeds immutable current helper contracts; raw compile stays fail-closed', async () => {
     const scratch = mkdtempSync(join(tmpdir(), 'kory-desktop-contract-compile-'));
     try {
@@ -81,8 +104,8 @@ describe('desktop embedded backend build', () => {
       writeFileSync(
         entrypoint,
         `
-import { currentV5SkillEvaluationContracts } from ${JSON.stringify(join(PROJECT_ROOT, 'backend/src/kory/skill-eval-current-contract.ts'))};
-import { EMBEDDED_CURRENT_V5_SKILL_EVALUATION_CONTRACTS as embedded } from ${JSON.stringify(join(PROJECT_ROOT, 'backend/src/kory/skill-eval-embedded-contracts.ts'))};
+import { currentV5SkillEvaluationContracts } from ${JSON.stringify(join(PROJECT_ROOT, 'backend/src/eval/skills/skill-eval-current-contract.ts'))};
+import { EMBEDDED_CURRENT_V5_SKILL_EVALUATION_CONTRACTS as embedded } from ${JSON.stringify(join(PROJECT_ROOT, 'backend/src/eval/skills/skill-eval-embedded-contracts.ts'))};
 const { packages, contractVersion } = JSON.parse(await Bun.stdin.text());
 const rows = packages.map((pkg) => ({
   packageName: pkg.sidecar.name,

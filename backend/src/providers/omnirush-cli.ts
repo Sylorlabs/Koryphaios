@@ -34,7 +34,10 @@ import { pathToFileURL } from 'node:url';
 import { createPrivateCliTextArtifact, type PrivateCliArtifact } from './private-cli-transport';
 import { buildProviderCliEnv } from './cli-environment';
 import { detectOmnirushCLILogin, omnirushStateDirectory } from './auth-utils';
-import { buildKoryCliMcpConfig } from './kory-cli-mcp-config';
+import {
+  buildKoryCliMcpConfig,
+  koryBridgeUnavailableError,
+} from './kory-cli-mcp-config';
 import { createKoryBridgeGrantLease, type KoryBridgeGrantLease } from './bridge-grant';
 import {
   createOmnirushKoryToolsArtifact,
@@ -2241,7 +2244,7 @@ export class OmnirushRpc {
           )?.[0]
         : undefined;
       if (this.request?.sessionId && !server)
-        throw new Error('Kory MCP bridge configuration is unavailable.');
+        throw new Error(koryBridgeUnavailableError('omnirush'));
       const authDirectory = this.stateRoot;
       this.omnirushStateRoot = authDirectory;
       this.mcpConfigPath = join(authDirectory, 'mcp.json');

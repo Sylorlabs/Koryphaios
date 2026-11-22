@@ -2,11 +2,24 @@
 // Domain: LLM model specifications and capabilities
 
 import type { ProviderName } from './ProviderNames';
+import type { ModelParameterDef } from './model-parameters';
 
 // Re-export for convenience
 export type { ProviderName } from './ProviderNames';
 
 export type ModelTier = 'flagship' | 'fast' | 'cheap' | 'reasoning';
+
+/** A vendor-confirmed faster serving tier of the same model (OpenAI Priority,
+ *  Devin/Codex/Hoplite Fast, MiniMax Highspeed, MiMo UltraSpeed). Each entry
+ *  describes a real serving-mode choice, not a different model. */
+export interface ModelSpeedTier {
+  /** Stable id used in `speedVariants`/`speedAliases` and `StreamRequest.speedTier`. */
+  id: string;
+  /** Short display label shown on the composer control. */
+  label: string;
+  /** What the tier does and how it is billed, shown in the tier menu. */
+  description: string;
+}
 
 /** Live quota info for a model from the provider's quota API (e.g. Antigravity's
  *  RetrieveUserQuota gRPC). `remainingFraction` is 0–1 (0% – 100%); `resetTime`
@@ -53,6 +66,24 @@ export interface ModelDef {
   /** True when this exact model is known to support Codex's ChatGPT Fast tier.
    * This is intentionally separate from reasoning effort and API priority. */
   supportsFastMode?: boolean;
+  /** Vendor-confirmed faster serving tiers of this exact model, in the order
+   *  the composer cycles through them. Standard speed is never listed — the
+   *  speed control is hidden entirely when this is absent or empty. */
+  speedTiers?: ModelSpeedTier[];
+  /** Speed tier id → (`reasoningLevel` effort or `'default'`) → the provider's
+   *  own model id, for providers that encode the serving tier in the model
+   *  slug (Devin `-fast` / `-priority`, MiniMax `-highspeed`, MiMo
+   *  `-ultraspeed`). Resolved at request time; a missing effort key falls
+   *  back to `default`, then to the standard slug. */
+  speedVariants?: Record<string, Record<string, string>>;
+  /** Superseded id/slug → the speed tier id it implied. Kept alongside
+   *  `aliases` so a selection persisted before a speed fold still resolves to
+   *  this model — and restores that tier as on. */
+  speedAliases?: Record<string, string>;
+  /** Provider-reported user-tunable request parameters, already filtered to
+   *  what the adapter forwards. Absent or empty means the model has no
+   *  settings the composer may offer. */
+  parameters?: ModelParameterDef[];
   supportsAttachments?: boolean;
   supportsStreaming?: boolean;
   tier?: ModelTier;
@@ -68,6 +99,10 @@ export interface ModelDef {
   /** True when contextWindow came from (or was confirmed against) a live provider/CLI
    *  response rather than a hand-maintained catalog entry. Trusted for UI telemetry. */
   contextVerified?: boolean;
+  /** Provider-reported Fusion pairing matrix (Devin's two-slot paired model).
+   *  Present only on the single collapsed `fusion` model — the composer edits
+   *  each slot (model, effort, fast) instead of picking a pairing slug. */
+  fusion?: FusionCatalog;
   /** The provider's own selectable context budgets (tokens), ascending, from
    *  the CLI product catalog's `contextWindow.supportedLengths`. Present only
    *  when the vendor reports at least two tiers — a single tier is not a
@@ -81,16 +116,61 @@ export interface ModelDef {
   quota?: ModelQuota;
   /** Provider-reported Freebuff model rate shown in the model picker. */
   freebuckCost?: number;
-  /** Provider-reported price label from a CLI's own product catalog
-   *  (e.g. "x0.03 credits"). Kept as the vendor's own text, never converted
-   *  into a currency amount we cannot substantiate. */
+  /** Provider-reported price label from a CLI's own product catalog. The
+   *  vendor's per-request credit multiplier ("x0.03 credits") is shown as
+   *  "0.03x", a zero multiplier as "free"; any other vendor text is kept
+   *  verbatim. Never converted into a currency amount we cannot substantiate. */
   creditsLabel?: string;
+  /** Vendor-reported numeric quota factor (e.g. 100MillionSeek's
+   *  `quota_multiplier`). Kept as reported; never converted into a price. */
+  quotaMultiplier?: number;
   /** Output modalities the provider reports for this model, lowercased
    *  ('text', 'image', 'video', 'audio', 'embedding'). Present only when the
    *  provider publishes them; never inferred from the model name. The image and
    *  video surfaces use this to decide which models can actually produce media,
    *  so a text model can never appear in those pickers. */
   outputModalities?: string[];
+}
+
+/** One selectable model for a Fusion slot. `efforts` empty means the slot has
+ *  no effort token at all (e.g. the GLM sidekick). */
+export interface FusionSlotOption {
+  id: string;
+  name: string;
+  efforts: string[];
+  defaultEffort: string | null;
+}
+
+/** Context/price facts for one pairing, taken from that pairing's
+ *  default-effort row. */
+export interface FusionPairingMeta {
+  contextWindow: number;
+  costPerMInputTokens?: number;
+  costPerMOutputTokens?: number;
+  costPerMInputCached?: number;
+}
+
+/** Devin's full Fusion offer: which leads and sidekicks exist, which pairings
+ *  the vendor actually lists, and what each pairing costs. */
+export interface FusionCatalog {
+  leads: FusionSlotOption[];
+  sidekicks: FusionSlotOption[];
+  /** key = fusionPairingKey(lead, leadFast, sidekick, sidekickEffort) →
+   *  leadEffort → the exact Devin slug for that cell. */
+  pairings: Record<string, Record<string, string>>;
+  /** Same key → the pairing's context/price facts. */
+  meta: Record<string, FusionPairingMeta>;
+  /** The pairing Devin lists first — the composer's initial selection. */
+  defaultSelection: FusionSelection;
+}
+
+/** The composer's editable Fusion state: one lead slot + one sidekick slot. */
+export interface FusionSelection {
+  lead: string;
+  leadEffort: string;
+  leadFast: boolean;
+  sidekick: string;
+  sidekickEffort: string | null;
 }
 
 export interface ProviderConfig {
@@ -117,6 +197,8 @@ export interface ProviderConfig {
    * 'verified' or drops them back to unconfigured.
    */
   lastVerificationState?: 'verified' | 'detected';
+  /** Runtime-only: material was auto-detected (env/AWS/local server) and verified; never persisted. */
+  autoDetected?: boolean;
   /** Ordered list of saved account IDs for automatic fallback on failure. */
   fallbackOrder?: string[];
   /** Whether automatic fallback between selected account profiles is enabled. */

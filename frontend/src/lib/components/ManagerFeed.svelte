@@ -3,7 +3,7 @@
   import { sessionStore } from '$lib/stores/sessions.svelte';
   import { feedStore } from '$lib/stores/feed.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
-  import { untrack } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { fade } from 'svelte/transition';
   import { projectStore } from '$lib/stores/project.svelte';
   import ArrowDown from 'lucide-svelte/icons/arrow-down';
@@ -21,6 +21,19 @@
   import Sparkles from 'lucide-svelte/icons/sparkles';
   import WelcomeCardIcon from './WelcomeCardIcon.svelte';
   import WelcomeBackground from './WelcomeBackground.svelte';
+  import CliChatImportPanel from './CliChatImportPanel.svelte';
+  import Download from 'lucide-svelte/icons/download';
+  import { apiFetch } from '$lib/api.svelte';
+  import { apiUrl } from '$lib/utils/api-url';
+  import {
+    NO_IMPORTABLE_CHATS,
+    dismissImportHint,
+    fetchImportableSummary,
+    importHintText,
+    isImportHintDismissed,
+    shouldShowImportHint,
+    type ImportableSummary,
+  } from '$lib/utils/cli-chat-import-hint';
   import FeedEntry from './FeedEntry.svelte';
   import VirtualList from './VirtualList.svelte';
   import ChatLoading from './ChatLoading.svelte';
@@ -28,13 +41,17 @@
   import { createAutoScroll } from '$lib/utils/autoscroll.svelte';
   import { estimateFeedHeight as estimateRowHeight } from '$lib/utils/estimate-row-height';
   import { welcomePreferencesStore } from '$lib/stores/welcome-preferences.svelte';
-  import type { WelcomeTextColor } from '$lib/utils/welcome-background-contrast';
+  import {
+    feedChromeColors,
+    type WelcomeTextColor,
+  } from '$lib/utils/welcome-background-contrast';
 
   let virtualList = $state<VirtualList<FeedEntryLocal>>();
   let expandedGroups = $state<Set<string>>(new Set());
   let editingSuggestionId = $state<string | null>(null);
   let editingSuggestionText = $state('');
   let welcomeTextColor = $state<WelcomeTextColor | undefined>();
+  const feedChrome = $derived(feedChromeColors(welcomeTextColor));
 
   interface Props {
     onUseSuggestion?: (prompt: string) => void;
@@ -43,6 +60,29 @@
   }
 
   let { onUseSuggestion, centered = false }: Props = $props();
+
+  // First-run import hint: one line on the empty start view when CLI chats on
+  // disk are not in Koryphaios yet. Its panel is the existing import panel.
+  let importSummary = $state<ImportableSummary>(NO_IMPORTABLE_CHATS);
+  let importDismissed = $state(isImportHintDismissed());
+  let importPanelOpen = $state(false);
+  const showImportHint = $derived(shouldShowImportHint(importSummary, importDismissed));
+
+  async function refreshImportHint() {
+    importSummary = await fetchImportableSummary(() =>
+      apiFetch(apiUrl('/api/cli-chat-import/discover')),
+    );
+  }
+
+  function dismissImport() {
+    importDismissed = true;
+    importPanelOpen = false;
+    dismissImportHint();
+  }
+
+  onMount(() => {
+    if (!importDismissed) void refreshImportHint();
+  });
 
   type DashboardSuggestion = {
     id: string;
@@ -205,6 +245,9 @@
     if (!id) return;
     untrack(() => {
       landedSessionId = '';
+      // Opening a chat is not following a live agent. The list owns the initial
+      // position; autoscroll must not write scrollTop until it has landed.
+      autoScrollCtl.setSuspended(true);
       autoScrollCtl.setFollow(true);
     });
   });
@@ -220,6 +263,8 @@
 
   function handleTranscriptLanded() {
     landedSessionId = untrack(() => sessionStore.activeSessionId);
+    // The transcript is placed. From here autoscroll may follow the agent.
+    autoScrollCtl.setSuspended(false);
   }
 
   // Rows that render as live this tick. Answer text keeps streaming into the
@@ -332,7 +377,12 @@
 </script>
 
 <div class="flex flex-col flex-1 overflow-hidden">
-  <div class="relative flex-1 min-h-0 overflow-hidden">
+  <div
+    class="relative flex-1 min-h-0 overflow-hidden"
+    style:--feed-chrome-fg={feedChrome.fg}
+    style:--feed-chrome-fg-hover={feedChrome.fgHover}
+    style:--feed-chrome-hover-bg={feedChrome.hoverBg}
+  >
     <!-- Keep the selected home background mounted while the chat is active,
       too. Starting a prompt changes the feed, not the user's appearance choice. -->
     <div class="welcome-background-layer" aria-hidden="true">
@@ -360,6 +410,39 @@
         class:justify-center={centered}
         class:flex={centered}
       >
+        {#if showImportHint}
+          <div class="relative mx-auto mb-4 max-w-3xl px-2 sm:px-4">
+            <div
+              class="flex items-center gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 py-2 text-sm text-[var(--color-text-secondary)]"
+            >
+              <Download size={14} class="shrink-0 text-[var(--color-accent)]" />
+              <span class="min-w-0 flex-1 truncate">{importHintText(importSummary)}</span>
+              <button
+                type="button"
+                class="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-[var(--color-accent)] hover:bg-[var(--color-surface-3)]"
+                aria-expanded={importPanelOpen}
+                onclick={() => (importPanelOpen = !importPanelOpen)}
+              >
+                {importPanelOpen ? 'Hide' : 'Review'}
+              </button>
+              <button
+                type="button"
+                class="shrink-0 rounded-md p-1 opacity-70 hover:bg-[var(--color-surface-3)] hover:opacity-100"
+                aria-label="Dismiss import suggestion"
+                onclick={dismissImport}
+              >
+                <X size={14} />
+              </button>
+            </div>
+            {#if importPanelOpen}
+              <!-- The panel is borderless; this wrapper only spaces and bounds it. -->
+              <div class="mt-4 max-h-[60vh] overflow-y-auto px-1">
+                <CliChatImportPanel onImportedChange={() => void refreshImportHint()} />
+              </div>
+            {/if}
+          </div>
+        {/if}
+
         {#if welcomePreferencesStore.preferences.enabled.suggestions}
           <div class="relative mx-auto max-w-3xl px-2 py-4 sm:px-4">
             <div class="animate-in fade-in slide-in-from-bottom-2 duration-300">
@@ -413,11 +496,8 @@
                           : 'pointer-events-none'}"
                       >
                          <div class="mb-2 flex items-center gap-2 pr-8">
-                           <span
-                             class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border"
-                             style="border-color: color-mix(in srgb, var(--color-accent) 32%, var(--color-border)); background: color-mix(in srgb, var(--color-accent) 10%, var(--color-surface-2)); color: var(--color-accent);"
-                           >
-                              <WelcomeCardIcon icon={suggestion.iconName} source={suggestion.iconSource} size={15} />
+                           <span class="flex shrink-0 items-center text-[var(--color-accent)]">
+                              <WelcomeCardIcon icon={suggestion.iconName} source={suggestion.iconSource} size={16} />
                            </span>
                            <span class="text-sm font-medium text-[var(--color-text-primary)]">
                              {suggestion.label}
@@ -427,7 +507,7 @@
                         {#if suggestion.provider || suggestion.model || suggestion.reasoning || suggestion.permission || suggestion.skills?.length}
                            <div class="relative z-[1] mb-2 flex flex-wrap gap-1.5 pr-8">
                             {#each [suggestion.provider, suggestion.model, suggestion.reasoning, suggestion.permission, ...(suggestion.skills ?? []).map((skill) => `skill · ${skill}`)] as chip (chip)}
-                              {#if chip}<span class="rounded-full border px-2 py-0.5 text-[10px]" style="border-color: var(--color-border); color: var(--color-text-muted); background: color-mix(in srgb, var(--color-surface-3) 70%, transparent);">{chip}</span>{/if}
+                              {#if chip}<span class="rounded-full border px-2 py-0.5 text-[11px]" style="border-color: var(--color-border); color: var(--color-text-muted); background: color-mix(in srgb, var(--color-surface-3) 70%, transparent);">{chip}</span>{/if}
                             {/each}
                           </div>
                         {/if}
@@ -490,6 +570,7 @@
           estimateHeight={estimateFeedHeight}
           follow={autoScrollCtl.follow}
           resetKey={sessionStore.activeSessionId}
+          ready={!wsStore.isLoadingSession}
           onScrollNearTop={() => {
             if (!wsStore.isLoadingSession) void feedStore.loadOlderSessionMessages(feedStore.sessionId);
           }}
@@ -617,7 +698,7 @@
     text-underline-offset: 2px;
   }
   :global(.markdown-content .kory-external-link) {
-    color: #3b82f6;
+    color: var(--color-info);
     text-decoration: underline;
     text-underline-offset: 2px;
   }

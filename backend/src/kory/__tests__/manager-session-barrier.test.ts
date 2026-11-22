@@ -325,3 +325,59 @@ describe('KoryManager session mutation barrier', () => {
     }
   });
 });
+
+describe('KoryManager ask_user wait serialization', () => {
+  test('concurrent question waits queue instead of cancelling each other', async () => {
+    const { manager } = createManager();
+    const parked: string[] = [];
+    const emitted: string[] = [];
+    const internal = manager as unknown as {
+      runLifecycle: {
+        handleForSession: (sessionId: string) => unknown;
+        waitForQuestion: (
+          handle: unknown,
+          question: { question: string },
+        ) => Promise<{ questionId: string }>;
+      };
+      emitWSMessage: (sessionId: string, type: string, payload: unknown) => void;
+      waitForUserInputInternal: (
+        sessionId: string,
+        question: string,
+        options: string[],
+      ) => Promise<string>;
+    };
+    internal.runLifecycle.handleForSession = (sessionId) => ({
+      sessionId,
+      runId: 'run-1',
+      revision: 1,
+    });
+    internal.runLifecycle.waitForQuestion = async (_handle, question) => {
+      parked.push(question.question);
+      return { ...question, questionId: `q-${parked.length}` };
+    };
+    internal.emitWSMessage = (_sessionId, type) => emitted.push(type);
+    try {
+      const first = internal.waitForUserInputInternal('qs', 'Pick a color?', ['Red', 'Blue']);
+      const second = internal.waitForUserInputInternal('qs', 'Pick a size?', ['Small', 'Large']);
+      // Let the queue settle: only the first wait may park and emit.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(parked).toEqual(['Pick a color?']);
+      expect(emitted).toEqual(['kory.ask_user']);
+
+      const state = managerState(manager);
+      expect(state.resolveUserInput('qs', 'Red')).toBe(true);
+      await expect(first).resolves.toBe('Red');
+      // The queued second wait parks only after the first released the queue.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(parked).toEqual(['Pick a color?', 'Pick a size?']);
+      expect(emitted).toEqual(['kory.ask_user', 'kory.ask_user']);
+
+      expect(state.resolveUserInput('qs', 'Large')).toBe(true);
+      await expect(second).resolves.toBe('Large');
+      expect(await first).not.toBe('__cancelled__');
+      expect(await second).not.toBe('__cancelled__');
+    } finally {
+      manager.shutdown();
+    }
+  });
+});

@@ -139,7 +139,7 @@
   .activity-panel { border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-surface-1); color: var(--color-text-primary); box-shadow: 0 8px 24px color-mix(in srgb, var(--color-text-primary) 12%, transparent); overflow: hidden; font-size: 11px; }
   header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--color-border); }
   .header-actions { display: flex; align-items: center; gap: 6px; }
-  .clear-all { padding: 3px 5px; color: var(--color-text-muted); font-size: 10px; font-weight: 600; }
+  .clear-all { padding: 3px 5px; color: var(--color-text-muted); font-size: 11px; font-weight: 600; }
   .clear-all:hover { color: var(--color-error); }
   ul { list-style: none; margin: 0; padding: 4px; max-height: min(320px, 60vh); overflow-y: auto; }
   .summary { display: flex; align-items: center; gap: 6px; min-width: 0; width: 100%; }

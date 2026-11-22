@@ -550,7 +550,12 @@ test('hidden: A writable -> B read-only -> A stays writable', () => {
   },
 };
 
+import {
+  CRITIC_SKILL_EVAL_MATERIALIZERS,
+  CRITIC_SKILL_EVAL_SCORERS,
+} from './skill-eval-critic-fixtures';
 export const BUILTIN_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMaterializer[] = [
+  ...CRITIC_SKILL_EVAL_MATERIALIZERS,
   ...C_CPP_SKILL_EVAL_MATERIALIZERS,
   crlfMaterializer,
   cacheMaterializer,
@@ -640,6 +645,7 @@ export const BUILTIN_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMaterial
 ];
 
 export const BUILTIN_SKILL_EVAL_SCORERS: readonly SkillEvalDeterministicScorer[] = [
+  ...CRITIC_SKILL_EVAL_SCORERS,
   ...C_CPP_SKILL_EVAL_SCORERS,
   crlfScorer,
   cacheScorer,

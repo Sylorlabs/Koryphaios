@@ -12,15 +12,15 @@ import {
 import { canonicalizePath, findExecutableOnPath, isUnix } from '../../runtime/platform';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { completePairForScenario } from '../skill-eval-blind-review';
-import { hasCompleteCurrentSkillPair } from '../skill-eval-campaign-resume';
+import { completePairForScenario } from '../../eval/skills/skill-eval-blind-review';
+import { hasCompleteCurrentSkillPair } from '../../eval/skills/skill-eval-campaign-resume';
 import {
   OPENCODE_TEXT_PATCH_QUARANTINE_REASON,
   OPENCODE_STATELESS_QUARANTINE_REASON,
   NATIVE_STATELESS_EXCLUSION_REASON,
   selectEligibleSkillEvaluationEvidence,
   skillEvaluationExecutionExclusionReason,
-} from '../skill-eval-eligibility';
+} from '../../eval/skills/skill-eval-eligibility';
 import {
   CURRENT_SKILL_EVAL_CONTRACT_VERSION,
   evaluateSkillPromotion,
@@ -114,12 +114,17 @@ function expected(run: SkillEvaluationRun) {
   };
 }
 
-function nativeRun(variant: 'with-skill' | 'without-skill' = 'with-skill') {
+function nativeRun(
+  variant: 'with-skill' | 'without-skill' = 'with-skill',
+  identity: { provider?: string; model?: string } = {},
+) {
+  const provider = identity.provider ?? 'native-cli';
+  const model = identity.model ?? 'gpt-6.1-sol';
   const root = mkdtempSync(join(tmpdir(), 'kory-native-eligibility-'));
   roots.push(root);
   const contract = 'a'.repeat(16);
   const binary = '/opt/homebrew/bin/claude';
-  const harnessVersion = `v5-campaign-2026-09-08:native-stateless-text-patch:native-stateless-text-patch:gpt-6.1-sol:${binary}:native-cli:gpt-6.1-sol:native-cli:${binary}:v2.1.309:no-tools-text-patch-v1:text-only-patch:none:180000ms:${contract}`;
+  const harnessVersion = `v5-campaign-2026-09-08:native-stateless-text-patch:native-stateless-text-patch:${model}:${binary}:${provider}:${model}:${provider}:${binary}:v2.1.309:no-tools-text-patch-v1:text-only-patch:none:180000ms:${contract}`;
   const output = '<kory-eval-patch>[]</kory-eval-patch>';
   const sessionId = `native-session-${variant}`;
   let stream =
@@ -128,7 +133,7 @@ function nativeRun(variant: 'with-skill' | 'without-skill' = 'with-skill') {
         type: 'system',
         subtype: 'init',
         session_id: sessionId,
-        model: 'gpt-6.1-sol',
+        model,
         tools: [],
         mcp_servers: [],
         skills: [],
@@ -157,7 +162,7 @@ function nativeRun(variant: 'with-skill' | 'without-skill' = 'with-skill') {
     kind: 'host-observed-unsigned',
     runtime: 'no-tools-text-patch-v1',
     cliVersion: '2.1.309',
-    requestedModel: 'gpt-6.1-sol',
+    requestedModel: model,
     boundary: 'native-no-tools-bare-restricted-explicit-stdin',
     boundaryBasis: 'measured-version-dependent',
     osIsolationVerified: false,
@@ -171,7 +176,7 @@ function nativeRun(variant: 'with-skill' | 'without-skill' = 'with-skill') {
   };
   const completion = {
     sessionId: `native-session-${variant}`,
-    observedModel: 'gpt-6.1-sol',
+    observedModel: model,
     tools: [] as string[],
     mcpServers: [] as string[],
     skills: [] as string[],
@@ -184,8 +189,8 @@ function nativeRun(variant: 'with-skill' | 'without-skill' = 'with-skill') {
   ];
   const run = pair('native-pair', {
     variant,
-    provider: 'native-cli',
-    model: 'gpt-6.1-sol',
+    provider,
+    model,
     harnessVersion,
   }).find((row) => row.variant === variant)!;
   const directory = join(root, variant);
@@ -270,7 +275,7 @@ mock.module('node:fs', () => ({ ...fs, lstatSync(...args) {
   }
   return stat;
 }}));
-const { skillEvaluationExecutionExclusionReason } = await import(${JSON.stringify(resolve(import.meta.dir, '../skill-eval-eligibility.ts'))});
+const { skillEvaluationExecutionExclusionReason } = await import(${JSON.stringify(resolve(import.meta.dir, '../../eval/skills/skill-eval-eligibility.ts'))});
 process.stdout.write(JSON.stringify({ reason: skillEvaluationExecutionExclusionReason(run) }) + '\\n');
 `;
   const child = Bun.spawn([process.execPath, '-e', source], {
@@ -326,6 +331,21 @@ describe('derived native stateless receipt eligibility', () => {
     f.refresh();
     expect(skillEvaluationExecutionExclusionReason(f.run)).toBeNull();
     expect(selectEligibleSkillEvaluationEvidence([f.run]).runs).toEqual([f.run]);
+  });
+  test('a receipt proves its own execution, so another model is not excluded by name', () => {
+    const f = nativeRun('with-skill', { model: 'gpt-6-luna' });
+    expect(skillEvaluationExecutionExclusionReason(f.run)).toBeNull();
+    const g = nativeRun('without-skill', { provider: 'claude-cli', model: 'kimi-k2.6' });
+    expect(skillEvaluationExecutionExclusionReason(g.run)).toBeNull();
+  });
+  test('a run that claims a model its receipt never observed stays excluded', () => {
+    const f = nativeRun();
+    f.run.model = 'gpt-6-luna';
+    expect(skillEvaluationExecutionExclusionReason(f.run)).toBe(NATIVE_STATELESS_EXCLUSION_REASON);
+    const g = nativeRun();
+    (g.receipt as Record<string, unknown>).requestedModel = 'gpt-6-luna';
+    g.refresh();
+    expect(skillEvaluationExecutionExclusionReason(g.run)).toBe(NATIVE_STATELESS_EXCLUSION_REASON);
   });
   test('a mode suffix or missing receipt cannot grant eligibility', () => {
     const f = nativeRun();
@@ -533,6 +553,21 @@ describe('derived OpenCode text-patch eligibility quarantine', () => {
       expect(completePairForScenario([withSkill, { ...withoutSkill, ...mismatch }], 'task-1', 'a'.repeat(16)))
         .toBeNull();
     }
+  });
+
+  test('an aborted arm is never offered to a blind reviewer as an artifact', () => {
+    const arms = pair('aborted-pair');
+    const withSkill = arms[0]!;
+    const withoutSkill = arms[1]!;
+    expect(completePairForScenario(arms, 'task-1', 'a'.repeat(16))).not.toBeNull();
+    // The executor rejected the provider output, so no candidate artifact exists.
+    expect(completePairForScenario(
+      [{ ...withSkill, executionAborted: true }, withoutSkill], 'task-1', 'a'.repeat(16),
+    )).toBeNull();
+    // A normal arm still pairs, so the exclusion is about the abort, not the flag's presence.
+    expect(completePairForScenario(
+      [{ ...withSkill, executionAborted: false }, withoutSkill], 'task-1', 'a'.repeat(16),
+    )).not.toBeNull();
   });
 
   test('orphan blind review never promotes a quarantined execution pair', () => {

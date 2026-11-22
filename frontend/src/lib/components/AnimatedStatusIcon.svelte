@@ -1,6 +1,5 @@
 <script lang="ts">
   import type { AgentStatus } from '@koryphaios/shared';
-  import Wrench from 'lucide-svelte/icons/wrench';
 
   interface Props {
     status: AgentStatus;
@@ -51,12 +50,20 @@
   </div>
 
 {:else if status === 'tool_calling'}
-  <!-- Existing lucide Wrench tapping against a wall -->
-  <div class="status-icon tool-tapping" style="width: {size}px; height: {size}px; position:relative; display:inline-flex; align-items:center; justify-content:center;">
-    <svg viewBox="0 0 24 24" fill="none" width={size} height={size} style="position:absolute; right:0; top:0;" aria-hidden="true">
-      <line x1="22" y1="4" x2="22" y2="20" stroke="currentColor" stroke-width="2" stroke-linecap="round" class="text-slate-400 wall"/>
+  <!-- Tool activity: a terminal prompt. This replaces the amber lucide wrench
+       that used to strike a wall here. That icon implied one specific hardware
+       action for every tool call, and it was the same wrench shape the chat feed
+       used for generic tools. A prompt reads as "a command is running" for shell
+       work, file reads and search alike, and it matches the terminal glyph in
+       activity-glyphs.ts. -->
+  <div class="status-icon tool-command" style="width: {size}px; height: {size}px; position:relative; display:inline-flex; align-items:center; justify-content:center;">
+    <svg viewBox="0 0 24 24" fill="none" width={size} height={size} aria-hidden="true">
+      <rect x="3" y="4" width="18" height="16" rx="2.2" stroke="currentColor" stroke-width="1.5" class="text-slate-400"/>
+      <path d="M3 8.5h18" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class="text-slate-400"/>
+      <path d="M6.4 11.9l2.3 2.3-2.3 2.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-400 cmd-chevron"/>
+      <path d="M11 16.5h3.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class="text-emerald-400"/>
+      <path d="M16.2 14.5v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class="text-emerald-400 cmd-caret"/>
     </svg>
-    <Wrench size={size} strokeWidth={1.7} class="wrench-icon text-amber-400" />
   </div>
 
 {:else if status === 'streaming'}
@@ -257,39 +264,20 @@
     65% { y: 10; height: 7.5; opacity: 0.5; }
   }
 
-  /* ── Terminal: typing cursor ────────────────────── */
-  .terminal {
-    animation: terminal-subtle 2s ease-in-out infinite;
+  /* ── Tool activity: terminal prompt with a caret ─── */
+  .tool-command .cmd-caret {
+    animation: caret-blink 1s step-end infinite;
   }
-  .terminal .cursor-blink {
-    animation: blink 0.8s step-end infinite;
+  .tool-command .cmd-chevron {
+    animation: chevron-nudge 1.6s ease-in-out infinite;
   }
-  @keyframes terminal-subtle {
-    0%, 100% { transform: scale(1); }
-    50% { transform: scale(1.03); }
-  }
-  @keyframes blink {
+  @keyframes caret-blink {
     0%, 100% { opacity: 1; }
     50% { opacity: 0; }
   }
-
-  /* ── Tool tapping: wrench hitting a wall ────────── */
-  .tool-tapping :global(.wrench-icon) {
-    transform-origin: 12px 12px;
-    display: inline-block;
-    animation: wrench-tap 0.9s ease-in-out infinite;
-  }
-  .tool-tapping .wall {
-    animation: wall-pulse 0.9s ease-in-out infinite;
-  }
-  @keyframes wrench-tap {
-    0%, 100% { transform: rotate(0deg) translate(0, 0); }
-    40% { transform: rotate(-18deg) translate(-2px, 1px); }
-    60% { transform: rotate(8deg) translate(1px, -1px); }
-  }
-  @keyframes wall-pulse {
-    0%, 100% { opacity: 0.6; }
-    50% { opacity: 1; }
+  @keyframes chevron-nudge {
+    0%, 100% { transform: translateX(0); }
+    50% { transform: translateX(0.6px); }
   }
 
   /* ── Exploring: magnifying glass sweeping ────────── */
@@ -479,5 +467,15 @@
     30% { stroke-dasharray: 3; stroke-dashoffset: 0; opacity: 1; }
     80% { stroke-dasharray: 3; stroke-dashoffset: 0; opacity: 1; }
     100% { stroke-dasharray: 3; stroke-dashoffset: 0; opacity: 0; }
+  }
+
+  /* Reduced motion: the tool prompt must not pulse. Every other status glyph
+     already animates without a guard here, so this is scoped to the mark this
+     change introduced rather than silently restyling unrelated states. */
+  @media (prefers-reduced-motion: reduce) {
+    .tool-command .cmd-caret,
+    .tool-command .cmd-chevron {
+      animation: none;
+    }
   }
 </style>

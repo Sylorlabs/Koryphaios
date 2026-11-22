@@ -40,7 +40,14 @@ export type WSEventType =
   | 'session.timeline_rewritten'
   // Ephemeral replay placeholder for a filtered durable sequence position.
   | 'session.replay_skipped'
+  // Unsequenced control row: history through payload.throughSequence was
+  // pruned and can never be replayed; clients advance past it.
+  | 'session.history_pruned'
   | 'run.state'
+  // Provider work ended for a manager turn; follow-up work (critic, checkpoint, persistence) may still run.
+  | 'turn.provider_completed'
+  // The run is terminal and every follow-up step has finished.
+  | 'run.settled'
   | 'compaction.started'
   | 'compaction.progress'
   | 'compaction.completed'
@@ -62,6 +69,7 @@ export type WSEventType =
   // Kory-specific
   | 'kory.thought'
   | 'kory.routing'
+  | 'kory.skill'
   | 'kory.verification'
   | 'kory.task_breakdown'
   | 'kory.ask_user'
@@ -139,6 +147,8 @@ export type WSMessagePayload =
   | KorySessionChangesResolvedPayload
   | SessionActionableWaitsPayload
   | KoryAskUserResolvedPayload
+  | TurnProviderCompletedPayload
+  | RunSettledPayload
   | StreamUsagePayload
 
   // Message payloads
@@ -195,6 +205,8 @@ import type {
   SessionActionableWaitsPayload,
   KoryAskUserResolvedPayload,
   RateLimitPayload,
+  TurnProviderCompletedPayload,
+  RunSettledPayload,
 } from './WSPayloads';
 
 export type { ChangeSummary, StreamUsage } from './WSPayloads';
@@ -244,7 +256,10 @@ export const SESSION_SCOPED_EVENT_TYPES: ReadonlySet<WSEventType> = new Set<WSEv
   'session.idle',
   'session.timeline_rewritten',
   'session.replay_skipped',
+  'session.history_pruned',
   'run.state',
+  'turn.provider_completed',
+  'run.settled',
   // Compaction
   'compaction.started',
   'compaction.progress',
@@ -253,6 +268,7 @@ export const SESSION_SCOPED_EVENT_TYPES: ReadonlySet<WSEventType> = new Set<WSEv
   // Kory
   'kory.thought',
   'kory.routing',
+  'kory.skill',
   'kory.verification',
   'kory.task_breakdown',
   'kory.ask_user',

@@ -41,7 +41,7 @@ afterEach(() => {
   else process.env.REFLECTION_API_KEY = originalApiKey;
 });
 
-describe('Beam (Reflection AI) registration', () => {
+describe('Reflection AI registration', () => {
   it('registers the stable ID across shared definitions and API validation', () => {
     expect(ProviderName.Beam).toBe('beam');
     expect(CompatibilityProviderName.Beam).toBe('beam');

@@ -5,7 +5,6 @@
   import { loadProvidersFromApi } from '$lib/stores/providers.svelte';
   import { copyText } from '$lib/utils/clipboard';
   import Share2 from 'lucide-svelte/icons/share-2';
-  import MonitorSmartphone from 'lucide-svelte/icons/monitor-smartphone';
   import ShieldAlert from 'lucide-svelte/icons/shield-alert';
   import ShieldCheck from 'lucide-svelte/icons/shield-check';
   import ShieldX from 'lucide-svelte/icons/shield-x';
@@ -75,9 +74,9 @@
 
 
   const riskMeta: Record<ProviderShareRisk, { icon: any; color: string; label: string }> = {
-    ok: { icon: ShieldCheck, color: '#22c55e', label: 'Safe to share' },
-    caution: { icon: ShieldAlert, color: '#f59e0b', label: 'May violate ToS' },
-    prohibited: { icon: ShieldX, color: '#ef4444', label: 'Violates ToS' },
+    ok: { icon: ShieldCheck, color: 'var(--color-success)', label: 'Safe to share' },
+    caution: { icon: ShieldAlert, color: 'var(--color-warning)', label: 'May violate ToS' },
+    prohibited: { icon: ShieldX, color: 'var(--color-error)', label: 'Violates ToS' },
   };
 
   async function loadHost() {
@@ -435,21 +434,18 @@
 </script>
 
 <div class="space-y-6">
-  <div class="flex items-start gap-3">
-    <Share2 size={18} class="mt-0.5 shrink-0 text-[var(--color-accent)]" />
-    <div>
-      <h3 class="text-base font-semibold text-[var(--color-text-primary)]">Models you share</h3>
-      <p class="mt-1 max-w-2xl text-xs leading-5 text-[var(--color-text-muted)]">
-        Lend providers for inference without sharing your workspace or files. Only the model call
-        travels.
-      </p>
-    </div>
+  <div>
+    <h3 class="text-sm font-semibold text-[var(--color-text-primary)]">Models you share</h3>
+    <p class="mt-1 max-w-2xl text-xs leading-5 text-[var(--color-text-muted)]">
+      Lend providers for inference without sharing your workspace or files. Only the model call
+      travels.
+    </p>
   </div>
 
   <!-- ── HOST: share my providers ── -->
   <section class="space-y-4">
     <div>
-      <h4 class="text-sm font-bold text-[var(--color-text-primary)]">Share my models</h4>
+      <h4 class="text-[13px] font-semibold text-[var(--color-text-primary)]">Share my models</h4>
       <p class="mt-1 text-xs leading-5 text-[var(--color-text-muted)]">
         Share selected inference models using a code. Host commands, files, native agents and login credentials are outside the code's permissions.
       </p>
@@ -484,7 +480,7 @@
           class="min-w-0 flex-1 bg-transparent text-xs text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-muted)]"
           aria-label="Search providers to share"
         />
-        <span class="text-[10px] text-[var(--color-text-muted)]"
+        <span class="text-[11px] text-[var(--color-text-muted)]"
           >{filteredCandidates.length}/{candidates.length}</span
         >
       </div>
@@ -492,13 +488,13 @@
         {#each filteredCandidates as c (c.provider)}
           {@const meta = riskMeta[c.risk]}
           {@const on = sharedSet.has(c.provider)}
-          <div class="provider-share-row flex items-start gap-3 rounded-md border border-transparent px-3 py-3 transition-colors hover:border-[var(--color-border-bright)] hover:bg-[var(--color-surface-2)] focus-within:border-[var(--color-border-bright)]">
+          <div class="provider-share-row flex items-start gap-3 rounded-md px-3 py-3 transition-colors hover:bg-[var(--color-surface-2)]">
             <div class="mt-0.5 shrink-0"><ProviderIcon provider={c.provider} size={20} /></div>
             <div class="min-w-0 flex-1">
               <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <h5 class="text-sm font-medium text-[var(--color-text-primary)]">{c.label}</h5>
-                <span class="inline-flex items-center gap-1 text-[10px] text-[var(--color-text-muted)]" title={c.reason}><meta.icon size={11} /> {meta.label}</span>
-                {#if c.agentic}<span class="inline-flex items-center gap-1 text-[10px] text-[var(--color-text-muted)]"><HardDrive size={11} /> CLI</span>{/if}
+                <span class="inline-flex items-center gap-1 text-[11px] text-[var(--color-text-muted)]" title={c.reason}><meta.icon size={11} /> {meta.label}</span>
+                {#if c.agentic}<span class="inline-flex items-center gap-1 text-[11px] text-[var(--color-text-muted)]"><HardDrive size={11} /> CLI</span>{/if}
               </div>
               <p class="mt-1 text-xs leading-5 text-[var(--color-text-muted)]">{candidateDescription(c)}</p>
               {#if c.available && c.models.length > 0}
@@ -536,9 +532,9 @@
       {#if anyRisky}
         <div
           class="mt-6 rounded-2xl border p-4 text-[11px] leading-relaxed"
-          style="border-color: color-mix(in srgb, #f59e0b 40%, transparent); background: color-mix(in srgb, #f59e0b 8%, transparent); color: var(--color-text-secondary);"
+          style="border-color: color-mix(in srgb, var(--color-warning) 40%, transparent); background: color-mix(in srgb, var(--color-warning) 8%, transparent); color: var(--color-text-secondary);"
         >
-          <strong style="color: #f59e0b;">Heads up:</strong> you've selected subscription-backed
+          <strong style="color: var(--color-warning);">Heads up:</strong> you've selected subscription-backed
           providers. Lending a subscription to another person is account-sharing that several
           providers' terms forbid and actively enforce (bans). Your own
           <em>API keys</em> are the safe way to share. Enable these only if you accept the risk.
@@ -593,8 +589,8 @@
         <!-- Sandbox policy — how the shared CLI runs on YOUR machine. -->
         <div class="mt-7 border-t border-[var(--color-border)] pt-7">
           <div class="mb-2 flex items-center gap-2">
-            <Lock size={14} style="color: #a78bfa;" />
-            <span class="text-xs font-bold text-[var(--color-text-primary)]">CLI sandbox</span>
+            <Lock size={16} class="text-[var(--color-text-muted)]" />
+            <span class="text-[13px] font-semibold text-[var(--color-text-primary)]">CLI sandbox</span>
             {#if savingSandbox}<Loader2
                 size={11}
                 class="animate-spin text-[var(--color-text-muted)]"
@@ -607,25 +603,25 @@
           <!-- OS-level enforcement indicator (mechanism-aware) -->
           {#if sandboxCaps}
             <div
-              class="mb-4 rounded-xl px-4 py-3 text-[10px] leading-relaxed"
+              class="mb-4 rounded-xl px-4 py-3 text-[11px] leading-relaxed"
               style="background: {sandboxCaps.osIsolation
-                ? 'color-mix(in srgb, #22c55e 10%, transparent)'
-                : 'color-mix(in srgb, #f59e0b 10%, transparent)'};"
+                ? 'color-mix(in srgb, var(--color-success) 10%, transparent)'
+                : 'color-mix(in srgb, var(--color-warning) 10%, transparent)'};"
             >
               {#if sandboxCaps.mechanism === 'bubblewrap'}
-                <span style="color:#22c55e"
+                <span style="color:var(--color-success)"
                   ><strong>Kernel-hardened jail active</strong> (bubblewrap).</span
                 >
                 The filesystem jail and network block are enforced by the Linux kernel. The CLI cannot
                 escape them, even via its own shell.
               {:else if sandboxCaps.mechanism === 'seatbelt'}
-                <span style="color:#22c55e"
+                <span style="color:var(--color-success)"
                   ><strong>Kernel-hardened jail active</strong> (macOS Seatbelt).</span
                 >
                 Writes are confined to the project, your secret stores (.ssh/.aws/Keychains…) are read-blocked
                 by the OS, and the network can be cut.
               {:else}
-                <span style="color:#f59e0b"
+                <span style="color:var(--color-warning)"
                   ><strong
                     >⚠ Warning: OS-level sandbox unavailable on {sandboxCaps.platform === 'win32'
                       ? 'Windows'
@@ -643,7 +639,7 @@
                   target="_blank"
                   rel="noreferrer"
                   class="inline-block mt-1 font-semibold underline"
-                  style="color:#f59e0b;">Read more →</a
+                  style="color:var(--color-warning);">Read more →</a
                 >
               {/if}
             </div>
@@ -656,7 +652,7 @@
                 type="button"
                 title={p.hint}
                 onclick={() => applyPreset(p.id)}
-                class="rounded-lg px-2.5 py-1 text-[10px] font-bold transition-colors"
+                class="rounded-lg px-2.5 py-1 text-[11px] font-bold transition-colors"
                 style="background: {sandbox.preset === p.id
                   ? 'var(--color-accent)'
                   : 'var(--color-surface-1)'}; color: {sandbox.preset === p.id
@@ -666,8 +662,8 @@
             {/each}
             {#if sandbox.preset === 'custom'}
               <span
-                class="rounded-lg px-2.5 py-1 text-[10px] font-bold"
-                style="background: color-mix(in srgb, #a78bfa 16%, transparent); color:#a78bfa;"
+                class="rounded-lg px-2.5 py-1 text-[11px] font-bold"
+                style="background: color-mix(in srgb, var(--color-accent-secondary) 16%, transparent); color:var(--color-accent-secondary);"
                 >Custom</span
               >
             {/if}
@@ -686,7 +682,7 @@
               />
             {/each}
           </div>
-          <p class="mt-3 text-[10px] leading-4 text-[var(--color-text-muted)]">
+          <p class="mt-3 text-[11px] leading-4 text-[var(--color-text-muted)]">
             A guest's access tier can only tighten these, never loosen them. Blocked catastrophic
             commands (rm -rf /, shutdown…) always apply.
             <a
@@ -705,11 +701,8 @@
   <section
     class="border-t border-[var(--color-border)] pt-6"
   >
-    <div class="mb-2 flex items-center gap-3">
-      <MonitorSmartphone size={18} style="color: var(--color-accent);" />
-      <h4 class="text-sm font-bold text-[var(--color-text-primary)]">Use someone's models</h4>
-    </div>
-    <p class="mb-6 text-[11px] leading-5 text-[var(--color-text-muted)]">
+    <h4 class="mb-1 text-[13px] font-semibold text-[var(--color-text-primary)]">Use someone's models</h4>
+    <p class="mb-4 text-xs leading-5 text-[var(--color-text-muted)]">
       Enter a host's model-sharing code or model link. Their models appear under the host's chosen name in your model picker and run on
       your own projects and files. You keep your workspace, they supply the inference.
     </p>
@@ -732,14 +725,14 @@
           <button
             type="button"
             onclick={disconnect}
-            class="rounded-xl border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-red-400 hover:bg-red-500/10"
+            class="rounded-xl border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-error)] hover:bg-[var(--color-error-bg)]"
             >Disconnect</button
           >
         </div>
-        <div class="mt-4 space-y-2 text-[10px] leading-4 text-[var(--color-text-muted)]">
+        <div class="mt-4 space-y-2 text-[11px] leading-4 text-[var(--color-text-muted)]">
           {#if apiCount}
             <div class="flex items-start gap-1.5">
-              <ShieldCheck size={11} style="color:#22c55e" class="mt-px shrink-0" />
+              <ShieldCheck size={11} style="color:var(--color-success)" class="mt-px shrink-0" />
               <span
                 ><strong>{apiCount} inference provider(s)</strong>. Only your messages and model calls are sent. The host cannot browse your workspace.</span
               >
@@ -747,7 +740,7 @@
           {/if}
           {#if cliCount}
             <div class="flex items-start gap-1.5">
-              <HardDrive size={11} style="color:#a78bfa" class="mt-px shrink-0" />
+              <HardDrive size={11} style="color:var(--color-accent-secondary)" class="mt-px shrink-0" />
               <span
                 ><strong>{cliCount} CLI model(s)</strong> (labeled "runs on host"). Your project is copied
                 to the host's temp folder to run, then edits come back. You'll confirm before the first

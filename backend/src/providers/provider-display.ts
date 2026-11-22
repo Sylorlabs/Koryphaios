@@ -44,12 +44,6 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
     description:
       'Reflection AI text models through OpenAI-compatible Chat Completions and Models endpoints.',
   },
-  agentrouter: {
-    label: 'AgentRouter',
-    deployment: 'api',
-    credentialUrl: 'https://agentrouter.org',
-    description: 'OpenAI-compatible Chat Completions and Anthropic-compatible Claude Messages through the selected AgentRouter gateway.',
-  },
   commandcode: {
     label: 'Command Code',
     iconPath: '/provider-icons/commandcode-color.svg',
@@ -69,6 +63,54 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
     deployment: 'api',
     credentialUrl: 'https://unorouter.com/en/docs/platform/quickstart',
     description: 'Open-source OpenAI-compatible gateway — one key for 200+ models.',
+  },
+  hundredmillionseek: {
+    label: '100MillionSeek',
+    iconPath: '/provider-icons/hundredmillionseek.svg',
+    deployment: 'api',
+    credentialUrl: 'https://100milionseek.top/',
+    description:
+      'OpenAI-compatible Chat Completions host. The authenticated /v1/models catalog supplies each model’s real context window (198K on the flagship), output limit, vendor price label and quota multiplier. Streaming and tool calls are live-verified. Models served on a non-chat endpoint are not listed.',
+  },
+  numes: {
+    label: 'Numes',
+    iconPath: '/provider-icons/numes.svg',
+    deployment: 'api',
+    credentialUrl: 'https://numes.ai/',
+    description:
+      'Multi-model OpenAI-compatible gateway. Its live catalog carries per-token USD pricing (input, output and cache read), real context and output limits, reasoning effort ladders, modalities and supported parameters, so the picker and billing use Numes’ own numbers rather than a table.',
+  },
+  coarena: {
+    label: 'Coarena',
+    iconPath: '/provider-icons/coarena.svg',
+    deployment: 'api',
+    credentialUrl: 'https://coarena.ai/account/api',
+    description:
+      'OpenAI-compatible Model API on one key. The public /models catalog supplies each model’s real context and output limits, vision/tool support and reasoning_effort ladder, so the picker uses Coarena’s own values. /credits and /limits provide the account’s real balance and daily usage for the billing view.',
+  },
+  crowllm: {
+    label: 'CrowLLM',
+    iconPath: '/provider-icons/crowllm.svg',
+    deployment: 'api',
+    credentialUrl: 'https://crowllm.com/keys',
+    description:
+      'OpenAI-compatible gateway over CrowLLM’s one key, with Anthropic- and Gemini-shaped surfaces on the same host. The public /v1/models catalog supplies the exact model ids, publishers and :free / -thinking variants, which the picker uses. The catalog publishes no context windows, output limits or per-token prices, so none are invented; only :free ids are marked free and -thinking ids expose the documented low/medium/high reasoning effort. Standard billing routes are probed when the account exposes them.',
+  },
+  radeon: {
+    label: 'AMD Radeon Cloud',
+    iconPath: '/provider-icons/radeon.svg',
+    deployment: 'api',
+    credentialUrl: 'https://developer.amd.com.cn/radeon/tokenfactory',
+    description:
+      'AMD Token Factory on Radeon Cloud: a platform-chosen open-model catalog served on Radeon GPUs through an OpenAI-compatible API (with an Anthropic-compatible /v1/messages on the same host). One rc- key covers every model, GET /v1/models is the catalog, and limits come from it rather than a table. Free daily allowance, reset at midnight Asia/Shanghai; 30 requests/min per key. China site only.',
+  },
+  runcrate: {
+    label: 'Runcrate',
+    iconPath: '/provider-icons/runcrate-color.png',
+    deployment: 'api',
+    credentialUrl: 'https://www.runcrate.ai/dashboard/keys',
+    description:
+      'Open and frontier open-weight models behind one OpenAI-compatible API, paid from the same balance as Runcrate GPUs. The public /v1/models catalog carries each model’s real context window, output limit, input modalities, tool/reasoning features and per-token USD prices, so the picker and cost display use Runcrate’s own numbers. Image, video, speech and embedding models share the key but are not offered as chat models. Runcrate also speaks the Anthropic Messages and OpenAI Responses shapes; Koryphaios uses Chat Completions.',
   },
   respan: {
     label: 'Respan',

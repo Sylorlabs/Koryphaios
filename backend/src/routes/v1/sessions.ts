@@ -1,4 +1,5 @@
 import { Elysia, t } from 'elysia';
+import type { SessionAgentOverrides } from '@koryphaios/shared';
 import { getContext } from '../../context';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 import { processSupervisor } from '../../process-supervisor/supervisor';
@@ -174,8 +175,32 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
           throw new ValidationError('Chat name cannot contain control characters.');
         }
       }
+      // Composer PATCH requests replace only the settings they own. Manager
+      // controls and agent-owned skill-feed blocks are separate durable
+      // surfaces and must survive a YOLO/critic toggle that happens to
+      // serialize a fresh agentOverrides object.
+      const preservedOverrides: SessionAgentOverrides = current.agentOverrides?.managerControls
+        ? { managerControls: current.agentOverrides.managerControls }
+        : {};
+      if (current.agentOverrides?.blockedSkillFeeds) {
+        preservedOverrides.blockedSkillFeeds = current.agentOverrides.blockedSkillFeeds;
+      }
+      const agentOverrides =
+        body.agentOverrides === undefined
+          ? undefined
+          : Object.keys(body.agentOverrides).length === 0
+            ? preservedOverrides
+            : {
+                ...current.agentOverrides,
+                ...body.agentOverrides,
+                ...(body.agentOverrides.managerControls === undefined &&
+                current.agentOverrides?.managerControls
+                  ? { managerControls: current.agentOverrides.managerControls }
+                  : {}),
+              };
       const updated = await sessions.update(id, {
         ...body,
+        ...(agentOverrides !== undefined ? { agentOverrides } : {}),
         ...(title !== undefined ? { title } : {}),
       });
       if (!updated) throw new NotFoundError('Session', id);
@@ -209,9 +234,32 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
             agentExecutionMode: t.Optional(
               t.Union([t.Literal('auto'), t.Literal('single'), t.Literal('multi')]),
             ),
+            worktreeMode: t.Optional(
+              t.Union([t.Literal('auto'), t.Literal('always'), t.Literal('never')]),
+            ),
+            worktreeIsolation: t.Optional(t.Boolean()),
             criticGateEnabled: t.Optional(t.Boolean()),
             criticMode: t.Optional(
               t.Union([t.Literal('auto'), t.Literal('always'), t.Literal('off')]),
+            ),
+            managerControls: t.Optional(
+              t.Record(
+                t.String(),
+                t.Object({
+                  model: t.String(),
+                  provider: t.Optional(t.String()),
+                  reasoningLevel: t.Optional(t.String()),
+                  fallbacks: t.Optional(
+                    t.Array(
+                      t.Object({
+                        model: t.String(),
+                        reasoningLevel: t.Optional(t.String()),
+                      }),
+                      { maxItems: 20 },
+                    ),
+                  ),
+                }),
+              ),
             ),
           }),
         }),
@@ -286,12 +334,15 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
       if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
       const { kory, wsManager } = getContext();
       const steering = body?.purpose === 'steer';
-      // Cancel all workers for this session
-      await getContext().goalDriver.pauseForSession(id);
+      // Stop the turn first. Goal bookkeeping and queued-job cleanup are
+      // follow-up work; they must never delay the user's stop response.
       await kory.cancelSessionWorkers(id);
-      // Cancel any LLM jobs for this session
-      const { cancelLLMJobsForSession } = await import('../../queue/workers/llm-worker');
-      await cancelLLMJobsForSession(id);
+      void getContext()
+        .goalDriver.pauseForSession(id)
+        .catch(() => undefined);
+      void import('../../queue/workers/llm-worker')
+        .then(({ cancelLLMJobsForSession }) => cancelLLMJobsForSession(id))
+        .catch(() => undefined);
       // A steer is an intentional cancel-and-continuation handoff. Do not put a
       // visible "Session cancelled" banner between the partial response and the
       // replacement instruction; the authoritative run.state still records the

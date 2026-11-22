@@ -6,7 +6,7 @@ import {
   runVectorRecallMigrationRuntime,
   runVectorShardedRecoveryRuntime,
   vectorSearchRuntimeReadiness,
-} from '../skill-eval-vector-search-runtime';
+} from '../../eval/skills/skill-eval-vector-search-runtime';
 
 function runtimeAvailable(): boolean {
   const blockers = vectorSearchRuntimeReadiness();

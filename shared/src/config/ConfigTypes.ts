@@ -25,13 +25,12 @@ export interface SafetyLimits {
 
 export interface WorkspaceConfig {
   /**
-   * Maximum number of concurrent Git worktrees allowed.
+   * Maximum number of concurrent Git worktrees.
+   * `0` (the default) means no host-imposed limit: the machine is the ceiling
+   * and the user owns that decision. A positive value is an explicit cap;
+   * additional delegations wait in FIFO order instead of failing.
    * Each worktree consumes RAM (roughly 200-500MB per active agent).
-   * Set based on your system's available memory:
-   * - 8GB RAM: 3-4 worktrees
-   * - 16GB RAM: 6-8 worktrees
-   * - 32GB+ RAM: 10+ worktrees
-   * @default 4
+   * @default 0
    */
   worktreeLimit?: number;
   /** Base directory for worktrees (relative to repo root). @default ".trees" */
@@ -88,8 +87,8 @@ export interface AgentSettings {
   autoApplySafeFixes: boolean;
   /** Require confirmation for rule violations */
   confirmRuleViolations: boolean;
-  /** Inter-agent messaging (AgentMail) policy. */
-  agentMessaging?: 'open' | 'approval-cross-project' | 'off';
+  /** Per-tier overrides for messaging other chats. Same-chat mail is always allowed. */
+  messagingPermissionsByTier?: import('../messaging-permissions').MessagingPermissionsByTier;
   /** Run the agent's tools without an upfront "proceed?" prompt (on by default). */
   autoRunTools?: boolean;
   /** Agent memory - allow agents to update memory files */

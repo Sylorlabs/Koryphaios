@@ -17,6 +17,8 @@
     compact?: boolean;
     /** Short scope type shown in the row; concrete names stay in the menu. */
     projectLabel?: 'Project' | 'Workspace';
+    /** Label the selector with the concrete project folder instead of the scope. */
+    showProjectName?: boolean;
     /**
      * `select` is for workspaces whose data can actually move between
      * projects. `current` is a non-interactive context marker for a page that
@@ -31,6 +33,7 @@
     contextLabel,
     compact = false,
     projectLabel = 'Project',
+    showProjectName = false,
     projectSelector = 'select',
   }: Props = $props();
 
@@ -61,6 +64,11 @@
   const activeProjectLabel = $derived.by(() => {
     if (projectSelector === 'current') {
       return projectLabel;
+    }
+    // Notes always reads the current project's collection, so a concrete name
+    // is the honest label even when the workspace scope is "all".
+    if (showProjectName && projectStore.currentPath) {
+      return projectDisplayName(projectStore.currentPath) || projectLabel;
     }
     if (projectScopeMode === 'all' || !projectStore.currentPath) {
       return `All ${projectLabel.toLowerCase()}s`;
@@ -138,16 +146,17 @@
     {:else}
       <button
         type="button"
-        class="inline-flex items-center gap-1 border-b-2 border-dotted border-[var(--color-text-secondary)]/60 pb-0.5 font-medium text-[var(--color-text-primary)] transition-colors hover:border-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 rounded-xs"
+        class="inline-flex min-w-0 max-w-[min(32ch,50vw)] items-center gap-1 border-b-2 border-dotted border-[var(--color-text-secondary)]/60 pb-0.5 font-medium text-[var(--color-text-primary)] transition-colors hover:border-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 rounded-xs"
         aria-haspopup="listbox"
         aria-expanded={openMenu === 'project'}
+        title={activeProjectLabel}
         onclick={(e) => {
           e.stopPropagation();
           openMenu = openMenu === 'project' ? null : 'project';
         }}
       >
-        <span>{activeProjectLabel}</span>
-        <ChevronDown size={13} class="text-[var(--color-text-muted)]" />
+        <span class="truncate">{activeProjectLabel}</span>
+        <ChevronDown size={13} class="shrink-0 text-[var(--color-text-muted)]" />
       </button>
     {/if}
 
@@ -155,7 +164,7 @@
       <div
         role="listbox"
         aria-label="Settings project scope"
-        class="absolute left-0 top-full z-50 mt-1.5 min-w-[220px] max-w-[300px] overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-0)] p-1 shadow-xl"
+        class="absolute left-0 top-full z-50 mt-1.5 min-w-[220px] max-w-[300px] max-h-[min(22rem,60vh)] overflow-y-auto overscroll-contain rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-0)] p-1 shadow-xl"
       >
         <button
           type="button"
@@ -227,7 +236,7 @@
       <div
         role="listbox"
         aria-label="Settings environment scope"
-        class="absolute left-0 top-full z-50 mt-1.5 min-w-[230px] max-w-[300px] overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-0)] p-1 shadow-xl"
+        class="absolute left-0 top-full z-50 mt-1.5 min-w-[230px] max-w-[300px] max-h-[min(22rem,60vh)] overflow-y-auto overscroll-contain rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-0)] p-1 shadow-xl"
       >
         {#each environmentOptions as env (env.id)}
           {@const isSelected = selectedEnvironment === env.id}
@@ -244,7 +253,7 @@
                 <span class="block truncate font-medium text-[var(--color-text-primary)]"
                   >{env.label}</span
                 >
-                <span class="block truncate text-[10px] text-[var(--color-text-muted)]"
+                <span class="block truncate text-[11px] text-[var(--color-text-muted)]"
                   >{env.subtitle}</span
                 >
               </span>

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, it, test } from 'vitest';
 import { OrderedSessionEventIngress } from './ordered-session-events';
 
 interface Event {
@@ -77,5 +77,44 @@ describe('OrderedSessionEventIngress', () => {
     const replacement = { sessionId: 'session-1', epoch: 2, sequence: 1, value: 'new branch' };
     expect(ingress.ingest(replacement)).toEqual([replacement]);
     expect(ingress.getCursor('session-1')).toEqual({ epoch: 2, sequence: 1 });
+  });
+});
+
+describe('pruned history (session.history_pruned)', () => {
+  const ev = (sequence: number, epoch = 1) => ({ sessionId: 's1', epoch, sequence, type: 'x' });
+
+  it('a fresh renderer jumps past pruned history without waiting on a gap or a reset', () => {
+    const ingress = new OrderedSessionEventIngress<ReturnType<typeof ev>>();
+    const skipped = ingress.skipPrunedHistory('s1', 1, 500);
+    expect(skipped).toEqual({ events: [], missed: false });
+    expect(ingress.ingestWithReplayRequest(ev(501))).toEqual({ events: [ev(501)] });
+    expect(ingress.getCursor('s1')).toEqual({ epoch: 1, sequence: 501 });
+  });
+
+  it('a live client that applied part of the epoch reports missed events', () => {
+    const ingress = new OrderedSessionEventIngress<ReturnType<typeof ev>>();
+    ingress.ingest(ev(1));
+    ingress.ingest(ev(2));
+    expect(ingress.skipPrunedHistory('s1', 1, 300).missed).toBe(true);
+    expect(ingress.ingest(ev(301))).toEqual([ev(301)]);
+  });
+
+  it('releases a pending tail that becomes contiguous and drops pruned pending copies', () => {
+    const ingress = new OrderedSessionEventIngress<ReturnType<typeof ev>>();
+    ingress.ingest(ev(1));
+    ingress.ingest(ev(5));
+    ingress.ingest(ev(11));
+    const { events, missed } = ingress.skipPrunedHistory('s1', 1, 10);
+    expect(missed).toBe(true);
+    expect(events).toEqual([ev(11)]);
+    expect(ingress.getCursor('s1')).toEqual({ epoch: 1, sequence: 11 });
+  });
+
+  it('a marker at or below the cursor changes nothing', () => {
+    const ingress = new OrderedSessionEventIngress<ReturnType<typeof ev>>();
+    ingress.ingest(ev(1));
+    ingress.ingest(ev(2));
+    expect(ingress.skipPrunedHistory('s1', 1, 2)).toEqual({ events: [], missed: false });
+    expect(ingress.getCursor('s1')).toEqual({ epoch: 1, sequence: 2 });
   });
 });

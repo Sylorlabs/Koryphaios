@@ -326,6 +326,8 @@ export function buildAntigravityHooks(input: AntigravityHooksInput): string {
     'PreToolUse',
     '--decision-vocabulary',
     'antigravity',
+    '--provider',
+    'antigravity',
   ].join(' ');
   return `${JSON.stringify(
     {

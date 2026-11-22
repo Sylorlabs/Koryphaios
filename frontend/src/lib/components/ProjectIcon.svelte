@@ -2,10 +2,12 @@
   import {
     resolveProjectIcon,
     automaticProjectIcon,
-    type ProjectIconColor,
+    segmentGraphemes,
     type ProjectIconSpec,
     type ProjectIdentity,
   } from '@koryphaios/shared';
+  import { projectIconAssetUrl } from '$lib/utils/project-icon-assets.svelte';
+  import { PROJECT_ICON_COLOR_CSS } from '$lib/utils/project-icon-colors';
 
   interface Props {
     identity: ProjectIdentity;
@@ -28,29 +30,30 @@
     oncontextmenu,
   }: Props = $props();
 
-  let imageFailed = $state(false);
   const resolvedIcon = $derived(resolveProjectIcon(identity, iconSpec ?? identity.icon));
-  const fallbackIcon = $derived.by(() => {
-    if (resolvedIcon.mode === 'image' || resolvedIcon.mode === 'color') {
-      return { ...automaticProjectIcon(identity), color: resolvedIcon.color };
-    }
-    return resolvedIcon;
-  });
+  const fallbackIcon = $derived(
+    resolvedIcon.mode === 'image'
+      ? { ...automaticProjectIcon(identity), color: resolvedIcon.color }
+      : resolvedIcon,
+  );
 
-  const colorTokens: Record<ProjectIconColor, string> = {
-    accent: 'var(--color-accent)',
-    blue: 'var(--color-info)',
-    green: 'var(--color-success)',
-    orange: 'var(--color-warning)',
-    pink: 'var(--color-pink, var(--color-accent))',
-    purple: 'var(--color-purple, var(--color-accent))',
-    teal: 'var(--color-teal, var(--color-info))',
-  };
-
-  const iconColor = $derived(colorTokens[resolvedIcon.color ?? fallbackIcon.color ?? 'accent']);
+  const iconColor = $derived(
+    PROJECT_ICON_COLOR_CSS[resolvedIcon.color ?? fallbackIcon.color ?? 'accent'],
+  );
   const customColor = $derived(resolvedIcon.customColor);
+  const isColorTile = $derived(resolvedIcon.mode === 'color');
   const iconShape = $derived(resolvedIcon.shape ?? 'rounded-square');
-  const showImage = $derived(resolvedIcon.mode === 'image' && Boolean(assetUrl) && !imageFailed);
+  // Asset routes require the Bearer token apiFetch adds, so the bytes arrive
+  // as a data: URL. Failure is tracked per resolved URL so a new URL retries.
+  const resolvedAssetUrl = $derived(
+    resolvedIcon.mode === 'image' ? projectIconAssetUrl(assetUrl) : null,
+  );
+  let failedAssetUrl = $state('');
+  const showImage = $derived(
+    resolvedIcon.mode === 'image' &&
+      Boolean(resolvedAssetUrl) &&
+      failedAssetUrl !== resolvedAssetUrl,
+  );
 
   // A monogram may mix letters and emoji ("K", "🚀", "🚀K"). Split the
   // graphemes so both parts can be drawn together instead of as one flat
@@ -66,48 +69,40 @@
     return { emoji: emoji.join(''), text: text.join('') };
   });
 
-  function segmentGraphemes(value: string): string[] {
-    const Segmenter = (
-      Intl as typeof Intl & {
-        Segmenter?: new (l?: string) => { segment(input: string): Iterable<{ segment: string }> };
-      }
-    ).Segmenter;
-    if (Segmenter) return Array.from(new Segmenter().segment(value), (part) => part.segment);
-    return Array.from(value);
-  }
-
   function markImageFailed() {
-    imageFailed = true;
+    failedAssetUrl = resolvedAssetUrl ?? '';
   }
 </script>
 
 <span
   class={`project-icon project-icon-shape-${iconShape} inline-flex shrink-0 items-center justify-center overflow-hidden font-semibold leading-none ${className}`}
-  style={`width: ${size}px; height: ${size}px; background: color-mix(in srgb, ${customColor ?? iconColor} 18%, var(--color-surface-3)); color: ${customColor ?? iconColor};`}
+  style={`width: ${size}px; height: ${size}px; ${iconShape === 'transparent' ? '' : isColorTile ? `background: ${customColor ?? iconColor};` : `background: color-mix(in srgb, ${customColor ?? iconColor} 18%, var(--color-surface-3));`} color: ${customColor ?? iconColor};`}
   data-testid="project-icon"
   data-project-id={identity.id}
   data-project-shape={iconShape}
   aria-hidden="true"
   oncontextmenu={oncontextmenu}
 >
-  {#if showImage}
-    <img src={assetUrl} alt="" width={size} height={size} onerror={markImageFailed} />
+  {#if isColorTile}
+    <!-- Color only: a solid clipped tile, no glyph. -->
+  {:else if showImage}
+    <img src={resolvedAssetUrl ?? ''} alt="" width={size} height={size} onerror={markImageFailed} />
   {:else if iconParts.emoji && iconParts.text}
     <span class="project-icon-stack" style={`gap: ${Math.max(1, Math.round(size * 0.04))}px;`}>
-      <span style={`font-size: ${Math.max(12, Math.round(size * 0.46))}px;`}
+      <span style={`font-size: ${Math.max(12, Math.round(size * (iconShape === 'transparent' ? 0.6 : 0.46)))}px;`}
         >{iconParts.emoji}</span
       >
-      <span style={`font-size: ${Math.max(9, Math.round(size * 0.26))}px;`}
+      <span style={`font-size: ${Math.max(9, Math.round(size * (iconShape === 'transparent' ? 0.34 : 0.26)))}px;`}
         >{iconParts.text}</span
       >
     </span>
-  {:else if fallbackIcon.mode === 'emoji'}
-    <span style={`font-size: ${Math.max(12, Math.round(size * 0.56))}px;`}
-      >{fallbackIcon.value}</span
+  {:else if iconParts.emoji && !iconParts.text}
+    <span style={`font-size: ${Math.max(12, Math.round(size * (iconShape === 'transparent' ? 0.72 : 0.56)))}px;`}
+      >{iconParts.emoji}</span
     >
   {:else}
-    <span style={`font-size: ${Math.max(11, Math.round(size * 0.38))}px;`}
-      >{fallbackIcon.value}</span
+    <span style={`font-size: ${Math.max(11, Math.round(size * (iconShape === 'transparent' ? 0.5 : 0.38)))}px;`}
+      >{iconParts.text}</span
     >
   {/if}
 
@@ -134,10 +129,20 @@
     border-radius: 0;
   }
 
+  .project-icon-shape-transparent {
+    border-radius: 0;
+    overflow: visible;
+    border: none;
+  }
+
   .project-icon img {
     width: 100%;
     height: 100%;
     object-fit: cover;
+  }
+
+  .project-icon-shape-transparent img {
+    object-fit: contain;
   }
 
   .project-icon-stack {

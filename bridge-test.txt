@@ -1,0 +1,2 @@
+Bridge write test — 2026-11-13
+If you can read this, the Write tool works.

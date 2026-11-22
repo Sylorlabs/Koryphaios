@@ -297,9 +297,8 @@ describe('FeedEntry tool output panel', () => {
     await fireEvent.click(toggle);
     expect(screen.getByText('Changes')).toBeTruthy();
     expect(screen.getByText('src/theme.ts')).toBeTruthy();
-    expect(container.querySelector('.minimal-file-indicator')).toHaveStyle({
-      justifyContent: 'flex-start',
-      gap: '8px',
+    expect(container.querySelector('.file-paths')).toHaveStyle({
+      flexDirection: 'column',
     });
     expect(container.querySelector('.removed')?.textContent).toContain('compact: false');
     expect(container.querySelector('.added')?.textContent).toContain('compact: true');
@@ -332,7 +331,7 @@ describe('FeedEntry tool output panel', () => {
         },
       ],
     } as FeedEntryLocal);
-    const group = screen.getByRole('button', { name: 'Explored 2 operations' });
+    const group = screen.getByRole('button', { name: 'Read theme.ts → searched “surface”' });
     expect(group).toHaveTextContent('30 ms');
     expect(group).toHaveAccessibleDescription('30 ms');
     await fireEvent.click(group);
@@ -625,9 +624,10 @@ describe('FeedEntry tool output panel', () => {
     const { container } = renderEntry({
       ...created, type: 'tool_group', metadata: {}, entries: [created],
     });
-    await fireEvent.click(screen.getByRole('button', { name: 'Explored 1 operation' }));
+    await fireEvent.click(container.querySelector('.tool-summary') as HTMLElement);
     expect(container.querySelector('[data-tool-icon="note"]')).toHaveAttribute('data-tool-intent', 'create');
-    await fireEvent.click(screen.getByRole('button', { name: 'Created note Research' }));
+    // A one-step group narrates the same words as its step; open the step itself.
+    await fireEvent.click(screen.getAllByRole('button', { name: 'Created note Research' }).at(-1)!);
     expect(screen.getByRole('region', { name: 'Tool input' })).toHaveTextContent('New findings');
     expect(screen.getByRole('region', { name: 'Tool response' })).toHaveTextContent('n1');
     expect(screen.getByRole('region', { name: 'Tool response' })).not.toHaveTextContent('New findings');

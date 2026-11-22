@@ -12,14 +12,14 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as platform from '../../runtime/platform';
-import { auditSkillEvalExecutionReadiness } from '../skill-eval-execution';
-import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
+import { auditSkillEvalExecutionReadiness } from '../../eval/skills/skill-eval-execution';
+import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
 import { loadV5SkillPackages } from '../skill-packages';
 import {
   SWIFT_SKILL_EVAL_MATERIALIZERS,
   SWIFT_SKILL_EVAL_SCORERS,
-} from '../skill-eval-swift-fixtures';
-import { runSwiftProgram, swiftRuntimeReadiness } from '../skill-eval-swift-runtime';
+} from '../../eval/skills/skill-eval-swift-fixtures';
+import { runSwiftProgram, swiftRuntimeReadiness } from '../../eval/skills/skill-eval-swift-runtime';
 
 const keys = [
   'DEVELOPER_DIR',

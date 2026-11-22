@@ -40,6 +40,7 @@ import {
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { resolveCompatibleMacSdk } from './desktop-mac-sdk';
 
 const SPAWN_SHELL = process.platform === 'win32';
 
@@ -329,6 +330,9 @@ async function main() {
     KORYPHAIOS_PORT: String(port),
     KORYPHAIOS_DATA_DIR: dataDir,
     KORYPHAIOS_FRONTEND_DIST: FRONTEND_DIST,
+    // The user is about to exercise real research runs; keep full debug logs.
+    LOG_LEVEL: process.env.LOG_LEVEL ?? 'debug',
+    LOG_DIR: join(dataDir, 'logs'),
   };
   // A local single-user install has no external KMS. Unless the operator
   // explicitly configured one (passphrase or provider), acknowledge the
@@ -440,6 +444,15 @@ async function main() {
   );
   const tauriConfigPath = join(tmpdir(), `kory-user-tauri-config-${process.pid}.json`);
   writeFileSync(tauriConfigPath, JSON.stringify({ build: { devUrl: actualUrl } }));
+  // Same macOS SDK workaround the dev launcher applies: a beta SDK whose .tbd
+  // stubs the Rust linker cannot parse otherwise fails the native shell build.
+  const sdkOverride = resolveCompatibleMacSdk();
+  if (sdkOverride) {
+    log(
+      `[user] Using SDKROOT=${sdkOverride.sdkPath} for the native shell (${sdkOverride.reason})`,
+      colors.yellow,
+    );
+  }
   const tauri = spawn('bun', ['run', 'tauri', 'dev', '--config', tauriConfigPath], {
     cwd: DESKTOP_DIR,
     env: {
@@ -447,6 +460,7 @@ async function main() {
       KORYPHAIOS_HOST: host,
       KORYPHAIOS_PORT: String(port),
       KORYPHAIOS_DESKTOP_DEV: '1',
+      ...(sdkOverride ? { SDKROOT: sdkOverride.sdkPath } : {}),
     },
     stdio: 'inherit',
     shell: SPAWN_SHELL,

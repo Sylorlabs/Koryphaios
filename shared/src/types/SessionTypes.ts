@@ -3,6 +3,7 @@
 
 import type { AgentRole, AgentStatus, WorkerDomain } from './AgentTypes';
 import type { ProviderName } from '../providers/ProviderNames';
+import type { AgentFallbackStep } from '../agent-controls';
 import type { CreatedGitWorkspace } from '../git-workspace';
 
 /**
@@ -11,14 +12,34 @@ import type { CreatedGitWorkspace } from '../git-workspace';
  * settings in `koryphaios.json`, so a chat that never touched a control keeps
  * the project default while a chat that did keeps its own choice.
  */
+export interface SessionManagerControl {
+  model: string;
+  provider?: ProviderName;
+  reasoningLevel?: string;
+  fallbacks: AgentFallbackStep[];
+}
+
 export interface SessionAgentOverrides {
   criticMode?: import('../critic-mode').CriticMode;
   /** Approval preset (yolo / guarded / accept-edits / ask / custom). */
   permissionMode?: 'yolo' | 'guarded' | 'edits' | 'ask' | 'custom';
   /** Delegation mode (Kory decides / solo / multi-agent). */
   agentExecutionMode?: 'auto' | 'single' | 'multi';
+  /** Worker isolation preset: Auto lets the manager decide per task (default),
+   *  Always forces worktrees, Never writes straight into this chat's checkout. */
+  worktreeMode?: 'auto' | 'always' | 'never';
+  /** Legacy boolean form of worktreeMode: true → 'auto', false → 'never'. */
+  worktreeIsolation?: boolean;
   /** Legacy compatibility input; criticMode takes precedence within this layer. */
   criticGateEnabled?: boolean;
+  /** Durable manager controls keyed by manager agent id. The live manager is
+   *  not special-cased in the record shape, so a peer manager can carry its own
+   *  route without adding a second chat-wide field. */
+  managerControls?: Record<string, SessionManagerControl>;
+  /** Skill names the agent blocked from the prompt feeder for this chat
+   *  (manage_skill_feeding). Durable so a block survives idle-runtime disposal
+   *  and app restarts; dies with the chat row when it is deleted or erased. */
+  blockedSkillFeeds?: string[];
 }
 
 export interface Session {

@@ -6,14 +6,14 @@ import {
   BROWSER_EVAL_CONSTANTS,
   BROWSER_SKILL_EVAL_MATERIALIZERS,
   BROWSER_SKILL_EVAL_SCORERS,
-} from '../skill-eval-browser-fixtures';
+} from '../../eval/skills/skill-eval-browser-fixtures';
 import {
   BUILTIN_SKILL_EVAL_MATERIALIZERS,
   BUILTIN_SKILL_EVAL_SCORERS,
-} from '../skill-eval-fixtures';
-import { auditSkillEvalExecutionReadiness } from '../skill-eval-execution';
-import { readJsonArtifact, writeFixtureFile } from '../skill-eval-fixture-helpers';
-import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
+} from '../../eval/skills/skill-eval-fixtures';
+import { auditSkillEvalExecutionReadiness } from '../../eval/skills/skill-eval-execution';
+import { readJsonArtifact, writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
+import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
 import { loadV5SkillPackages } from '../skill-packages';
 import { browserControlTest } from './browser-runtime-test-policy';
 

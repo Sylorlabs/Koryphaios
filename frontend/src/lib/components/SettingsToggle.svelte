@@ -24,7 +24,7 @@
   aria-checked={checked}
   {disabled}
   onclick={() => onchange?.()}
-  class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-1)] disabled:cursor-not-allowed disabled:opacity-50"
+  class="kory-toggle relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-1)] disabled:cursor-not-allowed disabled:opacity-50"
   style="border-color: {checked
     ? 'var(--color-accent)'
     : 'var(--color-border-bright)'}; background: {checked

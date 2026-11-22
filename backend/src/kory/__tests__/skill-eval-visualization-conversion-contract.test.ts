@@ -6,8 +6,8 @@ import { join } from 'node:path';
 import {
   DATA_PERFORMANCE_VISUALIZATION_MATERIALIZERS,
   DATA_PERFORMANCE_VISUALIZATION_SCORERS,
-} from '../skill-eval-data-performance-visualization-fixtures';
-import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
+} from '../../eval/skills/skill-eval-data-performance-visualization-fixtures';
+import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
 import { loadV5SkillPackages } from '../skill-packages';
 
 const roots: string[] = [];
@@ -204,16 +204,20 @@ describe('regional conversion public contract', () => {
   });
 
   test('requires per-row sample warnings and R8 resolution labels', async () => {
-    const { rows, artifact, write, score } = await fixture();
+    const { rows, write, score } = await fixture();
+    // An unmarked small row still fails.
     rows[0]!.lowSample = false;
     write();
     expect((await score()).passed).toBe(false);
     rows[0]!.lowSample = true;
-    rows[0]!.status = 'standard';
-    artifact.accessibility.textAlternative = 'Northeast and Southwest are low sample';
+    // A large row must not be marked low-sample: the flag is a per-row warning
+    // for the <50-sample regions, not a free-form label.
+    const large = rows.find((row) => (row.eligibleSessions as number) >= 50)!;
+    large.lowSample = true;
     write();
     expect((await score()).passed).toBe(false);
-    rows[0]!.status = 'low sample';
+    large.lowSample = false;
+    // The missing R8 label must stay unknown/unresolved, not invented.
     const unknown = rows.find((row) => row.region === null)!;
     unknown.label = 'Region 8';
     write();

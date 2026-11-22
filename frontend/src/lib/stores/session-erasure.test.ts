@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   apiFetch: vi.fn(),
-  unsubscribeFromSession: vi.fn(),
+  notifySessionUnsubscribed: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
 }));
@@ -13,8 +13,8 @@ vi.mock('$lib/utils/api-url', () => ({ apiUrl: (path: string) => path }));
 vi.mock('./toast.svelte', () => ({
   toastStore: { success: mocks.success, error: mocks.error },
 }));
-vi.mock('./websocket.svelte', () => ({
-  wsStore: { unsubscribeFromSession: mocks.unsubscribeFromSession },
+vi.mock('./session-subscriptions', () => ({
+  notifySessionUnsubscribed: mocks.notifySessionUnsubscribed,
 }));
 vi.mock('./project.svelte', () => ({
   projectStore: {

@@ -1,0 +1,249 @@
+SNAPSHOT HASH DOMAINS: beforeSha256/afterSha256 identify complete workspace entries, using SHA256("file\0" + original file bytes), or SHA256("symlink\0" + link target). Scorer artifactSHA and durable artifact hashes use SHA256(raw bytes), without that tag. These different hash domains must not be compared as if identical. Visible beforeText/afterText may be bounded or privacy-scrubbed; they are not the original complete bytes to hash.
+
+You are an independent blind semantic evaluator.
+Two anonymous agents attempted the same task. You are not told which agent received any extra guidance, and you must not infer or speculate about that hidden condition.
+Judge each artifact independently against the task contract. Do not reward matching wording, verbosity, or references to a skill. Focus on behavioral correctness, scope discipline, evidence quality, preservation of required facts, negative paths, recovery behavior, and whether completion claims are actually supported.
+The artifact bundle may include harness captured execution evidence and before and after file snapshots. Treat that as observed evidence, not as an agent claim.
+PUBLIC CANDIDATE CONTRACT SNAPSHOT is the exact task prompt and allowlisted README.md/contract.json bytes visible to the candidate before execution. Hashes are verified by the harness. If an entry says UNAVAILABLE, do not reconstruct it from the current repository or treat current files as historical proof.
+executionEvidence is supplied by the host after the agent attempt, including deterministic scorer observations. An agent can truthfully report that it could not run a check even when the host subsequently runs that check successfully. Those observations have different owners and times; that difference alone is not an integrity failure.
+Attribute a completion claim to its actual source. Penalize an agent for fabricated or overstated verification only when its finalOutput or authored file content makes that unsupported claim. Do not attribute a host scorer statement to the agent, require the agent to predict later host results, or treat an honest statement of limited access as contradicting later host verification.
+Host evidence is not infallible. If a scorer result conflicts with concrete artifact behavior, identify the disputed check and evidence as a possible verifier defect. Keep instrument uncertainty separate from an agent integrity finding; a score label alone does not prove the task succeeded.
+Treat afterText JSON strings as literal source bytes. Before claiming a URL or origin is malformed or Markdown-formatted, inspect and quote the exact JSON value. Do not transform plain URL strings into Markdown hyperlinks and then mistake that display formatting for the original value.
+The PAIR EXECUTION EVIDENCE section is evaluator owned evidence. It certifies that Artifact A and Artifact B are the two randomized arms of one matched same model comparison for this exact scenario and evaluation contract.
+When REQUIRED EVIDENCE or REQUIRED ARTIFACTS asks for paired skill and no skill run artifacts, paired evaluation evidence, or an equivalent pair label, the anonymous A and B bundle plus PAIR EXECUTION EVIDENCE satisfies the existence and provenance of that pair. Do not require either agent output to claim, create, or narrate evaluator owned pair evidence.
+The REQUIRED ARTIFACTS entries below are evaluation evidence labels for the overall harness. They are not literal filenames the agent was instructed to create unless the task itself says so. Judge whether the bundle substantively supplies the required evidence; do not require those exact label strings to appear.
+Routing and hierarchy selection are evaluated independently by the harness. Do not require the agent to narrate which skill was selected or provide meta level specialist selection rationale when the artifact itself respects the requested scope and neighboring responsibility boundaries.
+Never lower passed, quality, verification, or integrity because an artifact omits hierarchy narration, specialist selection rationale, skill names, or evaluator owned paired A/B evidence. If a draft criticism relies on one of those omissions, remove that criticism and score only the concrete task behavior and evidence.
+If a REQUIRED EVIDENCE or REQUIRED ARTIFACTS label describes routing, hierarchy selection, specialist selection, or paired skill versus no skill provenance, treat that meta level requirement as evaluator owned. The harness evidence in this prompt is authoritative for those concerns.
+When choosing preference A, B, or tie, compare concrete task behavior and evidence only. Evaluator-owned hierarchy or specialist narration, skill-guidance scope, filenames, and paired-run provenance must not affect the preference comparison.
+Treat genuinely missing task evidence as missing. Do not assume unshown commands or tests passed.
+Return JSON only, with this exact shape:
+{"artifactA":{"passed":true,"quality":0.0,"verification":0.0,"integrityFailure":false,"evidence":["..."]},"artifactB":{"passed":true,"quality":0.0,"verification":0.0,"integrityFailure":false,"evidence":["..."]},"preference":"A","rationale":["..."]}
+
+TASK
+Diagnose a SQLite WAL-mode desktop app where periodic checkpoints block a writer and users see intermittent “database is locked.” Confirm journal/busy-timeout/checkpoint configuration, identify long read transactions, bound transaction lifetimes, and choose checkpoint/retry behavior appropriate to the embedded workload. Verify concurrent reader/writer, long reader, crash/reopen, WAL growth, and no lost committed writes.
+
+FALSIFIABLE CHECKS
+[
+  {
+    "id": "scope-and-hierarchy",
+    "assertion": "The result must establish the actual sqlite-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=relational-data-modeling; near-neighbor=mysql-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+  },
+  {
+    "id": "operating-contract",
+    "assertion": "Treat SQLite as an embedded database with file and process semantics, not a tiny network server."
+  },
+  {
+    "id": "execution-invariant",
+    "assertion": "Transaction and checkpoint policy follows actual SQLite locking/WAL semantics; retries are bounded and committed data remains durable across contention/reopen."
+  },
+  {
+    "id": "verification-discipline",
+    "assertion": "Exercise concurrent readers/writers, crash/reopen behavior where risk warrants it, migration from real prior schemas, foreign-key enforcement, WAL checkpointing, and backup/restore or file replacement flows."
+  },
+  {
+    "id": "anti-pattern-resistance",
+    "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not open unbounded connections, assume foreign keys are always enabled, copy live database files casually, or use network-filesystem deployments without validated locking semantics."
+  },
+  {
+    "id": "evidence-and-uncertainty",
+    "assertion": "Every material completion claim must map to observable evidence (sqlite-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+  }
+]
+
+REQUIRED EVIDENCE
+[
+  "wal-busy-checkpoint scenario evidence",
+  "sqlite-engineering decision and boundary evidence",
+  "Hierarchy boundary and selected specialist rationale",
+  "hierarchy boundary and selected specialist rationale",
+  "paired skill/no-skill run artifacts",
+  "explicit unavailable, simulated, inferred, or stale evidence labels"
+]
+
+REQUIRED ARTIFACTS
+[
+  "sqlite-engineering-individual-scenario-1-result",
+  "sqlite-engineering-individual-scenario-1-verification",
+  "sqlite-engineering-individual-scenario-1-paired-evaluation"
+]
+
+PUBLIC CANDIDATE CONTRACT SNAPSHOT
+{
+  "taskPrompt": {
+    "available": true,
+    "sha256": "56a5f3d6b4214aee4476bbf232328ed5ae87454c4cf81169a5a708cbfbff328f",
+    "byteLength": 427,
+    "text": "Diagnose a SQLite WAL-mode desktop app where periodic checkpoints block a writer and users see intermittent “database is locked.” Confirm journal/busy-timeout/checkpoint configuration, identify long read transactions, bound transaction lifetimes, and choose checkpoint/retry behavior appropriate to the embedded workload. Verify concurrent reader/writer, long reader, crash/reopen, WAL growth, and no lost committed writes."
+  },
+  "fixtureFiles": {
+    "README.md": {
+      "available": true,
+      "sha256": "a19fa0327d9623f88ffd2b67d83b4dc7a2e7d208dd8a636be6dd3f59a2ab6628",
+      "byteLength": 715,
+      "text": "# SQLite WAL contention fixture\n\nRepair `open_db`/`read_snapshot` for the embedded desktop workload. Keep WAL; enable foreign keys; set bounded busy timeout; choose an explicit auto/manual checkpoint policy and document it. Read snapshots should materialize the required rows and end the transaction before returning data so UI/client work cannot hold a read transaction indefinitely. Keep connection count bounded by ownership.\n\nWrite `.kory-eval/sqlite-wal.json` with SQLite runtime version, journal/busy/checkpoint settings, concurrent reader/writer + long-reader result, bounded retry, WAL-size/checkpoint observations, crash/reopen committed-write proof, file/local-only boundary and MySQL neighbor hierarchy.\n"
+    },
+    "contract.json": {
+      "available": false,
+      "sha256": null,
+      "byteLength": 0,
+      "text": null,
+      "reason": "not-present"
+    }
+  }
+}
+
+PAIR EXECUTION EVIDENCE
+{
+  "matchedPair": true,
+  "sameScenario": true,
+  "sameProviderModel": true,
+  "sameHarness": true,
+  "sameEvaluationContract": true,
+  "sameMaterializer": true,
+  "sameDeterministicScorer": true,
+  "randomizedArmIdentity": true,
+  "evidenceOwner": "evaluation-harness"
+}
+
+ARTIFACT A
+{
+  "finalOutput": "Implemented the WAL fixes and recorded runtime evidence in [.kory-eval/sqlite-wal.json](<redacted-path>).\n\n[db.py](<redacted-path>) now enables and verifies WAL, enables foreign keys, sets a 5-second busy timeout, and explicitly configures passive auto-checkpointing at 1,000 pages. `read_snapshot` materializes its rows and ends the transaction before returning. [README.md](<redacted-path>) documents checkpoint, retry, and connection-ownership guidance.\n\nLocal checks on SQLite 3.51.0 confirmed a writer committed during a long read, the snapshot returned without an open transaction, a forced busy event succeeded on the bounded retry, passive checkpointed 947 frames, and a committed write survived process exit and reopen. Python compilation, JSON parsing, and a snapshot smoke check passed. The WAL file remained allocated after checkpoint, as expected.",
+  "executionEvidence": [
+    "Codex CLI completed successfully in 98094ms",
+    "SQLite WAL runtime config: pass",
+    "contention/reopen evidence: present",
+    "wal config/reopen pass"
+  ],
+  "publicContract": {
+    "taskPrompt": {
+      "available": true,
+      "sha256": "56a5f3d6b4214aee4476bbf232328ed5ae87454c4cf81169a5a708cbfbff328f",
+      "byteLength": 427,
+      "text": "Diagnose a SQLite WAL-mode desktop app where periodic checkpoints block a writer and users see intermittent “database is locked.” Confirm journal/busy-timeout/checkpoint configuration, identify long read transactions, bound transaction lifetimes, and choose checkpoint/retry behavior appropriate to the embedded workload. Verify concurrent reader/writer, long reader, crash/reopen, WAL growth, and no lost committed writes."
+    },
+    "fixtureFiles": {
+      "README.md": {
+        "available": true,
+        "sha256": "a19fa0327d9623f88ffd2b67d83b4dc7a2e7d208dd8a636be6dd3f59a2ab6628",
+        "byteLength": 715,
+        "text": "# SQLite WAL contention fixture\n\nRepair `open_db`/`read_snapshot` for the embedded desktop workload. Keep WAL; enable foreign keys; set bounded busy timeout; choose an explicit auto/manual checkpoint policy and document it. Read snapshots should materialize the required rows and end the transaction before returning data so UI/client work cannot hold a read transaction indefinitely. Keep connection count bounded by ownership.\n\nWrite `.kory-eval/sqlite-wal.json` with SQLite runtime version, journal/busy/checkpoint settings, concurrent reader/writer + long-reader result, bounded retry, WAL-size/checkpoint observations, crash/reopen committed-write proof, file/local-only boundary and MySQL neighbor hierarchy.\n"
+      },
+      "contract.json": {
+        "available": false,
+        "sha256": null,
+        "byteLength": 0,
+        "text": null,
+        "reason": "not-present"
+      }
+    }
+  },
+  "changes": [
+    {
+      "path": ".kory-eval/sqlite-wal.json",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "6ab973970ed15a0d0fa63d67939a6f552f8c4e0705678944edf1b34b010948df",
+      "afterText": "{\n  \"runtime_version\": \"3.51.0\",\n  \"journal_mode\": \"wal\",\n  \"busy_timeout_ms\": 5000,\n  \"foreign_keys\": true,\n  \"wal_autocheckpoint_pages\": 1000,\n  \"checkpoint_policy\": \"SQLite passive auto-checkpoint every 1000 pages; optional PASSIVE checkpoint during idle maintenance; no blocking checkpoint on writer/UI path\",\n  \"concurrent_reader_writer\": {\n    \"writer_committed\": true,\n    \"writer_elapsed_ms\": 0.02,\n    \"long_reader_snapshot_count\": 1\n  },\n  \"long_reader\": {\n    \"writer_completed_while_reader_open\": true,\n    \"snapshot_reader_finished\": true,\n    \"read_snapshot_transaction_open_on_return\": false\n  },\n  \"bounded_retry\": {\n    \"policy\": \"up to 3 retries after initial attempt; exponential backoff with jitter recommended\",\n    \"attempts_observed\": 2,\n    \"busy_errors_observed\": 1,\n    \"result\": \"committed\",\n    \"note\": \"Busy timeout and bounded retry backoff are both capped; retries apply to the whole transaction.\"\n  },\n  \"wal_observation\": {\n    \"wal_bytes_before_passive_checkpoint\": 3901672,\n    \"passive_checkpoint_result_busy_log_checkpoint\": [\n      0,\n      947,\n      947\n    ],\n    \"wal_bytes_after_passive_checkpoint\": 3901672,\n    \"note\": \"WAL file may remain allocated after checkpoint; page reuse is expected.\"\n  },\n  \"crash_reopen\": {\n    \"committed_write_survived_process_exit\": true,\n    \"earlier_committed_write_survived\": true\n  },\n  \"local_file_boundary\": \"Single-machine local filesystem database file only; do not share SQLite WAL over a network filesystem or use as a multi-host database.\",\n  \"mysql_neighbor_hierarchy\": \"When sustained concurrent writers, multi-host access, centralized backup/operations, or server-side availability become requirements, move to MySQL (or another client/server RDBMS); SQLite is appropriate for this embedded single-machine workload.\",\n  \"no_lost_committed_writes\": true\n}\n"
+    },
+    {
+      "path": "README.md",
+      "change": "modified",
+      "beforeSha256": "f6d6bab16975db963734edbd9e51b5ce7ee0740e588d3c450df382d5a86c98f6",
+      "afterSha256": "709c28d6a7843ccf0f9b91dabc7b5b47bf5d87628f1dfa25dcbf2334a5df3132",
+      "beforeText": "# SQLite WAL contention fixture\n\nRepair `open_db`/`read_snapshot` for the embedded desktop workload. Keep WAL; enable foreign keys; set bounded busy timeout; choose an explicit auto/manual checkpoint policy and document it. Read snapshots should materialize the required rows and end the transaction before returning data so UI/client work cannot hold a read transaction indefinitely. Keep connection count bounded by ownership.\n\nWrite `.kory-eval/sqlite-wal.json` with SQLite runtime version, journal/busy/checkpoint settings, concurrent reader/writer + long-reader result, bounded retry, WAL-size/checkpoint observations, crash/reopen committed-write proof, file/local-only boundary and MySQL neighbor hierarchy.\n",
+      "afterText": "# SQLite WAL contention fixture\n\nRepair `open_db`/`read_snapshot` for the embedded desktop workload. Keep WAL; enable foreign keys; set bounded busy timeout; choose an explicit auto/manual checkpoint policy and document it. Read snapshots should materialize the required rows and end the transaction before returning data so UI/client work cannot hold a read transaction indefinitely. Keep connection count bounded by ownership.\n\nWrite `.kory-eval/sqlite-wal.json` with SQLite runtime version, journal/busy/checkpoint settings, concurrent reader/writer + long-reader result, bounded retry, WAL-size/checkpoint observations, crash/reopen committed-write proof, file/local-only boundary and MySQL neighbor hierarchy.\n\nThe connection uses a 5-second busy timeout (also the sqlite3 connection timeout), foreign keys, WAL, and SQLite's passive auto-checkpoint at 1,000 pages. This embedded workload uses auto-checkpointing so commits do not synchronously force a blocking FULL checkpoint. If needed, the application may run `PRAGMA wal_checkpoint(PASSIVE)` during idle maintenance; do not run blocking `FULL`/`RESTART`/`TRUNCATE` checkpoints on the UI or writer path. `read_snapshot` fetches all rows and commits before returning, bounding the read transaction to the query/materialization. Keep a bounded number of long-lived connections, typically one per database worker, and close them on worker shutdown.\n\nThe busy timeout is a bounded first wait, not a retry policy. On `SQLITE_BUSY`/`SQLITE_LOCKED`, retry only the entire idempotent transaction, with a small bounded exponential backoff and jitter (for example 3 attempts after the initial attempt); never retry a partial transaction or hide exhausted failures. This is suitable for occasional brief contention in a local embedded database, not sustained multi-process write contention.\n"
+    },
+    {
+      "path": "src/__pycache__/__init__.cpython-315.pyc",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "80701fdf1227518bdc44c1813584c2b43569bd1246ca546c6dc1eea0337020e1"
+    },
+    {
+      "path": "src/__pycache__/db.cpython-315.pyc",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8d6174a1bff31b5e54fb4d9341fa9771fde48c1fcd71c453dedd57e4b877c69f"
+    },
+    {
+      "path": "src/db.py",
+      "change": "modified",
+      "beforeSha256": "50282c6acaa3c3054224b1aa04b0fd926832816214608ad2091531128e1dc339",
+      "afterSha256": "7e0aad966a1e7ffd368374787af94b7c20289d28ff62f242b2a457cc36d70bc7",
+      "beforeText": "import sqlite3\nfrom contextlib import contextmanager\n\ndef open_db(path: str):\n    db=sqlite3.connect(path, timeout=0.0, isolation_level=None)\n    db.execute('PRAGMA journal_mode=WAL')\n    # BUG: no busy_timeout/foreign_keys/checkpoint policy.\n    return db\n\n@contextmanager\ndef read_snapshot(db):\n    db.execute('BEGIN')\n    try:\n        yield db.execute('SELECT id,value FROM items ORDER BY id')\n    finally:\n        # BUG: caller may hold cursor/transaction arbitrarily; transaction is not bounded before yielding results.\n        db.execute('COMMIT')\n",
+      "afterText": "import sqlite3\nfrom contextlib import contextmanager\n\n\n# Embedded desktop workload: keep lock waits short and predictable, then let\n# SQLite's passive auto-checkpoint run without making the committing writer\n# wait for readers. A separate maintenance path can explicitly checkpoint when\n# the app is idle. WAL databases should be owned by a small, bounded set of\n# connections (normally one per worker), not opened per UI operation.\nBUSY_TIMEOUT_MS = 5_000\nWAL_AUTOCHECKPOINT_PAGES = 1_000\n\n\ndef open_db(path: str):\n    db = sqlite3.connect(\n        path,\n        timeout=BUSY_TIMEOUT_MS / 1_000,\n        isolation_level=None,\n    )\n    db.execute('PRAGMA busy_timeout = 5000')\n    db.execute('PRAGMA foreign_keys = ON')\n    mode = db.execute('PRAGMA journal_mode = WAL').fetchone()[0]\n    if mode.lower() != 'wal':\n        db.close()\n        raise RuntimeError(f'Could not enable WAL mode (got {mode!r})')\n    # SQLite's default auto-checkpoint is passive. State it explicitly and\n    # retain it: the writer is not blocked waiting for readers to finish.\n    db.execute(f'PRAGMA wal_autocheckpoint = {WAL_AUTOCHECKPOINT_PAGES}')\n    return db\n\n\ndef read_snapshot(db):\n    \"\"\"Return a materialized snapshot, closing the read transaction first.\n\n    The returned rows are detached from SQLite, so rendering or other client\n    work cannot keep a WAL read mark alive and prevent checkpoint progress.\n    \"\"\"\n    db.execute('BEGIN')\n    try:\n        rows = db.execute('SELECT id,value FROM items ORDER BY id').fetchall()\n        db.execute('COMMIT')\n        return rows\n    except BaseException:\n        if db.in_transaction:\n            db.execute('ROLLBACK')\n        raise\n"
+    }
+  ]
+}
+
+ARTIFACT B
+{
+  "finalOutput": "Implemented the SQLite WAL contention fixes in [src/db.py](<redacted-path>) and documented the connection and checkpoint policy in [README.md](<redacted-path>). `read_snapshot` materializes rows and commits before returning them; `run_write` uses `BEGIN IMMEDIATE` with a bounded retry policy. The connection enables WAL and foreign keys, sets a 2-second busy timeout, `synchronous=NORMAL`, and the 1000-page auto-checkpoint threshold. A passive checkpoint helper is available for maintenance.\n\nVerification on SQLite 3.51.0 passed: 31 writes committed during 40 concurrent reader snapshots; a delayed snapshot caller held no read transaction; a pinned raw reader limited passive checkpoint progress from 170 frames to 34 until it closed; crash/reopen retained the committed write and passed `integrity_check`. Results and WAL observations are recorded in [.kory-eval/sqlite-wal.json](<redacted-path>). `python3 -m compileall -q src` also passed.\n\nOne limitation surfaced: the bounded retry test took about 4.2 seconds because each attempt can wait for the full 2-second SQLite timeout. The recorded WAL file size remained unchanged after checkpointing; SQLite may reuse the file rather than shrink it. Network filesystem locking was not exercised.",
+  "executionEvidence": [
+    "Codex CLI completed successfully in 123305ms",
+    "SQLite WAL runtime config: pass",
+    "contention/reopen evidence: present",
+    "wal config/reopen pass"
+  ],
+  "publicContract": {
+    "taskPrompt": {
+      "available": true,
+      "sha256": "56a5f3d6b4214aee4476bbf232328ed5ae87454c4cf81169a5a708cbfbff328f",
+      "byteLength": 427,
+      "text": "Diagnose a SQLite WAL-mode desktop app where periodic checkpoints block a writer and users see intermittent “database is locked.” Confirm journal/busy-timeout/checkpoint configuration, identify long read transactions, bound transaction lifetimes, and choose checkpoint/retry behavior appropriate to the embedded workload. Verify concurrent reader/writer, long reader, crash/reopen, WAL growth, and no lost committed writes."
+    },
+    "fixtureFiles": {
+      "README.md": {
+        "available": true,
+        "sha256": "a19fa0327d9623f88ffd2b67d83b4dc7a2e7d208dd8a636be6dd3f59a2ab6628",
+        "byteLength": 715,
+        "text": "# SQLite WAL contention fixture\n\nRepair `open_db`/`read_snapshot` for the embedded desktop workload. Keep WAL; enable foreign keys; set bounded busy timeout; choose an explicit auto/manual checkpoint policy and document it. Read snapshots should materialize the required rows and end the transaction before returning data so UI/client work cannot hold a read transaction indefinitely. Keep connection count bounded by ownership.\n\nWrite `.kory-eval/sqlite-wal.json` with SQLite runtime version, journal/busy/checkpoint settings, concurrent reader/writer + long-reader result, bounded retry, WAL-size/checkpoint observations, crash/reopen committed-write proof, file/local-only boundary and MySQL neighbor hierarchy.\n"
+      },
+      "contract.json": {
+        "available": false,
+        "sha256": null,
+        "byteLength": 0,
+        "text": null,
+        "reason": "not-present"
+      }
+    }
+  },
+  "changes": [
+    {
+      "path": ".kory-eval/sqlite-wal.json",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "319c92fa4c13cb00e67770ed6188b9d6b25632023f381b8a5147de495fa80534",
+      "afterText": "{\n  \"sqlite_runtime_version\": \"3.51.0\",\n  \"connection_pragmas\": {\n    \"journal_mode\": \"wal\",\n    \"busy_timeout\": 2000,\n    \"wal_autocheckpoint\": 1000,\n    \"foreign_keys\": 1,\n    \"synchronous\": 1\n  },\n  \"concurrent_reader_writer\": {\n    \"result\": \"passed\",\n    \"writes_committed\": 31,\n    \"reader_snapshots\": 40\n  },\n  \"long_reader\": {\n    \"result\": \"passed\",\n    \"snapshot_transaction_ended_before_client_delay\": true,\n    \"wal_bytes_while_reader_open\": 700432,\n    \"passive_checkpoint_while_reader_open\": [\n      0,\n      170,\n      34\n    ],\n    \"passive_checkpoint_after_reader_closed\": [\n      0,\n      170,\n      170\n    ],\n    \"wal_bytes_after_checkpoint\": 700432\n  },\n  \"bounded_retry\": {\n    \"result\": \"passed\",\n    \"attempts\": 2,\n    \"elapsed_seconds\": 4.185,\n    \"write_timed_out_without_commit\": true\n  },\n  \"crash_reopen\": {\n    \"result\": \"passed\",\n    \"committed_write_survived\": true,\n    \"integrity_check\": \"ok\"\n  },\n  \"deployment_boundary\": \"local same-host filesystem only; network filesystem locking not exercised\",\n  \"mysql_neighbor_hierarchy\": \"This fixture is a SQLite embedded-storage implementation; MySQL is a separate client/server relational-database neighbor in the broader taxonomy, not an interchangeable SQLite mode.\"\n}\n"
+    },
+    {
+      "path": "README.md",
+      "change": "modified",
+      "beforeSha256": "f6d6bab16975db963734edbd9e51b5ce7ee0740e588d3c450df382d5a86c98f6",
+      "afterSha256": "4b16b5931655b11fcb3388aef1458b15f8d4b31bb8fcd6e551f6a7d3084ae6c5",
+      "beforeText": "# SQLite WAL contention fixture\n\nRepair `open_db`/`read_snapshot` for the embedded desktop workload. Keep WAL; enable foreign keys; set bounded busy timeout; choose an explicit auto/manual checkpoint policy and document it. Read snapshots should materialize the required rows and end the transaction before returning data so UI/client work cannot hold a read transaction indefinitely. Keep connection count bounded by ownership.\n\nWrite `.kory-eval/sqlite-wal.json` with SQLite runtime version, journal/busy/checkpoint settings, concurrent reader/writer + long-reader result, bounded retry, WAL-size/checkpoint observations, crash/reopen committed-write proof, file/local-only boundary and MySQL neighbor hierarchy.\n",
+      "afterText": "# SQLite WAL contention fixture\n\nThis module is for a local desktop database. WAL mode allows readers alongside\none writer, but SQLite still serializes writers. Keep one caller-owned\nconnection per active operation/worker and close it when that work ends; do\nnot create an unbounded pool. WAL's shared memory and file locking require\nsame-host filesystem semantics, so this setup is not supported on a network\nshare or for multi-host database access.\n\n`open_db` explicitly enables foreign keys, uses a 2 second busy timeout,\n`synchronous=NORMAL`, and configures SQLite's automatic WAL checkpoint at its\ndefault 1000-page threshold. The automatic policy is appropriate for this\nembedded workload: it avoids a synchronous checkpoint after each commit.\nWhen convenient, the app may call `checkpoint_passive` for maintenance; a\nPASSIVE checkpoint does not wait for readers or writers and may leave frames\nbehind if an older reader still needs them. Avoid FULL, RESTART, or TRUNCATE\ncheckpoints on the foreground path because they can wait on active work.\n\nUse `read_snapshot` to fetch and materialize rows inside a short read\ntransaction. It commits before yielding the list, so rendering or other client\nwork cannot keep a WAL read mark open. Use `run_write` for short write\ntransactions: it acquires the writer slot with `BEGIN IMMEDIATE`, permits a\nbounded busy wait, then retries busy/locked errors at most twice with a small\nbackoff. The callback must contain only database work; exhausted contention\nis raised to the caller.\n\nThe SQLite connection timeout and `PRAGMA busy_timeout` are both set to 2000\nms. SQLite exposes the effective library version through Python's\n`sqlite3.sqlite_version`; inspect `journal_mode`, `busy_timeout`,\n`wal_autocheckpoint`, `foreign_keys`, and `synchronous` per connection when\ndiagnosing deployment-specific behavior.\n"
+    },
+    {
+      "path": "src/__pycache__/__init__.cpython-315.pyc",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "c75cb352c1538a1f62e04b573f066874c4d736b7c1f20b4a90e0a0e141c5be52"
+    },
+    {
+      "path": "src/__pycache__/db.cpython-315.pyc",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "f215cec9e7e020678384f8ee228c33af1584696f9b46e078be6aeef45cf7e359"
+    },
+    {
+      "path": "src/db.py",
+      "change": "modified",
+      "beforeSha256": "50282c6acaa3c3054224b1aa04b0fd926832816214608ad2091531128e1dc339",
+      "afterSha256": "7f54eb7ccd0d30fa32bac68a9748565d9bdce7dc8f7b15655c4d3ba500f93940",
+      "beforeText": "import sqlite3\nfrom contextlib import contextmanager\n\ndef open_db(path: str):\n    db=sqlite3.connect(path, timeout=0.0, isolation_level=None)\n    db.execute('PRAGMA journal_mode=WAL')\n    # BUG: no busy_timeout/foreign_keys/checkpoint policy.\n    return db\n\n@contextmanager\ndef read_snapshot(db):\n    db.execute('BEGIN')\n    try:\n        yield db.execute('SELECT id,value FROM items ORDER BY id')\n    finally:\n        # BUG: caller may hold cursor/transaction arbitrarily; transaction is not bounded before yielding results.\n        db.execute('COMMIT')\n",
+      "afterText": "\"\"\"SQLite helpers for the app's local, embedded database.\n\nConnections are owned by their caller (normally one connection per worker or\nUI operation) and should be closed promptly. WAL is intended for local files\non a filesystem with reliable same-host SQLite locking; it is not for a\nnetwork share or multi-host access.\n\"\"\"\n\nimport sqlite3\nimport time\nfrom contextlib import contextmanager\n\n\nBUSY_TIMEOUT_MS = 2_000\nWRITE_RETRY_ATTEMPTS = 2\nWRITE_RETRY_DELAY_SECONDS = 0.025\n# SQLite's default WAL auto-checkpoint is 1000 pages. Keeping that policy lets\n# SQLite checkpoint at a moderate threshold without adding a checkpoint to\n# every foreground commit. PASSIVE maintenance checkpoints never wait for\n# readers or writers and can be run when the app is otherwise idle.\nWAL_AUTOCHECKPOINT_PAGES = 1_000\n\n\ndef open_db(path: str) -> sqlite3.Connection:\n    \"\"\"Open one caller-owned connection with consistent concurrency settings.\"\"\"\n    db = sqlite3.connect(\n        path,\n        timeout=BUSY_TIMEOUT_MS / 1_000,\n        isolation_level=None,\n    )\n    try:\n        db.execute(f\"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}\")\n        db.execute(\"PRAGMA foreign_keys=ON\")\n        mode = db.execute(\"PRAGMA journal_mode=WAL\").fetchone()[0]\n        if str(mode).lower() != \"wal\":\n            raise sqlite3.OperationalError(\n                f\"Could not enable WAL journal mode (got {mode!r})\"\n            )\n        db.execute(f\"PRAGMA wal_autocheckpoint={WAL_AUTOCHECKPOINT_PAGES}\")\n        db.execute(\"PRAGMA synchronous=NORMAL\")\n        return db\n    except BaseException:\n        db.close()\n        raise\n\n\n@contextmanager\ndef read_snapshot(db: sqlite3.Connection):\n    \"\"\"Yield a materialized snapshot, with its read transaction already closed.\n\n    The returned list contains ``(id, value)`` rows. The context manager shape\n    is retained for callers, but UI work inside the context cannot pin a WAL\n    read mark or delay checkpoints.\n    \"\"\"\n    db.execute(\"BEGIN\")\n    try:\n        rows = db.execute(\"SELECT id,value FROM items ORDER BY id\").fetchall()\n    except BaseException:\n        db.execute(\"ROLLBACK\")\n        raise\n    db.execute(\"COMMIT\")\n    yield rows\n\n\ndef run_write(db: sqlite3.Connection, operation, *, attempts=WRITE_RETRY_ATTEMPTS):\n    \"\"\"Run a short write transaction, retrying bounded SQLITE_BUSY failures.\n\n    The operation receives the connection and must not perform UI, filesystem,\n    or other slow work while its transaction is open. Non-busy errors and\n    exhausted contention are returned to the caller.\n    \"\"\"\n    for attempt in range(attempts):\n        try:\n            db.execute(\"BEGIN IMMEDIATE\")\n            result = operation(db)\n            db.execute(\"COMMIT\")\n            return result\n        except sqlite3.OperationalError as exc:\n            if db.in_transaction:\n                db.execute(\"ROLLBACK\")\n            if not _is_busy(exc) or attempt + 1 >= attempts:\n                raise\n            time.sleep(WRITE_RETRY_DELAY_SECONDS * (attempt + 1))\n        except BaseException:\n            if db.in_transaction:\n                db.execute(\"ROLLBACK\")\n            raise\n    raise AssertionError(\"unreachable\")\n\n\ndef _is_busy(exc: sqlite3.OperationalError) -> bool:\n    code = getattr(exc, \"sqlite_errorcode\", None)\n    if code is not None:\n        # Extended SQLite result codes retain the base result in the low byte.\n        return (code & 0xFF) in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)\n    return \"locked\" in str(exc).lower() or \"busy\" in str(exc).lower()\n\n\ndef checkpoint_passive(db: sqlite3.Connection):\n    \"\"\"Attempt a nonblocking passive WAL checkpoint; returns SQLite counters.\"\"\"\n    return db.execute(\"PRAGMA wal_checkpoint(PASSIVE)\").fetchone()\n"
+    }
+  ]
+}

@@ -27,12 +27,12 @@ describe('custom provider onboarding hardening', () => {
     );
   });
 
-  test('never substitutes a different AgentRouter origin during normalization', () => {
-    expect(normalizeCustomProviderBaseUrl('https://agentrouter.org/v1')).toBe(
-      'https://agentrouter.org/v1',
+  test('never substitutes a different origin during normalization', () => {
+    expect(normalizeCustomProviderBaseUrl('https://api.gateway.example.com/v1')).toBe(
+      'https://api.gateway.example.com/v1',
     );
-    expect(normalizeCustomProviderBaseUrl('https://co.agentrouter.org/v1')).toBe(
-      'https://co.agentrouter.org/v1',
+    expect(normalizeCustomProviderBaseUrl('https://eu.gateway.example.com/v1')).toBe(
+      'https://eu.gateway.example.com/v1',
     );
   });
 

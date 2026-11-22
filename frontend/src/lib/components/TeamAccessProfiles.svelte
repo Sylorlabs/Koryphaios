@@ -284,13 +284,11 @@
 </script>
 
 {#if policy && selectedTier}
-  <div
-    class="rounded-3xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-6 space-y-6"
-  >
+  <div class="space-y-6">
     <div class="flex flex-wrap items-start justify-between gap-4">
       <div>
-        <h4 class="text-sm font-bold text-[var(--color-text-primary)]">Access profiles</h4>
-        <p class="mt-1 text-[11px] text-[var(--color-text-muted)]">
+        <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Access profiles</h4>
+        <p class="mt-1 text-xs text-[var(--color-text-muted)]">
           Profiles are enforced at the relay before data or prompts reach a client.
         </p>
       </div>
@@ -301,13 +299,13 @@
         <button
           type="button"
           onclick={() => (advanced = false)}
-          class="rounded-lg px-3 py-1.5 text-[10px] font-bold {advanced
+          class="rounded-lg px-3 py-1.5 text-[11px] font-bold {advanced
             ? 'text-[var(--color-text-muted)]'
             : 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)]'}">Basic</button
         ><button
           type="button"
           onclick={() => (advanced = true)}
-          class="rounded-lg px-3 py-1.5 text-[10px] font-bold {advanced
+          class="rounded-lg px-3 py-1.5 text-[11px] font-bold {advanced
             ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)]'
             : 'text-[var(--color-text-muted)]'}">Advanced</button
         >
@@ -324,7 +322,7 @@
           type="button"
           onclick={addTier}
           disabled={!newTierName.trim()}
-          class="flex items-center gap-2 rounded-xl bg-[var(--color-accent)] px-3 py-2 text-xs font-bold text-[var(--color-surface-0)] disabled:opacity-40"
+          class="flex items-center gap-2 rounded-xl bg-[var(--color-accent)] px-3 py-2 text-xs font-bold text-[var(--color-on-accent)] disabled:cursor-not-allowed disabled:bg-[var(--color-surface-3)] disabled:text-[var(--color-text-muted)] disabled:shadow-none"
           ><Plus size={14} /> Create profile</button
         ><button
           type="button"
@@ -360,7 +358,7 @@
             ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10'
             : 'border-[var(--color-border)] bg-[var(--color-surface-1)]'}"
           ><span class="block text-xs font-bold">{tier.name}</span><span
-            class="text-[9px] uppercase text-[var(--color-text-muted)]"
+            class="text-[10px] uppercase text-[var(--color-text-muted)]"
             >{tier.builtin ?? 'custom'}</span
           ></button
         >
@@ -376,21 +374,21 @@
           <div class="text-xs font-bold text-[var(--color-text-primary)]">
             Effective access · {selectedTier.name}
           </div>
-          <div class="mt-1 text-[10px] text-[var(--color-text-muted)]">
+          <div class="mt-1 text-[11px] text-[var(--color-text-muted)]">
             This is what a person assigned to this profile actually receives.
           </div>
         </div>
         <button
           type="button"
           onclick={() => collaborationStore.createInvite(selectedTier.id)}
-          class="rounded-xl bg-[var(--color-accent)]/10 px-3 py-2 text-[10px] font-bold text-[var(--color-accent)]"
+          class="rounded-xl bg-[var(--color-accent)]/10 px-3 py-2 text-[11px] font-bold text-[var(--color-accent)]"
           ><Copy size={12} class="mr-1 inline" /> Copy invite</button
         >
       </div>
       <div class="mt-3 flex flex-wrap gap-2">
         {#each effectiveSummary as item}<span
-            class="rounded-lg border px-2.5 py-1.5 text-[10px]"
-            style="border-color:var(--color-border);background:var(--color-surface-1);color:var(--color-text-secondary)"
+            class="rounded-lg px-2.5 py-1.5 text-[11px]"
+            style="background:var(--color-surface-1);color:var(--color-text-secondary)"
             >{item}</span
           >{/each}
       </div>
@@ -399,7 +397,7 @@
     <div class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4">
       <div class="mb-3">
         <div class="text-xs font-bold text-[var(--color-text-primary)]">Whole-profile presets</div>
-        <div class="mt-1 text-[10px] text-[var(--color-text-muted)]">
+        <div class="mt-1 text-[11px] text-[var(--color-text-muted)]">
           A clear starting point. You can customize every category afterward.
         </div>
       </div>
@@ -407,37 +405,37 @@
         <button
           type="button"
           onclick={() => applyGlobalPreset('ask')}
-          class="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-left"
-          ><span class="block text-xs font-bold text-amber-300">Ask all</span><span
-            class="mt-1 block text-[10px] text-[var(--color-text-muted)]"
+          class="rounded-xl border border-[var(--color-warning)]/30 bg-[var(--color-warning-bg)] px-4 py-3 text-left"
+          ><span class="block text-xs font-bold text-[var(--color-warning)]">Ask all</span><span
+            class="mt-1 block text-[11px] text-[var(--color-text-muted)]"
             >Host approves every task before tools run</span
           ></button
         >
         <button
           type="button"
           onclick={() => (pendingDangerPreset = true)}
-          class="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-left"
-          ><span class="block text-xs font-bold text-emerald-300">Allow all</span><span
-            class="mt-1 block text-[10px] text-[var(--color-text-muted)]"
+          class="rounded-xl border border-[var(--color-success)]/30 bg-[var(--color-success-bg)] px-4 py-3 text-left"
+          ><span class="block text-xs font-bold text-[var(--color-success)]">Allow all</span><span
+            class="mt-1 block text-[11px] text-[var(--color-text-muted)]"
             >Full models, tools, commands, and project access</span
           ></button
         >
         <button
           type="button"
           onclick={() => applyGlobalPreset('block')}
-          class="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-left"
-          ><span class="block text-xs font-bold text-red-300">Block all</span><span
-            class="mt-1 block text-[10px] text-[var(--color-text-muted)]"
+          class="rounded-xl border border-[var(--color-error)]/30 bg-[var(--color-error-bg)] px-4 py-3 text-left"
+          ><span class="block text-xs font-bold text-[var(--color-error)]">Block all</span><span
+            class="mt-1 block text-[11px] text-[var(--color-text-muted)]"
             >No visibility, prompts, tools, files, or commands</span
           ></button
         >
       </div>
     </div>
-    {#if pendingDangerPreset}<div class="rounded-2xl border border-red-500/40 bg-red-500/10 p-4">
+    {#if pendingDangerPreset}<div class="rounded-2xl border border-[var(--color-error)]/40 bg-[var(--color-error-bg)] p-4">
         <div class="flex items-start gap-3">
-          <ShieldAlert size={19} class="mt-0.5 shrink-0 text-red-400" />
+          <ShieldAlert size={19} class="mt-0.5 shrink-0 text-[var(--color-error)]" />
           <div class="flex-1">
-            <div class="text-xs font-bold text-red-300">
+            <div class="text-xs font-bold text-[var(--color-error)]">
               Grant unrestricted control to {selectedTier.name}?
             </div>
             <p class="mt-1 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
@@ -451,12 +449,12 @@
                   applyGlobalPreset('allow');
                   pendingDangerPreset = false;
                 }}
-                class="rounded-lg bg-red-500 px-3 py-2 text-[10px] font-bold text-white"
+                class="rounded-lg bg-[var(--color-error)] px-3 py-2 text-[11px] font-bold text-white"
                 >I understand, grant full control</button
               ><button
                 type="button"
                 onclick={() => (pendingDangerPreset = false)}
-                class="rounded-lg border border-[var(--color-border)] px-3 py-2 text-[10px] font-bold"
+                class="rounded-lg border border-[var(--color-border)] px-3 py-2 text-[11px] font-bold"
                 >Cancel</button
               >
             </div>
@@ -496,7 +494,7 @@
               >{#if !selectedTier.builtin}<button
                   type="button"
                   onclick={deleteTier}
-                  class="rounded-xl bg-red-500/10 px-3 text-red-400"><Trash2 size={14} /></button
+                  class="rounded-xl bg-[var(--color-error-bg)] px-3 text-[var(--color-error)]"><Trash2 size={14} /></button
                 >{/if}
             </div>
           </div>
@@ -562,7 +560,7 @@
                               },
                             });
                           }}
-                          class="rounded-md border px-2 py-1 text-[9px] uppercase {selectedTier.reasoningByModel[
+                          class="rounded-md border px-2 py-1 text-[10px] uppercase {selectedTier.reasoningByModel[
                             item.id
                           ]?.includes(level)
                             ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
@@ -592,15 +590,15 @@
               <div class="flex flex-wrap gap-2">
                 <button
                   onclick={() => applyVisibilityPreset('all')}
-                  class="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[10px] hover:bg-[var(--color-surface-3)]"
+                  class="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[11px] hover:bg-[var(--color-surface-3)]"
                   >Everything</button
                 ><button
                   onclick={() => applyVisibilityPreset('work')}
-                  class="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[10px] hover:bg-[var(--color-surface-3)]"
+                  class="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[11px] hover:bg-[var(--color-surface-3)]"
                   >Work only</button
                 ><button
                   onclick={() => applyVisibilityPreset('none')}
-                  class="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[10px] hover:bg-[var(--color-surface-3)]"
+                  class="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[11px] hover:bg-[var(--color-surface-3)]"
                   >Hidden</button
                 >
               </div>
@@ -614,15 +612,15 @@
               <div class="flex flex-wrap gap-2">
                 <button
                   onclick={() => applyPromptPreset('ask')}
-                  class="rounded-lg border border-amber-500/30 px-3 py-1.5 text-[10px] text-amber-300"
+                  class="rounded-lg border border-[var(--color-warning)]/30 px-3 py-1.5 text-[11px] text-[var(--color-warning)]"
                   >Ask host</button
                 ><button
                   onclick={() => applyPromptPreset('allow')}
-                  class="rounded-lg border border-emerald-500/30 px-3 py-1.5 text-[10px] text-emerald-300"
+                  class="rounded-lg border border-[var(--color-success)]/30 px-3 py-1.5 text-[11px] text-[var(--color-success)]"
                   >Auto-run</button
                 ><button
                   onclick={() => applyPromptPreset('block')}
-                  class="rounded-lg border border-red-500/30 px-3 py-1.5 text-[10px] text-red-300"
+                  class="rounded-lg border border-[var(--color-error)]/30 px-3 py-1.5 text-[11px] text-[var(--color-error)]"
                   >Block</button
                 >
               </div>
@@ -636,15 +634,15 @@
               <div class="flex flex-wrap gap-2">
                 <button
                   onclick={() => applyFilePreset('read')}
-                  class="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[10px]"
+                  class="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[11px]"
                   >Read only</button
                 ><button
                   onclick={() => applyFilePreset('project')}
-                  class="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[10px]"
+                  class="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[11px]"
                   >Project edit</button
                 ><button
                   onclick={() => applyFilePreset('block')}
-                  class="rounded-lg border border-red-500/30 px-3 py-1.5 text-[10px] text-red-300"
+                  class="rounded-lg border border-[var(--color-error)]/30 px-3 py-1.5 text-[11px] text-[var(--color-error)]"
                   >No files</button
                 >
               </div>
@@ -658,19 +656,19 @@
               <div class="flex flex-wrap gap-2">
                 <button
                   onclick={() => applyCommandPreset('readonly')}
-                  class="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[10px]"
+                  class="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[11px]"
                   >Read only</button
                 ><button
                   onclick={() => applyCommandPreset('developer')}
-                  class="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[10px]"
+                  class="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[11px]"
                   >Developer</button
                 ><button
                   onclick={() => applyCommandPreset('allow')}
-                  class="rounded-lg border border-emerald-500/30 px-3 py-1.5 text-[10px] text-emerald-300"
+                  class="rounded-lg border border-[var(--color-success)]/30 px-3 py-1.5 text-[11px] text-[var(--color-success)]"
                   >Allow all</button
                 ><button
                   onclick={() => applyCommandPreset('block')}
-                  class="rounded-lg border border-red-500/30 px-3 py-1.5 text-[10px] text-red-300"
+                  class="rounded-lg border border-[var(--color-error)]/30 px-3 py-1.5 text-[11px] text-[var(--color-error)]"
                   >Block all</button
                 >
               </div>
@@ -692,7 +690,7 @@
             {/each}
           </div>
           {#if selectedTier.permissions.autoExecutePrompts && !selectedTier.permissions.fullSystemAccess}<div
-              class="flex gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[11px] text-amber-300"
+              class="flex gap-2 rounded-xl border border-[var(--color-warning)]/30 bg-[var(--color-warning-bg)] p-3 text-[11px] text-[var(--color-warning)]"
             >
               <ShieldAlert size={16} class="shrink-0" /> Auto-execution stays disabled until Full system
               access is enabled. Restricted prompts require host approval.
@@ -765,7 +763,7 @@
                   )}
                 placeholder="rm&#10;sudo&#10;curl&#10;ssh"
                 rows="5"
-                class="mt-2 w-full rounded-xl border border-red-500/20 bg-[var(--color-surface-1)] p-3 font-mono text-xs normal-case"
+                class="mt-2 w-full rounded-xl border border-[var(--color-error)]/20 bg-[var(--color-surface-1)] p-3 font-mono text-xs normal-case"
               ></textarea></label
             >
           </div>
@@ -804,7 +802,7 @@
     {#if collaborationStore.pendingJoins.length}<div
         class="space-y-2 border-t border-[var(--color-border)] pt-5"
       >
-        <div class="text-xs font-bold text-amber-400">Waiting for host approval</div>
+        <div class="text-xs font-bold text-[var(--color-warning)]">Waiting for host approval</div>
         {#each collaborationStore.pendingJoins as join (join.guestId)}<div
             class="flex flex-wrap items-center gap-3 rounded-xl bg-[var(--color-surface-1)] p-3"
           >
@@ -826,11 +824,11 @@
                   true,
                   joinAssignments[join.guestId] || policy.defaultTierId,
                 )}
-              class="rounded-lg bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-400"
+              class="rounded-lg bg-[var(--color-success-bg)] px-3 py-2 text-xs font-bold text-[var(--color-success)]"
               >Admit</button
             ><button
               onclick={() => collaborationStore.decideJoin(join.guestId, false)}
-              class="rounded-lg bg-red-500/10 px-3 py-2 text-xs font-bold text-red-400"
+              class="rounded-lg bg-[var(--color-error-bg)] px-3 py-2 text-xs font-bold text-[var(--color-error)]"
               >Reject</button
             >
           </div>{/each}

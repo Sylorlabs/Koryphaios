@@ -1,20 +1,68 @@
-// Theme system — multiple presets, accent colors, fonts, Svelte 5 runes
+// Theme system — per-scheme palettes + accents, fonts, Svelte 5 runes
+//
+// The config is versioned: v1 (single preset/accent pair, preset 'system' for
+// follow-OS) is migrated to v2 (a light slot and a dark slot, each with its own
+// preset + primary/secondary accents, plus an explicit mode). 'system' is no
+// longer a preset — it is the adaptive mode that resolves to whichever slot
+// matches the OS preference.
 
 import { browser } from '$app/environment';
 import { apiFetch } from '$lib/api.svelte';
 import { loadFont } from '$lib/fonts';
-import { THEME_PRESETS, type ConcreteThemePreset } from '$lib/theme-palette';
+import {
+  THEME_PRESETS,
+  THEME_SCHEME,
+  THEME_PRESET_OPTIONS,
+  type ConcreteThemePreset,
+  type ThemePalette,
+  type ThemeScheme,
+} from '$lib/theme-palette';
 import { readableForeground } from '$lib/theme-contrast';
 import { apiUrl } from '$lib/utils/api-url';
 
 export { THEME_PRESETS } from '$lib/theme-palette';
-export type ThemePreset = ConcreteThemePreset | 'system';
+export type { ThemePalette, ThemeScheme } from '$lib/theme-palette';
+export type ThemePreset = ConcreteThemePreset;
+export type ThemeMode = 'dark' | 'light' | 'system';
 export type AccentColor =
-  'gold' | 'indigo' | 'cyan' | 'emerald' | 'amber' | 'rose' | 'violet' | 'custom';
+  | 'gold'
+  | 'indigo'
+  | 'cyan'
+  | 'emerald'
+  | 'amber'
+  | 'rose'
+  | 'violet'
+  | 'custom';
 
 export interface CustomAccent {
   main: string;
   hover: string;
+}
+
+export interface ModeAppearance {
+  preset: ConcreteThemePreset;
+  accent: AccentColor;
+  secondaryAccent: AccentColor;
+  customAccent?: CustomAccent;
+  customSecondaryAccent?: CustomAccent;
+}
+
+export interface ThemeConfig {
+  version: 2;
+  mode: ThemeMode;
+  font: FontFamily;
+  dark: ModeAppearance;
+  light: ModeAppearance;
+}
+
+/** Legacy (v1) persisted shape — migrated by normalizeConfig. */
+interface ThemeConfigV1 {
+  preset: ConcreteThemePreset | 'system';
+  accent: AccentColor;
+  secondaryAccent: AccentColor;
+  font: FontFamily;
+  customAccent?: CustomAccent;
+  customSecondaryAccent?: CustomAccent;
 }
 
 export type FontFamily =
@@ -32,15 +80,6 @@ export type FontFamily =
   | 'berkeley-mono'
   | 'source-serif'
   | 'roboto-slab';
-
-export interface ThemeConfig {
-  preset: ThemePreset;
-  accent: AccentColor;
-  secondaryAccent: AccentColor;
-  font: FontFamily;
-  customAccent?: CustomAccent;
-  customSecondaryAccent?: CustomAccent;
-}
 
 const ACCENT_COLORS: Record<AccentColor, { main: string; hover: string }> = {
   gold: { main: '#D5B261', hover: '#F3DDB0' },
@@ -70,6 +109,14 @@ const FONT_FAMILIES: Record<FontFamily, string> = {
   'roboto-slab': "'Roboto Slab', 'Roboto', Georgia, serif",
 };
 
+export const THEME_DEFAULTS: ThemeConfig = {
+  version: 2,
+  mode: 'system',
+  font: 'inter',
+  dark: { preset: 'kintsugi', accent: 'gold', secondaryAccent: 'gold' },
+  light: { preset: 'kintsugi-light', accent: 'gold', secondaryAccent: 'gold' },
+};
+
 /** Convert #RRGGBB to an RGB triplet for alpha-blended CSS variables. */
 function hexToRgb(hex: string): string {
   const match = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex.trim());
@@ -77,58 +124,126 @@ function hexToRgb(hex: string): string {
   return `${parseInt(match[1], 16)}, ${parseInt(match[2], 16)}, ${parseInt(match[3], 16)}`;
 }
 
-function createThemeStore() {
-  const defaults: ThemeConfig = {
-    preset: 'kintsugi',
-    accent: 'gold',
-    secondaryAccent: 'gold',
-    font: 'inter',
+const isHex = (value: unknown): value is string =>
+  typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value.trim());
+
+function normalizeCustomAccent(value: unknown): CustomAccent | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const candidate = value as Partial<CustomAccent>;
+  if (!isHex(candidate.main) || !isHex(candidate.hover)) return undefined;
+  return { main: candidate.main.toUpperCase(), hover: candidate.hover.toUpperCase() };
+}
+
+function normalizeSlot(
+  value: unknown,
+  scheme: ThemeScheme,
+  fallback: ModeAppearance,
+): ModeAppearance {
+  if (!value || typeof value !== 'object') return { ...fallback };
+  const candidate = value as Partial<ModeAppearance>;
+  const preset =
+    typeof candidate.preset === 'string' &&
+    candidate.preset in THEME_PRESETS &&
+    THEME_SCHEME[candidate.preset as ConcreteThemePreset] === scheme
+      ? (candidate.preset as ConcreteThemePreset)
+      : fallback.preset;
+  const accent =
+    typeof candidate.accent === 'string' && candidate.accent in ACCENT_COLORS
+      ? (candidate.accent as AccentColor)
+      : fallback.accent;
+  const secondaryAccent =
+    typeof candidate.secondaryAccent === 'string' && candidate.secondaryAccent in ACCENT_COLORS
+      ? (candidate.secondaryAccent as AccentColor)
+      : candidate.accent && candidate.accent in ACCENT_COLORS
+        ? (candidate.accent as AccentColor)
+        : fallback.secondaryAccent;
+  return {
+    preset,
+    accent,
+    secondaryAccent,
+    customAccent: normalizeCustomAccent(candidate.customAccent) ?? fallback.customAccent,
+    customSecondaryAccent:
+      normalizeCustomAccent(candidate.customSecondaryAccent) ??
+      (candidate.secondaryAccent ? undefined : normalizeCustomAccent(candidate.customAccent)) ??
+      fallback.customSecondaryAccent,
   };
+}
 
-  const isHex = (value: unknown): value is string =>
-    typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value.trim());
+function normalizeFont(value: unknown, fallback: FontFamily): FontFamily {
+  return typeof value === 'string' && value in FONT_FAMILIES
+    ? (value as FontFamily)
+    : fallback;
+}
 
-  function normalizeCustomAccent(value: unknown): CustomAccent | undefined {
-    if (!value || typeof value !== 'object') return undefined;
-    const candidate = value as Partial<CustomAccent>;
-    if (!isHex(candidate.main) || !isHex(candidate.hover)) return undefined;
-    return { main: candidate.main.toUpperCase(), hover: candidate.hover.toUpperCase() };
+function normalizeConfig(value: unknown, fallback: ThemeConfig = THEME_DEFAULTS): ThemeConfig {
+  if (!value || typeof value !== 'object') {
+    return { ...fallback, dark: { ...fallback.dark }, light: { ...fallback.light } };
   }
+  const candidate = value as Record<string, unknown>;
 
-  function normalizeConfig(value: unknown, fallback: ThemeConfig = defaults): ThemeConfig {
-    if (!value || typeof value !== 'object') return { ...fallback };
-    const candidate = value as Partial<ThemeConfig>;
-    const preset =
-      candidate.preset === 'system' ||
-      (typeof candidate.preset === 'string' && candidate.preset in THEME_PRESETS)
-        ? candidate.preset
-        : fallback.preset;
-    const accent =
-      typeof candidate.accent === 'string' && candidate.accent in ACCENT_COLORS
-        ? candidate.accent
-        : fallback.accent;
-    const secondaryAccent =
-      typeof candidate.secondaryAccent === 'string' && candidate.secondaryAccent in ACCENT_COLORS
-        ? candidate.secondaryAccent
-        : candidate.accent && candidate.accent in ACCENT_COLORS
-          ? candidate.accent
-          : fallback.secondaryAccent;
-    const font =
-      typeof candidate.font === 'string' && candidate.font in FONT_FAMILIES
-        ? candidate.font
-        : fallback.font;
+  // v2: explicit mode + per-scheme slots.
+  if (candidate.mode === 'dark' || candidate.mode === 'light' || candidate.mode === 'system') {
     return {
-      preset: preset as ThemePreset,
-      accent: accent as AccentColor,
-      secondaryAccent: secondaryAccent as AccentColor,
-      font: font as FontFamily,
-      customAccent: normalizeCustomAccent(candidate.customAccent) ?? fallback.customAccent,
-      customSecondaryAccent:
-        normalizeCustomAccent(candidate.customSecondaryAccent) ??
-        (candidate.secondaryAccent ? undefined : normalizeCustomAccent(candidate.customAccent)) ??
-        fallback.customSecondaryAccent,
+      version: 2,
+      mode: candidate.mode,
+      font: normalizeFont(candidate.font, fallback.font),
+      dark: normalizeSlot(candidate.dark, 'dark', fallback.dark),
+      light: normalizeSlot(candidate.light, 'light', fallback.light),
     };
   }
+
+  // v1 migration: single preset (+ 'system') and one accent pair.
+  if (typeof candidate.preset === 'string') {
+    const legacy = candidate as unknown as Partial<ThemeConfigV1>;
+    const slotSource = {
+      accent: legacy.accent,
+      secondaryAccent: legacy.secondaryAccent,
+      customAccent: legacy.customAccent,
+      customSecondaryAccent: legacy.customSecondaryAccent,
+    };
+    const font = normalizeFont(legacy.font, fallback.font);
+    if (legacy.preset === 'system') {
+      return {
+        version: 2,
+        mode: 'system',
+        font,
+        dark: normalizeSlot(
+          { ...slotSource, preset: 'kintsugi' },
+          'dark',
+          fallback.dark,
+        ),
+        light: normalizeSlot({ ...slotSource, preset: 'light' }, 'light', fallback.light),
+      };
+    }
+    const scheme =
+      typeof legacy.preset === 'string' && legacy.preset in THEME_PRESETS
+        ? THEME_SCHEME[legacy.preset as ConcreteThemePreset]
+        : undefined;
+    if (scheme === 'light') {
+      return {
+        version: 2,
+        mode: 'light',
+        font,
+        dark: { ...fallback.dark },
+        light: normalizeSlot({ ...slotSource, preset: legacy.preset }, 'light', fallback.light),
+      };
+    }
+    if (scheme === 'dark') {
+      return {
+        version: 2,
+        mode: 'dark',
+        font,
+        dark: normalizeSlot({ ...slotSource, preset: legacy.preset }, 'dark', fallback.dark),
+        light: { ...fallback.light },
+      };
+    }
+  }
+
+  return { ...fallback, dark: { ...fallback.dark }, light: { ...fallback.light } };
+}
+
+function createThemeStore() {
+  const defaults = THEME_DEFAULTS;
 
   let savedConfig: ThemeConfig = defaults;
   if (browser) {
@@ -140,35 +255,61 @@ function createThemeStore() {
     }
   }
 
-  let preset = $state<ThemePreset>(savedConfig.preset);
-  let accent = $state<AccentColor>(savedConfig.accent);
-  let secondaryAccent = $state<AccentColor>(savedConfig.secondaryAccent);
+  let mode = $state<ThemeMode>(savedConfig.mode);
   let font = $state<FontFamily>(savedConfig.font);
-  let customAccent = $state<CustomAccent | undefined>(savedConfig.customAccent);
-  let customSecondaryAccent = $state<CustomAccent | undefined>(savedConfig.customSecondaryAccent);
+  let dark = $state<ModeAppearance>({ ...savedConfig.dark });
+  let light = $state<ModeAppearance>({ ...savedConfig.light });
   let backendHydrated = false;
   let mutationRevision = 0;
+  /**
+   * The light-scheme media query, or null where `matchMedia` is unavailable
+   * (SSR, jsdom, embedded webviews). Absent a query, the system is treated as
+   * "not light" so the dark scheme stays the default.
+   */
+  function lightSchemeQuery(): MediaQueryList | null {
+    if (!browser || typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return null;
+    }
+    return window.matchMedia('(prefers-color-scheme: light)') ?? null;
+  }
 
-  function resolvePreset(value: ThemePreset): ConcreteThemePreset {
-    if (value !== 'system') return value;
-    if (browser && window.matchMedia('(prefers-color-scheme: light)').matches) return 'light';
-    return 'kintsugi';
+  function prefersLight(): boolean {
+    return lightSchemeQuery()?.matches === true;
+  }
+
+  let systemPrefersLight = $state(prefersLight());
+
+  function systemScheme(): ThemeScheme {
+    void systemPrefersLight;
+    if (prefersLight()) return 'light';
+    return 'dark';
+  }
+
+  function slotFor(scheme: ThemeScheme): ModeAppearance {
+    return scheme === 'light' ? light : dark;
+  }
+
+  function activeScheme(): ThemeScheme {
+    return mode === 'system' ? systemScheme() : mode;
+  }
+
+  function accentValue(slot: ModeAppearance, which: 'primary' | 'secondary') {
+    const id = which === 'primary' ? slot.accent : slot.secondaryAccent;
+    const custom = which === 'primary' ? slot.customAccent : slot.customSecondaryAccent;
+    if (id === 'custom' && custom) return custom;
+    return ACCENT_COLORS[id] ?? ACCENT_COLORS.gold;
   }
 
   function applyToDOM() {
     if (!browser) return;
 
-    const resolvedPreset = resolvePreset(preset);
-    const vars = THEME_PRESETS[resolvedPreset];
-    let accentVars = ACCENT_COLORS[accent];
-    let secondaryAccentVars = ACCENT_COLORS[secondaryAccent];
+    const slot = slotFor(activeScheme());
+    const vars = THEME_PRESETS[slot.preset];
+    if (!vars) return;
+    const accentVars = accentValue(slot, 'primary');
+    const secondaryAccentVars = accentValue(slot, 'secondary');
     const root = document.documentElement;
-    if (!vars || !accentVars || !secondaryAccentVars) return;
 
-    if (accent === 'custom' && customAccent) accentVars = customAccent;
-    if (secondaryAccent === 'custom' && customSecondaryAccent) {
-      secondaryAccentVars = customSecondaryAccent;
-    }
     for (const [key, value] of Object.entries(vars)) root.style.setProperty(key, value);
     root.style.setProperty('--color-accent', accentVars.main);
     root.style.setProperty('--color-accent-hover', accentVars.hover);
@@ -187,13 +328,19 @@ function createThemeStore() {
     );
     root.style.setProperty('--font-sans', FONT_FAMILIES[font]);
 
-    const isLight = resolvedPreset === 'light';
-    root.setAttribute('data-theme', isLight ? 'light' : 'dark');
-    root.style.colorScheme = isLight ? 'light' : 'dark';
+    const scheme = THEME_SCHEME[slot.preset];
+    root.setAttribute('data-theme', scheme);
+    root.style.colorScheme = scheme;
   }
 
   function snapshot(): ThemeConfig {
-    return { preset, accent, secondaryAccent, font, customAccent, customSecondaryAccent };
+    return {
+      version: 2,
+      mode,
+      font,
+      dark: { ...dark },
+      light: { ...light },
+    };
   }
 
   async function persistToBackend(config: ThemeConfig = snapshot()) {
@@ -229,12 +376,10 @@ function createThemeStore() {
 
       if (payload.data) {
         const next = normalizeConfig(payload.data, snapshot());
-        preset = next.preset;
-        accent = next.accent;
-        secondaryAccent = next.secondaryAccent;
+        mode = next.mode;
         font = next.font;
-        customAccent = next.customAccent;
-        customSecondaryAccent = next.customSecondaryAccent;
+        dark = { ...next.dark };
+        light = { ...next.light };
         localStorage.setItem('koryphaios-theme', JSON.stringify(snapshot()));
         applyToDOM();
         void loadFont(font);
@@ -256,50 +401,98 @@ function createThemeStore() {
     if (browser) void persistToBackend();
   }
 
+  function mutateSlot(
+    scheme: ThemeScheme,
+    which: 'primary' | 'secondary',
+    accentId: AccentColor,
+    custom?: CustomAccent,
+  ) {
+    const slot = scheme === 'light' ? light : dark;
+    if (which === 'primary') {
+      slot.accent = accentId;
+      if (custom) slot.customAccent = custom;
+    } else {
+      slot.secondaryAccent = accentId;
+      if (custom) slot.customSecondaryAccent = custom;
+    }
+    save();
+  }
+
   return {
-    get preset() {
-      return preset;
+    get mode() {
+      return mode;
+    },
+    get activeScheme(): ThemeScheme {
+      return activeScheme();
+    },
+    get preset(): ConcreteThemePreset {
+      return slotFor(activeScheme()).preset;
     },
     get accent() {
-      return accent;
+      return slotFor(activeScheme()).accent;
     },
     get secondaryAccent() {
-      return secondaryAccent;
+      return slotFor(activeScheme()).secondaryAccent;
     },
     get font() {
       return font;
     },
     get customAccent() {
-      return customAccent;
+      return slotFor(activeScheme()).customAccent;
     },
     get customSecondaryAccent() {
-      return customSecondaryAccent;
+      return slotFor(activeScheme()).customSecondaryAccent;
+    },
+    get dark(): ModeAppearance {
+      return { ...dark };
+    },
+    get light(): ModeAppearance {
+      return { ...light };
+    },
+    get config(): ThemeConfig {
+      return snapshot();
     },
     get isDark() {
-      return resolvePreset(preset) !== 'light';
+      return activeScheme() === 'dark';
     },
 
-    setPreset(value: ThemePreset) {
-      preset = value;
+    setMode(value: ThemeMode) {
+      mode = value;
+      save();
+    },
+    setPreset(value: ConcreteThemePreset) {
+      const scheme = THEME_SCHEME[value];
+      if (!scheme) return;
+      slotFor(scheme).preset = value;
+      if (scheme !== activeScheme()) mode = scheme;
+      save();
+    },
+    setModePreset(scheme: ThemeScheme, value: ConcreteThemePreset) {
+      if (THEME_SCHEME[value] !== scheme) return;
+      slotFor(scheme).preset = value;
       save();
     },
     setAccent(value: AccentColor) {
-      accent = value;
-      save();
+      mutateSlot(activeScheme(), 'primary', value);
     },
     setSecondaryAccent(value: AccentColor) {
-      secondaryAccent = value;
-      save();
+      mutateSlot(activeScheme(), 'secondary', value);
     },
     setCustomAccent(value: CustomAccent) {
-      customAccent = value;
-      accent = 'custom';
-      save();
+      mutateSlot(activeScheme(), 'primary', 'custom', value);
     },
     setCustomSecondaryAccent(value: CustomAccent) {
-      customSecondaryAccent = value;
-      secondaryAccent = 'custom';
-      save();
+      mutateSlot(activeScheme(), 'secondary', 'custom', value);
+    },
+    setModeAccent(scheme: ThemeScheme, which: 'primary' | 'secondary', value: AccentColor) {
+      mutateSlot(scheme, which, value);
+    },
+    setModeCustomAccent(
+      scheme: ThemeScheme,
+      which: 'primary' | 'secondary',
+      value: CustomAccent,
+    ) {
+      mutateSlot(scheme, which, 'custom', value);
     },
     setFont(value: FontFamily) {
       font = value;
@@ -308,29 +501,29 @@ function createThemeStore() {
     },
 
     reset() {
-      preset = defaults.preset;
-      accent = defaults.accent;
-      secondaryAccent = defaults.secondaryAccent;
+      mode = defaults.mode;
       font = defaults.font;
-      customAccent = undefined;
-      customSecondaryAccent = undefined;
+      dark = { ...defaults.dark };
+      light = { ...defaults.light };
       save();
       void loadFont(defaults.font);
     },
 
-    get presets(): Array<{ id: ThemePreset; label: string }> {
-      return [
-        { id: 'kintsugi', label: 'Kintsugi' },
-        { id: 'midnight', label: 'Midnight' },
-        { id: 'nord', label: 'Nord' },
-        { id: 'dracula', label: 'Dracula' },
-        { id: 'catppuccin', label: 'Catppuccin' },
-        { id: 'gruvbox', label: 'Gruvbox' },
-        { id: 'tokyo', label: 'Tokyo Night' },
-        { id: 'solarized', label: 'Solarized Dark' },
-        { id: 'light', label: 'Light' },
-        { id: 'system', label: 'System' },
-      ];
+    modeAppearance(scheme: ThemeScheme): ModeAppearance {
+      return { ...slotFor(scheme) };
+    },
+    accentFor(scheme: ThemeScheme, which: 'primary' | 'secondary') {
+      return accentValue(slotFor(scheme), which);
+    },
+    presetsFor(scheme: ThemeScheme) {
+      return THEME_PRESET_OPTIONS.filter((option) => option.scheme === scheme);
+    },
+    paletteFor(preset: ConcreteThemePreset): ThemePalette | undefined {
+      return THEME_PRESETS[preset];
+    },
+
+    get presets(): Array<{ id: ConcreteThemePreset; label: string; scheme: ThemeScheme }> {
+      return THEME_PRESET_OPTIONS;
     },
     get accents(): Array<{ id: AccentColor; label: string; color: string }> {
       return [
@@ -344,12 +537,10 @@ function createThemeStore() {
       ];
     },
     get currentAccent(): { main: string; hover: string } {
-      if (accent === 'custom' && customAccent) return customAccent;
-      return ACCENT_COLORS[accent] ?? ACCENT_COLORS.gold;
+      return accentValue(slotFor(activeScheme()), 'primary');
     },
     get currentSecondaryAccent(): { main: string; hover: string } {
-      if (secondaryAccent === 'custom' && customSecondaryAccent) return customSecondaryAccent;
-      return ACCENT_COLORS[secondaryAccent] ?? ACCENT_COLORS.gold;
+      return accentValue(slotFor(activeScheme()), 'secondary');
     },
     get fonts(): Array<{ id: FontFamily; label: string; category: string }> {
       return [
@@ -369,14 +560,25 @@ function createThemeStore() {
 
     init() {
       if (!browser) return;
+      const media = lightSchemeQuery();
+      systemPrefersLight = media?.matches === true;
       applyToDOM();
       void hydrateFromBackend();
-      const media = window.matchMedia('(prefers-color-scheme: dark)');
+      if (!media) return;
       const handler = () => {
-        if (preset === 'system') applyToDOM();
+        systemPrefersLight = media.matches === true;
+        if (mode === 'system') applyToDOM();
       };
-      media.addEventListener('change', handler);
-      return () => media.removeEventListener('change', handler);
+      if (typeof media.addEventListener === 'function') {
+        media.addEventListener('change', handler);
+        return () => media.removeEventListener('change', handler);
+      }
+      if (typeof media.addListener === 'function') {
+        // Safari < 14 only exposes the deprecated listener API.
+        media.addListener(handler);
+        return () => media.removeListener(handler);
+      }
+      return undefined;
     },
   };
 }

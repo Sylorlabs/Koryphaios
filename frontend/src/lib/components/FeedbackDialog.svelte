@@ -194,7 +194,7 @@
           </p>
           <button
             type="button"
-            class="mt-6 rounded-xl bg-[var(--color-accent)] px-5 py-2.5 text-xs font-bold text-white"
+            class="mt-6 rounded-xl bg-[var(--color-accent)] px-5 py-2.5 text-xs font-bold text-[var(--color-on-accent)]"
             onclick={close}>Done</button
           >
         </div>
@@ -241,18 +241,10 @@
               placeholder="Share the details that would help us act on this."
               class="w-full resize-y rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-sm leading-6 text-[var(--color-text-primary)] outline-none transition focus:border-[var(--color-accent)]"
             ></textarea>
-            <span class="mt-1 block text-right text-[10px] text-[var(--color-text-muted)]"
+            <span class="mt-1 block text-right text-[11px] text-[var(--color-text-muted)]"
               >{message.length.toLocaleString()} / 8,000</span
             >
           </label>
-
-          <p
-            class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-[10px] leading-5 text-[var(--color-text-muted)]"
-          >
-            The report is created on GitHub with a category-specific template and automatically
-            filled-in app, frontend, backend, desktop runtime, and web runtime versions. Do not
-            include private project details, secrets, or contact information.
-          </p>
 
           {#if error}<p
               role="alert"
@@ -262,7 +254,7 @@
             </p>{/if}
 
           <div class="flex items-center justify-between gap-4 pt-1">
-            <p class="text-[10px] leading-4 text-[var(--color-text-muted)]">
+            <p class="text-[11px] leading-4 text-[var(--color-text-muted)]">
               Reports never include diagnostics, source, prompts, screenshots, or API keys.
             </p>
             <div class="flex gap-2">
@@ -274,7 +266,7 @@
               <button
                 type="submit"
                 disabled={submitting || !message.trim()}
-                class="flex min-w-28 items-center justify-center gap-2 rounded-xl bg-[var(--color-accent)] px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-[var(--color-accent)]/15 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-45"
+                class="flex min-w-28 items-center justify-center gap-2 rounded-xl bg-[var(--color-accent)] px-5 py-2.5 text-xs font-bold text-[var(--color-on-accent)] shadow-lg shadow-[var(--color-accent)]/15 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-45"
               >
                 {#if submitting}<LoaderCircle size={14} class="animate-spin" />Opening GitHub{:else}<Github
                     size={14}

@@ -1214,9 +1214,9 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
   )
   .get('/:name/quota', async ({ request, params: { name }, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    if (name !== 'antigravity') {
+    if (name !== 'antigravity' && name !== 'devin') {
       set.status = 404;
-      return { ok: false, error: 'Quota API is only available for the antigravity provider' };
+      return { ok: false, error: 'Quota API is only available for CLI providers that expose one' };
     }
     const { providers } = getContext();
     const provider = providers.get(name as ProviderName) as

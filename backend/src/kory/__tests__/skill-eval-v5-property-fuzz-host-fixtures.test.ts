@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import {
   hasHypothesisSettingsDecorator,
   hasJqwikDiscardContract,
-} from '../skill-eval-v5-property-fuzz-host-fixtures';
+} from '../../eval/skills/skill-eval-v5-property-fuzz-host-fixtures';
 
 test('Hypothesis settings can be applied through a named decorator', () => {
   expect(

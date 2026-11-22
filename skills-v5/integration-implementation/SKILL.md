@@ -25,6 +25,20 @@ A timeout does not establish whether a side effect committed. Use the provider's
 
 Cancellation stops local waiting only when that is all the provider supports. State whether remote work is canceled, still running, or requires later reconciliation. Define how late results, duplicate deliveries, expired credentials, and incompatible payload versions affect durable state.
 
+## Authenticate before you remember
+
+An inbound event is untrusted until its signature over the raw body verifies against the current secret, and its timestamp falls inside the accepted replay window. Run both checks before deduplication, before canonical reconciliation, and before any durable write. A dedupe store that records an unauthenticated payload lets a forged delivery claim an identifier the genuine event will need later, so the real event is then discarded as a duplicate.
+
+Reject on the raw bytes, never a re serialised body. A stale timestamp and an invalid signature are both rejections, and each carries its own reason in the result so an operator can tell a forged delivery from a delayed one. Only an authenticated identifier enters the dedupe store; a repeated authenticated delivery does nothing further and is neither an acceptance nor a rejection. Rotate secrets so that a previous secret stays acceptable for the overlap window.
+
+## Recover a gap from canonical state
+
+When a delivery is missed, a cursor is skipped, or ordering cannot be trusted, recover from the provider's canonical collection: read the authoritative list from the last position that is still valid and reconcile the local rows against it. Replaying increments from a local cache, or trusting that every identifier arrived, reproduces the gap and can silently drop the events that fell inside it.
+
+Reconciliation must be safe to repeat and must run even when no event arrived, because a quiet period is exactly when a missed delivery stays invisible. The canonical value is authoritative for the final state once the collection read succeeds, so an accepted event updates a row and the reconciliation then confirms or corrects it. Report whether reconciliation ran, and do not report a reconciled state from a cached or unreadable collection.
+
+Compare by stable provider identity, mark absent rows as removed only when the provider says the collection is complete, and advance the checkpoint after the reconciled page commits. Treat the local cache as an accelerator that a full read can always rebuild.
+
 ## Commit page progress atomically
 
 For paginated pulls, one page's durable mutations and its checkpoint advance are a single commit invariant: commit them together, and advance the checkpoint only after that commit succeeds. On failure, neither the page nor its checkpoint is partially accepted; restart from the last committed checkpoint and make replay safe with provider idempotency or local upsert/deduplication. Keep the checkpoint in durable shared state; an invocation-local `Map` may optimize work but is never the source of truth.

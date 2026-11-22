@@ -5,6 +5,10 @@
     import { onDestroy, onMount, untrack } from 'svelte';
     import type { Snippet } from 'svelte';
     import { EXPAND_ANCHOR_EVENT } from '$lib/utils/expand-anchor';
+    import {
+        getTranscriptScrollState,
+        saveTranscriptScrollState,
+    } from '$lib/utils/transcript-scroll';
 
     // Pixels of rendered rows kept beyond each edge of the viewport. Row-count
     // overscan alone scales with row height, so it is either wasteful for short
@@ -48,9 +52,14 @@
          *  the view restarts at the bottom rather than inheriting the previous
          *  chat's offset. */
         resetKey?: string | number;
+        /** False while the caller is still replacing a cached snapshot with
+         *  authoritative history. The list waits for authoritative rows before
+         *  placing the transcript, so a deep saved anchor cannot be clamped
+         *  against a page that is about to be replaced. */
+        ready?: boolean;
     }
 
-    let { items, estimateHeight, overscan = 5, class: className = '', onScroll, onScrollNearTop, onScrollNearBottom, onReady, onLanded, onRestoreState, row, follow = false, resetKey }: Props = $props();
+    let { items, estimateHeight, overscan = 5, class: className = '', onScroll, onScrollNearTop, onScrollNearBottom, onReady, onLanded, onRestoreState, row, follow = false, resetKey, ready = true }: Props = $props();
     
     // DOM refs
     let containerEl = $state<HTMLDivElement>();
@@ -138,7 +147,15 @@
             measurementFrame === null &&
             pendingRowSizes.size === 0 &&
             pendingDeltas.length === 0;
-        const pinned = !follow || !el || el.scrollHeight - el.scrollTop - el.clientHeight <= 2;
+        // The list owns the transcript's extent, so the landing reports against
+        // that extent — not the DOM's `scrollHeight`. The scroll element's
+        // padding and a rendered window that briefly overflows `contentHeight`
+        // both make `scrollHeight` disagree with `totalHeight`, and a
+        // frame-by-frame comparison against the DOM reset the stable-frame
+        // counter until the 24-frame cap. `scrollTop` is clamped by the browser
+        // to the real bottom, so a genuinely pinned view satisfies this even
+        // when the two extents differ.
+        const pinned = !follow || !el || el.scrollTop + el.clientHeight >= totalHeight - 2;
         if (quiet && pinned && layoutRevision === lastLayoutRevision) stableFrames++;
         else stableFrames = 0;
         lastLayoutRevision = layoutRevision;
@@ -183,18 +200,14 @@
     // jump and the next scroll event immediately loads another page.
     let viewportAnchor: { id: string; offset: number } | null = null;
 
-    function rememberViewportAnchor() {
-        if (!containerEl || follow || positions.length === 0) {
-            viewportAnchor = null;
-            return;
-        }
-        const top = containerEl.scrollTop;
+    function anchorAtOffset(offset: number): { id: string; offset: number; index: number } | null {
+        if (positions.length === 0) return null;
         let low = 0;
         let high = positions.length - 1;
         let found = 0;
         while (low <= high) {
             const mid = (low + high) >> 1;
-            if (positions[mid].top <= top) {
+            if (positions[mid].top <= offset) {
                 found = mid;
                 low = mid + 1;
             } else {
@@ -202,22 +215,33 @@
             }
         }
         const position = positions[found];
-        viewportAnchor = position ? { id: position.id, offset: top - position.top } : null;
+        return position
+            ? { id: position.id, offset: offset - position.top, index: found }
+            : null;
     }
 
-    function savedScrollState(id: string): { scrollTop: number; follow: boolean } | undefined {
-        return scrollStates.get(id);
+    function rememberViewportAnchor() {
+        if (!containerEl || follow) {
+            viewportAnchor = null;
+            return;
+        }
+        viewportAnchor = anchorAtOffset(containerEl.scrollTop);
     }
 
     function rememberScrollState(id: string, top: number, shouldFollow: boolean) {
         if (!id) return;
-        scrollStates.delete(id);
-        scrollStates.set(id, { scrollTop: Math.max(0, top), follow: shouldFollow });
-        while (scrollStates.size > MEASURED_TRANSCRIPTS) {
-            const oldest = scrollStates.keys().next();
-            if (oldest.done) break;
-            scrollStates.delete(oldest.value);
-        }
+        const anchor = shouldFollow ? null : anchorAtOffset(top);
+        saveTranscriptScrollState(id, {
+            scrollTop: top,
+            follow: shouldFollow,
+            ...(anchor
+                ? {
+                      anchorId: anchor.id,
+                      anchorOffset: anchor.offset,
+                      rowsAfterAnchor: positions.length - anchor.index - 1,
+                  }
+                : {}),
+        });
     }
 
     // Initialize scrollTop based on follow prop
@@ -248,14 +272,23 @@
      * landing must be part of the first paint, not a visible scroll downwards.
      */
     function landOnOpen(id: string): void {
-        const restored = savedScrollState(id);
+        const restored = getTranscriptScrollState(id);
+        const anchorIndex = restored?.anchorId ? indexById.get(restored.anchorId) : undefined;
+        const anchorPosition = anchorIndex === undefined ? undefined : positions[anchorIndex];
+        // A saved row is authoritative over the pixel offset: the row may have
+        // changed height since it was measured, and the resume page may start
+        // dozens of messages later than the page that was open when it was
+        // saved. Put that row back at the same screen position.
+        const restoredTop = anchorPosition
+            ? anchorPosition.top + (restored?.anchorOffset ?? 0)
+            : (restored?.scrollTop ?? 0);
         // A parked position is only worth restoring when it is genuinely above
         // the bottom. A saved offset sitting at the bottom with follow off left
         // the chat looking anchored while nothing followed the agent, so the
         // first thing that grew (the reader's own next message) arrived to a
         // frozen view and then moved it by hand. Treat that state as following.
         const bottomOffset = Math.max(0, totalHeight - clientHeight);
-        const parked = !!restored && !restored.follow && restored.scrollTop < bottomOffset - 8;
+        const parked = !!restored && !restored.follow && restoredTop < bottomOffset - 8;
         onRestoreState?.({ follow: !parked });
         // Arm even when the container has not bound yet: the fallback still
         // releases the caller's cover instead of stranding the spinner.
@@ -264,13 +297,36 @@
         openingRestore = parked;
         if (parked) {
             // The browser clamps this to the transcript's real extent.
-            containerEl.scrollTop = restored!.scrollTop;
+            containerEl.scrollTop = restoredTop;
         } else {
             pinToBottomNow();
         }
         scrollTop = containerEl.scrollTop;
         rememberViewportAnchor();
     }
+
+    // The caller may mount the list over a cached snapshot while the
+    // authoritative first page is still in flight. Positioning against that
+    // snapshot and then replacing it is what clamped a deep saved position to
+    // the bottom of the newest page. Wait for `ready` instead.
+    let pendingOpenLanding = false;
+
+    function landOpenWhenReady(id: string): void {
+        if (!ready) {
+            pendingOpenLanding = true;
+            return;
+        }
+        pendingOpenLanding = false;
+        landOnOpen(id);
+    }
+
+    $effect(() => {
+        if (!ready || !pendingOpenLanding) return;
+        untrack(() => {
+            pendingOpenLanding = false;
+            landOnOpen(transcriptId);
+        });
+    });
 
     // Opening a different chat is a different transcript, not a content change.
     // Row ids can collide across chats, so measurements are filed per
@@ -296,7 +352,7 @@
             // belongs to rows that may not exist here.
             landingComplete = false;
             viewportAnchor = null;
-            landOnOpen(nextId);
+            landOpenWhenReady(nextId);
         });
     });
 
@@ -313,7 +369,7 @@
             // for this frame is derived from it, and the 800px placeholder
             // would put the wrong rows on screen for the first paint.
             if (containerEl) clientHeight = containerEl.clientHeight;
-            landOnOpen(transcriptId);
+            landOpenWhenReady(transcriptId);
         });
     });
 
@@ -328,9 +384,32 @@
     //
     // This stays inert when the reader is parked mid-transcript (follow off),
     // where the compensation effect below owns the offset instead.
+    //
+    // It also stays inert while the transcript is still landing. During an open
+    // the viewport height is not stable: sibling chrome above and below the feed
+    // (the context bar moving from "awaiting report" to "used / max", the
+    // composer growing) resizes this container, and re-pinning on each of those
+    // resizes is what made an opening chat look like it was scrolling itself
+    // into place. The landing loop owns the position until it reports.
+    //
+    // The two triggers are deliberately separate. Content growth (`totalHeight`)
+    // must be absorbed even mid-landing — that is what keeps a measured row from
+    // shifting the transcript — while a viewport resize (`clientHeight`) must
+    // not move the reader until the open has landed.
     $effect(() => {
         void totalHeight;
+        if (!ready) return;
+        if (openingRestore || !follow || !containerEl) return;
+        untrack(() => pinToBottomNow());
+    });
+
+    $effect(() => {
         void clientHeight;
+        if (!ready) return;
+        // Only a caller that asked for a landing report gets the deferred
+        // viewport handling. Without `onLanded` there is no landing loop to own
+        // the position, so a resize must be absorbed immediately as before.
+        if (onLanded && !landingComplete) return;
         if (openingRestore || !follow || !containerEl) return;
         untrack(() => pinToBottomNow());
     });
@@ -695,10 +774,21 @@
             scheduleMeasurements();
         });
         ro.observe(containerEl);
-        
+
+        // Svelte's destroy path does not run reliably when the app is closed
+        // or the page is killed; the last position must already be stored or
+        // the next open cannot restore it. `pagehide` fires on every unload.
+        const persistPosition = () => {
+            if (containerEl) {
+                rememberScrollState(transcriptId, containerEl.scrollTop, follow);
+            }
+        };
+        window.addEventListener('pagehide', persistPosition);
+
         return () => {
             ro.disconnect();
             pendingClientHeight = null;
+            window.removeEventListener('pagehide', persistPosition);
         };
     });
     
@@ -732,10 +822,6 @@
     // Transcripts kept in the cache, so a window that walks through hundreds
     // of chats cannot grow it without limit.
     const MEASURED_TRANSCRIPTS = 12;
-    // Reader position follows the same bounded lifetime as measured heights.
-    // Keeping it at module scope lets a chat restore its position after the
-    // VirtualList unmounts during a session switch.
-    const scrollStates = new Map<string, { scrollTop: number; follow: boolean }>();
 
     function transcriptKey(key: string | number | undefined): string {
         return key === undefined ? '' : String(key);

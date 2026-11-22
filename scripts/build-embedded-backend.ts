@@ -26,7 +26,7 @@ import { hostOS } from '../backend/src/runtime/platform';
 import { currentV5SkillEvaluationContractsPlugin } from '../backend/scripts/build-current-v5-contracts';
 
 const PROJECT_ROOT = join(import.meta.dir, '..');
-const BACKEND_ENTRY = join(PROJECT_ROOT, 'backend', 'src', 'server.ts');
+const BACKEND_ENTRY = join(PROJECT_ROOT, 'backend', 'src', 'packaged-entry.ts');
 const PAYLOAD_DIR = join(PROJECT_ROOT, 'desktop', 'src-tauri', 'embedded-backend');
 
 export interface HostTarget {
@@ -97,18 +97,28 @@ export interface EmbeddedBackendCompileOptions {
   outfile: string;
   bunTarget: Bun.Build.CompileTarget;
   relayUrl?: string;
+  /** Build-coherent bundle hash baked into the payload's own identity. */
+  bundleHash?: string;
 }
 
 /** Shared by the real desktop route and a credential-free native compile smoke. */
 export function embeddedBackendBuildConfig(options: EmbeddedBackendCompileOptions): BuildConfig {
+  const define: Record<string, string> = {};
+  if (options.relayUrl) {
+    define['process.env.RELAY_URL'] = JSON.stringify(options.relayUrl);
+  }
+  // The payload reports its own build identity on /api/health, so the
+  // frontend's compat sentinel compares the backend hash to the frontend
+  // hash — not the frontend hash to itself via the shell's env stamp.
+  if (options.bundleHash) {
+    define['process.env.KORYPHAIOS_BACKEND_BUILD_HASH'] = JSON.stringify(options.bundleHash);
+  }
   return {
     entrypoints: [options.entrypoint],
     root: PROJECT_ROOT,
     target: 'bun',
     compile: { target: options.bunTarget, outfile: options.outfile },
-    define: options.relayUrl
-      ? { 'process.env.RELAY_URL': JSON.stringify(options.relayUrl) }
-      : undefined,
+    define: Object.keys(define).length > 0 ? define : undefined,
     // Each invocation collects actual current source packages/registered IDs.
     plugins: [currentV5SkillEvaluationContractsPlugin()],
   };
@@ -126,6 +136,20 @@ export async function compileEmbeddedBackend(
   }
   if (!existsSync(options.outfile)) {
     throw new Error(`Embedded backend payload was not written to ${options.outfile}`);
+  }
+}
+
+/** The hash the packaged backend reports as its own build identity. A missing
+ * or 'dev' compat file leaves the payload unstamped, same as a dev frontend. */
+export function readCompileTimeBundleHash(root: string = PROJECT_ROOT): string | undefined {
+  try {
+    const parsed = JSON.parse(readFileSync(join(root, 'compat-hash.json'), 'utf-8')) as {
+      hash?: unknown;
+    };
+    const hash = typeof parsed.hash === 'string' ? parsed.hash.trim() : '';
+    return hash && hash !== 'dev' ? hash : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -153,6 +177,7 @@ export async function buildEmbeddedBackend(payloadDir: string = PAYLOAD_DIR): Pr
       outfile: compileOutfile,
       bunTarget: target.bunTarget,
       relayUrl: process.env.RELAY_URL,
+      bundleHash: readCompileTimeBundleHash(),
     });
 
     if (target.compressResource) {

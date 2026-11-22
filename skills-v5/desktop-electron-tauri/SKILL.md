@@ -21,10 +21,21 @@ Compose `application-security` when the change affects privileged IPC, command e
 ## Decisions that change the implementation
 
 - In Electron, keep context isolation and a narrow preload bridge. Do not expose raw `ipcRenderer` or generic shell and filesystem primitives to renderer code. Validate IPC sender and arguments at the privileged handler.
-- Register process-wide IPC handlers at process scope, with per-window ownership tied to the live `webContents` and its frame lifecycle. Handle renderer reload, window destruction, and simultaneous windows without stale owners, duplicate listeners, or duplicate writes; validate the sender at the time of each request and avoid losing valid requests during a navigation transition.
+- Bind an IPC handler to the window that needs it, at the point that window is created, and remove that exact handler when the same window closes or its contents are destroyed. A handler installed once for the whole process counts as a stale owner after the last window is gone, because nothing remains that can receive the request; count the listeners after a close to prove zero. Handle renderer reload, window destruction, and simultaneous windows without stale owners, duplicate listeners, or duplicate writes; validate the sender at the time of each request and avoid losing valid requests during a navigation transition.
 - In Tauri v2, grant only the command and resource capability needed by the target window or webview. Treat allow and deny scopes as the enforcement boundary rather than copying Electron preload patterns.
 - Treat deep links, file open events, update URLs, and navigation targets as external input before they reach privileged operations.
 - Preserve the repository's packaging, signing, and update model unless the task explicitly changes distribution.
+
+## The chosen path and the native picker
+
+A native folder picker is a boundary where the platform answers in its own vocabulary, and the usual
+failure is losing that answer on the way back into the application.
+
+- Treat the picker result as an option. Cancellation is absence, not an empty string; map it to the canonical empty selection so the interface can tell "nothing chosen" apart from "chosen and empty".
+- Keep the selection as state and render it. An accepted folder has to arrive at the surface that reports it, or the user cannot tell a successful choice from a failed one.
+- Treat the stored path as untrusted at every use. Re-canonicalize it and require containment in the permitted root at the moment of the read, because a path that was legitimate when chosen can become a link into somewhere else afterwards.
+- Map an operating system error to a refusal the interface can act on. Surfacing raw error text as state hides whether the request was denied or merely malformed.
+- Register the commands the application actually exposes, and no catch-all handler. An unregistered command must fail as unregistered.
 
 ## Failure discriminators
 
@@ -39,12 +50,11 @@ Compose `application-security` when the change affects privileged IPC, command e
 - For privileged calls, verify one allowed request and the denied or malformed request with the highest risk from the actual renderer or webview boundary.
 - Cover cold start, second-window or deep-link activation where applicable, close versus quit behavior, and state restoration.
 - For window-owned IPC, verify one action after reload and independent actions from concurrent windows, then prove each produces one authorized effect and no stale listener persists after closure.
-- If updates change, test download, verification, restart, and recovery behavior using the configured update channel or a faithful test channel.
-- Record which security model was exercised: Electron process isolation or Tauri capabilities.
+- When a boundary cannot be exercised here, because there is no display, no build tool for the target OS, or no signing identity, record that check as unavailable with the reason and finish the remaining verification. Repeating an attempt that cannot succeed spends the budget without producing evidence, and an unavailable check that is named is worth more than a claim that was never made.
 
 ## Completion evidence
 
-- Runtime and privilege boundary affected: Electron or Tauri
+- Runtime and privilege boundary affected: Electron process isolation or Tauri capabilities
 - Packaged lifecycle evidence from the supported OS boundary
 - Allowed and denied privileged-call evidence when IPC, commands, or capabilities changed
 

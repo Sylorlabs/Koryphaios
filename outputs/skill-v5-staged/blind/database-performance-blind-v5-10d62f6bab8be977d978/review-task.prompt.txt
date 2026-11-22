@@ -1,0 +1,201 @@
+SNAPSHOT HASH DOMAINS: beforeSha256/afterSha256 identify complete workspace entries, using SHA256("file\0" + original file bytes), or SHA256("symlink\0" + link target). Scorer artifactSHA and durable artifact hashes use SHA256(raw bytes), without that tag. These different hash domains must not be compared as if identical. Visible beforeText/afterText may be bounded or privacy-scrubbed; they are not the original complete bytes to hash.
+
+You are an independent blind semantic evaluator.
+Two anonymous agents attempted the same task. You are not told which agent received any extra guidance, and you must not infer or speculate about that hidden condition.
+Judge each artifact independently against the task contract. Do not reward matching wording, verbosity, or references to a skill. Focus on behavioral correctness, scope discipline, evidence quality, preservation of required facts, negative paths, recovery behavior, and whether completion claims are actually supported.
+The artifact bundle may include harness captured execution evidence and before and after file snapshots. Treat that as observed evidence, not as an agent claim.
+PUBLIC CANDIDATE CONTRACT SNAPSHOT is the exact task prompt and allowlisted README.md/contract.json bytes visible to the candidate before execution. Hashes are verified by the harness. If an entry says UNAVAILABLE, do not reconstruct it from the current repository or treat current files as historical proof.
+executionEvidence is supplied by the host after the agent attempt, including deterministic scorer observations. An agent can truthfully report that it could not run a check even when the host subsequently runs that check successfully. Those observations have different owners and times; that difference alone is not an integrity failure.
+Attribute a completion claim to its actual source. Penalize an agent for fabricated or overstated verification only when its finalOutput or authored file content makes that unsupported claim. Do not attribute a host scorer statement to the agent, require the agent to predict later host results, or treat an honest statement of limited access as contradicting later host verification.
+Host evidence is not infallible. If a scorer result conflicts with concrete artifact behavior, identify the disputed check and evidence as a possible verifier defect. Keep instrument uncertainty separate from an agent integrity finding; a score label alone does not prove the task succeeded.
+Treat afterText JSON strings as literal source bytes. Before claiming a URL or origin is malformed or Markdown-formatted, inspect and quote the exact JSON value. Do not transform plain URL strings into Markdown hyperlinks and then mistake that display formatting for the original value.
+The PAIR EXECUTION EVIDENCE section is evaluator owned evidence. It certifies that Artifact A and Artifact B are the two randomized arms of one matched same model comparison for this exact scenario and evaluation contract.
+When REQUIRED EVIDENCE or REQUIRED ARTIFACTS asks for paired skill and no skill run artifacts, paired evaluation evidence, or an equivalent pair label, the anonymous A and B bundle plus PAIR EXECUTION EVIDENCE satisfies the existence and provenance of that pair. Do not require either agent output to claim, create, or narrate evaluator owned pair evidence.
+The REQUIRED ARTIFACTS entries below are evaluation evidence labels for the overall harness. They are not literal filenames the agent was instructed to create unless the task itself says so. Judge whether the bundle substantively supplies the required evidence; do not require those exact label strings to appear.
+Routing and hierarchy selection are evaluated independently by the harness. Do not require the agent to narrate which skill was selected or provide meta level specialist selection rationale when the artifact itself respects the requested scope and neighboring responsibility boundaries.
+Never lower passed, quality, verification, or integrity because an artifact omits hierarchy narration, specialist selection rationale, skill names, or evaluator owned paired A/B evidence. If a draft criticism relies on one of those omissions, remove that criticism and score only the concrete task behavior and evidence.
+If a REQUIRED EVIDENCE or REQUIRED ARTIFACTS label describes routing, hierarchy selection, specialist selection, or paired skill versus no skill provenance, treat that meta level requirement as evaluator owned. The harness evidence in this prompt is authoritative for those concerns.
+When choosing preference A, B, or tie, compare concrete task behavior and evidence only. Evaluator-owned hierarchy or specialist narration, skill-guidance scope, filenames, and paired-run provenance must not affect the preference comparison.
+Treat genuinely missing task evidence as missing. Do not assume unshown commands or tests passed.
+Return JSON only, with this exact shape:
+{"artifactA":{"passed":true,"quality":0.0,"verification":0.0,"integrityFailure":false,"evidence":["..."]},"artifactB":{"passed":true,"quality":0.0,"verification":0.0,"integrityFailure":false,"evidence":["..."]},"preference":"A","rationale":["..."]}
+
+TASK
+Diagnose a PostgreSQL-compatible orders query whose median latency is acceptable but p99 jumps from 80 ms to 4 s for one enterprise tenant. The table is highly tenant-skewed, a proposed index duplicates an existing prefix, and concurrent writes make lock impact relevant. Establish the actual engine/version and whether each result is synthetic or from an authorized target. Capture representative parameters/statistics, distinguish generic from custom prepared plans, compare actual plans for small and large tenants, choose the narrowest tuning change, and verify latency distribution plus write/storage effects. Do not offload the query to GPU compute.
+
+FALSIFIABLE CHECKS
+[
+  {
+    "id": "scope-and-hierarchy",
+    "assertion": "The result must establish the actual database-performance boundary and relevant environment before acting, preserve the hierarchy relationship (broader=performance-debugging; near-neighbor=gpu-compute), and not absorb the near-neighbor responsibility merely because it is adjacent."
+  },
+  {
+    "id": "operating-contract",
+    "assertion": "Capture the actual engine/version, exact query, representative bind classes, schema and indexes, statistics, data distribution, concurrency, measurement boundary, and latency/resource symptom before tuning.",
+    "source": "https://www.postgresql.org/docs/17/sql-prepare.html"
+  },
+  {
+    "id": "plan-cache-discrimination",
+    "assertion": "Distinguish a generic prepared plan from a custom plan for small and enterprise tenants before attributing the tail to statistics or an index; report planning overhead when testing scoped custom planning.",
+    "source": "https://www.postgresql.org/docs/17/sql-prepare.html"
+  },
+  {
+    "id": "execution-invariant",
+    "assertion": "A tuning change is justified by representative plan/runtime evidence and must improve the target tail without unacceptable write, lock, storage, or neighboring-query regressions."
+  },
+  {
+    "id": "verification-discipline",
+    "assertion": "Compare before/after plans and latency distributions under representative data and concurrency, confirm write/storage side effects of indexes or materialization, and monitor regressions on neighboring queries; a synthetic fixture result cannot be reported as a production p99 improvement."
+  },
+  {
+    "id": "anti-pattern-resistance",
+    "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not optimize from query text alone, add indexes for every predicate, trust one warm benchmark, or trade correctness/isolation for latency without an explicit decision."
+  },
+  {
+    "id": "evidence-and-uncertainty",
+    "assertion": "Every material completion claim must map to observable evidence (database-performance decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with synthetic, simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+  }
+]
+
+REQUIRED EVIDENCE
+[
+  "skewed-orders-plan-regression scenario evidence",
+  "database-performance decision and boundary evidence",
+  "Hierarchy boundary and selected specialist rationale",
+  "hierarchy boundary and selected specialist rationale",
+  "paired skill/no-skill run artifacts",
+  "explicit synthetic, unavailable, simulated, inferred, or stale evidence labels"
+]
+
+REQUIRED ARTIFACTS
+[
+  "database-performance-individual-scenario-1-result",
+  "database-performance-individual-scenario-1-verification",
+  "database-performance-individual-scenario-1-paired-evaluation"
+]
+
+PUBLIC CANDIDATE CONTRACT SNAPSHOT
+{
+  "taskPrompt": {
+    "available": true,
+    "sha256": "01dc7115d5f6b55ca4ae47b3922d7650af46c7231e3cb1ae3ad2ff5120f1b0bb",
+    "byteLength": 655,
+    "text": "Diagnose a PostgreSQL-compatible orders query whose median latency is acceptable but p99 jumps from 80 ms to 4 s for one enterprise tenant. The table is highly tenant-skewed, a proposed index duplicates an existing prefix, and concurrent writes make lock impact relevant. Establish the actual engine/version and whether each result is synthetic or from an authorized target. Capture representative parameters/statistics, distinguish generic from custom prepared plans, compare actual plans for small and large tenants, choose the narrowest tuning change, and verify latency distribution plus write/storage effects. Do not offload the query to GPU compute."
+  },
+  "fixtureFiles": {
+    "README.md": {
+      "available": true,
+      "sha256": "3bc4cd67f8c58f0207a88436c8793122ca68f1b03539a37a980dc8c66f8e7472",
+      "byteLength": 844,
+      "text": "# Database performance — skewed orders tail\n\nDiagnose and choose the narrowest tuning change from the supplied representative plans/statistics/experiments. The median is not the target; enterprise p99 is. Reject changes whose measured write/storage/neighbor-query cost is not justified. The proposed tenant-only index duplicates an existing leading prefix and has measured no tail benefit. GPU compute is outside the relational query boundary.\n\nWrite `.kory-eval/database-skew.json` with exact query/parameters, schema/index/statistics/distribution/concurrency identity, small-vs-enterprise before plans, hypothesis and evidence, selected experiment + rejected alternatives, before/after p99 and plan evidence, write/storage/lock/neighbor-query effects, and hierarchy boundary: broader `performance-debugging`; `gpu-compute` is not selected.\n"
+    },
+    "contract.json": {
+      "available": false,
+      "sha256": null,
+      "byteLength": 0,
+      "text": null,
+      "reason": "not-present"
+    }
+  }
+}
+
+PAIR EXECUTION EVIDENCE
+{
+  "matchedPair": true,
+  "sameScenario": true,
+  "sameProviderModel": true,
+  "sameHarness": true,
+  "sameEvaluationContract": true,
+  "sameMaterializer": true,
+  "sameDeterministicScorer": true,
+  "randomizedArmIdentity": true,
+  "evidenceOwner": "evaluation-harness"
+}
+
+ARTIFACT A
+{
+  "finalOutput": "Created the diagnosis record at [.kory-eval/database-skew.json](<redacted-path>).\n\nThe supplied **synthetic** evidence points to a generic prepared plan misestimating tenant/status skew and scanning 5.1M index tuples for the enterprise tenant. The narrowest measured option is extended statistics: enterprise p99 drops from 4,010 ms to 168 ms, with a reported 0.2% write CPU increase and 0.01 GiB storage increase. The tenant-only index has negligible benefit and higher costs; forcing custom plans broadly regresses neighbor queries.\n\nThe record identifies unavailable live-target evidence and keeps production validation open. No database client or server was available, so no SQL or runtime checks against a target were performed. JSON parsing and key assertions passed. GPU compute was not selected.",
+  "executionEvidence": [
+    "Codex CLI completed successfully in 68602ms",
+    "representative query/distribution/concurrency captured: yes",
+    "narrow plan/statistics change justified against alternatives: yes",
+    "write/storage/lock/neighbor effects checked: yes",
+    "performance-debugging/GPU boundary: explicit"
+  ],
+  "publicContract": {
+    "taskPrompt": {
+      "available": true,
+      "sha256": "01dc7115d5f6b55ca4ae47b3922d7650af46c7231e3cb1ae3ad2ff5120f1b0bb",
+      "byteLength": 655,
+      "text": "Diagnose a PostgreSQL-compatible orders query whose median latency is acceptable but p99 jumps from 80 ms to 4 s for one enterprise tenant. The table is highly tenant-skewed, a proposed index duplicates an existing prefix, and concurrent writes make lock impact relevant. Establish the actual engine/version and whether each result is synthetic or from an authorized target. Capture representative parameters/statistics, distinguish generic from custom prepared plans, compare actual plans for small and large tenants, choose the narrowest tuning change, and verify latency distribution plus write/storage effects. Do not offload the query to GPU compute."
+    },
+    "fixtureFiles": {
+      "README.md": {
+        "available": true,
+        "sha256": "3bc4cd67f8c58f0207a88436c8793122ca68f1b03539a37a980dc8c66f8e7472",
+        "byteLength": 844,
+        "text": "# Database performance — skewed orders tail\n\nDiagnose and choose the narrowest tuning change from the supplied representative plans/statistics/experiments. The median is not the target; enterprise p99 is. Reject changes whose measured write/storage/neighbor-query cost is not justified. The proposed tenant-only index duplicates an existing leading prefix and has measured no tail benefit. GPU compute is outside the relational query boundary.\n\nWrite `.kory-eval/database-skew.json` with exact query/parameters, schema/index/statistics/distribution/concurrency identity, small-vs-enterprise before plans, hypothesis and evidence, selected experiment + rejected alternatives, before/after p99 and plan evidence, write/storage/lock/neighbor-query effects, and hierarchy boundary: broader `performance-debugging`; `gpu-compute` is not selected.\n"
+      },
+      "contract.json": {
+        "available": false,
+        "sha256": null,
+        "byteLength": 0,
+        "text": null,
+        "reason": "not-present"
+      }
+    }
+  },
+  "changes": [
+    {
+      "path": ".kory-eval/database-skew.json",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "df2633cb9c1e0ae23d717eaa279d119b7f4e1c5c4f7c25cdd41f7b2d1d2e9851",
+      "afterText": "{\n  \"evidenceClass\": \"Synthetic\",\n  \"environment\": {\n    \"engine\": \"PostgreSQL-compatible 17 fixture\",\n    \"actualEngineVersion\": \"Not reported beyond PostgreSQL-compatible 17; exact server build/version unavailable\",\n    \"authorizationBoundary\": \"No authorized live target or credentials supplied. All supplied plans and experiment measurements are synthetic fixture evidence.\",\n    \"targetScale\": \"Unavailable\",\n    \"stagingToProductionRatio\": \"Unavailable; no staging or production targets identified\",\n    \"cacheCondition\": \"Unavailable in supplied evidence\",\n    \"measurementBoundary\": \"Supplied query latency/plan observations; request queue, connection acquisition, lock wait, planning, execution, I/O, and client/network components are not separately reported\",\n    \"concurrency\": {\n      \"writesPerSecond\": 850,\n      \"source\": \"Synthetic fixture; representative writes claimed by experiment record, not identified as a live target\"\n    }\n  },\n  \"workload\": {\n    \"query\": \"SELECT id,total_cents FROM orders WHERE tenant_id=$1 AND status=$2 ORDER BY created_at DESC LIMIT 100\",\n    \"parameters\": {\n      \"tenant_id\": \"Representative small and enterprise tenant values were used, but exact bind values are unavailable\",\n      \"status\": \"Exact bind value unavailable; enterprise open share is 61%\"\n    },\n    \"distribution\": {\n      \"smallTenantRows\": 1800,\n      \"enterpriseTenantRows\": 8400000,\n      \"enterpriseOpenPct\": 61,\n      \"source\": \"Synthetic fixture\"\n    },\n    \"schema\": \"Column types, constraints, full table row count, and transaction isolation are unavailable in supplied evidence\",\n    \"indexes\": [\n      \"orders_pkey(id)\",\n      \"orders_tenant_created_idx(tenant_id, created_at DESC)\",\n      \"orders_tenant_status_created_idx(tenant_id, status, created_at DESC)\"\n    ],\n    \"plannerStatistics\": \"The generic plan misestimates tenant/status cardinality for the enterprise bind. Statistics targets, freshness, and initial pg_stats are not supplied. Extended-statistics experiment used MCV and dependencies on (tenant_id,status), followed by ANALYZE.\",\n    \"preparedPlanBehavior\": \"Before: generic prepared plan, with misestimated tenant/status cardinality for enterprise tenant. After statistics: enterprise-specific estimate and bounded index scan reported. The force_custom_plan experiment changes plan selection to value-aware custom planning; exact plan-cache counters and plan transition threshold are unavailable.\"\n  },\n  \"before\": {\n    \"latencyMs\": {\n      \"median\": 62,\n      \"p99\": 4010,\n      \"class\": \"Synthetic\"\n    },\n    \"smallTenantPlan\": {\n      \"description\": \"Index Scan orders_tenant_status_created_idx\",\n      \"actualMs\": 14,\n      \"class\": \"Synthetic\",\n      \"estimatedRows\": \"Unavailable\",\n      \"actualRows\": \"Unavailable\"\n    },\n    \"enterprisePlan\": {\n      \"description\": \"Generic plan misestimates tenant/status cardinality; reads 5.1M index tuples\",\n      \"actualMs\": 3980,\n      \"class\": \"Synthetic\",\n      \"estimatedRows\": \"Unavailable\",\n      \"actualRows\": \"Unavailable\"\n    },\n    \"waitsIoAndSpills\": \"Unavailable; no wait-event, buffer, I/O, or spill counters supplied\"\n  },\n  \"diagnosis\": {\n    \"hypothesis\": \"The generic prepared plan does not account for tenant/status skew. For the 8.4M-row enterprise tenant (61% open), its chosen access path visits 5.1M index tuples, driving the tail while small-tenant execution remains fast.\",\n    \"evidence\": \"Synthetic before plan reports cardinality misestimate and 5.1M index tuples for enterprise, versus a 14 ms small-tenant index scan. Supplied candidate tests discriminate among extended statistics, a redundant prefix index, and forced custom plans.\",\n    \"claimLimit\": \"This is a fixture-supported mechanism, not a verified production root cause. Exact engine build, real bind values, raw EXPLAIN output, data/cache scale, and component timing are unavailable.\"\n  },\n  \"decision\": {\n    \"selectedChange\": {\n      \"id\": \"extended-statistics\",\n      \"sql\": \"CREATE STATISTICS orders_tenant_status_mcv (mcv, dependencies) ON tenant_id,status FROM orders; ANALYZE orders\",\n      \"reason\": \"Narrowest measured intervention in the fixture: it informs planning about correlated tenant/status skew without adding a duplicate tenant-leading index or imposing a broad session policy.\",\n      \"productionStatus\": \"Recommendation from synthetic evidence only; no DDL executed on a live or representative database target\"\n    },\n    \"rejectedAlternatives\": [\n      {\n        \"id\": \"redundant-prefix-index\",\n        \"change\": \"CREATE INDEX orders_tenant_idx ON orders(tenant_id)\",\n        \"evidence\": \"Existing indexes already lead with tenant_id and planner does not select the new index. Synthetic enterprise p99 improves only 4010 to 3995 ms, while write CPU rises 6.8% and storage rises 6.2 GiB.\"\n      },\n      {\n        \"id\": \"force-custom-plan\",\n        \"change\": \"SET plan_cache_mode=force_custom_plan for all application connections\",\n        \"evidence\": \"Synthetic enterprise p99 is 149 ms, but planning CPU rises 19% and unrelated neighbor-query p99 rises 14%; broad session-level policy has unacceptable adjacent workload regression.\"\n      }\n    ]\n  },\n  \"after\": {\n    \"selectedExperiment\": \"extended-statistics\",\n    \"latencyMs\": {\n      \"enterpriseP99\": 168,\n      \"smallTenantP99\": 76,\n      \"class\": \"Synthetic\"\n    },\n    \"plan\": {\n      \"description\": \"Enterprise parameter estimate reflects tenant/status skew; bounded index scan\",\n      \"actualMs\": 151,\n      \"class\": \"Synthetic\"\n    },\n    \"writeCpuDeltaPct\": 0.2,\n    \"storageGiBDelta\": 0.01,\n    \"lockObservation\": \"Statistics creation and ANALYZE completed under representative writes without blocking writers; synthetic fixture observation only. Lock wait duration and production lock behavior unavailable.\",\n    \"neighborQueryP99DeltaPct\": 1.1,\n    \"sampleCountCacheAndDistribution\": \"Unavailable; fixture provides latency figures but not repetitions, histogram method, cache condition, bind frequencies, or confidence intervals.\"\n  },\n  \"verification\": {\n    \"fixtureChecksAvailable\": [\n      \"Small and enterprise tenant before-plan comparison\",\n      \"Enterprise and small-tenant p99 after extended-statistics experiment\",\n      \"Synthetic write CPU, storage, lock observation, and neighbor-query comparison\",\n      \"Candidate comparison against redundant index and forced custom-plan policy\"\n    ],\n    \"realChecksUnavailable\": [\n      \"Exact PostgreSQL-compatible product and server version/build\",\n      \"Authorized live target plans and representative bind values\",\n      \"Repeated p50/p95/p99 distributions and request/queue/connection/lock/planning/execution/I/O timing breakdown\",\n      \"Raw estimated-versus-actual row counts, buffers, waits, spills, and plan-cache generic/custom counters\",\n      \"Production data scale ratio, cache state, concurrent transaction lifetimes, writer lock impact, storage and vacuum effects\",\n      \"Adjacent-query and representative-write validation on the actual target\",\n      \"DDL interruption, recovery, and abort-bound evidence\"\n    ],\n    \"successAndNegativeCase\": \"Synthetic success: enterprise p99 falls from 4010 to 168 ms with bounded index scan; small-tenant p99 is 76 ms. Negative case: redundant index has negligible tail benefit with measurable write/storage cost; forced custom plans improve the target query but regress neighbor-query p99 and planning CPU.\",\n    \"abortAndRecovery\": \"No live change was applied, so no production rollback was needed or demonstrated. If trialing on an authorized target, retain the prior statistics state/change record and abort if enterprise tail or adjacent-query/write impact breaches the workload's agreed bounds; exact thresholds and restoration procedure require target-specific validation.\"\n  },\n  \"hierarchy\": {\n    \"broaderMethod\": \"performance-debugging\",\n    \"databasePerformance\": \"Selected: workload, plan, and concurrency diagnosis\",\n    \"gpuCompute\": \"not selected; ordinary relational query tuning\",\n    \"mongodbEngineering\": \"not applicable; PostgreSQL-compatible relational workload\"\n  }\n}\n"
+    }
+  ]
+}
+
+ARTIFACT B
+{
+  "finalOutput": "Created [.kory-eval/database-skew.json](<redacted-path>) with the diagnosis and experiment comparison.\n\nThe supplied evidence identifies a PostgreSQL-compatible 17 fixture, not a verified live target. It supports choosing extended statistics for the tenant/status skew; the redundant index adds write and storage cost with almost no p99 improvement, while forcing custom plans broadly regresses neighboring queries. The artifact records that distinction and lists the live measurements still needed.\n\nValidation passed: the JSON parses, and checks confirmed the selected experiment and GPU boundary.",
+  "executionEvidence": [
+    "Codex CLI completed successfully in 50407ms",
+    "representative query/distribution/concurrency captured: yes",
+    "narrow plan/statistics change justified against alternatives: yes",
+    "write/storage/lock/neighbor effects checked: yes",
+    "performance-debugging/GPU boundary: explicit"
+  ],
+  "publicContract": {
+    "taskPrompt": {
+      "available": true,
+      "sha256": "01dc7115d5f6b55ca4ae47b3922d7650af46c7231e3cb1ae3ad2ff5120f1b0bb",
+      "byteLength": 655,
+      "text": "Diagnose a PostgreSQL-compatible orders query whose median latency is acceptable but p99 jumps from 80 ms to 4 s for one enterprise tenant. The table is highly tenant-skewed, a proposed index duplicates an existing prefix, and concurrent writes make lock impact relevant. Establish the actual engine/version and whether each result is synthetic or from an authorized target. Capture representative parameters/statistics, distinguish generic from custom prepared plans, compare actual plans for small and large tenants, choose the narrowest tuning change, and verify latency distribution plus write/storage effects. Do not offload the query to GPU compute."
+    },
+    "fixtureFiles": {
+      "README.md": {
+        "available": true,
+        "sha256": "3bc4cd67f8c58f0207a88436c8793122ca68f1b03539a37a980dc8c66f8e7472",
+        "byteLength": 844,
+        "text": "# Database performance — skewed orders tail\n\nDiagnose and choose the narrowest tuning change from the supplied representative plans/statistics/experiments. The median is not the target; enterprise p99 is. Reject changes whose measured write/storage/neighbor-query cost is not justified. The proposed tenant-only index duplicates an existing leading prefix and has measured no tail benefit. GPU compute is outside the relational query boundary.\n\nWrite `.kory-eval/database-skew.json` with exact query/parameters, schema/index/statistics/distribution/concurrency identity, small-vs-enterprise before plans, hypothesis and evidence, selected experiment + rejected alternatives, before/after p99 and plan evidence, write/storage/lock/neighbor-query effects, and hierarchy boundary: broader `performance-debugging`; `gpu-compute` is not selected.\n"
+      },
+      "contract.json": {
+        "available": false,
+        "sha256": null,
+        "byteLength": 0,
+        "text": null,
+        "reason": "not-present"
+      }
+    }
+  },
+  "changes": [
+    {
+      "path": ".kory-eval/database-skew.json",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "14a408e08b8054dafe0f45ec799b54d26b4f3ce5c9721458f6b8cbe1685a5ba1",
+      "afterText": "{\n  \"engine_identity\": {\n    \"engine\": \"PostgreSQL-compatible fixture\",\n    \"version\": \"17 (as stated by supplied evidence; exact PostgreSQL distribution/build is not identified)\",\n    \"identity_source\": \"evidence/query-analysis.json\",\n    \"target_status\": \"No authorized live database target or connection is present in the workspace.\",\n    \"evidence_classification\": \"All plans, latencies, row counts, index definitions, and experiment effects below are supplied fixture measurements. They are not verified measurements from a live authorized target.\"\n  },\n  \"query\": {\n    \"sql\": \"SELECT id,total_cents FROM orders WHERE tenant_id=$1 AND status=$2 ORDER BY created_at DESC LIMIT 100\",\n    \"representative_parameters\": {\n      \"small_tenant\": {\"tenant_id_class\": \"small tenant\", \"rows\": 1800, \"status\": \"open (inferred from enterpriseOpenPct; exact captured bind value not supplied)\"},\n      \"enterprise_tenant\": {\"tenant_id_class\": \"enterprise tenant\", \"rows\": 8400000, \"status\": \"open (inferred; exact tenant ID and bind value not supplied)\"}\n    },\n    \"parameter_capture_limit\": \"The fixture provides parameter classes and distributions, not literal parameter values or a query log.\"\n  },\n  \"schema_and_distribution\": {\n    \"table\": \"orders\",\n    \"tenant_rows\": {\"small\": 1800, \"enterprise\": 8400000},\n    \"enterprise_open_fraction_pct\": 61,\n    \"indexes\": [\n      \"orders_pkey(id)\",\n      \"orders_tenant_created_idx(tenant_id, created_at DESC)\",\n      \"orders_tenant_status_created_idx(tenant_id, status, created_at DESC)\"\n    ],\n    \"statistics_identity\": \"Before candidate: existing statistics are not described. Extended-statistics candidate: orders_tenant_status_mcv with MCV and dependencies on (tenant_id,status), followed by ANALYZE orders.\",\n    \"write_concurrency\": \"850 concurrent writes/second in supplied before workload; candidate statistics creation/ANALYZE reportedly completed under representative writes without blocking writers.\"\n  },\n  \"before\": {\n    \"latency_ms\": {\"median\": 62, \"p99\": 4010, \"reported_baseline_tail\": 4000},\n    \"prepared_plan_behavior\": \"The supplied evidence identifies the enterprise execution as using a generic prepared plan. No EXPLAIN output or separate generic/custom plan capture is included, so the classification is reported from the fixture rather than independently verified.\",\n    \"small_tenant_actual_plan\": {\n      \"plan\": \"Index Scan orders_tenant_status_created_idx\",\n      \"actual_ms\": 14,\n      \"plan_detail\": \"Only the index and actual time are supplied; estimated rows, actual rows, buffers, and bind values are absent.\"\n    },\n    \"enterprise_actual_plan\": {\n      \"plan\": \"Generic plan misestimates tenant/status cardinality; reads 5.1M index tuples\",\n      \"actual_ms\": 3980,\n      \"plan_detail\": \"The fixture does not include the full EXPLAIN (ANALYZE, BUFFERS) tree or a custom-plan comparison.\"\n    },\n    \"hypothesis\": \"Tenant and status selectivity are correlated and highly skewed. The generic plan's global/cardinality estimates do not represent the enterprise tenant, leading to a broad index scan that visits millions of tuples before producing the limited result set.\"\n  },\n  \"experiments\": {\n    \"selected\": {\n      \"id\": \"extended-statistics\",\n      \"change\": \"CREATE STATISTICS orders_tenant_status_mcv (mcv, dependencies) ON tenant_id,status FROM orders; ANALYZE orders\",\n      \"reason\": \"Narrow table-level planner information addresses the observed tenant/status estimate error without adding a redundant tenant-only index or imposing a broad per-session plan-cache policy.\",\n      \"after_latency_ms\": {\"enterprise_p99\": 168, \"small_tenant_p99\": 76},\n      \"after_plan\": \"Enterprise parameter estimate reflects tenant/status skew; bounded index scan; actual 151ms.\",\n      \"effects\": {\n        \"write_cpu_delta_pct\": 0.2,\n        \"storage_delta_gib\": 0.01,\n        \"lock_observation\": \"Statistics creation/ANALYZE completed under representative writes without blocking writers.\",\n        \"neighbor_query_p99_delta_pct\": 1.1\n      },\n      \"evidence_status\": \"Selected based on supplied fixture experiment; not run against a live target.\"\n    },\n    \"rejected\": [\n      {\n        \"id\": \"redundant-prefix-index\",\n        \"change\": \"CREATE INDEX orders_tenant_idx ON orders(tenant_id)\",\n        \"reason\": \"The proposed key duplicates the leading tenant_id prefix already present in two indexes, and the planner did not select it; supplied enterprise p99 improved only from 4010ms to 3995ms.\",\n        \"effects\": {\"write_cpu_delta_pct\": 6.8, \"storage_delta_gib\": 6.2, \"neighbor_query_p99_delta_pct\": 0},\n        \"decision\": \"Reject: no meaningful tail benefit for material write and storage cost. Concurrent index-build/lock behavior was not supplied, so no lock-safety claim is made.\"\n      },\n      {\n        \"id\": \"force-custom-plan\",\n        \"change\": \"SET plan_cache_mode=force_custom_plan for all application connections\",\n        \"reason\": \"It improves enterprise p99 to 149ms but applies a broad session setting and regresses unrelated prepared-query workload.\",\n        \"effects\": {\"planning_cpu_delta_pct\": 19, \"neighbor_query_p99_delta_pct\": 14, \"small_tenant_p99_ms\": 71},\n        \"decision\": \"Reject for this query-specific issue; scope is too broad and incurs unrelated workload cost.\"\n      }\n    ]\n  },\n  \"verification_and_rollout\": {\n    \"fixture_distribution_result\": \"Enterprise p99 falls from 4010ms to 168ms (~24x lower); small-tenant p99 is 76ms. The supplied post-change enterprise plan visits a bounded index range and reports 151ms actual execution.\",\n    \"latency_distribution_caveat\": \"No sample counts, confidence intervals, repeated-run protocol, or full latency histogram are supplied. Reported p99 values are fixture measurements only.\",\n    \"write_storage_and_lock_result\": \"Fixture reports +0.2% write CPU, +0.01 GiB storage, and no writer blocking during stats creation/ANALYZE at representative write load. These effects are not independently verified on a target.\",\n    \"live_verification_required\": \"Before production application, identify and authorize the exact PostgreSQL-compatible engine/build; capture literal tenant/status binds, schema/index and statistics state, write load, and generic plus custom EXPLAIN (ANALYZE, BUFFERS) for small and enterprise tenants. Apply the statistics experiment on that target, then compare repeated latency distributions, plan estimates/actuals, write CPU, storage, locks, and neighbor-query p99.\"\n  },\n  \"compute_boundary\": {\n    \"selected_hierarchy\": \"performance-debugging\",\n    \"gpu_compute\": \"not selected; the issue is relational plan estimation and index scanning, and the supplied evidence supports fixing planner statistics.\"\n  }\n}\n"
+    }
+  ]
+}

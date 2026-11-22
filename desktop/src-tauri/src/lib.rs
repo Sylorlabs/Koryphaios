@@ -2,8 +2,8 @@
 use objc2::rc::Retained;
 #[cfg(target_os = "macos")]
 use objc2_app_kit::{
-    NSEvent, NSScreen, NSWindow, NSWindowButton, NSWindowCollectionBehavior, NSWindowStyleMask,
-    NSWindowTitleVisibility,
+    NSEvent, NSImage, NSScreen, NSWindow, NSWindowButton, NSWindowCollectionBehavior,
+    NSWindowStyleMask, NSWindowTitleVisibility,
 };
 #[cfg(target_os = "macos")]
 use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize};
@@ -81,10 +81,13 @@ fn merge_packaged_cors_origins(existing: Option<&str>) -> Result<String, String>
 include!(concat!(env!("OUT_DIR"), "/embedded_backend.rs"));
 
 mod background_service;
+#[cfg(any(target_os = "macos", test))]
+mod bundle_icon;
 mod config;
 mod desktop_lifecycle;
 mod error;
 mod indexer;
+mod kory_capture;
 mod lifecycle_platform;
 mod local_voice;
 mod voice_python;
@@ -164,7 +167,10 @@ fn resolve_bundled_backend(
     // Dev mode: the launch-desktop.ts script sets KORYPHAIOS_PORT before
     // spawning Tauri, meaning the dev backend is already running on that
     // port. Skip the bundled backend entirely to avoid a port conflict.
-    if std::env::var("KORYPHAIOS_PORT").is_ok() {
+    // Release builds always own their backend: an inherited KORYPHAIOS_PORT
+    // from the user's shell (eval scripts export one) must not silently
+    // attach the packaged app to a foreign dev/eval backend.
+    if cfg!(debug_assertions) && std::env::var("KORYPHAIOS_PORT").is_ok() {
         println!("[Koryphaios] Dev mode: launcher owns the backend (KORYPHAIOS_PORT set)");
         return Ok(None);
     }
@@ -176,8 +182,13 @@ fn resolve_bundled_backend(
         .map_err(|e| format!("Failed to resolve backend resource directory: {e}"))?;
 
     if !backend_dir.exists() {
-        // Dev mode: no bundled backend, launcher owns the process.
-        return Ok(None);
+        // Dev mode: no bundled backend, launcher owns the process. A release
+        // build without its payload is a broken install — fail, don't fall
+        // into dev-supervisor mode.
+        if cfg!(debug_assertions) {
+            return Ok(None);
+        }
+        return Err("Bundled backend resource is missing".to_string());
     }
 
     // The backend binary is named `koryphaios-backend-{target_triple}{suffix}`.
@@ -226,8 +237,32 @@ fn resolve_bundled_backend(
         }
     }
 
-    // No backend found in resources — dev mode.
-    Ok(None)
+    // No backend found in resources — dev mode. Release fails closed.
+    if cfg!(debug_assertions) {
+        Ok(None)
+    } else {
+        Err("Bundled backend resource is missing".to_string())
+    }
+}
+
+/// The cached backend's name stamps everything that identifies the payload:
+/// app version, resource id, build hash, and the resource's own size + mtime.
+/// A rebuilt package therefore always yields a new executable path, which
+/// changes the service manifest — and a changed manifest restarts the running
+/// service on every OS (launchd bootout/bootstrap, systemctl restart, schtasks
+/// /End+/Create). Without the stamp, `ensure_running` saw an unchanged spec
+/// and left the previous build's backend serving.
+fn runtime_backend_name(
+    version: &str,
+    backend_id: &str,
+    bundle_hash: &str,
+    source_size: u64,
+    source_mtime_nanos: u128,
+    suffix: &str,
+) -> String {
+    format!(
+        "koryphaios-service-{version}-{backend_id}-{bundle_hash}-{source_size:x}{source_mtime_nanos:x}{suffix}"
+    )
 }
 
 /// Copy the backend binary from the resource directory to the data/runtime
@@ -250,42 +285,28 @@ fn copy_backend_to_runtime(
     let source_metadata =
         std::fs::metadata(source).map_err(|e| format!("Failed to inspect bundled backend: {e}"))?;
     let source_size = source_metadata.len();
+    let source_mtime_nanos = source_metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
 
-    let destination = runtime_dir.join(format!(
-        "koryphaios-service-{}-{}-{}{}",
+    let destination = runtime_dir.join(runtime_backend_name(
         env!("CARGO_PKG_VERSION"),
         EMBEDDED_BACKEND_ID,
         EMBEDDED_BUNDLE_HASH,
+        source_size,
+        source_mtime_nanos,
         if cfg!(target_os = "windows") {
             ".exe"
         } else {
             ""
-        }
+        },
     ));
 
-    let source_marker = destination.with_extension("source");
-    let source_stamp = format!(
-        "{}:{}",
-        source_size,
-        source_metadata
-            .modified()
-            .ok()
-            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|duration| duration.as_nanos())
-            .unwrap_or_default()
-    );
-    let source_is_compressed = source.extension().and_then(|ext| ext.to_str()) == Some("gz");
-
-    // Raw resources retain the old size fast-path. Compressed resources use a
-    // sidecar stamp because their source size is intentionally different from
-    // the decompressed executable size.
-    let current_size = std::fs::metadata(&destination).map(|m| m.len()).ok();
-    let needs_copy = if source_is_compressed {
-        std::fs::read_to_string(&source_marker).ok().as_deref() != Some(source_stamp.as_str())
-    } else {
-        current_size != Some(source_size)
-    };
-    if needs_copy {
+    // The name carries the resource's identity, so presence is the whole check.
+    if !destination.is_file() {
         let temporary = destination.with_extension("new");
         if let Err(error) = copy_backend_resource(source, &temporary, MAX_BACKEND_BYTES) {
             let _ = std::fs::remove_file(&temporary);
@@ -299,15 +320,6 @@ fn copy_backend_to_runtime(
         }
         std::fs::rename(&temporary, &destination)
             .map_err(|e| format!("Failed to activate backend: {e}"))?;
-        if source_is_compressed {
-            let marker_temporary = source_marker.with_extension("new");
-            std::fs::write(&marker_temporary, &source_stamp)
-                .map_err(|e| format!("Failed to stage backend source stamp: {e}"))?;
-            std::fs::rename(&marker_temporary, &source_marker)
-                .map_err(|e| format!("Failed to activate backend source stamp: {e}"))?;
-        } else {
-            let _ = std::fs::remove_file(&source_marker);
-        }
     }
     Ok(Some(destination))
 }
@@ -359,6 +371,67 @@ struct BackendReadyEvent {
     pid: Option<u32>,
     host: String,
     port: u16,
+}
+
+/// Emitted while a not-yet-listening backend reports startup progress through
+/// `.startup-status.json` — the frontend renders this as "starting", not
+/// "down". Serialized as { phase, detail, elapsedMs }.
+#[derive(serde::Serialize, Clone)]
+struct BackendStartingEvent {
+    phase: String,
+    detail: Option<String>,
+    #[serde(rename = "elapsedMs")]
+    elapsed_ms: u64,
+}
+
+/// What the backend's startup marker tells the readiness wait this iteration.
+#[derive(Debug, PartialEq)]
+enum StartupWait {
+    /// A live backend is mid-boot: keep polling and reset the no-signal clock.
+    KeepWaiting {
+        phase: String,
+        detail: Option<String>,
+    },
+    /// The backend recorded a startup failure: fail fast with its detail.
+    Failed(String),
+    /// The marker says nothing actionable — health polling decides the outcome
+    /// against the ordinary no-signal deadline.
+    NoSignal,
+}
+
+/// Decide what `.startup-status.json` means for the readiness wait.
+/// `pid_alive` is `process_alive(status.pid)`; `launched_at_ms` is the epoch-ms
+/// moment this wait began, so a marker written before it belongs to a previous
+/// process instance. A stale marker still counts when its pid is alive: a
+/// phase that writes nothing for minutes (a long VACUUM) looks stale while the
+/// process is very much at work.
+fn classify_startup(
+    status: Option<&crate::config::StartupStatus>,
+    pid_alive: bool,
+    launched_at_ms: u64,
+) -> StartupWait {
+    let Some(status) = status else {
+        return StartupWait::NoSignal;
+    };
+    let stale = status.updated_at.saturating_add(5_000) < launched_at_ms;
+    if status.phase == "failed" && (pid_alive || !stale) {
+        return StartupWait::Failed(
+            status
+                .detail
+                .clone()
+                .unwrap_or_else(|| "Backend reported a startup failure".to_string()),
+        );
+    }
+    // `ready` means the port is bound or binding — the health probe decides.
+    // A dead pid means the marker's writer is gone; either way the marker is
+    // not a reason to keep waiting.
+    if status.ready || !pid_alive {
+        return StartupWait::NoSignal;
+    }
+    StartupWait::KeepWaiting {
+        phase: status.phase.clone(),
+        detail: status.detail.clone(),
+    }
 }
 
 fn emit_backend_down(
@@ -529,10 +602,34 @@ fn open_private_backend_logs(
     Ok((open_log(stdout_name)?, open_log(stderr_name)?))
 }
 
+/// Why `start_bundled_backend` failed. `MissingResource` is a broken install —
+/// a release without its backend payload is not a functioning app, so it stays
+/// fatal. `Service` is a service-manager failure on an intact payload: the app
+/// keeps running and the overlay reports the backend as down.
+#[derive(Debug)]
+enum BundledBackendError {
+    MissingResource(String),
+    Service(String),
+}
+
+impl std::fmt::Display for BundledBackendError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingResource(message) | Self::Service(message) => {
+                f.write_str(message)
+            }
+        }
+    }
+}
+
+impl std::error::Error for BundledBackendError {}
+
 /// Register and start the backend in the signed-in user's login manager.
 /// Returns false only when the development launcher owns the backend.
-fn start_bundled_backend(app_handle: &tauri::AppHandle) -> Result<bool, String> {
-    let backend_path = match resolve_bundled_backend(app_handle)? {
+fn start_bundled_backend(app_handle: &tauri::AppHandle) -> Result<bool, BundledBackendError> {
+    let backend_path = match resolve_bundled_backend(app_handle)
+        .map_err(BundledBackendError::MissingResource)?
+    {
         Some(path) => path,
         None => {
             println!("[Koryphaios] Dev mode: launcher owns the backend");
@@ -541,8 +638,14 @@ fn start_bundled_backend(app_handle: &tauri::AppHandle) -> Result<bool, String> 
     };
 
     println!("[Koryphaios] Starting background login service");
+    start_backend_login_service(app_handle, &backend_path).map_err(BundledBackendError::Service)
+}
 
-    let mut cmd = std::process::Command::new(&backend_path);
+fn start_backend_login_service(
+    app_handle: &tauri::AppHandle,
+    backend_path: &std::path::Path,
+) -> Result<bool, String> {
+    let mut cmd = std::process::Command::new(backend_path);
     // NEVER pipe without a reader: the backend logs heavily and a full 64KB
     // pipe buffer blocks its writes — the whole backend freezes mid-session.
     // Log to files in the data dir instead (also gives users a crash log).
@@ -599,15 +702,32 @@ fn start_bundled_backend(app_handle: &tauri::AppHandle) -> Result<bool, String> 
 
     // AppImage resource mounts disappear when the GUI exits. Materialize the
     // frontend alongside the cached backend so the service can serve it later.
+    // The directory name carries the resource's identity (index.html size +
+    // mtime) for the same reason the backend executable does: a new build
+    // must never keep serving the previous generation's frontend.
+    let mut current_frontend: Option<std::path::PathBuf> = None;
     if let Ok(frontend_dir) = app_handle
         .path()
         .resolve("frontend", tauri::path::BaseDirectory::Resource)
     {
         if frontend_dir.exists() {
+            let frontend_stamp = std::fs::metadata(frontend_dir.join("index.html"))
+                .ok()
+                .map(|meta| {
+                    let nanos = meta
+                        .modified()
+                        .ok()
+                        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|duration| duration.as_nanos())
+                        .unwrap_or_default();
+                    format!("{:x}{:x}", meta.len(), nanos)
+                })
+                .unwrap_or_default();
             let persistent_frontend = data_dir.join("runtime").join(format!(
-                "frontend-{}-{}",
+                "frontend-{}-{}-{}",
                 env!("CARGO_PKG_VERSION"),
-                EMBEDDED_BUNDLE_HASH
+                EMBEDDED_BUNDLE_HASH,
+                frontend_stamp
             ));
             if !persistent_frontend.is_dir() {
                 let staging =
@@ -616,6 +736,7 @@ fn start_bundled_backend(app_handle: &tauri::AppHandle) -> Result<bool, String> 
                 std::fs::rename(&staging, &persistent_frontend).map_err(|e| e.to_string())?;
             }
             cmd.env("KORYPHAIOS_FRONTEND_DIST", &persistent_frontend);
+            current_frontend = Some(persistent_frontend);
         }
     }
 
@@ -633,7 +754,6 @@ fn start_bundled_backend(app_handle: &tauri::AppHandle) -> Result<bool, String> 
     // Login managers do not inherit the GUI's environment. Retain discovery
     // paths so already-configured native CLI providers keep resolving.
     for key in [
-        "PATH",
         "HOME",
         "USERPROFILE",
         "APPDATA",
@@ -645,14 +765,85 @@ fn start_bundled_backend(app_handle: &tauri::AppHandle) -> Result<bool, String> 
             environment.insert(key.to_string(), value);
         }
     }
+    // PATH comes from the login shell so the manifest — and the service it
+    // launches — is identical whether the app was opened from the Dock or a
+    // terminal; a manifest that flips with launch context would restart the
+    // service and kill in-flight turns.
+    if let Some(path) = background_service::service_path() {
+        environment.insert("PATH".to_string(), path);
+    }
     background_service::ensure_running(&background_service::ServiceSpec {
-        executable: backend_path,
-        working_directory: data_dir,
+        executable: backend_path.to_path_buf(),
+        working_directory: data_dir.clone(),
         environment,
         stdout: logs.join("backend.log"),
         stderr: logs.join("backend.err.log"),
     })?;
+    // Stamped payload names leave a generation behind on every update. Drop
+    // the stale copies once the new service is registered.
+    cleanup_runtime_dir(
+        &data_dir.join("runtime"),
+        backend_path,
+        current_frontend.as_deref(),
+    );
     Ok(true)
+}
+
+/// Decide which entries of the backend runtime directory are stale: every
+/// `koryphaios-service-*` payload and `frontend-*` tree except the ones this
+/// launch materialized, plus interrupted `*.new` staging files and `*.source`
+/// sidecars from the pre-stamp naming scheme.
+fn stale_runtime_entry_names<I>(
+    names: I,
+    keep: &std::collections::HashSet<String>,
+) -> Vec<String>
+where
+    I: IntoIterator<Item = String>,
+{
+    names
+        .into_iter()
+        .filter(|name| {
+            !keep.contains(name)
+                && (name.starts_with("koryphaios-service-")
+                    || name.starts_with("frontend-")
+                    || name.ends_with(".new")
+                    || name.ends_with(".source"))
+        })
+        .collect()
+}
+
+/// Best-effort removal of stale payload generations from the runtime cache.
+/// A still-running previous backend may be file-locked (Windows), so any
+/// failure simply leaves the entry for the next cleanup.
+fn cleanup_runtime_dir(
+    runtime_dir: &std::path::Path,
+    backend_path: &std::path::Path,
+    frontend_dir: Option<&std::path::Path>,
+) {
+    let mut keep = std::collections::HashSet::new();
+    if let Some(name) = backend_path.file_name().and_then(|n| n.to_str()) {
+        keep.insert(name.to_string());
+    }
+    if let Some(name) = frontend_dir
+        .and_then(|dir| dir.file_name())
+        .and_then(|n| n.to_str())
+    {
+        keep.insert(name.to_string());
+    }
+    let Ok(entries) = std::fs::read_dir(runtime_dir) else {
+        return;
+    };
+    let names = entries
+        .flatten()
+        .filter_map(|entry| entry.file_name().into_string().ok());
+    for name in stale_runtime_entry_names(names, &keep) {
+        let path = runtime_dir.join(&name);
+        if path.is_dir() {
+            let _ = std::fs::remove_dir_all(&path);
+        } else {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
 }
 
 fn copy_frontend_tree(
@@ -677,6 +868,11 @@ fn copy_frontend_tree(
 
 /// Called before initializing the desktop UI. Windows Task Scheduler invokes
 /// this windowless supervisor after login; other OSes supervise the backend.
+/// A one shot screen capture requested by the command line.
+pub fn run_capture_if_requested() -> bool {
+    kory_capture::run_if_requested()
+}
+
 pub fn run_background_service_if_requested() -> bool {
     background_service::run_if_requested()
 }
@@ -693,8 +889,23 @@ async fn wait_for_backend_ready(
     max_wait_ms: u64,
     expected_pid: Option<u32>,
     process: Option<Arc<std::sync::Mutex<std::process::Child>>>,
+    app: Option<&tauri::AppHandle>,
 ) -> Result<u16, String> {
     let start = std::time::Instant::now();
+    // `max_wait_ms` bounds silence, not startup: a live backend reporting
+    // phases through .startup-status.json resets the no-signal clock each
+    // poll, so a slow one-time migration or VACUUM reads as progress rather
+    // than a dead process. The absolute ceiling still bounds a stuck marker.
+    const ABSOLUTE_MAX_WAIT_MS: u64 = 30 * 60 * 1000;
+    let mut no_signal_since = std::time::Instant::now();
+    let launched_at_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let mut last_reported: Option<(String, Option<String>)> = None;
+    let mut last_report_at = std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_secs(5))
+        .unwrap_or_else(std::time::Instant::now);
     let mut current_port = port;
     let client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(2))
@@ -702,13 +913,70 @@ async fn wait_for_backend_ready(
         .build()
         .map_err(|e| format!("Failed to create backend health client: {e}"))?;
 
-    while (start.elapsed().as_millis() as u64) < max_wait_ms {
+    loop {
+        if (start.elapsed().as_millis() as u64) >= ABSOLUTE_MAX_WAIT_MS {
+            return Err(format!(
+                "Backend failed to become ready within {}ms absolute ceiling (last port: {})",
+                ABSOLUTE_MAX_WAIT_MS, current_port
+            ));
+        }
+        if (no_signal_since.elapsed().as_millis() as u64) >= max_wait_ms {
+            return Err(format!(
+                "Backend failed to become ready within {}ms (last port: {})",
+                max_wait_ms, current_port
+            ));
+        }
         if let Some(process) = &process {
             if let Ok(mut child) = process.lock() {
                 if let Ok(Some(status)) = child.try_wait() {
                     return Err(format!(
                         "Bundled backend exited before becoming ready ({status})"
                     ));
+                }
+            }
+        }
+
+        // The backend writes .startup-status.json while it boots but before it
+        // can answer /api/health. A live pid plus a progress marker means
+        // "still starting", so the no-signal deadline does not apply — the
+        // desktop reports the phase to the UI instead of declaring the
+        // backend down. Only the background-service layout has a known data
+        // dir to read the marker from.
+        if crate::config::uses_background_service() {
+            if let Some(status) = crate::config::read_startup_status() {
+                let pid_alive = lifecycle_platform::process_alive(status.pid);
+                match classify_startup(Some(&status), pid_alive, launched_at_ms) {
+                    StartupWait::KeepWaiting { phase, detail } => {
+                        no_signal_since = std::time::Instant::now();
+                        if let Some(app) = app {
+                            let signature = (phase.clone(), detail.clone());
+                            // Re-emit on every phase change, and at most every
+                            // 5s otherwise just to refresh the elapsed clock.
+                            if last_reported.as_ref() != Some(&signature)
+                                || last_report_at.elapsed()
+                                    >= std::time::Duration::from_secs(5)
+                            {
+                                let now_ms = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_millis() as u64;
+                                let _ = app.emit(
+                                    "backend://starting",
+                                    BackendStartingEvent {
+                                        phase,
+                                        detail,
+                                        elapsed_ms: now_ms.saturating_sub(status.started_at),
+                                    },
+                                );
+                                last_reported = Some(signature);
+                                last_report_at = std::time::Instant::now();
+                            }
+                        }
+                    }
+                    StartupWait::Failed(detail) => {
+                        return Err(format!("Backend startup failed: {detail}"));
+                    }
+                    StartupWait::NoSignal => {}
                 }
             }
         }
@@ -754,11 +1022,6 @@ async fn wait_for_backend_ready(
 
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
     }
-
-    Err(format!(
-        "Backend failed to become ready within {}ms (last port: {})",
-        max_wait_ms, current_port
-    ))
 }
 
 /// Stop only a development backend owned by this UI. Installed services are
@@ -915,7 +1178,7 @@ async fn spawn_and_wait_dev_backend(
             if let Ok(mut guard) = BACKEND_PROCESS.lock() {
                 *guard = Some(proc.clone());
             }
-            match wait_for_backend_ready(host, port, 60_000, pid, Some(proc.clone())).await {
+            match wait_for_backend_ready(host, port, 60_000, pid, Some(proc.clone()), Some(app_handle)).await {
                 Ok(actual_port) => {
                     emit_backend_ready(app_handle, pid, host.to_string(), actual_port);
                 }
@@ -1203,6 +1466,11 @@ async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
     // a clean ExitRequested → Exit → restart cycle via the event loop, which
     // is the safe path (app.restart() can skip cleanup when called off the
     // main thread).
+    // The updater swapped in a bundle without the custom Finder icon. Put it
+    // back before the restart so the Dock tile never shows the platter icon
+    // in between; the relaunched app re-checks it either way.
+    #[cfg(target_os = "macos")]
+    let _ = app.run_on_main_thread(install_bundle_icon);
     #[cfg(not(target_os = "windows"))]
     app.request_restart();
 
@@ -1212,6 +1480,34 @@ async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn get_backend_url() -> String {
     AppConfig::get().backend_url()
+}
+
+/// The frontend health sentinel's second signal when /api/health is
+/// unanswered: Some(startup progress) while the background-service backend is
+/// alive mid-boot, None when there is no live startup to wait on. Browser and
+/// dev mode always get None (no known data dir, no marker).
+#[tauri::command]
+fn get_backend_startup_status() -> Option<serde_json::Value> {
+    let status = crate::config::read_startup_status()?;
+    let pid_alive = lifecycle_platform::process_alive(status.pid);
+    // Staleness is only meaningful relative to a launch; for this on-demand
+    // query the marker just has to name a live process.
+    let launched_at_ms = status.updated_at.saturating_add(5_000);
+    match classify_startup(Some(&status), pid_alive, launched_at_ms) {
+        StartupWait::KeepWaiting { phase, detail } => {
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            Some(serde_json::json!({
+                "phase": phase,
+                "detail": detail,
+                "elapsedMs": now_ms.saturating_sub(status.started_at),
+                "startedAt": status.started_at,
+            }))
+        }
+        _ => None,
+    }
 }
 
 #[tauri::command]
@@ -2458,6 +2754,43 @@ fn install_fn_key_monitor(app: &tauri::AppHandle) {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn hexagon_icon_image() -> Option<Retained<NSImage>> {
+    use objc2::AllocAnyThread;
+    use objc2_app_kit::NSImage;
+    use objc2_foundation::NSData;
+    let data = NSData::with_bytes(bundle_icon::ICON_ART_PNG);
+    NSImage::initWithData(NSImage::alloc(), &data)
+}
+
+/// macOS 26 places any bundle icon that is not a full-bleed squircle on a gray
+/// platter. Setting the application icon image at runtime (as `tauri dev` does)
+/// shows the hexagon as drawn in the Dock and app switcher while the app runs.
+#[cfg(target_os = "macos")]
+fn install_dock_icon() {
+    use objc2_app_kit::NSApplication;
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    if let Some(image) = hexagon_icon_image() {
+        unsafe { NSApplication::sharedApplication(mtm).setApplicationIconImage(Some(&image)) };
+    }
+}
+
+/// macOS 26 also puts non-squircle bundle icons on a gray platter in Finder,
+/// Launchpad and the non-running Dock tile; a custom Finder icon is shown as
+/// drawn. It fails strict codesign verification, so it is applied at launch
+/// rather than shipped, and rewritten whenever it is missing or stale. See
+/// `bundle_icon` for the decision and the Dock/Finder refresh.
+#[cfg(target_os = "macos")]
+fn install_bundle_icon() {
+    use objc2_foundation::NSBundle;
+    let Some(image) = hexagon_icon_image() else {
+        return;
+    };
+    bundle_icon::install(&image, &NSBundle::mainBundle().bundlePath());
+}
+
 fn setup_file_drop_handler(window: &WebviewWindow) {
     let window_clone = window.clone();
     // Handle file drop events
@@ -2573,8 +2906,11 @@ pub fn run() {
 
             match start_bundled_backend(&app_handle) {
                 Ok(true) => {
-                    lifecycle_platform::enable_login_guard(&app_handle)
-                        .map_err(std::io::Error::other)?;
+                    // Login-item registration is best-effort: a failure here
+                    // must never abort the app launch.
+                    if let Err(error) = lifecycle_platform::enable_login_guard(&app_handle) {
+                        eprintln!("[Koryphaios] Warning: login guard registration failed: {error}");
+                    }
                     let host = browser_host(&config.server.host).to_string();
                     let port = config.server.port;
                     let nav_handle = app_handle.clone();
@@ -2587,6 +2923,7 @@ pub fn run() {
                             120_000,
                             None,
                             None,
+                            Some(&nav_handle),
                         )
                         .await;
                         match ready_result {
@@ -2645,15 +2982,32 @@ pub fn run() {
                         );
                     }
                 }
-                Err(e) => {
-                    // A release without its backend is not a functioning app.
-                    // Fail startup instead of showing a frontend that can
-                    // never authenticate, load data, or recover.
-                    return Err(std::io::Error::other(format!(
-                        "Failed to start bundled backend: {e}"
-                    ))
-                    .into());
-                }
+                Err(e) => match e {
+                    BundledBackendError::MissingResource(message) => {
+                        // A release without its backend is not a functioning
+                        // app. Fail startup instead of showing a frontend that
+                        // can never authenticate, load data, or recover.
+                        return Err(std::io::Error::other(format!(
+                            "Failed to start bundled backend: {message}"
+                        ))
+                        .into());
+                    }
+                    BundledBackendError::Service(message) => {
+                        // The payload is intact but the service manager could
+                        // not (re)start it — often a transient teardown race.
+                        // Keep the app alive so the BackendDownOverlay reports
+                        // it and the sentinel can recover later.
+                        eprintln!(
+                            "[Koryphaios] Warning: backend service did not start: {message}"
+                        );
+                        emit_backend_down(
+                            &app_handle,
+                            "service-start-failed",
+                            format!("Backend service did not start: {message}"),
+                            None,
+                        );
+                    }
+                },
             }
 
             // NOTE: Native menu bar is disabled for frameless window mode.
@@ -2757,6 +3111,10 @@ pub fn run() {
                 // them before the webview, so voice push-to-talk needs this.
                 #[cfg(target_os = "macos")]
                 install_fn_key_monitor(&app.handle());
+                #[cfg(target_os = "macos")]
+                install_dock_icon();
+                #[cfg(target_os = "macos")]
+                install_bundle_icon();
 
                 // On Linux/WebKitGTK, getUserMedia (microphone) is denied by
                 // default unless the app handles the webview's permission-request
@@ -2836,6 +3194,7 @@ pub fn run() {
             desktop_lifecycle::get_desktop_exit_request,
             desktop_lifecycle::resolve_desktop_exit,
             get_backend_url,
+            get_backend_startup_status,
             get_websocket_url,
             get_app_version,
             show_main_window,
@@ -3530,6 +3889,181 @@ mod tests {
         assert_eq!(
             std::fs::read(&outside).expect("outside file should remain readable"),
             b"do not touch\n"
+        );
+    }
+
+    #[test]
+    fn runtime_backend_name_stamps_the_payload_identity() {
+        let name = super::runtime_backend_name("0.5.0", "resource", "abc123", 100, 0x20, "");
+        assert_eq!(name, "koryphaios-service-0.5.0-resource-abc123-6420");
+        // Any payload change — size or mtime — yields a different path, so the
+        // service manifest changes and the running service is replaced.
+        assert_ne!(
+            super::runtime_backend_name("0.5.0", "resource", "abc123", 101, 0x20, ""),
+            name
+        );
+        assert_ne!(
+            super::runtime_backend_name("0.5.0", "resource", "abc123", 100, 0x21, ""),
+            name
+        );
+        assert_ne!(
+            super::runtime_backend_name("0.5.0", "resource", "def456", 100, 0x20, ""),
+            name
+        );
+        assert!(super::runtime_backend_name("0.5.0", "resource", "abc123", 100, 0x20, ".exe")
+            .ends_with(".exe"));
+    }
+
+    #[test]
+    fn stale_runtime_entries_keep_the_current_payload_and_remove_the_rest() {
+        let keep = std::collections::HashSet::from([
+            "koryphaios-service-0.5.0-resource-new-6420".to_string(),
+            "frontend-0.5.0-new-9f".to_string(),
+        ]);
+        let entries = vec![
+            // Previous generations of both payloads.
+            "koryphaios-service-0.5.0-resource-old-ff".to_string(),
+            "koryphaios-service-0.4.9-resource-older".to_string(),
+            "frontend-0.5.0-old-aa".to_string(),
+            "frontend-0.4.9-older".to_string(),
+            // Interrupted staging + the retired sidecar scheme.
+            "koryphaios-service-0.5.new".to_string(),
+            "frontend-0.5.1234.new".to_string(),
+            "koryphaios-service-0.5.0-resource-old.source".to_string(),
+            // The live payload and unrelated files must survive.
+            "koryphaios-service-0.5.0-resource-new-6420".to_string(),
+            "frontend-0.5.0-new-9f".to_string(),
+            "backend.log".to_string(),
+            "something-else".to_string(),
+        ];
+        let mut stale = super::stale_runtime_entry_names(entries, &keep);
+        stale.sort();
+        assert_eq!(
+            stale,
+            vec![
+                "frontend-0.4.9-older",
+                "frontend-0.5.0-old-aa",
+                "frontend-0.5.1234.new",
+                "koryphaios-service-0.4.9-resource-older",
+                "koryphaios-service-0.5.0-resource-old-ff",
+                "koryphaios-service-0.5.0-resource-old.source",
+                "koryphaios-service-0.5.new",
+            ]
+        );
+    }
+
+    // ─── Startup-status marker classification ────────────────────────────────
+
+    fn startup_status(phase: &str, updated_at: u64) -> crate::config::StartupStatus {
+        crate::config::StartupStatus {
+            pid: 4242,
+            phase: phase.to_string(),
+            detail: Some(format!("working on {phase}")),
+            started_at: updated_at.saturating_sub(1_000),
+            phase_started_at: updated_at,
+            updated_at,
+            ready: false,
+        }
+    }
+
+    #[test]
+    fn startup_marker_parses_the_backend_json_shape() {
+        let status: crate::config::StartupStatus = serde_json::from_str(
+            r#"{"pid":900,"phase":"database-vacuum","detail":"Compacting the database (one-time)","startedAt":1000,"phaseStartedAt":2000,"updatedAt":2000,"ready":false}"#,
+        )
+        .expect("marker JSON must parse");
+        assert_eq!(status.pid, 900);
+        assert_eq!(status.phase, "database-vacuum");
+        assert_eq!(
+            status.detail.as_deref(),
+            Some("Compacting the database (one-time)")
+        );
+        assert_eq!(status.started_at, 1000);
+        assert_eq!(status.updated_at, 2000);
+        assert!(!status.ready);
+        // A missing detail is normal for phases with no description.
+        let bare: crate::config::StartupStatus = serde_json::from_str(
+            r#"{"pid":900,"phase":"encryption","detail":null,"startedAt":1,"phaseStartedAt":1,"updatedAt":1,"ready":false}"#,
+        )
+        .expect("marker JSON must parse");
+        assert_eq!(bare.detail, None);
+    }
+
+    #[test]
+    fn classify_startup_no_marker_is_no_signal() {
+        assert_eq!(
+            super::classify_startup(None, true, 1_000_000),
+            super::StartupWait::NoSignal
+        );
+    }
+
+    #[test]
+    fn classify_startup_live_process_mid_boot_keeps_waiting() {
+        let status = startup_status("database-migrations", 1_000_000);
+        assert_eq!(
+            super::classify_startup(Some(&status), true, 1_000_000),
+            super::StartupWait::KeepWaiting {
+                phase: "database-migrations".to_string(),
+                detail: Some("working on database-migrations".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn classify_startup_dead_pid_is_no_signal() {
+        let status = startup_status("database-migrations", 1_000_000);
+        assert_eq!(
+            super::classify_startup(Some(&status), false, 1_000_000),
+            super::StartupWait::NoSignal
+        );
+    }
+
+    #[test]
+    fn classify_startup_ready_defers_to_health_polling() {
+        let mut status = startup_status("ready", 1_000_000);
+        status.ready = true;
+        assert_eq!(
+            super::classify_startup(Some(&status), true, 1_000_000),
+            super::StartupWait::NoSignal
+        );
+    }
+
+    #[test]
+    fn classify_startup_failed_marker_fails_fast() {
+        let status = startup_status("failed", 1_000_000);
+        // The writer may already have exited by the time we read the marker —
+        // the failure still counts because the marker is fresh.
+        assert_eq!(
+            super::classify_startup(Some(&status), false, 1_000_000),
+            super::StartupWait::Failed("working on failed".to_string())
+        );
+        assert_eq!(
+            super::classify_startup(Some(&status), true, 1_000_000),
+            super::StartupWait::Failed("working on failed".to_string())
+        );
+    }
+
+    #[test]
+    fn classify_startup_stale_marker_from_dead_process_is_no_signal() {
+        // Marker last touched 60s before this wait began, writer is gone.
+        let status = startup_status("failed", 940_000);
+        assert_eq!(
+            super::classify_startup(Some(&status), false, 1_000_000),
+            super::StartupWait::NoSignal
+        );
+    }
+
+    #[test]
+    fn classify_startup_stale_marker_with_live_pid_still_waits() {
+        // A multi-minute phase (VACUUM) writes nothing: the marker looks stale
+        // while the process is genuinely still working.
+        let status = startup_status("database-vacuum", 940_000);
+        assert_eq!(
+            super::classify_startup(Some(&status), true, 1_000_000),
+            super::StartupWait::KeepWaiting {
+                phase: "database-vacuum".to_string(),
+                detail: Some("working on database-vacuum".to_string()),
+            }
         );
     }
 }

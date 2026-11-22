@@ -26,6 +26,10 @@ import {
   type StreamRequest,
 } from './types';
 import { getCliBridge, getKoryphaiosCursorHome } from './cli-bridges';
+import {
+  koryBridgeUnavailableError,
+  resolveKoryBridgeScript,
+} from './kory-cli-mcp-config';
 import { mcpConfigCandidates } from './cli-config-paths';
 import { createKoryBridgeGrantLease } from './bridge-grant';
 import {
@@ -471,6 +475,14 @@ export class CursorProvider implements Provider {
       try {
         // MCP: write the kory server config so the CLI gets kory__ tools.
         const mcpConfigs = cursorBridge?.buildMcpConfig(bridgeCtx);
+        if (
+          bridgeCtx.sessionId &&
+          (!mcpConfigs || mcpConfigs.length === 0) &&
+          !resolveKoryBridgeScript()
+        ) {
+          yield { type: 'error', error: koryBridgeUnavailableError('cursor') };
+          return;
+        }
         if (mcpConfigs && mcpConfigs.length > 0) {
           // cursor-agent is not installed on the authoring host, so whether it
           // resolves mcp.json against CURSOR_CONFIG_DIR itself or against a
@@ -691,6 +703,13 @@ export class CursorProvider implements Provider {
             tokensOut: row.usage.outputTokens ?? 0,
             tokensCacheRead: row.usage.cacheReadTokens,
             tokensCacheWrite: row.usage.cacheWriteTokens,
+            // The result line is the agent turn's usage receipt; the stream has
+            // no per-request snapshot, and a tool-using turn re-reads its prefix
+            // once per internal request. Bill from it, but never present it as
+            // exact live occupancy: the meter bounds it as an estimate.
+            estimated: true,
+            billingTokensIn: row.usage.inputTokens ?? 0,
+            billingTokensOut: row.usage.outputTokens ?? 0,
           };
         }
         if (row.is_error) {

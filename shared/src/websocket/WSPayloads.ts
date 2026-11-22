@@ -201,7 +201,10 @@ export interface ToolCallPayload {
    *  See docs/architecture/transcript-integrity.md. */
   messageId?: string;
   toolCall: {
+    /** App-owned id (Invariant 2). Results carry the same id in `callId`. */
     id: string;
+    /** The provider-native id, kept as evidence only. Never used to match calls and results. */
+    nativeRef?: string;
     name: string;
     input: Record<string, unknown>;
   };
@@ -216,7 +219,10 @@ export interface StreamToolResultPayload {
    *  See docs/architecture/transcript-integrity.md. */
   messageId?: string;
   toolResult: {
+    /** App-owned id of the call this result belongs to. */
     callId: string;
+    /** The provider-native id of the call, kept as evidence only. */
+    nativeRef?: string;
     name: string;
     output: string;
     isError: boolean;
@@ -239,6 +245,29 @@ export interface StreamCompletePayload {
    *  the frontend replaces a live turn with persisted history by this id, never by text.
    *  See docs/architecture/transcript-integrity.md. */
   messageId?: string;
+}
+
+/** turn.provider_completed: the manager's final provider call for a turn ended (success, error or stop).
+ *  Emitted once per manager turn, before critic, checkpoint and persistence work start. The
+ *  spinner follows this event; later follow-up work is not provider work. */
+export interface TurnProviderCompletedPayload {
+  agentId: string;
+  /** The assistant message id allocated when the turn began (transcript-integrity Invariant 2). */
+  messageId: string;
+  runId?: string;
+  completedAt: number;
+}
+
+export type RunSettledOutcome = 'completed' | 'failed' | 'cancelled' | 'interrupted';
+
+/** run.settled: the run is terminal and every follow-up step for it has finished. Emitted once per run,
+ *  immediately after its terminal run.state transition. The `messageId` is optional because the run
+ *  coordinator does not know the turn id; `turn.provider_completed` carries the same `runId` and `messageId`. */
+export interface RunSettledPayload {
+  runId: string;
+  messageId?: string;
+  outcome: RunSettledOutcome;
+  settledAt: number;
 }
 
 export interface SessionCreatedPayload {
@@ -377,6 +406,19 @@ export interface KoryRoutingPayload {
   reasoning: string;
 }
 
+export interface KorySkillUse {
+  name: string;
+  representation: 'full' | 'compact' | 'minimal';
+  reason?: string;
+  source?: string;
+}
+
+/** The skills a turn actually injected into its compiled prompt. */
+export interface KorySkillPayload {
+  agentId?: string;
+  skills: KorySkillUse[];
+}
+
 export interface KoryTaskBreakdownPayload {
   tasks: Array<{
     id: string;
@@ -425,6 +467,9 @@ export interface ProviderInfo {
   verificationScope?: 'credential' | 'account' | 'endpoint' | 'catalog' | 'runtime';
   /** Last probe failure. Never contains raw credential material. */
   verificationError?: string;
+  /** Where auto-detected connection material came from (e.g. `OPENAI_API_KEY`,
+   *  `AWS credentials`, `Local server · http://localhost:11434`). */
+  autoDetectedSource?: string;
   /** Effective provider base URL used for inference and discovery. */
   endpointUrl?: string;
   /** Exact model-catalog URL used for provider discovery, when applicable. */
@@ -518,4 +563,11 @@ export interface NativeCommandPayload {
   isError?: boolean;
   /** Stable id so the frontend can accumulate streaming chunks into one entry. */
   messageId: string;
+}
+
+/** `session.history_pruned`: ordered events through `throughSequence` of
+ *  `epoch` were deleted by retention and can never be replayed. */
+export interface SessionHistoryPrunedPayload {
+  epoch: number;
+  throughSequence: number;
 }

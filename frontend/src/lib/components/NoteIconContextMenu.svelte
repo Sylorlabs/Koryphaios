@@ -5,7 +5,11 @@
   import X from 'lucide-svelte/icons/x';
   import { notesStore } from '$lib/stores/notes.svelte';
   import { projectStore } from '$lib/stores/project.svelte';
-  import { NOTE_ICON_CHOICES, type NoteIcon } from '@koryphaios/shared';
+  import {
+    MAX_NOTE_ICON_LABEL_LENGTH,
+    NOTE_ICON_CHOICES,
+    type NoteIcon,
+  } from '@koryphaios/shared';
 
   let { noteId, x, y, icon, onclose }: {
     noteId: string;
@@ -20,6 +24,7 @@
   let error = $state('');
   let left = $state(0);
   let top = $state(0);
+  let draftLabel = $state(icon?.label ?? '');
   let alive = true;
   const projectAtOpen = projectStore.currentPath;
 
@@ -27,9 +32,19 @@
     if (!alive || busy || projectStore.currentPath !== projectAtOpen) return;
     busy = true;
     error = '';
-    if (await notesStore.setNoteIcon(noteId, next)) { if (alive) onclose(); }
+    const label = draftLabel.trim().slice(0, MAX_NOTE_ICON_LABEL_LENGTH);
+    const payload = next ? { ...next, ...(label ? { label } : {}) } : null;
+    if (await notesStore.setNoteIcon(noteId, payload)) { if (alive) onclose(); }
     else error = 'Could not save this icon. Try again.';
     busy = false;
+  }
+
+  /** A label is appearance metadata: it never edits the note document. */
+  function saveLabel(): void {
+    if (!alive || busy || !icon) return;
+    const next = draftLabel.trim().slice(0, MAX_NOTE_ICON_LABEL_LENGTH);
+    if ((icon.label ?? '') === next) return;
+    void choose({ ...icon, ...(next ? { label: next } : {}) });
   }
 
   async function upload(event: Event): Promise<void> {
@@ -130,6 +145,22 @@
       </button>
     {/each}
   </div>
+  <label class="label-field">
+    <span>Label</span>
+    <input
+      bind:value={draftLabel}
+      maxlength={MAX_NOTE_ICON_LABEL_LENGTH}
+      placeholder="e.g. Incident notes"
+      disabled={busy || !icon}
+      onkeydown={(event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          saveLabel();
+        }
+      }}
+      onblur={saveLabel}
+    />
+  </label>
   <button type="button" role="menuitem" class="menu-action" disabled={busy} onclick={() => fileInput?.click()}>
     <ImagePlus size={14} /> Upload your own icon
   </button>
@@ -151,7 +182,10 @@
   .icon-grid button { position: relative; height: 34px; font-size: 20px; }
   .icon-grid button[aria-checked='true'] { background: var(--color-accent-transparent); }
   .icon-grid :global(.chosen) { position: absolute; bottom: 2px; right: 2px; color: var(--color-accent); }
+  .label-field { display: flex; flex-direction: column; gap: 4px; margin: 0 6px 8px; font-size: 11px; color: var(--color-text-muted); }
+  .label-field input { border: 1px solid var(--color-border); border-radius: 7px; background: var(--color-surface-1); color: var(--color-text-primary); padding: 6px 8px; font: inherit; font-size: 12px; }
+  .label-field input:disabled { opacity: 0.45; }
   .menu-action { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 7px; text-align: left; font-size: 12px; }
-  .hint, .error { margin: 6px 6px 2px; font-size: 10px; line-height: 1.5; color: var(--color-text-muted); }
+  .hint, .error { margin: 6px 6px 2px; font-size: 11px; line-height: 1.5; color: var(--color-text-muted); }
   .error { color: var(--color-error); }
 </style>

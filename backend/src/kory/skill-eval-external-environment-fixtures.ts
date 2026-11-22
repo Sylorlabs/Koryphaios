@@ -17,6 +17,10 @@ import {
   NEXTJS_RUNTIME_SKILL_EVAL_MATERIALIZERS,
   NEXTJS_RUNTIME_SKILL_EVAL_SCORERS,
 } from './skill-eval-nextjs-runtime-fixtures';
+import {
+  COMPUTER_USE_SKILL_EVAL_MATERIALIZERS,
+  COMPUTER_USE_SKILL_EVAL_SCORERS,
+} from './skill-eval-computer-use-desktop';
 
 /**
  * Full-task scenarios whose acceptance contract depends on an environment that
@@ -322,12 +326,14 @@ const executableMaterializers = [
   ...NEXTJS_RUNTIME_SKILL_EVAL_MATERIALIZERS,
   ...VISUAL_NATIVE_SKILL_EVAL_MATERIALIZERS,
   ...NATIVE_OPERATIONS_SKILL_EVAL_MATERIALIZERS,
+  ...COMPUTER_USE_SKILL_EVAL_MATERIALIZERS,
 ];
 const executableScorers = [
   ...VUE_BROWSER_SKILL_EVAL_SCORERS,
   ...NEXTJS_RUNTIME_SKILL_EVAL_SCORERS,
   ...VISUAL_NATIVE_SKILL_EVAL_SCORERS,
   ...NATIVE_OPERATIONS_SKILL_EVAL_SCORERS,
+  ...COMPUTER_USE_SKILL_EVAL_SCORERS,
 ];
 
 export const EXTERNAL_ENVIRONMENT_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMaterializer[] =

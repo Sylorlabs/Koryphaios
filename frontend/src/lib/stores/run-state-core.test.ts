@@ -157,11 +157,16 @@ describe('run-state-core: deriveButtonState', () => {
     });
   });
 
-  test('waiting phase + text remains waiting until the owned wait is cancelled', () => {
+  test('waiting phase + text steers past the owned wait instead of blocking the send', () => {
     expect(deriveButtonState('waiting_terminal', true, 'background terminal')).toEqual({
-      mode: 'waiting',
+      mode: 'steer',
       waitingReason: 'background terminal',
       phase: 'waiting_terminal',
+    });
+    expect(deriveButtonState('waiting_user', true, 'your answer')).toEqual({
+      mode: 'steer',
+      waitingReason: 'your answer',
+      phase: 'waiting_user',
     });
   });
 
@@ -885,7 +890,9 @@ describe('run-state-core: authoritative run projection', () => {
 
     expect(engine.applyEvent(runStateMessage(6, 'streaming', 'active'))).toBe(false);
     expect(engine.getPhase(SID)).toBe('done');
-    expect(engine.applyEvent(msg('stream.delta', SID, { agentId: AGENT, content: 'late' }))).toBe(false);
+    expect(engine.applyEvent(msg('stream.delta', SID, { agentId: AGENT, content: 'late' }))).toBe(
+      false,
+    );
     expect(engine.getPhase(SID)).toBe('done');
     expect(engine.states.get(SID)?.stoppedByUser).toBe(true);
   });
@@ -895,7 +902,9 @@ describe('run-state-core: authoritative run projection', () => {
     engine.applyEvent(runStateMessage(7, 'done', 'terminal'));
 
     expect(
-      engine.applyEvent(msg('stream.thinking', SID, { agentId: AGENT, thinking: 'late reasoning' })),
+      engine.applyEvent(
+        msg('stream.thinking', SID, { agentId: AGENT, thinking: 'late reasoning' }),
+      ),
     ).toBe(false);
     expect(engine.getPhase(SID)).toBe('done');
   });
@@ -908,5 +917,117 @@ describe('run-state-core: authoritative run projection', () => {
     expect(engine.applyEvent(runStateMessage(6, 'cancelled', 'terminal'))).toBe(true);
     expect(engine.getPhase(SID)).toBe('cancelled');
     expect(engine.states.get(SID)?.stoppedByUser).toBe(true);
+  });
+});
+
+describe('run-state-core: provider completion vs run settlement (B8)', () => {
+  const SID = 'settle-1';
+  function runState(revision: number, phase: string, runId = 'run-1') {
+    return msg('run.state', SID, {
+      snapshot: {
+        ...createIdleSessionRun(SID),
+        runId,
+        revision,
+        phase,
+        status: phase === 'done' ? 'completed' : 'running',
+      },
+    });
+  }
+
+  test('an active run becomes finalizing when the model finishes, and Stop stays available', () => {
+    const { engine } = makeEngine();
+    engine.applyEvent(runState(1, 'streaming'));
+    engine.applyEvent(
+      msg('turn.provider_completed', SID, {
+        agentId: 'kory-manager',
+        messageId: 'm1',
+        runId: 'run-1',
+      }),
+    );
+    expect(engine.getPhase(SID)).toBe('finalizing');
+    expect(engine.getButtonState(SID, false).mode).toBe('stop');
+    expect(phaseToAgentStatus('finalizing')).toBe('verifying');
+  });
+
+  test('an active snapshot during follow-up work does not flip back to writing', () => {
+    const { engine } = makeEngine();
+    engine.applyEvent(runState(1, 'streaming'));
+    engine.applyEvent(
+      msg('turn.provider_completed', SID, {
+        agentId: 'kory-manager',
+        messageId: 'm1',
+        runId: 'run-1',
+      }),
+    );
+    engine.applyEvent(runState(2, 'streaming'));
+    expect(engine.getPhase(SID)).toBe('finalizing');
+    engine.applyEvent(runState(3, 'done'));
+    expect(engine.getPhase(SID)).toBe('done');
+  });
+
+  test('a completion for another run, or after a user stop, changes nothing', () => {
+    const { engine } = makeEngine();
+    engine.applyEvent(runState(1, 'streaming'));
+    engine.applyEvent(
+      msg('turn.provider_completed', SID, {
+        agentId: 'kory-manager',
+        messageId: 'm0',
+        runId: 'old-run',
+      }),
+    );
+    expect(engine.getPhase(SID)).toBe('streaming');
+    engine.markUserStopped(SID);
+    const stoppedPhase = engine.getPhase(SID);
+    engine.applyEvent(
+      msg('turn.provider_completed', SID, {
+        agentId: 'kory-manager',
+        messageId: 'm1',
+        runId: 'run-1',
+      }),
+    );
+    expect(engine.getPhase(SID)).toBe(stoppedPhase);
+  });
+
+  test('run.settled closes a run still shown as finalizing; a new run clears the marker', () => {
+    const { engine } = makeEngine();
+    engine.applyEvent(runState(1, 'streaming'));
+    engine.applyEvent(
+      msg('turn.provider_completed', SID, {
+        agentId: 'kory-manager',
+        messageId: 'm1',
+        runId: 'run-1',
+      }),
+    );
+    engine.applyEvent(
+      msg('run.settled', SID, { runId: 'run-1', outcome: 'completed', settledAt: 1 }),
+    );
+    expect(engine.getPhase(SID)).toBe('done');
+    engine.startRun(SID);
+    engine.applyEvent(runState(4, 'streaming', 'run-1'));
+    expect(engine.getPhase(SID)).toBe('streaming');
+  });
+});
+
+describe('run-state-core: terminal reason for the restart Resume row', () => {
+  test('exposes the authoritative terminal reason and run id, cleared by the next run', () => {
+    const { engine } = makeEngine();
+    const SID = 'restart-1';
+    engine.applyEvent(
+      msg('run.state', SID, {
+        snapshot: {
+          ...createIdleSessionRun(SID),
+          runId: 'run-9',
+          revision: 2,
+          phase: 'error',
+          status: 'failed',
+          terminalReason: 'backend_restarted_during_active_run',
+        },
+      }),
+    );
+    expect(engine.getTerminalReason(SID)).toBe('backend_restarted_during_active_run');
+    expect(engine.getRunId(SID)).toBe('run-9');
+    engine.startRun(SID);
+    expect(engine.getTerminalReason(SID)).toBeNull();
+    expect(engine.getTerminalReason(null)).toBeNull();
   });
 });

@@ -629,7 +629,7 @@ describe('provider routes', () => {
 
     // Knowing another provider's account ID must not make its key reusable.
     const beforeWrongProvider = lastSetCredentials;
-    for (const other of ['anthropic', 'agentrouter', 'custom:other']) {
+    for (const other of ['anthropic', 'custom:other']) {
       const wrongList = await request(`/api/providers/${other}/accounts`);
       expect(wrongList.body.data.some((account: any) => account.id === accountId)).toBe(false);
       const wrongActivate = await request(

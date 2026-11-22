@@ -6,6 +6,7 @@
   import Power from 'lucide-svelte/icons/power';
   import { runStateStore } from '$lib/stores/run-state.svelte';
   import { isActivePhase } from '$lib/stores/run-state-core';
+  import { isDeviceSessionKey } from '$lib/stores/device-routing.svelte';
 
   type Request = { id: number; reason: 'close' | 'restart' | 'shutdown' | 'signout' };
   type Choice = 'background' | 'proceed' | 'cancel';
@@ -25,15 +26,19 @@
       request?.reason === 'signout' ? 'Sign out anyway' : 'Restart anyway',
   );
 
-  function hasRunningAgents(): boolean {
-    return [...runStateStore.states.values()].some(
-      (state) => isActivePhase(state.phase) || state.activeAgents.size > 0,
+  /** Only this desktop's own turns depend on this process. A linked chat runs
+   * in the target's backend and deliberately keeps going when this app quits. */
+  function hasRunningLocalAgents(): boolean {
+    return [...runStateStore.states.entries()].some(
+      ([sessionId, state]) =>
+        !isDeviceSessionKey(sessionId) &&
+        (isActivePhase(state.phase) || state.activeAgents.size > 0),
     );
   }
 
   async function show(next: Request): Promise<void> {
     if (request && next.id < request.id) return;
-    if (next.reason === 'close' && !hasRunningAgents()) {
+    if (next.reason === 'close' && !hasRunningLocalAgents()) {
       try {
         // No active manager or worker needs preserving, so close immediately
         // instead of asking whether to keep a background service alive.
@@ -147,9 +152,11 @@
       </div>
       <p id="desktop-exit-description">
         {#if closing}
-          Keep agents running in the background, or quit and stop them.
+          Keep local agents running in the background, or quit and stop them. Work on linked
+          computers continues.
         {:else}
-          This will interrupt running agents. Continue anyway?
+          This will interrupt local agents. Work already running on linked computers continues.
+          Continue anyway?
         {/if}
       </p>
       {#if error}<p class="exit-error" role="alert">{error}</p>{/if}

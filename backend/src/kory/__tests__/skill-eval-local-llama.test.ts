@@ -3,7 +3,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { osSandboxEnabled } from '../../security/os-sandbox';
-import { createLocalLlamaTextPatchSkillEvalExecutor, qwenInstructPrompt } from '../skill-eval-local-llama';
+import { createLocalLlamaTextPatchSkillEvalExecutor, qwenInstructPrompt } from '../../eval/skills/skill-eval-local-llama';
 
 const PINNED_SHA = 'c1e659736d89ac1065fb495330fb824d94001974a4bfa78e7270e43476a8d940';
 

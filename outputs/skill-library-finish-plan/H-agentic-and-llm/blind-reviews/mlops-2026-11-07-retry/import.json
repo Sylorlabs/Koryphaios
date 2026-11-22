@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "reviewer": {
+    "agentId": "logfare-stateless-ba2deaa8-938c-4eef-bddb-aeee24d7ec0f",
+    "provider": "logfare",
+    "model": "deepseek-v4.1-flash-1017"
+  },
+  "reviews": [
+    {
+      "assignmentId": "blind-v5-d6cc4453874b80c8c112",
+      "output": "{\"artifactA\":{\"passed\":false,\"quality\":0.35,\"verification\":0.2,\"integrityFailure\":false,\"evidence\":[\"Implements solve() building lineageKey from data|features|code|env|modelDigest and returns sorted blockers plus rollbackReady/promotionReady, matching README contract shape.\",\"Uses permissive field aliases (datasetSnapshot, featureDefinition, trainingCode, environment, modelArtifact) and accepts loose truthy/boolean gates rather than identity-bearing evidence; may diverge from expected input schema.\",\"Host synthetic behavioral vectors report 0/3 passing for both arms, including the happy-path promotion case, so the implementation does not satisfy the contract behavior.\",\"Final output honestly labels checks as synthetic and states no real model/serving environment was run; no fabricated verification.\",\"No negative/recovery demonstration beyond a single blocked-record check; no offline/online parity, canary, or rollback recovery evidence produced.\"]},\"artifactB\":{\"passed\":false,\"quality\":0.4,\"verification\":0.3,\"integrityFailure\":false,\"evidence\":[\"Implements solve() with lineageKey and fail-closed gates requiring identity-bearing evidence (artifact digest+signature, evaluation report linked to artifact, approval linked to evaluation, parity revisions, canary health/quality, rollback digest).\",\"Explicitly reports npm test found no test files and that duplicate-trigger resume and production rollback recovery paths are not demonstrated — honest limitation labeling.\",\"Host synthetic behavioral vectors report 0/3 passing, including happy-path promotion, so behavior does not match expected contract.\",\"Stricter schema assumptions (nested artifact/evaluation/approval/canary/rollback objects) may not match fixture input shape, contributing to failures.\",\"No fabricated verification claims; uncertainty is labeled rather than converted to certainty.\"]},\"preference\":\"B\",\"rationale\":[\"Both arms fail the host behavioral vectors (0/3), so neither passes.\",\"Artifact B is more fail-closed and requires identity-bearing evidence linkage (evaluation tied to artifact digest, approval tied to evaluation report, parity revisions, rollback deployment revision), better matching the anti-pattern-resistance and lineage requirements.\",\"Artifact B explicitly labels its verification limits and incomplete recovery paths, whereas Artifact A asserts local checks passed that the host scorer contradicts.\",\"Artifact A's permissive aliasing and loose boolean gates are weaker on traceability discipline.\",\"B's stricter schema may be over-assuming, but its evidence discipline and honesty edge out A.\"]}"
+    }
+  ]
+}

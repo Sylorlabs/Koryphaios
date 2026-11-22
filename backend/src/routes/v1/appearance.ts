@@ -6,6 +6,27 @@ import {
 } from '../../appearance-settings';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 
+const themePresetV1 = t.Union([
+  t.Literal('kintsugi'),
+  t.Literal('midnight'),
+  t.Literal('nord'),
+  t.Literal('dracula'),
+  t.Literal('catppuccin'),
+  t.Literal('gruvbox'),
+  t.Literal('tokyo'),
+  t.Literal('solarized'),
+  t.Literal('kintsugi-light'),
+  t.Literal('light'),
+  t.Literal('nord-light'),
+  t.Literal('tokyo-day'),
+  t.Literal('lagoon'),
+  t.Literal('everforest-light'),
+  t.Literal('gruvbox-light'),
+  t.Literal('rose-pine-dawn'),
+  t.Literal('catppuccin-latte'),
+  t.Literal('system'),
+]);
+
 const themePreset = t.Union([
   t.Literal('kintsugi'),
   t.Literal('midnight'),
@@ -15,8 +36,15 @@ const themePreset = t.Union([
   t.Literal('gruvbox'),
   t.Literal('tokyo'),
   t.Literal('solarized'),
+  t.Literal('kintsugi-light'),
   t.Literal('light'),
-  t.Literal('system'),
+  t.Literal('nord-light'),
+  t.Literal('tokyo-day'),
+  t.Literal('lagoon'),
+  t.Literal('everforest-light'),
+  t.Literal('gruvbox-light'),
+  t.Literal('rose-pine-dawn'),
+  t.Literal('catppuccin-latte'),
 ]);
 
 const accent = t.Union([
@@ -52,14 +80,34 @@ const customAccent = t.Object({
   hover: t.String({ pattern: '^#[0-9A-Fa-f]{6}$' }),
 });
 
-const appearanceBody = t.Object({
+const modeAppearance = t.Object({
   preset: themePreset,
+  accent,
+  secondaryAccent: accent,
+  customAccent: t.Optional(customAccent),
+  customSecondaryAccent: t.Optional(customAccent),
+});
+
+const appearanceBodyV2 = t.Object({
+  version: t.Literal(2),
+  mode: t.Union([t.Literal('dark'), t.Literal('light'), t.Literal('system')]),
+  font,
+  dark: modeAppearance,
+  light: modeAppearance,
+});
+
+const appearanceBodyV1 = t.Object({
+  preset: themePresetV1,
   accent,
   secondaryAccent: accent,
   font,
   customAccent: t.Optional(customAccent),
   customSecondaryAccent: t.Optional(customAccent),
 });
+
+// Both shapes are accepted so an older frontend can keep writing while a newer
+// backend serves either surface.
+const appearanceBody = t.Union([appearanceBodyV2, appearanceBodyV1]);
 
 export const appearanceRoutes = new Elysia({ prefix: '/api/appearance' })
   .get('/', ({ request, set }) => {

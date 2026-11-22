@@ -6,17 +6,22 @@ const relaunch = vi.fn();
 
 vi.mock('@tauri-apps/plugin-process', () => ({ relaunch: () => relaunch() }));
 
+const healthState = vi.hoisted(() => ({
+  status: 'unhealthy' as string,
+  reason: 'unreachable' as string | null,
+  consecutiveFailures: 275,
+  lastCheckedAt: 0,
+  failureDetail: 'Could not reach http://127.0.0.1:3001/api/health' as string | null,
+  frontendVersion: '0.5.0',
+  startupPhase: null as string | null,
+  startupDetail: null as string | null,
+  startupElapsedMs: null as number | null,
+}));
+
 vi.mock('$lib/stores/backend-health.svelte', () => ({
   POLL_INTERVAL_MS: 5_000,
   recheckBackendHealth: vi.fn(),
-  backendHealth: {
-    status: 'unhealthy',
-    reason: 'unreachable',
-    consecutiveFailures: 275,
-    lastCheckedAt: Date.now(),
-    failureDetail: 'Could not reach http://127.0.0.1:3001/api/health',
-    frontendVersion: '0.5.0',
-  },
+  backendHealth: healthState,
 }));
 
 vi.mock('$lib/demo-flags', () => ({ isDemoMode: false }));
@@ -45,6 +50,16 @@ async function clickRestart(button: HTMLElement) {
 describe('BackendDownOverlay restart app', () => {
   beforeEach(() => {
     relaunch.mockReset();
+    Object.assign(healthState, {
+      status: 'unhealthy',
+      reason: 'unreachable',
+      consecutiveFailures: 275,
+      lastCheckedAt: Date.now(),
+      failureDetail: 'Could not reach http://127.0.0.1:3001/api/health',
+      startupPhase: null,
+      startupDetail: null,
+      startupElapsedMs: null,
+    });
     // Pretend this is a packaged build inside the Tauri shell, which is the
     // only configuration where a relaunch can actually succeed.
     vi.stubEnv('DEV', false);
@@ -137,5 +152,47 @@ describe('BackendDownOverlay restart app', () => {
 
     expect(relaunch).not.toHaveBeenCalled();
     expect(reload).toHaveBeenCalledOnce();
+  });
+});
+
+describe('BackendDownOverlay starting state', () => {
+  beforeEach(() => {
+    Object.assign(healthState, {
+      status: 'starting',
+      reason: null,
+      consecutiveFailures: 0,
+      lastCheckedAt: Date.now(),
+      failureDetail: null,
+      startupPhase: 'database-vacuum',
+      startupDetail: 'Compacting the database (one-time)',
+      startupElapsedMs: 65_000,
+    });
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+  });
+
+  afterEach(() => {
+    delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('renders progress, not an error, while the backend is still booting', () => {
+    render(BackendDownOverlay);
+
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
+    expect(screen.getByText('Starting Koryphaios backend…')).toBeInTheDocument();
+    expect(screen.getByText('Compacting the database (one-time)')).toBeInTheDocument();
+    expect(screen.getByText(/Elapsed 1:0\d/)).toBeInTheDocument();
+    expect(screen.getByText(/Don't quit the app/)).toBeInTheDocument();
+    // No failure affordances while the boot is progressing normally.
+    expect(screen.queryByRole('button', { name: /Retry now/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Restart/ })).not.toBeInTheDocument();
+  });
+
+  it('falls back to a phase label when the backend supplied no detail', () => {
+    healthState.startupDetail = null;
+    healthState.startupPhase = 'database-migrations';
+    render(BackendDownOverlay);
+    expect(screen.getByText('Applying database migrations')).toBeInTheDocument();
   });
 });

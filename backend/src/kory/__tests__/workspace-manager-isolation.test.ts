@@ -78,17 +78,41 @@ describe('WorkspaceManager isolation boundaries', () => {
     }
   });
 
-  test('concurrent spawn cannot exceed capacity or reuse a task ID', async () => {
+  test('concurrent spawn queues behind an explicit cap and reuses a task ID', async () => {
     const root = repo();
     const manager = new WorkspaceManager(root, { worktreeLimit: 1 });
     await manager.init();
-    const results = await Promise.all([manager.spawn('one', 'One'), manager.spawn('two', 'Two')]);
-    expect(results.filter(Boolean)).toHaveLength(1);
+    const first = manager.spawn('one', 'One');
+    const second = manager.spawn('two', 'Two');
+    expect(await first).not.toBeNull();
     expect(manager.getStatus().availableSlots).toBe(0);
-    expect(await manager.listAllWorktrees()).toHaveLength(2);
+    expect(manager.getStatus().queued).toBe(1);
     await expect(manager.spawn('one', 'Duplicate')).rejects.toThrow('already active');
     await manager.cleanup('one');
-    expect(await manager.spawn('two', 'Two')).not.toBeNull();
+    expect(await second).not.toBeNull();
+    expect(manager.getStatus().active).toHaveLength(1);
+    expect(manager.getStatus().queued).toBe(0);
+    expect(await manager.listAllWorktrees()).toHaveLength(2);
+    await manager.shutdown();
+  });
+
+  test('a queued spawn can be aborted without taking a slot', async () => {
+    const root = repo();
+    const manager = new WorkspaceManager(root, { worktreeLimit: 1 });
+    await manager.init();
+    expect(await manager.spawn('one', 'One')).not.toBeNull();
+
+    const controller = new AbortController();
+    const queued = manager.spawn('two', 'Two', undefined, { signal: controller.signal });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(manager.getStatus().queued).toBe(1);
+
+    controller.abort();
+    await expect(queued).rejects.toThrow();
+    expect(manager.getStatus().queued).toBe(0);
+    expect(manager.getStatus().active).toHaveLength(1);
+
+    await manager.cleanup('one');
     await manager.shutdown();
   });
 

@@ -3,10 +3,10 @@ import { lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, sy
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { collectCurrentV5SkillEvaluationContracts, currentV5SkillEvaluationContractsPlugin } from '../../../scripts/build-current-v5-contracts';
-import { currentV5SkillEvaluationContracts } from '../skill-eval-current-contract';
-import { EMBEDDED_CURRENT_V5_SKILL_EVALUATION_CONTRACTS } from '../skill-eval-embedded-contracts';
-import { currentEmbeddedV5SkillEvaluationContracts } from '../skill-eval-embedded-contract-validation';
-import { BUILTIN_SKILL_EVAL_SCORERS } from '../skill-eval-fixtures';
+import { currentV5SkillEvaluationContracts } from '../../eval/skills/skill-eval-current-contract';
+import { EMBEDDED_CURRENT_V5_SKILL_EVALUATION_CONTRACTS } from '../../eval/skills/skill-eval-embedded-contracts';
+import { currentEmbeddedV5SkillEvaluationContracts } from '../../eval/skills/skill-eval-embedded-contract-validation';
+import { BUILTIN_SKILL_EVAL_SCORERS } from '../../eval/skills/skill-eval-fixtures';
 import { CURRENT_SKILL_EVAL_CONTRACT_VERSION } from '../skill-evaluations';
 import { loadV5SkillPackages } from '../skill-packages';
 import { directoryLinkType } from '../../runtime/platform';
@@ -24,7 +24,7 @@ async function bundledHelper(label: string, embedded: boolean) {
   const directory = join(scratch, label);
   mkdirSync(directory);
   const entry = join(directory, 'entry.ts');
-  writeFileSync(entry, `export { currentV5SkillEvaluationContracts } from ${JSON.stringify(resolve(import.meta.dir, '../skill-eval-current-contract.ts'))};\nexport { EMBEDDED_CURRENT_V5_SKILL_EVALUATION_CONTRACTS } from ${JSON.stringify(resolve(import.meta.dir, '../skill-eval-embedded-contracts.ts'))};\n`);
+  writeFileSync(entry, `export { currentV5SkillEvaluationContracts } from ${JSON.stringify(resolve(import.meta.dir, '../../eval/skills/skill-eval-current-contract.ts'))};\nexport { EMBEDDED_CURRENT_V5_SKILL_EVALUATION_CONTRACTS } from ${JSON.stringify(resolve(import.meta.dir, '../../eval/skills/skill-eval-embedded-contracts.ts'))};\n`);
   const result = await Bun.build({
     entrypoints: [entry], outdir: join(directory, 'output'), target: 'bun',
     plugins: embedded ? [currentV5SkillEvaluationContractsPlugin()] : [],
@@ -147,6 +147,8 @@ describe('lightweight current V5 embedded identities', () => {
       const contents = readFileSync(join(output, 'server.js'), 'utf8');
       // Inspect the real production bundle without executing server startup.
       const marker = [
+        '// src/eval/skills/skill-eval-embedded-contracts.ts\n',
+        '// backend/src/eval/skills/skill-eval-embedded-contracts.ts\n',
         '// src/kory/skill-eval-embedded-contracts.ts\n',
         '// backend/src/kory/skill-eval-embedded-contracts.ts\n',
       ].find((candidate) => contents.includes(candidate));

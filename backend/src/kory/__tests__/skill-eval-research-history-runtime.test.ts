@@ -3,8 +3,8 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { writeFixtureFile } from '../skill-eval-fixture-helpers';
-import type { SkillEvalScenarioV3 } from '../skill-eval-harness';
+import { writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
+import type { SkillEvalScenarioV3 } from '../../eval/skills/skill-eval-harness';
 import {
   RESEARCH_HISTORY_CASES,
   RESEARCH_HISTORY_SKILL_EVAL_MATERIALIZERS,
@@ -12,9 +12,10 @@ import {
   materializeResearchHistory,
   researchHistoryLocalBlockers,
   researchHistoryReadinessBlockers,
+  VERIFICATION_MAX_AGE_MS,
   scoreResearchHistory,
   verifyResearchHistoryCorpus,
-} from '../skill-eval-research-history-runtime';
+} from '../../eval/skills/skill-eval-research-history-runtime';
 
 // Every test source below is GENERATED CONTROLLED DATA. None of these bodies or
 // metadata purport to be real historical captures or publisher attestations.
@@ -83,7 +84,7 @@ function syntheticManifest(index: 0 | 1): { schemaVersion: 1; scenarioId: string
       publisher: `CONTROLLED TEST publisher ${spec.id}`,
       versionScope,
       provenance: isArchive
-        ? { kind: 'internet-archive', timestamp: '20260904120000' }
+        ? { kind: 'internet-archive', timestamp: `${(spec.archivedOn ?? '2026-09-04').replaceAll('-', '')}120000` }
         : { kind: 'github-commit', repository, revision, blobSha, path: repoPath },
     };
   });
@@ -161,8 +162,10 @@ describe('research-history real-source gate', () => {
       'research-full-task-1-individual', 'research-full-task-2-individual',
     ]);
     expect(RESEARCH_HISTORY_CASES.map((item) => item.sources.length)).toEqual([4, 5]);
+    // The archive holds no capture on the 2026-09-04 cutoff itself, so each site
+    // names the genuine nearest capture a researcher on that date would have had.
     expect(RESEARCH_HISTORY_CASES[0]!.sources.slice(0, 2).map((entry) => entry.archivedOn))
-      .toEqual(['2026-09-04', '2026-09-04']);
+      .toEqual(['2026-09-01', '2026-09-02']);
     for (const index of [0, 1] as const) {
       const item = scenario(index);
       expect(RESEARCH_HISTORY_SKILL_EVAL_MATERIALIZERS.some((entry) => entry.matches(item))).toBe(true);
@@ -242,11 +245,35 @@ describe('research-history real-source gate', () => {
       .rejects.toThrow('Historical corpus unverified');
   });
 
-  test('complete fabricated manifest still cannot make synchronous evaluation readiness green', () => {
-    const { dir } = setupFakeCorpus(0);
+  test('a fabricated manifest cannot make readiness green, and only a recorded observation can', () => {
+    const { dir, manifest } = setupFakeCorpus(0);
     expect(researchHistoryLocalBlockers(scenario(0), dir)).toEqual([]);
+    // Locally consistent bytes are not provenance, so nothing is green yet.
     expect(researchHistoryReadinessBlockers(scenario(0), dir).join(' '))
-      .toContain('needs independent archive/Git verification');
+      .toContain('Independent provenance has not been recorded');
+    // A record that no independent observation produced still cannot certify, because
+    // it is only written by the verification path; here it is written directly to prove
+    // that the record is checked against the corpus bytes rather than trusted blindly.
+    writeFixtureFile(dir, `${manifest.scenarioId}.verified.json`, JSON.stringify({
+      schemaVersion: 1, scenarioId: manifest.scenarioId,
+      verifiedAt: new Date().toISOString(),
+      sources: manifest.sourceRecords.map((row) => ({ id: row.id, sha256: 'f'.repeat(64) })),
+    }));
+    expect(researchHistoryReadinessBlockers(scenario(0), dir).join(' '))
+      .toContain('no longer matches the corpus bytes');
+    writeFixtureFile(dir, `${manifest.scenarioId}.verified.json`, JSON.stringify({
+      schemaVersion: 1, scenarioId: manifest.scenarioId,
+      verifiedAt: new Date(Date.now() - VERIFICATION_MAX_AGE_MS - 60_000).toISOString(),
+      sources: manifest.sourceRecords.map((row) => ({ id: row.id, sha256: row.sha256 })),
+    }));
+    expect(researchHistoryReadinessBlockers(scenario(0), dir).join(' '))
+      .toContain('is stale');
+    writeFixtureFile(dir, `${manifest.scenarioId}.verified.json`, JSON.stringify({
+      schemaVersion: 1, scenarioId: manifest.scenarioId,
+      verifiedAt: new Date().toISOString(),
+      sources: manifest.sourceRecords.map((row) => ({ id: row.id, sha256: row.sha256 })),
+    }));
+    expect(researchHistoryReadinessBlockers(scenario(0), dir)).toEqual([]);
   });
 
   test('controlled archive hashes and pinned Git blobs exercise validation without conferring provenance', async () => {

@@ -4,13 +4,13 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as platform from '../../runtime/platform';
-import { writeFixtureFile } from '../skill-eval-fixture-helpers';
+import { writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
 import {
   nativeFixturePreflight,
   probeNativeModes,
   scoreNativeFixture,
   type NativeFixture,
-} from '../skill-eval-native-runner';
+} from '../../eval/skills/skill-eval-native-runner';
 
 const envKeys = [
   'DEVELOPER_DIR',

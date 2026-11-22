@@ -8,6 +8,7 @@
   import X from 'lucide-svelte/icons/x';
   import ChevronDown from 'lucide-svelte/icons/chevron-down';
   import KorySelect from './KorySelect.svelte';
+  import SettingsPage from './settings/SettingsPage.svelte';
   import KorySlider from './KorySlider.svelte';
   import SettingsSwitch from './SettingsSwitch.svelte';
   import WelcomeCardIcon from './WelcomeCardIcon.svelte';
@@ -148,16 +149,15 @@
   }
 </script>
 
-<div class="home-settings mx-auto w-full max-w-5xl px-5 pb-10 pt-6 sm:px-8">
-  <header class="mb-6 flex flex-wrap items-end justify-between gap-4">
-    <div>
-      <p class="mb-1 text-xs font-medium uppercase tracking-[0.16em] text-[var(--color-accent)]">Experience</p>
-      <h3 class="text-xl font-semibold tracking-tight text-[var(--color-text-primary)]">Home screen</h3>
-      <p class="mt-1 max-w-2xl text-sm leading-relaxed text-[var(--color-text-muted)]">Shape the empty feed with a background and the starting points you actually use.</p>
-    </div>
+<SettingsPage
+  title="Home screen"
+  description="Shape the empty feed with a background and the starting points you actually use."
+  width="wide"
+>
+  {#snippet actions()}
     <button type="button" class="quiet-button" onclick={replayWalkthrough}><Sparkles size={14} /> Replay walkthrough</button>
-  </header>
-
+  {/snippet}
+<div class="home-settings">
   <section class="preview-shell" aria-label="Home screen preview">
     <div class="preview-toolbar">
       <div>
@@ -212,9 +212,9 @@
       </div>
     {/if}
   </section>
-  {#if importError}<p role="alert" class="mt-3 text-sm text-[var(--color-error)]">{importError}</p>{/if}
+  {#if importError}<p role="alert" class="import-error text-sm text-[var(--color-error)]">{importError}</p>{/if}
 
-  <section class="settings-section mt-5">
+  <section class="settings-section">
     <div class="section-heading"><div><h4>Home copy</h4><p>Edit the welcome message shown above the preset cards.</p></div></div>
     <div class="copy-fields">
       <label class="field"><span>Heading</span><input maxlength="160" value={welcomePreferencesStore.preferences.homeTitle} oninput={(event) => welcomePreferencesStore.setHomeCopy({ homeTitle: event.currentTarget.value })} /></label>
@@ -222,7 +222,7 @@
     </div>
   </section>
 
-  <section class="settings-section mt-8">
+  <section class="settings-section">
     <div class="section-heading">
       <div><h4>Starting suggestions</h4><p>Keep the home screen focused and useful.</p></div>
       {#each panels as panel}
@@ -234,7 +234,7 @@
     </div>
   </section>
 
-  <section class="settings-section mt-5">
+  <section class="settings-section">
     <div class="section-heading">
       <div><h4>Preset cards</h4><p>Select a card here or in the preview to edit its icon, name, and prompt.</p></div>
       <button type="button" class="accent-button" onclick={addCard}><Plus size={14} /> Add preset</button>
@@ -259,7 +259,7 @@
           </div>
           <div class="editor-main">
             <div class="icon-editor">
-              <span class="large-icon"><WelcomeCardIcon icon={selectedCard.icon} source={selectedCard.iconSource} size={24} /></span>
+              <span class="large-icon"><WelcomeCardIcon icon={selectedCard.icon} source={selectedCard.iconSource} size={20} /></span>
               <div class="min-w-0"><strong>Card icon</strong><p>Use a built-in icon or import your own.</p></div>
               <input bind:this={iconInput} id="home-icon-file" class="hidden" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml" onchange={importIcon} />
               <button type="button" class="small-button" onclick={() => iconInput?.click()}><Upload size={13} /> Custom icon</button>
@@ -291,9 +291,12 @@
 
   <p class="walkthrough-status">Welcome walkthrough · {walkthroughStatus}</p>
 </div>
+</SettingsPage>
 
 <style>
-  .home-settings { color: var(--color-text-primary); }
+  /* display: contents lets each section sit directly in SettingsPage's body
+     stack (32px gaps) while keeping the descendant selectors below. */
+  .home-settings { display: contents; color: var(--color-text-primary); }
   .quiet-button, .toolbar-button, .accent-button, .small-button, .text-button, .icon-button, .advanced-toggle { display: inline-flex; align-items: center; justify-content: center; gap: .45rem; transition: .16s ease; }
   .quiet-button, .toolbar-button, .small-button { border: 1px solid var(--color-border); border-radius: 8px; padding: .5rem .7rem; color: var(--color-text-secondary); background: color-mix(in srgb, var(--color-surface-2) 72%, transparent); font-size: .75rem; }
   .quiet-button:hover, .toolbar-button:hover, .small-button:hover { color: var(--color-text-primary); border-color: var(--color-text-muted); }
@@ -302,7 +305,7 @@
   .accent-button:hover { filter: brightness(1.08); }
   .preview-shell { overflow: hidden; border: 1px solid var(--color-border); border-radius: 16px; background: var(--color-surface-2); }
   .preview-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border-bottom: 1px solid var(--color-border); padding: .9rem 1rem; }
-  .preview-toolbar h4, .section-heading h4 { font-size: .9rem; font-weight: 650; }
+  .preview-toolbar h4, .section-heading h4 { font-size: .875rem; font-weight: 600; }
   .preview-toolbar p, .section-heading p, .icon-editor p, .section-actions { margin-top: .2rem; color: var(--color-text-muted); font-size: .7rem; }
   .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-accent) 14%, transparent); }
   /* Keep these dimensions aligned with ManagerFeed's real empty-state:
@@ -316,17 +319,18 @@
   .preview-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
   .preview-card { display: flex; align-items: flex-start; gap: .5rem; min-width: 0; min-height: 8rem; padding: 1rem; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface-1); text-align: left; transition: .16s ease; }
   .preview-card:hover, .preview-card.selected { border-color: color-mix(in srgb, var(--color-accent) 58%, var(--color-border)); transform: translateY(-1px); }
-  .preview-icon, .row-icon, .large-icon { display: inline-flex; align-items: center; justify-content: center; flex: none; border-radius: 7px; color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 12%, transparent); }
-  .preview-icon { width: 1.75rem; height: 1.75rem; }
+  .preview-icon, .row-icon, .large-icon { display: inline-flex; align-items: center; justify-content: center; flex: none; color: var(--color-accent); }
+  .preview-icon { margin-top: .1rem; }
   .preview-card strong, .preset-row strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .875rem; font-weight: 500; }
   .preview-card small, .preset-row small { display: block; overflow: hidden; margin-top: .5rem; color: var(--color-text-muted); font-size: .75rem; line-height: 1.5; text-overflow: ellipsis; }
   .preview-card small { display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; }
-  .preview-empty { padding: 1rem; border: 1px dashed var(--color-border); border-radius: 9px; color: var(--color-text-muted); font-size: .75rem; }
-  .settings-section { padding: 1.1rem 0; border-top: 1px solid var(--color-border); }
+  .preview-empty { padding: .25rem 0; color: var(--color-text-muted); font-size: .8125rem; }
+  .settings-section { min-width: 0; }
+  .import-error { margin-top: -1.25rem; }
   .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
   .section-actions { display: flex; align-items: center; justify-content: flex-end; gap: 1rem; margin-top: .25rem; }
   .switch-control { flex: 0 0 auto; }
-  .walkthrough-status { margin-top: 1.5rem; color: var(--color-text-muted); font-size: .75rem; }
+  .walkthrough-status { color: var(--color-text-muted); font-size: .75rem; }
   .text-button { padding: .25rem 0; color: var(--color-text-muted); font-size: .7rem; }
   .text-button:hover { color: var(--color-text-primary); }
   .preset-layout { display: grid; grid-template-columns: 225px minmax(0, 1fr); gap: 1rem; margin-top: 1rem; }
@@ -334,8 +338,8 @@
   .preset-row { display: flex; align-items: center; gap: .6rem; width: 100%; padding: .6rem; border: 1px solid transparent; border-radius: 9px; text-align: left; transition: .16s ease; }
   .preset-row:hover { background: var(--color-surface-2); }
   .preset-row.selected { border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border)); background: color-mix(in srgb, var(--color-accent) 8%, var(--color-surface-2)); }
-  .row-icon { width: 29px; height: 29px; }
-  .visibility-pill { border-radius: 99px; padding: .16rem .36rem; color: var(--color-text-muted); background: var(--color-surface-3); font-size: .58rem; }
+  .row-icon { width: 20px; }
+  .visibility-pill { border-radius: 99px; padding: .16rem .36rem; color: var(--color-text-muted); background: var(--color-surface-3); font-size: 11px; }
   .visibility-pill.active { color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 12%, transparent); }
   .empty-list { padding: .8rem; color: var(--color-text-muted); font-size: .72rem; }
   .card-editor { min-width: 0; border-left: 1px solid var(--color-border); padding-left: 1.1rem; }
@@ -345,13 +349,13 @@
   .icon-button:hover { color: var(--color-error); background: var(--color-error-bg); }
   .editor-main { display: flex; flex-direction: column; gap: .9rem; margin-top: 1rem; }
   .icon-editor { display: flex; flex-wrap: wrap; align-items: center; gap: .65rem; padding-bottom: .5rem; }
-  .large-icon { width: 42px; height: 42px; }
+  .large-icon { width: 24px; }
   .icon-editor strong { font-size: .74rem; font-weight: 600; }
   .icon-editor p { margin-top: .15rem; }
   .icon-editor .small-button { margin-left: auto; }
   .editor-grid, .advanced-panel, .background-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7rem; }
   .field { display: flex; min-width: 0; flex-direction: column; gap: .35rem; }
-  .field span { color: var(--color-text-muted); font-size: .65rem; }
+  .field span { color: var(--color-text-muted); font-size: 11px; }
   .field input, .field textarea { width: 100%; border: 1px solid var(--color-border); border-radius: 7px; background: var(--color-surface-1); padding: .55rem .65rem; color: var(--color-text-primary); font-size: .75rem; outline: none; }
   .field input:focus, .field textarea:focus { border-color: var(--color-accent); }
   .field textarea { min-height: 78px; resize: vertical; line-height: 1.45; }
@@ -362,11 +366,11 @@
   .advanced-panel { padding-top: .8rem; border-top: 1px solid var(--color-border); }
   .background-controls { padding: 1rem; grid-template-columns: 1fr 1fr 1.2fr; align-items: center; }
   .brightness-control { min-width: 0; }
-  .brightness-heading { display: flex; align-items: center; justify-content: flex-end; gap: .25rem; color: var(--color-text-muted); font-size: .65rem; }
+  .brightness-heading { display: flex; align-items: center; justify-content: flex-end; gap: .25rem; color: var(--color-text-muted); font-size: 11px; }
   .brightness-heading > span:first-child { margin-right: auto; color: var(--color-text-primary); font-weight: 500; }
   .brightness-input { width: 3.5rem; border: 1px solid var(--color-border); border-radius: 5px; background: var(--color-surface-1); padding: .25rem .35rem; color: var(--color-accent); font: inherit; text-align: right; outline: none; }
   .brightness-input:focus { border-color: var(--color-accent); }
   .copy-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7rem; margin-top: 1rem; max-width: 720px; }
-  .home-settings :is(button, input, textarea):focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; }
+  .home-settings :is(button, input, textarea):focus-visible, .quiet-button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; }
   @media (max-width: 700px) { .preview-toolbar, .section-heading, .section-actions, .editor-footer { align-items: flex-start; flex-direction: column; } .preview-canvas { min-height: 0; } .preview-cards, .preset-layout, .editor-grid, .advanced-panel, .background-controls, .copy-fields { grid-template-columns: 1fr; } .card-editor { border-left: 0; border-top: 1px solid var(--color-border); padding-top: 1rem; padding-left: 0; } .icon-editor .small-button { margin-left: 0; } }
 </style>

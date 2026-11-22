@@ -1,0 +1,22 @@
+[
+  {
+    "agent": "evidence",
+    "exitCode": 1,
+    "reportExists": false
+  },
+  {
+    "agent": "priorities",
+    "exitCode": 1,
+    "reportExists": false
+  },
+  {
+    "agent": "environments",
+    "exitCode": 1,
+    "reportExists": false
+  },
+  {
+    "agent": "integration",
+    "exitCode": 1,
+    "reportExists": false
+  }
+]

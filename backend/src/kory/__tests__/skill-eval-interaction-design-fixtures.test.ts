@@ -2,8 +2,8 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PILOT_SKILL_EVAL_SCORERS } from '../skill-eval-pilot-fixtures';
-import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
+import { PILOT_SKILL_EVAL_SCORERS } from '../../eval/skills/skill-eval-pilot-fixtures';
+import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
 import { loadV5SkillPackages } from '../skill-packages';
 
 const roots: string[] = [];

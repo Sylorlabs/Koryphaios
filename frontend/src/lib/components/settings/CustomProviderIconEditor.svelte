@@ -33,6 +33,9 @@
     initialShape?: CustomProviderIconShape;
     disabled?: boolean;
     focusOnMount?: boolean;
+    /** When given, the parent owns shape selection: it drives the crop frame
+     * radius and the internal shape control is hidden. */
+    frameShape?: 'circle' | 'rounded-square' | 'square';
     onchange?: (selection: CustomProviderIconSelection | null) => unknown | Promise<unknown>;
     onerror?: (message: string) => unknown | Promise<unknown>;
   }
@@ -41,6 +44,7 @@
     id = 'custom-provider-icon',
     existingIconUrl = null,
     initialShape = 'rounded-square',
+    frameShape,
     disabled = false,
     focusOnMount = false,
     onchange,
@@ -90,7 +94,14 @@
         )
       : null,
   );
-  let cropRadiusClass = $derived(shape === 'circle' ? 'rounded-full' : 'rounded-[26%]');
+  let effectiveFrameShape = $derived(frameShape ?? shape);
+  let cropRadiusClass = $derived(
+    effectiveFrameShape === 'circle'
+      ? 'rounded-full'
+      : effectiveFrameShape === 'square'
+        ? 'rounded-none'
+        : 'rounded-[26%]',
+  );
 
   onDestroy(() => {
     clearScheduledRender();
@@ -387,7 +398,7 @@
 </script>
 
 <section
-  class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2 sm:p-4"
+  class="space-y-4"
   aria-labelledby={`${id}-heading`}
 >
   <div class="flex items-start justify-between gap-4">
@@ -402,7 +413,7 @@
     </div>
     {#if hasAnyImage && !loading}
       <span
-        class="shrink-0 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-3)] px-2.5 py-1 text-[10px] font-medium text-[var(--color-text-secondary)]"
+        class="shrink-0 rounded-full bg-[var(--color-surface-3)] px-2.5 py-1 text-[11px] font-medium text-[var(--color-text-secondary)]"
       >
         256 × 256
       </span>
@@ -512,37 +523,39 @@
     </button>
   </div>
 
-  <fieldset class="space-y-2" {disabled}>
-    <legend class="text-xs font-medium text-[var(--color-text-primary)]">Icon shape</legend>
-    <div
-      class="grid grid-cols-2 gap-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-1"
-    >
-      <button
-        type="button"
-        aria-pressed={shape === 'rounded-square'}
-        class="flex min-h-9 items-center justify-center gap-2 rounded-lg px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 {shape ===
-        'rounded-square'
-          ? 'bg-[var(--color-accent)] text-[var(--color-on-accent)] shadow-sm'
-          : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]'}"
-        onclick={() => setShape('rounded-square')}
+  {#if !frameShape}
+    <fieldset class="space-y-2" {disabled}>
+      <legend class="text-xs font-medium text-[var(--color-text-primary)]">Icon shape</legend>
+      <div
+        class="grid grid-cols-2 gap-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-1"
       >
-        <Square size={14} />
-        Rounded square
-      </button>
-      <button
-        type="button"
-        aria-pressed={shape === 'circle'}
-        class="flex min-h-9 items-center justify-center gap-2 rounded-lg px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 {shape ===
-        'circle'
-          ? 'bg-[var(--color-accent)] text-[var(--color-on-accent)] shadow-sm'
-          : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]'}"
-        onclick={() => setShape('circle')}
-      >
-        <Circle size={14} />
-        Circle
-      </button>
-    </div>
-  </fieldset>
+        <button
+          type="button"
+          aria-pressed={shape === 'rounded-square'}
+          class="flex min-h-9 items-center justify-center gap-2 rounded-lg px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 {shape ===
+          'rounded-square'
+            ? 'bg-[var(--color-accent)] text-[var(--color-on-accent)] shadow-sm'
+            : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]'}"
+          onclick={() => setShape('rounded-square')}
+        >
+          <Square size={14} />
+          Rounded square
+        </button>
+        <button
+          type="button"
+          aria-pressed={shape === 'circle'}
+          class="flex min-h-9 items-center justify-center gap-2 rounded-lg px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 {shape ===
+          'circle'
+            ? 'bg-[var(--color-accent)] text-[var(--color-on-accent)] shadow-sm'
+            : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]'}"
+          onclick={() => setShape('circle')}
+        >
+          <Circle size={14} />
+          Circle
+        </button>
+      </div>
+    </fieldset>
+  {/if}
 
   <input
     bind:this={fileInput}

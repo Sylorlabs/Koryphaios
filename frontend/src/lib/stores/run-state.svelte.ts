@@ -143,6 +143,8 @@ export const clearUserStopped = engine.clearUserStopped;
 export const resetSession = engine.resetSession;
 export const clearAll = engine.clearAll;
 export const getPhase = engine.getPhase;
+export const getTerminalReason = engine.getTerminalReason;
+export const getRunId = engine.getRunId;
 export const isRunning = engine.isRunning;
 export const isWaiting = engine.isWaiting;
 export const isBusy = engine.isBusy;
@@ -166,6 +168,8 @@ export function phaseToAgentStatus(phase: RunPhase): AgentStatus {
       return 'tool_calling';
     case 'compacting':
       return 'compacting';
+    case 'finalizing':
+      return 'verifying';
     case 'waiting_terminal':
       return 'waiting';
     case 'waiting_user':
@@ -195,6 +199,8 @@ export const runStateStore = {
 
   // Reads
   getPhase,
+  getTerminalReason,
+  getRunId,
   isRunning,
   isWaiting,
   isBusy,

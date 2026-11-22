@@ -1,0 +1,38 @@
+{
+  "interfaces": {
+    "swd": [
+      "normal:swd:no-unrestricted-readout",
+      "temporary-physical-possession:swd:no-unrestricted-readout",
+      "authenticated-recovery:swd:recovery-session"
+    ],
+    "uart": [
+      "normal:uart:console-log-only",
+      "temporary-physical-possession:uart:console-log-only",
+      "authenticated-recovery:uart:recovery-console"
+    ],
+    "romUsb": [
+      "normal:romUsb:no-download-authority",
+      "temporary-physical-possession:romUsb:authenticated-image-download-only",
+      "authenticated-recovery:romUsb:recovery-image-download"
+    ]
+  },
+  "swdReadoutLocked": true,
+  "observedProductionLockState": true,
+  "authorizedRecoveryOnly": true,
+  "credentialHardwareBacked": true,
+  "credentialExportable": false,
+  "resetDestroysOrInvalidatesCredential": true,
+  "decommissionDestroysCredential": true,
+  "fleetRevocationCheckedOnRecovery": true,
+  "algorithmOwnedBy": "applied-cryptography",
+  "invasiveResistanceClaimed": false,
+  "faultInjectionResistanceClaimed": false,
+  "board": "mcu-rev-c",
+  "product": "device-x",
+  "keyHash": "prod-key-hash-2026",
+  "applicationVersion": 7,
+  "minimumVersion": 7,
+  "debugFuseObserved": false,
+  "bootloaderVerifiesSignature": true,
+  "bootloaderVerifiesProduct": true
+}

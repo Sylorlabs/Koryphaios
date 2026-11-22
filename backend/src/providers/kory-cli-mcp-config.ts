@@ -4,6 +4,26 @@ import type { ProviderName } from '@koryphaios/shared';
 import type { CliBridgeContext, CliMcpServerConfig } from './cli-bridge';
 import { getKoryBridgeGrant } from './bridge-grant';
 
+/** Locate the kory MCP bridge entry point. Source runs sit next to the .ts;
+ * packaged builds ship only the bundled .js beside server.js. An explicit
+ * KORY_MCP_BRIDGE_SCRIPT always wins. `dir` is an injection seam for tests. */
+export function resolveKoryBridgeScript(dir: string = import.meta.dir): string | null {
+  const configured = process.env.KORY_MCP_BRIDGE_SCRIPT?.trim();
+  if (configured) return configured;
+  for (const name of ['kory-mcp-bridge.ts', 'kory-mcp-bridge.js']) {
+    const candidate = join(dir, name);
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+/** The managed turn can proceed without the bridge only in research-only
+ * flows; a session-scoped turn with no bridge script must fail closed rather
+ * than run the CLI silently tool-less. */
+export function koryBridgeUnavailableError(provider: ProviderName): string {
+  return `${provider}: Kory tool bridge is unavailable (bridge script not found); refusing to run without tools.`;
+}
+
 /** Build the one allowed MCP server for a managed native CLI turn. The private
  * grant is scoped to this Kory session, role, and MCP actions; it never enters
  * the prompt or process arguments. */
@@ -12,9 +32,7 @@ export function buildKoryCliMcpConfig(
   provider: ProviderName,
 ): CliMcpServerConfig[] | null {
   if (!ctx.sessionId) return null;
-  const configuredScript = process.env.KORY_MCP_BRIDGE_SCRIPT?.trim();
-  const bundledScript = join(import.meta.dir, 'kory-mcp-bridge.ts');
-  const script = configuredScript || (existsSync(bundledScript) ? bundledScript : '');
+  const script = resolveKoryBridgeScript();
   if (!script) return null;
 
   const port = process.env.KORYPHAIOS_PORT ?? '3001';

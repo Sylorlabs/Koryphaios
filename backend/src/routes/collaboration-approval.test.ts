@@ -178,6 +178,7 @@ describe('collaboration prompt approval', () => {
           accepted: true,
           sessionId: 'session-1',
           runId: 'run-1',
+          userMessageId: 'command-user-test',
           completion: Promise.resolve({
             sessionId: 'session-1',
             runId: 'run-1',

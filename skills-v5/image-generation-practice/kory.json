@@ -1,15 +1,23 @@
 {
   "schemaVersion": 1,
   "name": "image-generation-practice",
-  "version": "5.1.0",
+  "version": "5.2.2",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
-  "domains": ["creative", "image", "generation"],
-  "targetMedia": ["any"],
+  "domains": [
+    "creative",
+    "image",
+    "generation"
+  ],
+  "targetMedia": [
+    "any"
+  ],
   "pathScopes": [],
   "contextBudget": 3424,
-  "broader": ["visual-interface-design"],
+  "broader": [
+    "visual-interface-design"
+  ],
   "facets": [],
   "requires": [],
   "conflicts": [],
@@ -51,8 +59,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["data-visualization"],
-        "tags": ["ambiguous", "hierarchy-boundary"]
+        "adjacentSkills": [
+          "data-visualization"
+        ],
+        "tags": [
+          "ambiguous",
+          "hierarchy-boundary"
+        ]
       },
       {
         "id": "image-generation-practice-ambiguous-2",
@@ -60,8 +73,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["embedded-interface"],
-        "tags": ["ambiguous", "hierarchy-boundary"]
+        "adjacentSkills": [
+          "embedded-interface"
+        ],
+        "tags": [
+          "ambiguous",
+          "hierarchy-boundary"
+        ]
       },
       {
         "id": "image-generation-practice-ambiguous-3",
@@ -69,8 +87,13 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["game-spatial-interface"],
-        "tags": ["ambiguous", "hierarchy-boundary"]
+        "adjacentSkills": [
+          "game-spatial-interface"
+        ],
+        "tags": [
+          "ambiguous",
+          "hierarchy-boundary"
+        ]
       }
     ],
     "adversarial": [
@@ -80,8 +103,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["native-interface"],
-        "tags": ["adversarial", "hierarchy-boundary"]
+        "adjacentSkills": [
+          "native-interface"
+        ],
+        "tags": [
+          "adversarial",
+          "hierarchy-boundary"
+        ]
       },
       {
         "id": "image-generation-practice-adversarial-2",
@@ -89,8 +117,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["terminal-interface"],
-        "tags": ["adversarial", "hierarchy-boundary"]
+        "adjacentSkills": [
+          "terminal-interface"
+        ],
+        "tags": [
+          "adversarial",
+          "hierarchy-boundary"
+        ]
       },
       {
         "id": "image-generation-practice-adversarial-3",
@@ -98,8 +131,13 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": ["visual-verification"],
-        "tags": ["adversarial", "hierarchy-boundary"]
+        "adjacentSkills": [
+          "visual-verification"
+        ],
+        "tags": [
+          "adversarial",
+          "hierarchy-boundary"
+        ]
       }
     ]
   },

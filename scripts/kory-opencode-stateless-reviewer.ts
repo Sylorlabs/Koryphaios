@@ -18,7 +18,12 @@ import {
 // an empty system, one user message and tools:[] without session/context dispatch.
 // This API boundary is not OS isolation, upstream identity or promotion credit.
 const VERSION = '2.0.32';
-const MAX_REQUEST_BYTES = 24_000;
+// A sealed assignment carries both candidate artifacts, so a packet is routinely
+// larger than 100 KB. The 24 000 byte bound refused those requests outright, which
+// made every full task un-reviewable on this adapter and looked like a reviewer
+// failure. Keep a bound (one request, still bounded) but size it to the packets the
+// harness actually seals rather than to the text-patch executor's own cap.
+const MAX_REQUEST_BYTES = 1_048_576;
 const MAX_RESPONSE_BYTES = 1_048_576;
 const MAX_STDERR_BYTES = 64_000;
 const DRAIN_MS = 500;

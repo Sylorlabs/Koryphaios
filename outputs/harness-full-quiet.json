@@ -1,0 +1,2102 @@
+{
+  "completed": true,
+  "startedAt": "2026-10-23T00:04:55.036Z",
+  "revision": "5830cbaa9c7fdcd323e91d383301c323a3cc449b",
+  "dirtyWorktree": true,
+  "frontendEntrySha256": "fe7a26168faa29f0030160e3c3603c1297f6981ba3d4c69e6085cb60e66e96bf",
+  "bun": "1.3.14",
+  "platform": "darwin",
+  "arch": "arm64",
+  "host": {
+    "cpu": "Apple M5",
+    "cores": 10,
+    "loadAverage": [
+      4.7431640625,
+      4.865234375,
+      6.0703125
+    ],
+    "freeMiB": 135.921875,
+    "totalMiB": 24576
+  },
+  "workload": {
+    "sessions": 40,
+    "messagesPerSession": 120,
+    "rounds": 3,
+    "streamBatches": 300,
+    "deadlineMs": 180000,
+    "syntheticProvider": true,
+    "profiling": false,
+    "backendMode": "source, NODE_ENV=test"
+  },
+  "budgets": {
+    "apiP95Ms": 100,
+    "switchP95Ms": 250,
+    "inputP95Ms": 100,
+    "backendPeakMiB": 512,
+    "rendererHeapPeakMiB": 512
+  },
+  "startupMs": 2740.6365419999997,
+  "apiLatencyMs": [
+    {
+      "count": 240,
+      "p50": 36.31800000000112,
+      "p95": 137.23099999999977,
+      "max": 237.02224999999999
+    },
+    {
+      "count": 240,
+      "p50": 61.769249999999374,
+      "p95": 189.74295900000106,
+      "max": 316.3134169999994
+    },
+    {
+      "count": 240,
+      "p50": 43.60450000000128,
+      "p95": 155.33995900000082,
+      "max": 251.70591700000114
+    }
+  ],
+  "browserVersion": "151.0.7922.34",
+  "pageErrors": [],
+  "browserCheckpoints": [
+    {
+      "name": "idle",
+      "heapMiB": 15.649402618408203,
+      "browserRssMiB": 290.34375,
+      "backendRssMiB": 75.578125,
+      "nodes": 6468,
+      "documents": 2,
+      "layoutCount": 16,
+      "hostLoadAverage": [
+        11.48779296875,
+        6.39501953125,
+        6.59033203125
+      ]
+    },
+    {
+      "name": "switch-round-1",
+      "heapMiB": 88.06555938720703,
+      "browserRssMiB": 603.546875,
+      "backendRssMiB": 126.5,
+      "nodes": 52505,
+      "documents": 65,
+      "layoutCount": 757,
+      "hostLoadAverage": [
+        15.63427734375,
+        7.43798828125,
+        6.95703125
+      ]
+    },
+    {
+      "name": "switch-round-2",
+      "heapMiB": 98.24512481689453,
+      "browserRssMiB": 644.90625,
+      "backendRssMiB": 131.765625,
+      "nodes": 86811,
+      "documents": 79,
+      "layoutCount": 1425,
+      "hostLoadAverage": [
+        19.1298828125,
+        8.47265625,
+        7.33056640625
+      ]
+    },
+    {
+      "name": "switch-round-3",
+      "heapMiB": 75.25584030151367,
+      "browserRssMiB": 548.765625,
+      "backendRssMiB": 165.796875,
+      "nodes": 33333,
+      "documents": 37,
+      "layoutCount": 2092,
+      "hostLoadAverage": [
+        23.6640625,
+        9.8037109375,
+        7.81689453125
+      ]
+    },
+    {
+      "name": "stream-complete",
+      "heapMiB": 85.25406646728516,
+      "browserRssMiB": 701.859375,
+      "backendRssMiB": 134.390625,
+      "nodes": 148905,
+      "documents": 42,
+      "layoutCount": 2768,
+      "hostLoadAverage": [
+        25.21240234375,
+        10.3544921875,
+        8.02294921875
+      ]
+    },
+    {
+      "name": "deleted-idle-10s",
+      "heapMiB": 35.31258010864258,
+      "browserRssMiB": 387.1875,
+      "backendRssMiB": 160.203125,
+      "nodes": 7649,
+      "documents": 2,
+      "layoutCount": 2812,
+      "hostLoadAverage": [
+        22.62646484375,
+        10.2919921875,
+        8.02783203125
+      ]
+    },
+    {
+      "name": "deleted-after-forced-gc-diagnostic-only",
+      "heapMiB": 17.486778259277344,
+      "browserRssMiB": 370.53125,
+      "backendRssMiB": 160.203125,
+      "nodes": 7649,
+      "documents": 2,
+      "layoutCount": 2812,
+      "hostLoadAverage": [
+        22.62646484375,
+        10.2919921875,
+        8.02783203125
+      ]
+    }
+  ],
+  "browserReadyMs": 1012.6105420000004,
+  "switchLatencyMs": [
+    {
+      "count": 40,
+      "p50": 209.12904100000014,
+      "p95": 292.315208,
+      "max": 467.1326670000017
+    },
+    {
+      "count": 40,
+      "p50": 190.99904199999582,
+      "p95": 386.35520800000086,
+      "max": 938.6710410000014
+    },
+    {
+      "count": 40,
+      "p50": 191.81133299999783,
+      "p95": 276.1018339999937,
+      "max": 352.7717499999999
+    }
+  ],
+  "streaming": {
+    "lanes": 32,
+    "events": 9664,
+    "elapsedMs": 6751.432166999999,
+    "inputToPaintMs": {
+      "count": 30,
+      "p50": 69.71654200000194,
+      "p95": 135.95179199999984,
+      "max": 166.71433300000353
+    }
+  },
+  "streamingFramesMs": {
+    "count": 275,
+    "p50": 25,
+    "p95": 41.599999999998545,
+    "max": 83.69999999999709
+  },
+  "streamingLongTasksMs": {
+    "count": 0,
+    "p50": 0,
+    "p95": 0,
+    "max": 0
+  },
+  "budgetFailures": [
+    "API round 1 p95 exceeds 100 ms",
+    "API round 2 p95 exceeds 100 ms",
+    "API round 3 p95 exceeds 100 ms",
+    "Switch round 1 p95 exceeds 250 ms",
+    "Switch round 2 p95 exceeds 250 ms",
+    "Switch round 3 p95 exceeds 250 ms",
+    "Streaming input p95 exceeds 100 ms"
+  ],
+  "budgetsPassed": false,
+  "backend": {
+    "startup": {
+      "rssMiB": {
+        "count": 2,
+        "p50": 197.703125,
+        "p95": 286.65625,
+        "max": 286.65625
+      },
+      "heapUsedMiB": {
+        "count": 2,
+        "p50": 12.894333839416504,
+        "p95": 52.28975009918213,
+        "max": 52.28975009918213
+      },
+      "timerDelayMs": {
+        "count": 2,
+        "p50": 1017.5802920000001,
+        "p95": 1128.5048749999999,
+        "max": 1128.5048749999999
+      }
+    },
+    "idle": {
+      "rssMiB": {
+        "count": 20,
+        "p50": 138.375,
+        "p95": 277.5625,
+        "max": 287.796875
+      },
+      "heapUsedMiB": {
+        "count": 20,
+        "p50": 53.30604362487793,
+        "p95": 53.30604362487793,
+        "max": 53.33223342895508
+      },
+      "timerDelayMs": {
+        "count": 20,
+        "p50": 1.284958000000188,
+        "p95": 4.680499999999938,
+        "max": 5.615834000000177
+      }
+    },
+    "api": {
+      "rssMiB": {
+        "count": 21,
+        "p50": 139.109375,
+        "p95": 147.296875,
+        "max": 148.328125
+      },
+      "heapUsedMiB": {
+        "count": 21,
+        "p50": 55.63440132141113,
+        "p95": 56.643632888793945,
+        "max": 56.71644878387451
+      },
+      "timerDelayMs": {
+        "count": 21,
+        "p50": 36.856958000000304,
+        "p95": 139.93808300000092,
+        "max": 193.0160420000011
+      }
+    },
+    "browser-launch": {
+      "rssMiB": {
+        "count": 1,
+        "p50": 128.578125,
+        "p95": 128.578125,
+        "max": 128.578125
+      },
+      "heapUsedMiB": {
+        "count": 1,
+        "p50": 56.73868465423584,
+        "p95": 56.73868465423584,
+        "max": 56.73868465423584
+      },
+      "timerDelayMs": {
+        "count": 1,
+        "p50": 3.041000000001077,
+        "p95": 3.041000000001077,
+        "max": 3.041000000001077
+      }
+    },
+    "browser-startup": {
+      "rssMiB": {
+        "count": 4,
+        "p50": 119.703125,
+        "p95": 124.46875,
+        "max": 124.46875
+      },
+      "heapUsedMiB": {
+        "count": 4,
+        "p50": 56.75113582611084,
+        "p95": 58.37120342254639,
+        "max": 58.37120342254639
+      },
+      "timerDelayMs": {
+        "count": 4,
+        "p50": 3.981166999999914,
+        "p95": 24.609292000001005,
+        "max": 24.609292000001005
+      }
+    },
+    "browser-idle": {
+      "rssMiB": {
+        "count": 20,
+        "p50": 108.75,
+        "p95": 121.15625,
+        "max": 122.140625
+      },
+      "heapUsedMiB": {
+        "count": 20,
+        "p50": 58.47979259490967,
+        "p95": 58.480215072631836,
+        "max": 58.48145580291748
+      },
+      "timerDelayMs": {
+        "count": 20,
+        "p50": 1.0113749999982247,
+        "p95": 6.0147500000002765,
+        "max": 8.791417000000365
+      }
+    },
+    "switching": {
+      "rssMiB": {
+        "count": 102,
+        "p50": 135.484375,
+        "p95": 198.15625,
+        "max": 205.421875
+      },
+      "heapUsedMiB": {
+        "count": 102,
+        "p50": 118.92613697052002,
+        "p95": 196.65026187896729,
+        "max": 206.2183437347412
+      },
+      "timerDelayMs": {
+        "count": 102,
+        "p50": 6.98750000000291,
+        "p95": 50.59141600000294,
+        "max": 206.6813340000008
+      }
+    },
+    "streaming": {
+      "rssMiB": {
+        "count": 28,
+        "p50": 141.296875,
+        "p95": 141.3125,
+        "max": 141.703125
+      },
+      "heapUsedMiB": {
+        "count": 28,
+        "p50": 120.49147415161133,
+        "p95": 120.57979679107666,
+        "max": 120.57979679107666
+      },
+      "timerDelayMs": {
+        "count": 28,
+        "p50": 1.0209590000013122,
+        "p95": 6.335541000000376,
+        "max": 14.65808300000208
+      }
+    },
+    "recovery": {
+      "rssMiB": {
+        "count": 45,
+        "p50": 155.46875,
+        "p95": 191.8125,
+        "max": 197.71875
+      },
+      "heapUsedMiB": {
+        "count": 45,
+        "p50": 57.02260780334473,
+        "p95": 120.57979679107666,
+        "max": 121.86672973632812
+      },
+      "timerDelayMs": {
+        "count": 45,
+        "p50": 1.0152910000033444,
+        "p95": 7.530582999999751,
+        "max": 21.97804200000246
+      }
+    }
+  },
+  "backendSamples": [
+    {
+      "phase": "startup",
+      "kind": "sample",
+      "rss": 207306752,
+      "heapUsed": 13520689,
+      "timerDelayMs": 1017.5802920000001
+    },
+    {
+      "phase": "startup",
+      "kind": "sample",
+      "rss": 300580864,
+      "heapUsed": 54829777,
+      "timerDelayMs": 1128.5048749999999
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 301776896,
+      "heapUsed": 55889973,
+      "timerDelayMs": 1.3768749999999272
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 291045376,
+      "heapUsed": 55889973,
+      "timerDelayMs": 1.284958000000188
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 289603584,
+      "heapUsed": 55889973,
+      "timerDelayMs": 1.0887920000000122
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 289603584,
+      "heapUsed": 55889973,
+      "timerDelayMs": 1.6567919999997684
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 289603584,
+      "heapUsed": 55889973,
+      "timerDelayMs": 1.002458000000388
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 288227328,
+      "heapUsed": 55889973,
+      "timerDelayMs": 4.680499999999938
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 259489792,
+      "heapUsed": 55889973,
+      "timerDelayMs": 1.0406249999996362
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 218890240,
+      "heapUsed": 55895438,
+      "timerDelayMs": 1.684291999999914
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 189497344,
+      "heapUsed": 55895438,
+      "timerDelayMs": 1.3569580000003043
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 177324032,
+      "heapUsed": 55895438,
+      "timerDelayMs": 2.897208000000319
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 145096704,
+      "heapUsed": 55895438,
+      "timerDelayMs": 0.9768749999993815
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 93421568,
+      "heapUsed": 55895438,
+      "timerDelayMs": 1.325459000000592
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 67895296,
+      "heapUsed": 55895438,
+      "timerDelayMs": 1.0135409999993499
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 70991872,
+      "heapUsed": 55895438,
+      "timerDelayMs": 5.615834000000177
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 70500352,
+      "heapUsed": 55895438,
+      "timerDelayMs": 0.40970800000013696
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 68141056,
+      "heapUsed": 55895438,
+      "timerDelayMs": 0.6554580000001806
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 68141056,
+      "heapUsed": 55895438,
+      "timerDelayMs": 1.0177089999997406
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 68173824,
+      "heapUsed": 55895438,
+      "timerDelayMs": 3.122707999999875
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 68009984,
+      "heapUsed": 55895438,
+      "timerDelayMs": 0.4945830000006026
+    },
+    {
+      "phase": "idle",
+      "kind": "sample",
+      "rss": 75644928,
+      "heapUsed": 55922900,
+      "timerDelayMs": 2.0564589999994496
+    },
+    {
+      "phase": "api",
+      "kind": "sample",
+      "rss": 126107648,
+      "heapUsed": 56460320,
+      "timerDelayMs": 10.05975000000035
+    },
+    {
+      "phase": "api",
+      "kind": "sample",
+      "rss": 154451968,
+      "heapUsed": 56978541,
+      "timerDelayMs": 109.4205409999995
+    },
+    {
+      "phase": "api",
+      "kind": "sample",
+      "rss": 155533312,
+      "heapUsed": 57384354,
+      "timerDelayMs": 72.14312500000051
+    },
+    {
+      "phase": "api",
+      "kind": "sample",
+      "rss": 149471232,
+      "heapUsed": 57530531,
+      "timerDelayMs": 29.368249999999534
+    },
+    {
+      "phase": "api",
+      "kind": "sample",
+      "rss": 151158784,
+      "heapUsed": 57658027,
+      "timerDelayMs": 24.508625000000393
+    },
+    {
+      "phase": "api",
+      "kind": "sample",
+      "rss": 141099008,
+      "heapUsed": 57701716,
+      "timerDelayMs": 43.253624999999374
+    },
+    {
+      "phase": "api",
+      "kind": "sample",
+      "rss": 141443072,
+      "heapUsed": 57751549,
+      "timerDelayMs": 193.0160420000011
+    },
+    {
+      "phase": "api",
+      "kind": "sample",
+      "rss": 140394496,
+      "heapUsed": 57760061,
+      "timerDelayMs": 2.4587499999997817
+    },
+    {
+      "phase": "api",
+      "kind": "sample",
+      "rss": 112574464,
+      "heapUsed": 58229867,
+      "timerDelayMs": 40.06054199999926
+    },
+    {
+      "phase": "api",
+      "kind": "sample",
+      "rss": 114163712,
+      "heapUsed": 58255876,
+      "timerDelayMs": 139.93808300000092
+    },
+    {
+      "phase": "api",
+      "kind": "sample",
+      "rss": 120700928,
+      "heapUsed": 58336898,
+      "timerDelayMs": 9.088874999999462
+    },
+    {
+      "phase": "api",
+      "kind": "sample",
+      "rss": 150831104,
+      "heapUsed": 58419613,
+      "timerDelayMs": 52.03600000000006
+    },
+    {
+      "phase": "api",
+      "kind": "sample",
+      "rss": 151896064,
+      "heapUsed": 58489256,
+      "timerDelayMs": 2.081416999999419
+    },
+    {
+      "phase": "api",
+      "kind": "sample",
+      "rss": 152190976,
+      "heapUsed": 58735168,
+      "timerDelayMs": 36.856958000000304
+    },
+    {
+      "phase": "api",
+      "kind": "sample",
+      "rss": 150896640,
+      "heapUsed": 58773356,
+      "timerDelayMs": 42.544167000000016
+    },
+    {
+      "phase": "api",
+      "kind": "sample",
+      "rss": 145866752,
+      "heapUsed": 58842077,
+      "timerDelayMs": 55.5697080000009
+    },
+    {
+      "phase": "api",
+      "kind": "sample",
+      "rss": 148930560,
+      "heapUsed": 58893830,
+      "timerDelayMs": 61.70658299999923
+    },
+    {
+      "phase": "api",
+      "kind": "sample",
+      "rss": 145424384,
+      "heapUsed": 58972854,
+      "timerDelayMs": 11.207791999999245
+    },
+    {
+      "phase": "api",
+      "kind": "sample",
+      "rss": 143245312,
+      "heapUsed": 59336446,
+      "timerDelayMs": 22.721000000001368
+    },
+    {
+      "phase": "api",
+      "kind": "sample",
+      "rss": 146948096,
+      "heapUsed": 59395154,
+      "timerDelayMs": 22.299166999999215
+    },
+    {
+      "phase": "api",
+      "kind": "sample",
+      "rss": 143114240,
+      "heapUsed": 59471507,
+      "timerDelayMs": 0.1943329999994603
+    },
+    {
+      "phase": "browser-launch",
+      "kind": "sample",
+      "rss": 134823936,
+      "heapUsed": 59494823,
+      "timerDelayMs": 3.041000000001077
+    },
+    {
+      "phase": "browser-startup",
+      "kind": "sample",
+      "rss": 125419520,
+      "heapUsed": 59494823,
+      "timerDelayMs": 1.661707999999635
+    },
+    {
+      "phase": "browser-startup",
+      "kind": "sample",
+      "rss": 125517824,
+      "heapUsed": 59507879,
+      "timerDelayMs": 3.981166999999914
+    },
+    {
+      "phase": "browser-startup",
+      "kind": "sample",
+      "rss": 130514944,
+      "heapUsed": 60567571,
+      "timerDelayMs": 24.609292000001005
+    },
+    {
+      "phase": "browser-startup",
+      "kind": "sample",
+      "rss": 126844928,
+      "heapUsed": 61206643,
+      "timerDelayMs": 5.470915999998397
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 128073728,
+      "heapUsed": 61311178,
+      "timerDelayMs": 2.534209000001283
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 127041536,
+      "heapUsed": 61311178,
+      "timerDelayMs": 0.8862909999988915
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 121257984,
+      "heapUsed": 61311178,
+      "timerDelayMs": 1.1195000000006985
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 119406592,
+      "heapUsed": 61316484,
+      "timerDelayMs": 6.0147500000002765
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 117604352,
+      "heapUsed": 61316484,
+      "timerDelayMs": 0.4915840000012395
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 117293056,
+      "heapUsed": 61316484,
+      "timerDelayMs": 2.9055410000000848
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 115605504,
+      "heapUsed": 61316484,
+      "timerDelayMs": 0.6919169999964652
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 115179520,
+      "heapUsed": 61320507,
+      "timerDelayMs": 1.8012500000004366
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 114032640,
+      "heapUsed": 61320507,
+      "timerDelayMs": 1.010375000001659
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 114376704,
+      "heapUsed": 61320507,
+      "timerDelayMs": 1.0155830000003334
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 114327552,
+      "heapUsed": 61320507,
+      "timerDelayMs": 0.6703749999978754
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 111132672,
+      "heapUsed": 61320507,
+      "timerDelayMs": 4.5865000000012515
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 87900160,
+      "heapUsed": 61320507,
+      "timerDelayMs": 1.008084000000963
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 88276992,
+      "heapUsed": 61320507,
+      "timerDelayMs": 1.0113749999982247
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 79544320,
+      "heapUsed": 61320507,
+      "timerDelayMs": 0.9017910000002303
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 79249408,
+      "heapUsed": 61320507,
+      "timerDelayMs": 3.5432089999994787
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 76234752,
+      "heapUsed": 61320507,
+      "timerDelayMs": 0.6397500000020955
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 79036416,
+      "heapUsed": 61320950,
+      "timerDelayMs": 2.228833000001032
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 79544320,
+      "heapUsed": 61320950,
+      "timerDelayMs": 0.52837499999805
+    },
+    {
+      "phase": "browser-idle",
+      "kind": "sample",
+      "rss": 79249408,
+      "heapUsed": 61322251,
+      "timerDelayMs": 8.791417000000365
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 79134720,
+      "heapUsed": 61322251,
+      "timerDelayMs": 1.0482080000001588
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 115769344,
+      "heapUsed": 62500348,
+      "timerDelayMs": 99.72562499999913
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 121962496,
+      "heapUsed": 62873034,
+      "timerDelayMs": 1.8835829999989073
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 130809856,
+      "heapUsed": 65046855,
+      "timerDelayMs": 1.7845420000012382
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 130154496,
+      "heapUsed": 66736041,
+      "timerDelayMs": 21.82166700000016
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 128106496,
+      "heapUsed": 68415569,
+      "timerDelayMs": 3.203041000000667
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 130416640,
+      "heapUsed": 70907839,
+      "timerDelayMs": 8.106124999998428
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 129024000,
+      "heapUsed": 72573585,
+      "timerDelayMs": 15.259417000001122
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 131710976,
+      "heapUsed": 73954288,
+      "timerDelayMs": 6.122583000000304
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 133185536,
+      "heapUsed": 75860258,
+      "timerDelayMs": 12.547500000000582
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 134660096,
+      "heapUsed": 77222688,
+      "timerDelayMs": 1.7629589999996824
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 135692288,
+      "heapUsed": 79682819,
+      "timerDelayMs": 0.39025000000037835
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 133890048,
+      "heapUsed": 80519911,
+      "timerDelayMs": 0.8390829999989364
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 134873088,
+      "heapUsed": 81347525,
+      "timerDelayMs": 4.7491249999984575
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 134479872,
+      "heapUsed": 83276385,
+      "timerDelayMs": 8.795292000002519
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 136790016,
+      "heapUsed": 86008617,
+      "timerDelayMs": 1.0652079999999842
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 142540800,
+      "heapUsed": 87423601,
+      "timerDelayMs": 3.3354999999974098
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 145440768,
+      "heapUsed": 89374252,
+      "timerDelayMs": 18.410375000003114
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 145326080,
+      "heapUsed": 91805250,
+      "timerDelayMs": 4.548457999997481
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 142098432,
+      "heapUsed": 93447253,
+      "timerDelayMs": 1.0754589999996824
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 143523840,
+      "heapUsed": 94830945,
+      "timerDelayMs": 3.750500000001921
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 145604608,
+      "heapUsed": 96490102,
+      "timerDelayMs": 0.3387079999993148
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 147636224,
+      "heapUsed": 98184034,
+      "timerDelayMs": 1.1091249999990396
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 150290432,
+      "heapUsed": 99820585,
+      "timerDelayMs": 3.2331670000021404
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 152584192,
+      "heapUsed": 102539927,
+      "timerDelayMs": 2.00066599999991
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 149504000,
+      "heapUsed": 104183928,
+      "timerDelayMs": 1.9227499999979045
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 147013632,
+      "heapUsed": 105867739,
+      "timerDelayMs": 20.784209000001283
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 148471808,
+      "heapUsed": 108297948,
+      "timerDelayMs": 7.538625000001048
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 150274048,
+      "heapUsed": 110216442,
+      "timerDelayMs": 2.6585830000003625
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 139493376,
+      "heapUsed": 111063350,
+      "timerDelayMs": 17.385082999997394
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 133840896,
+      "heapUsed": 112696158,
+      "timerDelayMs": 2.20824999999968
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 135462912,
+      "heapUsed": 114354713,
+      "timerDelayMs": 26.030125000001135
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 136544256,
+      "heapUsed": 117104918,
+      "timerDelayMs": 9.935375000000931
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 136806400,
+      "heapUsed": 118747205,
+      "timerDelayMs": 14.828417000000627
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 136069120,
+      "heapUsed": 120370742,
+      "timerDelayMs": 13.926916999997047
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 132644864,
+      "heapUsed": 121748039,
+      "timerDelayMs": 1.6872910000020056
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 132005888,
+      "heapUsed": 123115155,
+      "timerDelayMs": 1.0162920000002487
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 130875392,
+      "heapUsed": 124756646,
+      "timerDelayMs": 4.903041999998095
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 148701184,
+      "heapUsed": 125354935,
+      "timerDelayMs": 44.79579100000046
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 150913024,
+      "heapUsed": 126446778,
+      "timerDelayMs": 12.600125000000844
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 157925376,
+      "heapUsed": 127806781,
+      "timerDelayMs": 91.31504199999836
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 145227776,
+      "heapUsed": 128646929,
+      "timerDelayMs": 16.034083000002283
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 131956736,
+      "heapUsed": 128953045,
+      "timerDelayMs": 7.931874999998399
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 130711552,
+      "heapUsed": 128953045,
+      "timerDelayMs": 40.40404200000194
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 128909312,
+      "heapUsed": 131132067,
+      "timerDelayMs": 17.697416999999405
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 126009344,
+      "heapUsed": 131944105,
+      "timerDelayMs": 64.55316600000151
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 164282368,
+      "heapUsed": 132780512,
+      "timerDelayMs": 206.6813340000008
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 160104448,
+      "heapUsed": 134734159,
+      "timerDelayMs": 0.49370799999451265
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 160153600,
+      "heapUsed": 135016964,
+      "timerDelayMs": 5.38379200000054
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 163594240,
+      "heapUsed": 136636901,
+      "timerDelayMs": 16.37783300000592
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 164741120,
+      "heapUsed": 139329776,
+      "timerDelayMs": 4.4959169999929145
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 168329216,
+      "heapUsed": 141239986,
+      "timerDelayMs": 0.48779100000683684
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 171163648,
+      "heapUsed": 143151158,
+      "timerDelayMs": 24.006541999995534
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 171982848,
+      "heapUsed": 145060238,
+      "timerDelayMs": 0.9298330000019632
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 173391872,
+      "heapUsed": 146960174,
+      "timerDelayMs": 6.553083999999217
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 175964160,
+      "heapUsed": 149934712,
+      "timerDelayMs": 15.924916000003577
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 176816128,
+      "heapUsed": 151546969,
+      "timerDelayMs": 28.87933399999747
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 176685056,
+      "heapUsed": 154550565,
+      "timerDelayMs": 3.4212079999997513
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 168591360,
+      "heapUsed": 155374933,
+      "timerDelayMs": 6.586582999996608
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 167559168,
+      "heapUsed": 156218953,
+      "timerDelayMs": 24.74208400000498
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 168198144,
+      "heapUsed": 159477160,
+      "timerDelayMs": 22.21758299999783
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 169295872,
+      "heapUsed": 161087927,
+      "timerDelayMs": 14.859624999997322
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 171851776,
+      "heapUsed": 164341953,
+      "timerDelayMs": 14.268542000005255
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 166739968,
+      "heapUsed": 165963711,
+      "timerDelayMs": 2.8381659999940894
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 163430400,
+      "heapUsed": 167595940,
+      "timerDelayMs": 2.074709000000439
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 121307136,
+      "heapUsed": 170047369,
+      "timerDelayMs": 9.057416000003286
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 123699200,
+      "heapUsed": 173283561,
+      "timerDelayMs": 7.617459000000963
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 124895232,
+      "heapUsed": 174915192,
+      "timerDelayMs": 7.635833000000275
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 125878272,
+      "heapUsed": 178421364,
+      "timerDelayMs": 16.112874999998894
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 138166272,
+      "heapUsed": 179937179,
+      "timerDelayMs": 3.0207079999963753
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 138493952,
+      "heapUsed": 181302264,
+      "timerDelayMs": 4.2479590000002645
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 138903552,
+      "heapUsed": 182908907,
+      "timerDelayMs": 2.798041000001831
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 142065664,
+      "heapUsed": 185595299,
+      "timerDelayMs": 0.061792000000423286
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 142327808,
+      "heapUsed": 187500690,
+      "timerDelayMs": 11.08837499999936
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 128860160,
+      "heapUsed": 189671947,
+      "timerDelayMs": 14.903791999997338
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 128974848,
+      "heapUsed": 192629105,
+      "timerDelayMs": 38.97629100000631
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 131678208,
+      "heapUsed": 194545479,
+      "timerDelayMs": 12.69237499999872
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 131563520,
+      "heapUsed": 197238659,
+      "timerDelayMs": 62.556541999998444
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 127565824,
+      "heapUsed": 198874398,
+      "timerDelayMs": 41.18591700000252
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 126844928,
+      "heapUsed": 201589445,
+      "timerDelayMs": 12.067833000000974
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 125091840,
+      "heapUsed": 203217411,
+      "timerDelayMs": 14.497957999999926
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 126222336,
+      "heapUsed": 205383718,
+      "timerDelayMs": 3.25841699999728
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 126189568,
+      "heapUsed": 206202745,
+      "timerDelayMs": 10.34912500000064
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 125173760,
+      "heapUsed": 209181276,
+      "timerDelayMs": 3.494417000001704
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 121389056,
+      "heapUsed": 210018604,
+      "timerDelayMs": 3.6912909999955446
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 126353408,
+      "heapUsed": 211629785,
+      "timerDelayMs": 2.236084000003757
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 124272640,
+      "heapUsed": 214863026,
+      "timerDelayMs": 11.524416000000201
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 118210560,
+      "heapUsed": 216235606,
+      "timerDelayMs": 7.51104199999827
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 203931648,
+      "heapUsed": 97474112,
+      "timerDelayMs": 2.4495000000024447
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 206077952,
+      "heapUsed": 100521571,
+      "timerDelayMs": 0
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 207192064,
+      "heapUsed": 102405184,
+      "timerDelayMs": 50.59141600000294
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 207781888,
+      "heapUsed": 104314250,
+      "timerDelayMs": 6.98750000000291
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 206618624,
+      "heapUsed": 105733801,
+      "timerDelayMs": 7.426083999998809
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 208011264,
+      "heapUsed": 107393769,
+      "timerDelayMs": 4.17949999999837
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 209682432,
+      "heapUsed": 109007571,
+      "timerDelayMs": 3.2630409999983385
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 212664320,
+      "heapUsed": 110909839,
+      "timerDelayMs": 5.048125000001164
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 215400448,
+      "heapUsed": 114421703,
+      "timerDelayMs": 17.93037500000355
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 213843968,
+      "heapUsed": 116040291,
+      "timerDelayMs": 0.48104199999943376
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 206979072,
+      "heapUsed": 117683229,
+      "timerDelayMs": 3.010167000000365
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 203833344,
+      "heapUsed": 119579630,
+      "timerDelayMs": 2.1658749999987776
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 205094912,
+      "heapUsed": 121201513,
+      "timerDelayMs": 22.002290999997058
+    },
+    {
+      "phase": "switching",
+      "kind": "sample",
+      "rss": 173850624,
+      "heapUsed": 124703093,
+      "timerDelayMs": 16.4151669999992
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 148586496,
+      "heapUsed": 126332915,
+      "timerDelayMs": 14.65808300000208
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 147603456,
+      "heapUsed": 126332915,
+      "timerDelayMs": 1.6240840000027674
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 148160512,
+      "heapUsed": 126344025,
+      "timerDelayMs": 1.289915999994264
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 148160512,
+      "heapUsed": 126344025,
+      "timerDelayMs": 0.6187090000021271
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 148160512,
+      "heapUsed": 126344025,
+      "timerDelayMs": 6.335541000000376
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 148160512,
+      "heapUsed": 126344025,
+      "timerDelayMs": 0.25245900000300026
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 148160512,
+      "heapUsed": 126344025,
+      "timerDelayMs": 2.0079579999946873
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 148160512,
+      "heapUsed": 126344025,
+      "timerDelayMs": 0.8784169999998994
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 148160512,
+      "heapUsed": 126344025,
+      "timerDelayMs": 1.0173330000034184
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 148176896,
+      "heapUsed": 126344468,
+      "timerDelayMs": 1.3676669999986188
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 148176896,
+      "heapUsed": 126344468,
+      "timerDelayMs": 2.7378329999992275
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 148176896,
+      "heapUsed": 126344468,
+      "timerDelayMs": 0.8351249999977881
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 148176896,
+      "heapUsed": 126344468,
+      "timerDelayMs": 1.0443750000049477
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 148176896,
+      "heapUsed": 126344468,
+      "timerDelayMs": 0.44954199999483535
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 148176896,
+      "heapUsed": 126344468,
+      "timerDelayMs": 3.4054160000014235
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 148176896,
+      "heapUsed": 126344468,
+      "timerDelayMs": 1.0108749999999418
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 148176896,
+      "heapUsed": 126344468,
+      "timerDelayMs": 0.9255840000041644
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 148176896,
+      "heapUsed": 126344468,
+      "timerDelayMs": 0.6159579999948619
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 148045824,
+      "heapUsed": 126344468,
+      "timerDelayMs": 1.742208000003302
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 148045824,
+      "heapUsed": 126344468,
+      "timerDelayMs": 1.0209590000013122
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 148045824,
+      "heapUsed": 126344468,
+      "timerDelayMs": 0.4428750000006403
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 148045824,
+      "heapUsed": 126344468,
+      "timerDelayMs": 1.0146659999954863
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 143376384,
+      "heapUsed": 126437081,
+      "timerDelayMs": 2.0072090000030585
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 143294464,
+      "heapUsed": 126437081,
+      "timerDelayMs": 0.15637499999866122
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 143278080,
+      "heapUsed": 126437081,
+      "timerDelayMs": 2.195040999999037
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 141017088,
+      "heapUsed": 126437081,
+      "timerDelayMs": 1.8477920000004815
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 140918784,
+      "heapUsed": 126437081,
+      "timerDelayMs": 1.8176670000029844
+    },
+    {
+      "phase": "streaming",
+      "kind": "sample",
+      "rss": 140918784,
+      "heapUsed": 126437081,
+      "timerDelayMs": 0.5742499999978463
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 146096128,
+      "heapUsed": 126437081,
+      "timerDelayMs": 3.7203329999974812
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 148930560,
+      "heapUsed": 127680416,
+      "timerDelayMs": 7.530582999999751
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 149520384,
+      "heapUsed": 127786528,
+      "timerDelayMs": 21.97804200000246
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 207323136,
+      "heapUsed": 59636821,
+      "timerDelayMs": 11.364416999997047
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 203816960,
+      "heapUsed": 59737526,
+      "timerDelayMs": 2.1351250000006985
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 201129984,
+      "heapUsed": 59737526,
+      "timerDelayMs": 1.0157910000052652
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 200687616,
+      "heapUsed": 59737526,
+      "timerDelayMs": 1.5990839999940363
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 194265088,
+      "heapUsed": 59737526,
+      "timerDelayMs": 0.515625
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 188792832,
+      "heapUsed": 59737526,
+      "timerDelayMs": 1.0152910000033444
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 188760064,
+      "heapUsed": 59737526,
+      "timerDelayMs": 1.0129999999990105
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 188760064,
+      "heapUsed": 59749186,
+      "timerDelayMs": 1.4468340000021271
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 186990592,
+      "heapUsed": 59749186,
+      "timerDelayMs": 1.0153750000026776
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 167346176,
+      "heapUsed": 59749186,
+      "timerDelayMs": 0.5506249999962165
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 157859840,
+      "heapUsed": 59749186,
+      "timerDelayMs": 0.9957500000018626
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 159744000,
+      "heapUsed": 59757270,
+      "timerDelayMs": 1.4903750000012224
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 159612928,
+      "heapUsed": 59757270,
+      "timerDelayMs": 1.0131249999976717
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 159612928,
+      "heapUsed": 59757270,
+      "timerDelayMs": 0.8872499999997672
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 159596544,
+      "heapUsed": 59757270,
+      "timerDelayMs": 0.533000000003085
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 159727616,
+      "heapUsed": 59757270,
+      "timerDelayMs": 1.4749159999992116
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 159596544,
+      "heapUsed": 59757270,
+      "timerDelayMs": 1.0110419999982696
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 159596544,
+      "heapUsed": 59757270,
+      "timerDelayMs": 1.1719999999986612
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 163020800,
+      "heapUsed": 59792538,
+      "timerDelayMs": 1.7505830000009155
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 162889728,
+      "heapUsed": 59792538,
+      "timerDelayMs": 0.4189170000026934
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 162889728,
+      "heapUsed": 59792538,
+      "timerDelayMs": 0.23233299999992596
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 162889728,
+      "heapUsed": 59792538,
+      "timerDelayMs": 1.0107089999946766
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 162889728,
+      "heapUsed": 59792538,
+      "timerDelayMs": 1.0326659999991534
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 163020800,
+      "heapUsed": 59792538,
+      "timerDelayMs": 1.8069590000013704
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 162398208,
+      "heapUsed": 59792538,
+      "timerDelayMs": 1.0129999999990105
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 162136064,
+      "heapUsed": 59792538,
+      "timerDelayMs": 0.06854100000055041
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 161497088,
+      "heapUsed": 59792538,
+      "timerDelayMs": 0.3058339999988675
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 161497088,
+      "heapUsed": 59792538,
+      "timerDelayMs": 1.8838329999998678
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 161497088,
+      "heapUsed": 59792538,
+      "timerDelayMs": 1.010167000000365
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 161497088,
+      "heapUsed": 59792538,
+      "timerDelayMs": 0.5285409999996773
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 169050112,
+      "heapUsed": 59824355,
+      "timerDelayMs": 1.0188340000022436
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 169246720,
+      "heapUsed": 59824372,
+      "timerDelayMs": 2.093124999999418
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 169115648,
+      "heapUsed": 59824372,
+      "timerDelayMs": 0.3787080000038259
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 169115648,
+      "heapUsed": 59824372,
+      "timerDelayMs": 1.014208000000508
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 169115648,
+      "heapUsed": 59824372,
+      "timerDelayMs": 1.0169170000008307
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 169115648,
+      "heapUsed": 59824372,
+      "timerDelayMs": 1.7394579999963753
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 169115648,
+      "heapUsed": 59824372,
+      "timerDelayMs": 0.7677089999997406
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 169115648,
+      "heapUsed": 59824372,
+      "timerDelayMs": 1.0056249999979627
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 169476096,
+      "heapUsed": 59837468,
+      "timerDelayMs": 1.8157500000015716
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 168542208,
+      "heapUsed": 59837468,
+      "timerDelayMs": 1.3103750000009313
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 167985152,
+      "heapUsed": 59837468,
+      "timerDelayMs": 0.0962500000023283
+    },
+    {
+      "phase": "recovery",
+      "kind": "sample",
+      "rss": 168165376,
+      "heapUsed": 59837468,
+      "timerDelayMs": 1.0061249999998836
+    }
+  ],
+  "deadlineExceeded": false,
+  "finishedAt": "2026-10-23T00:06:00.775Z"
+}

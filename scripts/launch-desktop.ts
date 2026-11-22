@@ -4,13 +4,14 @@
  * Starts backend + frontend dev server + Tauri native shell.
  */
 
-const { spawn, execFileSync } = await import('node:child_process');
-const { readFileSync, existsSync, writeFileSync, rmSync, readdirSync } = await import('node:fs');
+const { spawn } = await import('node:child_process');
+const { readFileSync, existsSync, writeFileSync, rmSync } = await import('node:fs');
 const { join, resolve } = await import('node:path');
 const net = await import('node:net');
 const os = await import('node:os');
 const { isLauncherBackendReady, mergeCorsOriginEnv, resolveFrontendCorsOrigins } =
   await import('./desktop-launcher-cors');
+const { resolveCompatibleMacSdk } = await import('./desktop-mac-sdk');
 const { reapStrayFrontendServers, selectFreeFrontendPort, waitForPortRelease } =
   await import('./desktop-frontend-reaper');
 
@@ -41,6 +42,12 @@ const DESKTOP_DIR = resolve(PROJECT_ROOT, 'desktop');
 const LOCAL_CLAUDE_BIN_DIR = resolve(PROJECT_ROOT, '.tools', 'bin');
 const APP_CONFIG_PATH = resolve(PROJECT_ROOT, 'config', 'app.config.json');
 const ACTIVE_PORT_PATH = resolve(PROJECT_ROOT, '.koryphaios', '.active-port.json');
+// The backend derives its own PROJECT_ROOT from its cwd (`backend/`), where the
+// nested koryphaios.json wins over this repo root's. It therefore writes the
+// marker to backend/.koryphaios/.active-port.json while this launcher reads the
+// root copy. Check both so reusing a live backend doesn't fail with a false
+// "unverified process" when only the backend-local marker is fresh.
+const BACKEND_ACTIVE_PORT_PATH = resolve(BACKEND_DIR, '.koryphaios', '.active-port.json');
 // The checkout's normal backend database is also used by `bun run user` and
 // can contain a previously opened workspace. Desktop development must have its
 // own database so a stale project selection from another runtime cannot become
@@ -153,66 +160,6 @@ if (await isPreferredPortHeld()) {
   frontendCorsOrigins = resolveFrontendCorsOrigins(frontendUrl);
 }
 
-/**
- * macOS beta SDKs can ship `.tbd` stubs that declare targets the installed
- * Rust linker's tapi does not understand. MacOSX27.0, for example, lists
- * `arm64e.x1-macos`, which fails the desktop link with
- * "unknown architecture … tapi error: malformed file". When the default SDK
- * is unusable, pin SDKROOT to the newest installed SDK whose stubs the linker
- * can parse so `bun run dev` keeps working without hand-set environment.
- */
-function resolveCompatibleMacSdk(): { sdkPath: string; reason: string } | null {
-  if (process.platform !== 'darwin') return null;
-  const SDK_ROOT = '/Library/Developer/CommandLineTools/SDKs';
-  const PROBE = 'System/Library/Frameworks/CoreFoundation.framework/CoreFoundation.tbd';
-  const UNSUPPORTED_TARGET = 'arm64e.x1';
-  const readProbe = (sdkPath: string): string | null => {
-    try {
-      return readFileSync(join(sdkPath, PROBE), 'utf-8');
-    } catch {
-      return null;
-    }
-  };
-  let defaultSdk: string | null = null;
-  try {
-    defaultSdk = execFileSync('xcrun', ['--show-sdk-path'], { encoding: 'utf-8' }).trim();
-  } catch {
-    /* xcrun unavailable — nothing to pin */
-  }
-  const defaultProbe = defaultSdk ? readProbe(defaultSdk) : null;
-  // Only intervene when the default SDK actually declares a target the linker
-  // rejects; a healthy toolchain is left untouched.
-  if (!defaultProbe || !defaultProbe.includes(UNSUPPORTED_TARGET)) return null;
-  let candidates: string[] = [];
-  try {
-    candidates = readdirSync(SDK_ROOT)
-      .filter((entry) => /^MacOSX[\d.]+\.sdk$/.test(entry))
-      .sort((a, b) => {
-        const version = (name: string) => name.match(/\d+/g)?.map(Number) ?? [];
-        const va = version(a);
-        const vb = version(b);
-        for (let i = 0; i < Math.max(va.length, vb.length); i++) {
-          const diff = (vb[i] ?? 0) - (va[i] ?? 0);
-          if (diff !== 0) return diff;
-        }
-        return 0;
-      });
-  } catch {
-    return null;
-  }
-  for (const entry of candidates) {
-    const sdkPath = join(SDK_ROOT, entry);
-    if (sdkPath === defaultSdk) continue;
-    const probe = readProbe(sdkPath);
-    if (!probe || probe.includes(UNSUPPORTED_TARGET)) continue;
-    return {
-      sdkPath,
-      reason: `default SDK declares ${UNSUPPORTED_TARGET}, which the Rust linker rejects`,
-    };
-  }
-  return null;
-}
-
 const sharedEnv = {
   ...process.env,
   ...(existsSync(resolve(LOCAL_CLAUDE_BIN_DIR, 'claude'))
@@ -317,14 +264,30 @@ async function isPortListening(host: string, port: number): Promise<boolean> {
 
 type ActivePort = { host?: string; port?: number; pid?: number };
 
-function readActivePort(): ActivePort | null {
-  if (!existsSync(ACTIVE_PORT_PATH)) return null;
-  try {
-    const parsed = JSON.parse(readFileSync(ACTIVE_PORT_PATH, 'utf-8')) as ActivePort;
-    return typeof parsed.port === 'number' && typeof parsed.pid === 'number' ? parsed : null;
-  } catch {
-    return null;
+function readActivePort(expectedPid?: number): ActivePort | null {
+  const candidates: ActivePort[] = [];
+  for (const path of [ACTIVE_PORT_PATH, BACKEND_ACTIVE_PORT_PATH]) {
+    if (!existsSync(path)) continue;
+    try {
+      const parsed = JSON.parse(readFileSync(path, 'utf-8')) as ActivePort;
+      if (typeof parsed.port === 'number' && typeof parsed.pid === 'number') {
+        candidates.push(parsed);
+      }
+    } catch {
+      // Try the other location.
+    }
   }
+  // Prefer a marker owned by a live process — ideally the exact pid the healthy
+  // backend just reported. A stale root marker must never mask a fresh
+  // backend-local one (that mismatch caused the launch refusal this fixes).
+  return (
+    candidates.find(
+      (candidate) => expectedPid !== undefined && candidate.pid === expectedPid && isProcessAlive(candidate.pid!),
+    ) ??
+    candidates.find((candidate) => isProcessAlive(candidate.pid!)) ??
+    candidates[0] ??
+    null
+  );
 }
 
 function isProcessAlive(pid: number): boolean {
@@ -395,8 +358,8 @@ async function resolvePortState(
 ): Promise<'free' | 'reusable'> {
   if (!(await isPortListening(host, port))) return 'free';
   if (label === 'Backend' && (await isHealthy())) {
-    const activePort = readActivePort();
     const probe = await fetchBackendHealth();
+    const activePort = readActivePort(probe?.health.data?.pid);
     const markerMatches =
       activePort?.host === backendClientHost &&
       activePort.port === backendPort &&
@@ -467,7 +430,8 @@ async function main() {
   if (backendState === 'free') {
     const backend = spawn('bun', ['run', 'src/server.ts'], {
       cwd: BACKEND_DIR,
-      env: sharedEnv,
+      // Research runs need the full trace, not the production info threshold.
+      env: { ...sharedEnv, LOG_LEVEL: process.env.LOG_LEVEL ?? 'debug' },
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: SPAWN_SHELL,
     });

@@ -12,8 +12,15 @@ describe('productModelCreditLabel', () => {
     expect(productModelCreditLabel('  x0.00  credits ')).toBe('free');
   });
 
-  it('keeps a real price label verbatim', () => {
-    expect(productModelCreditLabel('x0.03 credits')).toBe('x0.03 credits');
+  it('renders a paid credit multiplier as <n>x', () => {
+    // The vendor writes a multiplier of the plan's credit allowance; the
+    // picker shows it next to the model name as "0.29x".
+    expect(productModelCreditLabel('x0.03 credits')).toBe('0.03x');
+    expect(productModelCreditLabel('x0.29 credits')).toBe('0.29x');
+  });
+
+  it('keeps a label that is not a credit multiplier verbatim', () => {
+    expect(productModelCreditLabel('included in plan')).toBe('included in plan');
   });
 
   it('returns undefined for empty or missing input', () => {
@@ -41,7 +48,7 @@ describe('productModelDisplayNames (duplicate-model disambiguation)', () => {
     ];
     expect(productModelDisplayNames(entries)).toEqual([
       'Deepseek-V4.1-Flash (free)',
-      'Deepseek-V4.1-Flash (x0.03 credits)',
+      'Deepseek-V4.1-Flash (0.03x)',
     ]);
   });
 

@@ -2,17 +2,59 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { mkdirSync } from 'node:fs';
 import { chromium } from 'playwright';
 import {
   ACCESSIBILITY_SKILL_EVAL_MATERIALIZERS,
   ACCESSIBILITY_SKILL_EVAL_SCORERS,
-} from '../skill-eval-accessibility-fixtures';
-import { writeFixtureFile } from '../skill-eval-fixture-helpers';
-import type { SkillEvalScenarioV3 } from '../skill-eval-harness';
+} from '../../eval/skills/skill-eval-accessibility-fixtures';
+import { WEB_LIVE_SESSION } from '../../eval/skills/skill-eval-accessibility-web-live';
+import { ANDROID_LIVE_SESSION } from '../../eval/skills/skill-eval-accessibility-android-live';
+import { writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
+import type { SkillEvalScenarioV3 } from '../../eval/skills/skill-eval-harness';
 
 const WEB_SCENARIO = 'accessibility-verification-full-task-1';
 const ANDROID_SCENARIO = 'accessibility-verification-full-task-2';
 const roots: string[] = [];
+
+type RecordedWebSession = {
+  browser: string;
+  locale: string;
+  keyboard: { focusOnOpen: string; tabStops: string[]; closedByEscape: boolean; focusAfterEscape: string };
+  errorState: { visible: boolean; role: string; text: string };
+  zoom200: {
+    horizontalOverflow: boolean;
+    dialogFits: boolean;
+    longTextFits: boolean;
+    dialogRectWidth: number;
+    viewportWidth: number;
+  };
+};
+
+type RecordedAndroidSession = {
+  device: { model: string; sdk: number };
+  assistiveTechnology: { talkBack: string; switchAccess: string; switchAccessBound: boolean };
+  focusTraversal: { label: string }[];
+  toggles: { label: string; checked: boolean }[];
+  textScale: { defaultRowHeight: number; largeRowHeight: number };
+};
+
+async function liveFixture(scenarioId: string) {
+  const root = mkdtempSync(join(tmpdir(), 'kory-accessibility-live-'));
+  roots.push(root);
+  const scenario = { id: scenarioId } as SkillEvalScenarioV3;
+  const materializer = ACCESSIBILITY_SKILL_EVAL_MATERIALIZERS.find((item) =>
+    item.matches(scenario),
+  );
+  if (!materializer) throw new Error(`Missing materializer for ${scenarioId}`);
+  await materializer.materialize(root, scenario);
+  const scorer = ACCESSIBILITY_SKILL_EVAL_SCORERS.find((item) =>
+    item.scenarioIds.includes(scenarioId),
+  );
+  if (!scorer) throw new Error(`Missing scorer for ${scenarioId}`);
+  mkdirSync(join(root, '.kory-eval'), { recursive: true });
+  return { root, scenario, scorer };
+}
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -31,130 +73,200 @@ async function fixture(scenarioId: string) {
 }
 
 describe('V5 accessibility verification infrastructure', () => {
-  test('pins both live runtime blockers and identifies evidence the synthetic fixtures cannot supply', async () => {
+  test('materializes recorded live sessions for both accessibility scenarios', async () => {
     const web = await fixture(WEB_SCENARIO);
     const android = await fixture(ANDROID_SCENARIO);
-    const webBlockers = web.materializer.readinessBlockers?.join(' ') ?? '';
-    const androidBlockers = android.materializer.readinessBlockers?.join(' ') ?? '';
-
-    expect(webBlockers).toMatch(/real supported browser.*NVDA 2026\.2/u);
-    expect(webBlockers).toContain('visible focus');
-    expect(webBlockers).toContain('actual 200% browser zoom/reflow');
-    expect(androidBlockers).toMatch(/real Android device or emulator.*TalkBack 17\.0/u);
-    expect(androidBlockers).toContain('Switch Access');
-
-    expect(JSON.parse(readFileSync(join(web.root, 'evidence/web.json'), 'utf8'))).toMatchObject({
-      browser: 'Chromium 140',
-      screenReader: 'NVDA 2026.2',
-    });
-    expect(readFileSync(join(web.root, 'README.md'), 'utf8'))
-      .toContain('A Chromium accessibility-tree snapshot, Playwright assertion');
-    expect(readFileSync(join(android.root, 'README.md'), 'utf8'))
-      .toContain('Accessibility semantics dumps and synthetic events cannot demonstrate');
+    expect(web.materializer.id).toBe('accessibility-verification/web-delete-dialog-live@4');
+    expect(android.materializer.id).toBe('accessibility-verification/android-live-session@4');
+    expect(web.materializer.readinessBlockers ?? []).toEqual([]);
+    expect(android.materializer.readinessBlockers ?? []).toEqual([]);
+    expect(readFileSync(join(web.root, 'evidence/web-live.json'), 'utf8')).toBe(WEB_LIVE_SESSION);
+    expect(readFileSync(join(android.root, 'evidence/android-live.json'), 'utf8')).toBe(
+      ANDROID_LIVE_SESSION,
+    );
+    // The recorded session, not a synthetic corpus, is the decision source:
+    // the README must say so, because the recording is what outruns the
+    // shipped automation report.
+    expect(readFileSync(join(web.root, 'README.md'), 'utf8')).toContain('recorded session');
+    expect(readFileSync(join(android.root, 'README.md'), 'utf8')).toContain('recorded session');
   });
 
-  test('rejects self-attested live results and macOS AT substituted for pinned NVDA', async () => {
-    const { root, scenario } = await fixture(WEB_SCENARIO);
-    const scorer = ACCESSIBILITY_SKILL_EVAL_SCORERS.find((item) =>
-      item.scenarioIds.includes(WEB_SCENARIO),
-    );
-    if (!scorer) throw new Error('Missing web scorer');
-    const corpus = JSON.parse(readFileSync(join(root, 'evidence/web.json'), 'utf8')) as {
-      browser: string;
-      screenReader: string;
-      requiredTasks: string[];
-    };
-    const candidate = {
+  test('web live scorer accepts a submission reconciled with the recorded session and rejects a substituted assistive-technology identity', async () => {
+    const { root, scenario, scorer } = await liveFixture(WEB_SCENARIO);
+    const session = JSON.parse(WEB_LIVE_SESSION) as RecordedWebSession;
+    const base = {
       environment: {
-        platformVersion: 'Windows 11',
-        appBuild: 'synthetic fixture',
-        assistiveTechnology: corpus.screenReader,
-        browser: corpus.browser,
+        browser: session.browser,
+        locale: session.locale,
+        screenReader: 'orca 43.1 with Speech Dispatcher 0.11.4 on Debian bookworm (aarch64), Xvfb 1280x800',
       },
-      rows: corpus.requiredTasks.map((task) => ({
-        task,
-        input: 'keyboard-only',
-        platform: 'Windows 11',
-        at: corpus.screenReader,
-        manual: true,
-        simulated: true,
-        passed: true,
-        observations: [],
-      })),
-      automation: { tool: 'synthetic fixture', passed: true, findings: [] },
-      manualVerdict: 'pass',
+      keyboard: session.keyboard,
+      errorState: session.errorState,
+      zoom200: session.zoom200,
+      rows: [
+        {
+          task: 'failure-alert-announcement',
+          input: 'keyboard',
+          platform: 'Debian bookworm',
+          at: 'orca 43.1',
+          manual: true,
+          passed: true,
+          observations: ['Speech Dispatcher log records "Löschen fehlgeschlagen. Erneut versuchen." for the opened dialog'],
+        },
+        {
+          task: 'focus-escape-defect',
+          input: 'keyboard',
+          platform: 'Debian bookworm',
+          at: 'orca 43.1',
+          manual: true,
+          passed: true,
+          observations: ['recorded tabStops show focus left the dialog onto the Seitenreiter (document body)'],
+        },
+        {
+          task: 'zoom-200-reflow',
+          input: 'keyboard',
+          platform: 'Debian bookworm',
+          at: 'orca 43.1',
+          manual: true,
+          passed: true,
+          observations: ['dialog fits at 200 percent zoom: no horizontal overflow at viewport width 640'],
+        },
+      ],
+      automation: {
+        tool: 'axe-core 4.10.2 with @axe-core/playwright 4.10.2',
+        executed: true,
+        accepted: ['spoken-announcement', 'escape-returns-focus', 'zoom-200-reflow'],
+        rejected: ['focus-trap'],
+      },
+      conflicts: [
+        {
+          claimId: 'focus-trap',
+          evidence: 'the recorded tabStops place one Tab stop on the document body outside the dialog',
+          verdict: 'rejected',
+        },
+      ],
+      manualVerdict: 'partial',
       automationControlsVerdict: false,
-      liveRuntimeVerified: false,
-      untested: ['Real Windows/NVDA session'],
+      liveRuntimeVerified: true,
+      untested: ['NVDA on Windows and VoiceOver on macOS were not driven'],
     };
-    const score = async () => scorer.score({
-      workingDirectory: root,
-      scenario,
-      observation: {} as never,
-      experiment: {} as never,
-    });
+    const score = async () =>
+      scorer.score({ workingDirectory: root, scenario, observation: {} as never, experiment: {} as never });
 
-    writeFixtureFile(root, '.kory-eval/web-verification.json', JSON.stringify(candidate));
-    const simulated = await score();
-    expect(simulated.passed, simulated.evidence.join('\n')).toBe(true);
-    expect(simulated.evidence.join(' ')).toMatch(/simulation: pass/u);
+    writeFixtureFile(root, '.kory-eval/web-verification.json', JSON.stringify(base));
+    const accepted = await score();
+    expect(accepted.passed, accepted.evidence.join('\n')).toBe(true);
 
-    candidate.liveRuntimeVerified = true;
-    writeFixtureFile(root, '.kory-eval/web-verification.json', JSON.stringify(candidate));
+    base.environment.screenReader = 'VoiceOver (macOS)';
+    writeFixtureFile(root, '.kory-eval/web-verification.json', JSON.stringify(base));
     expect((await score()).passed).toBe(false);
 
-    candidate.liveRuntimeVerified = false;
-    candidate.environment.assistiveTechnology = 'VoiceOver (macOS)';
-    writeFixtureFile(root, '.kory-eval/web-verification.json', JSON.stringify(candidate));
+    base.environment.screenReader = 'orca 43.1 with Speech Dispatcher 0.11.4 on Debian bookworm (aarch64), Xvfb 1280x800';
+    base.keyboard.focusOnOpen = 'confirm';
+    writeFixtureFile(root, '.kory-eval/web-verification.json', JSON.stringify(base));
     expect((await score()).passed).toBe(false);
   }, 30_000);
 
-  test('rejects an Android synthetic result labeled as live TalkBack/switch access', async () => {
-    const { root, scenario } = await fixture(ANDROID_SCENARIO);
-    const scorer = ACCESSIBILITY_SKILL_EVAL_SCORERS.find((item) =>
-      item.scenarioIds.includes(ANDROID_SCENARIO),
-    );
-    if (!scorer) throw new Error('Missing Android scorer');
-    const corpus = JSON.parse(readFileSync(join(root, 'evidence/android.json'), 'utf8')) as {
-      platformVersion: string;
-      talkBack: string;
-      requiredTasks: string[];
-    };
-    const candidate = {
+  test('Android live scorer accepts the exact recorded TalkBack identity and rejects capability padding', async () => {
+    const { root, scenario, scorer } = await liveFixture(ANDROID_SCENARIO);
+    const session = JSON.parse(ANDROID_LIVE_SESSION) as RecordedAndroidSession;
+    const base = {
       environment: {
-        platformVersion: corpus.platformVersion,
-        appBuild: 'synthetic fixture',
-        assistiveTechnology: corpus.talkBack,
+        platformVersion: 'Android 17 (API 37)',
+        device: session.device.model,
+        assistiveTechnology: session.assistiveTechnology.talkBack,
+        switchAccess: session.assistiveTechnology.switchAccess,
       },
-      rows: corpus.requiredTasks.map((task) => ({
-        task,
-        input: 'switch input',
-        platform: corpus.platformVersion,
-        at: corpus.talkBack,
-        manual: true,
-        simulated: true,
-        passed: true,
-        observations: [],
-      })),
-      automation: { tool: 'synthetic fixture', passed: true, findings: [] },
-      manualVerdict: 'pass',
+      focusOrder: session.focusTraversal.map((stop) => stop.label),
+      toggles: session.toggles.map((toggle) => ({ label: toggle.label, checked: toggle.checked })),
+      textScale: {
+        largeScale: '1.5',
+        defaultRowHeight: session.textScale.defaultRowHeight,
+        largeRowHeight: session.textScale.largeRowHeight,
+        grew: true,
+      },
+      rows: [
+        {
+          task: 'focus-traversal-order',
+          input: 'keyboard',
+          platform: 'Android 17 (API 37)',
+          at: 'TalkBack 17.0.0.889642762',
+          manual: true,
+          passed: true,
+          observations: ['recorded focusTraversal lists six stops in the submitted order'],
+        },
+        {
+          task: 'toggle-checked-state',
+          input: 'touch exploration',
+          platform: 'Android 17 (API 37)',
+          at: 'TalkBack 17.0.0.889642762',
+          manual: true,
+          passed: true,
+          observations: ['both recorded switch controls expose checked true'],
+        },
+        {
+          task: 'text-scale-reflow',
+          input: 'touch exploration',
+          platform: 'Android 17 (API 37)',
+          at: 'TalkBack 17.0.0.889642762',
+          manual: true,
+          passed: true,
+          observations: ['row height grew from 65 to 92 at text scale 1.5 without clipping'],
+        },
+      ],
+      automation: {
+        tool: 'androidx.test.espresso:espresso-core:3.6.1',
+        executed: true,
+        accepted: [] as string[],
+        rejected: ['spoken-state-change', 'switch-traversal', 'duplicate-label'],
+      },
+      conflicts: [
+        {
+          claimId: 'spoken-state-change',
+          evidence: 'the recording captured no utterance, so the Espresso assertion cannot attest spoken output',
+          verdict: 'rejected',
+        },
+        {
+          claimId: 'switch-traversal',
+          evidence: 'Switch Access is not bound in the recording (switchAccessBound false)',
+          verdict: 'rejected',
+        },
+        {
+          claimId: 'duplicate-label',
+          evidence: 'the two switch controls expose resource identifiers, not human labels',
+          verdict: 'rejected',
+        },
+      ],
+      manualVerdict: 'partial',
       automationControlsVerdict: false,
-      liveRuntimeVerified: false,
-      untested: ['Real Android/TalkBack/Switch Access session'],
+      liveRuntimeVerified: true,
+      untested: ['spoken output was not captured and Switch Access input was not exercised'],
     };
-    const score = async () => scorer.score({
-      workingDirectory: root,
-      scenario,
-      observation: {} as never,
-      experiment: {} as never,
-    });
+    const score = async () =>
+      scorer.score({ workingDirectory: root, scenario, observation: {} as never, experiment: {} as never });
 
-    writeFixtureFile(root, '.kory-eval/android-verification.json', JSON.stringify(candidate));
-    const simulated = await score();
-    expect(simulated.passed, simulated.evidence.join('\n')).toBe(true);
+    writeFixtureFile(root, '.kory-eval/android-verification.json', JSON.stringify(base));
+    const accepted = await score();
+    expect(accepted.passed, accepted.evidence.join('\n')).toBe(true);
 
-    candidate.liveRuntimeVerified = true;
-    writeFixtureFile(root, '.kory-eval/android-verification.json', JSON.stringify(candidate));
+    base.environment.assistiveTechnology = 'TalkBack 18.0';
+    writeFixtureFile(root, '.kory-eval/android-verification.json', JSON.stringify(base));
+    expect((await score()).passed).toBe(false);
+
+    base.environment.assistiveTechnology = session.assistiveTechnology.talkBack;
+    base.rows = [
+      ...base.rows,
+      {
+        task: 'spoken-state-change-confirmed',
+        input: 'touch exploration',
+        platform: 'Android 17 (API 37)',
+        at: 'TalkBack 17.0.0.889642762',
+        manual: true,
+        passed: true,
+        observations: ['claimed the spoken announcement the recording cannot show'],
+      },
+    ];
+    writeFixtureFile(root, '.kory-eval/android-verification.json', JSON.stringify(base));
     expect((await score()).passed).toBe(false);
   }, 30_000);
 

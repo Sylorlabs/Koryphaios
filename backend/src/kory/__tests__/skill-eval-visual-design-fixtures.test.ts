@@ -3,18 +3,18 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
-import { auditSkillEvalExecutionReadiness } from '../skill-eval-execution';
+import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
+import { auditSkillEvalExecutionReadiness } from '../../eval/skills/skill-eval-execution';
 import { loadV5SkillPackages } from '../skill-packages';
 import {
   VISUAL_DESIGN_SKILL_EVAL_MATERIALIZERS,
   VISUAL_DESIGN_SKILL_EVAL_SCORERS,
-} from '../skill-eval-visual-design-fixtures';
+} from '../../eval/skills/skill-eval-visual-design-fixtures';
 import {
   DIRECTION_CONTEXTS,
   EDITOR_DIRECTION_SCENARIO,
   OPS_DIRECTION_SCENARIO,
-} from '../skill-eval-visual-direction-fixtures';
+} from '../../eval/skills/skill-eval-visual-direction-fixtures';
 
 const roots: string[] = [];
 const skill = () =>

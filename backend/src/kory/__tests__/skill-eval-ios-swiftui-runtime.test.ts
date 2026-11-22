@@ -22,7 +22,7 @@ import {
   runIOSSwiftUINativeControl,
   runIOSSwiftUINativeRuntime,
   verifyIOSXCTestBundle,
-} from '../skill-eval-ios-swiftui-runtime';
+} from '../../eval/skills/skill-eval-ios-swiftui-runtime';
 
 const { navigation, documents } = IOS_SWIFTUI_NATIVE_SCENARIOS;
 const roots: string[] = [];
@@ -108,7 +108,7 @@ describe('iOS 27 native SwiftUI evaluator sidecar', () => {
       ) as { fixedSHA256: Record<string, string> };
       expect(Object.keys(contract.fixedSHA256).sort()).toEqual(fixedFiles);
       for (const file of fixedFiles) {
-        const fixedPath = join(import.meta.dir, '../fixtures/ios-swiftui-v5', file);
+        const fixedPath = join(import.meta.dir, '../../eval/skills/fixtures/ios-swiftui-v5', file);
         const digest = createHash('sha256').update(readFileSync(fixedPath)).digest('hex');
         expect(contract.fixedSHA256[file]).toBe(digest);
       }
@@ -129,6 +129,21 @@ describe('iOS 27 native SwiftUI evaluator sidecar', () => {
     expect(run.passed).toBe(false);
     expect(run.integrityFailure).toBe(true);
     expect(run.blockers.join(' ')).toContain('immutable scenario contract');
+  });
+
+  test('the executor temp root is harness owned, not a candidate override', () => {
+    const root = temp();
+    materializeIOSSwiftUIFixture(root, navigation);
+    mkdirSync(join(root, '.kory-tmp'), { recursive: true });
+    // A plain integrity probe: the fixture is untouched, so the only thing that
+    // could report a failure is the harness scratch directory.
+    const clean = runIOSSwiftUINativeRuntime(root, navigation);
+    expect(clean.blockers.join(' ')).not.toContain('Unexpected candidate root files');
+    // A genuinely unexpected root entry is still a violation.
+    writeFileSync(join(root, 'Package.resolved'), '{}\n');
+    const tampered = runIOSSwiftUINativeRuntime(root, navigation);
+    expect(tampered.integrityFailure).toBe(true);
+    expect(tampered.blockers.join(' ')).toContain('Unexpected candidate root files');
   });
 
   test('readiness fails closed for missing selected devices and Xcode', () => {

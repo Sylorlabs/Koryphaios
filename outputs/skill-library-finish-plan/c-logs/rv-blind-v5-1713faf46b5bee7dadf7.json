@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "reviewerId": "logfare-stateless-2b7b12fa-bd00-4cb6-bb5a-b598dbf670c1",
+  "completed": true,
+  "output": "{\"artifactA\":{\"passed\":false,\"quality\":0.6,\"verification\":0.0,\"integrityFailure\":false,\"evidence\":[\"Agent A attempted to implement the required state handling in `src/app.js` (mapping all 9 states, handling URL routing, and implementing refresh logic).\",\"Agent A created a mock backend (`.econ/mock-server.cjs`) and fixture files (`.econ/fixtures.ndjson`) to support the required job states.\",\"Execution evidence confirms that the required verification artifacts (`web-interface-implementation-contract.json` and `browser-state-and-viewport-matrix.json`) were missing or incomplete.\"]},\"artifactB\":{\"passed\":false,\"quality\":0.2,\"verification\":0.0,\"integrityFailure\":false,\"evidence\":[\"Agent B provided a local verification server (`verify/server.js`) but did not attempt to improve the actual operations console application.\",\"Agent B failed to provide the required JSON verification artifacts.\"]},\"preference\":\"A\",\"rationale\":[\"Both agents failed the task contract because they did not produce the required JSON verification artifacts (`web-interface-implementation-contract.json` and `browser-state-and-viewport-matrix.json`), as noted in the execution evidence.\",\"Agent A is preferred because it made a substantive attempt to fulfill the primary task: improving the browser-based operations console. It implemented logic for deep linking, history preservation, state mapping for all 9 required states, and refresh handling in `src/app.js`, and it provided a mock backend to facilitate testing these states.\",\"Agent B failed to address the core task of improving the console, only providing a verification server, which does not satisfy the implementation requirements.\"]}",
+  "events": [
+    {
+      "type": "review.started",
+      "reviewerId": "logfare-stateless-2b7b12fa-bd00-4cb6-bb5a-b598dbf670c1"
+    },
+    {
+      "type": "review.completed",
+      "reviewerId": "logfare-stateless-2b7b12fa-bd00-4cb6-bb5a-b598dbf670c1",
+      "outputSha256": "53eec98d3b6d690725f54d2d06b9ae31381c869dd9f4f237061bc71508662c2c"
+    }
+  ],
+  "hostReceipt": {
+    "schemaVersion": 1,
+    "stageOnly": true,
+    "identitySource": "host-invocation-uuid",
+    "upstreamSessionObserved": true,
+    "requestedModel": "gemma-4-26b",
+    "responseModel": "gemma-4-26b",
+    "promptSha256": "8eaec5e4b266d22378559e34d297ed2b7f85184d07507ef6ad14dc355d215aad",
+    "requestBytes": 46876,
+    "responseSha256": "3cc767276279d389ca40e02fb67bb2ffa0129b9637c7b66cdd37126a6cc78697",
+    "outputSha256": "53eec98d3b6d690725f54d2d06b9ae31381c869dd9f4f237061bc71508662c2c",
+    "elapsedMs": 55348,
+    "osIsolationVerified": false,
+    "upstreamIdentityVerified": false,
+    "signed": false
+  }
+}

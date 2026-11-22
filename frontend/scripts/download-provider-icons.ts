@@ -17,6 +17,10 @@ const providers = [
   'xai',
   'openrouter',
   'unorouter',
+  'hundredmillionseek',
+  'numes',
+  'radeon',
+  'runcrate',
   'groq',
   'copilot',
   'azure',
@@ -214,6 +218,26 @@ async function run() {
         );
         if (res.ok) {
           await fs.writeFile(path.join(OUT_DIR, 'commandcode-color.svg'), await res.text());
+          console.log(`Downloaded icon for ${p}`);
+          continue;
+        }
+      } catch {
+        /* fall through to placeholder */
+      }
+    }
+
+    if (p === 'runcrate') {
+      try {
+        // Runcrate publishes a single first-party mark as a 1250px RGBA PNG
+        // (`runcrate_logo.png`); it has no SVG and is not in SimpleIcons. Ship
+        // the color asset as-is rather than a fabricated monochrome glyph — a
+        // placeholder crate would be an invented logo.
+        const res = await fetch('https://www.runcrate.ai/runcrate_logo.png');
+        if (res.ok) {
+          await fs.writeFile(
+            path.join(OUT_DIR, 'runcrate-color.png'),
+            Buffer.from(await res.arrayBuffer()),
+          );
           console.log(`Downloaded icon for ${p}`);
           continue;
         }

@@ -474,241 +474,265 @@
 </script>
 
 <div class="network-workspace">
-  <header class="toolbar">
-    <div>
-      <h2>Notes network</h2>
-      <p>Review evidence relationships and explore a bounded query activation.</p>
-    </div>
-    <button type="button" onclick={refresh} disabled={!projectPath}>Refresh network</button>
-  </header>
-  {#if !projectPath}<p role="status">Choose a project to explore its notes.</p>{:else}
-    {#each Object.entries(errors).filter(([, message]) => message) as [lane, message]}
-      <p role="alert" class="error">{label(lane)}: {message}</p>
-    {/each}
-    <section aria-label="Relationship review" class="card">
-      <div class="toolbar">
-        <h3>Evidence relationships</h3>
-        <KorySelect
-          value={statusFilter}
-          options={statusOptions}
-          onchange={(value) => {
-            statusFilter = value;
-            relationshipOffset = 0;
-            void loadRelationships();
-          }}
-          label="Relationship status"
-          compact
-        />
+  <div class="content">
+    <header class="page-header">
+      <div>
+        <h2>Notes network</h2>
+        <p class="muted">Review evidence relationships and explore a bounded query activation.</p>
       </div>
-      <p>
-        Only accepted relationships participate in retrieval. Document links remain references, not
-        typed claims. Acceptance follows the dedicated review permission, not a similarity score;
-        critics can challenge claims without modifying the network.
-      </p>
-      <p class="muted">
-        Showing up to 100 relationships per page. Agent changes refresh this list automatically.
-        Document references and visual Canvas connectors remain separate from evidence claims.
-      </p>
-      {#if busy.relationships}<p role="status">Loading relationships…</p>{/if}
-      <ul class="relationships">
-        {#each visibleRelationships as row (`${row.fromId}:${row.toId}`)}
-          <li class="relationship">
-            <div class="path">
-              <button type="button" onclick={() => onOpenNote(row.fromId)}>{row.fromTitle}</button
-              ><span>→ {label(row.type)} →</span><button
-                type="button"
-                onclick={() => onOpenNote(row.toId)}>{row.toTitle}</button
-              >
-            </div>
-            <p>
-              <span class="badge">{row.status}</span> <span class="badge">{row.provenance}</span>
-              Revision {row.revision} · Evidence endpoints r{row.sourceRevision} / r{row.targetRevision}
-            </p>
-            {#if row.actor && Object.keys(row.actor).length}<p class="muted">
-                Origin: {Object.entries(row.actor)
-                  .map(([key, value]) => `${key}: ${value}`)
-                  .join(' · ')}
-              </p>{/if}
-            {#if row.stale}<p class="warning">
-                Stale evidence — an endpoint changed. Read both notes, then refresh the evidence as
-                a new proposal. Acceptance stays blocked until evidence matches current revisions.
-              </p>{/if}
-            <blockquote>{row.evidence || 'No evidence recorded.'}</blockquote>
-            <button
-              type="button"
-              disabled={busy.mutation || busy.notes}
-              onclick={() => void prepareEvidenceRefresh(row)}
-              aria-label={`Refresh evidence for ${row.fromTitle} and ${row.toTitle}`}
-              >Refresh evidence</button
-            >
-            {#if row.status === 'proposed'}
+      <button type="button" onclick={refresh} disabled={!projectPath}>Refresh network</button>
+    </header>
+    {#if !projectPath}<p role="status" class="muted">Choose a project to explore its notes.</p>{:else}
+      {#each Object.entries(errors).filter(([, message]) => message) as [lane, message]}
+        <p role="alert" class="error">{label(lane)}: {message}</p>
+      {/each}
+      <section aria-label="Relationship review">
+        <div class="section-head">
+          <h3>Evidence relationships</h3>
+          <div class="status-filter">
+            <KorySelect
+              value={statusFilter}
+              options={statusOptions}
+              onchange={(value) => {
+                statusFilter = value;
+                relationshipOffset = 0;
+                void loadRelationships();
+              }}
+              label="Relationship status"
+              compact
+            />
+          </div>
+        </div>
+        <p class="description">Only accepted relationships participate in retrieval.</p>
+        <details class="about">
+          <summary>How this works</summary>
+          <p>
+            Document links remain references, not typed claims. Acceptance follows the dedicated
+            review permission, not a similarity score; critics can challenge claims without
+            modifying the network.
+          </p>
+          <p>
+            Showing up to 100 relationships per page. Agent changes refresh this list automatically.
+            Document references and visual Canvas connectors remain separate from evidence claims.
+          </p>
+        </details>
+        {#if busy.relationships}<p role="status" class="muted">Loading relationships…</p>{/if}
+        <ul class="relationships">
+          {#each visibleRelationships as row (`${row.fromId}:${row.toId}`)}
+            <li class="relationship">
+              <div class="path">
+                <button
+                  type="button"
+                  class="link"
+                  onclick={() => onOpenNote(row.fromId)}>{row.fromTitle}</button
+                ><span class="path-step">→ {label(row.type)} →</span><button
+                  type="button"
+                  class="link"
+                  onclick={() => onOpenNote(row.toId)}>{row.toTitle}</button
+                >
+              </div>
+              <p class="meta">
+                <span class="badge badge-{row.status}">{row.status}</span>
+                <span class="badge">{row.provenance}</span>
+                <span class="muted"
+                  >Revision {row.revision} · Evidence endpoints r{row.sourceRevision} / r{row.targetRevision}</span
+                >
+              </p>
+              {#if row.actor && Object.keys(row.actor).length}<p class="muted">
+                  Origin: {Object.entries(row.actor)
+                    .map(([key, value]) => `${key}: ${value}`)
+                    .join(' · ')}
+                </p>{/if}
+              {#if row.stale}<p class="warning">
+                  Stale evidence — an endpoint changed. Read both notes, then refresh the evidence
+                  as a new proposal. Acceptance stays blocked until evidence matches current
+                  revisions.
+                </p>{/if}
+              <blockquote>{row.evidence || 'No evidence recorded.'}</blockquote>
               <div class="actions">
                 <button
                   type="button"
-                  disabled={busy.mutation || row.stale}
-                  onclick={() => review(row, 'accepted')}
-                  aria-label={`Accept ${row.fromTitle} ${label(row.type)} ${row.toTitle}`}
-                  >Accept</button
-                ><button
-                  type="button"
-                  disabled={busy.mutation}
-                  onclick={() => review(row, 'rejected')}
-                  aria-label={`Reject ${row.fromTitle} ${label(row.type)} ${row.toTitle}`}
-                  >Reject</button
+                  disabled={busy.mutation || busy.notes}
+                  onclick={() => void prepareEvidenceRefresh(row)}
+                  aria-label={`Refresh evidence for ${row.fromTitle} and ${row.toTitle}`}
+                  >Refresh evidence</button
                 >
-              </div>
-            {/if}
-            {#if removal?.fromId === row.fromId && removal?.toId === row.toId}
-              <div class="warning" role="group" aria-label="Confirm relationship removal">
-                <p>
-                  Remove this {removal.status} relationship at revision {removal.revision}? This
-                  removes only the typed association. Document wikilinks are not removed and may
-                  still appear as references. You can then propose new evidence for this pair; the
-                  new proposal still requires review.
-                </p>
-                <div class="actions">
+                {#if row.status === 'proposed'}
                   <button
                     type="button"
+                    class="primary"
+                    disabled={busy.mutation || row.stale}
+                    onclick={() => review(row, 'accepted')}
+                    aria-label={`Accept ${row.fromTitle} ${label(row.type)} ${row.toTitle}`}
+                    >Accept</button
+                  ><button
+                    type="button"
+                    class="danger"
                     disabled={busy.mutation}
-                    onclick={() => removal && removeRelationship(removal)}
-                    >Confirm remove relationship</button
+                    onclick={() => review(row, 'rejected')}
+                    aria-label={`Reject ${row.fromTitle} ${label(row.type)} ${row.toTitle}`}
+                    >Reject</button
                   >
-                  <button type="button" disabled={busy.mutation} onclick={() => (removal = null)}
-                    >Cancel removal</button
+                {/if}
+                {#if removal?.fromId === row.fromId && removal?.toId === row.toId}{:else}
+                  <button
+                    type="button"
+                    disabled={busy.mutation || busy.relationships}
+                    onclick={() => (removal = row)}
+                    aria-label={`Remove ${row.fromTitle} ${label(row.type)} ${row.toTitle}`}
+                    >Remove relationship…</button
                   >
-                </div>
+                {/if}
               </div>
-            {:else}
-              <button
-                type="button"
-                disabled={busy.mutation || busy.relationships}
-                onclick={() => (removal = row)}
-                aria-label={`Remove ${row.fromTitle} ${label(row.type)} ${row.toTitle}`}
-                >Remove relationship…</button
-              >
-            {/if}
-          </li>
-        {:else}<li>No relationships in this view.</li>{/each}
-      </ul>
-      <div class="toolbar" aria-label="Relationship pages">
-        <button
-          type="button"
-          disabled={relationshipOffset === 0 || busy.relationships}
-          onclick={() => {
-            relationshipOffset = Math.max(0, relationshipOffset - 100);
-            void loadRelationships();
-          }}>Previous relationships</button
-        >
-        <span class="muted">Page {Math.floor(relationshipOffset / 100) + 1}</span>
-        <button
-          type="button"
-          disabled={!relationshipsMayHaveMore || busy.relationships}
-          onclick={() => {
-            relationshipOffset += 100;
-            void loadRelationships();
-          }}>Next relationships</button
-        >
-      </div>
-      <details open={Boolean(refreshingRelationship)}>
-        <summary
-          >{refreshingRelationship
-            ? 'Refresh evidence as a new proposal'
-            : 'Propose a relationship'}</summary
-        >
-        {#if refreshingRelationship}<p class="muted">
-            Read both updated notes before submitting. The existing decision is retained in history;
-            refreshed evidence must be reviewed again.
+              {#if removal?.fromId === row.fromId && removal?.toId === row.toId}
+                <div class="warning" role="group" aria-label="Confirm relationship removal">
+                  <p>
+                    Remove this {removal.status} relationship at revision {removal.revision}? This
+                    removes only the typed association. Document wikilinks are not removed and may
+                    still appear as references. You can then propose new evidence for this pair; the
+                    new proposal still requires review.
+                  </p>
+                  <div class="actions">
+                    <button
+                      type="button"
+                      class="danger"
+                      disabled={busy.mutation}
+                      onclick={() => removal && removeRelationship(removal)}
+                      >Confirm remove relationship</button
+                    >
+                    <button type="button" disabled={busy.mutation} onclick={() => (removal = null)}
+                      >Cancel removal</button
+                    >
+                  </div>
+                </div>
+              {/if}
+            </li>
+          {:else}<li class="empty">No relationships in this view.</li>{/each}
+        </ul>
+        {#if relationshipOffset > 0 || relationshipsMayHaveMore}
+          <div class="pager" aria-label="Relationship pages">
+            <button
+              type="button"
+              disabled={relationshipOffset === 0 || busy.relationships}
+              onclick={() => {
+                relationshipOffset = Math.max(0, relationshipOffset - 100);
+                void loadRelationships();
+              }}>Previous relationships</button
+            >
+            <span class="muted">Page {Math.floor(relationshipOffset / 100) + 1}</span>
+            <button
+              type="button"
+              disabled={!relationshipsMayHaveMore || busy.relationships}
+              onclick={() => {
+                relationshipOffset += 100;
+                void loadRelationships();
+              }}>Next relationships</button
+            >
+          </div>
+        {/if}
+        <details class="propose" open={Boolean(refreshingRelationship)}>
+          <summary
+            >{refreshingRelationship
+              ? 'Refresh evidence as a new proposal'
+              : 'Propose a relationship'}</summary
+          >
+          {#if refreshingRelationship}<p class="muted">
+              Read both updated notes before submitting. The existing decision is retained in
+              history; refreshed evidence must be reviewed again.
+            </p>
+            <button
+              type="button"
+              onclick={() => {
+                refreshingRelationship = null;
+                evidence = '';
+              }}>Cancel evidence refresh</button
+            >{/if}
+          <form
+            class="search-row"
+            onsubmit={(event) => {
+              event.preventDefault();
+              void loadNotes();
+            }}
+          >
+            <label class="field"
+              ><span class="field-label">Find project notes</span><input
+                bind:value={search}
+                placeholder="Search note titles or content"
+                maxlength="2000"
+              /></label
+            >
+            <button type="submit" disabled={busy.notes}>Find notes</button>
+          </form>
+          <p class="muted">
+            {notes.length} scoped note choices{notesTruncated
+              ? ' · Results truncated; narrow your search.'
+              : '.'} Search refreshes endpoint revisions; selections outside the results must be
+            chosen again.
           </p>
+          <div class="proposal-grid">
+            <KorySelect
+              value={fromId}
+              options={noteOptions}
+              onchange={(value) => (fromId = value)}
+              label="Source note"
+              placeholder="Choose source note"
+              disabled={busy.notes || busy.mutation || Boolean(refreshingRelationship)}
+            />
+            <KorySelect
+              value={relationshipType}
+              options={typeOptions}
+              onchange={(value) => (relationshipType = value)}
+              label="Relationship type"
+            />
+            <KorySelect
+              value={toId}
+              options={noteOptions.filter((note) => note.value !== fromId)}
+              onchange={(value) => (toId = value)}
+              label="Target note"
+              placeholder="Choose target note"
+              disabled={busy.notes || busy.mutation || Boolean(refreshingRelationship)}
+            />
+          </div>
+          <label class="field evidence-field"
+            ><span class="field-label">Evidence</span><textarea
+              bind:value={evidence}
+              maxlength="2000"
+              rows="3"
+              placeholder="Quote or explain the evidence for this relationship."
+            ></textarea></label
+          >
           <button
             type="button"
-            onclick={() => {
-              refreshingRelationship = null;
-              evidence = '';
-            }}>Cancel evidence refresh</button
-          >{/if}
+            class="primary"
+            onclick={propose}
+            disabled={!canPropose || busy.mutation || busy.notes}
+            >{refreshingRelationship ? 'Save refreshed proposal' : 'Create proposal'}</button
+          >
+        </details>
+      </section>
+
+      <section aria-label="Query activation">
+        <h3>Query activation</h3>
+        <p class="description">Run a new read-only retrieval.</p>
+        <details class="about">
+          <summary>How this works</summary>
+          <p>
+            This is not a historical agent trace, and co-retrieval does not establish agreement.
+          </p>
+        </details>
         <form
           onsubmit={(event) => {
             event.preventDefault();
-            void loadNotes();
+            void activate();
           }}
-          class="toolbar"
         >
-          <label
-            >Find project notes<input
-              bind:value={search}
-              placeholder="Search note titles or content"
+          <label class="field query-field"
+            ><span class="field-label">Retrieval query</span><input
+              bind:value={query}
               maxlength="2000"
+              placeholder="What should these notes help answer?"
             /></label
           >
-          <button type="submit" disabled={busy.notes}>Find notes</button>
-        </form>
-        <p class="muted">
-          {notes.length} scoped note choices{notesTruncated
-            ? ' · Results truncated; narrow your search.'
-            : '.'} Search refreshes endpoint revisions; selections outside the results must be chosen
-          again.
-        </p>
-        <div class="proposal-grid">
-          <KorySelect
-            value={fromId}
-            options={noteOptions}
-            onchange={(value) => (fromId = value)}
-            label="Source note"
-            placeholder="Choose source note"
-            disabled={busy.notes || busy.mutation || Boolean(refreshingRelationship)}
-          />
-          <KorySelect
-            value={relationshipType}
-            options={typeOptions}
-            onchange={(value) => (relationshipType = value)}
-            label="Relationship type"
-          />
-          <KorySelect
-            value={toId}
-            options={noteOptions.filter((note) => note.value !== fromId)}
-            onchange={(value) => (toId = value)}
-            label="Target note"
-            placeholder="Choose target note"
-            disabled={busy.notes || busy.mutation || Boolean(refreshingRelationship)}
-          />
-        </div>
-        <label
-          >Evidence<textarea
-            bind:value={evidence}
-            maxlength="2000"
-            rows="3"
-            placeholder="Quote or explain the evidence for this relationship."
-          ></textarea></label
-        >
-        <button
-          type="button"
-          onclick={propose}
-          disabled={!canPropose || busy.mutation || busy.notes}
-          >{refreshingRelationship ? 'Save refreshed proposal' : 'Create proposal'}</button
-        >
-      </details>
-    </section>
-
-    <section aria-label="Query activation" class="card">
-      <h3>Query activation</h3>
-      <p>
-        Run a new read-only retrieval. This is not a historical agent trace, and co-retrieval does
-        not establish agreement.
-      </p>
-      <form
-        onsubmit={(event) => {
-          event.preventDefault();
-          void activate();
-        }}
-      >
-        <label
-          >Retrieval query<input
-            bind:value={query}
-            maxlength="2000"
-            placeholder="What should these notes help answer?"
-          /></label
-        >
-        <div class="query-controls">
           <SettingsSwitch
             checked={semantic}
             onchange={() => {
@@ -717,378 +741,579 @@
             label="Use semantic retrieval"
             description="Use the existing opted-in index; never automatically index note bodies."
             compact
+            flat
           />
-          <NumberStepper
-            value={maxHops}
-            min={0}
-            max={2}
-            step={1}
-            onchange={(value) => (maxHops = value)}
-            label="Graph hops"
-          />
-          <NumberStepper
-            value={maxChars}
-            min={256}
-            max={16000}
-            step={256}
-            onchange={(value) => (maxChars = value)}
-            label="Excerpt character budget"
-          />
-        </div>
-        <div class="actions">
-          <button type="submit" disabled={!query.trim() || busy.activation}>Activate query</button
-          >{#if busy.activation}<button type="button" onclick={() => cancel('activation')}
-              >Cancel query</button
-            ><span role="status">Retrieving…</span>{/if}
-        </div>
-      </form>
-      {#if activation}
-        <h4>Activation for “{activation.query}”</h4>
-        <p>
-          Coverage: {activation.results.length} notes · {activation.retrieval.exhaustive
-            ? 'exhaustive'
-            : 'bounded, non-exhaustive'} · Semantic: {label(activation.retrieval.semantic)} · Index: {label(
-            activation.retrieval.index,
-          )}
-        </p>
-        {#if activation.retrieval.coverage}
-          {#if activation.retrieval.coverage.countsAvailable === false}
-            <p>Semantic coverage was not evaluated · {label(activation.retrieval.coverage.mode)}</p>
-          {:else}
-            <p>
-              Semantic coverage at activation: {activation.retrieval.coverage.indexedNotes} / {activation
-                .retrieval.coverage.eligibleNotes} notes (revision metadata) · {activation.retrieval
-                .coverage.staleNotes} stale · {label(activation.retrieval.coverage.mode)}
-            </p>
-          {/if}
-          {#if activation.retrieval.coverage.search}
-            <p class:warning={!activation.retrieval.coverage.search.exhaustive}>
-              Semantic vectors examined: {activation.retrieval.coverage.search.scannedVectors} / {activation
-                .retrieval.coverage.search.maxVectors} maximum · {label(
-                activation.retrieval.coverage.search.reason,
-              )}.
-              {activation.retrieval.coverage.search.exhaustive
-                ? 'Current vector scan complete.'
-                : 'Non-exhaustive vector search; lexical and graph evidence remain available.'}
-            </p>
-          {/if}
-        {/if}
-        <p class:warning={activation.truncation.truncated}>
-          Truncation: {activation.truncation.truncated
-            ? activation.truncation.reasons.map(label).join(', ') || 'budget reached'
-            : 'none reported'}
-        </p>
-        <details>
-          <summary>Retrieval budget</summary>
-          <dl class="budget">
-            {#each Object.entries(activation.budget.used) as [key, value]}<div>
-                <dt>{label(key)}</dt>
-                <dd>
-                  {value} / {activation.budget.limits[key === 'excerptChars' ? 'maxChars' : key] ??
-                    '—'}
-                </dd>
-              </div>{/each}
-          </dl>
-          <p class="muted">
-            All reported limits: {Object.entries(activation.budget.limits)
-              .map(([key, value]) => `${key}: ${value}`)
-              .join(' · ')}
+          <div class="fields">
+            <div class="field">
+              <span class="field-label">Graph hops</span>
+              <NumberStepper
+                value={maxHops}
+                min={0}
+                max={2}
+                step={1}
+                onchange={(value) => (maxHops = value)}
+                label="Graph hops"
+                compact
+                quiet
+              />
+            </div>
+            <div class="field">
+              <span class="field-label">Excerpt character budget</span>
+              <NumberStepper
+                value={maxChars}
+                min={256}
+                max={16000}
+                step={256}
+                onchange={(value) => (maxChars = value)}
+                label="Excerpt character budget"
+                compact
+                quiet
+              />
+            </div>
+          </div>
+          <div class="actions">
+            <button type="submit" class="primary" disabled={!query.trim() || busy.activation}
+              >Activate query</button
+            >{#if busy.activation}<button type="button" onclick={() => cancel('activation')}
+                >Cancel query</button
+              ><span role="status" class="muted">Retrieving…</span>{/if}
+          </div>
+        </form>
+        {#if activation}
+          <h4>Activation for “{activation.query}”</h4>
+          <p>
+            Coverage: {activation.results.length} notes · {activation.retrieval.exhaustive
+              ? 'exhaustive'
+              : 'bounded, non-exhaustive'} · Semantic: {label(
+              activation.retrieval.semantic,
+            )} · Index: {label(activation.retrieval.index)}
           </p>
-        </details>
-        {#if activation.conflicts.length}<h4>Conflicts and stale evidence</h4>
-          <ul>
-            {#each activation.conflicts as conflict}<li class="warning">
-                {noteTitle(conflict.noteId)}: {label(conflict.reason)} (expected r{conflict.expectedRevision},
-                current {conflict.currentRevision === undefined
-                  ? 'unavailable'
-                  : `r${conflict.currentRevision}`}){conflict.relatedNoteId
-                  ? ` · ${noteTitle(conflict.relatedNoteId)}`
-                  : ''}
-              </li>{/each}
-          </ul>{/if}
-        {#if activation.connections?.length}
-          <details>
-            <summary>Examined connections ({activation.connections.length})</summary>
-            <p>
-              Includes relationships between independently retrieved seeds. Recorded labels are
-              claims, not verified facts.
-            </p>
-            <ul aria-label="Examined note connections">
-              {#each activation.connections as step}
-                <li>
-                  {noteTitle(step.fromId)} (r{step.fromRevision}) → {noteTitle(step.toId)} (r{step.toRevision}):
-                  {label(step.type ?? step.kind)} · {step.provenance}
-                  {#if step.stale}<strong class="warning">Stale connection evidence</strong>{/if}
-                  {#if step.evidence}<blockquote>{step.evidence}</blockquote>{/if}
-                </li>
-              {/each}
-            </ul>
-          </details>
-        {/if}
-        <div class="activation-map" aria-label="Local activation paths">
-          <div class="query-node">Query: {activation.query}</div>
-          {#each activation.results as result (result.id)}
-            <article class="activation-node">
-              <div class="path">
-                <span aria-hidden="true">↳</span><button
-                  type="button"
-                  onclick={() => onOpenNote(result.id)}>{result.title}</button
-                ><span class="badge">r{result.revision}</span>
-              </div>
-              <p><strong>Why selected:</strong> {result.explanation}</p>
-              <p class="muted">
-                Sources: {result.sources.join(', ')} · Ranking score: {result.score.toFixed(3)} (not confidence)
+          {#if activation.retrieval.coverage}
+            {#if activation.retrieval.coverage.countsAvailable === false}
+              <p>Semantic coverage was not evaluated · {label(activation.retrieval.coverage.mode)}</p>
+            {:else}
+              <p>
+                Semantic coverage at activation: {activation.retrieval.coverage.indexedNotes} / {activation
+                  .retrieval.coverage.eligibleNotes} notes (revision metadata) · {activation
+                  .retrieval.coverage.staleNotes} stale · {label(
+                  activation.retrieval.coverage.mode,
+                )}
               </p>
-              <ol aria-label={`Path to ${result.title}`}>
-                <li>Seed: {noteTitle(result.seedId)}</li>
-                {#each result.path as step}
+            {/if}
+            {#if activation.retrieval.coverage.search}
+              <p class:warning={!activation.retrieval.coverage.search.exhaustive}>
+                Semantic vectors examined: {activation.retrieval.coverage.search.scannedVectors} / {activation
+                  .retrieval.coverage.search.maxVectors} maximum · {label(
+                  activation.retrieval.coverage.search.reason,
+                )}.
+                {activation.retrieval.coverage.search.exhaustive
+                  ? 'Current vector scan complete.'
+                  : 'Non-exhaustive vector search; lexical and graph evidence remain available.'}
+              </p>
+            {/if}
+          {/if}
+          <p class:warning={activation.truncation.truncated}>
+            Truncation: {activation.truncation.truncated
+              ? activation.truncation.reasons.map(label).join(', ') || 'budget reached'
+              : 'none reported'}
+          </p>
+          <details>
+            <summary>Retrieval budget</summary>
+            <dl class="budget">
+              {#each Object.entries(activation.budget.used) as [key, value]}<div>
+                  <dt>{label(key)}</dt>
+                  <dd>
+                    {value} / {activation.budget.limits[
+                      key === 'excerptChars' ? 'maxChars' : key
+                    ] ?? '—'}
+                  </dd>
+                </div>{/each}
+            </dl>
+            <p class="muted">
+              All reported limits: {Object.entries(activation.budget.limits)
+                .map(([key, value]) => `${key}: ${value}`)
+                .join(' · ')}
+            </p>
+          </details>
+          {#if activation.conflicts.length}<h4>Conflicts and stale evidence</h4>
+            <ul>
+              {#each activation.conflicts as conflict}<li class="warning">
+                  {noteTitle(conflict.noteId)}: {label(conflict.reason)} (expected r{conflict.expectedRevision},
+                  current {conflict.currentRevision === undefined
+                    ? 'unavailable'
+                    : `r${conflict.currentRevision}`}){conflict.relatedNoteId
+                    ? ` · ${noteTitle(conflict.relatedNoteId)}`
+                    : ''}
+                </li>{/each}
+            </ul>{/if}
+          {#if activation.connections?.length}
+            <details>
+              <summary>Examined connections ({activation.connections.length})</summary>
+              <p>
+                Includes relationships between independently retrieved seeds. Recorded labels are
+                claims, not verified facts.
+              </p>
+              <ul aria-label="Examined note connections">
+                {#each activation.connections as step}
                   <li>
-                    <span
-                      >{noteTitle(step.fromId)} (r{step.fromRevision}) → {noteTitle(step.toId)} (r{step.toRevision})</span
-                    >
-                    <p>
-                      {step.direction} · {step.kind === 'document_link'
-                        ? 'Document reference'
-                        : label(step.type ?? step.kind)} · {step.provenance}{step.status
-                        ? ` · ${step.status}`
-                        : ''}{step.relationshipRevision === undefined
-                        ? ''
-                        : ` · relationship r${step.relationshipRevision}`}
-                    </p>
-                    {#if step.stale}<strong class="warning">Stale path evidence</strong
-                      >{/if}{#if step.evidence}<blockquote>{step.evidence}</blockquote>{/if}
+                    {noteTitle(step.fromId)} (r{step.fromRevision}) → {noteTitle(step.toId)} (r{step.toRevision}):
+                    {label(step.type ?? step.kind)} · {step.provenance}
+                    {#if step.stale}<strong class="warning">Stale connection evidence</strong>{/if}
+                    {#if step.evidence}<blockquote>{step.evidence}</blockquote>{/if}
                   </li>
                 {/each}
-              </ol>
-              <pre class="excerpt">{result.excerpt}</pre>
-              {#if result.truncated}<p class="warning">
-                  Excerpt truncated. Open the note for full context.
-                </p>{/if}
-            </article>
-          {:else}<p>
-              No notes selected. Try a more specific query or rebuild an enabled semantic index.
-            </p>{/each}
-        </div>
-      {/if}
-    </section>
+              </ul>
+            </details>
+          {/if}
+          <div class="activation-map" aria-label="Local activation paths">
+            <div class="query-node">Query: {activation.query}</div>
+            {#each activation.results as result (result.id)}
+              <article class="activation-node">
+                <div class="path">
+                  <span aria-hidden="true">↳</span><button
+                    type="button"
+                    class="link"
+                    onclick={() => onOpenNote(result.id)}>{result.title}</button
+                  ><span class="badge">r{result.revision}</span>
+                </div>
+                <p><strong>Why selected:</strong> {result.explanation}</p>
+                <p class="muted">
+                  Sources: {result.sources.join(', ')} · Ranking score: {result.score.toFixed(3)} (not
+                  confidence)
+                </p>
+                <ol aria-label={`Path to ${result.title}`}>
+                  <li>Seed: {noteTitle(result.seedId)}</li>
+                  {#each result.path as step}
+                    <li>
+                      <span
+                        >{noteTitle(step.fromId)} (r{step.fromRevision}) → {noteTitle(step.toId)} (r{step.toRevision})</span
+                      >
+                      <p>
+                        {step.direction} · {step.kind === 'document_link'
+                          ? 'Document reference'
+                          : label(step.type ?? step.kind)} · {step.provenance}{step.status
+                          ? ` · ${step.status}`
+                          : ''}{step.relationshipRevision === undefined
+                          ? ''
+                          : ` · relationship r${step.relationshipRevision}`}
+                      </p>
+                      {#if step.stale}<strong class="warning">Stale path evidence</strong
+                        >{/if}{#if step.evidence}<blockquote>{step.evidence}</blockquote>{/if}
+                    </li>
+                  {/each}
+                </ol>
+                <pre class="excerpt">{result.excerpt}</pre>
+                {#if result.truncated}<p class="warning">
+                    Excerpt truncated. Open the note for full context.
+                  </p>{/if}
+              </article>
+            {:else}<p class="muted">
+                No notes selected. Try a more specific query or rebuild an enabled semantic index.
+              </p>{/each}
+          </div>
+        {/if}
+      </section>
 
-    <section aria-label="Semantic index" class="card">
-      <div class="toolbar">
-        <h3>Semantic index</h3>
-        <button type="button" onclick={loadIndex} disabled={busy.index || busy.rebuild}
-          >Refresh index status</button
-        >
-      </div>
-      <p>
-        Embeddings are opt-in. Rebuilding may send scoped note text to the configured embedding
-        provider only when server configuration and Notes permissions allow it. Enabling semantic
-        query retrieval does not grant indexing permission.
-      </p>
-      {#if indexStatus}
-        <p>
-          Index mode: {label(indexStatus.mode)} · {indexStatus.enabled
-            ? 'Index opt-in active'
-            : 'Index not opted in'} · {indexStatus.providerIdentity
-            ? 'Provider configured'
-            : 'Provider unconfigured'}
-        </p>
-        <dl class="budget">
-          <div>
-            <dt>Index coverage</dt>
-            <dd>
-              {#if indexStatus.countsAvailable === false}
-                Not evaluated (not an empty-vault claim)
-              {:else}
-                {indexStatus.indexedNotes} / {indexStatus.eligibleNotes} notes ({Math.round(
-                  indexStatus.coverage * 100,
-                )}%; revision metadata)
-              {/if}
-            </dd>
-          </div>
-          <div>
-            <dt>Stale vectors</dt>
-            <dd>
-              {indexStatus.countsAvailable === false ? 'Not evaluated' : indexStatus.staleNotes}
-            </dd>
-          </div>
-          <div>
-            <dt>Representation cap</dt>
-            <dd>{indexStatus.representationChars} characters per note</dd>
-          </div>
-        </dl>
-        {#if indexStatus.mode === 'permission_denied'}<p class="warning">
-            Notes permissions disallow embedding. Change the project permissions before rebuilding.
+      <section aria-label="Semantic index">
+        <div class="section-head">
+          <h3>Semantic index</h3>
+          <button type="button" onclick={loadIndex} disabled={busy.index || busy.rebuild}
+            >Refresh index status</button
+          >
+        </div>
+        <p class="description">Embeddings are opt-in.</p>
+        <details class="about">
+          <summary>How this works</summary>
+          <p>
+            Rebuilding may send scoped note text to the configured embedding provider only when
+            server configuration and Notes permissions allow it. Enabling semantic query retrieval
+            does not grant indexing permission.
+          </p>
+          <p>
+            Each click processes one bounded batch. Rebuild continues the saved cursor; restart
+            scans from the beginning.
+          </p>
+        </details>
+        {#if indexStatus}
+          <p>
+            Index mode: {label(indexStatus.mode)} · {indexStatus.enabled
+              ? 'Index opt-in active'
+              : 'Index not opted in'} · {indexStatus.providerIdentity
+              ? 'Provider configured'
+              : 'Provider unconfigured'}
+          </p>
+          <dl class="budget">
+            <div>
+              <dt>Index coverage</dt>
+              <dd>
+                {#if indexStatus.countsAvailable === false}
+                  Not evaluated (not an empty-vault claim)
+                {:else}
+                  {indexStatus.indexedNotes} / {indexStatus.eligibleNotes} notes ({Math.round(
+                    indexStatus.coverage * 100,
+                  )}%; revision metadata)
+                {/if}
+              </dd>
+            </div>
+            <div>
+              <dt>Stale vectors</dt>
+              <dd>
+                {indexStatus.countsAvailable === false ? 'Not evaluated' : indexStatus.staleNotes}
+              </dd>
+            </div>
+            <div>
+              <dt>Representation cap</dt>
+              <dd>{indexStatus.representationChars} characters per note</dd>
+            </div>
+          </dl>
+          {#if indexStatus.mode === 'permission_denied'}<p class="warning">
+              Notes permissions disallow embedding. Change the project permissions before
+              rebuilding.
+            </p>{/if}
+        {:else}<p class="muted">
+            {busy.index ? 'Loading index status…' : 'Index status unavailable.'}
           </p>{/if}
-      {:else}<p>{busy.index ? 'Loading index status…' : 'Index status unavailable.'}</p>{/if}
-      <SettingsSwitch
-        checked={indexingConsent}
-        onchange={() => {
-          indexingConsent = !indexingConsent;
-        }}
-        label="Allow explicit indexing for this project"
-        description="I allow this rebuild to send bounded note representations to the configured embedding provider. This local consent resets when leaving the workspace."
-        compact
-        disabled={busy.rebuild}
-      />
-      <NumberStepper
-        value={batchLimit}
-        min={1}
-        max={128}
-        label="Index batch size"
-        onchange={(value) => (batchLimit = value)}
-        disabled={busy.rebuild}
-      />
-      <div class="actions">
-        <button
-          type="button"
-          onclick={() => rebuildIndex()}
-          disabled={!indexingConsent || !canRebuild || busy.rebuild}>Rebuild semantic index</button
-        >
-        <button
-          type="button"
-          onclick={() => rebuildIndex(true)}
-          disabled={!indexingConsent || !canRebuild || busy.rebuild}>Restart index rebuild</button
-        >
-        {#if busy.rebuild}<button type="button" onclick={cancelRebuild}>Cancel rebuild</button><span
-            role="status">Rebuilding…</span
-          >{/if}
-      </div>
-      <p class="muted">
-        Each click processes one bounded batch. Rebuild continues the saved cursor; restart scans
-        from the beginning.
-      </p>
-      {#if rebuildResult}<p role="status">
-          Processed {rebuildResult.processed} · Indexed {rebuildResult.indexed} · Skipped {rebuildResult.skipped}{rebuildResult.canceled
-            ? ' · Canceled'
-            : ''}. {rebuildResult.hasMore
-            ? 'More notes remain; rebuild again to continue.'
-            : 'Batch scan complete.'}
-        </p>{/if}
-    </section>
-  {/if}
+        <SettingsSwitch
+          checked={indexingConsent}
+          onchange={() => {
+            indexingConsent = !indexingConsent;
+          }}
+          label="Allow explicit indexing for this project"
+          description="I allow this rebuild to send bounded note representations to the configured embedding provider. This local consent resets when leaving the workspace."
+          compact
+          flat
+          disabled={busy.rebuild}
+        />
+        <div class="fields">
+          <div class="field">
+            <span class="field-label">Index batch size</span>
+            <NumberStepper
+              value={batchLimit}
+              min={1}
+              max={128}
+              label="Index batch size"
+              onchange={(value) => (batchLimit = value)}
+              disabled={busy.rebuild}
+              compact
+              quiet
+            />
+          </div>
+        </div>
+        <div class="actions">
+          <button
+            type="button"
+            class="primary"
+            onclick={() => rebuildIndex()}
+            disabled={!indexingConsent || !canRebuild || busy.rebuild}>Rebuild semantic index</button
+          >
+          <button
+            type="button"
+            onclick={() => rebuildIndex(true)}
+            disabled={!indexingConsent || !canRebuild || busy.rebuild}>Restart index rebuild</button
+          >
+          {#if busy.rebuild}<button type="button" onclick={cancelRebuild}>Cancel rebuild</button
+            ><span role="status" class="muted">Rebuilding…</span>{/if}
+        </div>
+        {#if rebuildResult}<p role="status">
+            Processed {rebuildResult.processed} · Indexed {rebuildResult.indexed} · Skipped {rebuildResult.skipped}{rebuildResult.canceled
+              ? ' · Canceled'
+              : ''}. {rebuildResult.hasMore
+              ? 'More notes remain; rebuild again to continue.'
+              : 'Batch scan complete.'}
+          </p>{/if}
+      </section>
+    {/if}
+  </div>
 </div>
 
 <style>
   .network-workspace {
     height: 100%;
     overflow: auto;
-    padding: 1rem;
     color: var(--color-text-primary);
     background: var(--color-surface-1);
     font-size: 0.8125rem;
+    line-height: 1.55;
+  }
+  .content {
+    max-width: 60rem;
+    margin: 0 auto;
+    padding: 1.5rem 2rem 3rem;
   }
   h2,
   h3,
   h4 {
     font-weight: 600;
-    margin: 0.25rem 0 0.6rem;
+    margin: 0;
   }
   h2 {
     font-size: 1rem;
+  }
+  h3 {
+    font-size: 0.875rem;
+  }
+  h4 {
+    font-size: 0.8125rem;
+    margin: 1.25rem 0 0.5rem;
   }
   p {
     margin: 0.5rem 0;
     overflow-wrap: anywhere;
   }
-  .muted,
-  .network-workspace > header p {
+  .muted {
     color: var(--color-text-muted);
   }
-  .toolbar,
-  .actions,
-  .path,
-  .query-controls {
+  .page-header {
     display: flex;
     align-items: center;
-    gap: 0.65rem;
+    justify-content: space-between;
+    gap: 1rem;
     flex-wrap: wrap;
   }
-  .toolbar {
+  .page-header p {
+    margin: 0.15rem 0 0;
+  }
+  section {
+    padding: 1.75rem 0;
+  }
+  section + section {
+    border-top: 1px solid var(--color-border);
+  }
+  .section-head {
+    display: flex;
+    align-items: center;
     justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
   }
-  .actions,
-  .query-controls {
-    margin: 0.75rem 0;
+  .status-filter {
+    width: 12rem;
+    flex-shrink: 0;
   }
-  .card {
-    padding: 1rem;
-    margin-top: 1rem;
-    border: 1px solid var(--color-border);
-    border-radius: 0.75rem;
-    background: var(--color-surface-2);
+  .description {
+    margin: 0.35rem 0 0;
+    color: var(--color-text-muted);
   }
-  button,
-  input,
-  textarea {
-    border: 1px solid var(--color-border);
-    border-radius: 0.4rem;
-    padding: 0.45rem 0.65rem;
-    background: var(--color-surface-1);
-    color: var(--color-text-primary);
-    font: inherit;
+  .about {
+    margin-top: 0.5rem;
+  }
+  .about > summary {
+    width: fit-content;
+    color: var(--color-text-muted);
+    font-size: 0.75rem;
+    cursor: pointer;
+  }
+  .about p {
+    max-width: 70ch;
+    color: var(--color-text-muted);
   }
   button {
+    border: 0;
+    border-radius: 0.5rem;
+    padding: 0.4rem 0.75rem;
+    background: transparent;
+    color: var(--color-text-secondary);
+    font: inherit;
     cursor: pointer;
   }
   button:hover:not(:disabled) {
     background: var(--color-surface-3);
+    color: var(--color-text-primary);
   }
   button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }
+  button.primary {
+    background: var(--color-accent);
+    color: var(--color-on-accent);
+  }
+  button.primary:hover:not(:disabled) {
+    background: var(--color-accent-hover);
+    color: var(--color-on-accent);
+  }
+  button.danger {
+    color: var(--color-error);
+  }
+  button.danger:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--color-error) 12%, transparent);
+    color: var(--color-error);
+  }
+  button.link {
+    padding: 0;
+    border-radius: 0.25rem;
+    color: var(--color-accent);
+  }
+  button.link:hover:not(:disabled) {
+    background: transparent;
+    color: var(--color-accent-hover);
+    text-decoration: underline;
+  }
   button:focus-visible,
-  input:focus-visible,
-  textarea:focus-visible,
   summary:focus-visible {
     outline: 2px solid var(--color-accent);
     outline-offset: 2px;
   }
-  label {
+  .field {
     display: flex;
     flex-direction: column;
-    gap: 0.4rem;
-    margin: 0.75rem 0;
-    flex: 1;
+    gap: 0.35rem;
+    min-width: 0;
+  }
+  .field-label {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--color-text-muted);
   }
   input,
   textarea {
     width: 100%;
     min-width: 0;
+    border: 1px solid transparent;
+    border-radius: 0.5rem;
+    padding: 0.55rem 0.75rem;
+    background: var(--color-surface-2);
+    color: var(--color-text-primary);
+    font: inherit;
+  }
+  input:focus-visible,
+  textarea:focus-visible {
+    outline: none;
+    border-color: var(--color-accent);
   }
   textarea {
     resize: vertical;
   }
+  .fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(11rem, 14rem));
+    gap: 1rem;
+    margin: 0.75rem 0;
+  }
   .relationships {
     list-style: none;
     padding: 0;
+    margin: 0.75rem 0 0;
   }
   .relationship {
+    padding: 1rem 0;
+  }
+  .relationship + .relationship {
     border-top: 1px solid var(--color-border);
-    padding: 0.85rem 0;
+  }
+  .empty {
+    padding: 1.5rem 0;
+    text-align: center;
+    color: var(--color-text-muted);
+  }
+  .path {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    overflow-wrap: anywhere;
+  }
+  .path-step {
+    color: var(--color-text-muted);
+  }
+  .meta {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-top: 0.75rem;
+  }
+  .pager {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
   }
   .badge {
     display: inline-block;
-    border: 1px solid var(--color-border);
-    border-radius: 1rem;
-    padding: 0.1rem 0.45rem;
+    border-radius: 999px;
+    padding: 0.1rem 0.5rem;
     font-size: 0.7rem;
+    background: var(--color-surface-3);
+    color: var(--color-text-secondary);
+  }
+  .badge-accepted {
+    background: color-mix(in srgb, var(--color-success) 14%, transparent);
+    color: var(--color-success);
+  }
+  .badge-proposed {
+    background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+    color: var(--color-accent);
+  }
+  .badge-rejected {
+    color: var(--color-text-muted);
   }
   blockquote {
-    border-left: 3px solid var(--color-border);
+    border-left: 2px solid var(--color-border);
     margin: 0.6rem 0;
-    padding: 0.4rem 0.75rem;
+    padding: 0.35rem 0.75rem;
+    color: var(--color-text-secondary);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
-  summary {
+  .propose {
+    margin-top: 1rem;
+  }
+  .propose > summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
     cursor: pointer;
-    margin: 0.75rem 0;
+    list-style: none;
+    border-radius: 0.5rem;
+    padding: 0.4rem 0.75rem;
+    margin-left: -0.75rem;
+    color: var(--color-text-secondary);
+  }
+  .propose > summary::-webkit-details-marker {
+    display: none;
+  }
+  .propose > summary::before {
+    content: '›';
+    color: var(--color-text-muted);
+    transition: transform 0.15s ease;
+  }
+  .propose[open] > summary::before {
+    transform: rotate(90deg);
+  }
+  .propose > summary:hover {
+    background: var(--color-surface-3);
+    color: var(--color-text-primary);
+  }
+  .propose .search-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.75rem;
+    margin: 1rem 0 0.5rem;
+  }
+  .propose .search-row .field {
+    flex: 1;
   }
   .proposal-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-    gap: 0.6rem;
+    gap: 1rem;
+    margin: 1rem 0;
+  }
+  .evidence-field {
+    margin: 1rem 0;
+  }
+  .query-field {
+    margin: 1rem 0;
+  }
+  details > summary {
+    cursor: pointer;
   }
   .warning {
     color: var(--color-warning);
@@ -1096,36 +1321,41 @@
   .error {
     color: var(--color-error);
   }
-  .budget {
+  dl.budget {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.75rem 1.5rem;
+    gap: 0.75rem 2rem;
+    margin: 0.75rem 0;
   }
-  .budget dt {
+  dl.budget > div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+  dl.budget dt {
+    font-size: 0.75rem;
     color: var(--color-text-muted);
   }
-  .budget dd {
+  dl.budget dd {
     margin: 0;
+    color: var(--color-text-primary);
     overflow-wrap: anywhere;
   }
   .activation-map {
-    border-left: 2px solid var(--color-accent);
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
     margin-top: 1rem;
-    padding-left: 1rem;
   }
   .query-node {
-    display: inline-block;
-    border: 1px solid var(--color-accent);
-    padding: 0.6rem;
-    border-radius: 0.6rem;
+    color: var(--color-accent);
+    font-weight: 600;
     overflow-wrap: anywhere;
   }
   .activation-node {
-    margin-top: 1rem;
-    border: 1px solid var(--color-border);
-    border-radius: 0.6rem;
-    padding: 0.8rem;
-    background: var(--color-surface-1);
+    border-radius: 0.75rem;
+    padding: 1rem;
+    background: var(--color-surface-2);
   }
   .activation-node ol {
     padding-left: 1.3rem;
@@ -1136,7 +1366,7 @@
     overflow-wrap: anywhere;
     font: inherit;
     padding: 0.65rem;
-    background: var(--color-surface-2);
-    border-radius: 0.4rem;
+    background: var(--color-surface-1);
+    border-radius: 0.5rem;
   }
 </style>

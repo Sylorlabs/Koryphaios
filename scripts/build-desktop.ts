@@ -263,7 +263,13 @@ function main() {
         Number.isSafeInteger(configuredTimeout) && configuredTimeout > 0
           ? configuredTimeout
           : DEFAULT_APPIMAGE_BUILD_TIMEOUT_MS;
-      run('bun', tauriArgs, { cwd: DESKTOP_DIR, timeoutMs });
+      // This script already wrote the compat hash and built the host payload
+      // itself; the before-build hook must not rebuild (or reject) it.
+      run('bun', tauriArgs, {
+        cwd: DESKTOP_DIR,
+        timeoutMs,
+        env: { KORY_EMBEDDED_BACKEND: 'prebuilt' },
+      });
     } catch (error) {
       const requestedAppImage = buildRequestsAppImage(tauriArgs);
       // Never bypass a signed build: the fallback intentionally produces only

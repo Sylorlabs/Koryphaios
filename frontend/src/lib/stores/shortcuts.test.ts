@@ -38,12 +38,12 @@ describe('shortcut store voice binding', () => {
     localStorage.clear();
   });
 
-  it('binds voice mode to a Control+Space toggle by default', async () => {
+  it('binds voice mode to Control+Space push-to-talk by default', async () => {
     const store = await loadStore();
     const voice = store.list.find((s) => s.id === 'voice_mode');
     expect(voice?.keys).toEqual(['Ctrl', ' ']);
     expect(voice?.action).toBe('Voice mode');
-    expect(voice?.description).toMatch(/press to record, press again/i);
+    expect(voice?.description).toMatch(/hold to talk, release to transcribe/i);
     expect(store.label('voice_mode')).toBe(`${formatKey('Ctrl')}+${formatKey(' ')}`);
   });
 
@@ -214,7 +214,7 @@ describe('shortcut store voice binding', () => {
     }
   });
 
-  it('re-describes a stored voice binding as a toggle', async () => {
+  it('re-describes a stored voice binding as push-to-talk', async () => {
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify([
@@ -229,6 +229,6 @@ describe('shortcut store voice binding', () => {
     const store = await loadStore();
     const voice = store.list.find((s) => s.id === 'voice_mode');
     expect(voice?.keys).toEqual(['Fn']);
-    expect(voice?.description).toMatch(/press to record, press again/i);
+    expect(voice?.description).toMatch(/hold to talk, release to transcribe/i);
   });
 });

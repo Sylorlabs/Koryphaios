@@ -3,14 +3,14 @@ import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { expect, test } from 'bun:test';
-import type { SkillEvalScenarioV3 } from '../skill-eval-harness';
+import type { SkillEvalScenarioV3 } from '../../eval/skills/skill-eval-harness';
 import {
   PHP_JSON_SCENARIO,
   PHP_WORKER_SCENARIO,
   V5_LANGUAGE_HOST_SKILL_EVAL_MATERIALIZERS,
   V5_LANGUAGE_HOST_SKILL_EVAL_SCORERS,
   phpHostReadiness,
-} from '../skill-eval-v5-language-host-fixtures';
+} from '../../eval/skills/skill-eval-v5-language-host-fixtures';
 
 // Replay saved, hash-checked PHP candidate files from the two genuine paired runs.
 // This exercises the local scorer only; it does not execute an agent, write to the

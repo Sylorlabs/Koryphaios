@@ -37,6 +37,10 @@
     xai: ['xai'],
     openrouter: ['openrouter'],
     unorouter: ['unorouter'],
+    hundredmillionseek: ['hundredmillionseek'],
+    numes: ['numes'],
+    radeon: ['radeon'],
+    runcrate: ['runcrate'],
     respan: ['respan'],
     experientiallabs: ['experientiallabs'],
     tokenharbor: ['tokenharbor'],
@@ -52,6 +56,8 @@
     deepseek: ['deepseek'],
     mistralai: ['mistral'],
     mistral: ['mistral'],
+    coarena: ['coarena'],
+    crowllm: ['crowllm'],
     cohere: ['cohere'],
     perplexity: ['perplexity'],
     azure: ['azure'],
@@ -151,6 +157,9 @@
     'opencode',
     'cursor',
     'cline',
+    'hundredmillionseek',
+    'numes',
+    'radeon',
     'cerebras',
     'poe',
   ]);
@@ -165,7 +174,12 @@
   // Vyce AI's bundled mark is a full-color SVG (gradients + strokes) that
   // happens to live at the monochrome-shaped path. It must never be inverted
   // in dark mode, otherwise the logo collapses to a white blob.
-  const nonAdaptiveIconPaths = new Set(['/provider-icons/vyceai.svg']);
+  const nonAdaptiveIconPaths = new Set([
+    '/provider-icons/vyceai.svg',
+    // CrowLLM's favicon is a full-color crow on a dark tile; inverting it in
+    // dark mode would turn the mark into a white blob.
+    '/provider-icons/crowllm.svg',
+  ]);
 
   // Cortecs does not publish an icon through the bundled LobeHub set. Use the
   // avatar from its verified Hugging Face organization instead of a fabricated

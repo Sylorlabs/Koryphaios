@@ -4,7 +4,13 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { userConfirmedImageInput } from './attachment-admission';
-import type { ProviderConfig, ModelDef, ProviderName } from '@koryphaios/shared';
+import type {
+  ModelParameterKey,
+  ProviderConfig,
+  ModelDef,
+  ProviderName,
+} from '@koryphaios/shared';
+import { sanitizeModelParameterValues } from '@koryphaios/shared';
 import {
   type Provider,
   type ProviderEvent,
@@ -115,6 +121,11 @@ export class AnthropicProvider implements Provider {
     if (this.cachedModels && isModelListCacheFresh(this.lastFetch)) return this.cachedModels;
     this.refreshModelsInBackground(fallback);
     return this.cachedModels ?? [];
+  }
+
+  /** The Messages API accepts temperature/top_p/top_k alongside max_tokens. */
+  forwardedModelParameters(): ReadonlySet<ModelParameterKey> {
+    return new Set(['temperature', 'top_p', 'top_k', 'max_tokens']);
   }
 
   refreshModels(forceRefresh = false): Promise<void> {
@@ -276,13 +287,35 @@ export class AnthropicProvider implements Provider {
           ]
         : request.systemPrompt;
 
-    const params: Anthropic.MessageCreateParamsStreaming = {
+    const modelDef = resolveModel(request.model);
+    const liveDef = this.listModels().find(
+      (m) => m.id === request.model || m.apiModelId === request.model,
+    );
+    // Composer "Model settings" overrides, sanitized against the model's own
+    // declared parameter list.
+    const modelParams = sanitizeModelParameterValues(
+      liveDef?.parameters ?? modelDef?.parameters,
+      request.modelParameters,
+    );
+
+    const params: Anthropic.MessageCreateParamsStreaming & {
+      top_p?: number;
+      top_k?: number;
+    } = {
       // Use the catalog's apiModelId (dated Anthropic id, or the Bedrock model id) when known.
-      model: resolveModel(request.model)?.apiModelId ?? request.model,
-      max_tokens: request.maxTokens ?? 16_384,
+      model: modelDef?.apiModelId ?? request.model,
+      max_tokens:
+        (typeof modelParams.max_tokens === 'number' ? modelParams.max_tokens : undefined) ??
+        request.maxTokens ??
+        16_384,
       system: system as Anthropic.MessageCreateParamsStreaming['system'],
       messages,
       stream: true,
+      ...(typeof modelParams.temperature === 'number' && {
+        temperature: modelParams.temperature,
+      }),
+      ...(typeof modelParams.top_p === 'number' && { top_p: modelParams.top_p }),
+      ...(typeof modelParams.top_k === 'number' && { top_k: modelParams.top_k }),
       ...(tools?.length && { tools }),
     };
     if (this.name === 'anthropic' && tools.length > 0 && request.allowedToolNames?.length === 0) {

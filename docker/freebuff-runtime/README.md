@@ -1,10 +1,25 @@
 # Freebuff real-TUI Linux runtime
 
-Normal macOS connection prepares the pinned image automatically inside
-Koryphaios using the embedded Dockerfile as the complete stdin build context.
-Only a genuinely missing image triggers a build; transport timeouts do not.
-An existing stopped default Colima profile can be resumed with
-`--activate=false`, preserving Docker's global context.
+Koryphaios auto-tracks the latest Freebuff release the same way the official
+npm launcher does: an unauthenticated `GET https://registry.npmjs.org/freebuff/latest`
+(10 s timeout, no redirects, no credentials) resolves the latest version, and
+the matching archive is downloaded from codebuff.com. Normal connection
+prepares the needed image automatically inside Koryphaios using the embedded
+Dockerfile as the complete stdin build context. Only a genuinely missing image
+triggers a build; transport timeouts do not. An existing stopped default
+Colima profile can be resumed with `--activate=false`, preserving Docker's
+global context.
+
+Images are tagged `koryphaios/freebuff-runtime:<version>-bun1.3.14-r<recipe>`
+(`-arm64` on arm64), where the recipe rev is a hash of the embedded Dockerfile.
+`FREEBUFF_MIN_RUNTIME_VERSION` (0.2.36, the qualified floor) is the minimum
+accepted version. When the resolved version differs from the newest installed
+one, the older proven image keeps serving turns while the newer image builds
+in the background; the swap happens only after a real isolation probe passes,
+and turns already running keep their container. Stale tags beyond the current
+and immediately previous version are garbage-collected afterward. A Codebuff
+410 `freebuff_update_required` answer forces a fresh resolve + blocking build +
+probe + swap and one retried turn.
 
 Developer-only build and diagnostic commands with a native Linux Docker daemon
 (amd64 and arm64 Colima work):
@@ -25,12 +40,14 @@ Colima as well as Docker Desktop.
 
 ## Release provenance
 
-The inspected npm launcher **freebuff 0.0.173** uses `stageBinary(version, targetKey)` in `launcher.js` to download `${appURL}/api/releases/download/${version}/${fileName}`. We use the official default `https://codebuff.com` and native CLI **0.2.16**, not the npm wrapper version. The x64 baseline build avoids an AVX2 requirement. Archive hashes were calculated from the official HTTPS downloads and are enforced during every build:
+The inspected npm launcher **freebuff 0.0.173** uses `stageBinary(version, targetKey)` in `launcher.js` to download `${appURL}/api/releases/download/${version}/${fileName}`. Kory resolves the same `${version}` from the npm `latest` tag and downloads the same official `https://codebuff.com` archives, not the npm wrapper version. The x64 baseline build avoids an AVX2 requirement.
+
+For versions Kory has measured (`KNOWN_FREEBUFF_ARCHIVE_SHA256`), the recorded archive SHA-256 is enforced during the build. For a not-yet-measured new release the build is trust-on-first-use — the official launcher verifies no hash either — and the downloaded archive's hash is recorded inside the image at `/opt/kory/freebuff/ARCHIVE_SHA256`. Bun remains hash-pinned. Measured hashes to date:
 
 | Artifact                                                                                  | SHA-256                                                            |
 | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `https://codebuff.com/api/releases/download/0.2.16/freebuff-linux-x64-baseline.tar.gz`    | `bc6fce99050823b9fdcc9b64a9993525b0c478c45b3bd4460cbab55d9afaf3f3` |
-| `https://codebuff.com/api/releases/download/0.2.16/freebuff-linux-arm64.tar.gz`            | `3d5e9049da25d176eedd8193aef12c1c485096c6a42d3927c3e183c38c62adc1` |
+| `https://codebuff.com/api/releases/download/0.2.36/freebuff-linux-x64-baseline.tar.gz`    | `7991a166aba6f374792ac8e9d9300280f6e5a2044935b268dfd96ff4b7d103e3` |
+| `https://codebuff.com/api/releases/download/0.2.36/freebuff-linux-arm64.tar.gz`            | `ed752a58958a01a3172eebdda3b7fabff27d4dc099e94c5d8a3a6da5d97692a3` |
 | `https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-linux-x64-baseline.zip` | `a063908ae08b7852ca10939bbdc6ceed3ddabce8fb9402dce83d65d73b36e6c7` |
 | `https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-linux-aarch64.zip`       | `a27ffb63a8310375836e0d6f668ae17fa8d8d18b88c37c821c65331973a19a3b` |
 

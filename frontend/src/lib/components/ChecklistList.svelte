@@ -147,7 +147,7 @@
             <span
               class="flex size-[15px] items-center justify-center rounded-full border transition-colors duration-150
                 {item.status === 'done'
-                ? 'border-[var(--color-success)] bg-[var(--color-success)] text-[var(--color-surface-0)]'
+                ? 'border-[var(--color-success)] bg-[var(--color-success)] text-[var(--color-on-success)]'
                 : item.status === 'skipped'
                   ? 'border-[var(--color-text-muted)] bg-[var(--color-surface-3)] text-[var(--color-text-muted)]'
                   : 'border-[var(--color-border-bright)] bg-transparent text-transparent group-hover/check:border-[var(--color-accent)]'}"
@@ -214,7 +214,7 @@
   {/if}
 
   {#if checklistStore.error}
-    <p class="mt-1 text-[10px] text-[var(--color-error)]" role="alert">
+    <p class="mt-1 text-[11px] text-[var(--color-error)]" role="alert">
       {checklistStore.error}
     </p>
   {/if}

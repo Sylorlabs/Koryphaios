@@ -64,6 +64,12 @@ const target = loadBackendTargetFromConfig();
 const wsBase = target.replace(/^http/, 'ws');
 const wsTarget = wsBase.endsWith('/ws') ? wsBase : `${wsBase}/ws`;
 
+// Static (packaged/Tauri) builds must not bake the dev backend target into the
+// bundle — the app would send its bearer token to whatever listens on that
+// port. Resolve backend URLs at runtime there instead.
+const isStaticBuild =
+  process.env.BUILD_MODE === 'static' || Boolean(process.env.TAURI_ENV_PLATFORM);
+
 // ─── Build-time frontend identity (compat contract with backend) ───────────
 // `__KORYPHAIOS_FRONTEND_VERSION__` mirrors the frontend package version; the
 // backend-health sentinel compares it against the backend's `minFrontend`
@@ -170,8 +176,8 @@ export default defineConfig({
     },
   },
   define: {
-    'import.meta.env.VITE_BACKEND_URL': JSON.stringify(target),
-    'import.meta.env.VITE_BACKEND_WS_URL': JSON.stringify(wsTarget),
+    'import.meta.env.VITE_BACKEND_URL': JSON.stringify(isStaticBuild ? '' : target),
+    'import.meta.env.VITE_BACKEND_WS_URL': JSON.stringify(isStaticBuild ? '' : wsTarget),
     __KORYPHAIOS_FRONTEND_VERSION__: JSON.stringify(frontendVersion),
     __KORYPHAIOS_FRONTEND_BUNDLE_HASH__: JSON.stringify(frontendBundleHash),
   },

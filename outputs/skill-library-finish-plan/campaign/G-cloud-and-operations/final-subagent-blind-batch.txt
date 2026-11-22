@@ -1,0 +1,7 @@
+Blind batch (2026-11-07, subagent reviewers, honest, opencode/iceman-free provenance):
+- networking-systems s1 blind-v5-ece6ad84 (ae0853bc, withIsA:true): A(with-skill) FAILED 0.45/0.3 (1/2, TLS-SNI vector), B passed 0.9/0.9. Ingested (honest). Adds failed semantic eval for with-skill.
+- networking-systems s2 blind-v5-390dd67e (ac26fdab, withIsA:true): A 0.72/0.6 pass, B 0.8/0.62 pass, 2/2. Ingested.
+- container-engineering s2 blind-v5-1a3dd7c7 (ea3e2921, withIsA:true): both pass 0.86/0.84, tie, hidden 2/2. Ingested.
+- aws-cloud s1 blind-v5-8304df53 (b406f2a8, withIsA:true): A/B FAILED 0.52/0.45 (host: missing effective AWS IAM/KMS evidence). Ingested (honest).
+- aws-cloud s2 blind-v5-77f96678 (3fce6511, withIsA:false => B is with-skill): A 0.82/0.78 pass, B 0.83/0.78 pass, tie. Ingested.
+Envelope: outputs/skill-library-finish-plan/campaign/G-cloud-and-operations/blind-batch-self-staged/import.json

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "status": "unimported",
+  "assignmentId": "blind-v5-181a340c1ad688c443b1",
+  "skill": "azure-cloud",
+  "scenarioId": "azure-cloud-full-task-1-individual",
+  "pairId": "azure-cloud-full-task-1-individual:356d2aba-55d1-4457-bc85-2bb2da9ee0b9",
+  "reviewerThread": "opencode:ses-eb75ae310ffeH4HkPGeLvMUUud",
+  "reviewerIdentitySource": "external-reviewer-adapter-output",
+  "reviewerAdapter": "/Users/Shared/micah/Documents/koryphaios/scripts/kory-opencode-reviewer",
+  "reviewerModel": "unorouter/claude-sonnet-5",
+  "reviewerModelSource": "configured-provider-model-metadata",
+  "reviewerBaseUrl": "http://127.0.0.1:17841/v1",
+  "promptSha256": "172dadee8c8f42f6f77ba642469d364764e17b44607093a26d507e9ce9b177fc",
+  "privateAssignmentSha256": "079147d3fa0e69d58356ff0481bc2c578ff1f595bb14d28580a8f63fc30be813",
+  "reviewerEventsSha256": "a1193b8610c5198ca673309b3b436d0021753e7bd6a60fccad10cd82afe8f957",
+  "judgeOutputSha256": "e77c4265350e8e4b187cc14e4524d9ea7b1db87f98428aeff675c701338f173a",
+  "envelopeSha256": "f4c70e99f91a4d503bf09810434b53b3ea4c2c26d300cfc40f8fd1d6c18c2902",
+  "importValidation": {
+    "mode": "validate",
+    "validatedReviews": 1,
+    "persistedReviews": 0
+  },
+  "promptSnapshotPath": "/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-nXb3OA/review-task.prompt.txt",
+  "reviewerEventsPath": "/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-nXb3OA/reviewer-events.json",
+  "envelopePath": "/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-nXb3OA/import.json"
+}

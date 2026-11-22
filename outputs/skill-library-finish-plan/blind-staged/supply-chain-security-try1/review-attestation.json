@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "status": "unimported",
+  "assignmentId": "blind-v5-9231a6cd06c2d338cae8",
+  "skill": "supply-chain-security",
+  "scenarioId": "supply-chain-security-full-task-1",
+  "pairId": "supply-chain-security-full-task-1:13b0d625-da5a-40c6-a1fc-e96eb05d0694",
+  "reviewerThread": "logfare-stateless-28996f5c-d749-4812-83df-cfc1ff7d310f",
+  "reviewerIdentitySource": "external-reviewer-adapter-output",
+  "reviewerAdapter": "scripts/kory-logfare-stateless-reviewer",
+  "reviewerModel": "deepseek-v4.1-flash-1017",
+  "reviewerModelSource": "configured-provider-model-metadata",
+  "reviewerBaseUrl": "http://127.0.0.1:17841/v1",
+  "promptSha256": "6bc549c52b4b77ce4d702f80d975e6a5a473192580951346f8e2826268030cdb",
+  "privateAssignmentSha256": "4fcc315ceb7f838a651dcff04959f6101b49040a06da72f70301cb29f667baa1",
+  "reviewerEventsSha256": "e9fa36c626b05b6978286dc2a9df2b7b0d07d990f1d76303e336b832cc195bf4",
+  "judgeOutputSha256": "6dcc8fccdf6ad833e2e4bed76f5d2e004f84185e1ddcbc5c7a9c5e854e177d28",
+  "envelopeSha256": "60869d94464b30eca08cea9d38625604a508e5db5f50f8fb2c361de5d0702f2e",
+  "importValidation": {
+    "mode": "validate",
+    "validatedReviews": 1,
+    "persistedReviews": 0
+  },
+  "promptSnapshotPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-BV7XGV/review-task.prompt.txt",
+  "reviewerEventsPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-BV7XGV/reviewer-events.json",
+  "envelopePath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-BV7XGV/import.json"
+}

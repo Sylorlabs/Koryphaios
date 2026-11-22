@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kory-status"
+description = "Enables the kory_status command without any pre-configured scope."
+commands.allow = ["kory_status"]
+
+[[permission]]
+identifier = "deny-kory-status"
+description = "Denies the kory_status command without any pre-configured scope."
+commands.deny = ["kory_status"]

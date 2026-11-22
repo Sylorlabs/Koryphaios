@@ -17,6 +17,13 @@ import { feedStore, getGroupedEntries } from './feed.svelte';
 import { runStateStore } from './run-state.svelte';
 import { TERMINAL_AGENT_STATUSES } from './run-state-core';
 import { onSessionRemoved, onSessionsRemoved } from './session-removal';
+import {
+  carryContextEstimate,
+  forgetPersistedManagerContext,
+  readPersistedManagerContext,
+  writePersistedManagerContext,
+} from '$lib/utils/context-carry';
+import { boundOpaqueCumulativeOccupancy } from '@koryphaios/shared';
 
 // ─── Agent State ────────────────────────────────────────────────────────────
 
@@ -132,7 +139,7 @@ type ManagerContextState = Pick<
   | 'cacheWriteInputTokens'
   | 'estimatedCostUsd'
   | 'cacheSavingsUsd'
-> & { provider: string; model: string };
+> & { provider: string; model: string; carried?: boolean };
 // Like the feed cache, context belongs to the chat, not to the currently
 // visible manager object. Switching away must not erase a known reading.
 const sessionManagerContext = new Map<string, ManagerContextState>();
@@ -152,6 +159,40 @@ const pendingManagerUsage = new Map<string, ManagerUsageSnapshot>();
 // Replay can beat both the composer's selection and the final archive write.
 // Retain the latest receipt without displaying it until its exact route is pinned.
 const pendingManagerLiveUsage = new Map<string, StreamUsagePayload>();
+// Managers, keyed agentKey(sessionId, MANAGER_ID), whose occupancy is a local
+// estimate: carried across a model switch, restored from this device's last
+// reading, or a backend character estimate. Any provider report or exact saved
+// snapshot replaces it; a weaker estimate never does.
+const carriedManagerEstimates = new Set<string>();
+function isCarriedEstimate(agent: AgentState): boolean {
+  return carriedManagerEstimates.has(agentKey(agent.sessionId, MANAGER_ID));
+}
+function setCarriedEstimate(agent: AgentState, carried: boolean): void {
+  const key = agentKey(agent.sessionId, MANAGER_ID);
+  if (carried) carriedManagerEstimates.add(key);
+  else carriedManagerEstimates.delete(key);
+}
+/** Show the prior route's context against the newly selected route at once,
+ *  as an estimate, instead of an empty bar until the provider reports. */
+function carryManagerUsage(
+  agent: AgentState,
+  previous: { used: number; breakdown?: ContextBreakdown; provider?: string },
+  nextProvider: string,
+): boolean {
+  const carried = carryContextEstimate(previous, nextProvider);
+  if (!carried) return false;
+  agent.tokensUsed = carried.used;
+  agent.hasUsageData = true;
+  agent.usageEstimated = true;
+  agent.contextBreakdown = carried.breakdown;
+  // A different model is a different prompt-cache identity.
+  agent.cachedInputTokens = undefined;
+  agent.cacheWriteInputTokens = undefined;
+  agent.estimatedCostUsd = undefined;
+  agent.cacheSavingsUsd = undefined;
+  setCarriedEstimate(agent, true);
+  return true;
+}
 function rememberManagerContext(agent: AgentState): void {
   if (
     !agent.sessionId ||
@@ -175,20 +216,56 @@ function rememberManagerContext(agent: AgentState): void {
     cacheWriteInputTokens: agent.cacheWriteInputTokens,
     estimatedCostUsd: agent.estimatedCostUsd,
     cacheSavingsUsd: agent.cacheSavingsUsd,
+    carried: isCarriedEstimate(agent),
   });
   if (sessionManagerContext.size > 100) {
     sessionManagerContext.delete(sessionManagerContext.keys().next().value!);
+  }
+  if (agent.hasUsageData && agent.tokensUsed > 0) {
+    writePersistedManagerContext(agent.sessionId, {
+      provider: agent.identity.provider,
+      model: agent.identity.model,
+      tokensUsed: agent.tokensUsed,
+      contextMax: agent.contextMax,
+      contextKnown: agent.contextKnown,
+      contextBreakdown: agent.contextBreakdown ? { ...agent.contextBreakdown } : undefined,
+    });
   }
 }
 
 function restoreManagerContext(agent: AgentState, sessionId: string): void {
   const saved = sessionManagerContext.get(sessionId);
-  if (!saved) return;
-  const { provider, model, ...telemetry } = saved;
+  if (!saved) {
+    restorePersistedManagerContext(agent, sessionId);
+    return;
+  }
+  const { provider, model, carried, ...telemetry } = saved;
   Object.assign(agent, telemetry);
   agent.identity.provider = provider as AgentIdentity['provider'];
   agent.identity.model = model;
+  setCarriedEstimate(agent, carried === true);
   managerContextSelection = { sessionId, provider, model };
+}
+
+/** A chat opened for the first time in this page paints this device's last
+ *  reading for it immediately, labelled as an estimate. No network involved. */
+function restorePersistedManagerContext(agent: AgentState, sessionId: string): void {
+  const saved = readPersistedManagerContext(sessionId);
+  if (!saved) return;
+  agent.identity.provider = saved.provider as AgentIdentity['provider'];
+  agent.identity.model = saved.model;
+  agent.tokensUsed = saved.tokensUsed;
+  agent.contextMax = saved.contextMax > 0 ? saved.contextMax : 0;
+  agent.contextKnown = saved.contextKnown === true && agent.contextMax > 0;
+  agent.hasUsageData = true;
+  agent.usageEstimated = true;
+  agent.contextBreakdown = saved.contextBreakdown ? { ...saved.contextBreakdown } : undefined;
+  agent.cachedInputTokens = undefined;
+  agent.cacheWriteInputTokens = undefined;
+  agent.estimatedCostUsd = undefined;
+  agent.cacheSavingsUsd = undefined;
+  setCarriedEstimate(agent, true);
+  managerContextSelection = { sessionId, provider: saved.provider, model: saved.model };
 }
 
 // Svelte 5's $state does not proxy Map contents or the plain objects
@@ -211,6 +288,51 @@ export function getSessionAgents(sessionId: string): AgentState[] {
   return [...agents.values()].filter((a) => a.sessionId === sessionId);
 }
 
+/** In-flight tool calls keyed (sessionId, agentId) → callId → call. The agent
+ *  rail reads the latest entry to render what the agent is doing right now. */
+let agentCurrentTools = $state(new Map<string, Map<string, { name: string; input?: Record<string, unknown> }>>());
+
+export function noteAgentToolCall(
+  sessionId: string | undefined,
+  agentId: string,
+  call: { id?: string; name: string; input?: Record<string, unknown> },
+): void {
+  if (!sessionId || !agentId) return;
+  const key = agentKey(sessionId, agentId);
+  const calls = agentCurrentTools.get(key) ?? new Map();
+  calls.set(call.id ?? `call-${calls.size}`, { name: call.name, input: call.input });
+  agentCurrentTools = new Map(agentCurrentTools).set(key, calls);
+}
+
+export function noteAgentToolResult(
+  sessionId: string | undefined,
+  agentId: string,
+  callId: string,
+): void {
+  if (!sessionId || !agentId) return;
+  const key = agentKey(sessionId, agentId);
+  const calls = agentCurrentTools.get(key);
+  if (!calls?.size) return;
+  calls.delete(callId);
+  // A result we never saw the call for still ends whatever the agent showed.
+  if (!calls.size) calls.clear();
+  const next = new Map(agentCurrentTools);
+  if (calls.size) next.set(key, calls);
+  else next.delete(key);
+  agentCurrentTools = next;
+}
+
+/** The most recently started tool call that has no result yet. */
+export function getAgentCurrentTool(
+  sessionId: string | undefined,
+  agentId: string,
+): { name: string; input?: Record<string, unknown> } | undefined {
+  if (!sessionId || !agentId) return undefined;
+  const calls = agentCurrentTools.get(agentKey(sessionId, agentId));
+  if (!calls?.size) return undefined;
+  return [...calls.values()][calls.size - 1];
+}
+
 /** The record to write to. The manager is created on first use for a chat;
  *  workers are only ever created by spawnAgent. */
 function ensureAgent(sessionId: string, agentId: string): AgentState | undefined {
@@ -225,11 +347,18 @@ function ensureAgent(sessionId: string, agentId: string): AgentState | undefined
   return created;
 }
 
+import {
+  continuationTargetKey,
+  findContinuationRow,
+  frozenThinkingDuration,
+  isTranscriptContinuation,
+  resumeThinkingTiming,
+} from './transcript-continuation';
+
 const MAX_THREAD_ENTRIES = 2000;
 // Answer text can continue across tool rows, but reasoning after a tool must
 // start a fresh row so the drill-down transcript preserves event order. Track
 // the row each thread's current turn is still filling for text continuation.
-const THREAD_CONTINUATION_TYPES: ReadonlySet<FeedEntry['type']> = new Set(['content', 'thinking']);
 const threadStreamTargets = new Map<
   string,
   { sessionId: string; agentId: string; entryId: string }
@@ -330,8 +459,8 @@ function accumulateAgentThreadEntry(
   }
   const lastIdx = current.length - 1;
   const last = lastIdx >= 0 ? current[lastIdx] : null;
-  const targetKey = `${key}::${entry.type}::${entry.userHidden ? 'hidden' : 'visible'}`;
-  const continuesTurn = THREAD_CONTINUATION_TYPES.has(entry.type);
+  const targetKey = continuationTargetKey(key, entry.type, entry.userHidden);
+  const continuesTurn = isTranscriptContinuation(entry.type);
   const target = continuesTurn
     ? openThreadStreamTarget(current, targetKey, key, entry as FeedEntry)
     : last &&
@@ -345,17 +474,7 @@ function accumulateAgentThreadEntry(
     target.text += entry.text;
     target.timestamp = entry.timestamp;
     if (target.type === 'thinking') {
-      // Reconnected mid-turn: replayed reasoning is sealed on arrival, so a
-      // live delta arriving afterwards has to re-open the block or the
-      // drill-down stopwatch stops counting while the turn is still running.
-      if (entry.thinkingFinalized === undefined && target.thinkingFinalized) {
-        target.thinkingFinalized = false;
-      }
-      if (target.thinkingStartedAt) {
-        target.durationMs = entry.timestamp - target.thinkingStartedAt;
-      } else {
-        target.thinkingStartedAt = entry.timestamp;
-      }
+      Object.assign(target, resumeThinkingTiming(target, entry));
     }
     agentThreadVersion++;
     if (continuesTurn) {
@@ -379,34 +498,12 @@ function openThreadStreamTarget(
   entry: FeedEntry,
 ): FeedEntry | null {
   if (closedThreadTurns.has(threadKey)) return null;
-  // Keep separate reasoning bursts in their real transcript positions. Text
-  // may continue across a tool call, but a thinking block that resumes after
-  // one is a new reasoning segment.
-  if (entry.type === 'thinking') {
-    const latest = current.at(-1);
-    if (
-      !latest ||
-      latest.type !== 'thinking' ||
-      latest.agentId !== entry.agentId ||
-      Boolean(latest.userHidden) !== Boolean(entry.userHidden)
-    ) {
-      return null;
-    }
-  }
   const recorded = threadStreamTargets.get(targetKey);
-  if (recorded) {
-    const target = current.findLast((row) => row.id === recorded.entryId);
-    if (target) return target;
-    threadStreamTargets.delete(targetKey);
-  }
-  return (
-    current.findLast(
-      (row) =>
-        row.type === entry.type &&
-        row.agentId === entry.agentId &&
-        Boolean(row.userHidden) === Boolean(entry.userHidden),
-    ) ?? null
-  );
+  const target = findContinuationRow(current, entry, {
+    recordedEntryId: recorded?.entryId,
+  });
+  if (!target && recorded) threadStreamTargets.delete(targetKey);
+  return target;
 }
 
 /** Close the rows a thread's current turn may still append to so the next delta
@@ -643,6 +740,7 @@ export function updateUsage(sessionId: string, agentId: string, payload: StreamU
   agent.cacheSavingsUsd = payload.cacheSavingsUsd;
   // A real provider report supersedes any model preview still in flight.
   if (agentId === MANAGER_ID) {
+    setCarriedEstimate(agent, false);
     managerOccupancyRevision++;
     rememberManagerContext(agent);
   }
@@ -669,12 +767,26 @@ export function seedManagerUsage(
     }
     return false;
   }
+  if (!managerContextSelection || managerContextSelection.sessionId !== sessionId) return false;
   if (
-    !managerContextSelection ||
-    managerContextSelection.sessionId !== sessionId ||
     managerContextSelection.provider !== usage.provider ||
     managerContextSelection.model !== usage.model
   ) {
+    // Measured on another route: not exact for the selected one, but the same
+    // conversation. Show it as an estimate rather than an empty bar, unless the
+    // selected route already has a better reading.
+    if (
+      (!agent.hasUsageData || isCarriedEstimate(agent)) &&
+      agent.identity.provider === managerContextSelection.provider &&
+      agent.identity.model === managerContextSelection.model &&
+      carryManagerUsage(agent, usage, managerContextSelection.provider)
+    ) {
+      if (agent.contextMax > 0 && agent.tokensUsed > agent.contextMax) {
+        agent.tokensUsed = agent.contextMax;
+      }
+      rememberManagerContext(agent);
+      commitAgents();
+    }
     return false;
   }
   const rawUsed = Math.max(0, usage.used);
@@ -690,6 +802,7 @@ export function seedManagerUsage(
   agent.cacheWriteInputTokens = undefined;
   agent.estimatedCostUsd = undefined;
   agent.cacheSavingsUsd = undefined;
+  setCarriedEstimate(agent, false);
   managerOccupancyRevision++;
   rememberManagerContext(agent);
   commitAgents();
@@ -717,11 +830,14 @@ function clearManagerUsage(agent: AgentState) {
   agent.cacheWriteInputTokens = undefined;
   agent.estimatedCostUsd = undefined;
   agent.cacheSavingsUsd = undefined;
+  setCarriedEstimate(agent, false);
 }
 
 /** Start a backend-owned context preview for an exact provider/model pair.
- *  A changed selection immediately drops the old pair's usage composition;
- *  only a matching backend preview or stream usage event may repopulate it. */
+ *  A changed selection immediately re-renders the old pair's composition
+ *  against the new window as an estimate (minus the old CLI's own overhead and
+ *  cache figures); a matching backend preview, saved snapshot or stream usage
+ *  event replaces it. */
 export function beginManagerContextPreview(
   sessionId: string,
   provider: string,
@@ -738,7 +854,16 @@ export function beginManagerContextPreview(
   }
   const selectionChanged = agent.identity.provider !== provider || agent.identity.model !== model;
   if (selectionChanged) {
+    const previous =
+      agent.hasUsageData && agent.tokensUsed > 0
+        ? {
+            used: agent.tokensUsed,
+            breakdown: agent.contextBreakdown,
+            provider: agent.identity.provider,
+          }
+        : null;
     clearManagerUsage(agent);
+    if (previous) carryManagerUsage(agent, previous, provider);
     managerOccupancyRevision++;
   }
   managerContextSelection = { sessionId, provider, model };
@@ -754,9 +879,14 @@ export function beginManagerContextPreview(
     agent.contextMax = 0;
     agent.contextKnown = false;
   }
+  if (isCarriedEstimate(agent) && agent.contextMax > 0 && agent.tokensUsed > agent.contextMax) {
+    agent.tokensUsed = agent.contextMax;
+  }
   const pending = pendingManagerUsage.get(sessionId);
   pendingManagerUsage.delete(sessionId);
-  if (pending && !agent.hasUsageData) seedManagerUsage(sessionId, pending);
+  if (pending && (!agent.hasUsageData || isCarriedEstimate(agent))) {
+    seedManagerUsage(sessionId, pending);
+  }
   const live = pendingManagerLiveUsage.get(sessionId);
   pendingManagerLiveUsage.delete(sessionId);
   if (live) updateUsage(sessionId, MANAGER_ID, live);
@@ -801,7 +931,16 @@ export function applyManagerContextPreview(
     agent.contextKnown = true;
   }
 
-  if (usage?.usageKnown === true && typeof usage.used === 'number') {
+  // The backend's fallback estimate counts message characters only (no system
+  // prompt, tools, memory or skills) and carries no composition. It may fill an
+  // empty bar, but it must never replace a richer reading: that is how a chat
+  // with ~6k of context showed "~16" right after a model switch.
+  const weakEstimate = usage?.estimated === true && !usage.breakdown;
+  if (
+    usage?.usageKnown === true &&
+    typeof usage.used === 'number' &&
+    !(weakEstimate && agent.hasUsageData && agent.tokensUsed >= Math.max(0, usage.used))
+  ) {
     const rawUsed = Math.max(0, usage.used);
     const windowSize = agent.contextKnown ? agent.contextMax : 0;
     agent.tokensUsed = windowSize > 0 ? Math.min(rawUsed, windowSize) : rawUsed;
@@ -812,7 +951,10 @@ export function applyManagerContextPreview(
     agent.cacheWriteInputTokens = undefined;
     agent.estimatedCostUsd = undefined;
     agent.cacheSavingsUsd = undefined;
-    managerOccupancyRevision++;
+    // An estimate is not a measurement: it must not lock out the saved
+    // snapshot that the history request is still fetching.
+    setCarriedEstimate(agent, weakEstimate);
+    if (!weakEstimate) managerOccupancyRevision++;
   }
   managerPreviewIssuedAtRevision = managerOccupancyRevision;
   rememberManagerContext(agent);
@@ -825,6 +967,7 @@ export function clearManagerContextPreview(sessionId: string) {
   if (!agent) return;
   managerContextSelection = null;
   sessionManagerContext.delete(sessionId);
+  forgetPersistedManagerContext(sessionId);
   pendingManagerUsage.delete(sessionId);
   pendingManagerLiveUsage.delete(sessionId);
   agent.contextMax = 0;
@@ -842,6 +985,8 @@ export function clearManagerContextPreview(sessionId: string) {
 export function invalidateManagerContextUsage(sessionId: string) {
   pendingManagerUsage.delete(sessionId);
   pendingManagerLiveUsage.delete(sessionId);
+  // The device snapshot was measured against the discarded branch.
+  forgetPersistedManagerContext(sessionId);
   const cached = sessionManagerContext.get(sessionId);
   if (cached) {
     cached.tokensUsed = 0;
@@ -948,6 +1093,8 @@ export function removeAgent(sessionId: string, agentId: string) {
 
 function clearSessionAgentState(sessionId: string): void {
   sessionManagerContext.delete(sessionId);
+  forgetPersistedManagerContext(sessionId);
+  carriedManagerEstimates.delete(agentKey(sessionId, MANAGER_ID));
   pendingManagerUsage.delete(sessionId);
   pendingManagerLiveUsage.delete(sessionId);
 
@@ -1146,7 +1293,7 @@ export function finalizeThreadThinking(
       if (e.type === 'thinking' && !e.thinkingFinalized && (!agentId || e.agentId === agentId)) {
         if (e.thinkingStartedAt !== undefined) {
           const serverEnd = endedAt ?? e.timestamp;
-          e.durationMs = Math.max(e.durationMs ?? 0, serverEnd - e.thinkingStartedAt, 0);
+          e.durationMs = frozenThinkingDuration(e.durationMs, e.thinkingStartedAt, serverEnd);
         }
         e.thinkingFinalized = true;
         changed = true;
@@ -1256,6 +1403,13 @@ export function getContextUsage(): {
   estimatedCostUsd?: number;
   cacheSavingsUsd?: number;
   provider?: string;
+  /** The CLI reported only a cumulative turn total, so its runtime overhead
+   *  was capped at `harnessCap` and `used` lowered to match. */
+  harnessCapped?: boolean;
+  harnessCap?: number;
+  /** Occupancy is a local estimate (carried across a model switch, or this
+   *  device's last reading) awaiting the selected route's first report. */
+  carried?: boolean;
 } {
   const activeSessionId = sessionStore.activeSessionId;
   const sessionManager = getAgent(activeSessionId, MANAGER_ID);
@@ -1274,27 +1428,41 @@ export function getContextUsage(): {
   // has a separate provider call and must never take over merely because it is
   // the only agent with usage while the selected manager awaits a fresh report.
   const agent = sessionManager;
+  const estimated = agent.usageEstimated || agent.identity.provider === 'antigravity';
+  // A cumulative CLI total counts the shared prefix once per internal request;
+  // bound its runtime-overhead remainder by what Kory itself measured.
+  const bounded = boundOpaqueCumulativeOccupancy(
+    agent.contextBreakdown,
+    agent.tokensUsed,
+    agent.identity.provider,
+    estimated,
+  );
+  const boundFields = {
+    ...(bounded.harnessCapped ? { harnessCapped: true, harnessCap: bounded.harnessCap } : {}),
+    ...(isCarriedEstimate(agent) ? { carried: true } : {}),
+  };
   if (!agent.contextKnown || agent.contextMax <= 0) {
     // Window size unknown — still report real usage so the bar never lies by
     // omission; the UI shows tokens-used with an "unknown window" treatment.
     return {
-      used: Math.max(0, agent.tokensUsed),
+      used: Math.max(0, bounded.used),
       max: 0,
       percent: 0,
       isReliable: false,
       reason: 'context_unknown',
-      estimated: agent.usageEstimated || agent.identity.provider === 'antigravity',
+      estimated,
       breakdown: agent.contextBreakdown,
       cachedInputTokens: agent.cachedInputTokens,
       cacheWriteInputTokens: agent.cacheWriteInputTokens,
       estimatedCostUsd: agent.estimatedCostUsd,
       cacheSavingsUsd: agent.cacheSavingsUsd,
       provider: agent.identity.provider,
+      ...boundFields,
     };
   }
 
   const max = agent.contextMax;
-  const used = Math.max(0, Math.min(agent.tokensUsed, max));
+  const used = Math.max(0, Math.min(bounded.used, max));
   const percent = Math.min(100, Math.round((used / max) * 100));
   return {
     used,
@@ -1303,13 +1471,14 @@ export function getContextUsage(): {
     isReliable: true,
     // Older saved Antigravity receipts predate the turn-total estimate flag.
     // They still cannot establish exact live occupancy after a reload.
-    estimated: agent.usageEstimated || agent.identity.provider === 'antigravity',
+    estimated,
     breakdown: agent.contextBreakdown,
     cachedInputTokens: agent.cachedInputTokens,
     cacheWriteInputTokens: agent.cacheWriteInputTokens,
     estimatedCostUsd: agent.estimatedCostUsd,
     cacheSavingsUsd: agent.cacheSavingsUsd,
     provider: agent.identity.provider,
+    ...boundFields,
   };
 }
 
@@ -1536,6 +1705,9 @@ export const agentStore = {
   loadAgentThreadMessages,
   applySessionFeedVisibility,
   getAgentSteeringQueue,
+  noteAgentToolCall,
+  noteAgentToolResult,
+  getAgentCurrentTool,
   setAgentSteeringQueue,
   loadAgentSteeringQueue,
   removeAgentSteeringQueue,

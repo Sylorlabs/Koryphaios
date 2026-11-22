@@ -140,7 +140,7 @@
           onkeydown={handleKeydown}
         />
         <div class="flex items-center gap-1">
-          <span class="text-[10px] px-1.5 py-0.5 rounded" style="background: var(--color-surface-3); color: var(--color-text-muted);">ESC to close</span>
+          <span class="text-[11px] px-1.5 py-0.5 rounded" style="background: var(--color-surface-3); color: var(--color-text-muted);">ESC to close</span>
         </div>
       </div>
 
@@ -177,7 +177,7 @@
                 {#if action.shortcut}
                   <div class="flex items-center gap-0.5 shrink-0 opacity-40 group-hover:opacity-100 transition-opacity">
                     {#each formatChord('Mod', ...action.shortcut.split('+')).split('+') as part}
-                      <span class="text-[10px] px-1 py-0.5 rounded border" style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-muted);">{part}</span>
+                      <span class="text-[11px] px-1 py-0.5 rounded border" style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-muted);">{part}</span>
                     {/each}
                   </div>
                 {/if}
@@ -190,15 +190,15 @@
       <div class="px-4 py-2 border-t flex items-center justify-between" style="border-color: var(--color-border); background: var(--color-surface-0);">
         <div class="flex items-center gap-4">
           <div class="flex items-center gap-1.5">
-            <kbd class="text-[10px] px-1.5 py-0.5 rounded bg-surface-3 border border-border" style="background: var(--color-surface-3); border-color: var(--color-border); color: var(--color-text-muted);">↑↓</kbd>
-            <span class="text-[10px]" style="color: var(--color-text-muted);">Navigate</span>
+            <kbd class="text-[11px] px-1.5 py-0.5 rounded bg-surface-3 border border-border" style="background: var(--color-surface-3); border-color: var(--color-border); color: var(--color-text-muted);">↑↓</kbd>
+            <span class="text-[11px]" style="color: var(--color-text-muted);">Navigate</span>
           </div>
           <div class="flex items-center gap-1.5">
-            <kbd class="text-[10px] px-1.5 py-0.5 rounded bg-surface-3 border border-border" style="background: var(--color-surface-3); border-color: var(--color-border); color: var(--color-text-muted);">↵</kbd>
-            <span class="text-[10px]" style="color: var(--color-text-muted);">Select</span>
+            <kbd class="text-[11px] px-1.5 py-0.5 rounded bg-surface-3 border border-border" style="background: var(--color-surface-3); border-color: var(--color-border); color: var(--color-text-muted);">↵</kbd>
+            <span class="text-[11px]" style="color: var(--color-text-muted);">Select</span>
           </div>
         </div>
-        <div class="text-[10px]" style="color: var(--color-text-muted);">
+        <div class="text-[11px]" style="color: var(--color-text-muted);">
           Koryphaios <span class="opacity-50">v{frontendVersion}</span>
         </div>
       </div>

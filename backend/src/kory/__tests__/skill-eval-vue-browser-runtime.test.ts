@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
 import { browserControlTest } from './browser-runtime-test-policy';
-import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
-import { writeFixtureFile } from '../skill-eval-fixture-helpers';
+import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
+import { writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
 import { loadV5SkillPackages } from '../skill-packages';
 import {
   VUE_NATIVE_BROWSER_EVAL_CONSTANTS,
@@ -13,7 +13,7 @@ import {
   VUE_NATIVE_BROWSER_SKILL_EVAL_SCORERS,
   vueNativeBrowserReadiness,
   writeVueBrowserFixtureContract,
-} from '../skill-eval-vue-browser-runtime';
+} from '../../eval/skills/skill-eval-vue-browser-runtime';
 
 const roots: string[] = [];
 const browserTest = browserControlTest('Vue/Chromium', vueNativeBrowserReadiness());

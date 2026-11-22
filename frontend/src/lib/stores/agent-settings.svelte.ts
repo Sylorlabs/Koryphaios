@@ -46,6 +46,8 @@ export interface AgentSettings {
   computerUseRevision?: string;
   ruleEnforcementLevel: 'strict' | 'moderate' | 'lenient';
   agentExecutionMode: 'auto' | 'single' | 'multi';
+  /** Project default worker-isolation preset; the composer sets it. */
+  worktreeMode: 'auto' | 'always' | 'never';
   /** Default approval behavior exposed in the composer permission picker. */
   permissionMode: 'yolo' | 'guarded' | 'edits' | 'ask' | 'custom';
   preferencesEnabled: boolean;
@@ -61,7 +63,7 @@ export interface AgentSettings {
   criticEnforcesPreferences: boolean;
   autoApplySafeFixes: boolean;
   confirmRuleViolations: boolean;
-  agentMessaging: 'open' | 'approval-cross-project' | 'off';
+  messagingPermissionsByTier?: import('@koryphaios/shared').MessagingPermissionsByTier;
   autoRunTools: boolean;
   allowExternalPaths: boolean;
   managerModelAccess: Record<string, string[]>;
@@ -105,6 +107,8 @@ export interface AgentSettings {
   contextPruneMinChars: number;
   /** Live context-usage report injected each turn so the agent self-manages */
   contextSelfAwareness: boolean;
+  /** Per-tool view of its own results: full output, model summary, or name/time only. */
+  toolContextPolicies: Record<string, 'full' | 'summary' | 'hidden'>;
   /** Compact a completed turn after it reaches the trusted context threshold. */
   autoCompactEnabled: boolean;
   /** Context-window percentage at which automatic compaction triggers. */
@@ -377,6 +381,7 @@ export interface SkillResolutionPreview {
 
 export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   criticMode: 'auto',
+  worktreeMode: 'auto',
   ruleEnforcementLevel: 'strict',
   agentExecutionMode: 'auto',
   permissionMode: 'guarded',
@@ -393,7 +398,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   criticEnforcesPreferences: true,
   autoApplySafeFixes: false,
   confirmRuleViolations: true,
-  agentMessaging: 'open',
+  messagingPermissionsByTier: {},
   autoRunTools: false,
   allowExternalPaths: false,
   managerModelAccess: {},
@@ -420,6 +425,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   contextKeepRecentTurns: 8,
   contextPruneMinChars: 2000,
   contextSelfAwareness: true,
+  toolContextPolicies: {},
   autoCompactEnabled: true,
   autoCompactThreshold: 80,
   reasoningExpandedByDefault: true,

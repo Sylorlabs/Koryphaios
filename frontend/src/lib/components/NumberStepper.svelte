@@ -131,7 +131,7 @@
     />
     {#if unit}
       <span
-        class="pointer-events-none absolute right-2 shrink-0 text-[10px] font-medium tracking-wide text-[var(--color-text-muted)]"
+        class="pointer-events-none absolute right-2 shrink-0 text-[11px] font-medium tracking-wide text-[var(--color-text-muted)]"
         aria-hidden="true">{unit}</span
       >
     {/if}

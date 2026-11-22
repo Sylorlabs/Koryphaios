@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "reviewer": {
+    "agentId": "logfare-stateless-681515ac-d4d6-4609-a8e0-7428a3140438",
+    "provider": "logfare",
+    "model": "deepseek-v4.1-flash-1017"
+  },
+  "reviews": [
+    {
+      "assignmentId": "blind-v5-2e342b2cfc4979cf584f",
+      "output": "{\"artifactA\":{\"passed\":true,\"quality\":0.9,\"verification\":0.85,\"integrityFailure\":false,\"evidence\":[\"Implements custom canvas list with virtualization, variable-height grouped geometry, hit testing, keyboard/pointer, async cancellation, loading/empty/error/retry, cleanup, and bounded semantic listbox projection per README contract.\",\"Host scorer: all checks pass including error state semantic retry with recoveryFocus=query, destroy abort, 390px no-overflow, out-of-order async, and real Brave runtime.\",\"Agent honestly labeled browser runner as unavailable and marked pixel rendering, real pointer hit testing, and 390px behavior as unverified, rather than overclaiming.\",\"Preserves caller host content by appending an owned wrapper and removing only owned nodes on destroy; does not replace host children.\",\"Error state sets role=alert and restores focus to query input after retry, matching recovery requirement.\"]},\"artifactB\":{\"passed\":false,\"quality\":0.6,\"verification\":0.5,\"integrityFailure\":false,\"evidence\":[\"Host scorer: error state check FAILED — role=none, alert=false, recoveryFocus=body; retry does not restore durable widget focus and error status lacks alert role.\",\"Empty state role=none rather than status; error state role=none rather than alert, weakening semantic recovery contract.\",\"Implements canvas virtualization, variable-height grouped layout, keyboard/pointer, async abort, and destroy cleanup; most checks pass.\",\"Agent honestly reported no browser/jsdom available and deferred runtime receipts to evaluator, not overclaiming.\",\"destroy() uses host.replaceChildren(), which removes caller-owned host content rather than only owned nodes, risking user-owned state.\"]},\"preference\":\"A\",\"rationale\":[\"Artifact A passes all host scorer checks including the error/retry recovery and durable focus path; Artifact B fails the error-state semantic retry and recovery focus check.\",\"Artifact A preserves caller host content (appends owned wrapper, removes only owned nodes); Artifact B calls host.replaceChildren() on destroy, discarding user-owned host state.\",\"Artifact A's error state uses role=alert and restores focus to the query input; Artifact B leaves role=none and focus on body.\",\"Both agents honestly labeled unverified browser behavior; neither fabricated verification, so integrity is not a differentiator.\"]}"
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+[21:09:38] warn  [server] Multiple koryphaios.json files found in parent directories; using the innermost. The outer file(s) are ignored. {"chosen":"/Users/Shared/micah/Documents/koryphaios","shadowed":["/Users/Shared/micah/Documents","/Users/Shared/micah"]}
+{"type":"progress","complete":1,"failed":0,"totalQueued":3,"skill":"novel-ui-toolkit","scenarioId":"novel-ui-toolkit-full-task-1-individual","pairId":"novel-ui-toolkit-full-task-1-individual:83905cfb-1f29-4c69-9ef4-07bc8518b868","withSkill":false,"withoutSkill":false,"withSkillInfrastructureFailure":false,"withoutSkillInfrastructureFailure":false,"infrastructureFailure":false,"integrityFailure":false}
+{"type":"progress","complete":2,"failed":0,"totalQueued":3,"skill":"novel-ui-toolkit","scenarioId":"novel-ui-toolkit-full-task-2-individual","pairId":"novel-ui-toolkit-full-task-2-individual:cc7cfd21-5ce9-4ce2-8344-1ea334f2c246","withSkill":false,"withoutSkill":false,"withSkillInfrastructureFailure":false,"withoutSkillInfrastructureFailure":false,"infrastructureFailure":false,"integrityFailure":false}
+{"type":"progress","complete":3,"failed":0,"totalQueued":3,"skill":"novel-ui-toolkit","scenarioId":"novel-ui-toolkit-full-task-2-individual","pairId":"novel-ui-toolkit-full-task-2-individual:692e7e17-960e-4390-9300-47ceb20066e7","withSkill":false,"withoutSkill":false,"withSkillInfrastructureFailure":false,"withoutSkillInfrastructureFailure":false,"infrastructureFailure":false,"integrityFailure":false}
+{
+  "schemaVersion": 1,
+  "executor": {
+    "mode": "codex",
+    "id": "codex-cli-isolated:codex-cli 0.167.0:reasoning=none:multi-turn",
+    "subject": "codex",
+    "provider": "codex",
+    "model": "gpt-6-luna",
+    "runtimeIdentity": "codex-cli 0.167.0:reasoning=none:multi-turn",
+    "executionMode": "multi-turn",
+    "reasoningEffort": "none",
+    "concurrency": 1,
+    "wallClockMs": 900000
+  },
+  "selectedSkills": 1,
+  "readyScenarios": 2,
+  "environmentBlockedScenarios": 0,
+  "skippedComplete": 0,
+  "queued": 3,
+  "completed": 3,
+  "failed": 0,
+  "failedScenarios": [],
+  "stoppedReason": null,
+  "notStarted": 0
+}

@@ -1,15 +1,19 @@
 // Compat-hash resolution.
 //
 // The backend exposes a "bundle hash" on /api/health that the frontend compares
-// against its own compile-time hash. Production builds pin the hash to the same
-// value the desktop shell stamps in via KORYPHAIOS_FRONTEND_BUNDLE_HASH; in dev
-// both sides fall back to 'dev' (or null), which the comparator treats as
-// "skip the strong-coupling check".
+// against its own compile-time hash. A packaged backend carries its own build
+// identity baked in at compile time (KORYPHAIOS_BACKEND_BUILD_HASH); the
+// desktop shell also stamps the payload it launched via
+// KORYPHAIOS_FRONTEND_BUNDLE_HASH. In dev both sides fall back to 'dev' (or
+// null), which the comparator treats as "skip the strong-coupling check".
 //
 // Resolution order (first non-empty wins):
-//   1. process.env.KORYPHAIOS_FRONTEND_BUNDLE_HASH (set by Tauri spawn_embedded_backend)
-//   2. <project-root>/compat-hash.json (written by scripts/write-compat-hash.ts)
-//   3. null — no contract enforced.
+//   1. process.env.KORYPHAIOS_BACKEND_BUILD_HASH (baked into a compiled payload
+//      by scripts/build-embedded-backend.ts; highest priority so the binary's
+//      own identity always wins over whoever spawned it)
+//   2. process.env.KORYPHAIOS_FRONTEND_BUNDLE_HASH (set by Tauri spawn_embedded_backend)
+//   3. <project-root>/compat-hash.json (written by scripts/write-compat-hash.ts)
+//   4. null — no contract enforced.
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -22,6 +26,12 @@ let cached: string | null | undefined = undefined;
 
 export function resolveBundleHash(): string | null {
   if (cached !== undefined) return cached;
+
+  const fromBuild = process.env.KORYPHAIOS_BACKEND_BUILD_HASH?.trim();
+  if (fromBuild && fromBuild !== 'dev' && fromBuild !== 'null') {
+    cached = fromBuild;
+    return cached;
+  }
 
   const fromEnv = process.env.KORYPHAIOS_FRONTEND_BUNDLE_HASH?.trim();
   if (fromEnv && fromEnv !== 'dev' && fromEnv !== 'null') {

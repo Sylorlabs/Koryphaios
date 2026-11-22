@@ -16,7 +16,7 @@
   import { projectDisplayName } from '$lib/stores/project.svelte';
   import { sessionStore, type LifecycleSession } from '$lib/stores/sessions.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
-  import SettingsPageIntro from './SettingsPageIntro.svelte';
+  import SettingsPage from './settings/SettingsPage.svelte';
 
   type PendingAction = 'restore' | 'rename' | 'delete';
 
@@ -118,32 +118,30 @@
   }
 </script>
 
-<div class="flex h-full min-h-0 flex-col overflow-hidden">
-  <SettingsPageIntro
+<div class="min-h-0 flex-1 overflow-y-auto">
+  <SettingsPage
     title="Archived chats"
     description="Chats removed from the sidebar stay here until you restore or permanently delete them."
+    width="wide"
   >
-    <span
-      class="inline-flex min-h-9 items-center rounded-xl bg-[var(--color-surface-2)] px-3 text-xs font-medium text-[var(--color-text-secondary)]"
-      aria-live="polite"
-    >
-      {sessionStore.archivedSessions.length}
-      {sessionStore.archivedSessions.length === 1 ? 'chat' : 'chats'}
-    </span>
-    <button
-      type="button"
-      class="inline-flex min-h-9 items-center gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:opacity-50"
-      disabled={sessionStore.archivedLoading}
-      onclick={() => void sessionStore.fetchArchivedSessions()}
-      aria-label="Refresh archived chats"
-    >
-      <RefreshCw size={13} class={sessionStore.archivedLoading ? 'animate-spin' : ''} />
-      Refresh
-    </button>
-  </SettingsPageIntro>
+    {#snippet actions()}
+      <span class="text-xs text-[var(--color-text-muted)]" aria-live="polite">
+        {sessionStore.archivedSessions.length}
+        {sessionStore.archivedSessions.length === 1 ? 'chat' : 'chats'}
+      </span>
+      <button
+        type="button"
+        class="inline-flex min-h-9 items-center gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:opacity-50"
+        disabled={sessionStore.archivedLoading}
+        onclick={() => void sessionStore.fetchArchivedSessions()}
+        aria-label="Refresh archived chats"
+      >
+        <RefreshCw size={13} class={sessionStore.archivedLoading ? 'animate-spin' : ''} />
+        Refresh
+      </button>
+    {/snippet}
 
-  <div class="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
-    <div class="mx-auto max-w-5xl space-y-4">
+    <div class="space-y-4">
       <div class="relative">
         <label for="archived-chat-search" class="sr-only">Search archived chats</label>
         <Search
@@ -202,16 +200,14 @@
       {#if sessionStore.archivedLoading && sessionStore.archivedSessions.length === 0}
         <section
           role="status"
-          class="flex min-h-44 items-center justify-center gap-2 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] text-sm text-[var(--color-text-muted)]"
+          class="flex items-center justify-center gap-2 py-12 text-sm text-[var(--color-text-muted)]"
         >
           <LoaderCircle size={16} class="animate-spin" /> Loading archived chats…
         </section>
       {:else if sessionStore.archivedSessions.length === 0}
         {#if !sessionStore.archivedError}
-          <section
-            class="rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-1)] px-5 py-12 text-center"
-          >
-            <Archive size={30} class="mx-auto text-[var(--color-text-muted)]" />
+          <section class="px-5 py-12 text-center">
+            <Archive size={20} class="mx-auto text-[var(--color-text-muted)]" />
             <h4 class="mt-3 text-sm font-semibold text-[var(--color-text-primary)]">
               No archived chats
             </h4>
@@ -222,10 +218,8 @@
           </section>
         {/if}
       {:else if filteredChats.length === 0}
-        <section
-          class="rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-1)] px-5 py-10 text-center"
-        >
-          <Search size={26} class="mx-auto text-[var(--color-text-muted)]" />
+        <section class="px-5 py-10 text-center">
+          <Search size={20} class="mx-auto text-[var(--color-text-muted)]" />
           <h4 class="mt-3 text-sm font-semibold text-[var(--color-text-primary)]">
             No archived chats match “{query.trim()}”
           </h4>
@@ -273,7 +267,7 @@
                           type="button"
                           disabled={pending[session.id] === 'rename'}
                           onclick={() => void saveRename(session)}
-                          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--color-accent)] text-[var(--color-surface-0)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:opacity-50"
+                          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--color-accent)] text-[var(--color-on-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:bg-[var(--color-surface-3)] disabled:text-[var(--color-text-muted)] disabled:shadow-none disabled:cursor-not-allowed"
                           aria-label={`Save renamed chat ${session.title}`}
                         >
                           {#if pending[session.id] === 'rename'}<LoaderCircle
@@ -292,7 +286,7 @@
                       </div>
                       <div
                         id={`archived-chat-title-help-${session.id}`}
-                        class="mt-1.5 flex items-center justify-between gap-3 text-[10px]"
+                        class="mt-1.5 flex items-center justify-between gap-3 text-[11px]"
                       >
                         <span
                           class={editError
@@ -314,7 +308,7 @@
                       {session.title}
                     </h4>
                     <div
-                      class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-[10px] text-[var(--color-text-muted)]"
+                      class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] text-[var(--color-text-muted)]"
                     >
                       <span
                         class="inline-flex min-w-0 items-center gap-1.5"
@@ -390,7 +384,7 @@
         </section>
       {/if}
     </div>
-  </div>
+  </SettingsPage>
 </div>
 
 <ConfirmDialog

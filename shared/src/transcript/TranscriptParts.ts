@@ -12,6 +12,9 @@ export type TranscriptPart =
       startedAt: number;
       endedAt?: number;
       thinkingTokens?: number;
+      /** The source never recorded how long this took. `startedAt`/`endedAt` then
+       *  only order the part; the UI must say "time unknown", never "0.0s". */
+      timeUnknown?: true;
     }
   | { kind: 'text'; text: string; startedAt: number }
   | {
@@ -24,10 +27,41 @@ export type TranscriptPart =
       isError?: boolean;
       durationMs?: number;
       endedAt?: number;
+      /** Duration not recorded by the source; never render a duration. */
+      timeUnknown?: true;
+      /** The full conversation of a sub-agent this tool call ran (imported chats). */
+      subagent?: SubagentTranscript;
     };
 
+/**
+ * A sub-agent's own conversation, nested under the tool call that started it.
+ * Recursive: its assistant parts may contain tool parts with their own `subagent`.
+ * A missing `createdAt` means the source recorded no time for that turn.
+ */
+export interface SubagentTranscript {
+  /** Stable id from the source (agent / thread / child session id), when present. */
+  agentId?: string;
+  /** Display name, e.g. "Explore", "general-purpose", "summarizer". */
+  name: string;
+  /** The task or prompt the parent handed to the sub-agent. */
+  task?: string;
+  model?: string;
+  provider?: string;
+  turns: SubagentTurn[];
+}
+
+export type SubagentTurn =
+  | { role: 'user'; text: string; createdAt?: number }
+  | { role: 'assistant'; parts: TranscriptPart[]; createdAt?: number };
+
 export type TurnEvent =
-  | { type: 'reasoning'; text: string; timestamp: number; thinkingTokens?: number }
+  | {
+      type: 'reasoning';
+      text: string;
+      timestamp: number;
+      thinkingTokens?: number;
+      timeUnknown?: true;
+    }
   | { type: 'text'; text: string; timestamp: number }
   | {
       type: 'tool_call';
@@ -35,6 +69,7 @@ export type TurnEvent =
       name: string;
       input: Record<string, unknown>;
       timestamp: number;
+      timeUnknown?: true;
     }
   | {
       type: 'tool_result';
@@ -42,8 +77,11 @@ export type TurnEvent =
       name: string;
       output: string;
       isError: boolean;
-      durationMs: number;
+      /** Omitted (or ignored) when `timeUnknown` is set. */
+      durationMs?: number;
       timestamp: number;
+      timeUnknown?: true;
+      subagent?: SubagentTranscript;
     }
   | { type: 'clear_text'; timestamp: number }
   | { type: 'complete'; timestamp: number };
@@ -91,11 +129,13 @@ function appendReasoning(
     const merged: ReasoningPart = { ...last, text: last.text + event.text };
     const thinkingTokens = maxDefined(last.thinkingTokens, tokens);
     if (thinkingTokens !== undefined) merged.thinkingTokens = thinkingTokens;
+    if (event.timeUnknown) merged.timeUnknown = true;
     return replaceAt(parts, parts.length - 1, merged);
   }
 
   const created: ReasoningPart = { kind: 'reasoning', text: event.text, startedAt: event.timestamp };
   if (tokens !== undefined) created.thinkingTokens = tokens;
+  if (event.timeUnknown) created.timeUnknown = true;
   return [...parts, created];
 }
 
@@ -127,34 +167,40 @@ function applyToolCall(
       name: event.name,
       input: { ...existing.input, ...event.input },
     };
+    if (event.timeUnknown) merged.timeUnknown = true;
     return replaceAt(closed, index, merged);
   }
-  return [
-    ...closed,
-    {
-      kind: 'tool',
-      callId: event.callId,
-      name: event.name,
-      input: { ...event.input },
-      startedAt: event.timestamp,
-    },
-  ];
+  const created: ToolPart = {
+    kind: 'tool',
+    callId: event.callId,
+    name: event.name,
+    input: { ...event.input },
+    startedAt: event.timestamp,
+  };
+  if (event.timeUnknown) created.timeUnknown = true;
+  return [...closed, created];
 }
 
 function applyToolResult(
   parts: readonly TranscriptPart[],
   event: Extract<TurnEvent, { type: 'tool_result' }>,
 ): TranscriptPart[] {
-  const result = {
+  const result: Partial<
+    Pick<ToolPart, 'output' | 'isError' | 'endedAt' | 'durationMs' | 'timeUnknown' | 'subagent'>
+  > = {
     output: event.output,
     isError: event.isError,
-    durationMs: event.durationMs,
     endedAt: event.timestamp,
   };
+  if (event.timeUnknown) result.timeUnknown = true;
+  else if (event.durationMs !== undefined) result.durationMs = event.durationMs;
+  if (event.subagent) result.subagent = event.subagent;
   const index = parts.findIndex((part) => isToolPart(part) && part.callId === event.callId);
   if (index >= 0) {
     const existing = parts[index] as ToolPart;
-    return replaceAt(parts, index, { ...existing, ...result });
+    const merged: ToolPart = { ...existing, ...result };
+    if (merged.timeUnknown) delete merged.durationMs;
+    return replaceAt(parts, index, merged);
   }
   // Orphan result: the call event was never seen (or was dropped). Keep the output
   // visible rather than losing it.
@@ -220,6 +266,8 @@ export function legacyTurnParts(
       text: reasoningContent,
       startedAt: createdAt,
       endedAt: createdAt,
+      // A legacy row stored the text but never how long the model thought.
+      timeUnknown: true,
     });
   }
   if (typeof content === 'string' && content.length > 0) {

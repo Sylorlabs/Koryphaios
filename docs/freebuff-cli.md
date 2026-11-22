@@ -18,14 +18,25 @@ freebuff login
 ```
 
 Connect Freebuff in the native Koryphaios Settings window. Koryphaios prepares the
-pinned credential-free runtime automatically and checks real kernel isolation.
+credential-free runtime automatically and checks real kernel isolation.
 First-time installation can take a few minutes. An existing stopped x64 default
 Colima profile can be resumed without changing Docker's global context.
 
-The runtime image pins native Freebuff **0.2.16** and Bun **1.3.14**. The native
-version is separate from the npm launcher version (0.0.173 on the inspected
-machine). Setup verifies artifact hashes and never includes credentials or the
-project in the image/build context. See [runtime security and artifact
+Kory auto-tracks the latest Freebuff release the same way the official launcher
+does: the npm `latest` tag on `freebuff` resolves the version (unauthenticated,
+10 s timeout, redirects refused, cached 6 h with a 10 min negative cache), and
+the image is built as
+`koryphaios/freebuff-runtime:<version>-bun1.3.14-r<recipe-rev>` (`-arm64` on
+arm64). Bun stays pinned at **1.3.14**; **0.2.36** is the minimum supported
+native version. Measured archive hashes are enforced for known versions; a new
+release builds trust-on-first-use and records its hash into the image, matching
+the official launcher's own unverified download. Setup never includes
+credentials or the project in the image/build context. When the latest release
+is newer than the installed image, the proven image keeps serving turns while
+the update builds and probes in the background, then swaps atomically; stale
+images beyond the current and previous version are garbage-collected. A
+Codebuff 410 `freebuff_update_required` answer triggers a forced update and
+one retried turn. See [runtime security and artifact
 provenance](../docker/freebuff-runtime/README.md).
 
 The model picker loads your available models using authenticated read-only
@@ -44,10 +55,10 @@ guessed into prices. **Freebuff CLI default** remains available to preserve the
 CLI's saved selection; its changing image capabilities are not guessed.
 
 On Linux, the adapter uses locally installed tmux, working bubblewrap, Bun and
-native Freebuff 0.2.16. On Linux the installed execution binary must match the
-qualified runtime version. On macOS discovery inspects the pinned container
-binary, so an independent host launcher update neither changes execution nor
-falsely rejects the working runtime. The probe reads actual embedded version and
+native Freebuff at whatever version the CLI installed, provided it is 0.2.36 or
+newer. On macOS discovery inspects the selected container binary, so an
+independent host launcher update neither changes execution nor falsely rejects
+the working runtime. The probe reads actual embedded version and
 protocol markers instead of relying on intermittently empty native `--version`
 output through Docker exec. Windows uses the same pinned Linux container as
 macOS; its host paths are translated to the container's private `/kory/run`
@@ -138,7 +149,14 @@ started the MCP server. Catalog/network/authentication failures cannot masquerad
 as an empty healthy server. Catalog requests have a short startup deadline;
 executions allow a bounded five-minute window so human approvals are not cut off
 by a thirty-second catalog timeout. Cancellation revokes the turn and tears down
-its private runtime and relay.
+its private runtime and relay. Before the forced teardown — including on
+cancellation, where the wait is bounded to three seconds — the adapter sends
+the TUI's own Ctrl-C quit sequence and gives Freebuff's clean-exit path a
+bounded chance to release its server-side session lease. This is defensive:
+a stale lease from a crashed session was once observed to produce the
+concurrent-session gate, but our own teardown leaving one was never
+reproduced on back-to-back turns. The forced tmux/container cleanup always
+runs afterward regardless.
 
 Structured completion is read from Freebuff's own `log.jsonl` **inside the
 sandbox**. Nested `shouldEndTurn` events do not complete the parent turn. Main
@@ -149,7 +167,7 @@ failure diagnostics.
 ## Verification
 
 Closed-transport tests use synthetic credentials, catalogs and logs. Optional
-kernel/transport tests run actual bubblewrap, tmux, and the pinned CLI without
+kernel/transport tests run actual bubblewrap, tmux, and the installed CLI without
 submitting an authenticated prompt:
 
 ```sh
@@ -180,17 +198,19 @@ an account catalog routing ID (`freebuff/catalog-<key>`) and optionally set
 diagnostics remain available via `bun scripts/setup-freebuff-runtime.ts --probe-only`;
 normal connection prepares the runtime inside the app.
 
-The 0.2.16 macOS/x64-Colima qualification passed both short- and long-prompt
-signed Notes reads. The long-prompt check reported 17,860 final context tokens
-and 41,625 processed input tokens across two billing samples, attributed to the
-actual CLI account. The live Freebuck account read and real confined runtime
-checks also passed. These are measured checks of this version and host layout,
-not claims about every account, model, or future release.
+The 0.2.36 macOS/aarch64-Colima qualification passed short- and long-prompt
+signed Notes reads plus an explicit account-catalog model turn. The short-prompt
+check reported 14,157 final context tokens and 32,382 processed input tokens
+across two billing samples; the long-prompt check reported 16,011 final context
+tokens and 37,574 processed input tokens, attributed to the actual CLI account.
+The live Freebuck account read and real confined runtime checks also passed.
+These are measured checks of this version and host layout, not claims about
+every account, model, or future release.
 
 ## Upgrade boundary
 
 There is no documented headless or general native-tool-deny mode in the inspected
-Freebuff 0.2.16 parser. Requalify the actual CLI version, model settings, trust
+Freebuff 0.2.36 parser. Requalify the actual CLI version, model settings, trust
 prompt, composer readiness, `.agents/mcp.json`, MCP invocation, image handling and
 root `log.jsonl` shapes for each upgrade. Do not use internal inference endpoints
 or treat passing synthetic tests as evidence of a successful account turn.

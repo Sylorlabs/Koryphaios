@@ -1,0 +1,79 @@
+{
+  "id": "critic-auto-selection-full-task-2",
+  "maturity": "individual",
+  "prompt": "Five turn endings from one session are supplied in `cases/turns.json`. Some carry a defect that a second model could plausibly catch, some are routine, and one contains a trap: an earlier turn recorded a concern that the pending decision must not be treated as already answered. Make the final Critic Auto decision for each turn ending and record it with the reason and, where a review is requested, the specific concern. The workspace is read only apart from your record file.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://critic-auto-selection/turn-endings",
+    "requirements": [
+      "one turn ending whose answer claims a fix without the run that would show it",
+      "one turn ending that is a routine status line with nothing at stake",
+      "one turn ending that says a test was not run and still asserts correctness",
+      "one turn ending carrying an earlier recorded concern that does not replace the pending decision",
+      "one turn ending where the user asked for review of a different artifact",
+      "fixture owned case file that must not be edited",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "critic-auto-selection-unrun",
+      "assertion": "The case that says a test was not run while asserting correctness requests a review whose concern is that unverified assertion."
+    },
+    {
+      "id": "critic-auto-selection-routine",
+      "assertion": "The routine status line is left without a review request."
+    },
+    {
+      "id": "critic-auto-selection-stale-concern",
+      "assertion": "The case with an earlier recorded concern still receives its own decision and reason instead of inheriting the earlier one."
+    },
+    {
+      "id": "critic-auto-selection-artifact-scope",
+      "assertion": "The case where the user asked for a review of a different artifact does not treat that request as a reason to review this turn ending."
+    },
+    {
+      "id": "critic-auto-selection-record",
+      "assertion": "Every turn ending records a decision with a non empty reason, and requested reviews name a concern."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "critic-auto-selection-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "unrun-test case requests review with a matching concern",
+        "routine case skipped",
+        "recorded concern does not replace the decision",
+        "artifact scoped request not misapplied",
+        "complete decision record"
+      ]
+    },
+    {
+      "id": "critic-auto-selection-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "decisions distinguish the risky endings from the routine ones",
+        "concerns point at the actual defect",
+        "no fabricated concern to justify a request"
+      ],
+      "blindTo": [
+        "skill-variant",
+        "expected-outcome"
+      ]
+    }
+  ],
+  "requiredEvidence": [
+    "per turn decision record",
+    "named concern for each requested review",
+    "reason for each skipped review",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "critic-auto-selection-scenario-2-result",
+    "critic-auto-selection-scenario-2-verification",
+    "critic-auto-selection-scenario-2-paired-evaluation"
+  ]
+}

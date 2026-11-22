@@ -129,7 +129,7 @@ describe('workbuddy-desktop adapter offline contracts', () => {
     expect(new Set(models.map((m) => m.name)).size).toBe(models.length);
     expect(models.map((m) => m.name)).toEqual([
       'Deepseek-V4.1-Flash (free)',
-      'Deepseek-V4.1-Flash (x0.03 credits)',
+      'Deepseek-V4.1-Flash (0.03x)',
       'Fast',
     ]);
     expect(models.map((m) => m.id)).toEqual([
@@ -138,7 +138,7 @@ describe('workbuddy-desktop adapter offline contracts', () => {
       'workbuddy-desktop-fast-model',
     ]);
     expect(models[0].creditsLabel).toBe('free');
-    expect(models[1].creditsLabel).toBe('x0.03 credits');
+    expect(models[1].creditsLabel).toBe('0.03x');
   });
 
   it('shows the app’s real context tiers instead of hiding its smaller default', () => {

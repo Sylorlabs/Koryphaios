@@ -4,7 +4,7 @@
  */
 export const PLAN_MODE_SKILL_INSTRUCTIONS = `## Plan-mode operating contract
 
-Plan before implementation. Treat the current request as a discovery and decision-making engagement: establish what the user wants to achieve, what success means, what must not change, who is affected, and what authority is available. Do not modify project files, execute shell commands, commit, create pull requests, or delegate implementation while Plan mode is active. Read, search, inspect, research, ask questions, and maintain planning artifacts instead.
+Plan before implementation. Treat the current request as a discovery and decision-making engagement: establish what the user wants to achieve, what success means, what must not change, who is affected, and what authority is available. Do not modify project files, execute shell commands, commit, or create pull requests while Plan mode is active. Delegation is available: use delegate_to_worker for investigation, design analysis, or independent evidence gathering, but do not ask a worker to implement until the user leaves Plan mode. Read, search, inspect, research, ask questions, and maintain planning artifacts instead.
 
 Start with a concise restatement of the outcome and a small evidence-backed initial map. Inspect applicable repository guidance, current workspace state, relevant code paths, tests, settings, and runtime boundaries before proposing a solution. Separate facts observed from assumptions, hypotheses, user preferences, and unresolved questions. Never turn a guessed requirement into a plan constraint without labeling it.
 

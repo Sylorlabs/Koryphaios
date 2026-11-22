@@ -114,6 +114,8 @@ export const KORY_TOOLS: KoryToolDef[] = [
     'scroll',
     'wait',
     'focus',
+    'place_window',
+    'sequence',
   ].map((action) => {
     const targeted = !['status', 'list_apps'].includes(action);
     const properties: Record<string, unknown> = targeted
@@ -141,6 +143,12 @@ export const KORY_TOOLS: KoryToolDef[] = [
       key: { key: { type: 'string', minLength: 1, maxLength: 80 } },
       scroll: { delta: { type: 'integer', minimum: -100, maximum: 100 } },
       wait: { ms: { type: 'integer', minimum: 0, maximum: 10000 } },
+      place_window: { hidden: { type: 'boolean' } },
+      sequence: {
+        steps: { type: 'array', minItems: 1, maxItems: 64 },
+        observationId: { type: 'string', minLength: 1, maxLength: 128 },
+        background: { type: 'boolean' },
+      },
     };
     Object.assign(properties, extras[action] ?? {});
     required.push(...Object.keys(extras[action] ?? {}));
@@ -598,6 +606,44 @@ export const KORY_TOOLS: KoryToolDef[] = [
     },
     role: 'any',
   },
+  {
+    name: 'kory__manage_context',
+    description:
+      'Report, hide, summarize, restore, re-policy or compact this agent\'s own tool-output context. Hiding and summarizing change only what the agent reads; the transcript keeps the full output.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['report', 'hide', 'summarize', 'restore', 'set_policy', 'compact'],
+        },
+        ids: { type: 'array', items: { type: 'string' } },
+        tool: { type: 'string' },
+        mode: { type: 'string', enum: ['full', 'summary', 'hidden'] },
+        summary: { type: 'string' },
+        keepRecent: { type: 'number', minimum: 2, maximum: 100 },
+      },
+      required: ['action'],
+    },
+    role: 'any',
+  },
+
+  {
+    name: 'kory__schedule_monitor',
+    description:
+      'Create, list, or cancel a durable recurring monitor in this chat. A monitor wakes this session with a fresh turn on the chosen cadence (default every 5 minutes).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['create', 'list', 'cancel'] },
+        prompt: { type: 'string', maxLength: 8000 },
+        intervalMinutes: { type: 'number', exclusiveMinimum: 0 },
+        monitorId: { type: 'string' },
+      },
+      required: ['action'],
+    },
+    role: 'manager',
+  },
 
   // ── Checkpoints ──
   {
@@ -635,12 +681,17 @@ export const KORY_TOOLS: KoryToolDef[] = [
   },
   {
     name: 'kory__ask_user',
-    description: 'Ask the user a question and wait for a response.',
+    description:
+      "Ask the user a question and wait for their answer. Use it whenever you are unsure, the request is ambiguous, or a decision would materially change the result. Provide 2-4 short options with your recommendation first; the UI always offers a custom-answer box, so do not add an 'Other' option.",
     inputSchema: {
       type: 'object',
       properties: {
         question: { type: 'string' },
-        options: { type: 'array', items: { type: 'string' } },
+        options: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '2-4 short answer choices, recommended first',
+        },
       },
       required: ['question'],
     },
@@ -659,10 +710,14 @@ export const KORY_TOOLS: KoryToolDef[] = [
   {
     name: 'kory__delegate_to_worker',
     description:
-      'Delegate a task to a Koryphaios worker agent. Use this instead of native subagents.',
+      'Delegate a task to a Koryphaios worker agent. Use this instead of native subagents. Set worktree false for read-only research and true for work that edits files; omit it to follow the chat setting.',
     inputSchema: {
       type: 'object',
-      properties: { task: { type: 'string' }, domain: { type: 'string' } },
+      properties: {
+        task: { type: 'string' },
+        domain: { type: 'string' },
+        worktree: { type: 'boolean' },
+      },
       required: ['task'],
     },
     role: 'manager',
@@ -688,10 +743,11 @@ export const KORY_TOOLS: KoryToolDef[] = [
   {
     name: 'kory__send_agent_message',
     description:
-      'Send an asynchronous message to another agent. Managers may message another project manager or agents in their own project. Sub-agents may message only within their own project; use request_manager_relay to ask your manager to contact another project.',
+      'Send an asynchronous message to another agent. You may message the manager or a named sub-agent of any other chat (by project name or exact chat id via toSessionId — use kory__list_sessions to find chat ids) and any agent in your own chat. Messages to other chats may need user approval depending on the permission mode; messaging within your own chat is always allowed. Use request_manager_relay to ask your manager to forward a request.',
     inputSchema: {
       type: 'object',
       properties: {
+        toSessionId: { type: 'string' },
         toProject: { type: 'string' },
         toAgent: { type: 'string' },
         subject: { type: 'string' },
@@ -725,6 +781,57 @@ export const KORY_TOOLS: KoryToolDef[] = [
       properties: {},
     },
     role: 'any',
+  },
+  {
+    name: 'kory__list_sessions',
+    description:
+      'List open chats (id, title, folder, isolated copy, runtime state, message count, last update). Use a chat id with kory__send_agent_message (toSessionId) or kory__read_session.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string' },
+        scope: { type: 'string', enum: ['all', 'this_folder'] },
+        limit: { type: 'number' },
+      },
+    },
+    role: 'any',
+  },
+  {
+    name: 'kory__read_session',
+    description:
+      "Read a chat's transcript by id, including archived chats. Returns the newest page of the active conversation; page older messages with the 'before' cursor.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string' },
+        limit: { type: 'number' },
+        before: { type: 'string' },
+        includeTools: { type: 'boolean' },
+      },
+      required: ['sessionId'],
+    },
+    role: 'any',
+  },
+  {
+    name: 'kory__isolate_chat',
+    description:
+      "Move this chat out of its project folder into an independent Git copy starting from the folder's last commit, when sibling chats could collide with your edits. The turn ends right after; the host continues the task in the copy. Never isolate for read-only work or when the task needs uncommitted folder changes.",
+    inputSchema: {
+      type: 'object',
+      properties: { reason: { type: 'string' } },
+      required: ['reason'],
+    },
+    role: 'manager',
+  },
+  {
+    name: 'kory__merge_chat_back',
+    description:
+      "Merge the work this chat did in its own copy back into the project folder and run there again. Only for chats isolated via kory__isolate_chat. Requires user approval outside YOLO mode; conflicts abort and keep the chat isolated.",
+    inputSchema: {
+      type: 'object',
+      properties: { message: { type: 'string' } },
+    },
+    role: 'manager',
   },
 
   {
@@ -947,6 +1054,26 @@ export const KORY_TOOLS: KoryToolDef[] = [
         source: { type: 'string', enum: ['personal', 'project'] },
       },
       required: ['name'],
+    },
+    role: 'any',
+  },
+  {
+    name: 'kory__manage_skill_feeding',
+    description:
+      "Control which skills the host feeds into the chat's system prompt: report the fed/blocked/in-context state, block skills so the feeder stops injecting them, or unblock. Conversation control-plane only; never touches the workspace.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['report', 'block', 'unblock'] },
+        skills: {
+          anyOf: [
+            { type: 'array', items: { type: 'string' } },
+            { type: 'string' },
+          ],
+        },
+        reason: { type: 'string' },
+      },
+      required: ['action'],
     },
     role: 'any',
   },

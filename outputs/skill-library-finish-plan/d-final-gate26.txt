@@ -1,0 +1,127 @@
+[06:37:27] warn  [server] Multiple koryphaios.json files found in parent directories; using the innermost. The outer file(s) are ignored. {"chosen":"/Users/Shared/micah/Documents/koryphaios","shadowed":["/Users/Shared/micah/Documents","/Users/Shared/micah"]}
+
+=== react-engineering rev 3cc598d289ac status=ready
+  candidate=20 baseline=19 pass=0.9473684210526315 quality=0.995 verify=0.994
+  routing p=1 r=1 obs=19 blind=1 openRegr=0/5
+  pairs=18 cats=positive,negative,ambiguous,adversarial,full-task ft=2
+  delta pass/qual/verify=0.556/0.455/0.012
+
+=== nextjs-engineering rev 5fbfdd963fbc status=ready
+  candidate=19 baseline=18 pass=0.8888888888888888 quality=0.989 verify=1.000
+  routing p=1 r=1 obs=18 blind=1 openRegr=0/1
+  pairs=18 cats=positive,negative,ambiguous,adversarial,full-task ft=2
+  delta pass/qual/verify=0.444/0.444/0.000
+
+=== vue-engineering rev 5c26afeb19b2 status=ready
+  candidate=19 baseline=18 pass=1 quality=1.000 verify=1.000
+  routing p=1 r=1 obs=18 blind=1 openRegr=0/3
+  pairs=18 cats=positive,negative,ambiguous,adversarial,full-task ft=2
+  delta pass/qual/verify=0.444/0.444/0.000
+
+=== svelte-engineering rev f8affde3842b status=ready
+  candidate=20 baseline=19 pass=0.8947368421052632 quality=0.965 verify=0.895
+  routing p=1 r=1 obs=19 blind=1 openRegr=0/2
+  pairs=18 cats=positive,negative,ambiguous,adversarial,full-task ft=2
+  delta pass/qual/verify=0.444/0.444/0.000
+
+=== angular-engineering rev 98b7a1e8249e status=ready
+  candidate=19 baseline=18 pass=0.9444444444444444 quality=0.994 verify=1.000
+  routing p=1 r=1 obs=18 blind=1 openRegr=0/3
+  pairs=18 cats=positive,negative,ambiguous,adversarial,full-task ft=2
+  delta pass/qual/verify=0.444/0.444/0.007
+
+=== web-interface rev c0bdbbac4930 status=ready
+  candidate=19 baseline=18 pass=0.8888888888888888 quality=0.926 verify=0.889
+  routing p=1 r=1 obs=18 blind=1 openRegr=0/1
+  pairs=18 cats=positive,negative,ambiguous,adversarial,full-task ft=2
+  delta pass/qual/verify=0.889/0.889/0.000
+
+=== visual-interface-design rev 5acb36aa0815 status=ready
+  candidate=21 baseline=20 pass=1 quality=1.000 verify=1.000
+  routing p=1 r=1 obs=20 blind=1 openRegr=0/4
+  pairs=18 cats=positive,negative,ambiguous,adversarial,full-task ft=2
+  delta pass/qual/verify=0.889/0.889/0.000
+
+=== interaction-design rev b5a514381145 status=ready
+  candidate=42 baseline=41 pass=0.9736842105263158 quality=0.987 verify=1.000
+  routing p=1 r=1 obs=41 blind=1 openRegr=0/2
+  pairs=18 cats=positive,negative,ambiguous,adversarial,full-task ft=2
+  delta pass/qual/verify=0.944/0.917/0.000
+
+=== information-architecture rev 82f9bf74be2a status=ready
+  candidate=19 baseline=18 pass=1 quality=1.000 verify=1.000
+  routing p=1 r=1 obs=18 blind=1 openRegr=0/2
+  pairs=18 cats=positive,negative,ambiguous,adversarial,full-task ft=2
+  delta pass/qual/verify=0.444/0.444/0.000
+
+=== accessibility-practice rev 96055153b0c8 status=ready
+  candidate=50 baseline=51 pass=0.9333333333333333 quality=0.970 verify=0.933
+  routing p=1 r=1 obs=49 blind=1 openRegr=0/5
+  pairs=26 cats=positive,negative,ambiguous,adversarial,full-task ft=2
+  delta pass/qual/verify=0.923/0.923/0.000
+
+=== accessibility-verification rev 2543d77d0415 status=ready
+  candidate=91 baseline=89 pass=0.9629629629629629 quality=0.963 verify=0.963
+  routing p=1 r=1 obs=89 blind=2 openRegr=0/2
+  pairs=18 cats=positive,negative,ambiguous,adversarial,full-task ft=2
+  delta pass/qual/verify=0.444/0.444/0.000
+
+=== novel-ui-toolkit rev 458562781d22 status=ready
+  candidate=20 baseline=19 pass=0.9473684210526315 quality=0.989 verify=0.947
+  routing p=1 r=1 obs=19 blind=1 openRegr=0/5
+  pairs=18 cats=positive,negative,ambiguous,adversarial,full-task ft=2
+  delta pass/qual/verify=0.556/0.460/0.111
+
+=== three-d-graphics rev 5d4e26955ae0 status=ready
+  candidate=35 baseline=34 pass=0.9705882352941176 quality=0.971 verify=0.971
+  routing p=1 r=1 obs=34 blind=1 openRegr=0/0
+  pairs=18 cats=positive,negative,ambiguous,adversarial,full-task ft=2
+  delta pass/qual/verify=0.444/0.444/0.000
+
+=== terminal-interface rev ce06306f8f30 status=ready
+  candidate=57 baseline=56 pass=0.9629629629629629 quality=0.963 verify=0.963
+  routing p=1 r=1 obs=56 blind=1 openRegr=0/2
+  pairs=18 cats=positive,negative,ambiguous,adversarial,full-task ft=2
+  delta pass/qual/verify=0.944/0.931/0.056
+
+=== human-experience rev fb73e07d06e4 status=ready
+  candidate=19 baseline=18 pass=0.9444444444444444 quality=0.994 verify=0.944
+  routing p=1 r=1 obs=18 blind=1 openRegr=0/2
+  pairs=18 cats=positive,negative,ambiguous,adversarial,full-task ft=2
+  delta pass/qual/verify=0.944/0.894/0.056
+
+=== usability-evaluation rev fff5c2ffd2ec status=ready
+  candidate=38 baseline=37 pass=0.972972972972973 quality=0.973 verify=0.973
+  routing p=1 r=1 obs=37 blind=1 openRegr=0/1
+  pairs=18 cats=positive,negative,ambiguous,adversarial,full-task ft=2
+  delta pass/qual/verify=0.944/0.944/0.056
+
+=== visual-verification rev f2093c9aa0e1 status=ready
+  candidate=43 baseline=42 pass=0.9473684210526315 quality=0.985 verify=0.921
+  routing p=1 r=1 obs=42 blind=1 openRegr=0/1
+  pairs=18 cats=positive,negative,ambiguous,adversarial,full-task ft=2
+  delta pass/qual/verify=0.944/0.897/0.056
+
+=== content-error-design rev 7bd4a9c535bb status=ready
+  candidate=19 baseline=18 pass=1 quality=1.000 verify=1.000
+  routing p=1 r=1 obs=18 blind=1 openRegr=0/2
+  pairs=18 cats=positive,negative,ambiguous,adversarial,full-task ft=2
+  delta pass/qual/verify=1.000/0.933/0.111
+
+=== frontend-engineering rev 7aec4ccac9ce status=ready
+  candidate=19 baseline=18 pass=0.9444444444444444 quality=0.944 verify=0.944
+  routing p=1 r=1 obs=18 blind=1 openRegr=0/1
+  pairs=18 cats=positive,negative,ambiguous,adversarial,full-task ft=2
+  delta pass/qual/verify=0.944/0.894/0.006
+
+=== interface-usability-testing rev 763b07b4a861 status=ready
+  candidate=19 baseline=18 pass=1 quality=1.000 verify=1.000
+  routing p=1 r=1 obs=18 blind=1 openRegr=0/0
+  pairs=18 cats=positive,negative,ambiguous,adversarial,full-task ft=2
+  delta pass/qual/verify=0.556/0.522/0.111
+
+=== user-research rev ad458915c5d2 status=ready
+  candidate=37 baseline=37 pass=0.9722222222222222 quality=0.972 verify=0.972
+  routing p=1 r=1 obs=36 blind=1 openRegr=0/1
+  pairs=18 cats=positive,negative,ambiguous,adversarial,full-task ft=2
+  delta pass/qual/verify=0.444/0.444/0.000

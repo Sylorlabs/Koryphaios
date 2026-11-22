@@ -10,14 +10,14 @@ import {
   type BusinessAssumptions,
   type BusinessOption,
   type BusinessPacket,
-} from '../skill-eval-business-case-fixtures';
+} from '../../eval/skills/skill-eval-business-case-fixtures';
 import {
   BUILTIN_SKILL_EVAL_MATERIALIZERS,
   BUILTIN_SKILL_EVAL_SCORERS,
-} from '../skill-eval-fixtures';
-import { auditSkillEvalExecutionReadiness } from '../skill-eval-execution';
+} from '../../eval/skills/skill-eval-fixtures';
+import { auditSkillEvalExecutionReadiness } from '../../eval/skills/skill-eval-execution';
 import { loadV5SkillPackages } from '../skill-packages';
-import type { SkillEvalScenarioV3 } from '../skill-eval-harness';
+import type { SkillEvalScenarioV3 } from '../../eval/skills/skill-eval-harness';
 
 const roots: string[] = [];
 afterEach(() => {

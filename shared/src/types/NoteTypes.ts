@@ -167,6 +167,12 @@ export interface NotesSettings {
   attachmentSizeLimitEnabled: boolean;
   maxAttachmentBytes: number;
   maxAttachmentsPerNote: number;
+  /** Soft ceiling for one project-document index pass. Reaching it stops the
+   *  pass and offers to continue; it is not a hard limit. */
+  indexScanLimitEnabled: boolean;
+  indexScanLimit: number;
+  /** Hide the soft-limit notice entirely. The configured limit still applies. */
+  hideIndexLimitNotice: boolean;
   graphPhysics: {
     gravity: number;
     linkDistance: number;
@@ -196,6 +202,9 @@ export const DEFAULT_NOTES_SETTINGS: NotesSettings = {
   attachmentSizeLimitEnabled: true,
   maxAttachmentBytes: 25_000_000,
   maxAttachmentsPerNote: 50,
+  indexScanLimitEnabled: true,
+  indexScanLimit: 50_000,
+  hideIndexLimitNotice: false,
   graphPhysics: {
     gravity: -30,
     linkDistance: 90,

@@ -18,11 +18,12 @@
 //   kimicode     ~/.kimi/sessions/<hash>/<uuid>/wire.jsonl    StatusUpdate token_usage events
 //   freebuff     Kory PTY usage events sourced from Freebuff's own log.jsonl
 //
-// Quota state: claude, codex, copilot, and antigravity expose live quota
-// endpoints or local rate_limit records. cursor, devin, and kimicode
-// return empty quotas because their CLIs don't expose a local quota state —
-// usage limits are enforced server-side by the backing API and are not
-// written to disk in a parseable form.
+// Quota state: claude, codex, copilot, antigravity, and devin expose live
+// quota — devin through the CLI's own GetUserStatus account RPC
+// (devin-account.ts: plan tier, daily/weekly remaining %, reset times).
+// cursor and kimicode return empty quotas because their CLIs don't expose a
+// local quota state — usage limits are enforced server-side by the backing
+// API and are not written to disk in a parseable form.
 
 import { readdirSync, statSync, readFileSync, existsSync, realpathSync } from 'node:fs';
 import { readdir, stat, readFile } from 'node:fs/promises';
@@ -43,6 +44,7 @@ import {
   discoverFreebuffAccounts,
 } from '../providers/auth-utils';
 import { fetchAntigravityQuotaGroups } from '../providers/antigravity-quota';
+import { getDevinAccountSnapshot } from '../providers/devin-account';
 import {
   getOpenRouterPricingCatalog,
   quoteOpenRouterInput,
@@ -1322,7 +1324,44 @@ function readCursorFromCreditDb(now: number, account?: DiscoveredCliAccount): Cl
 // We use the file's mtime as the sample timestamp and final_metrics as the
 // session-level token totals (one sample per transcript).
 
+/** Map an ATIF `final_metrics` block to billing tokens.
+ * `total_prompt_tokens` already includes the cached subset — real exports show
+ * cached < prompt on every agent step and per-turn totals (e.g. prompt
+ * 1,822,621 / cached 1,740,260). Adding it again bills cache-read tokens twice. */
+export function devinAtifFinalMetricsTokens(metrics: {
+  total_prompt_tokens?: number;
+  total_completion_tokens?: number;
+  total_cached_tokens?: number;
+}): { tokensIn: number; tokensOut: number; cacheRead: number } {
+  return {
+    tokensIn: metrics.total_prompt_tokens ?? 0,
+    tokensOut: metrics.total_completion_tokens ?? 0,
+    cacheRead: metrics.total_cached_tokens ?? 0,
+  };
+}
+
 async function readDevin(now: number, account?: DiscoveredCliAccount): Promise<CliUsageReport> {
+  // Live plan/quota from the CLI's own GetUserStatus account RPC. Failure is
+  // non-fatal: the transcript history below still reports, just without
+  // limits or a plan label.
+  const accountStatus = await getDevinAccountSnapshot().catch(() => null);
+  const quotas: QuotaWindow[] = [];
+  if (accountStatus?.dailyQuota && !accountStatus.dailyQuota.hidden) {
+    quotas.push({
+      label: 'Daily quota',
+      usedPercent: Math.max(0, Math.min(100, 100 - accountStatus.dailyQuota.remainingPercent)),
+      resetsAt: accountStatus.dailyQuota.resetAtMs,
+      windowMinutes: 24 * 60,
+    });
+  }
+  if (accountStatus?.weeklyQuota && !accountStatus.weeklyQuota.hidden) {
+    quotas.push({
+      label: 'Weekly quota',
+      usedPercent: Math.max(0, Math.min(100, 100 - accountStatus.weeklyQuota.remainingPercent)),
+      resetsAt: accountStatus.weeklyQuota.resetAtMs,
+      windowMinutes: 7 * 24 * 60,
+    });
+  }
   const transcriptRoot = join(homedir(), '.local', 'share', 'devin', 'cli', 'transcripts');
   const samples: UsageSample[] = [];
   if (existsSync(transcriptRoot)) {
@@ -1354,15 +1393,14 @@ async function readDevin(now: number, account?: DiscoveredCliAccount): Promise<C
         const model = data.agent?.model_name?.trim();
         const metrics = data.final_metrics;
         if (!model || !metrics) continue;
-        const tokensIn = (metrics.total_prompt_tokens ?? 0) + (metrics.total_cached_tokens ?? 0);
-        const tokensOut = metrics.total_completion_tokens ?? 0;
-        if (tokensIn > 0 || tokensOut > 0) {
+        const tokens = devinAtifFinalMetricsTokens(metrics);
+        if (tokens.tokensIn > 0 || tokens.tokensOut > 0) {
           samples.push({
             ts: st.mtimeMs,
             model,
-            tokensIn,
-            tokensOut,
-            cacheRead: metrics.total_cached_tokens ?? 0,
+            tokensIn: tokens.tokensIn,
+            tokensOut: tokens.tokensOut,
+            cacheRead: tokens.cacheRead,
             cacheReadIncludedInTokensIn: true,
             cacheReadEvidence: true,
           });
@@ -1390,9 +1428,11 @@ async function readDevin(now: number, account?: DiscoveredCliAccount): Promise<C
       available: hasReportedUsage(samples),
       attribution: 'account',
       usageSource: 'local-session-history',
+      ...(accountStatus?.planType ? { planType: accountStatus.planType } : {}),
+      ...(quotas.length > 0 ? { quotaSource: 'live-cli-account' as const } : {}),
       windows: windowsFromSamples(samples, now),
       dailyUsage: dailyUsageFromSamples(samples, now),
-      quotas: [],
+      quotas,
       byModel: byModelFromSamples(samples, now, makeApiEquivalentResolver('devin')),
       updatedAt: now,
     },

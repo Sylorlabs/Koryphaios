@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "reviewerId": "logfare-stateless-49bfe6dc-d910-42af-9593-2b4854990c8b",
+  "completed": true,
+  "output": "{\n  \"artifactA\": {\n    \"passed\": true,\n    \"quality\": 0.88,\n    \"verification\": 0.85,\n    \"integrityFailure\": false,\n    \"evidence\": [\n      \"result.md defines the market-strategy decision (bounded reversible legal-services entry test vs defer), explicitly rejects a broad launch, and keeps marketing-strategy downstream work out of scope while naming market-competitive-research as broader (scope-and-hierarchy preserved).\",\n      \"Operating contract is covered comprehensively: customer/job, incumbent/manual/non-consumption alternatives, buying roles and procurement path, willingness-to-switch behavioral tests, distribution reachability, economics, regulatory/security constraints, and capability fit, with absent values labeled unresolved/unavailable rather than invented.\",\n      \"Anti-patterns explicitly avoided: no TAM-to-obtainable-revenue inference (professional-services TAM decoy rejected), no feature-grid strategy, no fabricated share precision, expressed interest distinguished from purchase behavior.\",\n      \"verification.md provides success, negative-demand, and recovery paths explicitly labeled 'planned, not run', plus unavailable checks; evidence-map.json maps all E01–E08 records, all six falsifiable checks, and all three required artifacts.\",\n      \"Contract compliance: paired-evaluation artifact correctly marked 'external-evaluator' per README instruction; verification-discipline honestly marked 'unavailable' since no triangulation or small test could actually be executed in the sealed packet.\",\n      \"Host execution evidence shows all deterministic checks pass, including required artifact accounting.\"\n    ]\n  },\n  \"artifactB\": {\n    \"passed\": true,\n    \"quality\": 0.82,\n    \"verification\": 0.6,\n    \"integrityFailure\": false,\n    \"evidence\": [\n      \"result.md gives a conditional capped-validation recommendation with a five-step owner-assigned decision sequence, covers customer/job, non-consumption and other alternatives, buying process, switching, distribution, bottom-up economics, regulatory/security constraints, and capability fit; missing values are labeled unavailable.\",\n      \"Hierarchy boundary preserved: market-competitive-research broader, marketing-strategy adjacent and routed downstream; no absorption of the near-neighbor responsibility.\",\n      \"Anti-pattern resistance explicit: TAM decoy rejected, feature grids limited to discovery, no share precision, behavioral purchase evidence required over stated interest.\",\n      \"verification.md documents proposed negative-demand, negative-feasibility, and recovery paths labeled 'proposed, not run', plus a thorough unavailable-checks list; evidence-map.json covers all evidence records and falsifiable checks.\",\n      \"Contract deviation: paired-evaluation artifact marked 'unavailable' although the README explicitly instructs paired-run/evaluator-owned comparison artifacts use 'external-evaluator'; host scorer recorded 'required artifact accounting: fail', consistent with this deviation.\",\n      \"verification-discipline check marked 'passed' although the triangulation and small test were only prescribed, not performed; the evidence text admits 'recommendations, not completed research', making the status label an overstatement relative to A's honest 'unavailable'.\"\n    ]\n  },\n  \"preference\": \"A\",\n  \"rationale\": [\n    \"Both artifacts are substantively strong market-strategy responses: each defines the decision, preserves the market-competitive-research/marketing-strategy hierarchy without absorbing the decoy discipline, covers the full operating contract including non-consumption, and explicitly resists all four prohibited shortcuts with honest labeling of the sealed packet's missing values.\",\n    \"Decisive difference is contract compliance on the paired-evaluation artifact: the README explicitly directs paired-run/evaluator-owned artifacts to use status 'external-evaluator'; Artifact A followed this and passed the host's required-artifact-accounting check, while Artifact B used 'unavailable' and the host scorer recorded a fail on that check.\",\n    \"Artifact A's verification-discipline row is more honest: it marks the check 'unavailable' because no triangulation or small test could actually be run, whereas Artifact B marks it 'passed' while its own evidence text concedes the steps are recommendations, not completed research — a status-label overstatement, though not fabrication since the underlying evidence text is candid.\",\n    \"Artifact B's finalOutput claim that 'all required artifact names are accounted for' is true of its evidence map's rows but sits alongside a host-observed accounting failure, slightly weakening its verification posture; per instructions this is treated as a quality/verification gap, not an integrity failure, since B labeled the paired artifact honestly with an explanation.\",\n    \"Content quality is comparable, with B offering slightly richer owner-role detail and A offering equally comprehensive gates, stop conditions, and reversal criteria; A's stricter contract adherence and more conservative verification labeling give it the edge.\",\n    \"Preference is based solely on concrete task behavior and evidence; evaluator-owned pair provenance and hierarchy narration were not weighted.\"\n  ]\n}",
+  "events": [
+    {
+      "type": "review.started",
+      "reviewerId": "logfare-stateless-49bfe6dc-d910-42af-9593-2b4854990c8b"
+    },
+    {
+      "type": "review.completed",
+      "reviewerId": "logfare-stateless-49bfe6dc-d910-42af-9593-2b4854990c8b",
+      "outputSha256": "b8d0be970fc7425a39a5f2f712d642b349244f290f8b00e855c6c7630dc65c20"
+    }
+  ],
+  "hostReceipt": {
+    "schemaVersion": 1,
+    "stageOnly": true,
+    "identitySource": "host-invocation-uuid",
+    "upstreamSessionObserved": true,
+    "requestedModel": "deepseek-v4.1-flash-1017",
+    "responseModel": "deepseek-v4.1-flash-1017",
+    "promptSha256": "221b3d2dec19720ec91a9844c31b1569c65ea62b00beba3ff2d14a9d2ce8cb1f",
+    "requestBytes": 59161,
+    "responseSha256": "79eb7112099380fcb8ab689b56c611f1ba32e9d608e1ef662a706dc02dae9aab",
+    "outputSha256": "b8d0be970fc7425a39a5f2f712d642b349244f290f8b00e855c6c7630dc65c20",
+    "elapsedMs": 71582,
+    "osIsolationVerified": false,
+    "upstreamIdentityVerified": false,
+    "signed": false
+  }
+}

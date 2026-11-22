@@ -23,9 +23,24 @@ describe('agent resource budget snapshot', () => {
           },
         ],
         getSubscriptions: () => [],
+        getRateLimits: () => [
+          {
+            provider: 'logfare',
+            model: 'deepseek',
+            capturedAt: 300,
+            status: 'rate_limited',
+            retryAfterSeconds: 43,
+            requests: { limit: 80, remaining: 3, reset: '43s' },
+          },
+        ],
       },
     );
     expect(snapshot.entries.find((entry) => entry.provider === 'openrouter')?.state).toBe('exhausted');
+    expect(snapshot.rateLimits[0]).toMatchObject({
+      provider: 'logfare',
+      status: 'rate_limited',
+      retryAfterSeconds: 43,
+    });
     expect(snapshot.entries.find((entry) => entry.provider === 'codex')?.state).toBe('low');
     expect(snapshot.entries.find((entry) => entry.provider === 'codex')?.usedPercent).toBe(91);
     expect(JSON.stringify(snapshot)).not.toContain('secret-never-returned');

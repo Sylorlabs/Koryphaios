@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kory-place-window"
+description = "Enables the kory_place_window command without any pre-configured scope."
+commands.allow = ["kory_place_window"]
+
+[[permission]]
+identifier = "deny-kory-place-window"
+description = "Denies the kory_place_window command without any pre-configured scope."
+commands.deny = ["kory_place_window"]

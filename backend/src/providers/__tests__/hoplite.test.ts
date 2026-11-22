@@ -4,8 +4,8 @@ import { PROVIDER_AUTH_MODES, PROVIDER_ENV_VARS, providerSupport } from '@koryph
 import { buildAuthHeaders, PROVIDER_BASE_URLS } from '../api-endpoints';
 import { getProviderDisplay } from '../provider-display';
 import { PROVIDER_CONFIGS } from '../provider-configs';
-import { HopliteProvider, HOPLITE_DELEGATION_NOT_AVAILABLE } from '../hoplite';
-import { HOPLITE_DEFAULT_MODEL_ID, HOPLITE_FAST_TIER_MODEL_IDS } from '../hoplite-models';
+import { HopliteProvider, HOPLITE_DELEGATION_NOT_AVAILABLE, hopliteSpeedForRequest } from '../hoplite';
+import { HOPLITE_DEFAULT_MODEL_ID, HOPLITE_FAST_TIER_MODEL_IDS, HOPLITE_MODELS } from '../hoplite-models';
 import { HopliteClient } from '../hoplite-client';
 import { ProviderRegistry } from '../registry';
 import { getProviderHarnessCapabilities } from '../provider-harness';
@@ -356,5 +356,20 @@ describe('Hoplite registration metadata', () => {
     });
     expect(status?.configurationBlocked).toBeUndefined();
     expect(status?.allAvailableModels?.length).toBeGreaterThan(0);
+  });
+});
+
+describe('hoplite speed tier', () => {
+  it('maps the composer fast tier onto the request speed field and omits it otherwise', () => {
+    expect(hopliteSpeedForRequest({ speedTier: 'fast' })).toBe('fast');
+    expect(hopliteSpeedForRequest({ speedTier: 'priority' })).toBeUndefined();
+    expect(hopliteSpeedForRequest({})).toBeUndefined();
+  });
+
+  it('exposes the fast tier on every supportsFastMode catalog entry', () => {
+    for (const id of HOPLITE_FAST_TIER_MODEL_IDS) {
+      const model = HOPLITE_MODELS.find((m) => m.id === id);
+      expect(model?.speedTiers).toEqual([expect.objectContaining({ id: 'fast' })]);
+    }
   });
 });

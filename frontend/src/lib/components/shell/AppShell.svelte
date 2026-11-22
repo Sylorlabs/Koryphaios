@@ -18,14 +18,13 @@
     modalOpen = false,
     showNotes = false,
     activeSessionId = null,
-    connectionDot = 'bg-red-500',
+    connectionDot = 'bg-[var(--color-error)]',
     connectionStatusLabel = 'Realtime offline',
     connectedProviders = 0,
     recentProjects = [],
     onSidebarAction,
     onHideSidebar,
     onShowSidebar,
-    onCloseNotes,
     startDragging,
     menubar,
     fileInputs,
@@ -48,7 +47,6 @@
     onSidebarAction?: (action: string) => void | Promise<void>;
     onHideSidebar?: () => void;
     onShowSidebar?: () => void;
-    onCloseNotes?: () => void;
     startDragging?: (e: MouseEvent) => void;
     menubar?: Snippet;
     fileInputs?: Snippet;
@@ -179,7 +177,7 @@
             >
               Koryphaios
               <span
-                class="rounded px-1 py-px text-[9px] font-bold uppercase tracking-wider"
+                class="rounded px-1 py-px text-[10px] font-bold uppercase tracking-wider"
                 style="background: color-mix(in srgb, var(--color-accent) 18%, transparent); color: var(--color-accent);"
                 title="Koryphaios is in beta. Expect rapid changes">Beta</span
               >
@@ -292,7 +290,7 @@
           >
             Koryphaios
             <span
-              class="rounded px-1 py-px text-[9px] font-bold uppercase tracking-wider"
+              class="rounded px-1 py-px text-[10px] font-bold uppercase tracking-wider"
               style="background: color-mix(in srgb, var(--color-accent) 18%, transparent); color: var(--color-accent);"
               title="Koryphaios is in beta. Expect rapid changes">Beta</span
             >
@@ -407,31 +405,11 @@
           class="flex flex-1 min-h-0 min-w-0 flex-col"
           style="background: var(--color-surface-1);"
         >
-          <div
-            class="flex items-center justify-between px-4 border-b shrink-0"
-            style="height: var(--header-height); border-color: var(--color-border); background: var(--color-surface-0);"
-          >
-            <div class="flex items-center gap-2">
-              <StickyNote size={14} style="color: var(--color-accent);" />
-              <span class="text-sm font-semibold" style="color: var(--color-text-primary);"
-                >Notes</span
-              >
-            </div>
-            <button
-              type="button"
-              class="p-1.5 rounded-lg transition-colors hover:bg-[var(--color-surface-3)] text-xs"
-              style="color: var(--color-text-muted);"
-              onclick={onCloseNotes}
-              aria-label="Close notes"
-            >
-              Back to chat
-            </button>
-          </div>
           <div class="flex-1 min-h-0">
             <!-- Contain a Notes Network failure to this region. An exception
                  thrown inside an `$effect` escapes Svelte's reactive flush
                  unless a boundary catches it, which would otherwise freeze the
-                 entire window — including "Back to chat". -->
+                 entire window — including the titlebar Notes toggle. -->
             <svelte:boundary>
               {#if NotesPanelComponent}
                 <NotesPanelComponent />
@@ -534,10 +512,22 @@
                 >{voiceRecorder.state.phase === 'recording' ? 'Recording' : 'Transcribing'}</span
               >
             </div>
+            {#if voiceRecorder.state.partialText}
+              <!-- What the transcriber has heard so far, so dictation is visible
+                   while it is still being spoken. -->
+              <p
+                class="mt-1 line-clamp-2 text-[11px]"
+                style="color: var(--color-text-secondary);"
+                data-testid="voice-live-transcript"
+              >
+                {voiceRecorder.state.partialText}
+              </p>
+            {/if}
             <span class="sr-only" aria-live="polite">
-              {voiceRecorder.state.phase === 'recording'
-                ? 'Recording a voice prompt'
-                : 'Transcribing the recording'}
+              {voiceRecorder.state.partialText ||
+                (voiceRecorder.state.phase === 'recording'
+                  ? 'Recording a voice prompt'
+                  : 'Transcribing the recording')}
             </span>
           {/if}
         </div>

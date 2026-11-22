@@ -12,6 +12,18 @@
 import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
 import { type Provider, type ProviderEvent, type StreamRequest } from './types';
 import { HOPLITE_MODELS } from './hoplite-models';
+import type { HopliteSpeed } from './hoplite-client';
+
+/** Map a stream request's selected speed tier onto Hoplite's `speed` request
+ *  field: the composer's `fast` tier sends `speed: 'fast'`; every other
+ *  selection (including off) omits the field so the platform default applies.
+ *  Exported for the delegation request builder — Hoplite's adapter is inert
+ *  this release, but the mapping is where `speed` enters when it is wired. */
+export function hopliteSpeedForRequest(request: Pick<StreamRequest, 'speedTier'>):
+    | HopliteSpeed
+    | undefined {
+  return request.speedTier === 'fast' ? 'fast' : undefined;
+}
 
 /**
  * Why this adapter refuses to stream: delegation into Hoplite would need

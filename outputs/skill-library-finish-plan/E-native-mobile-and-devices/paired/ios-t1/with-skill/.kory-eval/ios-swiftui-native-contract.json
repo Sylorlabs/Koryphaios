@@ -1,0 +1,24 @@
+{
+  "scenarioId": "ios-swiftui-full-task-1-individual",
+  "skill": "ios-swiftui",
+  "kind": "native-xcode-27-swiftui-xcuitest-v5",
+  "broader": "native-interface",
+  "nearNeighbor": "android-compose",
+  "boundary": "real-ios-27-simulator-windowgroup-navigation-and-xcuitest",
+  "appAndEvaluatorOwnership": "fixed-evaluator-injected-into-independent-build",
+  "candidateEditableFiles": [
+    "Sources/DetailFeature.swift",
+    "Sources/DocumentFeature.swift"
+  ],
+  "evaluatedOnPhysicalDevice": false,
+  "pairedBlindEvaluation": "separate-orchestration-required",
+  "fixedSHA256": {
+    "Sources/KoryApp.swift": "588602bca367b34ff4beebc26efc1062f307ba0b2fb4f93bbeb401d4bd5a5466",
+    "Sources/NavigationSupport.swift": "5dbdfe401f211b1d6be381a3f7d0d743440bc294e37291d51075192a334fd1ad",
+    "Sources/DocumentSupport.swift": "0c49622a12895be235fd14fe9189239c98b96fa3c837159ce48f10d5c51c480e",
+    "KoryIOSFixture.xcodeproj/project.pbxproj": "6cff1936ceb1b111407a1d8ba00f3b9cf4e3125742f93196f48e423b3f8f0195",
+    "KoryIOSFixture.xcodeproj/xcshareddata/xcschemes/KoryIOSFixture.xcscheme": "5e887ac6a28b9241ee4a08eea61b96db00e732a15d390a1d737d628023f5b4d5",
+    "evaluator/IOSNativeUITests.swift": "d8db6f5b74f1dd8bd3773b6999171b8c1ccb4614fdf052292e8e05511deb6aca",
+    "evaluator/Info.plist": "e28cffa68845c2f7c2d9b35ed0ebec21fe11865217e44ebcc648b41d7339ae0a"
+  }
+}

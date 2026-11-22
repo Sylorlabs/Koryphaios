@@ -148,12 +148,23 @@ describe('finalizeParts', () => {
     ]);
   });
 
-  test('replaces mismatched text with one text part and keeps non-text order', () => {
-    const parts: TranscriptPart[] = [reasoning, { kind: 'text', text: 'draft', startedAt: 3 }, tool];
+  test('keeps narration written before a tool call when the final answer differs', () => {
+    // Live regression: the model wrote a paragraph, called tools, reasoned, then
+    // answered. The persisted content is only the final answer; the earlier
+    // paragraph must stay in the transcript.
+    const narration: TranscriptPart = { kind: 'text', text: 'Thinking first (before any tool).', startedAt: 3 };
+    const answer: TranscriptPart = { kind: 'text', text: 'It returns 43.', startedAt: 9 };
+    const parts: TranscriptPart[] = [reasoning, narration, tool, { ...reasoning, startedAt: 8 }, answer];
+    expect(finalizeParts(parts, 'It returns 43.', 99)).toEqual(parts);
+  });
+
+  test('replaces only the final answer when the persisted text differs (withheld or rewritten)', () => {
+    const narration: TranscriptPart = { kind: 'text', text: 'Reading the file.', startedAt: 3 };
+    const parts: TranscriptPart[] = [
+      reasoning, narration, tool, { kind: 'text', text: 'draft', startedAt: 5 },
+    ];
     expect(finalizeParts(parts, 'withheld notice', 99)).toEqual([
-      reasoning,
-      tool,
-      { kind: 'text', text: 'withheld notice', startedAt: 99 },
+      reasoning, narration, tool, { kind: 'text', text: 'withheld notice', startedAt: 5 },
     ]);
   });
 
@@ -163,9 +174,12 @@ describe('finalizeParts', () => {
     ]);
   });
 
-  test('empty persisted content drops every text part', () => {
-    const parts: TranscriptPart[] = [reasoning, { kind: 'text', text: 'stopped partial', startedAt: 3 }, tool];
-    expect(finalizeParts(parts, '', 50)).toEqual([reasoning, tool]);
+  test('empty persisted content drops only the trailing answer, never earlier narration', () => {
+    const narration: TranscriptPart = { kind: 'text', text: 'Reading the file.', startedAt: 3 };
+    const parts: TranscriptPart[] = [
+      reasoning, narration, tool, { kind: 'text', text: 'stopped partial', startedAt: 4 },
+    ];
+    expect(finalizeParts(parts, '', 50)).toEqual([reasoning, narration, tool]);
     expect(finalizeParts([], '', 50)).toEqual([]);
   });
 

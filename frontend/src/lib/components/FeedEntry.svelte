@@ -834,25 +834,25 @@ import {
       case 'user_message':
         return 'text-accent font-medium';
       case 'thought':
-        return 'text-yellow-400';
+        return 'text-[var(--color-warning)]';
       case 'content':
         return 'text-text-primary';
       case 'thinking':
-        return 'text-blue-400/70';
+        return 'text-[var(--color-info)]/70';
       case 'tool_call':
         return 'text-accent';
       case 'tool_result':
-        return isToolError(entry.metadata) ? 'text-red-300' : 'text-green-400';
+        return isToolError(entry.metadata) ? 'text-[var(--color-error)]' : 'text-[var(--color-success)]';
       case 'routing':
-        return 'text-yellow-300';
+        return 'text-[var(--color-warning)]';
       case 'error':
-        return 'text-red-400';
+        return 'text-[var(--color-error)]';
       case 'system':
         return 'text-text-muted';
       case 'tool_group':
-        return 'text-blue-400 font-medium italic';
+        return 'text-[var(--color-info)] font-medium italic';
       case 'agent_group':
-        return 'text-purple-400 font-medium';
+        return 'text-[var(--color-accent-secondary)] font-medium';
       default:
         return 'text-text-secondary';
     }
@@ -865,13 +865,13 @@ import {
   }
 
   const DOMAIN_STYLES: Record<string, { color: string; label: string }> = {
-    frontend: { color: 'text-sky-400', label: 'Frontend' },
-    ui: { color: 'text-sky-400', label: 'UI' },
-    backend: { color: 'text-emerald-400', label: 'Backend' },
-    review: { color: 'text-amber-400', label: 'Review' },
-    critic: { color: 'text-amber-400', label: 'Critic' },
-    test: { color: 'text-fuchsia-400', label: 'Test' },
-    general: { color: 'text-purple-400', label: 'Agent' },
+    frontend: { color: 'text-[var(--color-info)]', label: 'Frontend' },
+    ui: { color: 'text-[var(--color-info)]', label: 'UI' },
+    backend: { color: 'text-[var(--color-success)]', label: 'Backend' },
+    review: { color: 'text-[var(--color-warning)]', label: 'Review' },
+    critic: { color: 'text-[var(--color-warning)]', label: 'Critic' },
+    test: { color: 'text-[var(--color-accent-secondary)]', label: 'Test' },
+    general: { color: 'text-[var(--color-accent-secondary)]', label: 'Agent' },
   };
   function agentDomain(meta?: Record<string, unknown>): string {
     return (meta?.domain as string) ?? 'general';
@@ -977,18 +977,27 @@ import {
       aria-controls={entry.type === 'agent_group' && isExpanded ? `${detailsId}-agent` : undefined}
       tabindex="0"
     >
-      <span class="w-12 shrink-0 whitespace-nowrap text-[11px] leading-6 tabular-nums text-text-muted" aria-hidden={isToolActivity}>
-        {#if !isToolActivity}{new Date(entry.timestamp).toLocaleTimeString([], {
+      <span
+        class="w-12 shrink-0 text-[11px] tabular-nums {entry.timeUnknown && !isToolActivity
+          ? 'entry-time-unknown leading-tight pt-1'
+          : 'whitespace-nowrap leading-6'}"
+        style="color: var(--feed-chrome-fg, var(--color-text-muted))"
+        aria-hidden={isToolActivity}
+        title={entry.timeUnknown && !isToolActivity ? 'The source recorded no time for this message' : undefined}
+      >
+        <!-- An imported row whose source recorded no time: its timestamp only
+             orders it, so it must not claim a clock time. -->
+        {#if !isToolActivity}{#if entry.timeUnknown}Time unknown{:else}{new Date(entry.timestamp).toLocaleTimeString([], {
           hour: '2-digit',
           minute: '2-digit',
-        })}{/if}
+        })}{/if}{/if}
       </span>
 
       {#if entry.type === 'user_message'}
         <div class="shrink-0 flex items-center justify-center w-5 h-6">
           <Send size={14} class="text-accent" />
         </div>
-      {:else if isToolActivity}
+      {:else if isToolActivity || entry.type === 'skill'}
         <div class="shrink-0 flex items-center justify-center w-5 h-7">
           <ToolActivityIcon {entry} />
         </div>
@@ -1069,7 +1078,7 @@ import {
                     ? 'Context compacted'
                     : 'Compacting context…'}</span
               >
-              <span class="text-[10px] tabular-nums text-[var(--color-text-muted)]"
+              <span class="text-[11px] tabular-nums text-[var(--color-text-muted)]"
                 >{Math.max(0, Math.min(100, compaction?.progress ?? 100))}%</span
               >
             </button>
@@ -1106,7 +1115,7 @@ import {
                       ? ` → ${compaction.checkpointTokens} checkpoint tokens`
                       : ''}
                   </div>{/if}
-                {#if compaction?.error}<div class="text-red-300">{compaction.error}</div>{/if}
+                {#if compaction?.error}<div class="text-[var(--color-error)]">{compaction.error}</div>{/if}
               </div>
             {/if}
           </div>
@@ -1135,6 +1144,7 @@ import {
             defaultExpanded={agentSettingsStore.settings.reasoningExpandedByDefault ?? false}
             finalized={entry.thinkingFinalized ?? false}
             thinkingTokens={entry.metadata?.thinkingTokens as number | undefined}
+            timeUnknown={entry.durationUnknown === true}
           />
         {:else if entry.type === 'tool_group'}
           <ToolActivity {entry} bind:open={toolDetailsOpen} showIcon={false} />
@@ -1238,7 +1248,7 @@ import {
                       Loading rendered note…
                     </div>
                   {:else if note === null}
-                    <div class="px-4 py-3 text-xs text-red-400">Unable to render this note.</div>
+                    <div class="px-4 py-3 text-xs text-[var(--color-error)]">Unable to render this note.</div>
                   {:else}
                     <div
                       class="flex items-center gap-2 border-b px-4 py-2"
@@ -1249,7 +1259,7 @@ import {
                         >{note.title}</span
                       >
                       {#if note.sourcePath}<span
-                          class="ml-auto truncate font-mono text-[10px]"
+                          class="ml-auto truncate font-mono text-[11px]"
                           style="color: var(--color-text-muted);">{note.sourcePath}</span
                         >{/if}
                     </div>
@@ -1337,6 +1347,11 @@ import {
                   if (isImageResponse) void copyImageToClipboard();
                   else void copyToClipboard();
                 }}
+                title={isImageResponse
+                  ? 'Copy this image to the clipboard'
+                  : entry.type === 'content'
+                    ? 'Copy this response to the clipboard'
+                    : 'Copy this message to the clipboard'}
               >
                 {#if copied}
                   <Check size={10} />
@@ -1374,6 +1389,9 @@ import {
                     void toggleVoicePlayback();
                   }}
                   aria-pressed={voicePlaying}
+                  title={voicePlaying
+                    ? `Stop reading this ${entry.type === 'content' ? 'response' : 'message'} aloud`
+                    : `Read this ${entry.type === 'content' ? 'response' : 'message'} aloud`}
                 >
                   {#if voicePlaying}<Square size={10} /> Stop{:else}<Volume2 size={10} /> Listen{/if}
                 </button>
@@ -1388,7 +1406,7 @@ import {
                     void forkChat();
                   }}
                   disabled={forking || regenerating || activatingVariant || deleting}
-                  title="Fork"
+                  title="Start a new chat that continues from this point, leaving this chat unchanged"
                   aria-label="Fork"
                   data-testid="fork-chat"
                 >
@@ -1481,6 +1499,20 @@ import {
             </div>
           {/if}
           {/if}
+        {:else if entry.type === 'skill'}
+          {@const skillReason = typeof entry.metadata?.reason === 'string' ? entry.metadata.reason : ''}
+          <div
+            class="mt-0.5 flex flex-wrap items-baseline gap-x-1.5 text-[13px] leading-6"
+            title={skillReason ? `${entry.text}: ${skillReason}` : entry.text}
+          >
+            <span style="color: var(--feed-chrome-fg, var(--color-text-muted))">Used skill</span>
+            <span class="font-medium" style="color: var(--color-text-primary)">“{entry.text}”</span>
+            {#if entry.metadata?.representation}
+              <span class="text-[11px]" style="color: var(--feed-chrome-fg, var(--color-text-muted))">
+                {entry.metadata.representation}
+              </span>
+            {/if}
+          </div>
         {:else if entry.type === 'error'}
           <section
             class="mt-1 overflow-hidden border-l"
@@ -1511,12 +1543,12 @@ import {
         {#if archiveId}
           <button
             class="p-1.5 rounded flex items-center justify-center hover:bg-[var(--color-surface-3)] {entry.agentHidden
-              ? 'text-amber-400'
+              ? 'text-[var(--color-warning)]'
               : ''}"
             style={entry.agentHidden ? '' : 'color: var(--color-text-muted);'}
             onclick={(e) => setAgentHidden(e, !entry.agentHidden)}
             title={entry.agentHidden
-              ? 'Hidden from agent — click to restore to its context'
+              ? 'Hidden from agent. Click to restore to its context'
               : 'Hide from agent (frees its context; you still see it)'}
           >
             <Bot size={14} />
@@ -1569,11 +1601,14 @@ import {
         <div
           class="flex items-start gap-2 text-[12px] opacity-85 hover:opacity-100 transition-opacity"
         >
-          <span class="w-10 shrink-0 text-[var(--color-text-muted)]">
-            {new Date(subEntry.timestamp).toLocaleTimeString([], {
+          <span
+            class="w-10 shrink-0"
+            style="color: var(--feed-chrome-fg, var(--color-text-muted))"
+          >
+            {#if subEntry.timeUnknown}Time unknown{:else}{new Date(subEntry.timestamp).toLocaleTimeString([], {
               hour: '2-digit',
               minute: '2-digit',
-            })}
+            })}{/if}
           </span>
           <div class="flex-1 min-w-0">
             <span
@@ -1647,7 +1682,7 @@ import {
     <button
       type="button"
       role="menuitem"
-      class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-red-300 hover:bg-red-500/10 hover:text-red-200"
+      class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-[var(--color-error)] hover:bg-[var(--color-error-bg)]"
       disabled={deleting}
       onclick={(event) => {
         contextMenu = null;
@@ -1757,14 +1792,14 @@ import {
     border-radius: var(--radius-sm);
     font-size: var(--text-sm);
     font-weight: 400;
-    color: var(--color-text-muted);
+    color: var(--feed-chrome-fg, var(--color-text-muted));
   }
   .response-action.copied {
     color: var(--color-success);
   }
   .response-action:hover {
-    color: var(--color-text-primary);
-    background: var(--color-surface-2);
+    color: var(--feed-chrome-fg-hover, var(--color-text-primary));
+    background: var(--feed-chrome-hover-bg, var(--color-surface-2));
   }
   .response-action-icon {
     justify-content: center;
@@ -1960,7 +1995,7 @@ import {
   :global(.markdown-content .kory-color-chip-value) {
     margin-top: 2px;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
+    font-size: 11px;
     opacity: 0.85;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
   }
@@ -1982,7 +2017,7 @@ import {
   }
   /* External links: accent-colored with the destination site's icon. */
   :global(.markdown-content .kory-external-link) {
-    color: #3b82f6;
+    color: var(--color-info);
     text-decoration: underline;
     text-underline-offset: 2px;
   }
@@ -2041,7 +2076,7 @@ import {
     padding: 10px 12px;
     border: 1px solid var(--color-border);
     border-radius: 10px;
-    color: var(--color-danger, #ef4444);
+    color: var(--color-error);
     font-size: 12px;
   }
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { skillEvaluationV5ContractHash } from '../skill-eval-contract-hash';
+import { skillEvaluationV5ContractHash } from '../../eval/skills/skill-eval-contract-hash';
 import type { V5FullTaskFixture } from '../skill-packages';
 
 describe('V5 qualification/blind review contract identity', () => {

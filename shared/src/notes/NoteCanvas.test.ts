@@ -39,19 +39,24 @@ describe('dedicated Notes permissions', () => {
       tools: DEFAULT_NOTE_TOOL_PERMISSIONS,
       overrides: { patch_note_canvas: 'ask' },
     });
-    expect(effectiveNotePermission(explicit, 'patch_note_canvas', 'yolo')).toBe('auto');
+    // An explicit choice in `overrides` is the user's own Notes decision, so
+    // YOLO does not widen it. Only inherited defaults are relaxed.
+    expect(effectiveNotePermission(explicit, 'patch_note_canvas', 'yolo')).toBe('ask');
     const roundTrip = normalizeNotesAgentPermissions(JSON.parse(JSON.stringify(explicit)));
     expect(roundTrip.overrides?.patch_note_canvas).toBe('ask');
     expect(effectiveNotePermission(roundTrip, 'patch_note_canvas', 'guarded')).toBe('ask');
   });
   test('restrictive legacy presets and block overrides govern newly added operations', () => {
+    // A restrictive preset normalizes into explicit overrides, so it also
+    // survives YOLO: choosing "ask for everything" is not undone by the chat
+    // permission mode.
     expect(
       effectiveNotePermission(
         normalizeNotesAgentPermissions({ preset: 'ask_all' }),
         'patch_note_canvas',
         'yolo',
       ),
-    ).toBe('auto');
+    ).toBe('ask');
     const blocked = normalizeNotesAgentPermissions({
       preset: 'default',
       overrides: { patch_note_canvas: 'block' },

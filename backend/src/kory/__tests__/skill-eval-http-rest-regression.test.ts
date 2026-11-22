@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import {
   HTTP_REST_ENGINEERING_SKILL_EVAL_MATERIALIZERS,
   HTTP_REST_ENGINEERING_SKILL_EVAL_SCORERS,
-} from '../skill-eval-http-rest-engineering-fixtures';
-import { readFixtureText, writeFixtureFile } from '../skill-eval-fixture-helpers';
+} from '../../eval/skills/skill-eval-http-rest-engineering-fixtures';
+import { readFixtureText, writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
 
 const roots: string[] = [];
 afterEach(() => {

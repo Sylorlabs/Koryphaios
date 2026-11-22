@@ -191,10 +191,10 @@ describe('WSManager terminal-event delivery and backpressure', () => {
     manager.add(socket);
 
     manager.broadcast({
-      type: 'stream.delta',
+      type: 'agent.status',
       timestamp: 1,
       sessionId: 'session-1',
-      payload: { agentId: 'kory-manager', content: 'partial' },
+      payload: { agentId: 'kory-manager', status: 'thinking' },
     });
 
     // Not sent immediately.
@@ -225,10 +225,10 @@ describe('WSManager terminal-event delivery and backpressure', () => {
 
     // Non-terminal first, then terminal — both while overloaded.
     manager.broadcast({
-      type: 'stream.delta',
+      type: 'agent.status',
       timestamp: 1,
       sessionId: 'session-1',
-      payload: { agentId: 'kory-manager', content: 'partial' },
+      payload: { agentId: 'kory-manager', status: 'thinking' },
     });
     manager.broadcast({
       type: 'stream.complete',
@@ -252,8 +252,8 @@ describe('WSManager terminal-event delivery and backpressure', () => {
     const delivered = sent.map((value) => JSON.parse(value));
     expect(delivered).toHaveLength(1);
     expect(delivered[0].type).toBe('stream.complete');
-    // The delta must not appear — it was skipped, not queued.
-    expect(delivered.find((m) => m.type === 'stream.delta')).toBeUndefined();
+    // The skipped non-terminal status must not appear — it was skipped, not queued.
+    expect(delivered.find((m) => m.type === 'agent.status')).toBeUndefined();
   });
 
   test('multiple terminal events are all queued and retried', () => {

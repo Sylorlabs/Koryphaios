@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "status": "unimported",
+  "assignmentId": "blind-v5-99a528f3e8bce625a925",
+  "skill": "audio-production",
+  "scenarioId": "audio-production-full-task-1-individual",
+  "pairId": "audio-production-full-task-1-individual:bb633b1a-06fc-43a4-8d9d-ccd5ef8f518e",
+  "reviewerThread": "logfare-stateless-ee42330f-cc3c-4753-80d6-0295dc158f02",
+  "reviewerIdentitySource": "external-reviewer-adapter-output",
+  "reviewerAdapter": "scripts/kory-logfare-stateless-reviewer",
+  "reviewerModel": "deepseek-v4.1-flash-1017",
+  "reviewerModelSource": "configured-provider-model-metadata",
+  "reviewerBaseUrl": "http://127.0.0.1:17841/v1",
+  "promptSha256": "bd954d9857738ab17f3bd64bb3afdcd3e4d01a1d8bee7ad0470a6838ff9beac9",
+  "privateAssignmentSha256": "3b02232762d9a80f0bc7beb689a8652e88529a8f19f4cd82207acb4ff4964d54",
+  "reviewerEventsSha256": "3ad1c51144eaa3e9055d7a366421d1e75de9391fb357863c3e63a162eaf865b3",
+  "judgeOutputSha256": "4b871812f8dfe03c108ea46ffb333830e67e9ad04d2e06dfa4b1c93ba2dbd7fd",
+  "envelopeSha256": "13a3af079158c96fbe0e8b9c981f29d71472bac5db415068db3a520a75acb968",
+  "importValidation": {
+    "mode": "validate",
+    "validatedReviews": 1,
+    "persistedReviews": 0
+  },
+  "promptSnapshotPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-Ca9oaO/review-task.prompt.txt",
+  "reviewerEventsPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-Ca9oaO/reviewer-events.json",
+  "envelopePath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-Ca9oaO/import.json"
+}

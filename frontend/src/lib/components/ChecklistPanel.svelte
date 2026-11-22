@@ -152,7 +152,7 @@
             class="min-w-0 flex-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--color-text-muted)]"
             >Checklists</span
           >
-          <span class="shrink-0 text-[10px] tabular-nums text-[var(--color-text-muted)]">
+          <span class="shrink-0 text-[11px] tabular-nums text-[var(--color-text-muted)]">
             {ordered.length}
           </span>
         </button>

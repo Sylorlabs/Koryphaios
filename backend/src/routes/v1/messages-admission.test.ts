@@ -49,7 +49,10 @@ function context(input: {
       generateSessionTitle: async () => undefined,
       ...input.kory,
     },
-    wsManager: input.wsManager ?? { broadcast: () => undefined, broadcastToSession: () => undefined },
+    wsManager: input.wsManager ?? {
+      broadcast: () => undefined,
+      broadcastToSession: () => undefined,
+    },
   } as never);
 }
 
@@ -267,30 +270,6 @@ describe('message turn admission', () => {
     expect(deleteMessage).not.toHaveBeenCalled();
   });
 
-  test('returns 409 for a busy normal send without persisting or dispatching', async () => {
-    const add = mock(async () => undefined);
-    const dispatchAdmittedTask = mock(async () => undefined);
-    const reserveSessionTurn = mock(async () => null);
-    context({
-      messages: { add },
-      kory: {
-        reserveSessionTurn,
-        dispatchAdmittedTask,
-        rejectSessionTurn: async () => undefined,
-      },
-    });
-
-    const response = await app.handle(
-      request({ sessionId: 'session-1', content: 'Do not lose this message' }),
-    );
-
-    expect(response.status).toBe(409);
-    expect((await response.json()).code).toBe('CONFLICT');
-    expect(reserveSessionTurn).toHaveBeenCalledWith('session-1', 'user_turn');
-    expect(add).not.toHaveBeenCalled();
-    expect(dispatchAdmittedTask).not.toHaveBeenCalled();
-  });
-
   test('returns 409 for busy regeneration without preparing a branch', async () => {
     const prepareRegenerationBranch = mock(async () => ({
       ...regenerationBranch,
@@ -303,7 +282,7 @@ describe('message turn admission', () => {
         prepareRegenerationBranch,
       },
       kory: {
-        reserveSessionTurn,
+        reserveSessionTurnAfterSteer: reserveSessionTurn,
         dispatchAdmittedTask,
         rejectSessionTurn: async () => undefined,
       },
@@ -337,7 +316,7 @@ describe('message turn admission', () => {
         prepareRegenerationBranch,
       },
       kory: {
-        reserveSessionTurn: async () => {
+        reserveSessionTurnAfterSteer: async () => {
           order.push('reserve');
           return token;
         },
@@ -374,27 +353,56 @@ describe('message turn admission', () => {
     });
   });
 
-  test('reserves before persistence and dispatches the accepted run exactly once', async () => {
-    const order: string[] = [];
-    const token = admission();
-    const reserveSessionTurn = mock(async () => {
-      order.push('reserve');
-      return token;
-    });
-    const add = mock(async () => {
-      order.push('persist');
-    });
-    const dispatchAdmittedTask = mock(async () => {
-      order.push('dispatch');
-    });
-    const rejectSessionTurn = mock(async () => undefined);
-    context({
-      messages: { add },
-      kory: {
-        reserveSessionTurn,
-        dispatchAdmittedTask,
-        rejectSessionTurn,
+  test('returns 409 for a busy normal send without dispatching a turn', async () => {
+    const startSessionTurn = mock(async () => ({
+      accepted: false as const,
+      result: {
+        sessionId: 'session-1',
+        runId: '',
+        status: 'rejected' as const,
+        phase: 'idle' as const,
+        reason: 'session_busy',
       },
+    }));
+    const dispatchAdmittedTask = mock(async () => undefined);
+    context({
+      messages: { add: mock(async () => undefined), getById: async () => undefined },
+      kory: { startSessionTurn, dispatchAdmittedTask },
+    });
+
+    const response = await app.handle(
+      request({ sessionId: 'session-1', content: 'Do not lose this message' }),
+    );
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).code).toBe('CONFLICT');
+    expect(startSessionTurn).toHaveBeenCalledTimes(1);
+    expect(startSessionTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'user', sourceCommandId: expect.stringMatching(/^srv_/) }),
+    );
+    expect(dispatchAdmittedTask).not.toHaveBeenCalled();
+  });
+
+  test('admits a send without clientMessageId through startSessionTurn with a server-minted id, exactly once', async () => {
+    const completion = Promise.resolve({
+      sessionId: 'session-1',
+      runId: 'run-ledger-1',
+      status: 'completed' as const,
+      phase: 'done' as const,
+      reason: null,
+    });
+    const startSessionTurn = mock(async () => ({
+      accepted: true as const,
+      sessionId: 'session-1',
+      runId: 'run-ledger-1',
+      userMessageId: 'command-user-abc',
+      completion,
+    }));
+    const add = mock(async () => undefined);
+    const dispatchAdmittedTask = mock(async () => undefined);
+    context({
+      messages: { add, addIdempotent: mock(async () => undefined) },
+      kory: { startSessionTurn, dispatchAdmittedTask, reserveSessionTurn: mock(async () => null) },
     });
 
     const response = await app.handle(
@@ -407,103 +415,133 @@ describe('message turn admission', () => {
         interactionMode: 'plan',
       }),
     );
-    const payload = (await response.json()) as {
-      ok: boolean;
-      data: { status: string; runId: string; messageId: string };
-    };
 
     expect(response.status).toBe(200);
-    expect(payload).toEqual({
+    expect(await response.json()).toEqual({
       ok: true,
-      data: { status: 'processing', runId: token.runId, messageId: expect.any(String) },
+      data: { status: 'processing', runId: 'run-ledger-1', messageId: 'command-user-abc' },
     });
-    expect(order).toEqual(['reserve', 'persist', 'dispatch']);
-    expect(reserveSessionTurn).toHaveBeenCalledTimes(1);
-    expect(add).toHaveBeenCalledTimes(1);
-    expect(dispatchAdmittedTask).toHaveBeenCalledTimes(1);
-    expect(dispatchAdmittedTask).toHaveBeenCalledWith(token, {
+    expect(startSessionTurn).toHaveBeenCalledTimes(1);
+    expect(startSessionTurn).toHaveBeenCalledWith({
+      sessionId: 'session-1',
+      source: 'user',
+      sourceCommandId: expect.stringMatching(/^srv_[A-Za-z0-9_-]{21}$/),
       userMessage: 'Execute exactly once',
       preferredModel: 'openai:gpt-test',
       reasoningLevel: 'high',
+      contextWindow: undefined,
       attachments: undefined,
       interactionMode: 'plan',
       fastMode: true,
-      inputAlreadyPersisted: true,
+      speedTier: 'priority',
+      modelParameters: undefined,
+      fusion: undefined,
       imageInputMode: 'reject',
     });
-    expect(rejectSessionTurn).not.toHaveBeenCalled();
+    // The legacy write and dispatch are gone: one durable path only.
+    expect(add).not.toHaveBeenCalled();
+    expect(dispatchAdmittedTask).not.toHaveBeenCalled();
   });
 
-  test('does not publish a system error when an admitted turn rejects with its user cancellation reason', async () => {
-    const controller = new AbortController();
+  test('a client-supplied clientMessageId is used as the ledger source id unchanged', async () => {
+    const startSessionTurn = mock(async () => ({
+      accepted: true as const,
+      sessionId: 'session-1',
+      runId: 'run-ledger-2',
+      userMessageId: 'command-user-def',
+      completion: Promise.resolve(undefined as never),
+    }));
+    context({ messages: {}, kory: { startSessionTurn } });
+
+    await app.handle(
+      request({ sessionId: 'session-1', content: 'With id', clientMessageId: 'client-id-0001' }),
+    );
+
+    expect(startSessionTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceCommandId: 'client-id-0001' }),
+    );
+  });
+
+  test('does not publish a system error when a ledger turn settles with its user cancellation', async () => {
     const events: Array<{ type: string; payload: Record<string, unknown> }> = [];
-    const dispatchAdmittedTask = mock(async () => {
-      controller.abort(new DOMException('Stopped by user', 'AbortError'));
-      throw controller.signal.reason;
-    });
+    const cancellation = new DOMException('Stopped by user', 'AbortError');
     context({
-      messages: { add: async () => undefined },
+      messages: {},
       kory: {
-        reserveSessionTurn: async () => ({ ...admission(), signal: controller.signal }),
-        dispatchAdmittedTask,
-        rejectSessionTurn: async () => undefined,
+        startSessionTurn: async () => ({
+          accepted: true as const,
+          sessionId: 'session-1',
+          runId: 'run-cancelled-1',
+          userMessageId: 'command-user-cancel',
+          completion: Promise.reject(cancellation),
+        }),
       },
       wsManager: {
-        broadcastToSession: (_sessionId: string, event: { type: string; payload: Record<string, unknown> }) => {
+        broadcastToSession: (
+          _sessionId: string,
+          event: { type: string; payload: Record<string, unknown> },
+        ) => {
           events.push(event);
         },
       },
     });
 
-    const response = await app.handle(request({ sessionId: 'session-1', content: 'Continue after stop' }));
+    const response = await app.handle(request({ sessionId: 'session-1', content: 'Stop me' }));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(response.status).toBe(200);
-    expect(dispatchAdmittedTask).toHaveBeenCalledTimes(1);
     expect(events.some((event) => event.type === 'system.error')).toBe(false);
   });
 
-  test('continues to publish genuine admitted turn failures', async () => {
-    const failure = new Error('Provider request failed');
+  test('continues to publish genuine ledger turn failures', async () => {
     const events: Array<{ type: string; payload: Record<string, unknown> }> = [];
     context({
-      messages: { add: async () => undefined },
+      messages: {},
       kory: {
-        reserveSessionTurn: async () => admission(),
-        dispatchAdmittedTask: async () => { throw failure; },
-        rejectSessionTurn: async () => undefined,
+        startSessionTurn: async () => ({
+          accepted: true as const,
+          sessionId: 'session-1',
+          runId: 'run-failed-1',
+          userMessageId: 'command-user-failed',
+          completion: Promise.reject(new Error('Provider request failed')),
+        }),
       },
       wsManager: {
-        broadcastToSession: (_sessionId: string, event: { type: string; payload: Record<string, unknown> }) => {
+        broadcastToSession: (
+          _sessionId: string,
+          event: { type: string; payload: Record<string, unknown> },
+        ) => {
           events.push(event);
         },
       },
     });
 
-    const response = await app.handle(request({ sessionId: 'session-1', content: 'Report real errors' }));
+    const response = await app.handle(
+      request({ sessionId: 'session-1', content: 'Report real errors' }),
+    );
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(response.status).toBe(200);
-    expect(events).toContainEqual(expect.objectContaining({
-      type: 'system.error',
-      payload: expect.objectContaining({ error: 'Provider request failed', sessionId: 'session-1' }),
-    }));
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'system.error',
+        payload: expect.objectContaining({
+          error: 'Provider request failed',
+          sessionId: 'session-1',
+        }),
+      }),
+    );
   });
 
-  test('rejects the reserved run when user-message persistence fails', async () => {
-    const token = admission('run-persistence-failed');
-    const persistenceError = new Error('simulated message store outage');
-    const add = mock(async () => {
-      throw persistenceError;
-    });
+  test('surfaces a ledger input-persistence failure as a server error and dispatches nothing', async () => {
     const dispatchAdmittedTask = mock(async () => undefined);
-    const rejectSessionTurn = mock(async () => undefined);
     context({
-      messages: { add },
+      messages: {},
       kory: {
-        reserveSessionTurn: async () => token,
+        startSessionTurn: mock(async () => {
+          throw new Error('simulated message store outage');
+        }),
         dispatchAdmittedTask,
-        rejectSessionTurn,
       },
     });
 
@@ -512,9 +550,6 @@ describe('message turn admission', () => {
     );
 
     expect(response.status).toBe(500);
-    expect(add).toHaveBeenCalledTimes(1);
-    expect(rejectSessionTurn).toHaveBeenCalledTimes(1);
-    expect(rejectSessionTurn).toHaveBeenCalledWith(token, 'user_message_persistence_failed');
     expect(dispatchAdmittedTask).not.toHaveBeenCalled();
   });
 });

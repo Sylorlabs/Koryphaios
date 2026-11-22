@@ -1,0 +1,93 @@
+[
+  {
+    "file": "skills-v5/pricing-monetization/SKILL.md",
+    "findings": [
+      {
+        "line": 10,
+        "column": 89,
+        "offset": 438,
+        "character": "-",
+        "codePoint": "U+002D"
+      },
+      {
+        "line": 10,
+        "column": 92,
+        "offset": 441,
+        "character": "-",
+        "codePoint": "U+002D"
+      },
+      {
+        "line": 14,
+        "column": 73,
+        "offset": 943,
+        "character": "-",
+        "codePoint": "U+002D"
+      },
+      {
+        "line": 14,
+        "column": 166,
+        "offset": 1036,
+        "character": "-",
+        "codePoint": "U+002D"
+      },
+      {
+        "line": 14,
+        "column": 169,
+        "offset": 1039,
+        "character": "-",
+        "codePoint": "U+002D"
+      },
+      {
+        "line": 18,
+        "column": 25,
+        "offset": 1126,
+        "character": "-",
+        "codePoint": "U+002D"
+      },
+      {
+        "line": 18,
+        "column": 37,
+        "offset": 1138,
+        "character": "-",
+        "codePoint": "U+002D"
+      },
+      {
+        "line": 41,
+        "column": 65,
+        "offset": 4458,
+        "character": "-",
+        "codePoint": "U+002D"
+      },
+      {
+        "line": 41,
+        "column": 68,
+        "offset": 4461,
+        "character": "-",
+        "codePoint": "U+002D"
+      },
+      {
+        "line": 46,
+        "column": 184,
+        "offset": 5110,
+        "character": "-",
+        "codePoint": "U+002D"
+      },
+      {
+        "line": 47,
+        "column": 185,
+        "offset": 5495,
+        "character": "-",
+        "codePoint": "U+002D"
+      },
+      {
+        "line": 51,
+        "column": 67,
+        "offset": 6159,
+        "character": "-",
+        "codePoint": "U+002D"
+      }
+    ],
+    "protectedCharacters": 405,
+    "semanticReviewRequired": true
+  }
+]

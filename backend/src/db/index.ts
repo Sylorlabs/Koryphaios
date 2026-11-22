@@ -43,8 +43,10 @@ dbHolder.sqlite.exec('PRAGMA journal_mode = WAL;');
 // connection before Drizzle performs any writes.
 dbHolder.sqlite.exec('PRAGMA foreign_keys = ON;');
 // Set a busy timeout so concurrent writers wait instead of immediately
-// throwing "database is locked". 5 seconds is generous for a local DB.
-dbHolder.sqlite.exec('PRAGMA busy_timeout = 5000;');
+// throwing "database is locked". Several agents writing transcripts to one
+// local DB routinely hold the write lock longer than 5 seconds, and that
+// surfaced as run-ending turn failures, so the wait is bounded at 15 instead.
+dbHolder.sqlite.exec('PRAGMA busy_timeout = 15000;');
 
 // Harden the WAL/SHM sidecars that WAL mode just created.
 hardenFilePermissions(`${dbPath}-wal`);
@@ -89,7 +91,7 @@ export async function reopenDatabase(overridePath?: string): Promise<void> {
   const fresh = new Database(path);
   fresh.exec('PRAGMA journal_mode = WAL;');
   fresh.exec('PRAGMA foreign_keys = ON;');
-  fresh.exec('PRAGMA busy_timeout = 5000;');
+  fresh.exec('PRAGMA busy_timeout = 15000;');
   // Patch the drizzle instance's internal client and session so all
   // subsequent queries go through the new Database.
   (db as unknown as { $client: Database }).$client = fresh;

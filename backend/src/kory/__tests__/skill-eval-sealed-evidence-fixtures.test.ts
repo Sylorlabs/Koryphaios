@@ -2,19 +2,19 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { auditSkillEvalExecutionReadiness } from '../skill-eval-execution';
+import { auditSkillEvalExecutionReadiness } from '../../eval/skills/skill-eval-execution';
 import {
   BUILTIN_SKILL_EVAL_MATERIALIZERS,
   BUILTIN_SKILL_EVAL_SCORERS,
-} from '../skill-eval-fixtures';
-import { readFixtureText, writeFixtureFile } from '../skill-eval-fixture-helpers';
-import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
+} from '../../eval/skills/skill-eval-fixtures';
+import { readFixtureText, writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
+import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
 import { loadV5SkillPackages } from '../skill-packages';
 import {
   SEALED_EVIDENCE_SCENARIO_IDS,
   SEALED_EVIDENCE_SKILL_EVAL_MATERIALIZERS,
   scoreSealedEvidenceFixture,
-} from '../skill-eval-sealed-evidence-fixtures';
+} from '../../eval/skills/skill-eval-sealed-evidence-fixtures';
 
 const roots: string[] = [];
 const REAL_BROWSER_AVAILABLE = existsSync(
@@ -54,10 +54,13 @@ describe('sealed evidence professional-task fixtures', () => {
       expect(readiness.find((row) => row.scenarioId === id)?.ready, id).toBe(true);
     }
 
+    // Genuinely unavailable runtime classes stay fail-closed behind the external
+    // environment gate. accessibility-verification no longer appears here: it now
+    // replays recorded live sessions instead of requiring a Windows/NVDA or
+    // Android TalkBack host.
     const stillBlocked = [
-      'hardware-runtime-debugging-full-task-1',
-      'android-compose-full-task-1-individual',
-      'research-full-task-1-individual',
+      'gpu-compute-full-task-1-individual',
+      'simulation-device-testing-full-task-2',
     ];
     for (const id of stillBlocked) {
       expect(readiness.find((row) => row.scenarioId === id)?.ready, id).toBe(false);

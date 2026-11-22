@@ -6,7 +6,7 @@ import AgentRail from './AgentRail.svelte';
 import type { AgentRailState } from './useAgentRail.svelte';
 
 vi.mock('$lib/stores/agents.svelte', () => ({
-  agentStore: { getAgentSteeringQueue: () => [] },
+  agentStore: { getAgentSteeringQueue: () => [], getAgentCurrentTool: () => undefined },
 }));
 
 function agent(

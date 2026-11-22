@@ -21,15 +21,18 @@ export interface ProductModelLabelInput {
   credits?: string;
 }
 
-/** Normalize a vendor credit label for display. "x0.00 credits" reads better
- *  as "free"; every other label is kept exactly as the vendor wrote it. */
+/** Normalize a vendor credit label for display. The vendor writes a
+ *  per-request multiplier of the plan's credit allowance ("x0.29 credits"),
+ *  which reads as the compact "0.29x" the picker shows next to the name; a
+ *  zero multiplier is "free". The vendor's own digits are preserved, and any
+ *  label that is not that shape is kept exactly as written. */
 export function productModelCreditLabel(raw: string | undefined): string | undefined {
   if (typeof raw !== 'string') return undefined;
   const text = raw.trim();
   if (!text) return undefined;
   const match = text.match(/^x?\s*(\d+(?:\.\d+)?)\s*credits?$/i);
-  if (match && Number(match[1]) === 0) return 'free';
-  return text;
+  if (!match) return text;
+  return Number(match[1]) === 0 ? 'free' : `${match[1]}x`;
 }
 
 /**

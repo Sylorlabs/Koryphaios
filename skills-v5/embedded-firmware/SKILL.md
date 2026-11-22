@@ -24,6 +24,9 @@ Compose `embedded-device-security` when boot trust, update authenticity, debug a
 - Identify who owns each DMA buffer and when CPU and device access becomes valid. Do not infer cache coherence or transfer completion from a generic RTOS rule.
 - Make stack, heap, static allocation, watchdog deadlines, and worst-case queue depth explicit for hard resource limits.
 - Preserve a recoverable boot or update path for field-updated devices. Do not make an irreversible image transition without an established recovery mechanism.
+- Make every durable write a commit of a self-validating record, and never let the write erase or overwrite the page that currently holds the newest committed record. With two erase pages the cost of that rule is a slot region per page plus a sequence number: a save appends the next slot, and only a full page triggers an erase of the page that is already superseded, so an interruption at any single erase or program still leaves the previous record intact and loadable. Partial programming is expected, not exceptional, so validation must reject a record whose checksum or terminator did not arrive, and the loader must scan rather than trust a fixed slot.
+- Treat wear as a second invariant of the same design, not a finish step. Alternate the erase target between pages and verify the erase counts stay within one of each other after a long commit run; a scheme that erases the same page every save passes a brownout test and still wears the device out early.
+- Size ring indices to the capacity, not to the bus width, and count every rejected byte. A producer/consumer ring that drops a byte when full without incrementing a rejection counter destroys the consumer's framing and leaves the failure unexplained; the invariant to check is that pushed minus consumed equals rejected, so no byte is lost silently. Wrap the ring many times in verification, not once, and confirm a fresh boot reinitialises both indices and the counter.
 
 ## Failure discriminators
 
@@ -39,6 +42,8 @@ Compose `embedded-device-security` when boot trust, update authenticity, debug a
 - For RTOS changes, verify task and ISR API choice against the target RTOS version and observe scheduling under representative load.
 - For firmware updates, verify interrupted update and rollback or recovery behavior on non-production hardware before claiming field safety.
 - Record MCU, board revision, firmware build, RTOS version, and relevant clock or peripheral configuration with hardware evidence.
+- Prove persistence by interrupting the commit, not by rebooting after a clean save: replay the device's own erase/program journal with the interrupted operation applied to half of its bytes and boot each resulting image, asserting that every one loads either the new or the previous committed record and none loads a hybrid.
+- Measure interrupt duration with a hardware counter (a SysTick current-value read is enough for a handler shorter than one reload period); a host-side timing of an emulated run is not evidence about the handler.
 
 ## Completion evidence
 

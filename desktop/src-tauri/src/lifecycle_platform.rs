@@ -342,6 +342,36 @@ pub(crate) fn reply_to_os(app: &AppHandle, proceed: bool) -> Result<(), String> 
     native::reply(app, proceed)
 }
 
+/// Whether `pid` currently names a live process. A permission error counts as
+/// alive — the process exists, we just may not signal it.
+#[cfg(unix)]
+pub(crate) fn process_alive(pid: u32) -> bool {
+    // kill(pid, 0) performs error checking only; no signal is delivered.
+    if unsafe { libc::kill(pid as libc::pid_t, 0) } == 0 {
+        return true;
+    }
+    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+/// Whether `pid` currently names a live process.
+#[cfg(windows)]
+pub(crate) fn process_alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle == 0 {
+            return false;
+        }
+        let mut code: u32 = 0;
+        let ok = GetExitCodeProcess(handle, &mut code);
+        CloseHandle(handle);
+        ok != 0 && code == STILL_ACTIVE
+    }
+}
+
 /// Register the hidden desktop/tray session guard alongside the independent
 /// backend. It is present after login even when no window has been opened.
 pub(crate) fn enable_login_guard(app: &AppHandle) -> Result<(), String> {
@@ -353,14 +383,10 @@ pub(crate) fn enable_login_guard(app: &AppHandle) -> Result<(), String> {
             .build(),
     )
     .map_err(|error| error.to_string())?;
-    if !app
-        .autolaunch()
-        .is_enabled()
-        .map_err(|error| error.to_string())?
-    {
-        app.autolaunch()
-            .enable()
-            .map_err(|error| error.to_string())?;
-    }
+    // enable() rewrites the login item every launch so it always points at the
+    // running bundle; an old install path must not survive across relocations.
+    app.autolaunch()
+        .enable()
+        .map_err(|error| error.to_string())?;
     Ok(())
 }

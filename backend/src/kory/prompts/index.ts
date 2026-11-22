@@ -46,6 +46,25 @@ export type TaskKind =
   | 'security-infra';
 export type PromptRole = 'manager' | 'worker' | 'critic';
 
+/**
+ * The delegation surface the manager can actually use this turn.
+ *
+ * A static instruction to "choose from the user's pool" is not actionable: the
+ * model cannot name a category it cannot see, and Kory silently degraded to
+ * `general` when the manager guessed. Rendering the real pools (and the real
+ * failure state of an empty pool) is what makes subagent choice deterministic.
+ */
+export interface DelegationContext {
+  available: boolean;
+  reason?: string;
+  /** Plan mode: delegation is for investigation and design, not implementation. */
+  planning?: boolean;
+  /** Chat's worker-isolation preset: 'auto' defers to the worktree argument,
+   *  'always'/'never' are the user's fixed choice and ignore it. */
+  worktreeMode?: 'auto' | 'always' | 'never';
+  pools: Array<{ domain: string; models: readonly string[]; unrestricted?: boolean }>;
+}
+
 export interface TaskContract {
   goal: string;
   taskKind: TaskKind;
@@ -353,7 +372,29 @@ const UNIVERSAL_CORE = `## Non-negotiable execution contract
 - Do not disguise stubs, uncertainty, skipped checks, unavailable evidence, or partial work. Never claim completion without exact evidence.
 - Publishing is separate from implementation. Do not commit, push, or open a pull request unless the user or an explicit workspace policy requested it.
 - Notice when the work would benefit from durable Goal Mode or a reusable workflow. Suggest Goal Mode for long-running, multi-session, dependency-heavy, or evidence-tracked outcomes. Suggest a workflow when the same ordered procedure is likely to recur. Make the suggestion briefly and at a natural boundary; do not interrupt active work, repeatedly ask, or suggest either for ordinary questions, one-off fixes, or small edits. Never create a goal or workflow without the user's explicit approval.
-- Work autonomously inside the granted project jail. Do not ask for routine edits, shell commands, tests, installs, network access, or delegation. Ask only immediately before catastrophic broad destruction such as recursively deleting a home/root directory, formatting a disk, destructive raw-device writes, or powering down the host.`;
+- Work autonomously inside the granted project jail. Never ask permission for routine edits, shell commands, tests, installs, network access, or delegation. Ask before catastrophic broad destruction such as recursively deleting a home/root directory, formatting a disk, destructive raw-device writes, or powering down the host.
+- Asking permission and asking for clarification are different. When you are confused, the request is ambiguous or underspecified, or a choice would materially change the result and the repository cannot settle it, ask instead of guessing: a manager calls ask_user, a worker calls ask_manager, and a critic names the ambiguity in its verdict. Inspect first so the question is specific to what you found, ask one decision per call, and offer 2-4 short concrete options with your recommendation first. Never ask what you can find out yourself.`;
+
+const COMPUTE_DELEGATION = `## Linked computers and compute delegation
+A linked computer can be used for the work itself or for its compute. The difference must be explicit, because the user's files should not be flooded and their public repository should not receive unreviewed work.
+
+Placements:
+- stay: the work lives on the target. This is the default when the user chose that computer for the chat.
+- return: the other computer is used for compute, and the changed files come back here for review.
+
+Rules:
+- Default to one computer per task. Keep the manager and every worker for that task on the machine where the chat runs. Do not mirror the same workstream with local workers and a remote chat.
+- If the chat's selected device is another computer, keep the work there unless the user asks for it back. Do not copy it back on your own.
+- If the user says "use my compute on my VPS", "run this on the server", or names another machine only as faster hardware, use placement return.
+- When the user asks for work on another computer, call delegate once. The target chat's manager owns that work and spawns its workers on the target itself. Do not keep a local copy of the same task running alongside it.
+- Split one task across machines only for genuinely independent workstreams, an explicit user request, or a concrete resource constraint. Say why before doing it. Independent fan-out targets are allowed, but do not default to two machines.
+- A turn started on a linked computer is owned by that computer's backend. It continues if this app quits, loses its connection, or the local machine sleeps. Only local agents and a local manager controlling another machine depend on this process. Never tell the user remote work needs this machine kept open.
+- If this machine is struggling with a heavy build, test, or job, you may move only that compute to another granted computer, and then return the result. Say so first.
+- Before starting remote work, state the machine, workspace, placement, and execution owner in one sentence so the user can stop you. For return: "I'll run this on <machine> (<workspace>) and bring the changed files back here, without committing or pushing anything." For stay: "I'll run this on <machine> (<workspace>) and keep the work there; its manager and workers run on that machine."
+- Never commit, push, or open a pull request on a linked computer. Never push returned work. Returned changes are written under .koryphaios/incoming/<transferId>/ and the user applies them.
+- Use delegate to start one remote chat, snapshot to inspect it, and collect_work to bring a return-policy chat's changes back. A stay-policy chat cannot be collected.
+- Workers cannot contact another machine, so remote fan-out belongs to the target chat's manager. Provider credentials and logins are never transferred by an agent. Only the user can stage a login on a target.
+`;
 
 export const MANAGER_OUTPUT_TOKEN_LIMIT = 16_384;
 export const WORKER_OUTPUT_TOKEN_LIMIT = 16_384;
@@ -598,6 +639,61 @@ function capabilities(provider: ProviderName | string): ProviderCapabilityProfil
   };
 }
 
+function renderExecutionContext(
+  input: { role: PromptRole; provider: ProviderName | string; model?: string },
+  capability: ProviderCapabilityProfile,
+): string {
+  const roleMeaning =
+    input.role === 'manager'
+      ? 'You own the user-facing outcome and the final answer.'
+      : input.role === 'worker'
+        ? 'You are a bounded worker. Your output goes to the manager as evidence, not to the user as a completion.'
+        : 'You are an independent reviewer. Your verdict is advisory to the host and must rest on inspected evidence.';
+  const isolation = capability.filesystemIsolation
+    ? 'OS-confined to the granted workspace paths.'
+    : 'Policy-gated, not OS-confined. Every write and command still goes through the host tool policy.';
+  return `## Your execution context
+- Role: ${input.role}. ${roleMeaning}
+- Harness: ${input.provider} (${capability.mode}${input.model ? `, model ${input.model}` : ''}).
+- Filesystem: ${isolation}
+- Native shell: ${capability.shell ? 'available through Kory tool policy' : 'not available; use Kory-managed tools only'}.
+- Never claim a capability this harness does not have. Report an unavailable tool as unavailable instead of simulating its result.`;
+}
+
+function renderDelegation(delegation: DelegationContext | undefined): string {
+  if (!delegation) return '';
+  if (!delegation.available) {
+    return `## Sub-agents (delegation)
+Delegation is unavailable this turn${delegation.reason ? ` (${delegation.reason})` : ''}. Do the work directly. Do not claim to have spawned or consulted an agent.`;
+  }
+  const pools = delegation.pools.length
+    ? delegation.pools
+        .map(
+          (pool) =>
+            `- ${pool.domain}: ${
+              pool.unrestricted
+                ? 'all enabled models (no category allowlist)'
+                : pool.models.length
+                  ? pool.models.join(', ')
+                  : 'NO ELIGIBLE MODEL configured for this category'
+            }`,
+        )
+        .join('\n')
+    : '- none configured';
+  const worktreeGuidance =
+    delegation.worktreeMode === 'always'
+      ? 'The user set Worktree to Always for this chat; every worker runs in an isolated worktree and the worktree argument is ignored.'
+      : delegation.worktreeMode === 'never'
+        ? 'The user set Worktree to Never for this chat; every worker writes directly into this checkout and the worktree argument is ignored.'
+        : 'You decide worktree isolation for every delegation and must pass worktree explicitly. Use worktree: true when two or more workers may edit files at the same time, for risky or experimental changes, or when the user asks for isolation — a new worktree starts from the last commit and cannot see uncommitted work. Use worktree: false for read-only research, for a single worker making a focused edit, and whenever the task depends on uncommitted changes in the chat checkout.';
+  return `## Sub-agents (delegation)
+You are the only agent permitted to start a sub-agent. Call delegate_to_worker with a self-contained task and the domain whose pool fits the work.
+${pools}
+Before a fan-out or any long delegation, call get_resource_budget to check provider-reported balances, live rate-limit windows, and this chat's spend. Never assign work to a route you know is exhausted or rate limited; prefer a healthy route or configure a fallback chain. manage_agents list shows every manager, worker, and critic with its model, provider, reasoning, fallback chain, permission posture, worktree isolation, and busy state. You may change a worker's or the manager's next-turn model, reasoning, or fallback chain when the user asks or the task requires it, but permissions remain exactly as the user configured them and are view-only here. A manager control persists for this chat and applies to manager turns until changed, but never overrides a model the user explicitly pinned on a request. Do not change controls routinely, and do not silently widen a worker's authority.${delegation.planning ? '\nPlan mode: delegation is available for investigation, design analysis, and independent evidence gathering. Do not ask a worker to implement or reconcile changes yet; keep the plan in your response and durable plan note.' : ''}
+The user chooses the manager and each pool; choose only within the named pool. Prefer an independent model from that pool. When a pool has no eligible model, the host reuses the manager model and reports the worker as non-independent, so say so rather than pretending the work was independent. Each worker starts from its own dedicated context — your conversation is not replayed into it — so make every task self-contained and say what evidence to return. ${worktreeGuidance} Issue one call per independent workstream; calls emitted together run concurrently. There is no fixed host concurrency cap by default: excess delegations queue until a worker slot is free instead of failing, and a positive workspace.worktreeLimit is the user's own choice. Never state that a worker ran before the tool returns its result, and never present a worker's summary as your own verification. Use schedule_monitor when the user asks for a recurring check or a later wake-up; the host starts a real turn in this chat at that cadence and queues it while the chat is busy.`;
+
+}
+
 function renderTaskContract(contract: TaskContract): string {
   const goalContext = contract.goalContext
     ? `\n\n## Goal Mode execution context (immutable)\nGoal ID: ${contract.goalContext.goalId}\nGoal objective: ${contract.goalContext.objective}\nActive checklist item: ${contract.goalContext.itemTitle} (${contract.goalContext.itemId})\nProvider verification: ${contract.goalContext.verification}\nDo not mark this item or goal complete without concrete verified evidence. ${contract.goalContext.verification === 'eligible' ? '' : 'This provider result is not sufficient completion evidence; require independent managed/local verification.'}`
@@ -647,6 +743,8 @@ export function compilePrompt(input: {
   contextPaths?: string[];
   /** Live chat metadata belongs after the stable cache prefix. */
   sessionTitle?: string;
+  /** Manager-only: the worker pools this turn can actually delegate into. */
+  delegation?: DelegationContext;
   skillSelection?: {
     pins?: string[];
     remove?: string[];
@@ -657,6 +755,12 @@ export function compilePrompt(input: {
      * explicit skill-context cap. Authored budgets remain advisory metadata. */
     warnOnAuthoredBudgetOverflow?: boolean;
     activePaths?: string[];
+    /** Skills the chat's agent blocked via manage_skill_feeding; the feeder
+     * stops injecting them (see resolveSkills for the exact semantics). */
+    agentBlocked?: string[];
+    /** Skills whose full text the agent already holds in context from
+     * load_skill_detail; they are fed as minimal pointers only. */
+    detailAlreadyInContext?: string[];
   };
 }): CompiledPrompt {
   const instructionState = inspectInstructionSources(input.workingDirectory, input.contextPaths);
@@ -698,7 +802,12 @@ export function compilePrompt(input: {
     `## Provider capability truth\n${providerRules}`,
     `## Applicable repository instructions (broad to specific)\n${instructionText}`,
   ];
-  const taskSections = [renderTaskContract(input.taskContract)];
+  const taskSections = [
+    renderTaskContract(input.taskContract),
+    renderExecutionContext(input, capabilityProfile),
+    input.role === 'manager' ? COMPUTE_DELEGATION : '',
+    input.role === 'manager' ? renderDelegation(input.delegation) : '',
+  ];
   if (input.role === 'manager' && input.sessionTitle) {
     taskSections.push(`## Current session title\n${JSON.stringify(input.sessionTitle)}`);
   }

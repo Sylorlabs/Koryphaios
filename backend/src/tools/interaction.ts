@@ -33,11 +33,143 @@ export class RequestCriticReviewTool implements Tool {
   }
 }
 
+export interface AskUserPrompt {
+  question: string;
+  options: string[];
+}
+
+const ASK_USER_OTHER_OPTION = /^\s*(other|something else)\b/i;
+const ASK_USER_MAX_OPTIONS = 8;
+const ASK_USER_STOP_ANSWERS = new Set(['__cancelled__', '__timeout__']);
+
+function normalizeAskUserOptions(raw: unknown): string[] {
+  const items = Array.isArray(raw) ? raw : typeof raw === 'string' ? [raw] : [];
+  const options: string[] = [];
+  const seen = new Set<string>();
+  for (const item of items) {
+    let option: string | null = null;
+    if (typeof item === 'string') {
+      option = item.trim();
+    } else if (typeof item === 'object' && item !== null) {
+      const record = item as Record<string, unknown>;
+      for (const key of ['label', 'value', 'title', 'text', 'option']) {
+        const candidate = record[key];
+        if (typeof candidate === 'string' && candidate.trim()) {
+          option = candidate.trim();
+          break;
+        }
+      }
+    }
+    if (!option || ASK_USER_OTHER_OPTION.test(option)) continue;
+    const dedupeKey = option.toLowerCase();
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    options.push(option);
+    if (options.length >= ASK_USER_MAX_OPTIONS) break;
+  }
+  return options;
+}
+
+function askUserQuestionText(entry: unknown, keys: string[]): string | null {
+  if (typeof entry !== 'object' || entry === null) return null;
+  const record = entry as Record<string, unknown>;
+  for (const key of keys) {
+    const candidate = record[key];
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+  }
+  return null;
+}
+
+/**
+ * Normalize the agent-supplied ask_user input into concrete prompts. Accepts
+ * the plain `{ question, options }` shape and the Claude Code AskUserQuestion
+ * `{ questions: [{ question, header?, options: [{ label, description }] }] }`
+ * shape so a CLI-native call still lands on the durable question UI.
+ */
+export function normalizeAskUserInput(input: unknown): AskUserPrompt[] {
+  const record = typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {};
+  if (Array.isArray(record.questions)) {
+    const prompts: AskUserPrompt[] = [];
+    for (const entry of record.questions) {
+      const question = askUserQuestionText(entry, ['question', 'prompt', 'text']);
+      if (!question) continue;
+      const options =
+        typeof entry === 'object' && entry !== null
+          ? normalizeAskUserOptions((entry as Record<string, unknown>).options)
+          : [];
+      prompts.push({ question, options });
+    }
+    return prompts;
+  }
+  const question = askUserQuestionText(record, ['question']);
+  if (!question) return [];
+  return [{ question, options: normalizeAskUserOptions(record.options) }];
+}
+
+/**
+ * Runs the normalized ask_user flow: sequential questions, always answerable
+ * with a custom response or a keep-chatting defer. Shared by the first-party
+ * AskUserTool, the manager intercept, and the CLI MCP-bridge path (whose
+ * waitForUserInput defaults both UI affordances off for binary approvals).
+ */
+export async function runAskUser(
+  callId: string,
+  name: string,
+  input: unknown,
+  wait: (
+    question: string,
+    options: string[],
+    opts: { allowOther: boolean; allowKeepChatting: boolean },
+  ) => Promise<string>,
+): Promise<ToolCallOutput> {
+  const prompts = normalizeAskUserInput(input);
+  if (prompts.length === 0) {
+    return {
+      callId,
+      name,
+      output:
+        'ask_user needs { "question": string, "options"?: string[] }. Example: {"question":"Which database should I use?","options":["SQLite (Recommended)","Postgres"]}',
+      isError: true,
+      durationMs: 0,
+    };
+  }
+  const answered: { question: string; answer: string }[] = [];
+  try {
+    for (const prompt of prompts) {
+      const answer = await wait(prompt.question, prompt.options, {
+        allowOther: true,
+        allowKeepChatting: true,
+      });
+      answered.push({ question: prompt.question, answer });
+      if (ASK_USER_STOP_ANSWERS.has(answer)) break;
+    }
+  } catch (err: unknown) {
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'ask_user: error waiting for user input',
+    );
+    return {
+      callId,
+      name,
+      output: `Error waiting for user input: ${err instanceof Error ? err.message : String(err)}`,
+      isError: true,
+      durationMs: 0,
+    };
+  }
+  const output =
+    answered.length === 1
+      ? `User selected: ${answered[0]!.answer}`
+      : answered
+          .map((entry) => `Q: ${entry.question}\nUser selected: ${entry.answer}`)
+          .join('\n\n');
+  return { callId, name, output, isError: false, durationMs: 0 };
+}
+
 export class AskUserTool implements Tool {
   readonly name = 'ask_user';
   readonly role = 'manager' as const;
   readonly description =
-    "Ask the user a question and provide multiple options for them to choose from. Use this when you need user guidance, approval, or clarification on how to proceed. Always include an 'Other' option.";
+    "Ask the user a question and wait for their answer. Use it whenever you are unsure, the request is ambiguous, or a decision would materially change the result. Provide 2-4 short options with your recommendation first; the UI always offers a custom-answer box, so do not add an 'Other' option.";
   readonly inputSchema = {
     type: 'object',
     properties: {
@@ -45,16 +177,13 @@ export class AskUserTool implements Tool {
       options: {
         type: 'array',
         items: { type: 'string' },
-        description:
-          "List of options for the user to choose from (e.g. ['Apply changes', 'Discard changes', 'Other...'])",
+        description: '2-4 short answer choices, recommended first',
       },
     },
-    required: ['question', 'options'],
+    required: ['question'],
   };
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
-    const { question, options } = call.input as { question: string; options: string[] };
-
     if (!ctx.waitForUserInput) {
       return {
         callId: call.id,
@@ -64,29 +193,7 @@ export class AskUserTool implements Tool {
         durationMs: 0,
       };
     }
-
-    try {
-      const selection = await ctx.waitForUserInput(question, options);
-      return {
-        callId: call.id,
-        name: this.name,
-        output: `User selected: ${selection}`,
-        isError: false,
-        durationMs: 0,
-      };
-    } catch (err: unknown) {
-      serverLog.debug(
-        { err: err instanceof Error ? err.message : String(err) },
-        'ask_user: error waiting for user input',
-      );
-      return {
-        callId: call.id,
-        name: this.name,
-        output: `Error waiting for user input: ${err instanceof Error ? err.message : String(err)}`,
-        isError: true,
-        durationMs: 0,
-      };
-    }
+    return runAskUser(call.id, this.name, call.input, ctx.waitForUserInput);
   }
 }
 
@@ -119,6 +226,26 @@ export class DelegateToWorkerTool implements Tool {
         enum: ['low', 'medium', 'high', 'xhigh'],
         description: 'Optional reasoning effort for this worker turn.',
       },
+      worktree: {
+        type: 'boolean',
+        description:
+          'Whether this worker gets its own Git worktree, which starts from the last commit and cannot see uncommitted work. Use false for read-only research, a single focused edit, or work that depends on uncommitted changes in the chat checkout; true for parallel or risky edits. Required unless the chat Worktree setting is Always or Never, which overrides it.',
+      },
+      fallbacks: {
+        type: 'array',
+        maxItems: 20,
+        description:
+          'Ordered fallback models tried only when the primary worker fails because its provider is unavailable or rate limited. Each step may set its own reasoning level.',
+        items: {
+          type: 'object',
+          properties: {
+            model: { type: 'string', description: 'Fallback model, optionally provider:model.' },
+            reasoningLevel: { type: 'string', enum: ['low', 'medium', 'high', 'xhigh'] },
+          },
+          required: ['model'],
+          additionalProperties: false,
+        },
+      },
       criticSkills: {
         type: 'array',
         items: { type: 'string' },
@@ -130,12 +257,29 @@ export class DelegateToWorkerTool implements Tool {
   };
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
-    const { task, domain, model, reasoningLevel } = call.input as {
+    const { task, domain, model, reasoningLevel, worktree } = call.input as {
       task: string;
       domain?: string;
       model?: string;
       reasoningLevel?: string;
+      worktree?: boolean;
     };
+    const fallbacks = Array.isArray(call.input.fallbacks)
+      ? call.input.fallbacks
+          .filter(
+            (step): step is { model: string; reasoningLevel?: string } =>
+              typeof step === 'object' &&
+              step !== null &&
+              typeof (step as { model?: unknown }).model === 'string' &&
+              Boolean((step as { model: string }).model.trim()),
+          )
+          .map((step) => ({
+            model: step.model.trim(),
+            ...(typeof step.reasoningLevel === 'string'
+              ? { reasoningLevel: step.reasoningLevel }
+              : {}),
+          }))
+      : undefined;
     if (!task || typeof task !== 'string' || !task.trim()) {
       return {
         callId: call.id,
@@ -147,13 +291,13 @@ export class DelegateToWorkerTool implements Tool {
     }
     if (!ctx.delegateToWorker) {
       const role = ctx.callerRole ?? 'unknown';
-      const mode = ctx.permissionPolicy?.interactionMode ?? 'act';
+      // Plan mode is a planning posture, not a delegation veto. A manager may
+      // delegate investigation while planning; only the host grant controls
+      // whether delegation is bound at all.
       const reason =
         role !== 'manager'
           ? `caller role is '${role}' (delegation requires 'manager')`
-          : mode === 'plan'
-            ? 'session is in planning mode'
-            : 'no host delegation grant is bound to this session';
+          : 'no host delegation grant is bound to this session';
       return {
         callId: call.id,
         name: this.name,
@@ -167,7 +311,15 @@ export class DelegateToWorkerTool implements Tool {
         worker: call.input.workerSkills,
         critic: call.input.criticSkills,
       });
-      const result = await ctx.delegateToWorker(task.trim(), domain, skills, model, reasoningLevel);
+      const result = await ctx.delegateToWorker(
+        task.trim(),
+        domain,
+        skills,
+        model,
+        reasoningLevel,
+        typeof worktree === 'boolean' ? worktree : undefined,
+        fallbacks,
+      );
       const failed = typeof result === 'string' && result.startsWith('WORKER_FAILED');
       return {
         callId: call.id,

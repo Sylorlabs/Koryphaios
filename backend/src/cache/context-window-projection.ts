@@ -4,6 +4,29 @@ const DEFAULT_SAFETY_RATIO = 0.9;
 const DEFAULT_RECENT_TAIL_RATIO = 0.62;
 const TOKEN_CHARS = 4;
 
+/**
+ * Inline images are billed by pixel geometry, never by the base64 payload that
+ * carries them. A 1.4 MB screenshot is ~1.9M base64 characters, which the prose
+ * estimate would charge as ~467k tokens and let a single screenshot trip the
+ * "latest context alone exceeds the window" guard on a 1M-token model. The
+ * [1024, 4096] band matches the image estimate already used by
+ * `estimateContextBreakdown` in kory/prompts/index.ts.
+ */
+const IMAGE_MIN_TOKENS = 1_024;
+const IMAGE_MAX_TOKENS = 4_096;
+const IMAGE_TOKENS_PER_PIXEL = 1 / 750;
+
+/** Parity with `estimateProviderMessagesChars`: a payload-free media block is ~1k tokens. */
+const PAYLOADLESS_MEDIA_TOKENS = 1_000;
+
+/**
+ * Audio and video are billed per second of media, not per base64 byte. A single
+ * attachment is capped so it can never, by itself, exceed a large window and
+ * hard-throw before the provider is even called. 32k tokens comfortably covers
+ * the longest clip `MAX_CHAT_MEDIA_BYTES` admits.
+ */
+const MEDIA_MAX_TOKENS = 32_768;
+
 export interface ProjectableContextMessage {
   role: string;
   content: unknown;
@@ -72,12 +95,62 @@ function safeJson(value: unknown): string {
   }
 }
 
+function imageTokenUpperBound(block: Record<string, unknown>): number {
+  const width = typeof block.width === 'number' ? block.width : undefined;
+  const height = typeof block.height === 'number' ? block.height : undefined;
+  const pixels = width !== undefined && height !== undefined ? width * height : 0;
+  if (pixels > 0) {
+    return Math.min(
+      IMAGE_MAX_TOKENS,
+      Math.max(IMAGE_MIN_TOKENS, Math.ceil(pixels * IMAGE_TOKENS_PER_PIXEL)),
+    );
+  }
+  // Chat image blocks carry only bytes, so geometry is usually absent and the
+  // ceiling is the effective estimate. Providers tile images (768px tiles at
+  // ~258 tokens each), which puts a 4K screenshot near this ceiling and a
+  // small one well under it. Over-reserving only costs a projection.
+  return IMAGE_MAX_TOKENS;
+}
+
+/**
+ * Counts a message body without ever tokenizing binary payloads as prose.
+ * Images use a geometry band. Audio and video stay payload-scaled, matching
+ * `estimateProviderMessagesChars`, but each attachment is capped so a single
+ * clip cannot by itself trip the window guard.
+ */
+function contentTokenUpperBound(content: unknown): number {
+  if (typeof content === 'string') return tokenUpperBoundFromChars(content.length);
+  if (!Array.isArray(content)) return tokenUpperBoundFromChars(safeJson(content).length);
+  let total = 0;
+  for (const entry of content) {
+    const block = entry as Record<string, unknown> | null;
+    if (!block || typeof block !== 'object') {
+      total += tokenUpperBoundFromChars(safeJson(entry).length);
+      continue;
+    }
+    if (block.type === 'image') {
+      total += imageTokenUpperBound(block);
+      continue;
+    }
+    if (block.type === 'audio' || block.type === 'video') {
+      const payload = typeof block.mediaData === 'string' ? block.mediaData : '';
+      total +=
+        payload.length > 0
+          ? Math.min(MEDIA_MAX_TOKENS, tokenUpperBoundFromChars(payload.length))
+          : PAYLOADLESS_MEDIA_TOKENS;
+      continue;
+    }
+    total += tokenUpperBoundFromChars(safeJson(entry).length);
+  }
+  return total;
+}
+
 export function projectionMessageTokenUpperBound(message: ProjectableContextMessage): number {
-  const content = typeof message.content === 'string' ? message.content : safeJson(message.content);
   const toolCalls = message.tool_calls === undefined ? '' : safeJson(message.tool_calls);
   const toolId = message.tool_call_id ?? '';
-  return tokenUpperBoundFromChars(
-    message.role.length + content.length + toolCalls.length + toolId.length + 24,
+  return (
+    contentTokenUpperBound(message.content) +
+    tokenUpperBoundFromChars(message.role.length + toolCalls.length + toolId.length + 24)
   );
 }
 

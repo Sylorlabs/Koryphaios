@@ -6,6 +6,57 @@ use std::process::Command;
 
 const SERVICE_ID: &str = "com.sylorlabs.koryphaios.backend";
 
+/// `launchctl bootout` only *initiates* shutdown — the label stays registered
+/// until launchd finishes teardown, so a `bootstrap` issued in that window
+/// fails with 37 ("Operation already in progress") or 5 ("Input/output
+/// error"). Those two are transient; anything else is a real failure.
+#[cfg(any(target_os = "macos", test))]
+fn transient_bootstrap_error(error: &str) -> bool {
+    error.contains("37:") || error.contains("5:")
+}
+
+/// Poll `is_loaded` until the service name leaves the domain or the deadline
+/// passes. Sleeping and the clock are injected so the logic is unit-testable.
+#[cfg(any(target_os = "macos", test))]
+fn wait_for_service_unload(
+    is_loaded: &mut dyn FnMut() -> bool,
+    sleep: &mut dyn FnMut(std::time::Duration),
+    now: &mut dyn FnMut() -> std::time::Duration,
+) -> Result<(), String> {
+    const UNLOAD_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
+    const UNLOAD_POLL: std::time::Duration = std::time::Duration::from_millis(100);
+    let deadline = now() + UNLOAD_DEADLINE;
+    while is_loaded() {
+        if now() >= deadline {
+            return Err("Login service did not unload within 30s of bootout".to_string());
+        }
+        sleep(UNLOAD_POLL);
+    }
+    Ok(())
+}
+
+/// Bootstrap, retrying transient launchd teardown races until the deadline.
+/// The last error is returned once the deadline passes; unrelated errors fail
+/// immediately.
+#[cfg(any(target_os = "macos", test))]
+fn bootstrap_with_retry(
+    bootstrap: &mut dyn FnMut() -> Result<(), String>,
+    sleep: &mut dyn FnMut(std::time::Duration),
+    now: &mut dyn FnMut() -> std::time::Duration,
+) -> Result<(), String> {
+    const RETRY_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+    const RETRY_BACKOFF: std::time::Duration = std::time::Duration::from_millis(250);
+    let deadline = now() + RETRY_DEADLINE;
+    loop {
+        match bootstrap() {
+            Err(error) if transient_bootstrap_error(&error) && now() < deadline => {
+                sleep(RETRY_BACKOFF);
+            }
+            result => return result,
+        }
+    }
+}
+
 /// Stop this session's backend without removing its next-login registration.
 #[cfg(target_os = "macos")]
 pub(crate) fn stop() -> Result<(), String> {
@@ -18,6 +69,19 @@ pub(crate) fn stop() -> Result<(), String> {
         .success();
     if loaded {
         run(Command::new("launchctl").args(["bootout", &service]))?;
+        // Return only once the name is gone so a later start cannot collide
+        // with the teardown in progress.
+        let mut is_loaded = || {
+            Command::new("launchctl")
+                .args(["print", &service])
+                .output()
+                .map(|output| output.status.success())
+                .unwrap_or(false)
+        };
+        let started = std::time::Instant::now();
+        wait_for_service_unload(&mut is_loaded, &mut std::thread::sleep, &mut || {
+            started.elapsed()
+        })?;
     }
     Ok(())
 }
@@ -204,7 +268,29 @@ pub(crate) fn ensure_running(spec: &ServiceSpec) -> Result<(), String> {
         run(Command::new("launchctl").args(["bootout", &service]))?;
     }
     run(Command::new("launchctl").args(["enable", &service]))?;
-    if !loaded || changed {
+    if loaded && changed {
+        // bootout above only initiated teardown: the label is still registered
+        // until launchd cleans up, and bootstrapping into that window races it
+        // (37 "Operation already in progress"). Wait for the unload, then
+        // retry transient teardown errors briefly.
+        let mut is_loaded = || {
+            Command::new("launchctl")
+                .args(["print", &service])
+                .output()
+                .map(|output| output.status.success())
+                .unwrap_or(false)
+        };
+        let mut bootstrap = || {
+            run(Command::new("launchctl")
+                .arg("bootstrap")
+                .arg(&domain)
+                .arg(&manifest))
+        };
+        let started = std::time::Instant::now();
+        let mut now = || started.elapsed();
+        wait_for_service_unload(&mut is_loaded, &mut std::thread::sleep, &mut now)?;
+        bootstrap_with_retry(&mut bootstrap, &mut std::thread::sleep, &mut now)?;
+    } else if !loaded {
         run(Command::new("launchctl")
             .arg("bootstrap")
             .arg(&domain)
@@ -698,5 +784,320 @@ mod tests {
         assert!(task.contains("<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>"));
         assert!(task.contains("<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>"));
         assert!(task.contains("--background-service &quot;C:\\My App\\service.json&quot;"));
+    }
+}
+
+const PATH_MARKER_BEGIN: &str = "__KORY_PATH_BEGIN_9F3A__";
+const PATH_MARKER_END: &str = "__KORY_PATH_END_9F3A__";
+
+/// PATH value for the installed background service. Probing the login shell
+/// keeps the manifest identical whether the app was launched from the Dock
+/// (minimal GUI PATH) or a terminal (full user PATH), and keeps user-installed
+/// CLIs resolvable either way. A constant manifest also avoids needlessly
+/// restarting the service when the launch context changes.
+#[cfg(unix)]
+pub(crate) fn service_path() -> Option<String> {
+    login_shell_path().or_else(fallback_service_path)
+}
+
+/// Windows passes the inherited PATH through unchanged: GUI apps inherit the
+/// user's environment block there, so there is no Dock/Terminal split.
+#[cfg(windows)]
+pub(crate) fn service_path() -> Option<String> {
+    std::env::var("PATH").ok()
+}
+
+/// Ask the user's login shell for its PATH. Interactive rc files may print
+/// noise or block, so PATH is emitted between unique markers and the child is
+/// killed after a hard timeout. stdin stays null so a shell that prompts
+/// cannot hang the install.
+#[cfg(unix)]
+fn login_shell_path() -> Option<String> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    let shell = std::env::var("SHELL")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| {
+            if cfg!(target_os = "macos") {
+                "/bin/zsh".to_string()
+            } else {
+                "/bin/bash".to_string()
+            }
+        });
+    let mut child = Command::new(shell)
+        .args([
+            "-ilc",
+            &format!("printf '%s' {PATH_MARKER_BEGIN}$PATH{PATH_MARKER_END}"),
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => break,
+            Ok(Some(_)) | Err(_) => return None,
+            Ok(None) => {}
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let mut stdout = String::new();
+    child.stdout.take()?.read_to_string(&mut stdout).ok()?;
+    parse_marked_path(&stdout)
+}
+
+/// Extract the marked PATH out of login-shell output, tolerating arbitrary
+/// rc-file noise before and after the markers.
+fn parse_marked_path(stdout: &str) -> Option<String> {
+    let start = stdout.find(PATH_MARKER_BEGIN)? + PATH_MARKER_BEGIN.len();
+    let end = stdout[start..].find(PATH_MARKER_END)? + start;
+    let path = stdout[start..end].trim();
+    // The value lands inside a service manifest; reject embedded control
+    // characters along with an empty PATH.
+    if path.is_empty() || path.chars().any(|c| c.is_control()) {
+        return None;
+    }
+    Some(path.to_string())
+}
+
+/// Merge the inherited PATH with the standard locations of user-managed
+/// toolchains, first occurrence wins.
+#[cfg(unix)]
+fn merge_service_path(inherited: &str, home: &str) -> String {
+    const STANDARD_DIRS: &[&str] = &[
+        "/opt/homebrew/bin",
+        "/opt/homebrew/sbin",
+        "/usr/local/bin",
+        "~/.local/bin",
+        "~/.bun/bin",
+        "~/.cargo/bin",
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+    ];
+    let mut parts: Vec<String> = Vec::new();
+    let mut push = |entry: &str| {
+        if !entry.is_empty() && !parts.iter().any(|p| p == entry) {
+            parts.push(entry.to_string());
+        }
+    };
+    for entry in inherited.split(':') {
+        push(entry);
+    }
+    for dir in STANDARD_DIRS {
+        match dir.strip_prefix("~/") {
+            Some(rest) if !home.is_empty() => push(&format!("{home}/{rest}")),
+            Some(_) => {}
+            None => push(dir),
+        }
+    }
+    parts.join(":")
+}
+
+#[cfg(unix)]
+fn fallback_service_path() -> Option<String> {
+    let merged = merge_service_path(
+        std::env::var("PATH").as_deref().unwrap_or_default(),
+        std::env::var("HOME").as_deref().unwrap_or_default(),
+    );
+    if merged.is_empty() {
+        None
+    } else {
+        Some(merged)
+    }
+}
+
+#[cfg(test)]
+mod service_path_tests {
+    use super::*;
+
+    #[test]
+    fn parse_marked_path_ignores_rc_noise_around_markers() {
+        let stdout = "rc banner\r\n__KORY_PATH_BEGIN_9F3A__/usr/local/bin:/usr/bin__KORY_PATH_END_9F3A__\ntrailing noise";
+        assert_eq!(
+            parse_marked_path(stdout).as_deref(),
+            Some("/usr/local/bin:/usr/bin")
+        );
+    }
+
+    #[test]
+    fn parse_marked_path_requires_both_markers() {
+        assert_eq!(parse_marked_path("no markers at all"), None);
+        assert_eq!(
+            parse_marked_path("__KORY_PATH_BEGIN_9F3A__/usr/bin"),
+            None
+        );
+        assert_eq!(parse_marked_path("__KORY_PATH_END_9F3A__"), None);
+    }
+
+    #[test]
+    fn parse_marked_path_rejects_empty_or_control_characters() {
+        assert_eq!(
+            parse_marked_path("__KORY_PATH_BEGIN_9F3A____KORY_PATH_END_9F3A__"),
+            None
+        );
+        assert_eq!(
+            parse_marked_path("__KORY_PATH_BEGIN_9F3A__/bin\n/evil__KORY_PATH_END_9F3A__"),
+            None
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn merge_service_path_appends_standard_dirs_without_duplicates() {
+        let merged = merge_service_path("/usr/bin:/custom/bin", "/home/u");
+        let parts: Vec<&str> = merged.split(':').collect();
+        assert_eq!(parts[0], "/usr/bin");
+        assert_eq!(parts[1], "/custom/bin");
+        assert_eq!(parts.iter().filter(|p| **p == "/usr/bin").count(), 1);
+        assert!(parts.contains(&"/opt/homebrew/bin"));
+        assert!(parts.contains(&"/home/u/.local/bin"));
+        assert!(parts.contains(&"/home/u/.bun/bin"));
+        assert!(parts.contains(&"/home/u/.cargo/bin"));
+        assert_eq!(parts.last(), Some(&"/sbin"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn merge_service_path_skips_home_dirs_without_home() {
+        let merged = merge_service_path("/usr/bin", "");
+        assert!(!merged.contains(".local/bin"));
+        assert!(!merged.contains('~'));
+    }
+
+    // Fake clock for the launchd wait/retry helpers: `sleep` advances time so
+    // deadlines and poll counts are exercised without real waiting.
+    struct FakeLaunchd {
+        time: std::rc::Rc<std::cell::RefCell<std::time::Duration>>,
+    }
+
+    impl FakeLaunchd {
+        fn new() -> Self {
+            Self {
+                time: std::rc::Rc::new(std::cell::RefCell::new(std::time::Duration::ZERO)),
+            }
+        }
+        fn sleep(&self) -> impl FnMut(std::time::Duration) + '_ {
+            let time = self.time.clone();
+            move |duration| *time.borrow_mut() += duration
+        }
+        fn now(&self) -> impl FnMut() -> std::time::Duration + '_ {
+            let time = self.time.clone();
+            move || *time.borrow()
+        }
+    }
+
+    #[test]
+    fn bootstrap_waits_until_unloaded() {
+        use std::time::Duration;
+        let fake = FakeLaunchd::new();
+        // Loaded for three polls, then gone.
+        let polls = std::rc::Rc::new(std::cell::RefCell::new(3));
+        let mut is_loaded = {
+            let polls = polls.clone();
+            move || {
+                let mut remaining = polls.borrow_mut();
+                if *remaining == 0 {
+                    false
+                } else {
+                    *remaining -= 1;
+                    true
+                }
+            }
+        };
+        let bootstrapped = std::rc::Rc::new(std::cell::RefCell::new(false));
+        let unloaded_at_bootstrap = std::rc::Rc::new(std::cell::RefCell::new(false));
+        let mut bootstrap = {
+            let bootstrapped = bootstrapped.clone();
+            let unloaded = unloaded_at_bootstrap.clone();
+            let polls = polls.clone();
+            move || {
+                *bootstrapped.borrow_mut() = true;
+                *unloaded.borrow_mut() = *polls.borrow() == 0;
+                Ok(())
+            }
+        };
+        let mut sleep = fake.sleep();
+        let mut now = fake.now();
+        wait_for_service_unload(&mut is_loaded, &mut sleep, &mut now).unwrap();
+        bootstrap_with_retry(&mut bootstrap, &mut sleep, &mut now).unwrap();
+        assert!(*bootstrapped.borrow());
+        assert!(
+            *unloaded_at_bootstrap.borrow(),
+            "bootstrap ran before the service unloaded"
+        );
+        assert_eq!(*fake.time.borrow(), Duration::from_millis(300));
+    }
+
+    #[test]
+    fn bootstrap_retries_transient_errors_then_succeeds() {
+        let fake = FakeLaunchd::new();
+        let attempts = std::rc::Rc::new(std::cell::RefCell::new(0));
+        let mut bootstrap = {
+            let attempts = attempts.clone();
+            move || {
+                let mut n = attempts.borrow_mut();
+                *n += 1;
+                if *n < 3 {
+                    Err("Bootstrap failed (37: Operation already in progress)".to_string())
+                } else {
+                    Ok(())
+                }
+            }
+        };
+        let mut sleep = fake.sleep();
+        let mut now = fake.now();
+        bootstrap_with_retry(&mut bootstrap, &mut sleep, &mut now).unwrap();
+        assert_eq!(*attempts.borrow(), 3);
+    }
+
+    #[test]
+    fn bootstrap_gives_up_after_the_deadline_with_the_last_error() {
+        use std::time::Duration;
+        let fake = FakeLaunchd::new();
+        let mut bootstrap =
+            || Err::<(), String>("Bootstrap failed (37: Operation already in progress)".to_string());
+        let mut sleep = fake.sleep();
+        let mut now = fake.now();
+        let error = bootstrap_with_retry(&mut bootstrap, &mut sleep, &mut now).unwrap_err();
+        assert!(error.contains("37:"));
+        assert!(*fake.time.borrow() >= Duration::from_secs(10));
+    }
+
+    #[test]
+    fn bootstrap_does_not_retry_unrelated_errors() {
+        let fake = FakeLaunchd::new();
+        let attempts = std::rc::Rc::new(std::cell::RefCell::new(0));
+        let mut bootstrap = {
+            let attempts = attempts.clone();
+            move || {
+                *attempts.borrow_mut() += 1;
+                Err::<(), String>("Bootstrap failed: Bootstrapped failed with exit code 1".into())
+            }
+        };
+        let mut sleep = fake.sleep();
+        let mut now = fake.now();
+        let error = bootstrap_with_retry(&mut bootstrap, &mut sleep, &mut now).unwrap_err();
+        assert!(error.contains("exit code 1"));
+        assert_eq!(*attempts.borrow(), 1);
+    }
+
+    #[test]
+    fn unload_wait_times_out_when_the_service_never_leaves() {
+        let fake = FakeLaunchd::new();
+        let mut is_loaded = || true;
+        let mut sleep = fake.sleep();
+        let mut now = fake.now();
+        let error = wait_for_service_unload(&mut is_loaded, &mut sleep, &mut now).unwrap_err();
+        assert!(error.contains("did not unload"));
     }
 }

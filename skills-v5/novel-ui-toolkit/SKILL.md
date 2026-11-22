@@ -23,7 +23,13 @@ Coalesce continuous input into one paint per frame: a burst of scroll, wheel, or
 
 ### Operating contract
 
-Design a reusable rendering or widget substrate without cloning browser architecture by default.
+Keep the semantic projection in lockstep with visual selection, so the active item alone carries `aria-current` and an activation key invokes exactly that item and never its neighbour. Convert a pointer event exactly once, from client coordinates into model coordinates: subtract the canvas rectangle origin, subtract the pan offset, then divide by the zoom factor, and compare the result with model bounds. Applying the transform twice, or comparing client coordinates with model coordinates, resolves a click to the wrong node. Design a reusable rendering or widget substrate without cloning browser architecture by default.
+
+### Canvas surface and virtualized window
+
+A canvas has two sizes and they are not interchangeable. The backing store comes from the dataset, and the CSS box must equal it exactly. A percentage width, a padding box, or a border that shrinks the drawing area all produce a surface that silently scales every coordinate, so the hit test and the paint disagree while the picture still looks plausible. Set the CSS box in pixels from the same constants that set the backing store, and fail loudly when the measured client box and the backing store diverge.
+
+A virtualized list derives its projected window instead of guessing one. Walk cumulative item and group header heights from the scroll offset until the viewport height is covered, add a small overscan for pointer and keyboard travel, and keep the projected row count inside the stated bound. A fixed row guess either overflows the bound on tall rows or leaves a blank band on short ones. Project only the visible slice into the semantic tree and draw once per frame from that same slice, so the accessible structure, the drawn rows and the reported count can never describe three different lists.
 
 ### Execution sequence
 

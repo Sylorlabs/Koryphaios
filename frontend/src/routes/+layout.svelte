@@ -68,15 +68,15 @@
 			return;
 		}
 
-		// Start the backend health sentinel immediately — it polls /api/health
-		// and surfaces the BackendDownOverlay if the backend goes away or the
-		// version contract rejects this frontend. A working UI without a
-		// working backend is never allowed.
-		startBackendHealthSentinel();
-
-		// Resolve backend URLs first, then wait for auth before requesting protected data.
+		// Resolve backend URLs first (in Tauri this discovers the runtime
+		// backend), then start the health sentinel so its very first poll hits
+		// the real backend rather than a baked dev URL — it surfaces the
+		// BackendDownOverlay if the backend goes away or the version contract
+		// rejects this frontend. A working UI without a working backend is never
+		// allowed.
 		void Promise.resolve()
 			.then(() => initUrls())
+			.then(() => startBackendHealthSentinel())
 			.then(() => waitForBackendHealthy())
 			.then(() => authStore.initialize())
 			.then((authReady) => {

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "research-full-task-1-individual",
+  "verifiedAt": "2026-11-15T10:05:12.015Z",
+  "sources": [
+    {
+      "id": "agent-skills-spec",
+      "sha256": "9181f4efe72daa1171ace26388745aec866acc231c3ca9e279f8d0cc9b317840"
+    },
+    {
+      "id": "cursor-skills-docs",
+      "sha256": "37ef27a9cecbc2714dd47a22c77aea64f5a3cfdf5146641e8d7c61968b1bbb60"
+    },
+    {
+      "id": "community-client-extension",
+      "sha256": "f06969c51b516c8fc083dab279846b95b51c04f22e370945ee3dfc7b6b2d8b43"
+    },
+    {
+      "id": "pre-support-internal-note",
+      "sha256": "941f4e8709c5bf505532a57f0445a05ecd72859e0c6e8b586c0b8913a7ce3de7"
+    }
+  ]
+}

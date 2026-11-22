@@ -13,6 +13,8 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 import { normalizeToolName, toolPresentation } from '$lib/utils/tool-presentation';
 import { setSessionMcpToolRegistry, type McpToolServerIdentity } from './mcp-tool-registry.svelte';
 import {
+  compareFeedChronology,
+  insertByChronology,
   mergeFeedTimeline,
   omitArchivedToolDuplicates,
   operationalEntriesForReload,
@@ -87,14 +89,20 @@ const olderMessagesBySession = new Map<string, boolean>();
 const oldestMessageCursorBySession = new Map<string, string | null>();
 let loadingOlderSessionId = $state('');
 
+import {
+  continuationTargetKey,
+  findContinuationRow,
+  frozenThinkingDuration,
+  isTranscriptContinuation,
+  resumeThinkingTiming,
+} from './transcript-continuation';
+
 // ── Turn-scoped row continuation ───────────────────────────────────────────
 // Answer text can continue across tool activity, so continuation deltas resolve
 // the row they continue by identity rather than by "whatever happens to be
 // last". Reasoning is deliberately different: a reasoning burst after a tool
 // gets a new row so the transcript preserves the event order. agents.svelte.ts
 // holds the drilldown mirror of this logic.
-const FEED_CONTINUATION_TYPES: ReadonlySet<FeedEntry['type']> = new Set(['content', 'thinking']);
-/** The row a given (session, agent, type, visibility) delta continues. */
 const feedStreamTargets = new Map<
   string,
   { sessionId: string; agentId: string; entryId: string }
@@ -134,14 +142,6 @@ function forgetLiveTurnsForSession(sessionId: string): void {
 function feedTurnKey(sessionId: string, agentId: string): string {
   return `${sessionId}::${agentId}`;
 }
-function feedTargetKey(
-  sessionId: string,
-  agentId: string,
-  type: FeedEntry['type'],
-  userHidden: boolean,
-): string {
-  return `${sessionId}::${agentId}::${type}::${userHidden ? 'hidden' : 'visible'}`;
-}
 
 /** The row this delta continues within its session lane, or null when the turn
  *  has no open row (new turn, ended turn, or a user message started a new one). */
@@ -152,42 +152,18 @@ function openFeedStreamTarget(
   entry: FeedEntry,
 ): FeedEntry | null {
   if (closedFeedTurns.has(turnKey)) return null;
-  const lastIdx = entries.length - 1;
-  // Reasoning is a distinct transcript event. A provider may emit another
-  // reasoning burst after a tool call or response, and that burst must render
-  // after the tool rather than being appended to the first reasoning block.
-  // Content is intentionally allowed to continue across tool activity below;
-  // reasoning is not.
-  if (entry.type === 'thinking') {
-    const latest = entries[lastIdx];
-    if (
-      !latest ||
-      latest.type !== 'thinking' ||
-      latest.agentId !== entry.agentId ||
-      Boolean(latest.userHidden) !== Boolean(entry.userHidden)
-    ) {
-      return null;
-    }
-  }
   // A user message is a hard row boundary: it starts a new turn, so nothing
   // before it may be continued.
   const boundary = entries.findLastIndex((row) => row.type === 'user_message');
   const floor = boundary + 1;
-
   const recorded = feedStreamTargets.get(targetKey);
-  if (recorded) {
-    const at = entries.findIndex((row) => row.id === recorded.entryId);
-    if (at >= floor && at >= 0) return entries[at];
-    // Superseded by a new turn (or evicted) — stop honouring it.
-    feedStreamTargets.delete(targetKey);
-  }
-  for (let i = lastIdx; i >= floor; i--) {
-    const row = entries[i];
-    if (row.type === entry.type && row.agentId === entry.agentId) {
-      return Boolean(row.userHidden) === Boolean(entry.userHidden) ? row : null;
-    }
-  }
-  return null;
+  const target = findContinuationRow(entries, entry, {
+    floor,
+    recordedEntryId: recorded?.entryId,
+  });
+  // Superseded by a new turn (or evicted) — stop honouring it.
+  if (!target && recorded) feedStreamTargets.delete(targetKey);
+  return target;
 }
 
 type DurableClientFeedEntry = { id: string; kind: 'client_error'; text: string; timestamp: number };
@@ -227,8 +203,33 @@ function clearThinkingClocksForSession(sessionId: string): void {
   }
 }
 
+// Rebuilding the grouped view is O(feed). A replay burst lands hundreds of
+// lane mutations back-to-back and none of them is visible yet — the rows
+// appear in one settle when the burst flushes, so per-event rebuilds here are
+// pure main-thread waste on exactly the path that makes opening a chat feel
+// slow. Authoritative commits (history merges, resets) call
+// rebuildGroupedFeedNow so they always render regardless of replay state.
+let groupRebuildHold = 0;
+let groupRebuildDirty = false;
+
 function rebuildGroupedFeedCache(): void {
+  if (
+    groupRebuildHold > 0 ||
+    (feedSessionId !== '' && replayQuietTimers.has(feedSessionId))
+  ) {
+    groupRebuildDirty = true;
+    return;
+  }
   lastGroupedFeed = getGroupedEntries(feed);
+}
+
+function rebuildGroupedFeedNow(): void {
+  groupRebuildDirty = false;
+  lastGroupedFeed = getGroupedEntries(feed);
+}
+
+function releaseGroupRebuild(): void {
+  if (groupRebuildHold === 0 && groupRebuildDirty) rebuildGroupedFeedNow();
 }
 
 function cloneEntries(entries: FeedEntry[]): FeedEntry[] {
@@ -393,6 +394,8 @@ async function loadFeedPersistence(
 function activateSessionFeed(sessionId: string): number {
   if (feedSessionId === sessionId) return feedTransitionGeneration;
   const previousSessionId = feedSessionId;
+  // A burst aimed at the chat being left must not cover the one being opened.
+  endReplayBurst();
   if (feedSessionId) {
     // A reasoning block still running in the chat the reader is leaving must be
     // sealed, or reopening it shows a stopwatch climbing from a start timestamp
@@ -402,12 +405,19 @@ function activateSessionFeed(sessionId: string): number {
   }
   feedTransitionGeneration++;
   feedSessionId = sessionId;
-  feed = sessionId ? cloneEntries(sessionFeedCache.get(sessionId) ?? []) : [];
-  // A cached snapshot is useful as the next render's data, but it is not the
-  // authoritative restore. Keep it behind the loading state while the current
-  // history request reconciles it, rather than exposing VirtualList's estimated
-  // layout and making the transcript visibly scroll into place.
-  beginSessionLoad(sessionId);
+  const snapshot = sessionId ? sessionFeedCache.get(sessionId) : undefined;
+  feed = snapshot ? cloneEntries(snapshot) : [];
+  // A cached snapshot is already a readable transcript: reveal it at the
+  // remembered position and let the fresh history merge in place. Hiding it
+  // behind the loading surface for a fetch the reader cannot watch is what
+  // made switching back to a chat feel like opening it cold. With no snapshot
+  // there is nothing to show, so the load owns the surface as before.
+  if (snapshot?.length) {
+    loadingSessionId = '';
+    sessionLoadToken++;
+  } else {
+    beginSessionLoad(sessionId);
+  }
   // Message history is a rehydratable duplicate of the feed cache. Keep it
   // only for the session being opened so switching through many large chats
   // cannot retain a second full copy of every transcript indefinitely.
@@ -424,8 +434,79 @@ function activateSessionFeed(sessionId: string): number {
   clearThinkingClocksForSession(previousSessionId);
   deletedMessageIds.clear();
   feedVersion++;
-  rebuildGroupedFeedCache();
+  rebuildGroupedFeedNow();
   return feedTransitionGeneration;
+}
+
+// A replay is one durable burst, not live streaming. The server sends the
+// whole event log back-to-back on subscribe. Expanding every replayed delta
+// into its lane on arrival is the expensive part of opening a chat: each
+// event re-expanded its turn's rows and regrouped the whole feed, only for
+// the history projection to supersede most of those rows a moment later.
+// The burst is tracked per session, turn expansion and feed regrouping are
+// deferred until the burst ends, and the transcript reveals at the state the
+// agent is actually at — one publish per turn, not one per event.
+const REPLAY_QUIET_MS = 180;
+const replayQuietTimers = new Map<string, ReturnType<typeof setTimeout>>();
+/** Live turns folded from replayed events whose row expansion is deferred
+ *  until the session's burst ends or authoritative history merges them. */
+const replayDeferredTurns = new Map<string, Set<string>>();
+// Bumped whenever the replaying-session set changes so isReplayingSession
+// stays reactive for consumers that derive from it.
+let replaySessionsVersion = $state(0);
+
+/** Note one replayed event. The burst ends after a quiet beat with no events. */
+function noteReplayBurst(sessionId: string): void {
+  if (!sessionId) return;
+  const existing = replayQuietTimers.get(sessionId);
+  if (existing !== undefined) clearTimeout(existing);
+  replayQuietTimers.set(
+    sessionId,
+    setTimeout(() => {
+      replayQuietTimers.delete(sessionId);
+      replaySessionsVersion++;
+      flushReplayTurns(sessionId);
+    }, REPLAY_QUIET_MS),
+  );
+  replaySessionsVersion++;
+}
+
+/** Expand every deferred turn of a session once, then regroup once. */
+function flushReplayTurns(sessionId: string): void {
+  const deferred = replayDeferredTurns.get(sessionId);
+  replayDeferredTurns.delete(sessionId);
+  groupRebuildHold++;
+  try {
+    for (const key of deferred ?? []) {
+      const turn = liveTurns.get(key);
+      // Settled turns were dropped from liveTurns when their persisted rows
+      // committed; the history projection already renders them.
+      if (turn) publishLiveTurnNow(turn);
+    }
+  } finally {
+    groupRebuildHold--;
+    releaseGroupRebuild();
+  }
+}
+
+/** End every in-flight burst, e.g. when the visible feed moves chats. The
+ *  deferred turns still publish — into their own lanes — so a switch never
+ *  loses evidence whose ingress cursor already advanced. */
+function endReplayBurst(): void {
+  const sessions = [...replayQuietTimers.keys()];
+  for (const timer of replayQuietTimers.values()) clearTimeout(timer);
+  replayQuietTimers.clear();
+  if (sessions.length > 0) replaySessionsVersion++;
+  for (const sessionId of sessions) flushReplayTurns(sessionId);
+}
+
+/** Forget a session's burst and deferred turns entirely — the session was
+ *  erased or its branch discarded, so there is nothing left to publish. */
+function dropReplayStateForSession(sessionId: string): void {
+  const timer = replayQuietTimers.get(sessionId);
+  if (timer !== undefined) clearTimeout(timer);
+  if (replayQuietTimers.delete(sessionId)) replaySessionsVersion++;
+  replayDeferredTurns.delete(sessionId);
 }
 
 /** Start owning the loading surface for a session that is being opened. */
@@ -561,8 +642,9 @@ function nextFeedId(prefix: string): string {
  *  real position in the event stream. */
 function closeReasoningSegment(sessionId: string, entry: Pick<FeedEntry, 'type' | 'agentId'>): void {
   if (entry.type === 'thinking') return;
-  feedStreamTargets.delete(feedTargetKey(sessionId, entry.agentId, 'thinking', false));
-  feedStreamTargets.delete(feedTargetKey(sessionId, entry.agentId, 'thinking', true));
+  const lane = `${sessionId}::${entry.agentId}`;
+  feedStreamTargets.delete(continuationTargetKey(lane, 'thinking', false));
+  feedStreamTargets.delete(continuationTargetKey(lane, 'thinking', true));
 }
 
 /** Append an already-decorated row to the displayed lane. */
@@ -576,7 +658,7 @@ function appendDisplayedEntry(sessionId: string, visible: FeedEntry): FeedEntry 
   ) {
     analyzingThoughtId = newEntry.id;
   }
-  feed.push(newEntry);
+  insertByChronology(feed, newEntry);
   if (feed.length > MAX_FEED_ENTRIES) feed.splice(0, feed.length - MAX_FEED_ENTRIES);
   feedVersion++;
   rebuildGroupedFeedCache();
@@ -588,7 +670,7 @@ function appendCachedEntry(sessionId: string, visible: FeedEntry): FeedEntry {
   const newEntry: FeedEntry = { ...visible, id: nextFeedId('fe') };
   closeReasoningSegment(sessionId, newEntry);
   const cached = sessionFeedCache.get(sessionId) ?? [];
-  cached.push(newEntry);
+  insertByChronology(cached, newEntry);
   if (cached.length > MAX_FEED_ENTRIES) cached.splice(0, cached.length - MAX_FEED_ENTRIES);
   sessionFeedCache.set(sessionId, cached);
   return newEntry;
@@ -656,9 +738,13 @@ function accumulateFeedEntry(sessionId: string, entry: Omit<FeedEntry, 'id'>) {
   const lane = displayed ? feed : (sessionFeedCache.get(sessionId) ?? []);
   const lastIdx = lane.length - 1;
   const last = lastIdx >= 0 ? lane[lastIdx] : null;
-  const continuesTurn = FEED_CONTINUATION_TYPES.has(entry.type);
+  const continuesTurn = isTranscriptContinuation(entry.type);
   const turnKey = feedTurnKey(sessionId, entry.agentId);
-  const targetKey = feedTargetKey(sessionId, entry.agentId, entry.type, Boolean(entry.userHidden));
+  const targetKey = continuationTargetKey(
+    `${sessionId}::${entry.agentId}`,
+    entry.type,
+    entry.userHidden,
+  );
   // A continuation delta resolves the row it continues by identity, not by
   // "whatever is last": a tool call or another agent's row landing mid-sentence
   // must not split this turn's text or reasoning into two rows.
@@ -685,17 +771,7 @@ function accumulateFeedEntry(sessionId: string, entry: Omit<FeedEntry, 'id'>) {
     };
 
     if (target.type === 'thinking') {
-      // Reconnected mid-turn: replayed reasoning is sealed on arrival, so a live
-      // delta arriving afterwards has to re-open the block or the stopwatch
-      // stops counting while the turn is still running.
-      if (entry.thinkingFinalized === undefined && target.thinkingFinalized) {
-        updates.thinkingFinalized = false;
-      }
-      if (target.thinkingStartedAt) {
-        updates.durationMs = entry.timestamp - target.thinkingStartedAt;
-      } else {
-        updates.thinkingStartedAt = entry.timestamp;
-      }
+      Object.assign(updates, resumeThinkingTiming(target, entry));
     }
     // Redacted-thinking progress (token estimates) rides in metadata and must
     // keep updating as new deltas land - monotonically (provider estimates can
@@ -878,16 +954,33 @@ function upsertCompaction(
 }
 
 /** Splice a turn's expansion into a lane in place of the rows it already has.
- *  The first replaced row's position is kept, so a turn that grows never moves
- *  above rows that came before it. */
+ *
+ * A turn is not an opaque block: another lane (a skill selection, a worker
+ * row, a replayed event) can legitimately land in the middle of it. Replacing
+ * the old rows as one contiguous block pushed those rows below the whole turn,
+ * so a skill selected at 15:30 surfaced under a tool call that ran at 15:51.
+ * Re-insert each row at its own chronological position instead. The `floor`
+ * keeps the turn's own part order authoritative even when a part carries a
+ * later display time (a tool row is stamped at its completion), so a late text
+ * delta can never jump above the tool that produced it. */
 function spliceTurnRows(lane: FeedEntry[], messageId: string, rows: FeedEntry[]): FeedEntry[] {
   const isTurnRow = (row: FeedEntry) => row.metadata?.turnMessageId === messageId;
   const first = lane.findIndex(isTurnRow);
   if (first < 0) return rows.length > 0 ? [...lane, ...rows] : lane;
-  // Rows before `first` are not this turn's, so their index is unchanged once the
-  // turn's rows are removed.
   const kept = lane.filter((row) => !isTurnRow(row));
-  return [...kept.slice(0, first), ...rows, ...kept.slice(first)];
+  let floor = 0;
+  for (const row of rows) {
+    let low = floor;
+    let high = kept.length;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      if (compareFeedChronology(kept[mid], row) <= 0) low = mid + 1;
+      else high = mid;
+    }
+    kept.splice(low, 0, row);
+    floor = low + 1;
+  }
+  return kept;
 }
 
 function rowFingerprint(row: FeedEntry): string {
@@ -920,6 +1013,19 @@ function patchLastTurnRowInPlace(lane: FeedEntry[], rows: FeedEntry[]): boolean 
 }
 
 function publishLiveTurn(turn: LiveTurn): void {
+  // During the session's replay burst, expanding rows for every folded event
+  // re-splices the lane per delta and is superseded by the history projection
+  // a moment later. Record the turn and let the burst flush expand it once.
+  if (replayQuietTimers.has(turn.sessionId)) {
+    let deferred = replayDeferredTurns.get(turn.sessionId);
+    if (!deferred) replayDeferredTurns.set(turn.sessionId, (deferred = new Set()));
+    deferred.add(liveTurnKey(turn.sessionId, turn.messageId));
+    return;
+  }
+  publishLiveTurnNow(turn);
+}
+
+function publishLiveTurnNow(turn: LiveTurn): void {
   const rows = partsToFeedEntries({
     sessionId: turn.sessionId,
     messageId: turn.messageId,
@@ -1052,7 +1158,7 @@ function sealThinkingInLane(
     if (measured) {
       const startedAt =
         e.thinkingStartedAt ?? activeThinkingStartedAt.get(feedTurnKey(sessionId, e.agentId));
-      if (startedAt !== undefined) e.durationMs = Math.max(e.durationMs ?? 0, endedAt - startedAt);
+      if (startedAt !== undefined) e.durationMs = frozenThinkingDuration(e.durationMs, startedAt, endedAt);
     } else {
       // Leaving the chat: the start timestamp's origin is no longer visible, so
       // freeze at the last server timestamp observed rather than differencing
@@ -1493,7 +1599,7 @@ function clearFeed(sessionId: string) {
   feedVersion++;
   streamingRevision = 0;
   analyzingThoughtId = null;
-  rebuildGroupedFeedCache();
+  rebuildGroupedFeedNow();
 }
 
 /** Drop the visible and cached transcript after an authoritative conversation
@@ -1503,6 +1609,7 @@ function clearFeed(sessionId: string) {
 function resetSessionFeed(sessionId: string): number {
   sessionFeedCache.delete(sessionId);
   forgetLiveTurnsForSession(sessionId);
+  dropReplayStateForSession(sessionId);
   if (feedSessionId !== sessionId) return feedTransitionGeneration;
   // Invalidate any history request that began on the discarded branch. The
   // rewrite handler starts a fresh generation after this reset.
@@ -1514,7 +1621,7 @@ function resetSessionFeed(sessionId: string): number {
   analyzingThoughtId = null;
   clearThinkingClocksForSession(sessionId);
   feedVersion++;
-  rebuildGroupedFeedCache();
+  rebuildGroupedFeedNow();
   return feedTransitionGeneration;
 }
 
@@ -1550,6 +1657,7 @@ function clearSessionFeedState(sessionId: string): void {
     if (key.startsWith(`${sessionId}::`)) closedFeedTurns.delete(key);
   }
   clearThinkingClocksForSession(sessionId);
+  dropReplayStateForSession(sessionId);
   if (loadingOlderSessionId === sessionId) loadingOlderSessionId = '';
 }
 
@@ -1568,7 +1676,7 @@ function forgetSessionFeed(sessionId: string): void {
   clearThinkingClocksForSession(sessionId);
   deletedMessageIds.clear();
   feedVersion++;
-  rebuildGroupedFeedCache();
+  rebuildGroupedFeedNow();
 }
 
 onSessionRemoved(forgetSessionFeed);
@@ -1584,7 +1692,7 @@ onSessionsRemoved((sessionIds) => {
   analyzingThoughtId = null;
   deletedMessageIds.clear();
   feedVersion++;
-  rebuildGroupedFeedCache();
+  rebuildGroupedFeedNow();
 });
 
 function isDuplicateError(sessionId: string, text: string, timestamp: number): boolean {
@@ -1641,7 +1749,9 @@ export function getGroupedEntries(entries: FeedEntry[]): FeedEntry[] {
       currentGroup = null;
       if (agentGroup && agentGroup.agentId === entry.agentId) {
         agentGroup.entries!.push(entry);
-        agentGroup.timestamp = entry.timestamp;
+        // The group stays where its first step landed. Moving its timestamp to
+        // the newest child left the row showing 15:51 above another row that
+        // happened at 15:40.
         agentGroup.text = `${entry.agentName} — ${agentGroup.entries!.length} steps`;
         agentGroup.userHidden = agentGroup.entries!.every((child) => child.userHidden === true);
       } else {
@@ -1674,7 +1784,7 @@ export function getGroupedEntries(entries: FeedEntry[]): FeedEntry[] {
     if (isEphemeral) {
       if (currentGroup && currentGroup.agentId === entry.agentId) {
         currentGroup.entries!.push(entry);
-        currentGroup.timestamp = entry.timestamp;
+        // Keep the group anchored at the time its first operation happened.
         currentGroup.userHidden = currentGroup.entries!.every((child) => child.userHidden === true);
 
         const toolNames = new Set(currentGroup.entries!.map(getToolName).filter(Boolean));
@@ -1738,6 +1848,10 @@ type SessionLoadOptions = {
   /** Older-page hydration only needs to rebuild text; do not refetch the
    * expensive enrichment lanes that were already loaded for this session. */
   loadAncillary?: boolean;
+  /** The token that owns the loading surface for this load. Set by
+   *  `loadSessionMessages`; the impl uses it to release the surface at the text
+   *  commit without letting a superseded load clear a newer one's spinner. */
+  loadToken?: number;
   onUsage?: (
     usage: {
       used: number;
@@ -1752,13 +1866,15 @@ type SessionLoadOptions = {
 };
 
 /**
- * Own the chat loading surface for the whole open, not just the first commit.
+ * Own the chat loading surface for the open, but only until its text is
+ * readable.
  *
- * The text page commits first, but the archived tool rows join a moment later.
- * Revealing between those two commits is what made an opened chat look like
- * someone flick-scrolling to the bottom: the second commit grows the
- * transcript by hundreds of estimated rows, and the bottom pin walks the view
- * down through every tool card as each measurement batch settles.
+ * The text page commits first and the archived tool rows join a moment later.
+ * Holding the surface for that second commit made opening a chat sit behind a
+ * spinner for the length of the enrichment lanes (bounded at three seconds),
+ * which is what a reader experiences as "loading takes ages and then it is
+ * already scrolled". The text page is the chat; enrichment is merged after the
+ * reveal, with autoscroll suspended so it cannot move the reader.
  */
 async function loadSessionMessages(
   sessionId: string,
@@ -1771,7 +1887,7 @@ async function loadSessionMessages(
   const loadToken =
     options.loadAncillary === false ? sessionLoadToken : ++sessionLoadToken;
   try {
-    return await loadSessionMessagesImpl(sessionId, messages, options);
+    return await loadSessionMessagesImpl(sessionId, messages, { ...options, loadToken });
   } finally {
     // Older-page hydration is a background append, not a session open. It
     // must neither release nor take ownership of the loading surface.
@@ -1785,6 +1901,10 @@ async function loadSessionMessagesImpl(
   options: SessionLoadOptions,
 ): Promise<boolean> {
   if (!ownsFeed(sessionId, options.generation)) return false;
+  // Turns folded from the replay so far join the live tail this load merges;
+  // expand them now rather than leaving them for the burst-end flush. Events
+  // still replaying re-defer and flush when their quiet beat ends.
+  flushReplayTurns(sessionId);
   const removalGeneration = sessionRemovalGeneration;
   const pageInfo = sessionStore.getMessagePageInfo?.(messages);
   if (pageInfo) {
@@ -2031,6 +2151,8 @@ async function loadSessionMessagesImpl(
           : {}),
       },
       ghostHash: undefined,
+      // Display data, not ordering: the source recorded no time for this row.
+      ...(m.timeUnknown ? { timeUnknown: true as const } : {}),
     };
     const parts = persistedTurnParts(m);
     if (!parts) return [legacyRow];
@@ -2040,6 +2162,7 @@ async function loadSessionMessagesImpl(
       parts,
       ...MANAGER_TURN_IDENTITY,
       messageMetadata: legacyRow.metadata,
+      timeUnknown: m.timeUnknown === true,
     });
   });
 
@@ -2092,19 +2215,20 @@ async function loadSessionMessagesImpl(
   feedVersion++;
   streamingRevision = 0;
   analyzingThoughtId = null;
-  rebuildGroupedFeedCache();
-  // Deliberately keep the loading surface up. The text page is only half the
-  // transcript: archived tool rows are merged below and change the layout by
-  // hundreds of rows. Revealing here is what produced the visible scroll down
-  // through the tool cards while the bottom pin chased the growing extent.
-  // `loadSessionMessages` releases the surface in its finally block, so an
-  // abort, a failed enrichment lane, or an early return cannot strand it.
+  rebuildGroupedFeedNow();
+  // Reveal the chat as soon as its text is committed. The previous version held
+  // the loading surface up until the timeline and archived-tool lanes resolved
+  // (bounded at ENRICHMENT_TIMEOUT_MS), so opening a chat sat behind a spinner
+  // for up to three seconds and then appeared already scrolled. Enrichment is
+  // not part of "can I read this chat": it is merged below, after the reader
+  // already has the transcript, and the merged rows must not move their view.
+  if (options.loadAncillary !== false) endSessionLoad(options.loadToken ?? -1, sessionId);
   if (options.loadAncillary === false) return true;
 
   const ancillaryResult = await ancillary;
-  // A timed-out lane may still land later. Merging it after the reveal would
-  // grow the transcript in front of the reader, which is the exact scroll
-  // crawl the loading surface exists to hide. Reveal the text page instead.
+  // A timed-out lane may still land later. Merging it after the reveal grows the
+  // transcript below the reader, which the suspended autoscroll controller does
+  // not chase; the reveal already happened above.
   if (ancillaryResult === ENRICHMENT_TIMED_OUT) return true;
   const [timelineResult, contextResult] = ancillaryResult;
   if (
@@ -2226,7 +2350,7 @@ async function loadSessionMessagesImpl(
   feedVersion++;
   streamingRevision = 0;
   analyzingThoughtId = null;
-  rebuildGroupedFeedCache();
+  rebuildGroupedFeedNow();
   // The transcript is complete now. `loadSessionMessages` drops the loading
   // surface in its finally block, so the reader's first paint is this full
   // layout rather than the estimate-sized text page from above.
@@ -2345,6 +2469,12 @@ export const feedStore = {
   forgetSessionFeed,
   activateSessionFeed,
   finishSessionLoad,
+  noteReplayBurst,
+  endReplayBurst,
+  isReplayingSession: (sessionId: string) => {
+    void replaySessionsVersion;
+    return !!sessionId && replayQuietTimers.has(sessionId);
+  },
   ownsFeed,
   lastEntryForSession,
   latestToolEntryForSession,

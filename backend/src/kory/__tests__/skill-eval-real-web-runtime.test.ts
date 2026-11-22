@@ -11,7 +11,7 @@ import {
   pinnedBrowserPackage,
   pinnedPackageBlockers,
   withRealChromium,
-} from '../skill-eval-real-web-runtime';
+} from '../../eval/skills/skill-eval-real-web-runtime';
 
 const originalCache = process.env.BUN_INSTALL_CACHE_DIR;
 const roots: string[] = [];

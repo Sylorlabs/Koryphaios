@@ -10,10 +10,15 @@ export const ProviderName = {
 
   // Aggregators (OpenAI-compatible APIs)
   OpenRouter: 'openrouter',
-  AgentRouter: 'agentrouter',
   UnoRouter: 'unorouter',
   TokenRouter: 'tokenrouter',
   ExperientialLabs: 'experientiallabs',
+  HundredMillionSeek: 'hundredmillionseek',
+  Numes: 'numes',
+  Coarena: 'coarena',
+  CrowLLM: 'crowllm',
+  RadeonCloud: 'radeon',
+  Runcrate: 'runcrate',
   TokenHarbor: 'tokenharbor',
   Logfare: 'logfare',
   APInex: 'apinex',
@@ -114,10 +119,15 @@ export const IMPLEMENTED_PROVIDERS: ProviderName[] = [
   'aistudio',
   'xai',
   'openrouter',
-  'agentrouter',
   'unorouter',
   'tokenrouter',
   'experientiallabs',
+  'hundredmillionseek',
+  'numes',
+  'coarena',
+  'crowllm',
+  'radeon',
+  'runcrate',
   'tokenharbor',
   'logfare',
   'apinex',
@@ -187,6 +197,9 @@ export interface ModelDef {
   costPerMOutputTokens?: number;
   costPerMInputCached?: number;
   costPerMOutputCached?: number;
+  /** Vendor-reported numeric quota factor (e.g. 100MillionSeek's
+   *  `quota_multiplier`). Kept as reported; never converted into a price. */
+  quotaMultiplier?: number;
   canReason?: boolean;
   supportsAttachments?: boolean;
   supportsStreaming?: boolean;
@@ -236,10 +249,15 @@ export const PROVIDER_AUTH_MODES: Record<ProviderName, ProviderAuthMode> = {
   aistudio: 'api_key',
   xai: 'api_key',
   openrouter: 'api_key',
-  agentrouter: 'api_key',
   unorouter: 'api_key',
   tokenrouter: 'api_key',
   experientiallabs: 'api_key',
+  hundredmillionseek: 'api_key',
+  numes: 'api_key',
+  coarena: 'api_key',
+  crowllm: 'api_key',
+  radeon: 'api_key',
+  runcrate: 'api_key',
   tokenharbor: 'api_key',
   logfare: 'api_key',
   apinex: 'api_key',
@@ -313,11 +331,18 @@ export const PROVIDER_ENV_VARS: Record<
   aistudio: { apiKey: 'GEMINI_API_KEY' },
   xai: { apiKey: 'XAI_API_KEY' },
   openrouter: { apiKey: 'OPENROUTER_API_KEY', baseUrl: 'OPENROUTER_BASE_URL' },
-  agentrouter: { apiKey: 'AGENTROUTER_API_KEY' },
   unorouter: { apiKey: 'UNOROUTER_API_KEY' },
   cline: { apiKey: 'CLINE_API_KEY' },
   tokenrouter: { apiKey: 'TOKENROUTER_API_KEY' },
   experientiallabs: { apiKey: 'EXPERIENTIALLABS_API_KEY' },
+  hundredmillionseek: { apiKey: 'HUNDREDMILLIONSEEK_API_KEY' },
+  numes: { apiKey: 'NUMES_API_KEY' },
+  coarena: { apiKey: 'COARENA_API_KEY' },
+  crowllm: { apiKey: 'CROWLLM_API_KEY' },
+  // AMD documents `RADEON_API_KEY` in its quickstart; tutorials also use
+  // `AMD_API_KEY`, so both are accepted when resolving the stored key.
+  radeon: { apiKey: 'RADEON_API_KEY' },
+  runcrate: { apiKey: 'RUNCRATE_API_KEY' },
   tokenharbor: { apiKey: 'TOKENHARBOR_API_KEY' },
   logfare: { apiKey: 'LOGFARE_API_KEY' },
   apinex: { apiKey: 'APINEX_API_KEY' },

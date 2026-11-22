@@ -3,8 +3,8 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
-import { writeFixtureFile } from '../skill-eval-fixture-helpers';
+import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
+import { writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
 import {
   PHP_JSON_CONTROL,
   PHP_JSON_SCENARIO,
@@ -13,7 +13,7 @@ import {
   V5_LANGUAGE_HOST_SKILL_EVAL_MATERIALIZERS,
   V5_LANGUAGE_HOST_SKILL_EVAL_SCORERS,
   phpHostReadiness,
-} from '../skill-eval-v5-language-host-fixtures';
+} from '../../eval/skills/skill-eval-v5-language-host-fixtures';
 import { loadV5SkillPackages } from '../skill-packages';
 
 const roots: string[] = [];

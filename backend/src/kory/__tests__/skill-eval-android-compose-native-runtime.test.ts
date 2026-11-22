@@ -13,8 +13,8 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { writeFixtureFile } from '../skill-eval-fixture-helpers';
-import { BUILTIN_SKILL_EVAL_MATERIALIZERS, BUILTIN_SKILL_EVAL_SCORERS } from '../skill-eval-fixtures';
+import { writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
+import { BUILTIN_SKILL_EVAL_MATERIALIZERS, BUILTIN_SKILL_EVAL_SCORERS } from '../../eval/skills/skill-eval-fixtures';
 import {
   ANDROID_COMPOSE_NATIVE_SCENARIOS,
   ANDROID_COMPOSE_NATIVE_MATERIALIZERS,
@@ -23,7 +23,7 @@ import {
   androidEmulatorAvdMatches,
   materializeAndroidComposeNativeFixture,
   runAndroidComposeNativeRuntime,
-} from '../skill-eval-android-compose-native-runtime';
+} from '../../eval/skills/skill-eval-android-compose-native-runtime';
 
 const { edit, feed } = ANDROID_COMPOSE_NATIVE_SCENARIOS;
 const workspaces: string[] = [];
@@ -39,7 +39,7 @@ const envKeys = [
 const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
 const initiallyReady = androidComposeNativeReadiness(edit).length === 0;
 const nativeOptIn = process.env.KORY_SKILL_EVAL_ANDROID_NATIVE_TESTS === '1';
-const sourceBase = join(import.meta.dir, '../fixtures/android-compose-v5');
+const sourceBase = join(import.meta.dir, '../../eval/skills/fixtures/android-compose-v5');
 
 function workspace(): string {
   const path = mkdtempSync(join(tmpdir(), 'kory-android-native-test-'));

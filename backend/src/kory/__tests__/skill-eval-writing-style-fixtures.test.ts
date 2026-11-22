@@ -7,13 +7,13 @@ import {
   WRITING_STYLE_SKILL_EVAL_MATERIALIZERS,
   scoreWritingStyle,
   writingStylePacket,
-} from '../skill-eval-writing-style-fixtures';
+} from '../../eval/skills/skill-eval-writing-style-fixtures';
 import {
   BUILTIN_SKILL_EVAL_MATERIALIZERS,
   BUILTIN_SKILL_EVAL_SCORERS,
-} from '../skill-eval-fixtures';
+} from '../../eval/skills/skill-eval-fixtures';
 import { loadV5SkillPackages } from '../skill-packages';
-import { auditSkillEvalExecutionReadiness } from '../skill-eval-execution';
+import { auditSkillEvalExecutionReadiness } from '../../eval/skills/skill-eval-execution';
 
 const roots: string[] = [];
 afterEach(() => {

@@ -506,9 +506,14 @@
     pendingTooltip = null;
   }
 
+  function tooltipMetaFor(node: SimNode): string {
+    const label = node.icon?.label ? `${node.icon.label} · ` : '';
+    return `${label}${node.linkCount} links · ${node.folderPath}${node.unresolved ? ' · unresolved' : ''}`;
+  }
+
   function updateTooltip(node: SimNode, sx: number, sy: number): void {
     tooltipTitle = node.title;
-    tooltipMeta = `${node.linkCount} links · ${node.folderPath}${node.unresolved ? ' · unresolved' : ''}`;
+    tooltipMeta = tooltipMetaFor(node);
     tooltipX = sx + 14;
     tooltipY = sy - 12;
     tooltipVisible = true;
@@ -715,7 +720,7 @@
     const node = candidates[normalized];
     selectedNodeId = node.id;
     tooltipTitle = node.title;
-    tooltipMeta = `${node.linkCount} links · ${node.folderPath}${node.unresolved ? ' · unresolved' : ''}`;
+    tooltipMeta = tooltipMetaFor(node);
     // Keep keyboard navigation visible even when the graph has been panned or
     // the selected node is outside the current viewport.
     tx = width / 2 - node.x * scale;
@@ -784,6 +789,7 @@
   $effect(() => {
     // Canvas paint values are resolved from live theme tokens, so repaint when
     // either the preset or accent changes instead of keeping old pixel colors.
+    void theme.activeScheme;
     void theme.preset;
     void theme.accent;
     requestDraw();
@@ -827,6 +833,7 @@
   let legendEntries = $derived.by(() => {
     const seen = new Set<string>();
     const entries: { folder: string; colorToken: string }[] = [];
+    void theme.activeScheme;
     void theme.preset;
     void theme.accent;
     for (const n of getVisibleGraph().nodes) {
@@ -946,7 +953,7 @@
     </span>
     {#if performanceLayout}
       <span
-        class="rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider"
+        class="rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider"
         style="border-color: var(--color-border); color: var(--color-success);"
         >Stable layout</span
       >
@@ -1051,7 +1058,7 @@
         {/each}
       </div>
       <div
-        class="mt-2 pt-2 border-t text-[10px]"
+        class="mt-2 pt-2 border-t text-[11px]"
         style="border-color: var(--color-border); color: var(--color-text-muted);"
       >
         Ring = agent context · click to focus · double-click to open · right-click for icon · scroll to zoom

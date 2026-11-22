@@ -14,9 +14,13 @@ import {
   type ComputerUseSettings,
   type SessionAgentOverrides,
   resolveCriticMode,
+  DEFAULT_MESSAGING_PERMISSIONS,
+  type MessagingPermissionsByTier,
+  type MessagingTierKey,
 } from '@koryphaios/shared';
 import { mergeComputerUseSettings, normalizeComputerUseSettings } from './computer-use/settings';
 import { MIN_SKILL_CONTEXT_BUDGET } from './kory/skills';
+import { normalizeToolContextMode } from './tool-context-policy';
 import { stopComputerUse } from './computer-use/control';
 import { wsBroker } from './pubsub';
 import { getSessionAgentOverrides } from './stores/session-agent-overrides';
@@ -50,6 +54,11 @@ export interface AgentSettings {
 
   /** Agent orchestration mode preference. Auto lets Kory decide when to delegate. */
   agentExecutionMode: 'auto' | 'single' | 'multi';
+
+  /** Delegated-worker isolation preset. 'auto' lets the manager choose per
+   *  task, 'always' forces git worktrees, 'never' writes workers straight into
+   *  the chat checkout where parallel workers can collide. */
+  worktreeMode: 'auto' | 'always' | 'never';
 
   /** Whether to use preferences.md for workflow guidance */
   preferencesEnabled: boolean;
@@ -103,10 +112,10 @@ export interface AgentSettings {
   /** Require confirmation for rule violations */
   confirmRuleViolations: boolean;
 
-  /** Inter-agent messaging (AgentMail) policy. 'open' delivers automatically
-   *  (default); 'approval-cross-project' holds cross-project mail for user
-   *  approval; 'off' disables the mailbox entirely. */
-  agentMessaging: 'open' | 'approval-cross-project' | 'off';
+  /** Per-tier overrides for messaging *other* chats. Missing cells fall back
+   *  to DEFAULT_MESSAGING_PERMISSIONS; messaging inside the same chat is
+   *  always allowed regardless. */
+  messagingPermissionsByTier?: MessagingPermissionsByTier;
 
   /** In Custom mode, allow routine non-edit tools without a per-action prompt. */
   autoRunTools: boolean;
@@ -151,6 +160,13 @@ export interface AgentSettings {
 
   /** Give the agent a live context-usage report each turn so it can decide to prune/compact on its own. */
   contextSelfAwareness: boolean;
+
+  /** Per-tool decision about how much of a tool result enters the AGENT's
+   *  context. The transcript always keeps the full output. 'full' is the
+   *  default; 'summary' compresses it with an auxiliary model call; 'hidden'
+   *  gives the agent only the tool name, timestamp, size and archive id.
+   *  A per-session override set by `manage_context` wins over this map. */
+  toolContextPolicies: Record<string, import('./tool-context-policy').ToolContextMode>;
 
   /** Automatically compact after a completed turn reaches the safe context threshold. */
   autoCompactEnabled: boolean;
@@ -252,6 +268,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   computerUse: defaultComputerUseSettings(),
   ruleEnforcementLevel: 'strict',
   agentExecutionMode: 'auto',
+  worktreeMode: 'auto',
   preferencesEnabled: true,
   allowExternalPaths: false,
   managerModelAccess: {},
@@ -268,7 +285,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   criticEnforcesPreferences: true,
   autoApplySafeFixes: false,
   confirmRuleViolations: true,
-  agentMessaging: 'open',
+  messagingPermissionsByTier: {},
   // Default to false for fresh installs. Existing koryphaios.json files that
   // explicitly set autoRunTools keep their value via the merge at the bottom
   // of loadAgentSettings ({ ...DEFAULT_AGENT_SETTINGS, ...userSettings }).
@@ -287,6 +304,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   contextKeepRecentTurns: 8,
   contextPruneMinChars: 2000,
   contextSelfAwareness: true,
+  toolContextPolicies: {},
   autoCompactEnabled: true,
   autoCompactThreshold: 80,
   reasoningExpandedByDefault: true,
@@ -555,12 +573,40 @@ export function loadAgentSettings(projectRoot: string): AgentSettings {
     permissionMode: persistedPermissionMode,
     criticMode,
     criticGateEnabled: criticMode !== 'off',
+    worktreeMode:
+      persistedSettings?.worktreeMode === 'always' ||
+      persistedSettings?.worktreeMode === 'never' ||
+      persistedSettings?.worktreeMode === 'auto'
+        ? persistedSettings.worktreeMode
+        : // Legacy persisted boolean: on was the auto default, off meant never.
+          (persistedSettings as { worktreeIsolation?: boolean } | undefined)
+            ?.worktreeIsolation === false
+          ? 'never'
+          : 'auto',
     sandbox: mergeSandboxSettings(DEFAULT_AGENT_SETTINGS.sandbox, persistedSettings?.sandbox),
     computerUse: effectiveComputerPolicy(
       projectRoot,
       normalizeComputerUseSettings(persistedSettings?.computerUse),
     ),
   };
+
+  // Legacy `agentMessaging` policy maps onto the per-tier matrix: 'off' blocks
+  // every tier, 'approval-cross-project' asks everywhere, 'open' keeps the
+  // defaults. Only applies when the new key was never saved.
+  if (persistedSettings?.messagingPermissionsByTier === undefined) {
+    const legacy = isPlainRecord(config.agentSettings)
+      ? (config.agentSettings as Record<string, unknown>).agentMessaging
+      : undefined;
+    if (legacy === 'off' || legacy === 'approval-cross-project') {
+      const level = legacy === 'off' ? ('block' as const) : ('ask' as const);
+      merged.messagingPermissionsByTier = Object.fromEntries(
+        (Object.keys(DEFAULT_MESSAGING_PERMISSIONS) as MessagingTierKey[]).map((tier) => [
+          tier,
+          { manager: level, subAgents: level },
+        ]),
+      );
+    }
+  }
 
   let migrated = legacyPlanPermission;
   if (persistedSettings?.contextKeepRecentTurns === LEGACY_CONTEXT_KEEP_RECENT_TURNS) {
@@ -601,6 +647,11 @@ export function applySessionAgentOverrides(
   const next: AgentSettings = { ...settings };
   if (overrides.permissionMode) next.permissionMode = overrides.permissionMode;
   if (overrides.agentExecutionMode) next.agentExecutionMode = overrides.agentExecutionMode;
+  if (overrides.worktreeMode) {
+    next.worktreeMode = overrides.worktreeMode;
+  } else if (typeof overrides.worktreeIsolation === 'boolean') {
+    next.worktreeMode = overrides.worktreeIsolation ? 'auto' : 'never';
+  }
   if (typeof overrides.criticGateEnabled === 'boolean') {
     next.criticGateEnabled = overrides.criticGateEnabled;
   }
@@ -693,8 +744,8 @@ const SETTING_ENUMS: Partial<Record<keyof AgentSettings, readonly string[]>> = {
   criticMode: ['auto', 'always', 'off'],
   ruleEnforcementLevel: ['strict', 'moderate', 'lenient'],
   agentExecutionMode: ['auto', 'single', 'multi'],
+  worktreeMode: ['auto', 'always', 'never'],
   gateStrictness: ['strict', 'advisory', 'off'],
-  agentMessaging: ['open', 'approval-cross-project', 'off'],
   intentInterview: ['off', 'adaptive', 'deep'],
   goalPlanningDepth: ['minimal', 'adaptive', 'structured'],
   planApproval: ['always', 'material', 'never'],
@@ -783,6 +834,19 @@ export function mergeAgentSettings(current: AgentSettings, patch: unknown): Agen
       next.managerNotes = notes;
       continue;
     }
+    if (typedKey === 'toolContextPolicies') {
+      if (!isPlainRecord(value)) continue;
+      const policies: Record<string, import('./tool-context-policy').ToolContextMode> = {};
+      for (const [tool, mode] of Object.entries(value).slice(0, 500)) {
+        const normalized = normalizeToolContextMode(mode);
+        if (!tool || tool.length > 128 || !normalized) continue;
+        // 'full' is the default; storing it would bloat every config file.
+        if (normalized === 'full') continue;
+        policies[tool] = normalized;
+      }
+      next.toolContextPolicies = policies;
+      continue;
+    }
     if (typedKey === 'skillCollisionChoices') {
       if (!isPlainRecord(value)) continue;
       next.skillCollisionChoices = Object.fromEntries(
@@ -823,6 +887,22 @@ export function mergeAgentSettings(current: AgentSettings, patch: unknown): Agen
         tierMap[tier] = { allow: allow ?? [], block: block ?? [], ask: ask ?? [] };
       }
       next.toolPermissionsByTier = tierMap;
+      continue;
+    }
+    if (typedKey === 'messagingPermissionsByTier') {
+      if (!isPlainRecord(value)) continue;
+      const tierMap: MessagingPermissionsByTier = {};
+      for (const [tier, entry] of Object.entries(value).slice(0, 20)) {
+        if (!(tier in DEFAULT_MESSAGING_PERMISSIONS) || !isPlainRecord(entry)) continue;
+        const cell: { manager?: 'allow' | 'ask' | 'block'; subAgents?: 'allow' | 'ask' | 'block' } =
+          {};
+        for (const roleKey of ['manager', 'subAgents'] as const) {
+          const level = (entry as Record<string, unknown>)[roleKey];
+          if (level === 'allow' || level === 'ask' || level === 'block') cell[roleKey] = level;
+        }
+        if (cell.manager || cell.subAgents) tierMap[tier as MessagingTierKey] = cell;
+      }
+      next.messagingPermissionsByTier = tierMap;
       continue;
     }
     const allowed = SETTING_ENUMS[typedKey];

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "factual-research",
-  "version": "5.3.0",
+  "version": "5.6.0",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",

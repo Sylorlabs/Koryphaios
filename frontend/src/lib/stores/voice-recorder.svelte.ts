@@ -12,9 +12,16 @@ export interface VoiceRecorderState {
   /** The live tap, retained for the frozen frame during transcription. */
   analyser: AnalyserNode | null;
   elapsedMs: number;
+  /** Transcript of the speech captured so far, updated while the user speaks. */
+  partialText: string;
 }
 
-const initial: VoiceRecorderState = { phase: 'idle', analyser: null, elapsedMs: 0 };
+const initial: VoiceRecorderState = {
+  phase: 'idle',
+  analyser: null,
+  elapsedMs: 0,
+  partialText: '',
+};
 
 let state = $state<VoiceRecorderState>({ ...initial });
 
@@ -29,7 +36,13 @@ export const voiceRecorder = {
   },
 
   begin(phase: VoicePhase, analyser: AnalyserNode | null, elapsedMs = 0) {
-    state = { phase, analyser, elapsedMs };
+    state = { phase, analyser, elapsedMs, partialText: '' };
+  },
+
+  /** Publish the live transcript of the audio captured so far. */
+  setPartialText(partialText: string) {
+    if (state.phase === 'idle' || state.partialText === partialText) return;
+    state = { ...state, partialText };
   },
 
   setElapsed(elapsedMs: number) {

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "status": "unimported",
+  "assignmentId": "blind-v5-b863d91b03d6d52e5ba0",
+  "skill": "ruby-engineering",
+  "scenarioId": "ruby-engineering-full-task-1-individual",
+  "pairId": "ruby-engineering-full-task-1-individual:ba72b9c5-9426-4448-b8d8-81f8d2b68602",
+  "reviewerThread": "logfare-stateless-2ae64ca9-b7ca-4659-9032-4923c9823075",
+  "reviewerIdentitySource": "external-reviewer-adapter-output",
+  "reviewerAdapter": "scripts/kory-logfare-stateless-reviewer",
+  "reviewerModel": "deepseek-v4.1-flash-1017",
+  "reviewerModelSource": "configured-provider-model-metadata",
+  "reviewerBaseUrl": "http://127.0.0.1:17841/v1",
+  "promptSha256": "80ab1ad476f3b689e89aa924f5485e7707d275e7c55f75649a3d5c1313b735a8",
+  "privateAssignmentSha256": "0c2e5183e8d49d4341c08cc59e8a4b605bdfbe2f0ea7265641a786b3921141db",
+  "reviewerEventsSha256": "8347cc8cac0ea82c38ff8a782d1ddb7ceaef38f6689bb503c132cb9824ee328c",
+  "judgeOutputSha256": "1c6285c87bd4a2e959243f4ad9ed149e1f91234bd0481c247b0e97a93b9edcc3",
+  "envelopeSha256": "9f66a08fe68b09b96cd27f155e2e5f768d0c827e911f7e3240147b6159ec8de6",
+  "importValidation": {
+    "mode": "validate",
+    "validatedReviews": 1,
+    "persistedReviews": 0
+  },
+  "promptSnapshotPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-566CId/review-task.prompt.txt",
+  "reviewerEventsPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-566CId/reviewer-events.json",
+  "envelopePath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-566CId/import.json"
+}

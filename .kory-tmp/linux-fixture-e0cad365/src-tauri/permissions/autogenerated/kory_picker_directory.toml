@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-kory-picker-directory"
+description = "Enables the kory_picker_directory command without any pre-configured scope."
+commands.allow = ["kory_picker_directory"]
+
+[[permission]]
+identifier = "deny-kory-picker-directory"
+description = "Denies the kory_picker_directory command without any pre-configured scope."
+commands.deny = ["kory_picker_directory"]

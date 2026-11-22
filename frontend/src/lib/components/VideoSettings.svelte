@@ -9,6 +9,7 @@
   import { apiUrl } from '$lib/utils/api-url';
   import KorySelect from './KorySelect.svelte';
   import SettingsSwitch from './SettingsSwitch.svelte';
+  import SettingsPage from './settings/SettingsPage.svelte';
 
   // Video generation is asynchronous upstream: Luma, Kling, and Replicate all
   // submit a task and finish it out of band. A generation can run for minutes, so
@@ -126,9 +127,13 @@
   );
   let historyThumbs = $derived(history.slice(0, 12));
 
-  $effect(() => {
+  // The selected ratio has to stay renderable by the model that will produce the
+  // clip. Correct it where the model choice changes rather than synchronizing it
+  // from an effect: an effect here cost an extra reactive pass and hid the write
+  // from the handler that caused it.
+  function syncAspectRatio() {
     if (!aspectRatios.includes(aspectRatio)) aspectRatio = aspectRatios[0] ?? '16:9';
-  });
+  }
 
   async function loadProviders() {
     loading = true;
@@ -145,6 +150,7 @@
       if (!next?.models.some((model) => model.id === selectedModel)) {
         selectedModel = next?.models[0]?.id ?? '';
       }
+      syncAspectRatio();
     } catch {
       providers = [];
     } finally {
@@ -158,6 +164,7 @@
     if (!provider?.models.some((model) => model.id === selectedModel)) {
       selectedModel = provider?.models[0]?.id ?? '';
     }
+    syncAspectRatio();
   }
 
   async function loadHistory() {
@@ -386,33 +393,23 @@
   });
 </script>
 
-<div class="mx-auto w-full max-w-5xl space-y-6 p-6">
-  <header class="flex flex-wrap items-start justify-between gap-3">
-    <div class="flex items-start gap-3">
-      <div class="rounded-xl bg-[var(--color-surface-3)] p-2 text-[var(--color-accent)]">
-        <Film size={20} />
-      </div>
-      <div>
-        <h3 class="text-lg font-semibold text-[var(--color-text-primary)]">Video</h3>
-        <p class="mt-1 max-w-3xl text-sm text-[var(--color-text-muted)]">
-          Generate short clips with Luma, Kling AI, Prodia, or Replicate. Generation runs on the
-          provider and is billed per clip, so it usually takes 30 seconds to several minutes.
-        </p>
-      </div>
-    </div>
+<SettingsPage
+  title="Video"
+  description="Generate short clips with Luma, Kling AI, Prodia, or Replicate. Generation runs on the provider and is billed per clip, so it usually takes 30 seconds to several minutes."
+  width="wide"
+>
+  {#snippet actions()}
     <button type="button" class="btn" onclick={() => void loadProviders()} disabled={loading}>
       <RefreshCw size={14} class={loading ? 'animate-spin' : ''} /> Refresh
     </button>
-  </header>
+  {/snippet}
 
-  <section
-    class="settings-panel overflow-visible rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)]"
-  >
-    <div class="grid gap-0 overflow-visible lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
-      <div class="space-y-5 p-5">
+  <section>
+    <div class="grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
+      <div class="min-w-0 space-y-5">
         <div class="flex items-center justify-between gap-3">
           <div>
-            <h4 class="font-medium text-[var(--color-text-primary)]">Video studio</h4>
+            <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Video studio</h4>
             <p class="mt-1 text-xs text-[var(--color-text-muted)]">
               {#if activeProvider}
                 {activeProvider.label}{selectedModel ? ` · ${selectedModel}` : ''}
@@ -423,7 +420,7 @@
           </div>
           {#if activeProvider}
             <span
-              class="rounded-full px-2.5 py-1 text-[10px] font-medium {activeProvider.configured
+              class="rounded-full px-2.5 py-1 text-[11px] font-medium {activeProvider.configured
                 ? 'bg-[var(--color-success-bg)] text-[var(--color-success)]'
                 : 'bg-[var(--color-warning-bg)] text-[var(--color-warning)]'}"
             >
@@ -482,7 +479,10 @@
               <div class="mt-1.5">
                 <KorySelect
                   value={selectedModel}
-                  onchange={(value: string) => (selectedModel = value)}
+                  onchange={(value: string) => {
+                    selectedModel = value;
+                    syncAspectRatio();
+                  }}
                   disabled={generating}
                   options={(activeProvider?.models ?? []).map((model) => ({
                     value: model.id,
@@ -586,7 +586,7 @@
           <div class="flex flex-wrap items-center gap-3 pt-1">
             <button
               type="button"
-              class="btn"
+              class="btn btn-primary"
               onclick={() => void generate()}
               disabled={!canGenerate}
             >
@@ -608,8 +608,8 @@
         </div>
       </div>
 
-      <div class="space-y-4 border-t border-[var(--color-border)] p-5 lg:border-l lg:border-t-0">
-        <h4 class="font-medium text-[var(--color-text-primary)]">Result</h4>
+      <div class="min-w-0 space-y-4">
+        <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Result</h4>
         {#if generated}
           <video
             class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)]"
@@ -641,11 +641,28 @@
             <Download size={14} /> Download
           </button>
         {:else}
-          <p
-            class="rounded-xl border border-dashed border-[var(--color-border)] px-4 py-10 text-center text-xs text-[var(--color-text-muted)]"
+          <!-- Same empty-preview treatment as Images: one quiet surface, bare
+               icon, sized to its content and top-aligned with the studio. -->
+          <div
+            class="relative overflow-hidden rounded-2xl bg-[var(--color-surface-1)] px-6 py-12 text-center text-[var(--color-text-muted)]"
           >
-            {generating ? 'Rendering on the provider…' : 'Generated clips appear here.'}
-          </p>
+            <div class="pointer-events-none absolute inset-0 opacity-40 video-atmosphere"></div>
+            <div class="relative mx-auto max-w-xs">
+              <Film
+                size={20}
+                class="mx-auto mb-3 text-[var(--color-accent)] {generating ? 'animate-pulse' : ''}"
+                aria-hidden="true"
+              />
+              <p class="text-sm font-medium text-[var(--color-text-secondary)]">
+                {generating ? 'Rendering on the provider…' : 'Generated clips appear here.'}
+              </p>
+              <p class="mt-2 text-xs leading-relaxed">
+                {generating
+                  ? 'Clips usually take 30 seconds to several minutes. You can leave this page.'
+                  : 'Describe the shot, pick a provider and model, then generate a clip.'}
+              </p>
+            </div>
+          </div>
         {/if}
 
         {#if historyThumbs.length > 0}
@@ -678,4 +695,20 @@
       </div>
     </div>
   </section>
-</div>
+</SettingsPage>
+
+<style>
+  .video-atmosphere {
+    background:
+      radial-gradient(
+        circle at 20% 20%,
+        color-mix(in srgb, var(--color-accent) 35%, transparent),
+        transparent 40%
+      ),
+      radial-gradient(
+        circle at 80% 75%,
+        color-mix(in srgb, var(--color-info) 25%, transparent),
+        transparent 42%
+      );
+  }
+</style>

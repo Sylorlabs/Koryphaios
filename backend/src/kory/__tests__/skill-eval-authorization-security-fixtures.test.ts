@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import {
   AUTHORIZATION_SECURITY_SKILL_EVAL_MATERIALIZERS,
   AUTHORIZATION_SECURITY_SKILL_EVAL_SCORERS,
-} from '../skill-eval-authorization-security-fixtures';
-import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
+} from '../../eval/skills/skill-eval-authorization-security-fixtures';
+import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
 import { loadV5SkillPackages } from '../skill-packages';
 
 const roots: string[] = [];

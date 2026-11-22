@@ -40,6 +40,10 @@ For asynchronous requests, track the input or revision that launched each attemp
 
 Keep browser-only listeners, subscriptions, timers, observers, and imperative integrations behind the correct client lifecycle and remove them when their owning effect or component ends. Verify that reruns do not accumulate handlers or reopen a completed request; do not use a one-time global flag to hide an incorrect dependency or ownership boundary.
 
+### Workspace and dependency boundary
+
+The runtime a task hands you is the runtime to measure. Treat an installed Svelte compiler, browser harness, and test runner as fixed host capability: do not add dependencies, edit `package.json`, or run a package install to obtain a tool, because the install can spend the whole turn, change lock state the task did not ask for, and still leave the check unrun. Do not scaffold a new application or build configuration to observe a component that already has a harness. When a tool is genuinely absent, record the check as unverified with the missing tool named, and report which observations you could still make.
+
 ### SvelteKit and repository controls
 
 Keep server and browser capabilities separate. Browser globals and `$effect` do not belong to the server-rendered path. For SvelteKit data or navigation work, identify where the code executes and how server output reaches hydration before deciding where state should live.
@@ -48,7 +52,9 @@ For URL- or server-owned state, inspect the route loader, action, navigation/inv
 
 Reuse the repository's shared controls and theme primitives when they exist. Do not recreate a project-standard select, switch, stepper, or other reusable control with a browser-default substitute.
 
-Repair the consuming component before changing a shared control that already supplies the required behavior. A fixture or task may explicitly make shared controls immutable; preserve that boundary. Persist requested version, execution context and transition evidence in the supplied report format. Distinguish authored verification expectations from browser observations, especially when tools are unavailable.
+Repair the consuming component before changing a shared control that already supplies the required behavior. A fixture or task may explicitly make shared controls immutable; preserve that boundary.
+
+A file the task marks as harness, fixture, evaluator owned, generated, or fixed is read only even when it looks wrong. Editing it is not a repair, it invalidates the run, and the work is discarded. When such a control genuinely misbehaves, the fix belongs in the consumer, and the suspected defect belongs in the verification record. Persist requested version, execution context and transition evidence in the supplied report format. Distinguish authored verification expectations from browser observations, especially when tools are unavailable.
 
 ## Boundary verification
 
@@ -66,6 +72,12 @@ Identify the Svelte and SvelteKit versions, reactivity generation, and whether t
 
 ## Verification artifacts
 
-When a task supplies a verification artifact schema, write it with the exact field names, version strings, check identifiers, and terminal status it lists. Set the status from what you actually ran: a check you performed carries its observed result, and a check you could not run stays unverified with the reason recorded. Never leave a placeholder status after performing the work, and never claim a check you did not run.
+The task packet decides whether a verification schema applies. When the workspace ships result or verification files, or the task text names them, that schema applies, and the files are part of the deliverable rather than a summary of it. Write them with the exact field names, version strings, check identifiers, and terminal status the packet lists.
+
+Order the turn around that contract. Create or open the artifact while the work is still in progress and record the environment facts you already hold, because a turn that runs out of time or dies inside a runtime attempt still has to leave a document behind. Update each field as its observation happens rather than holding the whole document until the end. An unfinished artifact is the one defect that erases every other result in the same turn.
+
+The artifact is a file in the workspace, not a section of your final message. A prose summary that describes what you would have checked leaves the deliverable missing.
+
+Set the status from what you actually ran: a check you performed carries its observed result, and a check you could not run stays unverified with the reason recorded. Never leave a placeholder status after performing the work, and never claim a check you did not run. Before you stop, reopen the artifact files and confirm that no `TODO` or placeholder value survives in a field you had the evidence to fill.
 
 Use [the maintained source map](references/sources.md) for version-sensitive Svelte behavior and legacy-to-runes distinctions.

@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "reviewerId": "logfare-stateless-a5f74c90-b997-473a-a333-12b0272e5e97",
+  "completed": true,
+  "output": "{\"artifactA\":{\"passed\":false,\"quality\":0.55,\"verification\":0.5,\"integrityFailure\":false,\"evidence\":[\"Policy artifact and evidence artifact both present; evidence maps all 8 supplied fields with source/purpose/store/recipient/retention/deletion and includes jurisdictionSpecificLegalClaim:false.\",\"Host hidden test 'aggregate adoption cannot reuse the caller account identity as its event identity' FAILED: adoption emits 'adopt:eventId:undefined' because adoptionFields=['eventId'] but the method only reads user/email/deviceId, so eventId is undefined and identical across calls.\",\"Agent's own test asserts the broken behavior (expects ['adopt:eventId:undefined']) and its finalOutput claims 'bounded pseudonymous event identity' and '8/8 fields mapped' while the emitted event identity is undefined — an overstated completion claim.\",\"Opt-out suppression, stale-queue neutralization, and backup-restore tombstone replay are implemented and pass tests; deletion propagation across stores and CDC tombstone check implemented.\",\"Evidence artifact honestly labels missingness (eventId undefined), immutable-backup limitation, and residual linkage; scope keeps application security out.\",\"Verification claim '5 passed, 0 failed' is true for the agent's own tests but those tests encode the defect, so verification is not meaningful for the aggregate-identity requirement.\"]},\"artifactB\":{\"passed\":true,\"quality\":0.85,\"verification\":0.85,\"integrityFailure\":false,\"evidence\":[\"All three host hidden tests pass, including 'aggregate adoption cannot reuse the caller account identity as its event identity' — adoption generates a fresh per-event pseudonymous id via nonce+hash, so repeated calls differ and no raw identifiers leak.\",\"Opt-out adds durable suppression, removes recommendation/precise history, filters queue, and drainQueue checks suppression so late stale events cannot rehydrate; test explicitly pushes a stale queued event after opt-out.\",\"Backup restore reapplies suppression before serving; DeletionSystem deletes across all stores and CDC checks tombstone.\",\"Evidence artifact maps all 8 fields, includes purpose/necessity rationale, retention/deletion matrix, before/after emitted events and durable state, stale-queue replay, backup limitation, residual linkage, and jurisdictionSpecificLegalClaim:false.\",\"Honestly labels unavailable/external items (analytics retention, backup schedule, third parties) rather than converting to certainty; scope excludes application security.\",\"Minor: adoption loop pushes 'adopt:eventId:' per adoptionFields entry rather than per field name, but behavior satisfies the contract; verification claims (5 passed, 8/8 fields) match observed evidence.\"]},\"preference\":\"B\",\"rationale\":[\"Artifact B passes the decisive hidden test on aggregate event identity; Artifact A fails it, emitting 'adopt:eventId:undefined' and thus a stable/undefined identity that violates the bounded-pseudonymous-event requirement.\",\"Artifact A's own regression test asserts the broken undefined behavior and its finalOutput claims a bounded pseudonymous event identity, an unsupported completion claim.\",\"Both cover opt-out suppression, stale-queue neutralization, backup-restore tombstone replay, deletion propagation, and field-level evidence; B additionally satisfies the aggregate-identity requirement with passing host evidence.\",\"B's evidence artifact is comparably complete and honestly labels unavailable items; A's evidence is also honest about missingness but the code does not resolve it.\"]}",
+  "events": [
+    {
+      "type": "review.started",
+      "reviewerId": "logfare-stateless-a5f74c90-b997-473a-a333-12b0272e5e97"
+    },
+    {
+      "type": "review.completed",
+      "reviewerId": "logfare-stateless-a5f74c90-b997-473a-a333-12b0272e5e97",
+      "outputSha256": "af4a8f051c3c880da4e3a59dd1e9de35ecb44f82adba7c2123b0c942a5009f21"
+    }
+  ],
+  "hostReceipt": {
+    "schemaVersion": 1,
+    "stageOnly": true,
+    "identitySource": "host-invocation-uuid",
+    "upstreamSessionObserved": true,
+    "requestedModel": "deepseek-v4.1-flash-1017",
+    "responseModel": "deepseek-v4.1-flash-1017",
+    "promptSha256": "9de4a4d271395d08b04cb152b2de6f159e869e59f5bb5b3be9e0c8f19bb5a3bd",
+    "requestBytes": 60140,
+    "responseSha256": "40f126d0799546d3b2d3e2e4f2019043e5f9986e691619adfc0ebab699a75388",
+    "outputSha256": "af4a8f051c3c880da4e3a59dd1e9de35ecb44f82adba7c2123b0c942a5009f21",
+    "elapsedMs": 4774,
+    "osIsolationVerified": false,
+    "upstreamIdentityVerified": false,
+    "signed": false
+  }
+}

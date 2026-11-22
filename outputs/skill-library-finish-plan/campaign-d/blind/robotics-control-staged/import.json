@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "reviewer": {
+    "agentId": "logfare-stateless-005fb113-b998-4d30-83d0-c033ef7da110",
+    "provider": "logfare",
+    "model": "deepseek-v4.1-flash-1017"
+  },
+  "reviews": [
+    {
+      "assignmentId": "blind-v5-b8afc01976f4bb5c9d3d",
+      "output": "{\"artifactA\":{\"passed\":false,\"quality\":0.35,\"verification\":0.3,\"integrityFailure\":false,\"evidence\":[\"Host scorer: tracking fail (rms=0.3004 worst=0.3706 vs limits 0.10/0.20); recovery fail (rms 0.4073 vs 0.12).\",\"Passes contract, joint-limits, determinism, watchdog (fault latched after 1 cycle).\",\"Controller uses feedforward inverse dynamics via mj_forward/mj_fullM and trajectory reference, with torque clipping and joint-limit protection — reasonable structure but gains insufficient to meet tracking.\",\"No authored verification narrative; relies on host checks. No fabricated claims of success.\"]},\"artifactB\":{\"passed\":false,\"quality\":0.2,\"verification\":0.2,\"integrityFailure\":false,\"evidence\":[\"Host scorer: tracking fail (rms=0.4823 worst=0.6191); recovery fail (rms 0.7614 vs 0.12).\",\"Passes contract, joint-limits, determinism, watchdog.\",\"Hardcodes reference velocity/acceleration (0.5cos t, 0.48cos 1.2t) rather than importing robot/trajectory.py, and uses a heuristic bias-sign calibration — brittle and less faithful to the published trajectory.\",\"Worse tracking and recovery than A; no authored verification narrative.\"]},\"preference\":\"A\",\"rationale\":[\"Both artifacts fail the core tracking and recovery requirements per host scorer, so neither passes.\",\"A is closer to the contract: it imports the actual trajectory reference and computes inverse dynamics from the plant model, whereas B hardcodes the reference derivatives and uses a fragile bias-sign heuristic.\",\"A's measured errors (rms 0.30, recovery 0.41) are substantially better than B's (rms 0.48, recovery 0.76).\",\"Neither agent fabricated verification claims; both rely on host checks, so no integrity failure.\"]}"
+    }
+  ]
+}

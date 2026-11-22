@@ -1,0 +1,57 @@
+{
+  "sessionId": "3MFm6MLCgUR7",
+  "outDir": "/Users/Shared/micah/Documents/koryphaios/outputs/soak-2026-11-20T06-57-57-298Z",
+  "finishedAt": "2026-11-20T07:08:23.354Z",
+  "turns": 5,
+  "passByKind": {
+    "build": {
+      "total": 4,
+      "passed": 1
+    },
+    "bigout": {
+      "total": 0,
+      "passed": 0
+    },
+    "readback": {
+      "total": 1,
+      "passed": 0
+    },
+    "recall": {
+      "total": 0,
+      "passed": 0
+    }
+  },
+  "terminal": {
+    "error/logfare is unavailable or failed to start. — provider said: \"Error:Service temporarily unavailable\" Koryphaios retried this turn 3 attempts without success — the provider kept interrupting the request. Retry the turn, or pick another provider if it persists.": 2,
+    "done/provider_turn_completed": 1,
+    "error/logfare request failed. Retry or inspect provider status in Settings. — provider said: \"Error:AiError: AiError: Service temporarily at capacity (60c2eaf2-6e25-4639-94a6-fab4614fc1d5)\"": 1,
+    "error/logfare request failed. Retry or inspect provider status in Settings. — provider said: \"Error:Please wait and consider throttling your request speed\"": 1
+  },
+  "driverTimeouts": 0,
+  "turnDurationSec": {
+    "p50": 40.06,
+    "p95": 388.562,
+    "max": 388.562
+  },
+  "compactions": [],
+  "serviceRestarted": false,
+  "hourly": [
+    {
+      "hour": 0,
+      "rssMiB": {
+        "median": 132.359375,
+        "max": 326.390625
+      },
+      "childCountMax": 1,
+      "childRssMiBMax": 190.75,
+      "fdsMax": 31,
+      "healthMs": {
+        "p50": 3.1963749999995343,
+        "p95": 630.6147089999868
+      },
+      "healthFailures": 1,
+      "dbMiB": 2034.39453125,
+      "walMiBMax": 3.9527435302734375
+    }
+  ]
+}

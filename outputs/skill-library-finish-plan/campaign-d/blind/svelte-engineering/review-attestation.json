@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "status": "unimported",
+  "assignmentId": "blind-v5-dcc261fce072a6f2c7ec",
+  "skill": "svelte-engineering",
+  "scenarioId": "svelte-engineering-full-task-1-individual",
+  "pairId": "svelte-engineering-full-task-1-individual:88a0c6de-9169-4b4f-82fb-882bc5ba8403",
+  "reviewerThread": "kory-cli-stateless-35896e18-d4b8-46c2-aa35-0aae6cc06e39",
+  "reviewerIdentitySource": "external-reviewer-adapter-output",
+  "reviewerAdapter": "scripts/kory-cli-stateless-reviewer",
+  "reviewerModel": "logfare/deepseek-v4.1-flash-1017",
+  "reviewerModelSource": "configured-provider-model-metadata",
+  "reviewerBaseUrl": "http://127.0.0.1:17841/v1",
+  "promptSha256": "5ace566d12867e5c42c436f4ed2e10b8767f6ce7b5b297b2f9a6bf6beb476795",
+  "privateAssignmentSha256": "e7802e9a133c198a3bfe9e66650856e7714b988470d7faa046d31bae7bbbaa67",
+  "reviewerEventsSha256": "f4e4a05a9ba093e70f3f3826e3d7bf985f8b870d11669d1c215745dd267c14e2",
+  "judgeOutputSha256": "b28f3694691f9460d5f3cf53a6621accd4067040116c084b457d9a72988e93d5",
+  "envelopeSha256": "eb28023e7ed6954d1ed85c4b3cd6ee9802e555729141bae21981503f73ed67b2",
+  "importValidation": {
+    "mode": "validate",
+    "validatedReviews": 1,
+    "persistedReviews": 0
+  },
+  "promptSnapshotPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-kJBOfW/review-task.prompt.txt",
+  "reviewerEventsPath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-kJBOfW/reviewer-events.json",
+  "envelopePath": "/private/var/folders/kf/5y26484x0571_3cq5b2hfk3w0000gn/T/kory-v5-blind-review-kJBOfW/import.json"
+}

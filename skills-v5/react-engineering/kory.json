@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "react-engineering",
-  "version": "5.2.0",
+  "version": "5.7.1",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",

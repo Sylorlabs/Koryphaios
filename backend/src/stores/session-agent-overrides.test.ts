@@ -42,6 +42,32 @@ describe('per-session agent overrides', () => {
     expect((await new SessionStore().get(session.id))?.agentOverrides).toBeUndefined();
   });
 
+  test('persists id-addressed manager controls and drops malformed entries', async () => {
+    const session = await sessions.create('local-user', 'Manager control chat');
+    await sessions.update(session.id, {
+      agentOverrides: {
+        managerControls: {
+          'kory-manager': {
+            model: 'gpt-5',
+            provider: 'openai',
+            reasoningLevel: 'high',
+            fallbacks: [{ model: 'anthropic:sonnet', reasoningLevel: 'low' }],
+          },
+          broken: { model: '', fallbacks: [] } as never,
+        },
+      },
+    });
+    const reloaded = await new SessionStore().get(session.id);
+    expect(reloaded?.agentOverrides?.managerControls).toEqual({
+      'kory-manager': {
+        model: 'gpt-5',
+        provider: 'openai',
+        reasoningLevel: 'high',
+        fallbacks: [{ model: 'anthropic:sonnet', reasoningLevel: 'low' }],
+      },
+    });
+  });
+
   test('rejects unknown or ill-typed override values', () => {
     expect(sanitizeSessionAgentOverrides({ permissionMode: 'everything-goes' })).toBeUndefined();
     expect(sanitizeSessionAgentOverrides({ permissionMode: 'plan' })).toBeUndefined();

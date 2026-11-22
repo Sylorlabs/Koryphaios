@@ -27,11 +27,17 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { whichBinary } from './cli-detection';
 import { getCliBridge } from './cli-bridges';
+import {
+  koryBridgeUnavailableError,
+  resolveKoryBridgeScript,
+} from './kory-cli-mcp-config';
 import { ClaudeCodeCliBridge } from './cli-bridges';
 import type { CliHookConfig } from './cli-bridge';
 import {
+  type LifecycleCapabilities,
   type Provider,
   type ProviderEvent,
+  type ProviderLifecycle,
   type ProviderMessage,
   type StreamRequest,
   type CliCommand,
@@ -94,11 +100,11 @@ function reasoningLevelToThinkingTokens(level: string | undefined): string | nul
 let effortLevelsPromise: Promise<string[] | null> | null = null;
 let cachedEffortLevels: string[] | null = null;
 
-function detectEffortLevels(): Promise<string[] | null> {
+function detectEffortLevels(spawnChild: typeof spawn = spawn): Promise<string[] | null> {
   if (!effortLevelsPromise) {
     effortLevelsPromise = new Promise((resolve) => {
       const claudeConfigDir = getKoryphaiosClaudeConfigDir();
-      const child = spawn('claude', ['--help'], {
+      const child = spawnChild('claude', ['--help'], {
         stdio: ['ignore', 'pipe', 'ignore'],
         env: buildProviderCliEnv('claude', {
           CLAUDE_CONFIG_DIR: claudeConfigDir,
@@ -491,11 +497,11 @@ function readCliExtraModels(): ModelDef[] {
   }
 }
 
-function refreshModelsInBackground(): Promise<void> {
+function refreshModelsInBackground(spawnChild: typeof spawn = spawn): Promise<void> {
   if (refreshInProgress) return refreshPromise ?? Promise.resolve();
   refreshInProgress = true;
 
-  refreshPromise = Promise.all([detectEffortLevels()])
+  refreshPromise = Promise.all([detectEffortLevels(spawnChild)])
     .then(([effortLevels]) => {
       const base = readCliExtraModels();
       // Server-driven extras from the CLI's own cache (skip any that duplicate a
@@ -737,14 +743,51 @@ function buildCliCommands(names: string[]): CliCommand[] {
 export class ClaudeCodeProvider implements Provider {
   readonly imageInputTransport = 'file' as const;
   readonly name = 'claude' as const;
+  /**
+   * Lifecycle evidence (verified against this file):
+   * - interrupt: false. `onAbort` (~line 1079) SIGTERMs the child, but the generator
+   *   returns without a status when `request.signal?.aborted` (~line 1183). No
+   *   interrupted status is reported.
+   * - resume / resumeAfterRestart: false. The argv (~line 890-950) has no `--resume`,
+   *   `--continue` or `--session-id`, and the `system/init` envelope (~line 393) is read
+   *   only for `model`. Its `session_id` is never captured. The `resume` string at
+   *   ~line 714 is a slash-palette description, not a resume path.
+   * - steerInFlight: false. The prompt is written once to stdin (~line 1109), and the
+   *   CLI runs in `-p` print mode.
+   * - rollback / fork: false. The prompt is rebuilt from messages each call (`buildPrompt`,
+   *   ~line 1392), but this adapter does not declare supportsFreshConversation, so that is
+   *   not claimed here.
+   * - terminalStatusQuality: weak. A `result` envelope yields a definitive `complete`
+   *   (~line 1280), but when the process exits 0 without one, `complete` is still emitted
+   *   (~line 1197).
+   * - resumeHandle: null. No session id is stored.
+   */
+  readonly lifecycle: ProviderLifecycle = {
+    capabilities: (): LifecycleCapabilities => ({
+      version: 1,
+      interrupt: false,
+      resume: false,
+      resumeAfterRestart: false,
+      steerInFlight: false,
+      rollback: false,
+      fork: false,
+      terminalStatusQuality: 'weak',
+    }),
+    resumeHandle: () => null,
+  };
 
-  constructor(readonly config: ProviderConfig) {}
+  // spawnChild is the process seam: production uses node's spawn; replay tests
+  // inject a recorded-transcript process (see providers/replay/).
+  constructor(
+    readonly config: ProviderConfig,
+    private readonly spawnChild: typeof spawn = spawn,
+  ) {}
 
   isAvailable(): boolean {
     if (this.config.disabled) return false;
     const available = !!this.config.authToken || detectClaudeCodeLogin();
     if (available && Date.now() - cachedModelsAt > MODELS_CACHE_TTL_MS) {
-      refreshModelsInBackground();
+      refreshModelsInBackground(this.spawnChild);
     }
     return available;
   }
@@ -764,7 +807,7 @@ export class ClaudeCodeProvider implements Provider {
     if (cachedModels && Date.now() - cachedModelsAt < MODELS_CACHE_TTL_MS) {
       return cachedModels;
     }
-    refreshModelsInBackground();
+    refreshModelsInBackground(this.spawnChild);
     if (cachedModels) return cachedModels;
     return [];
   }
@@ -775,7 +818,7 @@ export class ClaudeCodeProvider implements Provider {
       cachedModels = null;
       cachedModelsAt = 0;
     }
-    return refreshModelsInBackground();
+    return refreshModelsInBackground(this.spawnChild);
   }
 
   private resolveCliModel(modelId: string): string | undefined {
@@ -838,7 +881,7 @@ export class ClaudeCodeProvider implements Provider {
       : (bridgeScopes?.deny ??
         (() => {
           // Fallback to the inline computation if the bridge isn't available.
-          const d = ['Task', 'Agent'];
+          const d = ['Task', 'Agent', 'AskUserQuestion'];
           if (sandbox && !sandbox.allowEdits) d.push('Edit', 'Write', 'MultiEdit', 'NotebookEdit');
           if (sandbox && !sandbox.allowShell) d.push('Bash');
           if (sandbox && !sandbox.allowWebSearch) d.push('WebFetch', 'WebSearch');
@@ -859,10 +902,12 @@ export class ClaudeCodeProvider implements Provider {
       '--verbose',
       '--model',
       cliModel,
-      // Agentic, non-interactive: auto-approve edits + the pre-approved toolset so a
-      // headless run never hangs waiting for a permission prompt.
+      // Agentic, non-interactive: Kory is the permission authority, so bypass
+      // the CLI's own approval layer entirely — --disallowedTools still hides
+      // native tools from the model and --allowedTools pre-approves the kory
+      // set. Any residual prompt would hang a headless turn.
       '--permission-mode',
-      request.harnessRole === 'critic' ? 'plan' : 'acceptEdits',
+      'bypassPermissions',
       '--allowedTools',
       allowedTools,
       '--disallowedTools',
@@ -895,7 +940,7 @@ export class ClaudeCodeProvider implements Provider {
     ensureManagedCliDirectory(claudeConfigDir);
     let appliedEffort: string | null = null;
     if (request.reasoningLevel) {
-      const cliLevels = await detectEffortLevels();
+      const cliLevels = await detectEffortLevels(this.spawnChild);
       const modelDef = this.listModels().find(
         (m) => m.id === request.model || m.apiModelId === request.model,
       );
@@ -939,6 +984,15 @@ export class ClaudeCodeProvider implements Provider {
     // Write the kory MCP server config to the isolated Claude home so the CLI
     // discovers it on startup. This is how the CLI gets access to kory__ tools.
     const mcpConfigs = researchOnly ? null : claudeBridge?.buildMcpConfig(bridgeCtx);
+    if (
+      !researchOnly &&
+      bridgeCtx.sessionId &&
+      (!mcpConfigs || mcpConfigs.length === 0) &&
+      !resolveKoryBridgeScript()
+    ) {
+      yield { type: 'error', error: koryBridgeUnavailableError('claude') };
+      return;
+    }
     if (mcpConfigs && mcpConfigs.length > 0) {
       try {
         const mcpConfigPath = join(env.CLAUDE_CONFIG_DIR!, '.claude.json');
@@ -1027,7 +1081,7 @@ export class ClaudeCodeProvider implements Provider {
 
     const child = spawnWithPrivateArtifactCleanup(
       () =>
-        spawn(spawnBin, spawnArgs, {
+        this.spawnChild(spawnBin, spawnArgs, {
           cwd,
           stdio: ['pipe', 'pipe', 'pipe'],
           env,
@@ -1240,15 +1294,22 @@ export class ClaudeCodeProvider implements Provider {
       }
       case 'result': {
         if (envelope.usage) {
+          const u = envelope.usage;
+          const cache = (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
           yield {
             type: 'usage_update',
-            tokensIn: envelope.usage.input_tokens,
-            tokensOut: envelope.usage.output_tokens,
-            tokensCache:
-              (envelope.usage.cache_read_input_tokens ?? 0) +
-              (envelope.usage.cache_creation_input_tokens ?? 0),
-            tokensCacheRead: envelope.usage.cache_read_input_tokens,
-            tokensCacheWrite: envelope.usage.cache_creation_input_tokens,
+            tokensIn: u.input_tokens,
+            tokensOut: u.output_tokens,
+            tokensCache: cache,
+            tokensCacheRead: u.cache_read_input_tokens,
+            tokensCacheWrite: u.cache_creation_input_tokens,
+            // The result receipt sums every internal request of the turn (each
+            // tool round re-reads the whole prefix), so it is billing evidence,
+            // not live occupancy. Each request's `message_start` above is the
+            // per-request context snapshot the meter keeps.
+            estimated: true,
+            billingTokensIn: (u.input_tokens ?? 0) + cache,
+            billingTokensOut: u.output_tokens,
           };
         }
         if (envelope.is_error) {

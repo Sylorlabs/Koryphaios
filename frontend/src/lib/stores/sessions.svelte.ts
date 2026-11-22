@@ -10,7 +10,7 @@ import { browser } from '$app/environment';
 import { friendlyHttpError } from '$lib/utils/http-error';
 import { apiUrl } from '$lib/utils/api-url';
 import { apiFetch } from '$lib/api.svelte';
-import { wsStore } from './websocket.svelte';
+import { notifySessionUnsubscribed } from './session-subscriptions';
 import { notifySessionRemoved, notifySessionsRemoved } from './session-removal';
 import { loadLastSessionId, saveLastSessionId } from './navigation-preferences';
 import {
@@ -116,7 +116,7 @@ function replacementSessionId(remaining: LifecycleSession[]): string {
 
 function removeFromActiveProjection(id: string): void {
   sessions = sessions.filter((session) => session.id !== id);
-  wsStore.unsubscribeFromSession(id);
+  notifySessionUnsubscribed(id);
   if (activeSessionId === id) {
     selectSession(replacementSessionId(sessions));
     saveLastSession(activeSessionId);
@@ -338,7 +338,7 @@ async function fetchArchivedSessions(): Promise<boolean> {
     const activeWasArchived = activeSessionId ? archivedIds.has(activeSessionId) : false;
     sessions = sessions.filter((session) => !archivedIds.has(session.id));
     if (activeWasArchived) {
-      wsStore.unsubscribeFromSession(activeSessionId);
+      notifySessionUnsubscribed(activeSessionId);
       selectSession(replacementSessionId(sessions));
       saveLastSession(activeSessionId);
     }
@@ -530,7 +530,7 @@ async function archiveSession(id: string): Promise<boolean> {
     archivedSessions = upsertSession(archivedSessions, archived, sortArchived);
     removeFromActiveProjection(id);
     toastStore.success('Chat archived', {
-      duration: 8000,
+      duration: 6000,
       action: () => void restoreSession(id),
       actionLabel: 'Undo',
     });
@@ -703,7 +703,7 @@ async function deleteAllSessions(): Promise<boolean> {
     const erased = [...sessions.filter((session) => !session.id.startsWith('linked-')), ...archivedSessions];
     for (const session of erased) {
       deletedSessionIds.add(session.id);
-      wsStore.unsubscribeFromSession(session.id);
+      notifySessionUnsubscribed(session.id);
     }
     sessions = sessions.filter((session) => session.id.startsWith('linked-'));
     archivedSessions = [];

@@ -1,0 +1,226 @@
+SNAPSHOT HASH DOMAINS: beforeSha256/afterSha256 identify complete workspace entries, using SHA256("file\0" + original file bytes), or SHA256("symlink\0" + link target). Scorer artifactSHA and durable artifact hashes use SHA256(raw bytes), without that tag. These different hash domains must not be compared as if identical. Visible beforeText/afterText may be bounded or privacy-scrubbed; they are not the original complete bytes to hash.
+
+You are an independent blind semantic evaluator.
+Two anonymous agents attempted the same task. You are not told which agent received any extra guidance, and you must not infer or speculate about that hidden condition.
+Judge each artifact independently against the task contract. Do not reward matching wording, verbosity, or references to a skill. Focus on behavioral correctness, scope discipline, evidence quality, preservation of required facts, negative paths, recovery behavior, and whether completion claims are actually supported.
+The artifact bundle may include harness captured execution evidence and before and after file snapshots. Treat that as observed evidence, not as an agent claim.
+PUBLIC CANDIDATE CONTRACT SNAPSHOT is the exact task prompt and allowlisted README.md/contract.json bytes visible to the candidate before execution. Hashes are verified by the harness. If an entry says UNAVAILABLE, do not reconstruct it from the current repository or treat current files as historical proof.
+executionEvidence is supplied by the host after the agent attempt, including deterministic scorer observations. An agent can truthfully report that it could not run a check even when the host subsequently runs that check successfully. Those observations have different owners and times; that difference alone is not an integrity failure.
+Attribute a completion claim to its actual source. Penalize an agent for fabricated or overstated verification only when its finalOutput or authored file content makes that unsupported claim. Do not attribute a host scorer statement to the agent, require the agent to predict later host results, or treat an honest statement of limited access as contradicting later host verification.
+Host evidence is not infallible. If a scorer result conflicts with concrete artifact behavior, identify the disputed check and evidence as a possible verifier defect. Keep instrument uncertainty separate from an agent integrity finding; a score label alone does not prove the task succeeded.
+Treat afterText JSON strings as literal source bytes. Before claiming a URL or origin is malformed or Markdown-formatted, inspect and quote the exact JSON value. Do not transform plain URL strings into Markdown hyperlinks and then mistake that display formatting for the original value.
+The PAIR EXECUTION EVIDENCE section is evaluator owned evidence. It certifies that Artifact A and Artifact B are the two randomized arms of one matched same model comparison for this exact scenario and evaluation contract.
+When REQUIRED EVIDENCE or REQUIRED ARTIFACTS asks for paired skill and no skill run artifacts, paired evaluation evidence, or an equivalent pair label, the anonymous A and B bundle plus PAIR EXECUTION EVIDENCE satisfies the existence and provenance of that pair. Do not require either agent output to claim, create, or narrate evaluator owned pair evidence.
+The REQUIRED ARTIFACTS entries below are evaluation evidence labels for the overall harness. They are not literal filenames the agent was instructed to create unless the task itself says so. Judge whether the bundle substantively supplies the required evidence; do not require those exact label strings to appear.
+Routing and hierarchy selection are evaluated independently by the harness. Do not require the agent to narrate which skill was selected or provide meta level specialist selection rationale when the artifact itself respects the requested scope and neighboring responsibility boundaries.
+Never lower passed, quality, verification, or integrity because an artifact omits hierarchy narration, specialist selection rationale, skill names, or evaluator owned paired A/B evidence. If a draft criticism relies on one of those omissions, remove that criticism and score only the concrete task behavior and evidence.
+If a REQUIRED EVIDENCE or REQUIRED ARTIFACTS label describes routing, hierarchy selection, specialist selection, or paired skill versus no skill provenance, treat that meta level requirement as evaluator owned. The harness evidence in this prompt is authoritative for those concerns.
+When choosing preference A, B, or tie, compare concrete task behavior and evidence only. Evaluator-owned hierarchy or specialist narration, skill-guidance scope, filenames, and paired-run provenance must not affect the preference comparison.
+Treat genuinely missing task evidence as missing. Do not assume unshown commands or tests passed.
+Return JSON only, with this exact shape:
+{"artifactA":{"passed":true,"quality":0.0,"verification":0.0,"integrityFailure":false,"evidence":["..."]},"artifactB":{"passed":true,"quality":0.0,"verification":0.0,"integrityFailure":false,"evidence":["..."]},"preference":"A","rationale":["..."]}
+
+TASK
+The evaluation repository asks the agent to "Apply mlops expertise to this task". The fixture contains a plausible happy path, an adjacent-skill decoy, one invalid or partial state, and a recovery condition that must be demonstrated rather than assumed. The acceptance boundary is mlops: Make dataset snapshots, feature definitions, training code, environment, model artifacts, evaluation, approvals, serving configuration, monitoring, and rollback one traceable lineage. The adjacent cicd-engineering discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.
+
+FALSIFIABLE CHECKS
+[
+  {
+    "id": "scope-and-hierarchy",
+    "assertion": "The result must establish the actual mlops boundary and relevant environment before acting, preserve the hierarchy relationship (broader=release-planning; near-neighbor=cicd-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+  },
+  {
+    "id": "operating-contract",
+    "assertion": "Make dataset snapshots, feature definitions, training code, environment, model artifacts, evaluation, approvals, serving configuration, monitoring, and rollback one traceable lineage."
+  },
+  {
+    "id": "execution-invariant",
+    "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+  },
+  {
+    "id": "verification-discipline",
+    "assertion": "Reproduce a candidate from recorded inputs, compare offline and serving features, validate canary/rollback, test missing/stale features, and monitor performance/data drift with thresholds tied to action."
+  },
+  {
+    "id": "anti-pattern-resistance",
+    "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not deploy untraceable notebook artifacts, let online/offline feature logic diverge silently, retrain automatically on unvalidated drift, or call a registry entry production-ready without evaluation evidence."
+  },
+  {
+    "id": "evidence-and-uncertainty",
+    "assertion": "Every material completion claim must map to observable evidence (Immutable code/data/feature/run/model/evaluation/registry/deployment lineage; Inference schema/package and offline-online feature/preprocessing parity evidence; Qualification/promotion, canary/shadow, serving-health/model-quality and rollback evidence; Monitoring/retraining trigger semantics, platform version/deprecation and reproducibility artifacts), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+  }
+]
+
+REQUIRED EVIDENCE
+[
+  "Immutable code/data/feature/run/model/evaluation/registry/deployment lineage",
+  "Inference schema/package and offline-online feature/preprocessing parity evidence",
+  "Qualification/promotion, canary/shadow, serving-health/model-quality and rollback evidence",
+  "Monitoring/retraining trigger semantics, platform version/deprecation and reproducibility artifacts",
+  "Hierarchy boundary and selected specialist rationale",
+  "Representative success, negative-path, and recovery verification",
+  "hierarchy boundary and selected specialist rationale",
+  "representative success plus negative/recovery evidence",
+  "paired skill/no-skill run artifacts",
+  "explicit unavailable, simulated, inferred, or stale evidence labels"
+]
+
+REQUIRED ARTIFACTS
+[
+  "mlops-individual-scenario-1-result",
+  "mlops-individual-scenario-1-verification",
+  "mlops-individual-scenario-1-paired-evaluation"
+]
+
+PUBLIC CANDIDATE CONTRACT SNAPSHOT
+{
+  "taskPrompt": {
+    "available": true,
+    "sha256": "02aecb2e8e983b720258f0c4df420720abd5a46424592dfe00b2dbf90546a52d",
+    "byteLength": 793,
+    "text": "The evaluation repository asks the agent to \"Apply mlops expertise to this task\". The fixture contains a plausible happy path, an adjacent-skill decoy, one invalid or partial state, and a recovery condition that must be demonstrated rather than assumed. The acceptance boundary is mlops: Make dataset snapshots, feature definitions, training code, environment, model artifacts, evaluation, approvals, serving configuration, monitoring, and rollback one traceable lineage. The adjacent cicd-engineering discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient."
+  },
+  "fixtureFiles": {
+    "README.md": {
+      "available": true,
+      "sha256": "99a4c9f22b99bc28d504628dda0664aca851da0b529cf3b993ae3cde1e0a5414",
+      "byteLength": 1338,
+      "text": "# mlops: transferable behavior exercise\n\nInput is one record whose lineage fields sit inside lineage: {lineage:{data,features,code,env,modelDigest,signatureValid}, evaluationPassed, approved, featureParity, canary:{health,quality}, rollbackDigest}. Only evaluationPassed, approved, featureParity, canary, rollbackDigest and lineage are read, and the signature flag is lineage.signatureValid. lineageKey is data|features|code|env|modelDigest joined with a pipe in that order. Promotion requires lineage.signatureValid, evaluationPassed, approved, featureParity, canary.health, canary.quality and a nonempty rollbackDigest. Return exactly {promotable, lineageKey, rollbackReady, blockers}, where blockers is the sorted list of failed gate names drawn from approval, artifact-signature, evaluation, feature-parity, canary-health, canary-quality, rollback, and rollbackReady is whether rollbackDigest is a nonempty string.\n\nImplement the pure solve(input) export in candidate.ts. Return JSON data; no network, subprocesses, or real account access is needed. Inputs vary identifiers, values, ordering, and failure paths. Score the supplied evidence; do not claim a real model, device, browser, codec, or permission sandbox ran.\n\nThe subject is an explicitly synthetic trace corpus. This tests evaluation logic, not the safety of a live model.\n"
+    },
+    "contract.json": {
+      "available": true,
+      "sha256": "799eac19f4cea52140e629c819b8e74dc6400cfa64005cc4e913301b6c487dc8",
+      "byteLength": 104,
+      "text": "{\n  \"scenarioId\": \"mlops-full-task-1-individual\",\n  \"evidence\": \"synthetic\",\n  \"fullTaskBlockers\": []\n}\n"
+    }
+  }
+}
+
+PAIR EXECUTION EVIDENCE
+{
+  "matchedPair": true,
+  "sameScenario": true,
+  "sameProviderModel": true,
+  "sameHarness": true,
+  "sameEvaluationContract": true,
+  "sameMaterializer": true,
+  "sameDeterministicScorer": true,
+  "randomizedArmIdentity": true,
+  "evidenceOwner": "evaluation-harness"
+}
+
+ARTIFACT A
+{
+  "finalOutput": "Implemented the fail-closed target-guidance promotion decision in [candidate.ts](<redacted-path>).\n\nAdded [candidate.test.ts](<redacted-path>) covering:\n\n- Complete healthy promotion\n- Missing and malformed evidence failing closed\n- Sorted independent blockers\n- Rollback recovery while degraded canary still blocks promotion\n- Input ordering and decoy fields\n\nVerification: `bun test` — 5 passed, 0 failed.\n\nA strict compiler check could not run because TypeScript was not locally installed and network access is prohibited; its temporary artifacts were removed.",
+  "executionEvidence": [
+    "Codex CLI completed successfully in 74469ms",
+    "Synthetic behavioral vectors: 3/3; full-task coverage: synthetic evaluation protocol."
+  ],
+  "publicContract": {
+    "taskPrompt": {
+      "available": true,
+      "sha256": "02aecb2e8e983b720258f0c4df420720abd5a46424592dfe00b2dbf90546a52d",
+      "byteLength": 793,
+      "text": "The evaluation repository asks the agent to \"Apply mlops expertise to this task\". The fixture contains a plausible happy path, an adjacent-skill decoy, one invalid or partial state, and a recovery condition that must be demonstrated rather than assumed. The acceptance boundary is mlops: Make dataset snapshots, feature definitions, training code, environment, model artifacts, evaluation, approvals, serving configuration, monitoring, and rollback one traceable lineage. The adjacent cicd-engineering discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient."
+    },
+    "fixtureFiles": {
+      "README.md": {
+        "available": true,
+        "sha256": "99a4c9f22b99bc28d504628dda0664aca851da0b529cf3b993ae3cde1e0a5414",
+        "byteLength": 1338,
+        "text": "# mlops: transferable behavior exercise\n\nInput is one record whose lineage fields sit inside lineage: {lineage:{data,features,code,env,modelDigest,signatureValid}, evaluationPassed, approved, featureParity, canary:{health,quality}, rollbackDigest}. Only evaluationPassed, approved, featureParity, canary, rollbackDigest and lineage are read, and the signature flag is lineage.signatureValid. lineageKey is data|features|code|env|modelDigest joined with a pipe in that order. Promotion requires lineage.signatureValid, evaluationPassed, approved, featureParity, canary.health, canary.quality and a nonempty rollbackDigest. Return exactly {promotable, lineageKey, rollbackReady, blockers}, where blockers is the sorted list of failed gate names drawn from approval, artifact-signature, evaluation, feature-parity, canary-health, canary-quality, rollback, and rollbackReady is whether rollbackDigest is a nonempty string.\n\nImplement the pure solve(input) export in candidate.ts. Return JSON data; no network, subprocesses, or real account access is needed. Inputs vary identifiers, values, ordering, and failure paths. Score the supplied evidence; do not claim a real model, device, browser, codec, or permission sandbox ran.\n\nThe subject is an explicitly synthetic trace corpus. This tests evaluation logic, not the safety of a live model.\n"
+      },
+      "contract.json": {
+        "available": true,
+        "sha256": "799eac19f4cea52140e629c819b8e74dc6400cfa64005cc4e913301b6c487dc8",
+        "byteLength": 104,
+        "text": "{\n  \"scenarioId\": \"mlops-full-task-1-individual\",\n  \"evidence\": \"synthetic\",\n  \"fullTaskBlockers\": []\n}\n"
+      }
+    }
+  },
+  "changes": [
+    {
+      "path": ".kory-tmp<redacted-path>",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "44cd25e5e25eb5077f83058d6219572e4eaac9ceac6765ec336fc5767986f964",
+      "afterText": "{}\n"
+    },
+    {
+      "path": "candidate.test.ts",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "3bee89aee478a26960a89818eec827e5133ea4feebca39915c542090ef7125b3",
+      "afterText": "import { describe, expect, test } from \"bun:test\";\nimport { solve } from \"./candidate\";\n\nconst healthy = {\n  lineage: {\n    data: \"dataset:sha256:data\",\n    features: \"feature-view:v7\",\n    code: \"git:abc123\",\n    env: \"image:sha256:env\",\n    modelDigest: \"sha256:model\",\n    signatureValid: true,\n  },\n  evaluationPassed: true,\n  approved: true,\n  featureParity: true,\n  canary: { health: true, quality: true },\n  rollbackDigest: \"sha256:known-good\",\n};\n\ndescribe(\"solve\", () => {\n  test(\"promotes a complete healthy immutable lineage\", () => {\n    expect(solve(healthy)).toEqual({\n      promotable: true,\n      lineageKey:\n        \"dataset:sha256:data|feature-view:v7|git:abc123|image:sha256:env|sha256:model\",\n      rollbackReady: true,\n      blockers: [],\n    });\n  });\n\n  test(\"fails closed and reports every missing gate in sorted order\", () => {\n    expect(solve({ lineage: { data: \"data-only\" } })).toEqual({\n      promotable: false,\n      lineageKey: \"data-only||||\",\n      rollbackReady: false,\n      blockers: [\n        \"approval\",\n        \"artifact-signature\",\n        \"canary-health\",\n        \"canary-quality\",\n        \"evaluation\",\n        \"feature-parity\",\n        \"rollback\",\n      ],\n    });\n  });\n\n  test(\"does not accept truthy claims as recorded boolean evidence\", () => {\n    const partial = {\n      ...healthy,\n      approved: 1,\n      lineage: { ...healthy.lineage, signatureValid: \"true\" },\n      canary: { health: true, quality: false },\n    };\n\n    expect(solve(partial)).toEqual({\n      promotable: false,\n      lineageKey:\n        \"dataset:sha256:data|feature-view:v7|git:abc123|image:sha256:env|sha256:model\",\n      rollbackReady: true,\n      blockers: [\"approval\", \"artifact-signature\", \"canary-quality\"],\n    });\n  });\n\n  test(\"demonstrates rollback recovery by restoring a nonempty target\", () => {\n    const degraded = {\n      ...healthy,\n      canary: { health: false, quality: true },\n      rollbackDigest: \"\",\n    };\n    expect(solve(degraded)).toMatchObject({\n      promotable: false,\n      rollbackReady: false,\n      blockers: [\"canary-health\", \"rollback\"],\n    });\n\n    const recovered = { ...degraded, rollbackDigest: \"sha256:known-good\" };\n    expect(solve(recovered)).toMatchObject({\n      promotable: false,\n      rollbackReady: true,\n      blockers: [\"canary-health\"],\n    });\n  });\n\n  test(\"uses only contract fields despite input ordering and decoys\", () => {\n    const reordered = {\n      rollbackDigest: healthy.rollbackDigest,\n      pipelinePassed: false,\n      canary: { quality: true, health: true, latency: \"bad\" },\n      featureParity: true,\n      approved: true,\n      evaluationPassed: true,\n      lineage: {\n        signatureValid: true,\n        modelDigest: healthy.lineage.modelDigest,\n        env: healthy.lineage.env,\n        code: healthy.lineage.code,\n        features: healthy.lineage.features,\n        data: healthy.lineage.data,\n        mutableAlias: \"production\",\n      },\n    };\n    expect(solve(reordered)).toEqual(solve(healthy));\n  });\n});\n"
+    },
+    {
+      "path": "candidate.ts",
+      "change": "modified",
+      "beforeSha256": "ae926a5325a88321d95c1364eed088ceb8a3d57eaad30bd5d2548f54a6274a72",
+      "afterSha256": "f8afc7a6899b34953337187620929f28f5a6935c405d9c96cd7e5411868f93ae",
+      "beforeText": "// Implement the contract in README.md. Architecture and internal representation are yours.\nexport function solve(input: unknown): unknown {\n  return null;\n}\n",
+      "afterText": "type RecordValue = Record<string, unknown>;\n\nconst isRecord = (value: unknown): value is RecordValue =>\n  typeof value === \"object\" && value !== null && !Array.isArray(value);\n\nconst lineagePart = (lineage: RecordValue, field: string): string => {\n  const value = lineage[field];\n  return typeof value === \"string\" ? value : \"\";\n};\n\n// Evaluate only recorded evidence. Missing, malformed, or merely truthy values fail\n// closed instead of being treated as proof of a promotion gate.\nexport function solve(input: unknown): unknown {\n  const record = isRecord(input) ? input : {};\n  const lineage = isRecord(record.lineage) ? record.lineage : {};\n  const canary = isRecord(record.canary) ? record.canary : {};\n  const rollbackReady =\n    typeof record.rollbackDigest === \"string\" && record.rollbackDigest.length > 0;\n\n  const gates: Record<string, boolean> = {\n    approval: record.approved === true,\n    \"artifact-signature\": lineage.signatureValid === true,\n    evaluation: record.evaluationPassed === true,\n    \"feature-parity\": record.featureParity === true,\n    \"canary-health\": canary.health === true,\n    \"canary-quality\": canary.quality === true,\n    rollback: rollbackReady,\n  };\n\n  const blockers = Object.entries(gates)\n    .filter(([, passed]) => !passed)\n    .map(([name]) => name)\n    .sort();\n\n  return {\n    promotable: blockers.length === 0,\n    lineageKey: [\"data\", \"features\", \"code\", \"env\", \"modelDigest\"]\n      .map((field) => lineagePart(lineage, field))\n      .join(\"|\"),\n    rollbackReady,\n    blockers,\n  };\n}\n"
+    }
+  ]
+}
+
+ARTIFACT B
+{
+  "finalOutput": "Implemented the target-guidance lineage evaluator in [candidate.ts](<redacted-path>).\n\nIt now:\n\n- Builds the ordered lineage key.\n- Enforces all promotion gates.\n- Fails malformed or missing gates closed.\n- Reports alphabetically sorted blockers.\n- Requires a nonempty rollback digest.\n\nAdded [candidate.test.ts](<redacted-path>), covering happy path, full failure, malformed values, and demonstrated rollback recovery.\n\nVerification: `bun test` — **5 passed, 0 failed**. A separate `bunx tsc` attempt was unavailable because the sandbox denied temporary package writes.",
+  "executionEvidence": [
+    "Codex CLI completed successfully in 57489ms",
+    "Synthetic behavioral vectors: 3/3; full-task coverage: synthetic evaluation protocol."
+  ],
+  "publicContract": {
+    "taskPrompt": {
+      "available": true,
+      "sha256": "02aecb2e8e983b720258f0c4df420720abd5a46424592dfe00b2dbf90546a52d",
+      "byteLength": 793,
+      "text": "The evaluation repository asks the agent to \"Apply mlops expertise to this task\". The fixture contains a plausible happy path, an adjacent-skill decoy, one invalid or partial state, and a recovery condition that must be demonstrated rather than assumed. The acceptance boundary is mlops: Make dataset snapshots, feature definitions, training code, environment, model artifacts, evaluation, approvals, serving configuration, monitoring, and rollback one traceable lineage. The adjacent cicd-engineering discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient."
+    },
+    "fixtureFiles": {
+      "README.md": {
+        "available": true,
+        "sha256": "99a4c9f22b99bc28d504628dda0664aca851da0b529cf3b993ae3cde1e0a5414",
+        "byteLength": 1338,
+        "text": "# mlops: transferable behavior exercise\n\nInput is one record whose lineage fields sit inside lineage: {lineage:{data,features,code,env,modelDigest,signatureValid}, evaluationPassed, approved, featureParity, canary:{health,quality}, rollbackDigest}. Only evaluationPassed, approved, featureParity, canary, rollbackDigest and lineage are read, and the signature flag is lineage.signatureValid. lineageKey is data|features|code|env|modelDigest joined with a pipe in that order. Promotion requires lineage.signatureValid, evaluationPassed, approved, featureParity, canary.health, canary.quality and a nonempty rollbackDigest. Return exactly {promotable, lineageKey, rollbackReady, blockers}, where blockers is the sorted list of failed gate names drawn from approval, artifact-signature, evaluation, feature-parity, canary-health, canary-quality, rollback, and rollbackReady is whether rollbackDigest is a nonempty string.\n\nImplement the pure solve(input) export in candidate.ts. Return JSON data; no network, subprocesses, or real account access is needed. Inputs vary identifiers, values, ordering, and failure paths. Score the supplied evidence; do not claim a real model, device, browser, codec, or permission sandbox ran.\n\nThe subject is an explicitly synthetic trace corpus. This tests evaluation logic, not the safety of a live model.\n"
+      },
+      "contract.json": {
+        "available": true,
+        "sha256": "799eac19f4cea52140e629c819b8e74dc6400cfa64005cc4e913301b6c487dc8",
+        "byteLength": 104,
+        "text": "{\n  \"scenarioId\": \"mlops-full-task-1-individual\",\n  \"evidence\": \"synthetic\",\n  \"fullTaskBlockers\": []\n}\n"
+      }
+    }
+  },
+  "changes": [
+    {
+      "path": ".kory-tmp/.1befbc7fd7ff7bf9-00000000.hm",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "665b9b46b49bbf8a926dd2b17751fa203125e3efaf20830f005b29e5cc268ee5"
+    },
+    {
+      "path": ".kory-tmp/bunx-501-typescript@latest/package.json",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "44cd25e5e25eb5077f83058d6219572e4eaac9ceac6765ec336fc5767986f964",
+      "afterText": "{}\n"
+    },
+    {
+      "path": "candidate.test.ts",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "0d1c6c31b9201e2035ae10d89e967a87698bed33e9ce14d4b1a4b2012679caf3",
+      "afterText": "import { describe, expect, test } from \"bun:test\";\nimport { solve } from \"./candidate\";\n\nconst healthy = {\n  lineage: {\n    data: \"dataset@sha256:data\",\n    features: \"features@v3\",\n    code: \"git:abc123\",\n    env: \"image@sha256:env\",\n    modelDigest: \"sha256:model\",\n    signatureValid: true,\n  },\n  evaluationPassed: true,\n  approved: true,\n  featureParity: true,\n  canary: { health: true, quality: true },\n  rollbackDigest: \"sha256:previous-model\",\n};\n\ndescribe(\"solve\", () => {\n  test(\"returns a complete traceable promotion decision\", () => {\n    expect(solve(healthy)).toEqual({\n      promotable: true,\n      lineageKey:\n        \"dataset@sha256:data|features@v3|git:abc123|image@sha256:env|sha256:model\",\n      rollbackReady: true,\n      blockers: [],\n    });\n  });\n\n  test(\"fails every gate closed and sorts blockers\", () => {\n    expect(solve({ lineage: {}, canary: {}, rollbackDigest: \"\" })).toEqual({\n      promotable: false,\n      lineageKey: \"||||\",\n      rollbackReady: false,\n      blockers: [\n        \"approval\",\n        \"artifact-signature\",\n        \"canary-health\",\n        \"canary-quality\",\n        \"evaluation\",\n        \"feature-parity\",\n        \"rollback\",\n      ],\n    });\n  });\n\n  test(\"does not accept truthy substitutes for boolean gates\", () => {\n    const invalid = {\n      ...healthy,\n      approved: \"true\",\n      canary: { health: 1, quality: true },\n      rollbackDigest: 123,\n    };\n    expect(solve(invalid)).toMatchObject({\n      promotable: false,\n      rollbackReady: false,\n      blockers: [\"approval\", \"canary-health\", \"rollback\"],\n    });\n  });\n\n  test(\"recovers once a rollback artifact is supplied\", () => {\n    const missingRollback = { ...healthy, rollbackDigest: \"\" };\n    expect(solve(missingRollback)).toMatchObject({\n      promotable: false,\n      rollbackReady: false,\n      blockers: [\"rollback\"],\n    });\n\n    expect(solve({ ...missingRollback, rollbackDigest: \"sha256:restored\" })).toMatchObject({\n      promotable: true,\n      rollbackReady: true,\n      blockers: [],\n    });\n  });\n\n  test(\"handles non-record input without throwing\", () => {\n    expect(() => solve(null)).not.toThrow();\n    expect(solve(null)).toMatchObject({\n      promotable: false,\n      lineageKey: \"||||\",\n      rollbackReady: false,\n    });\n  });\n});\n"
+    },
+    {
+      "path": "candidate.ts",
+      "change": "modified",
+      "beforeSha256": "ae926a5325a88321d95c1364eed088ceb8a3d57eaad30bd5d2548f54a6274a72",
+      "afterSha256": "463786aabca6584760d5eb42e2e0fc9df4eeec1c5025c769e3bd5438a0c90a94",
+      "beforeText": "// Implement the contract in README.md. Architecture and internal representation are yours.\nexport function solve(input: unknown): unknown {\n  return null;\n}\n",
+      "afterText": "type RecordLike = Record<string, unknown>;\n\nconst isRecord = (value: unknown): value is RecordLike =>\n  typeof value === \"object\" && value !== null && !Array.isArray(value);\n\nconst isTrue = (value: unknown): boolean => value === true;\n\n// Missing and malformed gates fail closed. Lineage identifiers are deliberately\n// stringified so the key remains deterministic for any JSON-compatible input.\nconst lineagePart = (value: unknown): string =>\n  value === undefined ? \"\" : String(value);\n\nexport function solve(input: unknown): unknown {\n  const record = isRecord(input) ? input : {};\n  const lineage = isRecord(record.lineage) ? record.lineage : {};\n  const canary = isRecord(record.canary) ? record.canary : {};\n  const rollbackReady =\n    typeof record.rollbackDigest === \"string\" && record.rollbackDigest.length > 0;\n\n  const failedGates: Array<[string, boolean]> = [\n    [\"approval\", isTrue(record.approved)],\n    [\"artifact-signature\", isTrue(lineage.signatureValid)],\n    [\"evaluation\", isTrue(record.evaluationPassed)],\n    [\"feature-parity\", isTrue(record.featureParity)],\n    [\"canary-health\", isTrue(canary.health)],\n    [\"canary-quality\", isTrue(canary.quality)],\n    [\"rollback\", rollbackReady],\n  ];\n  const blockers = failedGates\n    .filter(([, passed]) => !passed)\n    .map(([name]) => name)\n    .sort();\n\n  return {\n    promotable: blockers.length === 0,\n    lineageKey: [\n      lineage.data,\n      lineage.features,\n      lineage.code,\n      lineage.env,\n      lineage.modelDigest,\n    ]\n      .map(lineagePart)\n      .join(\"|\"),\n    rollbackReady,\n    blockers,\n  };\n}\n"
+    }
+  ]
+}

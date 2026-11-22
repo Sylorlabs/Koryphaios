@@ -19,6 +19,8 @@ export interface PartsToFeedEntriesInput {
   /** Existing message metadata (model, variants, cost, attachments ...). It is
    *  placed on the text row, or on the last row when the turn has no text. */
   messageMetadata?: Record<string, unknown>;
+  /** The message's source recorded no clock time; every row says "Time unknown". */
+  timeUnknown?: boolean;
 }
 
 /** Feed text for a finished tool call, matching the live stream.tool_result path. */
@@ -37,7 +39,7 @@ export function turnRowId(messageId: string, index: number): string {
 }
 
 export function partsToFeedEntries(input: PartsToFeedEntriesInput): FeedEntry[] {
-  const { sessionId, messageId, parts, agentName, glowClass, messageMetadata } = input;
+  const { sessionId, messageId, parts, agentName, glowClass, messageMetadata, timeUnknown } = input;
   if (!messageId) return [];
   const rows = parts.map((part, index): FeedEntry => {
     const base = {
@@ -45,6 +47,7 @@ export function partsToFeedEntries(input: PartsToFeedEntriesInput): FeedEntry[] 
       agentId: 'kory-manager',
       agentName,
       glowClass,
+      ...(timeUnknown ? { timeUnknown: true as const } : {}),
     };
     const rowMetadata: Record<string, unknown> = { sessionId, turnMessageId: messageId };
 
@@ -53,6 +56,20 @@ export function partsToFeedEntries(input: PartsToFeedEntriesInput): FeedEntry[] 
         const ended = part.endedAt !== undefined;
         const metadata: Record<string, unknown> = { ...rowMetadata };
         if (part.thinkingTokens !== undefined) metadata.thinkingTokens = part.thinkingTokens;
+        if (part.timeUnknown) {
+          // No recorded duration: the block is over (it came from a source, not a
+          // live stream) and carries no duration a renderer could show as 0.0s.
+          return {
+            ...base,
+            timestamp: part.startedAt,
+            type: 'thinking',
+            text: part.text,
+            thinkingStartedAt: part.startedAt,
+            thinkingFinalized: true,
+            durationUnknown: true,
+            metadata,
+          };
+        }
         return {
           ...base,
           timestamp: part.startedAt,
@@ -74,26 +91,43 @@ export function partsToFeedEntries(input: PartsToFeedEntriesInput): FeedEntry[] 
         };
       case 'tool': {
         const toolCall = { id: part.callId, name: part.name, input: part.input };
+        const toolMetadata: Record<string, unknown> = { ...rowMetadata, toolCall };
+        // Display data only: the sub-agent's own conversation rides on its row.
+        if (part.subagent) toolMetadata.subagent = part.subagent;
+        const durationUnknown = part.timeUnknown ? { durationUnknown: true as const } : {};
         if (part.endedAt === undefined) {
           return {
             ...base,
+            ...durationUnknown,
             timestamp: part.startedAt,
             type: 'tool_call',
             text: `Calling tool: ${part.name}`,
-            metadata: { ...rowMetadata, toolCall },
+            metadata: toolMetadata,
+          };
+        }
+        const output = part.output ?? '';
+        const isError = part.isError === true;
+        if (part.timeUnknown) {
+          return {
+            ...base,
+            ...durationUnknown,
+            timestamp: part.endedAt,
+            type: 'tool_result',
+            text: toolResultText(output, isError, 0),
+            metadata: {
+              ...toolMetadata,
+              toolResult: { callId: part.callId, name: part.name, output, isError, timeUnknown: true },
+            },
           };
         }
         const durationMs = part.durationMs ?? 0;
-        const output = part.output ?? '';
-        const isError = part.isError === true;
         return {
           ...base,
           timestamp: part.endedAt,
           type: 'tool_result',
           text: toolResultText(output, isError, durationMs),
           metadata: {
-            ...rowMetadata,
-            toolCall,
+            ...toolMetadata,
             toolResult: {
               callId: part.callId,
               name: part.name,

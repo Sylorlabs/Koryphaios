@@ -32,7 +32,7 @@ vi.mock('./goals.svelte', () => ({ goalStore: {} }));
 vi.mock('./checklists.svelte', () => ({ checklistStore: {} }));
 vi.mock('./toast.svelte', () => ({ toastStore: { error: vi.fn(), success: vi.fn() } }));
 vi.mock('./run-state.svelte', () => ({ runStateStore: {
-  states: new Map(), applyEvent: () => true, startRun: vi.fn(), markUserStopped: vi.fn(), getAgentStatusForSession: () => 'idle',
+  states: new Map(), applyEvent: () => true, startRun: vi.fn(), markUserStopped: vi.fn(), clearUserStopped: vi.fn(), getAgentStatusForSession: () => 'idle',
   markAgentStopped: vi.fn(),
   isRunning: () => false, isWaiting: () => false, isBusy: () => false,
 } }));
@@ -311,7 +311,10 @@ describe('Stop then Send cancellation handoff', () => {
     cancellation.resolve(response({}, false, 409));
     await expect(stop).rejects.toThrow('Could not stop this session');
     await expect(sending).resolves.toBe(false);
-    expect(runStateStore.markUserStopped).not.toHaveBeenCalled();
+    // The stop is optimistic so the UI reacts immediately; a rejected request
+    // restores the authoritative fence instead of leaving a false stopped run.
+    expect(runStateStore.markUserStopped).toHaveBeenCalledWith(state.activeSessionId);
+    expect(runStateStore.clearUserStopped).toHaveBeenCalledWith(state.activeSessionId);
     expect(toastStore.error).toHaveBeenCalledWith(expect.stringContaining('Could not stop this session'));
     expect(wsStore.feed).toHaveLength(before);
     expect(vi.mocked(apiFetch).mock.calls.map(([path]) => path)).toEqual([

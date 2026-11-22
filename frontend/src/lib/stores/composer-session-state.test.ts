@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, test } from 'vitest';
 import {
+  clearComposerApprovalState,
   clearComposerSessionState,
+  composerApprovalDefaults,
   loadComposerSessionState,
   saveComposerSessionState,
 } from './composer-session-state';
@@ -126,5 +128,47 @@ describe('per-chat composer control state', () => {
       agentExecutionMode: 'auto',
     });
     expect(loadComposerSessionState('session-c')).toEqual({});
+  });
+
+  test('maps every composer posture to a project default except model/reasoning', () => {
+    expect(composerApprovalDefaults({})).toEqual({});
+    expect(
+      composerApprovalDefaults({
+        permissionMode: 'yolo',
+        agentExecutionMode: 'multi',
+        worktreeMode: 'never' as const,
+        criticMode: 'off',
+        criticGateEnabled: false,
+      }),
+    ).toEqual({
+      permissionMode: 'yolo',
+      agentExecutionMode: 'multi',
+      worktreeMode: 'never' as const,
+      criticMode: 'off',
+      criticGateEnabled: false,
+    });
+  });
+
+  test('clearing a draft after hand-off drops the posture but keeps preferences', () => {
+    saveComposerSessionState('welcome', {
+      model: 'codex:gpt-5.6-sol',
+      reasoningLevel: 'high',
+      fastMode: true,
+      permissionMode: 'yolo',
+      agentExecutionMode: 'multi',
+      worktreeMode: 'never' as const,
+      criticMode: 'off',
+      criticGateEnabled: false,
+    });
+
+    clearComposerApprovalState('welcome');
+
+    // The next new chat must fall back to the project default instead of
+    // replaying this draft's YOLO/Ask/worktree choice.
+    expect(loadComposerSessionState('welcome')).toEqual({
+      model: 'codex:gpt-5.6-sol',
+      reasoningLevel: 'high',
+      fastMode: true,
+    });
   });
 });

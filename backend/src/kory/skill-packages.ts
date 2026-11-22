@@ -32,6 +32,20 @@ export type V5SelectionMode = (typeof V5_SELECTION_MODES)[number];
 export const V5_INVOCATION_MODES = ['model-invoked', 'user-invoked'] as const;
 export type V5InvocationMode = (typeof V5_INVOCATION_MODES)[number];
 
+/** Runtime control skills live alongside the V5 library but are not packages:
+ *  the host injects them itself (critic auto-selection, critic review), so the
+ *  package catalog, its audits, and its routing gates count exactly the
+ *  authored packages and never these two. They still validate with the same
+ *  sidecar schema and stay active in listSkills(). */
+export const RUNTIME_CONTROL_SKILL_NAMES = [
+  'critic-auto-selection',
+  'critic-review',
+] as const;
+
+export function isRuntimeControlSkillName(name: string): boolean {
+  return (RUNTIME_CONTROL_SKILL_NAMES as readonly string[]).includes(name);
+}
+
 export const V5_ROUTING_CATEGORIES = ['positive', 'negative', 'ambiguous', 'adversarial'] as const;
 
 export type V5RoutingCategory = (typeof V5_ROUTING_CATEGORIES)[number];
@@ -176,7 +190,14 @@ export interface V5SkillPackageValidation {
 
 export interface V5SkillPackageCatalog {
   root: string;
+  /** The authored V5 packages: counts, audits, and routing gates cover exactly
+   *  these. Runtime control skills are deliberately not here. */
   packages: V5CompiledSkillPackage[];
+  /** Host-owned runtime control skills (critic auto-selection, critic review).
+   *  They validate with the same sidecar schema and their content still feeds
+   *  the deployed definition overlay and eval contracts — they only stay out
+   *  of the package inventory, its audits, and its routing gates. */
+  runtimeControls: V5CompiledSkillPackage[];
   errors: string[];
   warnings: string[];
 }
@@ -821,9 +842,10 @@ export function resolveSkillsPackageRoot(root: string = 'skills-v5'): string {
 export function loadV5SkillPackages(root = 'skills-v5'): V5SkillPackageCatalog {
   const resolvedRoot = resolveSkillsPackageRoot(root);
   if (!existsSync(resolvedRoot)) {
-    return { root: resolvedRoot, packages: [], errors: [], warnings: [] };
+    return { root: resolvedRoot, packages: [], runtimeControls: [], errors: [], warnings: [] };
   }
   const packages: V5CompiledSkillPackage[] = [];
+  const runtimeControls: V5CompiledSkillPackage[] = [];
   const errors: string[] = [];
   const warnings: string[] = [];
   for (const entry of readdirSync(resolvedRoot, { withFileTypes: true }).sort((a, b) =>
@@ -836,7 +858,19 @@ export function loadV5SkillPackages(root = 'skills-v5'): V5SkillPackageCatalog {
     const validation = validateV5SkillPackage(directory);
     errors.push(...validation.errors.map((error) => `${entry.name}: ${error}`));
     warnings.push(...validation.warnings.map((warning) => `${entry.name}: ${warning}`));
-    if (validation.package) packages.push(validation.package);
+    if (!validation.package) continue;
+    // Runtime control skills validate with the same schema and their content
+    // still feeds the deployed overlay, but they are host-owned: they never
+    // enter the package graph, the audits, or the routing gates.
+    if (!validation.package) continue;
+    // Runtime control skills validate with the same schema and their content
+    // still feeds the deployed overlay, but they are host-owned: they never
+    // enter the package graph, the audits, or the routing gates.
+    if (isRuntimeControlSkillName(validation.package.sidecar.name)) {
+      runtimeControls.push(validation.package);
+    } else {
+      packages.push(validation.package);
+    }
   }
   const byName = new Map(packages.map((skillPackage) => [skillPackage.sidecar.name, skillPackage]));
   // Validate the complete graph before any package can be used by the runtime or eval harness.
@@ -889,6 +923,7 @@ export function loadV5SkillPackages(root = 'skills-v5'): V5SkillPackageCatalog {
   return {
     root: resolvedRoot,
     packages,
+    runtimeControls,
     errors: [...new Set(errors)],
     warnings: [...new Set(warnings)],
   };

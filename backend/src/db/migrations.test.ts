@@ -1159,3 +1159,331 @@ describe('database migration repairs', () => {
     ).toEqual({ count: 2 });
   });
 });
+
+describe('migration 0058 notes FTS rowid map', () => {
+  function insertNote(
+    database: Database,
+    id: string,
+    title: string,
+    content: string,
+    tags = '[]',
+  ): void {
+    database.run(
+      'INSERT INTO notes(id, title, content, tags, created_at, updated_at) VALUES (?, ?, ?, ?, 1, 1)',
+      [id, title, content, tags],
+    );
+  }
+
+  /** Post-0059 the index is contentless and indexing lives in TypeScript.
+   * These helpers mirror `setNoteSearchText`/`removeNoteSearchText` exactly. */
+  function setSearchText(
+    database: Database,
+    id: string,
+    title: string,
+    content: string,
+    tags = '[]',
+  ): void {
+    database.run(
+      `DELETE FROM notes_fts
+       WHERE rowid = (SELECT fts_rowid FROM notes_fts_rowids WHERE note_id = ?)`,
+      [id],
+    );
+    database.run('DELETE FROM notes_fts_rowids WHERE note_id = ?', [id]);
+    database.run('INSERT INTO notes_fts_rowids(note_id) VALUES (?)', [id]);
+    database.run(
+      `INSERT INTO notes_fts(rowid, title, content, tags)
+       VALUES ((SELECT fts_rowid FROM notes_fts_rowids WHERE note_id = ?), ?, ?, ?)`,
+      [id, title, content, tags],
+    );
+  }
+
+  function removeSearchText(database: Database, id: string): void {
+    database.run(
+      `DELETE FROM notes_fts
+       WHERE rowid = (SELECT fts_rowid FROM notes_fts_rowids WHERE note_id = ?)`,
+      [id],
+    );
+    database.run('DELETE FROM notes_fts_rowids WHERE note_id = ?', [id]);
+  }
+
+  function matchIds(database: Database, term: string): string[] {
+    return database
+      .query<{ note_id: string }, [string]>(
+        `SELECT notes_fts_rowids.note_id
+         FROM notes_fts
+         JOIN notes_fts_rowids ON notes_fts_rowids.fts_rowid = notes_fts.rowid
+         WHERE notes_fts MATCH ? ORDER BY notes_fts_rowids.note_id`,
+      )
+      .all(term)
+      .map((row) => row.note_id);
+  }
+
+  function expectFtsInvariant(database: Database, noteCount: number): void {
+    const counts = database
+      .query<{ notes: number; map: number; fts: number }, []>(
+        `SELECT (SELECT COUNT(*) FROM notes) AS notes,
+                (SELECT COUNT(*) FROM notes_fts_rowids) AS map,
+                (SELECT COUNT(*) FROM notes_fts) AS fts`,
+      )
+      .get();
+    expect(counts).toEqual({ notes: noteCount, map: noteCount, fts: noteCount });
+    // One map row per note, and the FTS rowid set equals the map rowid set.
+    expect(
+      database.query<{ c: number }, []>(
+        `SELECT COUNT(*) AS c FROM notes_fts_rowids
+         WHERE note_id NOT IN (SELECT id FROM notes)`,
+      ).get()?.c,
+    ).toBe(0);
+    expect(
+      database.query<{ c: number }, []>(
+        `SELECT COUNT(*) AS c FROM notes_fts
+         WHERE rowid NOT IN (SELECT fts_rowid FROM notes_fts_rowids)`,
+      ).get()?.c,
+    ).toBe(0);
+    expect(
+      database.query<{ c: number }, []>(
+        `SELECT COUNT(*) AS c FROM notes_fts_rowids
+         WHERE fts_rowid NOT IN (SELECT rowid FROM notes_fts)`,
+      ).get()?.c,
+    ).toBe(0);
+  }
+
+  test('keeps the contentless index in sync through the TypeScript writer helpers', async () => {
+    const database = new Database(':memory:');
+    openDatabases.push(database);
+    const runner = new MigrationRunner(database);
+    await runner.migrate();
+
+    insertNote(database, 'note-a', 'Alpha title', 'alpha uniqueword content');
+    insertNote(database, 'note-b', 'Beta title', 'beta body', '["wanderlust"]');
+    setSearchText(database, 'note-a', 'Alpha title', 'alpha uniqueword content');
+    setSearchText(database, 'note-b', 'Beta title', 'beta body', '["wanderlust"]');
+    expect(matchIds(database, 'uniqueword')).toEqual(['note-a']);
+    expect(matchIds(database, 'wanderlust')).toEqual(['note-b']);
+    expectFtsInvariant(database, 2);
+
+    setSearchText(database, 'note-a', 'Alpha title', 'gamma newterm');
+    expect(matchIds(database, 'uniqueword')).toEqual([]);
+    expect(matchIds(database, 'newterm')).toEqual(['note-a']);
+    expectFtsInvariant(database, 2);
+
+    // bm25 ranking works on the contentless table.
+    const ranked = database
+      .query<{ note_id: string }, [string]>(
+        `SELECT notes_fts_rowids.note_id
+         FROM notes_fts
+         JOIN notes_fts_rowids ON notes_fts_rowids.fts_rowid = notes_fts.rowid
+         WHERE notes_fts MATCH ? ORDER BY bm25(notes_fts) LIMIT 5`,
+      )
+      .all('beta OR gamma')
+      .map((row) => row.note_id);
+    expect(ranked.sort()).toEqual(['note-a', 'note-b']);
+
+    database.run('UPDATE notes SET id = ? WHERE id = ?', ['note-c', 'note-a']);
+    removeSearchText(database, 'note-a');
+    setSearchText(database, 'note-c', 'Alpha title', 'gamma newterm');
+    expect(matchIds(database, 'newterm')).toEqual(['note-c']);
+    expect(
+      database
+        .query<{ c: number }, [string]>(
+          'SELECT COUNT(*) AS c FROM notes_fts_rowids WHERE note_id = ?',
+        )
+        .get('note-a')?.c,
+    ).toBe(0);
+    expectFtsInvariant(database, 2);
+
+    removeSearchText(database, 'note-c');
+    database.run('DELETE FROM notes WHERE id = ?', ['note-c']);
+    expect(matchIds(database, 'newterm')).toEqual([]);
+    expectFtsInvariant(database, 1);
+  });
+
+  test('does not retokenize a note on non-indexed column updates', async () => {
+    const database = new Database(':memory:');
+    openDatabases.push(database);
+    await new MigrationRunner(database).migrate();
+    insertNote(database, 'note-a', 'Title', 'persistent content');
+    setSearchText(database, 'note-a', 'Title', 'persistent content');
+
+    const mapBefore = database
+      .query<{ fts_rowid: number }, [string]>(
+        'SELECT fts_rowid FROM notes_fts_rowids WHERE note_id = ?',
+      )
+      .get('note-a');
+
+    database.run(
+      'UPDATE notes SET pinned = 1, trashed_at = 5, trash_reason = ?, updated_at = 2 WHERE id = ?',
+      ['user', 'note-a'],
+    );
+
+    expect(
+      database
+        .query<{ fts_rowid: number }, [string]>(
+          'SELECT fts_rowid FROM notes_fts_rowids WHERE note_id = ?',
+        )
+        .get('note-a'),
+    ).toEqual(mapBefore);
+    expect(matchIds(database, 'persistent')).toEqual(['note-a']);
+    expectFtsInvariant(database, 1);
+  });
+
+  test('drops the 0014 triggers and leaves an empty map for compaction to fill', async () => {
+    const database = new Database(':memory:');
+    openDatabases.push(database);
+    const runner = new MigrationRunner(database);
+    const lastPreRowidIndex = MIGRATIONS.findIndex(({ version }) => version === '0057');
+    expect(lastPreRowidIndex).toBeGreaterThanOrEqual(0);
+    for (const item of MIGRATIONS.slice(0, lastPreRowidIndex + 1)) {
+      expect(await runner.applyMigration(item)).toBe(true);
+    }
+
+    insertNote(database, 'dup', 'Dup title', 'originalcontent');
+    insertNote(database, 'lost', 'Lost title', 'lostword');
+    // The 0014 triggers indexed both rows.
+    expect(
+      database
+        .query<{ c: number }, []>('SELECT COUNT(*) AS c FROM notes_fts')
+        .get()?.c,
+    ).toBe(2);
+
+    expect(await runner.applyMigration(migration('0058'))).toBe(true);
+
+    // The scan-per-write triggers are gone and the map is a shell: 0059 +
+    // compaction populate it, so 0058 does zero tokenization work.
+    const triggerSql = database
+      .query<{ sql: string }, []>(
+        `SELECT sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'notes'`,
+      )
+      .all()
+      .map((row) => row.sql ?? '');
+    for (const sql of triggerSql) expect(sql).not.toMatch(/notes_fts/i);
+    expect(
+      database
+        .query<{ c: number }, []>('SELECT COUNT(*) AS c FROM notes_fts_rowids')
+        .get()?.c,
+    ).toBe(0);
+
+    // With the triggers gone, note writes stop touching FTS entirely — the
+    // startup-hang write path is dead even before 0059 lands.
+    insertNote(database, 'new', 'New title', 'newword');
+    expect(
+      database
+        .query<{ c: number }, []>('SELECT COUNT(*) AS c FROM notes_fts')
+        .get()?.c,
+    ).toBe(2);
+
+    // After 0059 + the TypeScript backfill path (what compaction runs), every
+    // note resolves through the map exactly once.
+    expect(await runner.applyMigration(migration('0059'))).toBe(true);
+    setSearchText(database, 'dup', 'Dup title', 'originalcontent');
+    setSearchText(database, 'lost', 'Lost title', 'lostword');
+    setSearchText(database, 'new', 'New title', 'newword');
+    expect(matchIds(database, 'originalcontent')).toEqual(['dup']);
+    expect(matchIds(database, 'lostword')).toEqual(['lost']);
+    expect(matchIds(database, 'newword')).toEqual(['new']);
+    expectFtsInvariant(database, 3);
+  });
+
+  test('leaves no notes_fts trigger keyed on the unindexed note_id column', async () => {
+    const database = new Database(':memory:');
+    openDatabases.push(database);
+    await new MigrationRunner(database).migrate();
+
+    const triggerSql = database
+      .query<{ sql: string }, []>(`SELECT sql FROM sqlite_master WHERE type = 'trigger'`)
+      .all()
+      .map((row) => row.sql);
+    for (const sql of triggerSql) {
+      // 0059 dropped the trigger layer entirely — indexing is TypeScript-side.
+      expect(sql ?? '').not.toMatch(/notes_fts/i);
+      expect(sql ?? '').not.toMatch(/notes_fts\s+WHERE\s+note_id/i);
+    }
+  });
+});
+
+describe('migration 0059 file-backed notes', () => {
+  test('creates the contentless index, derived columns, blob store, and compaction state', async () => {
+    const database = new Database(':memory:');
+    openDatabases.push(database);
+    await new MigrationRunner(database).migrate();
+
+    const ftsSql = database
+      .query<{ sql: string }, [string]>(
+        `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'notes_fts'`,
+      )
+      .get('notes_fts')?.sql;
+    expect(ftsSql).toContain("content = ''");
+    expect(ftsSql).toContain('contentless_delete = 1');
+    expect(ftsSql).toContain('detail = column');
+    // Contentless: no stored note_id/title/content payload.
+    const ftsRow = database
+      .query<{ name: string }, []>(`SELECT name FROM sqlite_master WHERE name = 'notes_fts_content'`)
+      .get();
+    expect(ftsRow?.name).toBeUndefined();
+
+    for (const column of ['content_hash', 'content_bytes', 'aliases', 'has_refs']) {
+      expect(
+        database
+          .query<{ c: number }, [string]>(
+            `SELECT COUNT(*) AS c FROM pragma_table_info('notes') WHERE name = ?`,
+          )
+          .get(column)?.c,
+      ).toBe(1);
+    }
+
+    for (const table of [
+      'notes_fts_rowids',
+      'note_revision_blobs',
+      'note_revisions',
+      'note_revisions_legacy',
+      'notes_compaction_state',
+    ]) {
+      expect(
+        database
+          .query<{ c: number }, [string]>(
+            `SELECT COUNT(*) AS c FROM sqlite_master WHERE type = 'table' AND name = ?`,
+          )
+          .get(table)?.c,
+      ).toBe(1);
+    }
+    expect(
+      database
+        .query<{ c: number }, []>(
+          `SELECT COUNT(*) AS c FROM pragma_table_info('note_revisions') WHERE name = 'content_blob_id'`,
+        )
+        .get()?.c,
+    ).toBe(1);
+  });
+
+  test('down restores the pre-0059 schema shape (not data)', async () => {
+    const database = new Database(':memory:');
+    openDatabases.push(database);
+    const runner = new MigrationRunner(database);
+    const index = MIGRATIONS.findIndex(({ version }) => version === '0059');
+    expect(index).toBeGreaterThan(0);
+    for (const item of MIGRATIONS.slice(0, index + 1)) {
+      expect(await runner.applyMigration(item)).toBe(true);
+    }
+
+    await runner.rollbackMigration(migration('0059'));
+
+    const ftsSql = database
+      .query<{ sql: string }, []>(`SELECT sql FROM sqlite_master WHERE name = 'notes_fts'`)
+      .get()?.sql;
+    expect(ftsSql).toContain('note_id UNINDEXED');
+    expect(
+      database
+        .query<{ c: number }, []>(
+          `SELECT COUNT(*) AS c FROM pragma_table_info('note_revisions') WHERE name = 'content'`,
+        )
+        .get()?.c,
+    ).toBe(1);
+    expect(
+      database
+        .query<{ c: number }, []>(
+          `SELECT COUNT(*) AS c FROM sqlite_master WHERE name IN ('note_revision_blobs', 'notes_compaction_state', 'note_revisions_legacy')`,
+        )
+        .get()?.c,
+    ).toBe(0);
+  });
+});

@@ -1,0 +1,72 @@
+{
+  "board": "mcu-rev-c",
+  "keyHash": "prod-key-hash-2026",
+  "product": "device-x",
+  "images": [
+    {
+      "id": "current",
+      "version": 7,
+      "product": "device-x",
+      "signed": true,
+      "signatureValid": true,
+      "corrupt": false
+    },
+    {
+      "id": "older",
+      "version": 5,
+      "product": "device-x",
+      "signed": true,
+      "signatureValid": true,
+      "corrupt": false
+    },
+    {
+      "id": "wrong-product",
+      "version": 8,
+      "product": "device-y",
+      "signed": true,
+      "signatureValid": true,
+      "corrupt": false
+    },
+    {
+      "id": "unsigned",
+      "version": 8,
+      "product": "device-x",
+      "signed": false,
+      "signatureValid": false,
+      "corrupt": false
+    },
+    {
+      "id": "corrupt",
+      "version": 8,
+      "product": "device-x",
+      "signed": true,
+      "signatureValid": true,
+      "corrupt": true
+    },
+    {
+      "id": "recovery",
+      "version": 3,
+      "product": "device-x",
+      "signed": true,
+      "signatureValid": true,
+      "corrupt": false,
+      "authorizedRecovery": true
+    }
+  ],
+  "steps": [
+    "write-inactive",
+    "verify-inactive",
+    "mark-pending",
+    "boot-pending",
+    "commit-version"
+  ],
+  "observed": {
+    "serialBootLog": true,
+    "keyHashFuseRecord": true,
+    "productionLockRegister": true
+  },
+  "emulator": {
+    "physicalFuseProof": false,
+    "debugLockProof": false
+  }
+}

@@ -1,0 +1,192 @@
+{
+  "sessionId": "nq5jPS7hoH-z",
+  "outDir": "/Users/Shared/micah/Documents/koryphaios/outputs/soak-2026-11-20T07-08-58-650Z",
+  "finishedAt": "2026-11-20T15:10:52.471Z",
+  "turns": 158,
+  "passByKind": {
+    "build": {
+      "total": 64,
+      "passed": 56
+    },
+    "bigout": {
+      "total": 12,
+      "passed": 12
+    },
+    "readback": {
+      "total": 8,
+      "passed": 8
+    },
+    "recall": {
+      "total": 9,
+      "passed": 9
+    }
+  },
+  "terminal": {
+    "done/provider_turn_completed": 88
+  },
+  "providerErrorAttempts": 70,
+  "turnsAbandonedOnProvider": 5,
+  "driverTimeouts": 0,
+  "turnDurationSec": {
+    "p50": 35.066,
+    "p95": 410.535,
+    "max": 695.103
+  },
+  "compactions": [],
+  "serviceRestarted": false,
+  "hourly": [
+    {
+      "hour": 0,
+      "rssMiB": {
+        "median": 253.40625,
+        "max": 510.484375
+      },
+      "childCountMax": 2,
+      "childRssMiBMax": 333.8125,
+      "fdsMax": 31,
+      "healthMs": {
+        "p50": 0.49770900000294205,
+        "p95": 3.9520839999895543
+      },
+      "healthFailures": 14,
+      "dbMiB": 2034.39453125,
+      "walMiBMax": 3.94488525390625
+    },
+    {
+      "hour": 1,
+      "rssMiB": {
+        "median": 165.25,
+        "max": 360.875
+      },
+      "childCountMax": 0,
+      "childRssMiBMax": 0,
+      "fdsMax": 31,
+      "healthMs": {
+        "p50": 0.7139579998329282,
+        "p95": 78.51987500023097
+      },
+      "healthFailures": 0,
+      "dbMiB": 2034.39453125,
+      "walMiBMax": 3.8938064575195312
+    },
+    {
+      "hour": 2,
+      "rssMiB": {
+        "median": 235.359375,
+        "max": 387.296875
+      },
+      "childCountMax": 4,
+      "childRssMiBMax": 279.703125,
+      "fdsMax": 32,
+      "healthMs": {
+        "p50": 0.7247079983353615,
+        "p95": 46.950207999907434
+      },
+      "healthFailures": 1,
+      "dbMiB": 2034.39453125,
+      "walMiBMax": 3.929168701171875
+    },
+    {
+      "hour": 3,
+      "rssMiB": {
+        "median": 264.71875,
+        "max": 629.65625
+      },
+      "childCountMax": 5,
+      "childRssMiBMax": 379.421875,
+      "fdsMax": 30,
+      "healthMs": {
+        "p50": 0.48420799896121025,
+        "p95": 22.353541998192668
+      },
+      "healthFailures": 3,
+      "dbMiB": 2034.39453125,
+      "walMiBMax": 3.6894912719726562
+    },
+    {
+      "hour": 4,
+      "rssMiB": {
+        "median": 239.203125,
+        "max": 429.3125
+      },
+      "childCountMax": 0,
+      "childRssMiBMax": 0,
+      "fdsMax": 31,
+      "healthMs": {
+        "p50": 0.47645900025963783,
+        "p95": 3.537542000412941
+      },
+      "healthFailures": 0,
+      "dbMiB": 2034.39453125,
+      "walMiBMax": 3.88201904296875
+    },
+    {
+      "hour": 5,
+      "rssMiB": {
+        "median": 342.296875,
+        "max": 775.828125
+      },
+      "childCountMax": 1,
+      "childRssMiBMax": 128.03125,
+      "fdsMax": 31,
+      "healthMs": {
+        "p50": 0.4352080002427101,
+        "p95": 14.03083299845457
+      },
+      "healthFailures": 10,
+      "dbMiB": 2034.39453125,
+      "walMiBMax": 3.94488525390625
+    },
+    {
+      "hour": 6,
+      "rssMiB": {
+        "median": 314.515625,
+        "max": 717.25
+      },
+      "childCountMax": 4,
+      "childRssMiBMax": 336.84375,
+      "fdsMax": 35,
+      "healthMs": {
+        "p50": 0.7625829987227917,
+        "p95": 256.21158399805427
+      },
+      "healthFailures": 6,
+      "dbMiB": 2034.39453125,
+      "walMiBMax": 3.9409561157226562
+    },
+    {
+      "hour": 7,
+      "rssMiB": {
+        "median": 282.21875,
+        "max": 360.140625
+      },
+      "childCountMax": 0,
+      "childRssMiBMax": 0,
+      "fdsMax": 31,
+      "healthMs": {
+        "p50": 0.8413329981267452,
+        "p95": 3.216916996985674
+      },
+      "healthFailures": 0,
+      "dbMiB": 2034.39453125,
+      "walMiBMax": 3.9330978393554688
+    },
+    {
+      "hour": 8,
+      "rssMiB": {
+        "median": 125.1875,
+        "max": 247.25
+      },
+      "childCountMax": 0,
+      "childRssMiBMax": 0,
+      "fdsMax": 29,
+      "healthMs": {
+        "p50": 1.0439589992165565,
+        "p95": 16.079707998782396
+      },
+      "healthFailures": 0,
+      "dbMiB": 2034.39453125,
+      "walMiBMax": 3.5401840209960938
+    }
+  ]
+}

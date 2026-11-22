@@ -19,7 +19,10 @@ test('Notes is a dedicated workspace with compound Bases, Canvas and per-operati
     expect((await api.post('/api/workspace/select', { path: root })).ok()).toBe(true);
     await page.goto('/');
     await page.getByRole('button', { name: 'Notes', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'Close notes' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Notes', exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
     await expect(page.getByTestId('chat-feed')).toHaveCount(0);
     await page.getByRole('tab', { name: 'Bases', exact: true }).click();
     await page.getByRole('button', { name: 'Create your first Base' }).click();
@@ -58,7 +61,7 @@ test('Notes is a dedicated workspace with compound Bases, Canvas and per-operati
       /Investigate note "Bug investigation"/,
     );
     await page.getByRole('button', { name: 'Notes', exact: true }).click();
-    await page.getByRole('button', { name: 'Close notes' }).click();
+    await page.getByRole('button', { name: 'Notes', exact: true }).click();
     await expect(page.getByTestId('chat-feed')).toBeVisible();
     await page.getByRole('button', { name: 'Open settings', exact: true }).click();
     await page
@@ -219,7 +222,7 @@ test('relationship proposals can be accepted, rejected, and refreshed after evid
   } finally {
     try {
       await page
-        .getByRole('button', { name: 'Close notes' })
+        .getByRole('button', { name: 'Notes', exact: true })
         .click()
         .catch(() => undefined);
       await api.post('/api/workspace/deselect');
@@ -363,7 +366,10 @@ test('chat note links open encoded paths and protect unsaved drafts', async ({
       document.body.append(fixture);
     });
     await page.getByRole('link', { name: 'Open finding', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'Close notes' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Notes', exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
     await expect(page.getByPlaceholder('Note title...')).toHaveValue('Café & Links');
     const editor = page.getByRole('combobox', { name: 'Note content' });
     await expect(editor).toHaveValue('Original finding.');

@@ -179,7 +179,7 @@
       />
       {#if folders.length > 0 && query.trim()}
         <span
-          class="hidden items-center gap-1 text-[10px] sm:flex"
+          class="hidden items-center gap-1 text-[11px] sm:flex"
           style="color: var(--color-text-muted);"
         >
           <CornerDownRight size={11} /> opens {folders[0].name}

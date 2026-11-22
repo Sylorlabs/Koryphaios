@@ -20,9 +20,11 @@ import {
   makeDeviceIdentity,
   type DeviceBody,
 } from '@koryphaios/shared/src/device-client';
+import { openDeviceMessage, sealDeviceMessage } from '@koryphaios/shared/src/devices';
 import type { DeviceIdentity, LinkedDevice, DeviceWorkspace } from '@koryphaios/shared/src/devices';
 import { validateDeviceRelayUrl } from '@koryphaios/shared/src/devices';
 import { getContext } from '../context';
+import { normalizeSpeedTier } from '../providers/speed-tiers';
 import { getDb } from '../db';
 import { WorkspaceNavigationStore } from '../stores/workspace-navigation-store';
 import { getPendingQuestion } from '../stores/pending-question-store';
@@ -31,8 +33,14 @@ import { toolApprovalQueue } from '../tools/approval-queue';
 import { buildDeviceProviderBundle, stageDeviceProviders } from './provider-bundle';
 import { withProviderExecutionScope } from '../providers/execution-scope';
 import { executeDeviceWorkbench } from './workbench';
-import { getOrderedEventLog } from '../ws/ordered-event-log';
+import { getOrderedEventLog, prunedBoundaryAhead } from '../ws/ordered-event-log';
+import type { SessionHistoryPrunedPayload, WSMessage } from '@koryphaios/shared';
 import { parseDevicePrompt } from './prompt';
+import {
+  normalizeComputeDelegation,
+  type ComputeDelegation,
+} from '@koryphaios/shared/src/compute-delegation';
+import { exportWorkspaceChanges } from './delegated-work';
 
 type Store = {
   identity: DeviceIdentity;
@@ -44,6 +52,8 @@ type Store = {
   requests?: Record<string, number>;
   relayUrl?: string;
   selectedWorkspaceRoots?: string[];
+  /** Per-chat delegation policy. `stay` is the default for a chat created here. */
+  delegations?: Record<string, ComputeDelegation>;
 };
 type PairRequest = { id: string; identity: DeviceIdentity; check: string; expiresAt: number };
 const OS_NAMES: Record<string, string> = { darwin: 'macOS', win32: 'Windows', linux: 'Linux' };
@@ -331,14 +341,27 @@ export class DeviceService {
     if (['prompt', 'workbench'].includes(operation) && input.useLocalProviders === true) {
       if (actor !== 'user')
         throw new Error('Only a user can transfer provider credentials to a device.');
+      const target = this.store!.peers.find((peer) => peer.id === deviceId);
+      if (!target) throw new Error('Device is not linked');
+      const bundle = await buildDeviceProviderBundle(
+        getContext().providers,
+        typeof input.model === 'string'
+          ? input.model
+          : typeof (input.body as Record<string, unknown> | undefined)?.model === 'string'
+            ? (input.body as { model: string }).model
+            : undefined,
+        signal,
+      );
+      // A second, identity-bound seal on top of the device channel. The grant
+      // is readable only by this target's private key, expires with the device
+      // envelope window, and is never written to config or message storage.
       input = {
         ...input,
-        providerBundle: await buildDeviceProviderBundle(
-          getContext().providers,
-           typeof input.model === 'string' ? input.model :
-             typeof (input.body as Record<string, unknown> | undefined)?.model === 'string'
-               ? (input.body as { model: string }).model : undefined,
-          signal,
+        credentialEnvelope: await sealDeviceMessage(
+          this.store!.privateKey,
+          target,
+          this.store!.identity.id,
+          bundle,
         ),
       };
       delete input.useLocalProviders;
@@ -439,6 +462,24 @@ export class DeviceService {
         throw new Error('This device has not granted remote-agent access');
     };
     authorize();
+    // Open a source-sealed credential grant into this process's memory only.
+    // The plaintext bundle never reaches disk, a tool result, or a chat row.
+    if (input.credentialEnvelope !== undefined) {
+      if (!peer) throw new Error('Credential grants require a linked device');
+      let opened: unknown;
+      try {
+        opened = await openDeviceMessage(
+          this.store!.privateKey,
+          peer,
+          this.store!.identity.id,
+          input.credentialEnvelope as Parameters<typeof openDeviceMessage>[3],
+        );
+      } catch {
+        throw new Error('Credential grant was rejected, expired, or addressed elsewhere');
+      }
+      input.providerBundle = opened;
+      delete input.credentialEnvelope;
+    }
     const claim = () => {
       authorize();
       const now = Date.now();
@@ -481,7 +522,11 @@ export class DeviceService {
       ];
       if (!allowed.includes(String(input.operation)) || typeof input.deviceId !== 'string')
         throw new Error('Unsupported device operation');
-      if (['create_chat', 'prompt', 'cancel', 'answer', 'review', 'permission'].includes(String(input.operation)))
+      if (
+        ['create_chat', 'prompt', 'cancel', 'answer', 'review', 'permission'].includes(
+          String(input.operation),
+        )
+      )
         claim();
       if (['open_chat', 'prompt'].includes(String(input.operation))) {
         const sessionId = String((input.input as Record<string, unknown>)?.sessionId ?? '');
@@ -605,14 +650,17 @@ export class DeviceService {
         this.store!.selectedWorkspaceRoots = [
           ...new Set([...(this.store!.selectedWorkspaceRoots ?? []), root]),
         ];
-        this.save();
       }
+      const delegation = normalizeComputeDelegation(input.delegation);
+      (this.store!.delegations ??= {})[chat.id] = delegation;
+      this.save();
       return {
         id: chat.id,
         title: chat.title,
         deviceId: this.store!.identity.id,
         deviceName: this.store!.identity.name,
         workspaceName: basename(root),
+        delegation,
       };
     }
     if (operation === 'workbench' && peer?.kind === 'mobile') {
@@ -636,10 +684,18 @@ export class DeviceService {
         Number(input.sequence) < 0
       )
         throw new Error('Invalid target event cursor.');
-      const events = getOrderedEventLog().getAfter(
+      const log = getOrderedEventLog();
+      const current = log.getCursor(chat.id);
+      const cursor = { epoch: Number(input.epoch), sequence: Number(input.sequence) };
+      // Same rule as the WebSocket replay: a cursor below the current-epoch
+      // prune mark has lost events. Deliver the marker first (it rides in the
+      // RPC array, the only transport this path has) and replay from the mark
+      // without rotating the epoch.
+      const pruned = prunedBoundaryAhead(log.getPruneMark(chat.id), current, cursor);
+      const events = log.getAfter(
         chat.id,
-        Number(input.epoch),
-        Number(input.sequence),
+        pruned ? current.epoch : cursor.epoch,
+        pruned ? pruned.sequence : cursor.sequence,
         100,
       );
       // Durable history contains resolved attention requests. As in the
@@ -650,17 +706,30 @@ export class DeviceService {
         getPendingSessionReview(chat.id),
       ]);
       authorize();
-      return events.map((event) => {
+      const replayed = events.map((event) => {
         const payload = event.payload as Record<string, unknown> | null;
-        const staleQuestion = event.type === 'kory.ask_user' &&
+        const staleQuestion =
+          event.type === 'kory.ask_user' &&
           (!question?.questionId || payload?.questionId !== question.questionId);
-        const staleReview = event.type === 'session.changes' &&
-          (!review?.reviewId || !review?.reviewRevision ||
-            payload?.reviewId !== review.reviewId || payload?.reviewRevision !== review.reviewRevision);
+        const staleReview =
+          event.type === 'session.changes' &&
+          (!review?.reviewId ||
+            !review?.reviewRevision ||
+            payload?.reviewId !== review.reviewId ||
+            payload?.reviewRevision !== review.reviewRevision);
         return staleQuestion || staleReview
           ? { ...event, type: 'session.replay_skipped', payload: null, replayed: true }
           : { ...event, replayed: true };
       });
+      if (!pruned) return replayed;
+      const marker: WSMessage<SessionHistoryPrunedPayload> = {
+        type: 'session.history_pruned',
+        sessionId: chat.id,
+        epoch: pruned.epoch,
+        timestamp: Date.now(),
+        payload: { epoch: pruned.epoch, throughSequence: pruned.sequence },
+      };
+      return [marker, ...replayed];
     }
     if (operation === 'workbench') {
       if (actor !== 'user' || peer?.kind !== 'desktop')
@@ -679,7 +748,10 @@ export class DeviceService {
           this.retainProviderRun(chat.id, peer.id, staged);
         else staged.cleanup();
         return result;
-      } catch (error) { staged.cleanup(); throw error; }
+      } catch (error) {
+        staged.cleanup();
+        throw error;
+      }
     }
     if (operation === 'close_chat') {
       const key = `${peer?.id}:${chat.id}`;
@@ -714,6 +786,7 @@ export class DeviceService {
         },
         messages,
         run: ctx.runs.get(chat.id),
+        delegation: this.store!.delegations?.[chat.id] ?? { placement: 'stay', commit: 'none' },
         question: await getPendingQuestion(chat.id),
         review: await getPendingSessionReview(chat.id),
         eventCursor,
@@ -734,7 +807,10 @@ export class DeviceService {
       const start = () =>
         ctx.kory.startSessionTurn({
           sessionId: chat.id,
-          source: 'internal',
+          // A remote device prompt is the user's own send, not background
+          // automation: it takes the same steer-or-supersede admission as a
+          // message typed into the local composer.
+          source: 'user',
           sourceCommandId: `device:${peer?.id ?? this.store!.identity.id}:${requestId}`,
           userMessage: prompt.content,
           preferredModel: prompt.model,
@@ -744,6 +820,13 @@ export class DeviceService {
           interactionMode: prompt.interactionMode ?? chat.interactionMode ?? 'act',
           imageInputMode: prompt.imageInputMode,
           fastMode: prompt.fastMode,
+          speedTier: normalizeSpeedTier(
+            prompt.model?.split(':')[0],
+            prompt.speedTier,
+            prompt.fastMode,
+          ),
+          modelParameters: prompt.modelParameters,
+          fusion: prompt.fusion,
         });
       let submission;
       try {
@@ -752,7 +835,14 @@ export class DeviceService {
         staged?.cleanup();
         throw error;
       }
-      if (staged && submission.accepted) {
+      if (submission.accepted === 'queued') {
+        // The prompt parked behind the remote session's live run and will be
+        // admitted as its next turn — there is no provider execution to
+        // retain on this peer yet.
+        staged?.cleanup();
+        return { accepted: true, runId: '', steeringCommandId: submission.steeringCommandId };
+      }
+      if (staged && submission.accepted === true) {
         const previous = this.providerRuns.get(chat.id);
         if (previous) {
           clearTimeout(previous.timer);
@@ -810,9 +900,10 @@ export class DeviceService {
         throw new Error('Select a permission decision');
       const selection = input.selection;
       const permissionId = input.permissionId;
-      const pending = toolApprovalQueue.list(chat.id).find((request) => request.id === permissionId);
-      if (!pending)
-        throw new Error('This permission request is no longer pending');
+      const pending = toolApprovalQueue
+        .list(chat.id)
+        .find((request) => request.id === permissionId);
+      if (!pending) throw new Error('This permission request is no longer pending');
       const option =
         selection === 'granted'
           ? pending.options?.find((candidate) => /allow|approve|grant/i.test(candidate))
@@ -825,60 +916,106 @@ export class DeviceService {
         throw new Error('This permission request could not be settled');
       return { responded: true, permissionId };
     }
+    if (operation === 'export_work') {
+      const stored = this.store!.delegations?.[chat.id] ?? {
+        placement: 'stay' as const,
+        commit: 'none' as const,
+      };
+      const placement = input.placement === 'return' ? 'return' : stored.placement;
+      const commit =
+        placement === 'return' && (input.commit === 'local' || stored.commit === 'local')
+          ? 'local'
+          : 'none';
+      const root = chat.workingDirectory;
+      if (!root) throw new Error('This chat has no workspace to return work from');
+      return exportWorkspaceChanges({
+        workspaceRoot: root,
+        sessionId: chat.id,
+        deviceId: this.store!.identity.id,
+        deviceName: this.store!.identity.name,
+        workspaceName: basename(root),
+        placement,
+        commit,
+        sourceSessionId: stored.sourceSessionId,
+        transferId: typeof input.transferId === 'string' ? input.transferId : stored.transferId,
+        summary: typeof input.summary === 'string' ? input.summary : undefined,
+      });
+    }
     if (operation === 'review') {
       if (actor === 'agent') throw new Error('Agents cannot approve remote changes');
       if (typeof input.accept !== 'boolean') throw new Error('Invalid review decision');
       if (
-        typeof input.reviewId !== 'string' || !input.reviewId ||
-        typeof input.reviewRevision !== 'string' || !input.reviewRevision
-      ) throw new Error('Missing review identity. Refresh this review before responding.');
+        typeof input.reviewId !== 'string' ||
+        !input.reviewId ||
+        typeof input.reviewRevision !== 'string' ||
+        !input.reviewRevision
+      )
+        throw new Error('Missing review identity. Refresh this review before responding.');
       const review = await getPendingSessionReview(chat.id);
-      if (!review || review.reviewId !== input.reviewId || review.reviewRevision !== input.reviewRevision)
+      if (
+        !review ||
+        review.reviewId !== input.reviewId ||
+        review.reviewRevision !== input.reviewRevision
+      )
         throw new Error('This review is no longer pending');
       claim();
-      const resolved = await ctx.kory.handleSessionResponse(chat.id, input.accept, {
-        reviewId: input.reviewId, reviewRevision: input.reviewRevision,
-      }, (projectRoot) => {
-        authorize();
-        if (!this.workspaceRoots().some((allowed) => isContainedBy(allowed, projectRoot)))
-          throw new Error('Chat is outside this device’s shared workspaces');
-      });
+      const resolved = await ctx.kory.handleSessionResponse(
+        chat.id,
+        input.accept,
+        {
+          reviewId: input.reviewId,
+          reviewRevision: input.reviewRevision,
+        },
+        (projectRoot) => {
+          authorize();
+          if (!this.workspaceRoots().some((allowed) => isContainedBy(allowed, projectRoot)))
+            throw new Error('Chat is outside this device’s shared workspaces');
+        },
+      );
       return {
-        reviewed: true, reviewId: resolved.reviewId,
-        reviewRevision: resolved.reviewRevision, status: resolved.status,
+        reviewed: true,
+        reviewId: resolved.reviewId,
+        reviewRevision: resolved.reviewRevision,
+        status: resolved.status,
       };
     }
     throw new Error('Unsupported device operation');
   }
-  private retainProviderRun(sessionId: string, peerId: string,
-    staged: ReturnType<typeof stageDeviceProviders>, completion: Promise<unknown> = Promise.resolve()) {
+  private retainProviderRun(
+    sessionId: string,
+    peerId: string,
+    staged: ReturnType<typeof stageDeviceProviders>,
+    completion: Promise<unknown> = Promise.resolve(),
+  ) {
     const ctx = getContext();
     staged.bind();
-    const timer = setTimeout(() => {
-      void ctx.kory.cancelSessionWorkers(sessionId).then(async () => {
-        const { cancelLLMJobsForSession } = await import('../queue/workers/llm-worker');
-        await cancelLLMJobsForSession(sessionId);
-      }).finally(() => {
-        staged.cleanup();
-        if (this.providerRuns.get(sessionId)?.staged === staged) this.providerRuns.delete(sessionId);
-      }).catch(() => undefined);
-    }, 30 * 60_000);
-    timer.unref?.();
-    this.providerRuns.set(sessionId, { peerId, staged, timer });
-    void completion.finally(() => {
-      // Automatic compaction may start just after the turn receipt. Keep the
-      // same session-scoped lease through this bounded tail and human waits.
-      const releaseWhenQuiet = () => {
-        if (this.providerRuns.get(sessionId)?.staged !== staged) return;
-        const status = ctx.runs.get(sessionId)?.status;
-        if (status === 'active' || status === 'waiting') {
-          const retry = setTimeout(releaseWhenQuiet, 60_000); retry.unref?.();
-          return;
-        }
-        clearTimeout(timer); staged.cleanup(); this.providerRuns.delete(sessionId);
-      };
-      const tail = setTimeout(releaseWhenQuiet, 60_000); tail.unref?.();
-    }).catch(() => undefined);
+    // The target owns this turn, so a disconnected origin must not cancel it or
+    // revoke its credential scope mid-run. The lease is released only once the
+    // turn is quiet; the timer is a stale-grant sweep, never a work deadline.
+    let leaseTimer: ReturnType<typeof setTimeout> | undefined;
+    const releaseWhenQuiet = () => {
+      if (this.providerRuns.get(sessionId)?.staged !== staged) return;
+      const status = ctx.runs.get(sessionId)?.status;
+      if (status === 'active' || status === 'waiting') {
+        const retry = setTimeout(releaseWhenQuiet, 60_000);
+        retry.unref?.();
+        return;
+      }
+      if (leaseTimer) clearTimeout(leaseTimer);
+      staged.cleanup();
+      this.providerRuns.delete(sessionId);
+    };
+    leaseTimer = setTimeout(releaseWhenQuiet, 30 * 60_000);
+    leaseTimer.unref?.();
+    this.providerRuns.set(sessionId, { peerId, staged, timer: leaseTimer });
+    void completion
+      .finally(() => {
+        // Automatic compaction may start just after the turn receipt. Keep the
+        // same session-scoped lease through this bounded tail and human waits.
+        const tail = setTimeout(releaseWhenQuiet, 60_000);
+        tail.unref?.();
+      })
+      .catch(() => undefined);
   }
   private watch(peer: LinkedDevice, sessionId: string) {
     const key = `${peer.id}:${sessionId}`;

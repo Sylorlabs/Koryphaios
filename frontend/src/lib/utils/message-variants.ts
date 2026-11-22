@@ -25,6 +25,8 @@ export interface DisplayMessage {
   /** Ordered transcript parts of an assistant turn (Invariant 1). Absent on
    *  user rows and on responses that predate persisted parts. */
   parts?: TranscriptPart[];
+  /** The row's source recorded no time; `createdAt` only orders it. */
+  timeUnknown?: true;
 }
 
 export interface MessageDisplayBoundary {
@@ -108,6 +110,7 @@ function parseMessage(value: unknown, activeLineageIds: ReadonlySet<string>): Di
     isActive:
       value.isActive === true || value.isActiveBranch === true || activeLineageIds.has(value.id),
     parts: Array.isArray(value.parts) ? parseTranscriptParts(value.parts) : undefined,
+    ...(value.timeUnknown === true ? { timeUnknown: true as const } : {}),
   };
 }
 

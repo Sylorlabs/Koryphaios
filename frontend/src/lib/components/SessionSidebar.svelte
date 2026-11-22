@@ -235,7 +235,9 @@
   let collapsedProjectKeys = $state<Set<string>>(new Set());
   let collapsedWorkspaceRoot = $state<string | null>(null);
   let sessionBilling = $state<Record<string, SessionBillingSummary>>({});
-  let sessionBillingDetails = $state<Record<string, SessionBillingSummary | null | undefined>>({});
+  /** True once the first session-costs payload has landed, so an absent session
+   *  means "no metered spend" rather than "not loaded yet". */
+  let sessionBillingLoaded = $state(false);
   let hoveredCostSessionId = $state('');
   /** Viewport coordinates for the fixed tracked-spend popover. */
   let costPopoverAnchor = $state<{ left: number; top: number } | null>(null);
@@ -247,6 +249,9 @@
   let billingExcludedProviders = $state<string[]>([]);
   let showSubscriptionApiEquivalent = $state(true);
   let sessionBillingTimer: ReturnType<typeof setInterval> | null = null;
+  let billingRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Coalesces the burst of usage events a single turn emits into one read. */
+  const BILLING_USAGE_REFRESH_DEBOUNCE_MS = 400;
   let projectIconContextMenu = $state<{
     id: string;
     projectName: string;
@@ -315,6 +320,30 @@
     return `${path}${query ? `?${query}` : ''}`;
   }
 
+  /** The one price string for a session. The sidebar row and its
+   *  tracked-spend popover both render this, so a session can never show a
+   *  row price that disagrees with its own breakdown. */
+  function billingSummaryLabel(summary: SessionBillingSummary | null | undefined): string {
+    if (!summary) return '';
+    if (!summary.hasMeteredUsage && summary.hasSubscriptionUsage) return formatUsd(0);
+    if (summary.hasMeteredUsage && !summary.hasKnownCost) return USD_UNKNOWN;
+    return formatUsd(summary.spendUsd ?? summary.spendCents / 100);
+  }
+
+  function sessionCostLabel(session: Session): string {
+    const summary = sessionBilling[session.id];
+    if (summary) return billingSummaryLabel(summary);
+    // Pre-ledger fallback only: printed until the first poll lands. It is a
+    // different accumulator (`messages.cost`) so it must never be shown beside a
+    // ledger price; nothing else in this component reads `totalCost`.
+    if (session.totalCost > 0) return formatUsd(session.totalCost);
+    if ((session.totalTokensIn ?? 0) > 0 || (session.totalTokensOut ?? 0) > 0) return USD_UNKNOWN;
+    return '';
+  }
+
+  /** The one read of session spend. Rows and the tracked-spend card render this
+   *  exact payload, so a session shows one price on both surfaces. A second,
+   *  separately-timed read is how the card and the row drifted apart. */
   async function loadSessionBilling() {
     try {
       const response = await apiFetch(
@@ -324,39 +353,12 @@
       );
       if (!response.ok) return;
       const payload = await response.json();
-      if (payload?.ok && payload.sessions) sessionBilling = payload.sessions;
+      if (!payload?.ok || !payload.sessions) return;
+      sessionBilling = payload.sessions;
+      sessionBillingLoaded = true;
     } catch {
       // Supplemental UI: preserve last-known-good costs on transient failures.
     }
-  }
-
-  async function loadSessionBillingDetail(sessionId: string) {
-    if (Object.prototype.hasOwnProperty.call(sessionBillingDetails, sessionId)) return;
-    sessionBillingDetails[sessionId] = undefined;
-    try {
-      const path = sidebarBillingPath(`/api/billing/session/${encodeURIComponent(sessionId)}`);
-      const response = await apiFetch(apiUrl(path), {}, 3_000);
-      if (!response.ok) {
-        sessionBillingDetails[sessionId] = null;
-        return;
-      }
-      const payload = await response.json();
-      sessionBillingDetails[sessionId] = payload?.ok ? payload.summary : null;
-    } catch {
-      sessionBillingDetails[sessionId] = null;
-    }
-  }
-
-  function sessionCostLabel(session: Session): string {
-    const summary = sessionBilling[session.id];
-    if (summary) {
-      if (!summary.hasMeteredUsage && summary.hasSubscriptionUsage) return formatUsd(0);
-      if (summary.hasMeteredUsage && !summary.hasKnownCost) return USD_UNKNOWN;
-      return formatUsd(summary.spendUsd ?? summary.spendCents / 100);
-    }
-    if (session.totalCost > 0) return formatUsd(session.totalCost);
-    if ((session.totalTokensIn ?? 0) > 0 || (session.totalTokensOut ?? 0) > 0) return USD_UNKNOWN;
-    return '';
   }
 
   onMount(() => {
@@ -366,10 +368,21 @@
     void loadSessionBilling();
     const handleBillingPreferencesChanged = () => {
       loadSidebarBillingPreferences();
-      sessionBillingDetails = {};
       void loadSessionBilling();
     };
     const handleTeamUiPreferencesChanged = () => loadTeamUiPreferences();
+    /** Spend is written when a turn reports usage, not on a clock. Refreshing
+     *  from that signal keeps the price current at the moment it changes, so the
+     *  poll interval below is only a fallback for other writers (reprice, other
+     *  windows, CLI usage imports). */
+    const handleUsageChanged = () => {
+      if (billingRefreshTimer) return;
+      billingRefreshTimer = setTimeout(() => {
+        billingRefreshTimer = null;
+        void loadSessionBilling();
+      }, BILLING_USAGE_REFRESH_DEBOUNCE_MS);
+    };
+    window.addEventListener('kory:usage-changed', handleUsageChanged);
     window.addEventListener('kory:billing-preferences-changed', handleBillingPreferencesChanged);
     window.addEventListener('kory:team-ui-preferences-changed', handleTeamUiPreferencesChanged);
     sessionBillingTimer = setInterval(() => void loadSessionBilling(), 15_000);
@@ -377,6 +390,8 @@
       nowClock.unsubscribe();
       cancelCostPopoverClose();
       if (sessionBillingTimer) clearInterval(sessionBillingTimer);
+      if (billingRefreshTimer) clearTimeout(billingRefreshTimer);
+      window.removeEventListener('kory:usage-changed', handleUsageChanged);
       window.removeEventListener(
         'kory:billing-preferences-changed',
         handleBillingPreferencesChanged,
@@ -463,7 +478,7 @@
     }
 
     return [
-      { key: 'running', label: 'Running', count: counts.running, color: '#8b929b' },
+      { key: 'running', label: 'Running', count: counts.running, color: 'var(--color-text-muted)' },
       { key: 'failed', label: 'Failed', count: counts.failed, color: 'var(--color-error)' },
       {
         key: 'compacting',
@@ -546,7 +561,7 @@
     if (status === 'done') return 'var(--color-success)';
     if (status === 'error') return 'var(--color-error)';
     if (status === 'waiting' || status === 'waiting_user') return 'var(--color-accent)';
-    return '#8b929b';
+    return 'var(--color-text-muted)';
   }
 
   const WORKSPACE_ROOT_KEY = '__workspace_root__';
@@ -1034,7 +1049,8 @@
     cancelCostPopoverClose();
     hoveredCostSessionId = sessionId;
     anchorCostPopover(trigger);
-    void loadSessionBillingDetail(sessionId);
+    // The card reads the polled summary, so opening it can never show a
+    // different number from the row that triggered it.
   }
 
   function keepCostPopoverOpen() {
@@ -1253,6 +1269,19 @@
     openLifecycleWarning('delete', id);
   }
 
+  /** Pin or unpin a chat, offering an Undo that restores the previous state. */
+  function toggleChatPin(id: string) {
+    const wasPinned = chatSidebarPrefs.isPinned(id);
+    chatSidebarPrefs.togglePin(id);
+    toastStore.success(wasPinned ? 'Chat unpinned' : 'Chat pinned', {
+      duration: 6000,
+      action: () => {
+        chatSidebarPrefs.setPinned(id, wasPinned);
+      },
+      actionLabel: 'Undo',
+    });
+  }
+
   async function handleArchive(e: MouseEvent, id: string) {
     e.stopPropagation();
     if (isGuidedDemo) {
@@ -1382,7 +1411,7 @@
         {#if projectStore.workspaceRoot || recentProjects.length > 0}
           <div class="my-1 border-t border-[var(--color-border)]"></div>
           <div
-            class="px-3 pb-1 pt-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]"
+            class="px-3 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]"
           >
             Recent
           </div>
@@ -1399,7 +1428,7 @@
             >
               <FolderOpen size={13} class="shrink-0" />
               <span class="truncate">{projectDisplayName(projectStore.workspaceRoot)}</span>
-              <span class="ml-auto shrink-0 text-[9px] text-[var(--color-text-muted)]"
+              <span class="ml-auto shrink-0 text-[11px] text-[var(--color-text-muted)]"
                 >workspace</span
               >
             </button>
@@ -1492,7 +1521,7 @@
                           <input
                             type="text"
                             class="input h-7 min-w-0 flex-1 text-xs {editError
-                              ? 'border-red-500'
+                              ? 'border-[var(--color-error)]'
                               : ''}"
                             bind:value={editTitle}
                             maxlength={80}
@@ -1533,7 +1562,7 @@
                           </button>
                         </div>
                         <span
-                          class="px-0.5 text-[9px]"
+                          class="px-0.5 text-[11px]"
                           style="color: {editError
                             ? 'var(--color-error)'
                             : 'var(--color-text-muted)'};"
@@ -1612,7 +1641,7 @@
                           {/if}
                           {#if needsApproval && sessionStore.activeSessionId !== session.id}
                             <span
-                              class="approval-badge inline-flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-[9px] font-semibold"
+                              class="approval-badge inline-flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-[11px] font-semibold"
                               title="An agent in this chat is waiting for your approval"
                             >
                               <ShieldAlert size={9} />Approve
@@ -1622,7 +1651,7 @@
                         <!-- Meta row packs price, message count and timestamp into a
                              single tight left-aligned group so no width is wasted. -->
                         <div
-                          class="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px]"
+                          class="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px]"
                           style="color: var(--color-text-muted);"
                         >
                           {#if sessionCostLabel(session)}
@@ -1659,25 +1688,23 @@
                                 style="left: {costPopoverAnchor?.left ??
                                   0}px; top: {costPopoverAnchor?.top ?? 0}px;"
                               >
-                                {#if sessionBillingDetails[session.id] === undefined}
-                                  <div class="text-[10px] text-[var(--color-text-muted)]">
-                                    Loading billing detail…
-                                  </div>
-                                {:else if sessionBillingDetails[session.id] === null}
-                                  <div class="text-[10px] text-[var(--color-text-muted)]">
-                                    Billing detail unavailable
+                                {#if sessionBilling[session.id] === undefined}
+                                  <div class="text-[11px] text-[var(--color-text-muted)]">
+                                    {sessionBillingLoaded
+                                      ? 'No tracked spend yet'
+                                      : 'Loading billing detail…'}
                                   </div>
                                 {:else}
-                                  {@const detail = sessionBillingDetails[session.id]}
+                                  {@const detail = sessionBilling[session.id]}
                                   <div class="mb-2 flex items-start justify-between gap-3">
                                     <div>
                                       <div
-                                        class="text-[10px] font-semibold text-[var(--color-text-primary)]"
+                                        class="text-[11px] font-semibold text-[var(--color-text-primary)]"
                                       >
                                         Tracked spend
                                       </div>
                                       {#if detail?.pricingIncomplete}<div
-                                          class="text-[9px] text-[var(--color-warning)]"
+                                          class="text-[11px] text-[var(--color-warning)]"
                                         >
                                           Pricing incomplete
                                         </div>{/if}
@@ -1685,16 +1712,14 @@
                                     <div
                                       class="font-mono text-[11px] font-bold text-[var(--color-text-primary)]"
                                     >
-                                      {detail?.hasMeteredUsage && !detail?.hasKnownCost
-                                        ? USD_UNKNOWN
-                                        : formatUsd(detail?.spendUsd ?? 0)}
+                                      {billingSummaryLabel(detail)}
                                     </div>
                                   </div>
                                   <div class="space-y-2">
                                     {#each detail?.providers ?? [] as provider (provider.name)}
                                       <div>
                                         <div
-                                          class="flex items-center justify-between gap-2 text-[10px]"
+                                          class="flex items-center justify-between gap-2 text-[11px]"
                                         >
                                           <span
                                             class="font-semibold text-[var(--color-text-secondary)]"
@@ -1713,7 +1738,7 @@
                                         </div>
                                         {#each provider.models ?? [] as model (model.model)}
                                           <div
-                                            class="ml-2 flex items-center justify-between gap-2 py-0.5 text-[9px] text-[var(--color-text-muted)]"
+                                            class="ml-2 flex items-center justify-between gap-2 py-0.5 text-[11px] text-[var(--color-text-muted)]"
                                           >
                                             <span class="min-w-0 truncate font-mono"
                                               >{model.model}</span
@@ -1735,7 +1760,7 @@
                                   </div>
                                 {/if}
                                 <div
-                                  class="mt-2 flex items-center justify-between gap-2 border-t pt-1.5 text-[9px]"
+                                  class="mt-2 flex items-center justify-between gap-2 border-t pt-1.5 text-[11px]"
                                   style="color: var(--color-text-muted); border-color: var(--color-border);"
                                 >
                                   <span>Click to open billing</span>
@@ -1805,7 +1830,7 @@
                               aria-label={chatSidebarPrefs.isPinned(session.id) ? 'Unpin chat' : 'Pin chat'}
                               onclick={(event) => {
                                 event.stopPropagation();
-                                chatSidebarPrefs.togglePin(session.id);
+                                toggleChatPin(session.id);
                               }}
                             >
                               <Pin size={11} />
@@ -1871,7 +1896,7 @@
               class="min-w-0"
               ><span class="block truncate text-xs text-[var(--color-text-primary)]"
                 >{chat.title}</span
-              ><span class="block truncate text-[10px] text-[var(--color-text-muted)]"
+              ><span class="block truncate text-[11px] text-[var(--color-text-muted)]"
                 >{chat.deviceName} · {chat.workspaceName}</span
               ></span
             ></button
@@ -1886,7 +1911,7 @@
             class="text-xs font-semibold uppercase tracking-[0.14em]"
             style="color:var(--color-text-muted)">Team workspaces</span
           ><span
-            class="rounded-full px-2 py-0.5 text-[9px]"
+            class="rounded-full px-2 py-0.5 text-[11px]"
             style="background:var(--color-surface-3);color:var(--color-text-muted)"
             >{collaborationStore.joinedSessions.length}</span
           >
@@ -1934,7 +1959,7 @@
           >
             {projectDisplayName(projectStore.workspaceRoot)}
           </span>
-          <span class="shrink-0 text-[9px]" style="color: var(--color-text-muted);">
+          <span class="shrink-0 text-[11px]" style="color: var(--color-text-muted);">
             {workspaceProjectCount}
           </span>
         </button>
@@ -2521,7 +2546,7 @@
     align-items: center;
     gap: 6px;
     color: var(--color-text-muted);
-    font-size: 10px;
+    font-size: 11px;
   }
   .status-detail-stat strong {
     color: var(--color-text-primary);
@@ -2565,11 +2590,11 @@
   .status-detail-row small {
     margin-top: 2px;
     color: var(--color-text-muted);
-    font-size: 10px;
+    font-size: 11px;
   }
   .status-detail-state {
     flex: 0 0 auto;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 600;
   }
   @keyframes status-chart-in {
@@ -2657,7 +2682,7 @@
   .status-popover-heading small {
     margin-top: var(--space-1);
     color: var(--color-text-muted);
-    font-size: 10px;
+    font-size: 11px;
   }
 
   .status-legend {
@@ -2671,7 +2696,7 @@
     grid-template-columns: 7px 1fr auto 28px;
     align-items: center;
     gap: var(--space-2);
-    font-size: 10px;
+    font-size: 11px;
   }
 
   .status-swatch {
@@ -2841,7 +2866,7 @@
     color: var(--color-text-secondary);
     background: color-mix(in srgb, var(--color-surface-4) 88%, var(--color-surface-0));
     box-shadow: 0 8px 24px color-mix(in srgb, var(--color-surface-0) 72%, transparent);
-    font-size: 10px;
+    font-size: 11px;
     font-weight: var(--font-medium);
     line-height: var(--leading-tight);
     letter-spacing: 0.01em;

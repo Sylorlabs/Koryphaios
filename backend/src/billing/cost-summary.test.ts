@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import type { CreditUsageEventRow, UsageCostBreakdownRow } from '../credit-accountant/db';
+import type { ResolvedPricing } from '../pricing';
 import {
+  createMemoizedPricing,
   summarizeBillingSpend,
   summarizeSessionCosts,
   summarizeUsageAnalytics,
@@ -167,5 +169,78 @@ describe('billing cost summaries', () => {
     expect(w24.byModel[1]?.model).toBe('gemini-4-argon-medium');
     expect(w24.byModel[1]?.hasKnownCost).toBe(false);
     expect(w24.byModel[1]?.spendUsd).toBeNull();
+  });
+});
+
+describe('memoized pricing resolution', () => {
+  const fakePricing = (provider: string, model: string): ResolvedPricing | null => ({
+    inPerM: 1,
+    outPerM: 2,
+    source: 'models.dev',
+  });
+
+  function countingResolver(resolve = fakePricing) {
+    const calls = new Map<string, number>();
+    const resolver = (provider: string, model: string) => {
+      const key = `${provider}::${model}`;
+      calls.set(key, (calls.get(key) ?? 0) + 1);
+      return resolve(provider, model);
+    };
+    return { calls, resolver };
+  }
+
+  test('summarizeUsageAnalytics resolves each provider/model pair once across all windows', () => {
+    const now = 1_760_000_000_000;
+    const pairs: Array<Pick<CreditUsageEventRow, 'provider' | 'model' | 'costUsd' | 'costKnown'>> = [
+      // Subscription usage exercises the API-equivalent pricing path.
+      { provider: 'claude', model: 'claude-sonnet-4.5', costUsd: 0, costKnown: true },
+      // Metered usage with a known cost exercises cost-by-type apportionment.
+      { provider: 'openai', model: 'gpt-5.6', costUsd: 2.13, costKnown: true },
+      { provider: 'google', model: 'gemini-2.5-pro', costUsd: 1.05, costKnown: true },
+    ];
+    const events: CreditUsageEventRow[] = Array.from({ length: 500 }, (_, index) =>
+      eventRow(
+        {
+          ...pairs[index % pairs.length],
+          // Spread events across every window (24h, 7d, 30d, 90d).
+          ts: now - (index % 89) * 24 * 60 * 60 * 1_000,
+          sessionId: `session-${index % 7}`,
+        },
+        now,
+      ),
+    );
+
+    const memoRun = countingResolver();
+    const memoized = summarizeUsageAnalytics(
+      events,
+      now,
+      createMemoizedPricing(memoRun.resolver),
+    );
+    const rawRun = countingResolver();
+    const unmemoized = summarizeUsageAnalytics(events, now, rawRun.resolver);
+
+    expect([...memoRun.calls.values()].reduce((sum, count) => sum + count, 0)).toBe(3);
+    expect(memoized).toEqual(unmemoized);
+  });
+
+  test('summarizeBillingSpend resolves each subscription provider/model pair once', () => {
+    const rows: UsageCostBreakdownRow[] = [
+      row({ provider: 'claude', model: 'claude-sonnet-4.5' }),
+      row({ provider: 'claude', model: 'claude-sonnet-4.5', tokensIn: 200 }),
+      row({ provider: 'codex', model: 'gpt-5.6' }),
+      row({ provider: 'codex', model: 'gpt-5.6', tokensIn: 300 }),
+      row({ provider: 'grok', model: 'grok-4' }),
+      // Metered rows never resolve API-equivalent pricing.
+      row({ provider: 'openai', model: 'gpt-5.6', knownCostUsd: 0.5, knownRows: 1 }),
+    ];
+
+    const memoRun = countingResolver();
+    const memoized = summarizeBillingSpend(rows, createMemoizedPricing(memoRun.resolver));
+    const rawRun = countingResolver();
+    const unmemoized = summarizeBillingSpend(rows, rawRun.resolver);
+
+    // One resolve per distinct (apiProvider, model) pair, not per row.
+    expect([...memoRun.calls.values()].reduce((sum, count) => sum + count, 0)).toBe(3);
+    expect(memoized).toEqual(unmemoized);
   });
 });

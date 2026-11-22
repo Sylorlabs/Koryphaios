@@ -143,7 +143,7 @@
           </button>
         {/each}
       </div>
-      <label for={inputId} class="mt-3 block text-[10px] font-medium text-[var(--color-text-muted)]"
+      <label for={inputId} class="mt-3 block text-[11px] font-medium text-[var(--color-text-muted)]"
         >Custom hex color</label
       >
       <div class="mt-1.5 flex gap-2">
@@ -165,7 +165,7 @@
           type="button"
           onclick={() => choose(draft)}
           disabled={!normalizeHex(draft)}
-          class="h-10 rounded-xl bg-[var(--color-accent)] px-3 text-xs font-semibold text-[var(--color-surface-0)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/70 disabled:cursor-not-allowed disabled:opacity-40"
+          class="h-10 rounded-xl bg-[var(--color-accent)] px-3 text-xs font-semibold text-[var(--color-on-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/70 disabled:cursor-not-allowed disabled:opacity-40"
           >Apply</button
         >
       </div>

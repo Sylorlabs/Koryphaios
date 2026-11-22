@@ -24,12 +24,33 @@ import { BRIDGE_CATALOG_TIMEOUT_MS, BRIDGE_EXECUTE_TIMEOUT_MS } from '../kory-mc
 import {
   createFreebuffBridgeRelay,
   FREEBUFF_RELAY_BODY_LIMIT,
+  freebuffBridgeStagePlan,
   prepareFreebuffBridge,
 } from '../freebuff-bridge-runtime';
 
 const CATALOG = '/api/v1/mcp-bridge/catalog';
 const EXECUTE = '/api/v1/mcp-bridge/execute';
 const cleanup: Array<() => unknown | Promise<unknown>> = [];
+
+describe('bridge bundle staging plan', () => {
+  it('copies the shipped sibling bundle when only the packaged layout exists', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kory-bridge-plan-'));
+    cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
+    writeFileSync(join(dir, 'kory-mcp-bridge.js'), 'export {};');
+    const plan = freebuffBridgeStagePlan(dir);
+    expect(plan.prebuilt).toBe(join(dir, 'kory-mcp-bridge.js'));
+  });
+
+  it('rebuilds from source whenever the TypeScript entry is present', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kory-bridge-plan-'));
+    cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
+    writeFileSync(join(dir, 'kory-mcp-bridge.ts'), 'export {};');
+    writeFileSync(join(dir, 'kory-mcp-bridge.js'), 'export {};');
+    const plan = freebuffBridgeStagePlan(dir);
+    expect(plan.prebuilt).toBeUndefined();
+    expect(plan.source).toBe(join(dir, 'kory-mcp-bridge.ts'));
+  });
+});
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });

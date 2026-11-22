@@ -1,34 +1,34 @@
 {
   "id": "hardware-runtime-debugging-full-task-2",
   "maturity": "individual",
-  "prompt": "A Vulkan renderer intermittently returns VK_ERROR_DEVICE_LOST during one compute-to-graphics workload on an NVIDIA GPU after a driver update. Diagnose the GPU crash using the exact GPU model, PCIe topology, OS/kernel, driver, Vulkan loader/runtime, application build, workload seed, validation-layer version, and kernel Xid logs. Reproduce the same submission first without changing the driver; enable Khronos validation/synchronization or GPU-assisted diagnostics as appropriate, preserve any VUIDs and Xids, minimize the command sequence, and use a driver-version or second-GPU control only after the application-level evidence is captured. Determine the narrowest supported layer—invalid application usage, driver/runtime, transport/platform, or physical device—and verify the fix or mitigation against the original workload without claiming a hardware defect from Xid/device-loss alone.",
+  "prompt": "A Cortex-M4 telemetry board stops on the first packet after a dispatch change. Nothing was reflashed and no probe is attached: the workspace holds the board source, the build and capture tools, the record the target wrote in faults/fault-1.txt, and the matching image with symbols in faults/fault-1.elf. Work from that record and that image: decode which fault class fired and which status bits carry it, explain what the recorded faulting address can and cannot mean for this class, and resolve the stacked frame to the code that executed and the code that called it. Then decide whether the recorded instruction is the defect or where a corrupted pointer became visible, repair firmware/board.c so every packet reaches its handler, and record the triage in diagnosis.json in the shape the README specifies. The harness rebuilds your source with a fresh seed and runs it, so the published checksum must come from the repaired dispatch path executing on the target.",
   "environment": {
     "kind": "synthetic",
-    "startingState": "fixture://hardware-runtime-debugging/scenario-2",
+    "startingState": "fixture://hardware-runtime-debugging/cortex-m-invstate",
     "requirements": [
-      "recorded NVIDIA GPU and PCIe/topology identity",
-      "recorded OS/kernel, NVIDIA driver, Vulkan loader/API, validation-layer, and app-build versions",
-      "fixed workload seed and reproducible command/submission capture",
-      "kernel/event log containing any Xid messages and application device-loss result",
-      "paired same-model skill/no-skill execution"
+      "real Cortex-M4 target built from the workspace source with clang for thumbv7m-none-eabi and linked with ld.lld",
+      "hardware fault record captured from the running target, carrying the stacked frame plus CFSR, HFSR, MMFAR, BFAR and EXC_RETURN",
+      "matching ELF with symbols shipped next to the record it produced",
+      "diagnosis.json derived from the record and the ELF symbol table",
+      "repaired source, rebuilt with a fresh seed and executed on the target"
     ]
   },
   "falsifiableChecks": [
     {
       "id": "hardware-runtime-debugging-env-identity-2",
-      "assertion": "The reproduction records GPU, topology, kernel/OS, driver, Vulkan runtime/API, validation-layer, app build, and workload identity before changing any layer."
+      "assertion": "The diagnosis names the recorded fault class and status bits, and the image hash and MCU identity of the image that produced the record."
     },
     {
       "id": "hardware-runtime-debugging-validation-2",
-      "assertion": "Application valid-usage evidence is collected with the appropriate Khronos validation features, preserving VUIDs/debug output while acknowledging that validation instrumentation can perturb timing/performance."
+      "assertion": "The stacked frame is resolved against faults/fault-1.elf, with the executed address and the calling site named from that symbol table rather than from the current source layout."
     },
     {
       "id": "hardware-runtime-debugging-xid-scope-2",
-      "assertion": "Any NVIDIA Xid and VK_ERROR_DEVICE_LOST evidence is treated as diagnostic evidence rather than automatic proof of defective hardware, and competing app/driver/platform hypotheses are tested."
+      "assertion": "The faulting address is interpreted within what this fault class permits, and no cause is claimed from that address alone when the class carries no valid address register."
     },
     {
       "id": "hardware-runtime-debugging-minimized-proof-2",
-      "assertion": "A minimized failing submission or other layer-discriminating reproducer is preserved, and the proposed fix/mitigation is rerun against both that reproducer and the original workload on a stated real GPU/driver configuration."
+      "assertion": "The repaired source is rebuilt with a fresh seed and run on the target, all packets reach their handler, and the published checksum matches the packets derived from that seed."
     }
   ],
   "scorers": [
@@ -52,16 +52,19 @@
         "independent evaluator record",
         "quality comparison without variant labels"
       ],
-      "blindTo": ["skill-variant", "expected-outcome"]
+      "blindTo": [
+        "skill-variant",
+        "expected-outcome"
+      ]
     }
   ],
   "requiredEvidence": [
-    "GPU/driver/runtime/application/workload identity",
-    "device-loss and vendor diagnostic logs",
-    "validation-layer evidence",
-    "minimized failing or discriminating workload",
-    "real-GPU fix/mitigation rerun",
-    "paired skill/no-skill run artifacts"
+    "board and MCU identity, image hash, and the ELF that matches the record",
+    "raw captured record with the decoded fault class and status bits",
+    "stacked PC and LR resolved to named symbols in the matching ELF",
+    "the corrupting change identified in the source",
+    "target before/after reproduction of the dispatch path",
+    "paired skill/no-skill runs"
   ],
   "requiredArtifacts": [
     "hardware-runtime-debugging-scenario-2-result",

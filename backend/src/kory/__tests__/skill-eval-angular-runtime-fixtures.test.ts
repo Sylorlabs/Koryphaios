@@ -2,13 +2,13 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
-import { writeFixtureFile } from '../skill-eval-fixture-helpers';
+import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
+import { writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
 import {
   ANGULAR_RUNTIME_V5,
   LIFECYCLE_CONCEPT_SKILL_EVAL_MATERIALIZERS,
   LIFECYCLE_CONCEPT_SKILL_EVAL_SCORERS,
-} from '../skill-eval-lifecycle-concept-fixtures';
+} from '../../eval/skills/skill-eval-lifecycle-concept-fixtures';
 import { loadV5SkillPackages } from '../skill-packages';
 
 const roots: string[] = [];

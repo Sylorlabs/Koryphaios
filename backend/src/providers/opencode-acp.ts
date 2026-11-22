@@ -163,6 +163,8 @@ export interface OpenCodeAcpClientOptions {
   args: string[];
   cwd: string;
   env: NodeJS.ProcessEnv;
+  /** Process seam: defaults to node's spawn; replay tests inject a transcript process. */
+  spawnChild?: typeof spawn;
 }
 
 type PendingRequest = {
@@ -186,17 +188,19 @@ export class OpenCodeAcpClient {
   private readonly args: string[];
   private readonly cwd: string;
   private readonly env: NodeJS.ProcessEnv;
+  private readonly spawnChild: typeof spawn;
 
   constructor(opts: OpenCodeAcpClientOptions) {
     this.command = opts.command;
     this.args = opts.args;
     this.cwd = opts.cwd;
     this.env = opts.env;
+    this.spawnChild = opts.spawnChild ?? spawn;
   }
 
   /** Spawn the ACP server and perform the protocol handshake. */
   async connect(): Promise<AcpInitializeResult> {
-    this.child = spawn(this.command, this.args, {
+    this.child = this.spawnChild(this.command, this.args, {
       cwd: this.cwd,
       env: this.env,
       stdio: ['pipe', 'pipe', 'pipe'],

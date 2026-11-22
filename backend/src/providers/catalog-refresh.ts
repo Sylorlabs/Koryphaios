@@ -72,7 +72,6 @@ const CLI_BACKED_PROVIDERS: ReadonlySet<ProviderName> = new Set([
   'codex',
   'codex-auth',
   'grok',
-  'codebuddy',
   'antigravity',
   'cursor',
   'devin',
@@ -83,8 +82,34 @@ const CLI_BACKED_PROVIDERS: ReadonlySet<ProviderName> = new Set([
 /** Keyless public catalog endpoints, localhost servers, and cheap authenticated
  * read-only catalogs (no subprocess or generation). */
 const CHEAP_CATALOG_PROVIDERS: ReadonlySet<ProviderName> = new Set([
+  // Both buddy adapters discover their catalog by reading the installed
+  // product*.json (plus the CLI bundle's effort enum) — plain file reads, no
+  // subprocess. Sitting in the cli tier meant a model the vendor shipped
+  // today (e.g. hy3) could take an hour to appear, for a refresh that costs
+  // one readFileSync.
+  'codebuddy',
+  'workbuddy-desktop',
   'beam',
   'cline',
+  // One authenticated read-only GET each, and the only source of these
+  // providers' limits/pricing, so they are polled on the cheap cadence.
+  'hundredmillionseek',
+  'numes',
+  // Coarena's /models is a public read-only GET and the only source of its
+  // context/output limits, modalities and reasoning ladder.
+  'coarena',
+  // CrowLLM's /v1/models is a public read-only GET and the catalog is the only
+  // source of its exact ids, publishers and :free / -thinking variants.
+  'crowllm',
+  // One authenticated read-only GET, and the only source of Token Factory's
+  // platform-chosen catalog and its limits.
+  'radeon',
+  // Runcrate's /v1/models is a public read-only GET and the only source of its
+  // per-model limits, modalities and USD prices.
+  'runcrate',
+  // One authenticated read-only GET, and the only source of Token Harbor's
+  // context limits, USD prices and reasoning ladders.
+  'tokenharbor',
   'github-models',
   'local',
   'ollama',

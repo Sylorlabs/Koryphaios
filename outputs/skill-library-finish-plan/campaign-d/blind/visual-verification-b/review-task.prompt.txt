@@ -1,0 +1,816 @@
+SNAPSHOT HASH DOMAINS: beforeSha256/afterSha256 identify complete workspace entries, using SHA256("file\0" + original file bytes), or SHA256("symlink\0" + link target). Scorer artifactSHA and durable artifact hashes use SHA256(raw bytes), without that tag. These different hash domains must not be compared as if identical. Visible beforeText/afterText may be bounded or privacy-scrubbed; they are not the original complete bytes to hash.
+
+You are an independent blind semantic evaluator.
+Two anonymous agents attempted the same task. You are not told which agent received any extra guidance, and you must not infer or speculate about that hidden condition.
+Judge each artifact independently against the task contract. Do not reward matching wording, verbosity, or references to a skill. Focus on behavioral correctness, scope discipline, evidence quality, preservation of required facts, negative paths, recovery behavior, and whether completion claims are actually supported.
+The artifact bundle may include harness captured execution evidence and before and after file snapshots. Treat that as observed evidence, not as an agent claim.
+PUBLIC CANDIDATE CONTRACT SNAPSHOT is the exact task prompt and allowlisted README.md/contract.json bytes visible to the candidate before execution. Hashes are verified by the harness. If an entry says UNAVAILABLE, do not reconstruct it from the current repository or treat current files as historical proof.
+executionEvidence is supplied by the host after the agent attempt, including deterministic scorer observations. An agent can truthfully report that it could not run a check even when the host subsequently runs that check successfully. Those observations have different owners and times; that difference alone is not an integrity failure.
+Attribute a completion claim to its actual source. Penalize an agent for fabricated or overstated verification only when its finalOutput or authored file content makes that unsupported claim. Do not attribute a host scorer statement to the agent, require the agent to predict later host results, or treat an honest statement of limited access as contradicting later host verification.
+Host evidence is not infallible. If a scorer result conflicts with concrete artifact behavior, identify the disputed check and evidence as a possible verifier defect. Keep instrument uncertainty separate from an agent integrity finding; a score label alone does not prove the task succeeded.
+Treat afterText JSON strings as literal source bytes. Before claiming a URL or origin is malformed or Markdown-formatted, inspect and quote the exact JSON value. Do not transform plain URL strings into Markdown hyperlinks and then mistake that display formatting for the original value.
+The PAIR EXECUTION EVIDENCE section is evaluator owned evidence. It certifies that Artifact A and Artifact B are the two randomized arms of one matched same model comparison for this exact scenario and evaluation contract.
+When REQUIRED EVIDENCE or REQUIRED ARTIFACTS asks for paired skill and no skill run artifacts, paired evaluation evidence, or an equivalent pair label, the anonymous A and B bundle plus PAIR EXECUTION EVIDENCE satisfies the existence and provenance of that pair. Do not require either agent output to claim, create, or narrate evaluator owned pair evidence.
+The REQUIRED ARTIFACTS entries below are evaluation evidence labels for the overall harness. They are not literal filenames the agent was instructed to create unless the task itself says so. Judge whether the bundle substantively supplies the required evidence; do not require those exact label strings to appear.
+Routing and hierarchy selection are evaluated independently by the harness. Do not require the agent to narrate which skill was selected or provide meta level specialist selection rationale when the artifact itself respects the requested scope and neighboring responsibility boundaries.
+Never lower passed, quality, verification, or integrity because an artifact omits hierarchy narration, specialist selection rationale, skill names, or evaluator owned paired A/B evidence. If a draft criticism relies on one of those omissions, remove that criticism and score only the concrete task behavior and evidence.
+If a REQUIRED EVIDENCE or REQUIRED ARTIFACTS label describes routing, hierarchy selection, specialist selection, or paired skill versus no skill provenance, treat that meta level requirement as evaluator owned. The harness evidence in this prompt is authoritative for those concerns.
+When choosing preference A, B, or tie, compare concrete task behavior and evidence only. Evaluator-owned hierarchy or specialist narration, skill-guidance scope, filenames, and paired-run provenance must not affect the preference comparison.
+Treat genuinely missing task evidence as missing. Do not assume unshown commands or tests passed.
+Return JSON only, with this exact shape:
+{"artifactA":{"passed":true,"quality":0.0,"verification":0.0,"integrityFailure":false,"evidence":["..."]},"artifactB":{"passed":true,"quality":0.0,"verification":0.0,"integrityFailure":false,"evidence":["..."]},"preference":"A","rationale":["..."]}
+
+TASK
+A responsive web analytics dashboard has been implemented from an approved visual direction. Perform visual verification in the real browser at 1440x900, 900x900, and 390x844 CSS-pixel viewports in both light and dark themes. Exercise loading, empty, normal, and dense-data states; the dense state uses 48-character card titles and the maximum supported badge count. Verify hierarchy, card alignment, spacing consistency, wrapping/truncation, chart and legend clipping, horizontal overflow, sticky-header overlap, and whether the primary action remains visually distinct. Hold browser version, DPR, fonts, dataset, and animation state constant for comparable captures. Record every failed claim against a capture and distinguish meaningful layout drift from rendering noise.
+
+FALSIFIABLE CHECKS
+[
+  {
+    "id": "visual-dashboard-matrix",
+    "assertion": "Captures exist for all required viewport/theme combinations and include the loading, empty, normal, and dense states needed to test the stated claims."
+  },
+  {
+    "id": "visual-dashboard-layout",
+    "assertion": "No supported state has unintended horizontal overflow, chart/legend clipping, sticky-header overlap, or unreadable title/badge collision; any observed failure is tied to its exact capture and environment."
+  },
+  {
+    "id": "visual-dashboard-hierarchy",
+    "assertion": "The primary action and content hierarchy remain visually legible across widths/themes, and screenshot differences are interpreted only after fonts, DPR, animation, data, and runtime are stabilized."
+  }
+]
+
+REQUIRED EVIDENCE
+[
+  "Stabilized runtime captures",
+  "State and size matrix",
+  "claim-level visual verdicts",
+  "environment identity for comparison captures",
+  "paired skill/no-skill run artifacts",
+  "explicit unavailable or simulated evidence labels"
+]
+
+REQUIRED ARTIFACTS
+[
+  "visual-verification-scenario-1-capture-matrix",
+  "visual-verification-scenario-1-claim-audit",
+  "visual-verification-scenario-1-verdict",
+  "visual-verification-scenario-1-paired-evaluation"
+]
+
+PUBLIC CANDIDATE CONTRACT SNAPSHOT
+{
+  "taskPrompt": {
+    "available": true,
+    "sha256": "11b0d059e9a25dc254ea33fcd7f96eae4fd9f4b637cf65ce624beba333b3dc0a",
+    "byteLength": 774,
+    "text": "A responsive web analytics dashboard has been implemented from an approved visual direction. Perform visual verification in the real browser at 1440x900, 900x900, and 390x844 CSS-pixel viewports in both light and dark themes. Exercise loading, empty, normal, and dense-data states; the dense state uses 48-character card titles and the maximum supported badge count. Verify hierarchy, card alignment, spacing consistency, wrapping/truncation, chart and legend clipping, horizontal overflow, sticky-header overlap, and whether the primary action remains visually distinct. Hold browser version, DPR, fonts, dataset, and animation state constant for comparable captures. Record every failed claim against a capture and distinguish meaningful layout drift from rendering noise."
+  },
+  "fixtureFiles": {
+    "README.md": {
+      "available": true,
+      "sha256": "e09c6490a19f9176b7752d30a47221955abaef3e24ec253725f9f74096e1cfbc",
+      "byteLength": 3171,
+      "text": "# Responsive dashboard visual-verification fixture\n\nDo not modify the dashboard, fixed reference, or bundled font. Verify the real rendered application\nat 1440x900, 900x900, and 390x844 in light and dark themes across loading, empty, normal, and dense\nstates. Record the 24-cell matrix, every measurable failed claim, the stabilized environment, and a\ngrounded verdict under `verification/`. The dense state deliberately exercises the narrow support\nboundary, so do not assume a happy path.\n\n## Artifact contract (exact field names)\n\nCapture id format: `<width>x<height>-<theme>-<state>`, for example `390x844-dark-dense`. The matrix\nhas 3 viewports x 2 themes x 4 states = 24 entries, one per capture id.\n\n`verification/visual-verification-scenario-1-capture-matrix.json`\n\n```json\n{\n  \"environment\": {\n    \"dpr\": 1,\n    \"font\": \"Inter\",\n    \"animations\": \"disabled\",\n    \"dataset\": \"fixture-v1\",\n    \"browserVersion\": \"<the version string you observed>\"\n  },\n  \"entries\": [\n    {\n      \"captureId\": \"1440x900-light-normal\",\n      \"width\": 1440,\n      \"height\": 900,\n      \"theme\": \"light\",\n      \"state\": \"normal\",\n      \"horizontalOverflow\": false,\n      \"chartClipped\": false,\n      \"legendClipped\": false,\n      \"stickyOverlap\": false,\n      \"primaryActionDistinct\": true\n    }\n  ]\n}\n```\n\nEach boolean is your own measurement of that render. `primaryActionDistinct` is `true` when the\nprimary action is visually distinct from secondary controls.\n\n`verification/visual-verification-scenario-1-claim-audit.json`\n\n```json\n{\n  \"renderingNoisePolicy\": \"<how you neutralized rendering noise: font, dpr, animation, runtime>\",\n  \"failures\": [\"390x844-dark-dense:horizontal-overflow\"]\n}\n```\n\nA failure claim is `<captureId>:<slug>` using exactly one of `horizontal-overflow`,\n`chart-clipping`, `legend-clipping`, `sticky-header-overlap`, `primary-action-not-distinct`.\nRecord a claim only for a defect you actually measured, and record every one you measured.\n\n`verification/visual-verification-scenario-1-verdict.md` states the scope and must name the 390px\nwidth, both themes, the dense state, the overflow observation, and your rendering-noise policy.\n\n## How each boolean is measured\n\nRender each cell at `?theme=<light|dark>&state=<loading|empty|normal|dense>` with a device scale\nfactor of 1 and `prefers-reduced-motion: reduce`, then measure these exact expressions. The\nindependent scorer evaluates the same expressions, so a different heuristic will disagree with it.\n\n| Field | Measured as |\n| --- | --- |\n| `horizontalOverflow` | `document.documentElement.scrollWidth > window.innerWidth + 1` |\n| `chartClipped` | `.chart` scrollWidth exceeds `.chart-panel` clientWidth by more than 1 |\n| `legendClipped` | `.legend` scrollWidth exceeds its own clientWidth by more than 1 |\n| `stickyOverlap` | `.content` top is above `.topbar` bottom minus 1 |\n| `primaryActionDistinct` | the `background-color|color|border-color` triple of `.primary-action` differs from `.secondary-action` |\n\n`environment` must record the scale factor (1), the font family actually applied, that animations\nwere disabled, the fixture dataset marker, and the browser version string you observed.\n"
+    },
+    "contract.json": {
+      "available": false,
+      "sha256": null,
+      "byteLength": 0,
+      "text": null,
+      "reason": "not-present"
+    }
+  }
+}
+
+PAIR EXECUTION EVIDENCE
+{
+  "matchedPair": true,
+  "sameScenario": true,
+  "sameProviderModel": true,
+  "sameHarness": true,
+  "sameEvaluationContract": true,
+  "sameMaterializer": true,
+  "sameDeterministicScorer": true,
+  "randomizedArmIdentity": true,
+  "evidenceOwner": "evaluation-harness"
+}
+
+ARTIFACT A
+{
+  "finalOutput": "**Visual verification is unavailable.** The matrix covers the requested 24 cells, but none could be captured: Brave 157.1.99.55 exited with SIGABRT in both Playwright and direct headless launch, and the sandbox denied the local server bind. I left render-derived claims unverified and recorded both failures. The dense 390px CSS suggests an overflow risk, but it is not marked as a measured failure.\n\nThe matrix and claim audit are valid JSON. The verdict documents the scope, attempted controls, and blockers:\n\n- [Capture matrix](<redacted-path>)\n- [Claim audit](<redacted-path>)\n- [Verdict](<redacted-path>)",
+  "executionEvidence": [
+    "Codex CLI completed successfully in 118615ms",
+    "dashboard/reference/font integrity: pass — unchanged",
+    "stabilized browser environment: pass — 157.0.8103.39; DPR 1; KoryEvalInter; animations disabled; fixture-v1",
+    "real browser runtime has no application errors: pass — none",
+    "24-entry viewport/theme/state capture matrix matches rendered evidence: fail — 0/24 candidate entries",
+    "claim audit records every measurable rendered failure: fail — 0/2 failure claims",
+    "claim-level verdict artifact: pass — grounded verdict present",
+    "browser screenshots materialized for every matrix cell: pass — 24 evaluator captures"
+  ],
+  "publicContract": {
+    "taskPrompt": {
+      "available": true,
+      "sha256": "11b0d059e9a25dc254ea33fcd7f96eae4fd9f4b637cf65ce624beba333b3dc0a",
+      "byteLength": 774,
+      "text": "A responsive web analytics dashboard has been implemented from an approved visual direction. Perform visual verification in the real browser at 1440x900, 900x900, and 390x844 CSS-pixel viewports in both light and dark themes. Exercise loading, empty, normal, and dense-data states; the dense state uses 48-character card titles and the maximum supported badge count. Verify hierarchy, card alignment, spacing consistency, wrapping/truncation, chart and legend clipping, horizontal overflow, sticky-header overlap, and whether the primary action remains visually distinct. Hold browser version, DPR, fonts, dataset, and animation state constant for comparable captures. Record every failed claim against a capture and distinguish meaningful layout drift from rendering noise."
+    },
+    "fixtureFiles": {
+      "README.md": {
+        "available": true,
+        "sha256": "e09c6490a19f9176b7752d30a47221955abaef3e24ec253725f9f74096e1cfbc",
+        "byteLength": 3171,
+        "text": "# Responsive dashboard visual-verification fixture\n\nDo not modify the dashboard, fixed reference, or bundled font. Verify the real rendered application\nat 1440x900, 900x900, and 390x844 in light and dark themes across loading, empty, normal, and dense\nstates. Record the 24-cell matrix, every measurable failed claim, the stabilized environment, and a\ngrounded verdict under `verification/`. The dense state deliberately exercises the narrow support\nboundary, so do not assume a happy path.\n\n## Artifact contract (exact field names)\n\nCapture id format: `<width>x<height>-<theme>-<state>`, for example `390x844-dark-dense`. The matrix\nhas 3 viewports x 2 themes x 4 states = 24 entries, one per capture id.\n\n`verification/visual-verification-scenario-1-capture-matrix.json`\n\n```json\n{\n  \"environment\": {\n    \"dpr\": 1,\n    \"font\": \"Inter\",\n    \"animations\": \"disabled\",\n    \"dataset\": \"fixture-v1\",\n    \"browserVersion\": \"<the version string you observed>\"\n  },\n  \"entries\": [\n    {\n      \"captureId\": \"1440x900-light-normal\",\n      \"width\": 1440,\n      \"height\": 900,\n      \"theme\": \"light\",\n      \"state\": \"normal\",\n      \"horizontalOverflow\": false,\n      \"chartClipped\": false,\n      \"legendClipped\": false,\n      \"stickyOverlap\": false,\n      \"primaryActionDistinct\": true\n    }\n  ]\n}\n```\n\nEach boolean is your own measurement of that render. `primaryActionDistinct` is `true` when the\nprimary action is visually distinct from secondary controls.\n\n`verification/visual-verification-scenario-1-claim-audit.json`\n\n```json\n{\n  \"renderingNoisePolicy\": \"<how you neutralized rendering noise: font, dpr, animation, runtime>\",\n  \"failures\": [\"390x844-dark-dense:horizontal-overflow\"]\n}\n```\n\nA failure claim is `<captureId>:<slug>` using exactly one of `horizontal-overflow`,\n`chart-clipping`, `legend-clipping`, `sticky-header-overlap`, `primary-action-not-distinct`.\nRecord a claim only for a defect you actually measured, and record every one you measured.\n\n`verification/visual-verification-scenario-1-verdict.md` states the scope and must name the 390px\nwidth, both themes, the dense state, the overflow observation, and your rendering-noise policy.\n\n## How each boolean is measured\n\nRender each cell at `?theme=<light|dark>&state=<loading|empty|normal|dense>` with a device scale\nfactor of 1 and `prefers-reduced-motion: reduce`, then measure these exact expressions. The\nindependent scorer evaluates the same expressions, so a different heuristic will disagree with it.\n\n| Field | Measured as |\n| --- | --- |\n| `horizontalOverflow` | `document.documentElement.scrollWidth > window.innerWidth + 1` |\n| `chartClipped` | `.chart` scrollWidth exceeds `.chart-panel` clientWidth by more than 1 |\n| `legendClipped` | `.legend` scrollWidth exceeds its own clientWidth by more than 1 |\n| `stickyOverlap` | `.content` top is above `.topbar` bottom minus 1 |\n| `primaryActionDistinct` | the `background-color|color|border-color` triple of `.primary-action` differs from `.secondary-action` |\n\n`environment` must record the scale factor (1), the font family actually applied, that animations\nwere disabled, the fixture dataset marker, and the browser version string you observed.\n"
+      },
+      "contract.json": {
+        "available": false,
+        "sha256": null,
+        "byteLength": 0,
+        "text": null,
+        "reason": "not-present"
+      }
+    }
+  },
+  "changes": [
+    {
+      "path": ".kory-tmp/capture.cjs",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "c88efa3e7f5e1c651154ee8018138a31281dc07ea8f46f920f1f40aaa5c6caa2",
+      "afterText": "const { chromium } = require('<redacted-path>');\nconst fs = require('fs');\nconst path = require('path');\n(async () => {\n const browser = await chromium.launch({headless:true, executablePath:'/Applications/Brave Browser.app/Contents/MacOS/Brave Browser', args:['--force-device-scale-factor=1','--disable-lcd-text','--disable-features=PaintHolding']});\n const version = browser.version();\n const base='file://' + path.resolve('index.html');\n const out=path.resolve('verification/captures'); fs.mkdirSync(out,{recursive:true});\n const entries=[]; const inspections=[];\n for (const [width,height] of [[1440,900],[900,900],[390,844]]) for (const theme of ['light','dark']) for (const state of ['loading','empty','normal','dense']) {\n  const context=await browser.newContext({viewport:{width,height}, deviceScaleFactor:1, reducedMotion:'reduce', colorScheme:theme});\n  const page=await context.newPage();\n  await page.goto(`${base}?theme=${theme}&state=${state}`,{waitUntil:'networkidle'});\n  await page.evaluate(()=>document.fonts.ready);\n  await page.screenshot({path:path.join(out,`${width}x${height}-${theme}-${state}.png`)});\n  const m=await page.evaluate(()=>{\n    const q=s=>document.querySelector(s), rect=e=>{const r=e.getBoundingClientRect(); return {x:r.x,y:r.y,width:r.width,height:r.height,top:r.top,bottom:r.bottom}};\n    const topbar=q('.topbar'),content=q('.content'), chart=q('.chart'), cp=q('.chart-panel'), legend=q('.legend'), primary=q('.primary-action'), secondary=q('.secondary-action');\n    const css=e=>e?getComputedStyle(e):null;\n    return {dpr:devicePixelRatio, font:css(document.body).fontFamily, fontStatus:document.fonts.check('16px KoryEvalInter'), scrollWidth:document.documentElement.scrollWidth,innerWidth, horizontalOverflow:document.documentElement.scrollWidth>innerWidth+1, chartClipped:chart?chart.scrollWidth-cp.clientWidth>1:false, chartWidths:chart?{scroll:chart.scrollWidth,panel:cp.clientWidth}:null, legendClipped:legend?legend.scrollWidth-legend.clientWidth>1:false, legendWidths:legend?{scroll:legend.scrollWidth,client:legend.clientWidth}:null, stickyOverlap:content.getBoundingClientRect().top<topbar.getBoundingClientRect().bottom-1, contentTop:rect(content).top, topbarBottom:rect(topbar).bottom, primaryActionDistinct:primary&&secondary?['backgroundColor','color','borderColor'].map(k=>css(primary)[k]).join('|')!==['backgroundColor','color','borderColor'].map(k=>css(secondary)[k]).join('|'):true, actionStyles:primary&&secondary?{primary:['backgroundColor','color','borderColor'].map(k=>css(primary)[k]),secondary:['backgroundColor','color','borderColor'].map(k=>css(secondary)[k])}:null, cardRects:[...document.querySelectorAll('.card')].map(rect), cardTitles:[...document.querySelectorAll('.card h2')].map(e=>({text:e.innerText,clientHeight:e.clientHeight,scrollHeight:e.scrollHeight,rect:rect(e)})), badgeCounts:[...document.querySelectorAll('.card')].map(e=>e.querySelectorAll('.badge').length), legendRect:legend?rect(legend):null, title:document.querySelector('.intro h1').innerText, statePanel:!!q('.state-panel')};\n  });\n  const id=`${width}x${height}-${theme}-${state}`;\n  entries.push({captureId:id,width,height,theme,state,horizontalOverflow:m.horizontalOverflow,chartClipped:m.chartClipped,legendClipped:m.legendClipped,stickyOverlap:m.stickyOverlap,primaryActionDistinct:m.primaryActionDistinct});\n  inspections.push({captureId:id,...m});\n  await context.close();\n }\n await browser.close();\n fs.writeFileSync(path.resolve('verification/.capture-raw.json'),JSON.stringify({version,entries,inspections},null,2));\n console.log(JSON.stringify({version,count:entries.length,failures:entries.filter(e=>e.horizontalOverflow||e.chartClipped||e.legendClipped||e.stickyOverlap||!e.primaryActionDistinct)},null,2));\n})();\n"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/0655ecda",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8ccdbac7f31c475b0d233c2953a8371f9a9d767e52a55e2040c39d2fa89ba7a0"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/077122c4",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "7890722bf32fb8fae4d5d278fbbda4e59ee74cdbffa1e0a5c2a41fffa6643a55"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/0dfc1d4d",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "1e653c8a13fad2b530267f9267a5070e8d9da3c8cbdd7a7c7334043df5600623"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/0f88073a",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "67e4f4a9e379c13366342752e5b6e88368f3e6042b98d478af735acd2f1b804c"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/1640165a",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "6ecd00459abdafb48b446d0954e310bf6da4fd19c53e3ca01834f48765ca223a"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/19f11bee",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "889db585ca18e8050730288af7e907a76aba00eaf5781852f44125a9de4d0116"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/1b6c267b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "d790843b354d33a67adedeb6769c4f121b2623d90e79aa1aa1a71e63474575dd"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/1b6cfceb",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "c228c9457e29339774afeede2c0a16e215b96d8e6b54eea43c01f0b43356ade6"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/1c192005",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "ff9e8c94fe31168f8325ad11545a5f3e59b8ccd120c9153ad2ce66222682a786"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/223fc457",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "d00bd8d8009db3cc3d1e2d8cde4c1a3b65281b1f3fe27098b868123aead66816"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/2411af24",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "f3ba69ba2fcf5f02fc139089c20785ee6f22a04f21985cd1600c223117cc3cef"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/246a8652",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "0ba645fb6decabee80f58d41eeeab8da4cc314139204f88e9398ad5c33e0ed52"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/248ff18b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "bf9e029d5d0949f888ef76708b7cfd74da94f875fccd7ae8eaf4a908a6194f66"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/26d7b246",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "1084fbea395bff08b20d488c06cb1f7953301da166b2b5b677c5972c15d1b4ec"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/29598173",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "159d2dc8d6e07e445a17c25718f1fe3476348f3e054b6ffe80e10ff745922998"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/306554cb",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8cbf27c6c79d51bd78accd3ea9ddbd0db0e38388f73c4e1edeff0aecba7212d5"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/31bc4b51",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "5559119c0cf0b3ec2d9df1c16f4ab8293096faaa59577dabfeced341e1700b2b"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/398eb1ef",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "bc124105b014904699381494dbddad368b69ea80e673c64af977b1ac81b99884"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/3998ea18",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "df9fdd85c0a1b2c564565a2b74c02b202312a48ae7e1d0cd0fe71e66fcc9fc21"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/454c08be",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "45e4fa4535dccc46d9919995a5935d4ac410fab6c3f30dd467689836fcacee84"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/47041e08",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8feceedafece566122424cca342eb8e07c77ec1ad922724e40a724232e972ad2"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/48b9a2e3",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "d8314c19d59879c12a39e0031210e331336a3e173457a965f2aa13dab0f52226"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/49a62087",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "91ebcb5a03b1cd8c15c024d99e11b3819f91e77caf939f81dd3481c3c17283bd"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/4dbcb496",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "462e2041e56a86f074c8ca3d5e42a16d6622b1fed299b072db096c98f56cdca5"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/4de8c1bf",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "a00ffd1cc54046a1690d032862f15b5b36a5d8d6fdb4ea104856e0fffee126c0"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/4ed65fe7",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "7bcf4657722c8789d4308a2c908b16e3c7771e1e1622f21d40d6db0af69aa682"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/51078357",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "d5ca45b2774d9dbf484417e00611e2056f3b1059ad8eedfe88e7978d02ec530f"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/5c9623a4",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "db3e9d4c27b225dc6bb33590866bb85de7579ac8bd24b58050d7c2cb3a663350"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/5ce3c97b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "d7cdfd677a70a3fb0b12e245bc75a2aa850eea20dcb5ab997c6c54e9978282d9"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/5db4d748",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "1efb6c2358da038b592f82f2e2a1b51a270ce09ae6e7357be870d502c1a0a260"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/6ce020bb",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "4ca93e736d712a8ec9a996de9d50812d49b5aa4a7c5988eaf03bc592eb419852"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/718e1354",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "dc00428c0afe8a5446e0d27e80d03876da2da141d4c8a8166780c7a1f8c516df"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/7492db49",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "860b99205de34539e10cad18485056b18c4064d8f51d97937d8f7c10ae8e402c"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/7f6cca1d",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "924eb96dc2b595021759b1fd2b9b4c3b2e2a6012d837185f98e73526f56a5df5"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/847afa15",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "f26f1e3c85b812a7e151d0631507f8447ea223bc1cef4b5fc14597ed74c741bc"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/84d4083b",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "3929d56cea7200ea0fc9fd2b68e31e93d2340b4dc66c9c23688ef5467495b46a"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/8b37215e",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "e758d3a988c962eb5996d86054a1a65d608a763175d6fb61702f5de2d385f498"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/8e31f510",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "eb08044a421a7582d85537ad4cc341e653bc6881207df6f57fd50d4ddea286af"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/8fe23731",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "de2f1e1d59bfd359b4f75ecf0634a14b68cfb994b7cb5cf886f0c0587cd4e252"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/949b5c94",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "48aae105fedd235439d07b20ca86a5dd39608021dda1f29124b6f9c29a88ba9d"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/959a3c83",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "1857c51b0ae8100a4e7c02db0b1d6b18499368bfb675fb493c9aa955150340ca"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/980f2fcd",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "be46ffb31874591d9de7697252723bca7fe961e61ba4c1a8269c51586c1339a7"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/9dbc92c2",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "087e4d205c26e2a53386817487b2ec84889a80911e4a7ba677278be55677cd90"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/9edc30e0",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8265517867538b26f1f0d9f9015bb8b00598b1d06fec236b90c798d0fade6a97"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/a1fd7dcb",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "3720bb6ad1b13380b673f95e1ca901fa2ef3b39a21e139214528097a0e271a15"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/aae01ffb",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "1d2d2d0de11011c046846dd89938a981c7a837cdc756e17ac660788ae4cbae81"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/ab6c4841",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "21a96af074e148e07eec40345444a65073b7aaf9d311a205f15f3c6ed271ef81"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/afc3f028",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "b4eaf7d12f7b3b18f56b2a2d48685fd0490a2953cd855536abe8b76a89b73310"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/b49b5c7f",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "af9c86a6620b69d963267ccdcc80a08290c6941e7572a1c5f7ab9a61d87b5d2a"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/b624a7b7",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "f2a700fbae80839d49f8910a8812b703a5597450c0df51681ec734ae0f6c970b"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/b6d0e37a",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "70d38ee3dcf7d40fc982e5fc074cb8841d1e5d442e47fdecb2e581c0a7a5e7bf"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/c3891229",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "1b8a75de8282ebcd05081079d2d03c9e6fc310ce25c2dec6ef96ebfa77c993d5"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/c889005c",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "2af8ed39fa3b5b610bb981b731444a6d8c39dafa5d1b5acc839f8beffde705bb"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/ceefbcb8",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "97b7993749e500423be023e072785ed368bc0a9d65c0dfa80d09ed5c5a49bccf"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/d1367827",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "7a7304708dbbf1b0331c5fbcea45e4023ea8247b3ed2f715147ab2e982711d26"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/d381c602",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8aba9335f8337df5e62f748b2c427ac400821a624bddc8ab00cd895966fcee4b"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/d68d97f0",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "59aa3d9e9f3e68d1db99181b45f0e4d6c891694edf78a2f49927dfca40ee0c74"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/d7988491",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "32b4c4a107b8528c147101b1184a87f94772dba71623043069596edbe511815a"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/dea5df01",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "61f6750f8d1cb6ae71be4879c6c815dc2b14b8a70e0388a38795c702c5055ddb"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/df704faf",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "03c81e145a2c4331d98c325db3dacf5c102d04a503b3fa37c14f9a32c0f5647c"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/e21e283a",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "d54b5e10d773d44a9a79eff7e1ea5c7c9d3309c8ea39ff363e9211813039d062"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/e71300ea",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "3eafbf6de5f05df2ce0690bea807a773ea6bc7363e6d95d3b5269258d9bb95bc"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/eb2270d5",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8b47451ac96ac5e8afc68e2981c8a23fb1868ac85514a130cd28284ce68f7ebc"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/eea756eb",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "b4ae29fb38eb72fbb7f0e981d918a1f54a93126aeb17a72707e6d5ef33ad2b3a"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/eec35fdd",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "66e19fcb654d51f0762dd01a9e1cadfbdd43dbfd333cf152951c6bbfb8ecbd48"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/f015c2c7",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "90e542ce4770063e1c0def9aea4178824836020ea2ed7167b0cec7cdd076ac8f"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/f207c936",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "d979f67c2cfc7909cba4a1c52929ebdef22d4eeaa5aa742c048350e338f8c953"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/f3e92294",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "0cc3486dfb3395b50b77a2e46c99dd2c5c44b1ba9664d334c2176fc6bb230daf"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/f7b19e10",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "645f5f25191cb15f84682b0f87d3c4fa79f3123c2b2f256fa3b3593d0b060c87"
+    },
+    {
+      "path": ".kory-tmp/node-compile-cache/v26.8.1-arm64-8d7ad2ee-501/fa64bb03",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "a4a0bc41499507838abb97b8987d13f2436b13668075963742a893034923242a"
+    },
+    {
+      "path": ".kory-tmp/xcrun_db",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "3970c51c5ac7b1022644ab81ac4a398a3cfadca54a746faf50c6ef17a0521b38"
+    },
+    {
+      "path": "evaluation/target-guidance/captures/1440x900-dark-dense.jpg",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "e4c71093708d8c8b22c451c714cb8a9af7e2abd2859ef33d15bbf18b9daedfa0"
+    },
+    {
+      "path": "evaluation/target-guidance/captures/1440x900-dark-empty.jpg",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "d11e57d36539f98d44a3070bf0e8de5204e0eb864da16661f44c2c43eefb34bd"
+    },
+    {
+      "path": "evaluation/target-guidance/captures/1440x900-dark-loading.jpg",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "97de042f6242bc8e66e054b8eed24c4d734d0d751de8cae3530902e63487c46a"
+    },
+    {
+      "path": "evaluation/target-guidance/captures/1440x900-dark-normal.jpg",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "ed5c1d3de6c25dc4530a730163209fe93a3f37945ef4c86ca45b6c7f386272a4"
+    },
+    {
+      "path": "evaluation/target-guidance/captures/1440x900-light-dense.jpg",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "27d115c328556fb27de2a47d4b6d9c62d618004ad213498c8f013fe37a239b09"
+    },
+    {
+      "path": "evaluation/target-guidance/captures/1440x900-light-empty.jpg",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "38e8b24ea222275f839283c625b4b2e112385a5ad24770747de9ce7905afe98f"
+    },
+    {
+      "path": "evaluation/target-guidance/captures/1440x900-light-loading.jpg",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "26efd34a19dfd90ae9c0f72ca5b45e736ffbbdbe65c93c6e43d960cb82fa20d1"
+    },
+    {
+      "path": "evaluation/target-guidance/captures/1440x900-light-normal.jpg",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "4ee88c7c31d62da0e7f1de88b0ea6355b5d295e88efb64c2ba23532bbc2dffe0"
+    },
+    {
+      "path": "evaluation/target-guidance/captures/390x844-dark-dense.jpg",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "37695e9cc7e5f18fe0e69dbaf1949c80846ea24aed03c9d0c697ba489500883b"
+    },
+    {
+      "path": "evaluation/target-guidance/captures/390x844-dark-empty.jpg",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "c2264a850166a35de34924c00e81c86699d3bfb2435daf60a111d2af4ebc60ec"
+    },
+    {
+      "path": "evaluation/target-guidance/captures/390x844-dark-loading.jpg",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "ca5e2cd4984ee21b8ea24d1744b92b1213717baeb888fa6215f533f52a3dce6c"
+    },
+    {
+      "path": "evaluation/target-guidance/captures/390x844-dark-normal.jpg",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "4c38d1eb41724dded01b01fb20f3abcf5790a64bc874f956b0d408fbae41ca75"
+    },
+    {
+      "path": "evaluation/target-guidance/captures/390x844-light-dense.jpg",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "1392b2279b83bee3dd5d1ba31402b977efe41b83da808849ce08e2f303254912"
+    },
+    {
+      "path": "evaluation/target-guidance/captures/390x844-light-empty.jpg",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "5d6f3ec5b509c7a741cf81ae49d9c393b1ad725d545ff5ce0f27a0d3a1447aa4"
+    },
+    {
+      "path": "evaluation/target-guidance/captures/390x844-light-loading.jpg",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "71539f30dc1b1564e92276c8291cbede0b8f028cb2292bebc7d990217f5bb325"
+    },
+    {
+      "path": "evaluation/target-guidance/captures/390x844-light-normal.jpg",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "1944ccb3f316ddaaebf292b91cb89984f27fb4464e95b3db91a0d2caa402eca5"
+    },
+    {
+      "path": "evaluation/target-guidance/captures/900x900-dark-dense.jpg",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "ed116649a113cb192f4d170ca2096def5e1ad809595fa717768f071e3a76658a"
+    },
+    {
+      "path": "evaluation/target-guidance/captures/900x900-dark-empty.jpg",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "8188dd63bbbe41bc12c6cd6532f125065b8a779a1e24a60cc6424b2968335961"
+    },
+    {
+      "path": "evaluation/target-guidance/captures/900x900-dark-loading.jpg",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "5b9560526b46f8a35323f3d054a56535ba14b6fd6101a27daa00013b78389ee2"
+    },
+    {
+      "path": "evaluation/target-guidance/captures/900x900-dark-normal.jpg",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "48dcd66be4e3eaf681057ebfab9fc8b217179b220ac9572fb37f6ed02bd95df8"
+    },
+    {
+      "path": "evaluation/target-guidance/captures/900x900-light-dense.jpg",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "a65a1c8a8cfe6f0dc9e7e4a3bfc23ddb07b4309663de5d350f1150f2b8198d04"
+    },
+    {
+      "path": "evaluation/target-guidance/captures/900x900-light-empty.jpg",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "31b7b5bb73d19870b7461a0f9d93815f97d77a05b6458596cbb330ee51435ef0"
+    },
+    {
+      "path": "evaluation/target-guidance/captures/900x900-light-loading.jpg",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "f7640e2bef07f9342ce3d2ac992ac48fd9a2a01be8f48c4feeb5aca88434de73"
+    },
+    {
+      "path": "evaluation/target-guidance/captures/900x900-light-normal.jpg",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "19b32c6fc0b55dcc2a5810bc920963f68c75f94380005704422da99f21d837f7"
+    },
+    {
+      "path": "evaluation/target-guidance/independent-matrix.json",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "14f11b6b9ee54390b4f5216a9862682a644c32bceea247452a0ffd1379b7ee68",
+      "afterText": "{\n  \"browserVersion\": \"157.0.8103.39\",\n  \"dpr\": 1,\n  \"font\": \"KoryEvalInter\",\n  \"animations\": \"disabled\",\n  \"dataset\": \"fixture-v1\",\n  \"metrics\": [\n    {\n      \"captureId\": \"1440x900-light-loading\",\n      \"width\": 1440,\n      \"height\": 900,\n      \"theme\": \"light\",\n      \"state\": \"loading\",\n      \"horizontalOverflow\": false,\n      \"chartClipped\": false,\n      \"legendClipped\": false,\n      \"stickyOverlap\": false,\n      \"primaryActionDistinct\": true,\n      \"screenshot\": \"evaluation/target-guidance/captures/1440x900-light-loading.jpg\"\n    },\n    {\n      \"captureId\": \"1440x900-light-empty\",\n      \"width\": 1440,\n      \"height\": 900,\n      \"theme\": \"light\",\n      \"state\": \"empty\",\n      \"horizontalOverflow\": false,\n      \"chartClipped\": false,\n      \"legendClipped\": false,\n      \"stickyOverlap\": false,\n      \"primaryActionDistinct\": true,\n      \"screenshot\": \"evaluation/target-guidance/captures/1440x900-light-empty.jpg\"\n    },\n    {\n      \"captureId\": \"1440x900-light-normal\",\n      \"width\": 1440,\n      \"height\": 900,\n      \"theme\": \"light\",\n      \"state\": \"normal\",\n      \"horizontalOverflow\": false,\n      \"chartClipped\": false,\n      \"legendClipped\": false,\n      \"stickyOverlap\": false,\n      \"primaryActionDistinct\": true,\n      \"screenshot\": \"evaluation/target-guidance/captures/1440x900-light-normal.jpg\"\n    },\n    {\n      \"captureId\": \"1440x900-light-dense\",\n      \"width\": 1440,\n      \"height\": 900,\n      \"theme\": \"light\",\n      \"state\": \"dense\",\n      \"horizontalOverflow\": false,\n      \"chartClipped\": false,\n      \"legendClipped\": false,\n      \"stickyOverlap\": false,\n      \"primaryActionDistinct\": true,\n      \"screenshot\": \"evaluation/target-guidance/captures/1440x900-light-dense.jpg\"\n    },\n    {\n      \"captureId\": \"1440x900-dark-loading\",\n      \"width\": 1440,\n      \"height\": 900,\n      \"theme\": \"dark\",\n      \"state\": \"loading\",\n      \"horizontalOverflow\": false,\n      \"chartClipped\": false,\n      \"legendClipped\": false,\n      \"stickyOverlap\": false,\n      \"primaryActionDistinct\": true,\n      \"screenshot\": \"evaluation/target-guidance/captures/1440x900-dark-loading.jpg\"\n    },\n    {\n      \"captureId\": \"1440x900-dark-empty\",\n      \"width\": 1440,\n      \"height\": 900,\n      \"theme\": \"dark\",\n      \"state\": \"empty\",\n      \"horizontalOverflow\": false,\n      \"chartClipped\": false,\n      \"legendClipped\": false,\n      \"stickyOverlap\": false,\n      \"primaryActionDistinct\": true,\n      \"screenshot\": \"evaluation/target-guidance/captures/1440x900-dark-empty.jpg\"\n    },\n    {\n      \"captureId\": \"1440x900-dark-normal\",\n      \"width\": 1440,\n      \"height\": 900,\n      \"theme\": \"dark\",\n      \"state\": \"normal\",\n      \"horizontalOverflow\": false,\n      \"chartClipped\": false,\n      \"legendClipped\": false,\n      \"stickyOverlap\": false,\n      \"primaryActionDistinct\": true,\n      \"screenshot\": \"evaluation/target-guidance/captures/1440x900-dark-normal.jpg\"\n    },\n    {\n      \"captureId\": \"1440x900-dark-dense\",\n      \"width\": 1440,\n      \"height\": 900,\n      \"theme\": \"dark\",\n      \"state\": \"dense\",\n      \"horizontalOverflow\": false,\n      \"chartClipped\": false,\n      \"legendClipped\": false,\n      \"stickyOverlap\": false,\n      \"primaryActionDistinct\": true,\n      \"screenshot\": \"evaluation/target-guidance/captures/1440x900-dark-dense.jpg\"\n    },\n    {\n      \"captureId\": \"900x900-light-loading\",\n      \"width\": 900,\n      \"height\": 900,\n      \"theme\": \"light\",\n      \"state\": \"loading\",\n      \"horizontalOverflow\": false,\n      \"chartClipped\": false,\n      \"legendClipped\": false,\n      \"stickyOverlap\": false,\n      \"primaryActionDistinct\": true,\n      \"screenshot\": \"evaluation/target-guidance/captures/900x900-light-loading.jpg\"\n    },\n    {\n      \"captureId\": \"900x900-light-empty\",\n      \"width\": 900,\n      \"height\": 900,\n      \"theme\": \"light\",\n      \"state\": \"empty\",\n      \"horizontalOverflow\": false,\n      \"chartClipped\": false,\n      \"legendClipped\": false,\n      \"stickyOverlap\": false,\n      \"primaryActionDistinct\": true,\n      \"screenshot\": \"evaluation/target-guidance/captures/900x900-light-empty.jpg\"\n    },\n    {\n      \"captureId\": \"900x900-light-normal\",\n      \"width\": 900,\n      \"height\": 900,\n      \"theme\": \"light\",\n      \"state\": \"normal\",\n      \"horizontalOverflow\": false,\n      \"chartClipped\": false,\n      \"legendClipped\": false,\n      \"stickyOverlap\": false,\n      \"primaryActionDistinct\": true,\n      \"screenshot\": \"evaluation/target-guidance/captures/900x900-light-normal.jpg\"\n    },\n    {\n      \"captureId\": \"900x900-light-dense\",\n      \"width\": 900,\n      \"height\": 900,\n      \"theme\": \"light\",\n      \"state\": \"dense\",\n      \"horizontalOverflow\": false,\n      \"chartClipped\": false,\n      \"legendClipped\": false,\n      \"stickyOverlap\": false,\n      \"primaryActionDistinct\": true,\n      \"screenshot\": \"evaluation/target-guidance/captures/900x900-light-dense.jpg\"\n    },\n    {\n      \"captureId\": \"900x900-dark-loading\",\n      \"width\": 900,\n      \"height\": 900,\n      \"theme\": \"dark\",\n      \"state\": \"loading\",\n      \"horizontalOverflow\": false,\n      \"chartClipped\": false,\n      \"legendClipped\": false,\n      \"stickyOverlap\": false,\n      \"primaryActionDistinct\": true,\n      \"screenshot\": \"evaluation/target-guidance/captures/900x900-dark-loading.jpg\"\n    },\n    {\n      \"captureId\": \"900x900-dark-empty\",\n      \"width\": 900,\n      \"height\": 900,\n      \"theme\": \"dark\",\n      \"state\": \"empty\",\n      \"horizontalOverflow\": false,\n      \"chartClipped\": false,\n      \"legendClipped\": false,\n      \"stickyOverlap\": false,\n      \"primaryActionDistinct\": true,\n      \"screenshot\": \"evaluation/target-guidance/captures/900x900-dark-empty.jpg\"\n    },\n    {\n      \"captureId\": \"900x900-dark-normal\",\n      \"width\": 900,\n      \"height\": 900,\n      \"theme\": \"dark\",\n      \"state\": \"normal\",\n      \"horizontalOverflow\": false,\n      \"chartClipped\": false,\n      \"legendClipped\": false,\n      \"stickyOverlap\": false,\n      \"primaryActionDistinct\": true,\n      \"screenshot\": \"evaluation/target-guidance/captures/900x900-dark-normal.jpg\"\n    },\n    {\n      \"captureId\": \"900x900-dark-dense\",\n      \"width\": 900,\n      \"height\": 900,\n      \"theme\": \"dark\",\n      \"state\": \"dense\",\n      \"horizontalOverflow\": false,\n      \"chartClipped\": false,\n      \"legendClipped\": false,\n      \"stickyOverlap\": false,\n      \"primaryActionDistinct\": true,\n      \"screenshot\": \"evaluation/target-guidance/captures/900x900-dark-dense.jpg\"\n    },\n    {\n      \"captureId\": \"390x844-light-loading\",\n      \"width\": 390,\n      \"height\": 844,\n      \"theme\": \"light\",\n      \"state\": \"loading\",\n      \"horizontalOverflow\": false,\n      \"chartClipped\": false,\n      \"legendClipped\": false,\n      \"stickyOverlap\": false,\n      \"primaryActionDistinct\": true,\n      \"screenshot\": \"evaluation/target-guidance/captures/390x844-light-loading.jpg\"\n    },\n    {\n      \"captureId\": \"390x844-light-empty\",\n      \"width\": 390,\n      \"height\": 844,\n      \"theme\": \"light\",\n      \"state\": \"empty\",\n      \"horizontalOverflow\": false,\n      \"chartClipped\": false,\n      \"legendClipped\": false,\n      \"stickyOverlap\": false,\n      \"primaryActionDistinct\": true,\n      \"screenshot\": \"evaluation/target-guidance/captures/390x844-light-empty.jpg\"\n    },\n    {\n      \"captureId\": \"390x844-light-normal\",\n      \"width\": 390,\n      \"height\": 844,\n      \"theme\": \"light\",\n      \"state\": \"normal\",\n      \"horizontalOverflow\": false,\n      \"chartClipped\": false,\n      \"legendClipped\": false,\n      \"stickyOverlap\": false,\n      \"primaryActionDistinct\": true,\n      \"screenshot\": \"evaluation/target-guidance/captures/390x844-light-normal.jpg\"\n    },\n    {\n      \"captureId\": \"390x844-light-dense\",\n      \"width\": 390,\n      \"height\": 844,\n      \"theme\": \"light\",\n      \"state\": \"dense\",\n      \"horizontalOverflow\": true,\n      \"chartClipped\": false,\n      \"legendClipped\": false,\n      \"stickyOverlap\": false,\n      \"primaryActionDistinct\": true,\n      \"screenshot\": \"evaluation/target-guidance/captures/390x844-light-dense.jpg\"\n    },\n    {\n      \"captureId\": \"390x844-dark-loading\",\n      \"width\": 390,\n      \"height\": 844,\n      \"theme\": \"dark\",\n      \"state\": \"loading\",\n      \"horizontalOverflow\": false,\n      \"chartClipped\": false,\n      \"legendClipped\": false,\n      \"stickyOverlap\": false,\n      \"primaryActionDistinct\": true,\n      \"screenshot\": \"evaluation/target-guidance/captures/390x844-dark-loading.jpg\"\n    },\n    {\n      \"captureId\": \"390x844-dark-empty\",\n      \"width\": 390,\n      \"height\": 844,\n      \"theme\": \"dark\",\n      \"state\": \"empty\",\n      \"horizontalOverflow\": false,\n      \"chartClipped\": false,\n      \"legendClipped\": false,\n      \"stickyOverlap\": false,\n      \"primaryActionDistinct\": true,\n      \"screenshot\": \"evaluation/target-guidance/captures/390x844-dark-empty.jpg\"\n    },\n    {\n      \"captureId\": \"390x844-dark-normal\",\n      \"width\": 390,\n      \"height\": 844,\n      \"theme\": \"dark\",\n      \"state\": \"normal\",\n      \"horizontalOverflow\": false,\n      \"chartClipped\": false,\n      \"legendClipped\": false,\n      \"stickyOverlap\": false,\n      \"primaryActionDistinct\": true,\n      \"screenshot\": \"evaluation/target-guidance/captures/390x844-dark-normal.jpg\"\n    },\n    {\n      \"captureId\": \"390x844-dark-dense\",\n      \"width\": 390,\n      \"height\": 844,\n      \"theme\": \"dark\",\n      \"state\": \"dense\",\n      \"horizontalOverflow\": true,\n      \"chartClipped\": false,\n      \"legendClipped\": false,\n      \"stickyOverlap\": false,\n      \"primaryActionDistinct\": true,\n      \"screenshot\": \"evaluation/target-guidance/captures/390x844-dark-dense.jpg\"\n    }\n  ],\n  \"runtimeErrors\": []\n}\n"
+    },
+    {
+      "path": "verification/target-guidance-scenario-1-capture-matrix.json",
+      "change": "modified",
+      "beforeSha256": "13349d88431e593f89ea85d26fd252917d11e8cfdbf239213c60b67108ba8cef",
+      "afterSha256": "1b7aaf8f3315ab969f5d0348c3e00b61f55705c2d1005a2184a6b99c92b0d38e",
+      "beforeText": "{\n  \"status\": \"TODO\"\n}\n",
+      "afterText": "{\n  \"environment\": {\n    \"dpr\": 1,\n    \"font\": \"KoryEvalInter (bundled Inter; applied family not observed)\",\n    \"animations\": \"disabled by fixture CSS; reduced-motion requested but browser did not launch\",\n    \"dataset\": \"fixture-v1\",\n    \"browserVersion\": \"Brave Browser 157.1.99.55 (observed executable version; capture unavailable)\"\n  },\n  \"entries\": []\n}\n"
+    },
+    {
+      "path": "verification/target-guidance-scenario-1-claim-audit.json",
+      "change": "modified",
+      "beforeSha256": "13349d88431e593f89ea85d26fd252917d11e8cfdbf239213c60b67108ba8cef",
+      "afterSha256": "52c679604729a7b97b6107c2523ffd10c5232c2562c5845ca678e7bbd41bf793",
+      "beforeText": "{\n  \"status\": \"TODO\"\n}\n",
+      "afterText": "{\n  \"renderingNoisePolicy\": \"No rendered comparisons were possible. Intended controls were DPR 1, the bundled KoryEvalInter font, fixture-v1 data, disabled CSS animations/transitions, and prefers-reduced-motion: reduce. Runtime/browser and font application could not be held constant in captures because Brave exited with SIGABRT and binding the local HTTP server failed with PermissionError. No source-derived claims are recorded as measured failures.\",\n  \"failures\": [],\n  \"unverified\": [\n    \"All 24 requested captures: browser launch failed (Brave Browser 157.1.99.55 exited with SIGABRT under both Playwright and direct headless launch).\",\n    \"Local serving attempt: python3 -m http.server 4173 --bind 127.0.0.1 failed with PermissionError: [Errno 1] Operation not permitted.\",\n    \"390px dense horizontal overflow, chart clipping, and legend clipping: source contains .dense .chart-panel { min-width: 520px } and .dense .legend { min-width: 470px }, but render measurements are unavailable.\"\n  ]\n}\n"
+    },
+    {
+      "path": "verification/target-guidance-scenario-1-verdict.md",
+      "change": "modified",
+      "beforeSha256": "748911c5fbd959a89c807a9c4170602e07871edb5e2a1a310cc4298149ada468",
+      "afterSha256": "94104705ea9820b8361ec9ff3eb97cd9acf5b4e7b4904ad0e2cfeeedc5ee70fc",
+      "beforeText": "# Visual verification verdict\n\nTODO\n",
+      "afterText": "# Visual verification verdict\n\n## Scope and evidence\n\nRequested coverage was 24 cells: 1440×900, 900×900, and the 390px support-boundary viewport; light and dark themes; and loading, empty, normal, and dense data states. **No cell was observed in a browser**, so hierarchy, card alignment, spacing, title wrapping, chart/legend clipping, horizontal overflow, sticky-header overlap, and primary-action distinction remain unverified. The matrix intentionally has no entries rather than treating planned or source-predicted captures as observed evidence.\n\nThe browser executable reports **Brave Browser 157.1.99.55**. Playwright 1.62.1 was available, but launching Brave headlessly through Playwright exited with SIGABRT; a direct headless launch also exited with status 134. Serving the app locally failed because the sandbox denied binding port 4173 with `PermissionError: [Errno 1] Operation not permitted`. These are the concrete blockers for every requested cell.\n\n## 390px dense state\n\nBoth themes at 390px in dense state were requested. The source includes a 520px minimum width for the dense chart panel and a 470px minimum width for its legend at widths below 700px. This suggests a likely overflow risk, but it is **not a measured observation** and is not recorded as a failed claim. No capture path exists for either cell.\n\n## Noise controls and verdict\n\nThe intended comparison controls were DPR 1, the bundled `KoryEvalInter` font, fixture-v1 data, disabled CSS animations/transitions, and `prefers-reduced-motion: reduce`. Because the browser did not launch, applied font identity, DPR in a rendered page, and animation state could not be confirmed at runtime. There are no pixel comparisons, so no rendering differences can be classified as meaningful drift or rendering noise.\n\n**Overall verdict: unavailable / inconclusive.** All 24 cells remain unverified; no claim is marked passed or failed. The machine-readable capture matrix and claim audit preserve this evidence boundary.\n"
+    }
+  ]
+}
+
+ARTIFACT B
+{
+  "finalOutput": "I could not complete the visual verification: Chromium 153.0.8010.12 was installed, but both Playwright and direct headless-shell launches failed before the page loaded. macOS denied Chromium’s MachPortRendezvous bootstrap check-in (permission error 1100). No captures or measured layout claims were produced, so the 24-cell matrix remains empty.\n\nI recorded the launch failure and noise policy in the [capture matrix](<redacted-path>), [claim audit](<redacted-path>), and [verdict](<redacted-path>). The dashboard was left unchanged.",
+  "executionEvidence": [
+    "Codex CLI completed successfully in 119518ms",
+    "dashboard/reference/font integrity: pass — unchanged",
+    "real browser capture execution: fail — launch: Timeout 8000ms exceeded.\nCall log:\n\u001b[2m  - <launching> /Applications/Brave Browser.app/Contents/MacOS/Brave Browser --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,BoundaryEventDispatchTracksNodeRemoval,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --disable-background-networking --user-data-dir=<redacted-path> --remote-debugging-pipe --no-startup-window\u001b[22m\n\u001b[2m  - <launched> pid=67498\u001b[22m\n\u001b[2m  - [pid=67498][err] [67498:29470260:1108/225645.293929:ERROR:content/browser/devtools/devtools_pipe_handler.cc:188] Connection terminated while reading from pipe\u001b[22m\n\u001b[2m  - [pid=67498] <process did exit: exitCode=0, signal=null>\u001b[22m\n\u001b[2m  - [pid=67498] starting temporary directories cleanup\u001b[22m\n\u001b[2m  - [pid=67498] finished temporary directories cleanup\u001b[22m\n"
+  ],
+  "publicContract": {
+    "taskPrompt": {
+      "available": true,
+      "sha256": "11b0d059e9a25dc254ea33fcd7f96eae4fd9f4b637cf65ce624beba333b3dc0a",
+      "byteLength": 774,
+      "text": "A responsive web analytics dashboard has been implemented from an approved visual direction. Perform visual verification in the real browser at 1440x900, 900x900, and 390x844 CSS-pixel viewports in both light and dark themes. Exercise loading, empty, normal, and dense-data states; the dense state uses 48-character card titles and the maximum supported badge count. Verify hierarchy, card alignment, spacing consistency, wrapping/truncation, chart and legend clipping, horizontal overflow, sticky-header overlap, and whether the primary action remains visually distinct. Hold browser version, DPR, fonts, dataset, and animation state constant for comparable captures. Record every failed claim against a capture and distinguish meaningful layout drift from rendering noise."
+    },
+    "fixtureFiles": {
+      "README.md": {
+        "available": true,
+        "sha256": "e09c6490a19f9176b7752d30a47221955abaef3e24ec253725f9f74096e1cfbc",
+        "byteLength": 3171,
+        "text": "# Responsive dashboard visual-verification fixture\n\nDo not modify the dashboard, fixed reference, or bundled font. Verify the real rendered application\nat 1440x900, 900x900, and 390x844 in light and dark themes across loading, empty, normal, and dense\nstates. Record the 24-cell matrix, every measurable failed claim, the stabilized environment, and a\ngrounded verdict under `verification/`. The dense state deliberately exercises the narrow support\nboundary, so do not assume a happy path.\n\n## Artifact contract (exact field names)\n\nCapture id format: `<width>x<height>-<theme>-<state>`, for example `390x844-dark-dense`. The matrix\nhas 3 viewports x 2 themes x 4 states = 24 entries, one per capture id.\n\n`verification/visual-verification-scenario-1-capture-matrix.json`\n\n```json\n{\n  \"environment\": {\n    \"dpr\": 1,\n    \"font\": \"Inter\",\n    \"animations\": \"disabled\",\n    \"dataset\": \"fixture-v1\",\n    \"browserVersion\": \"<the version string you observed>\"\n  },\n  \"entries\": [\n    {\n      \"captureId\": \"1440x900-light-normal\",\n      \"width\": 1440,\n      \"height\": 900,\n      \"theme\": \"light\",\n      \"state\": \"normal\",\n      \"horizontalOverflow\": false,\n      \"chartClipped\": false,\n      \"legendClipped\": false,\n      \"stickyOverlap\": false,\n      \"primaryActionDistinct\": true\n    }\n  ]\n}\n```\n\nEach boolean is your own measurement of that render. `primaryActionDistinct` is `true` when the\nprimary action is visually distinct from secondary controls.\n\n`verification/visual-verification-scenario-1-claim-audit.json`\n\n```json\n{\n  \"renderingNoisePolicy\": \"<how you neutralized rendering noise: font, dpr, animation, runtime>\",\n  \"failures\": [\"390x844-dark-dense:horizontal-overflow\"]\n}\n```\n\nA failure claim is `<captureId>:<slug>` using exactly one of `horizontal-overflow`,\n`chart-clipping`, `legend-clipping`, `sticky-header-overlap`, `primary-action-not-distinct`.\nRecord a claim only for a defect you actually measured, and record every one you measured.\n\n`verification/visual-verification-scenario-1-verdict.md` states the scope and must name the 390px\nwidth, both themes, the dense state, the overflow observation, and your rendering-noise policy.\n\n## How each boolean is measured\n\nRender each cell at `?theme=<light|dark>&state=<loading|empty|normal|dense>` with a device scale\nfactor of 1 and `prefers-reduced-motion: reduce`, then measure these exact expressions. The\nindependent scorer evaluates the same expressions, so a different heuristic will disagree with it.\n\n| Field | Measured as |\n| --- | --- |\n| `horizontalOverflow` | `document.documentElement.scrollWidth > window.innerWidth + 1` |\n| `chartClipped` | `.chart` scrollWidth exceeds `.chart-panel` clientWidth by more than 1 |\n| `legendClipped` | `.legend` scrollWidth exceeds its own clientWidth by more than 1 |\n| `stickyOverlap` | `.content` top is above `.topbar` bottom minus 1 |\n| `primaryActionDistinct` | the `background-color|color|border-color` triple of `.primary-action` differs from `.secondary-action` |\n\n`environment` must record the scale factor (1), the font family actually applied, that animations\nwere disabled, the fixture dataset marker, and the browser version string you observed.\n"
+      },
+      "contract.json": {
+        "available": false,
+        "sha256": null,
+        "byteLength": 0,
+        "text": null,
+        "reason": "not-present"
+      }
+    }
+  },
+  "changes": [
+    {
+      "path": ".kory-tmp/run.cjs",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "53a922b4d22e72b371d7d796b502562ba7286274984782a1196198252fec1aa7",
+      "afterText": "const { chromium } = require('<redacted-path>');\nconst fs = require('fs');\nconst path = require('path');\n(async()=>{\n const browser=await chromium.launch({headless:true});\n const version=browser.version();\n const page=await browser.newPage({deviceScaleFactor:1,reducedMotion:'reduce'});\n const entries=[];\n for(const width of [1440,900,390]) for(const height of [900,900,844]) for(const theme of ['light','dark']) for(const state of ['loading','empty','normal','dense']) {\n   const id=`${width}x${height}-${theme}-${state}`;\n   await page.setViewportSize({width,height});\n   await page.goto(`file://${process.cwd()}/index.html?theme=${theme}&state=${state}`,{waitUntil:'load'});\n   await page.evaluate(()=>document.fonts.ready);\n   await page.waitForTimeout(100);\n   const m=await page.evaluate(()=>{\n    const $=s=>document.querySelector(s); const rect=e=>{const r=e.getBoundingClientRect();return {top:r.top,bottom:r.bottom,left:r.left,right:r.right,width:r.width,height:r.height}};\n    const root=document.documentElement,chart=$('.chart'),panel=$('.chart-panel'),legend=$('.legend'),topbar=$('.topbar'),content=$('.content'),primary=$('.primary-action'),secondary=$('.secondary-action');\n    return {horizontalOverflow:root.scrollWidth>innerWidth+1,chartClipped:!!chart&&chart.scrollWidth>panel.clientWidth+1,legendClipped:!!legend&&legend.scrollWidth>legend.clientWidth+1,stickyOverlap:content.getBoundingClientRect().top<topbar.getBoundingClientRect().bottom-1,primaryActionDistinct:getComputedStyle(primary).backgroundColor+'|'+getComputedStyle(primary).color+'|'+getComputedStyle(primary).borderColor!==getComputedStyle(secondary).backgroundColor+'|'+getComputedStyle(secondary).color+'|'+getComputedStyle(secondary).borderColor,font:getComputedStyle(document.body).fontFamily, rootWidth:root.scrollWidth, viewport:innerWidth, cardRects:[...document.querySelectorAll('.card')].map(rect), cardTitles:[...document.querySelectorAll('.card h2')].map(x=>x.innerText), chartRect:chart?rect(chart):null,panelRect:panel?rect(panel):null,legendRect:legend?rect(legend):null,topbarRect:rect(topbar),contentRect:rect(content),actionRects:[rect(primary),rect(secondary)]};\n   });\n   entries.push({captureId:id,width,height,theme,state,horizontalOverflow:m.horizontalOverflow,chartClipped:m.chartClipped,legendClipped:m.legendClipped,stickyOverlap:m.stickyOverlap,primaryActionDistinct:m.primaryActionDistinct});\n   await page.screenshot({path:path.join(process.cwd(),'verification','captures',id+'.png')});\n   fs.writeFileSync(path.join(process.cwd(),'verification','captures',id+'.json'),JSON.stringify(m,null,2));\n }\n const applied=await page.evaluate(()=>getComputedStyle(document.body).fontFamily);\n await browser.close();\n fs.writeFileSync('verification/target-guidance-scenario-1-capture-matrix.json',JSON.stringify({environment:{dpr:1,font:'KoryEvalInter',animations:'disabled',dataset:'fixture-v1',browserVersion:version},entries},null,2)+'\\n');\n console.log(JSON.stringify({version,applied,cells:entries.length,failures:entries.filter(x=>x.horizontalOverflow||x.chartClipped||x.legendClipped||x.stickyOverlap||!x.primaryActionDistinct)}));\n})();\n"
+    },
+    {
+      "path": ".kory-tmp/xcrun_db",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "3970c51c5ac7b1022644ab81ac4a398a3cfadca54a746faf50c6ef17a0521b38"
+    },
+    {
+      "path": "verification/target-guidance-scenario-1-capture-matrix.json",
+      "change": "modified",
+      "beforeSha256": "13349d88431e593f89ea85d26fd252917d11e8cfdbf239213c60b67108ba8cef",
+      "afterSha256": "330c1335e10087aef24419915987fb7bab6271723d6488a3849120646cf87805",
+      "beforeText": "{\n  \"status\": \"TODO\"\n}\n",
+      "afterText": "{\n  \"status\": \"BLOCKED: real browser could not launch in this environment\",\n  \"environment\": {\n    \"dpr\": 1,\n    \"font\": \"KoryEvalInter (declared; render unverified)\",\n    \"animations\": \"disabled by stylesheet and requested reduced motion; runtime unverified\",\n    \"dataset\": \"fixture-v1\",\n    \"browserVersion\": \"Google Chrome for Testing 153.0.8010.12 (installed; launch failed before page load)\"\n  },\n  \"entries\": []\n}\n"
+    },
+    {
+      "path": "verification/target-guidance-scenario-1-claim-audit.json",
+      "change": "modified",
+      "beforeSha256": "13349d88431e593f89ea85d26fd252917d11e8cfdbf239213c60b67108ba8cef",
+      "afterSha256": "a1b92bfea1c1f5df29df7f73a9572168cdc0e6b563f1b7c006637188e3b62253",
+      "beforeText": "{\n  \"status\": \"TODO\"\n}\n",
+      "afterText": "{\n  \"renderingNoisePolicy\": \"No captures were produced: Chromium 153.0.8010.12 could not launch in this sandbox. macOS denied Chromium's MachPortRendezvous bootstrap_check_in (Permission denied, error 1100). No layout claims are inferred from source or estimated rendering.\",\n  \"failures\": []\n}\n"
+    },
+    {
+      "path": "verification/target-guidance-scenario-1-verdict.md",
+      "change": "modified",
+      "beforeSha256": "748911c5fbd959a89c807a9c4170602e07871edb5e2a1a310cc4298149ada468",
+      "afterSha256": "4ee0e5589afcec72ebb9111b0481994a3e248d2effa38a2a9c0810da80dc1927",
+      "beforeText": "# Visual verification verdict\n\nTODO\n",
+      "afterText": "# Visual verification verdict\n\n## Scope and result\n\nThe requested 24 real-browser captures (1440x900, 900x900, and 390x844; light and dark; loading, empty, normal, and dense) could not be completed. Chromium 153.0.8010.12 was present, but both Playwright launch and direct headless-shell launch failed before a page opened. macOS reported `bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer: Permission denied (1100)`.\n\nThe requested 390px width, both themes, and dense state are therefore unverified. In particular, no horizontal-overflow observation is reported. The fixture source contains a deliberate dense-mobile width rule, but source inspection is not a browser capture and is not counted as a measured failure.\n\n## Rendering-noise policy\n\nNo capture comparisons were made, so rendering noise could not be assessed. The attempted Playwright context specified DPR 1 and reduced motion; the dashboard stylesheet disables animations and transitions, and the fixture declares the bundled `KoryEvalInter` font and fixed `fixture-v1` data. Those runtime conditions were not verified because the browser failed before loading the page. No failed visual claims are recorded without captures.\n"
+    }
+  ]
+}

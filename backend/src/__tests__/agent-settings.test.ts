@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { resolveMessagingPermission } from '@koryphaios/shared';
 import {
   applySessionAgentOverrides,
   assembleAgentContext,
@@ -38,6 +39,12 @@ describe('autonomy limits', () => {
         permissionMode,
       );
     }
+    // The composer's Worktree preset writes this project default, so a PUT
+    // patch must keep it rather than silently falling back to `auto`.
+    expect(DEFAULT_AGENT_SETTINGS.worktreeMode).toBe('auto');
+    expect(
+      mergeAgentSettings(DEFAULT_AGENT_SETTINGS, { worktreeMode: 'never' }).worktreeMode,
+    ).toBe('never');
     expect(
       mergeAgentSettings(DEFAULT_AGENT_SETTINGS, { permissionMode: 'unsafe-value' }).permissionMode,
     ).toBe('guarded');
@@ -396,6 +403,74 @@ describe('per-chat agent overrides', () => {
     }
   });
 
+  describe('worktreeMode migration', () => {
+    it('maps the legacy worktreeIsolation boolean to a preset', () => {
+      const off = mkdtempSync(join(tmpdir(), 'kory-wt-off-'));
+      const on = mkdtempSync(join(tmpdir(), 'kory-wt-on-'));
+      try {
+        writeFileSync(
+          join(off, 'koryphaios.json'),
+          JSON.stringify({ agentSettings: { worktreeIsolation: false } }),
+        );
+        writeFileSync(
+          join(on, 'koryphaios.json'),
+          JSON.stringify({ agentSettings: { worktreeIsolation: true } }),
+        );
+        expect(loadAgentSettings(off).worktreeMode).toBe('never');
+        expect(loadAgentSettings(on).worktreeMode).toBe('auto');
+      } finally {
+        rmSync(off, { recursive: true, force: true });
+        rmSync(on, { recursive: true, force: true });
+      }
+    });
+
+    it('keeps an explicit worktreeMode and defaults to auto', () => {
+      const root = mkdtempSync(join(tmpdir(), 'kory-wt-mode-'));
+      try {
+        writeFileSync(
+          join(root, 'koryphaios.json'),
+          JSON.stringify({ agentSettings: { worktreeMode: 'always' } }),
+        );
+        expect(loadAgentSettings(root).worktreeMode).toBe('always');
+        expect(DEFAULT_AGENT_SETTINGS.worktreeMode).toBe('auto');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it('session overrides prefer worktreeMode but still accept the legacy boolean', () => {
+      const base = { ...DEFAULT_AGENT_SETTINGS };
+      expect(
+        applySessionAgentOverrides(base, { worktreeMode: 'never' }).worktreeMode,
+      ).toBe('never');
+      expect(
+        applySessionAgentOverrides(base, { worktreeIsolation: false }).worktreeMode,
+      ).toBe('never');
+      expect(
+        applySessionAgentOverrides(base, {
+          worktreeMode: 'always',
+          worktreeIsolation: false,
+        }).worktreeMode,
+      ).toBe('always');
+    });
+
+    it('the composer per-chat permission choice lands in the durable session preset', () => {
+      // Composer permission picks call setSessionAgentOverrides; getIsYoloMode
+      // reads the same durable value through loadAgentSettingsForSession.
+      const root = mkdtempSync(join(tmpdir(), 'kory-yolo-durable-'));
+      try {
+        writeFileSync(join(root, 'koryphaios.json'), JSON.stringify({}));
+        setSessionAgentOverrides('chat-yolo-write', { permissionMode: 'yolo' });
+        expect(loadAgentSettingsForSession(root, 'chat-yolo-write').permissionMode).toBe(
+          'yolo',
+        );
+      } finally {
+        resetSessionAgentOverridesCache();
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+  });
+
   it('drops the override when a chat clears it', () => {
     setSessionAgentOverrides('chat-clear', { permissionMode: 'yolo' });
     setSessionAgentOverrides('chat-clear', undefined);
@@ -403,6 +478,124 @@ describe('per-chat agent overrides', () => {
       expect(getSessionAgentOverrides('chat-clear')).toEqual({});
     } finally {
       resetSessionAgentOverridesCache();
+    }
+  });
+});
+
+describe('inter-agent messaging permissions', () => {
+  it('defaults to the preset table per permission mode', () => {
+    expect(
+      resolveMessagingPermission({ permissionMode: 'yolo' }, 'subAgent'),
+    ).toBe('allow');
+    expect(
+      resolveMessagingPermission({ permissionMode: 'guarded' }, 'manager'),
+    ).toBe('allow');
+    expect(
+      resolveMessagingPermission({ permissionMode: 'guarded' }, 'subAgent'),
+    ).toBe('ask');
+    expect(resolveMessagingPermission({ permissionMode: 'ask' }, 'manager')).toBe('ask');
+    expect(resolveMessagingPermission({ permissionMode: 'custom' }, 'subAgent')).toBe('ask');
+  });
+
+  it('stored tier overrides win over the preset default', () => {
+    expect(
+      resolveMessagingPermission(
+        {
+          permissionMode: 'ask',
+          messagingPermissionsByTier: { ask: { manager: 'allow' } },
+        },
+        'manager',
+      ),
+    ).toBe('allow');
+    expect(
+      resolveMessagingPermission(
+        {
+          permissionMode: 'yolo',
+          messagingPermissionsByTier: { yolo: { subAgents: 'block' } },
+        },
+        'subAgent',
+      ),
+    ).toBe('block');
+  });
+
+  it('migrates legacy agentMessaging: off blocks, approval-cross-project asks, open defaults', () => {
+    const root = mkdtempSync(join(tmpdir(), 'kory-msg-migration-'));
+    try {
+      writeFileSync(
+        join(root, 'koryphaios.json'),
+        JSON.stringify({ agentSettings: { agentMessaging: 'off' } }),
+      );
+      const blocked = loadAgentSettings(root);
+      expect(blocked.messagingPermissionsByTier).toEqual({
+        yolo: { manager: 'block', subAgents: 'block' },
+        guarded: { manager: 'block', subAgents: 'block' },
+        edits: { manager: 'block', subAgents: 'block' },
+        ask: { manager: 'block', subAgents: 'block' },
+        custom: { manager: 'block', subAgents: 'block' },
+      });
+
+      writeFileSync(
+        join(root, 'koryphaios.json'),
+        JSON.stringify({ agentSettings: { agentMessaging: 'approval-cross-project' } }),
+      );
+      const asking = loadAgentSettings(root);
+      expect(asking.messagingPermissionsByTier?.ask).toEqual({
+        manager: 'ask',
+        subAgents: 'ask',
+      });
+      expect(asking.messagingPermissionsByTier?.yolo).toEqual({
+        manager: 'ask',
+        subAgents: 'ask',
+      });
+
+      writeFileSync(
+        join(root, 'koryphaios.json'),
+        JSON.stringify({ agentSettings: { agentMessaging: 'open' } }),
+      );
+      const open = loadAgentSettings(root);
+      expect(open.messagingPermissionsByTier).toEqual({});
+      expect(resolveMessagingPermission(open, 'subAgent')).toBe('ask');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not migrate when messagingPermissionsByTier was already saved', () => {
+    const root = mkdtempSync(join(tmpdir(), 'kory-msg-nomig-'));
+    try {
+      writeFileSync(
+        join(root, 'koryphaios.json'),
+        JSON.stringify({
+          agentSettings: {
+            agentMessaging: 'off',
+            messagingPermissionsByTier: { yolo: { manager: 'allow' } },
+          },
+        }),
+      );
+      const loaded = loadAgentSettings(root);
+      expect(loaded.messagingPermissionsByTier).toEqual({ yolo: { manager: 'allow' } });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('round-trips messagingPermissionsByTier through save/load', () => {
+    const root = mkdtempSync(join(tmpdir(), 'kory-msg-roundtrip-'));
+    try {
+      const merged = mergeAgentSettings(loadAgentSettings(root), {
+        messagingPermissionsByTier: {
+          ask: { manager: 'allow', subAgents: 'block' },
+          bogus: { manager: 'allow' },
+          guarded: { manager: 'shout' },
+        },
+      });
+      saveAgentSettings(root, merged);
+      const loaded = loadAgentSettings(root);
+      expect(loaded.messagingPermissionsByTier).toEqual({
+        ask: { manager: 'allow', subAgents: 'block' },
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });

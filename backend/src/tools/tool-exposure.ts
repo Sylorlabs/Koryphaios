@@ -39,12 +39,17 @@ export const STUB_INPUT_SCHEMA: Readonly<Record<string, unknown>> = Object.freez
  */
 const EXPOSURE_HINTS: Readonly<Record<string, string>> = Object.freeze({
   ask_manager: 'Ask the manager agent, not the human. params: question',
-  ask_user: 'Ask the human and wait for their answer. params: question, options',
+  ask_user:
+    'Ask the human whenever you are unsure; waits for the answer. params: question, options (2-4 short strings; a custom-answer box is always shown)',
   rename_session: 'Rename this chat as its topic evolves. params: title (3-6 descriptive words)',
   request_manager_relay: 'Relay a message to the manager on another agent behalf.',
   send_agent_message: 'Send a message to another agent. params: body',
   fetch_context: 'Pull previously pruned context back into the window. params: id, query',
   prune_context: 'Drop context out of the window to free space. params: ids',
+  manage_context:
+    'Control what tool output stays in your context, or compact early. params: action, ids, tool, mode',
+  manage_skill_feeding:
+    'Control which skills the feeder injects each turn: report, block, unblock. params: action, skills, reason',
   read_note: 'Return the text content of a note. params: title, id',
   render_note: 'Render a note into another format. params: id, mode',
   get_note_properties: 'Read one property on a note. params: noteId',
@@ -148,40 +153,113 @@ export function buildExposedToolset(
 export type ToolInputValidation =
   { valid: true; value: Record<string, unknown> } | { valid: false; error: string };
 
+/**
+ * Rescue pass for the stringified-array habit models have (measured live: a
+ * flash model sent `skills: "[\"response-style\"]"` four times in a row and
+ * never recovered from a strict array-only schema, even with the full schema
+ * echoed back). Where the schema declares an array property and the call
+ * carries a string, accept a JSON-encoded array; where the items are strings,
+ * also accept a bare string as a one-element list. Everything else is left
+ * untouched so real type errors still surface through the normal guidance.
+ */
+export function coerceStringifiedArrayInputs(
+  schema: Record<string, unknown>,
+  input: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const properties = schema.properties;
+  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) return null;
+  const coerced: Record<string, unknown> = { ...input };
+  let changed = false;
+  for (const [key, rawProp] of Object.entries(properties)) {
+    if (typeof rawProp !== 'object' || rawProp === null) continue;
+    const prop = rawProp as Record<string, unknown>;
+    const branches = Array.isArray(prop.anyOf)
+      ? (prop.anyOf as unknown[]).filter(
+          (branch): branch is Record<string, unknown> =>
+            typeof branch === 'object' && branch !== null,
+        )
+      : [];
+    const expectsArray =
+      prop.type === 'array' || branches.some((branch) => branch.type === 'array');
+    if (!expectsArray || typeof coerced[key] !== 'string') continue;
+    const text = (coerced[key] as string).trim();
+    if (!text) continue;
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (Array.isArray(parsed)) {
+        coerced[key] = parsed;
+        changed = true;
+        continue;
+      }
+    } catch {
+      // Not JSON — fall through to the bare-string form below.
+    }
+    const itemTypes = [
+      ...branches.map((branch) => (branch.items as Record<string, unknown> | undefined)?.type),
+      (prop.items as Record<string, unknown> | undefined)?.type,
+    ];
+    if (itemTypes.includes('string')) {
+      coerced[key] = [text];
+      changed = true;
+    }
+  }
+  return changed ? coerced : null;
+}
+
 /** Validate a call against a tool's authoritative JSON Schema. */
 export async function validateToolInputAgainstSchema(
   schema: Record<string, unknown>,
   input: unknown,
 ): Promise<ToolInputValidation> {
-  try {
-    const wrapped = fromJsonSchema(schema) as unknown as {
-      '~standard': {
-        validate: (
-          value: unknown,
-        ) =>
-          | { value?: unknown; issues?: Array<{ message?: string }> }
-          | Promise<{ value?: unknown; issues?: Array<{ message?: string }> }>;
+  const validateOnce = async (
+    candidate: unknown,
+  ): Promise<ToolInputValidation> => {
+    try {
+      const wrapped = fromJsonSchema(schema) as unknown as {
+        '~standard': {
+          validate: (
+            value: unknown,
+          ) =>
+            | { value?: unknown; issues?: Array<{ message?: string }> }
+            | Promise<{ value?: unknown; issues?: Array<{ message?: string }> }>;
+        };
       };
-    };
-    const result = await wrapped['~standard'].validate(input);
-    if (result.issues?.length) {
-      return {
-        valid: false,
-        error:
-          result.issues
-            .map((issue) => issue.message?.trim())
-            .filter((message): message is string => Boolean(message))
-            .slice(0, 3)
-            .join('; ') || 'Input does not match the tool schema.',
-      };
+      const result = await wrapped['~standard'].validate(candidate);
+      if (result.issues?.length) {
+        return {
+          valid: false,
+          error:
+            result.issues
+              .map((issue) => issue.message?.trim())
+              .filter((message): message is string => Boolean(message))
+              .slice(0, 3)
+              .join('; ') || 'Input does not match the tool schema.',
+        };
+      }
+      if (!result.value || typeof result.value !== 'object' || Array.isArray(result.value)) {
+        return { valid: false, error: 'Tool input must be an object.' };
+      }
+      return { valid: true, value: result.value as Record<string, unknown> };
+    } catch {
+      return { valid: false, error: 'Tool input schema could not be validated.' };
     }
-    if (!result.value || typeof result.value !== 'object' || Array.isArray(result.value)) {
-      return { valid: false, error: 'Tool input must be an object.' };
+  };
+  const direct = await validateOnce(input);
+  if (direct.valid) return direct;
+  // One rescue pass for stringified array parameters; if the coerced form
+  // still fails, report the original error so the guidance stays truthful.
+  if (
+    input &&
+    typeof input === 'object' &&
+    !Array.isArray(input)
+  ) {
+    const coerced = coerceStringifiedArrayInputs(schema, input as Record<string, unknown>);
+    if (coerced) {
+      const retried = await validateOnce(coerced);
+      if (retried.valid) return retried;
     }
-    return { valid: true, value: result.value as Record<string, unknown> };
-  } catch {
-    return { valid: false, error: 'Tool input schema could not be validated.' };
   }
+  return direct;
 }
 
 /**

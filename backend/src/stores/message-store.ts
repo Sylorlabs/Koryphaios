@@ -22,6 +22,18 @@ export interface IMessageStore {
   ): Promise<'inserted' | 'existing'>;
   getById(sessionId: string, messageId: string): Promise<StoredMessage | undefined>;
   getAll(sessionId: string, limit?: number): Promise<StoredMessage[]>;
+  /**
+   * Ids of messages persisted before `persistedBefore` (row `created_at`, which
+   * is stamped at write time), across all branches. A fresh renderer's HTTP
+   * projection already carries each of these turns' `parts`, which are the fold
+   * of the stream events stamped with that messageId — so a from-zero replay
+   * may skip them (see websocket-handler.ts). The `persistedBefore` bound keeps
+   * a turn that committed moments ago out of the set, so a message that raced
+   * the renderer's projection read still gets its events replayed. Optional so
+   * test fakes need not implement it; absence disables the filter, which just
+   * replays the whole log as before.
+   */
+  listPersistedIds?(sessionId: string, persistedBefore?: number): Promise<string[]>;
   /** Active conversation plus retained sibling responses needed by the feed's variant picker. */
   getDisplayMessages(sessionId: string, limit?: number): Promise<StoredMessage[]>;
   getRecent(sessionId: string, limit?: number): Promise<StoredMessage[]>;
@@ -161,11 +173,26 @@ function isTranscriptPartsBlock(block: unknown): block is { type: string; parts:
   );
 }
 
+/**
+ * Block type that carries row metadata that is not message text, e.g.
+ * `timeUnknown` for an imported row whose source recorded no time. Never text.
+ */
+const MESSAGE_META_BLOCK = 'kory_message_meta';
+
+function isMessageMetaBlock(block: unknown): block is { type: string; timeUnknown?: unknown } {
+  return (
+    typeof block === 'object' &&
+    block !== null &&
+    (block as { type?: unknown }).type === MESSAGE_META_BLOCK
+  );
+}
+
 function parseStoredContent(raw: string): {
   text: string;
   attachments: MessageAttachment[];
   reasoningContent?: string;
   parts?: TranscriptPart[];
+  timeUnknown?: true;
 } {
   try {
     const blocks = JSON.parse(raw);
@@ -181,11 +208,13 @@ function parseStoredContent(raw: string): {
       (block) => block?.type === 'thinking' && typeof block.thinking === 'string',
     );
     const partsBlock = blocks.find(isTranscriptPartsBlock);
+    const metaBlock = blocks.find(isMessageMetaBlock);
     return {
       text: blocks
         .filter(
           (block) =>
             !isTranscriptPartsBlock(block) &&
+            !isMessageMetaBlock(block) &&
             (block?.type === 'text' || typeof block?.text === 'string'),
         )
         .map((block) => block.text ?? '')
@@ -193,6 +222,7 @@ function parseStoredContent(raw: string): {
       attachments,
       reasoningContent: thinking.length ? thinking.map((block) => block.thinking).join('') : undefined,
       parts: Array.isArray(partsBlock?.parts) ? (partsBlock.parts as TranscriptPart[]) : undefined,
+      ...(metaBlock?.timeUnknown === true ? { timeUnknown: true as const } : {}),
     };
   } catch (err: unknown) {
     serverLog.debug(
@@ -208,6 +238,7 @@ function serializeStoredContent(
   attachments: MessageAttachment[] = [],
   reasoningContent?: string,
   parts?: TranscriptPart[],
+  timeUnknown?: boolean,
 ): string {
   return JSON.stringify([
     ...(reasoningContent !== undefined ? [{ type: 'thinking', thinking: reasoningContent }] : []),
@@ -228,6 +259,7 @@ function serializeStoredContent(
       return { ...attachment, mimeType };
     }),
     ...(parts !== undefined ? [{ type: TRANSCRIPT_PARTS_BLOCK, parts }] : []),
+    ...(timeUnknown === true ? [{ type: MESSAGE_META_BLOCK, timeUnknown: true }] : []),
   ]);
 }
 
@@ -241,6 +273,7 @@ function toStoredMessage(m: DbMessage): StoredMessage {
     content: stored.text,
     reasoningContent: stored.reasoningContent,
     parts: stored.parts,
+    ...(stored.timeUnknown ? { timeUnknown: true as const } : {}),
     attachments: stored.attachments.length > 0 ? stored.attachments : undefined,
     model: m.model ?? undefined,
     provider: m.provider ?? undefined,
@@ -505,8 +538,20 @@ export class MessageStore implements IMessageStore {
     return row ? toStoredMessage(row) : undefined;
   }
 
+  async listPersistedIds(sessionId: string, persistedBefore?: number): Promise<string[]> {
+    const rows = await db
+      .select({ id: messages.id })
+      .from(messages)
+      .where(
+        persistedBefore === undefined
+          ? eq(messages.sessionId, sessionId)
+          : and(eq(messages.sessionId, sessionId), sql`${messages.createdAt} < ${persistedBefore}`),
+      );
+    return rows.map((row) => row.id);
+  }
+
   async addIdempotent(sessionId: string, msg: StoredMessage): Promise<'inserted' | 'existing'> {
-    const expectedContent = serializeStoredContent(msg.content, msg.attachments, msg.reasoningContent, msg.parts);
+    const expectedContent = serializeStoredContent(msg.content, msg.attachments, msg.reasoningContent, msg.parts, msg.timeUnknown);
     const assertExistingMatches = async (): Promise<boolean> => {
       const [row] = await db.select().from(messages).where(eq(messages.id, msg.id)).limit(1);
       if (!row) return false;
@@ -546,7 +591,7 @@ export class MessageStore implements IMessageStore {
     msg: StoredMessage,
     expected: MessageAppendBoundary,
   ): Promise<'inserted' | 'existing'> {
-    const content = serializeStoredContent(msg.content, msg.attachments, msg.reasoningContent, msg.parts);
+    const content = serializeStoredContent(msg.content, msg.attachments, msg.reasoningContent, msg.parts, msg.timeUnknown);
     const tokensIn = msg.tokensIn ?? 0;
     const tokensOut = msg.tokensOut ?? 0;
     const cost = msg.cost ?? 0;
@@ -668,7 +713,7 @@ export class MessageStore implements IMessageStore {
           id: msg.id,
           sessionId,
           role: msg.role,
-          content: serializeStoredContent(msg.content, msg.attachments, msg.reasoningContent, msg.parts),
+          content: serializeStoredContent(msg.content, msg.attachments, msg.reasoningContent, msg.parts, msg.timeUnknown),
           model: msg.model ?? null,
           provider: msg.provider ?? null,
           tokensIn: msgTokensIn,
@@ -1536,7 +1581,7 @@ export class MessageStore implements IMessageStore {
           id: message.id,
           sessionId: reservation.sessionId,
           role: 'assistant',
-          content: serializeStoredContent(message.content, message.attachments, message.reasoningContent, message.parts),
+          content: serializeStoredContent(message.content, message.attachments, message.reasoningContent, message.parts, message.timeUnknown),
           model: message.model ?? null,
           provider: message.provider ?? null,
           tokensIn: msgTokensIn,
@@ -1586,7 +1631,15 @@ export class MessageStore implements IMessageStore {
       const stored = parseStoredContent(pivot.content);
       tx
         .update(messages)
-        .set({ content: serializeStoredContent(content, stored.attachments, stored.reasoningContent, stored.parts) })
+        .set({
+          content: serializeStoredContent(
+            content,
+            stored.attachments,
+            stored.reasoningContent,
+            stored.parts,
+            stored.timeUnknown,
+          ),
+        })
         .where(and(eq(messages.id, messageId), eq(messages.sessionId, sessionId)))
         .run();
       writeActiveBoundary(tx, {

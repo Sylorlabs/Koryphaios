@@ -45,6 +45,7 @@ import {
   modelFromRemoteId,
 } from './model-list-cache';
 import { applyModelsDevMetadata, modelsDevKeysFor, refreshModelsDevCache } from './models-dev';
+import { foldVendorSpeedTiers } from './speed-tiers';
 import { providerLog } from '../logger';
 import {
   CLINE_EFFORT_REASONING_LEVELS,
@@ -318,10 +319,8 @@ export class ClineProvider extends OpenAIProvider {
     // the reasoning ladder, so this only adds reasoning tiers and context for
     // models neither of those covers. It is what lets a brand-new Cline model
     // show real reasoning levels with no code change and no regeneration.
-    const enriched = applyModelsDevMetadata(
-      this.name,
-      defs,
-      modelsDevKeysFor(this.name, this.config.kind),
+    const enriched = foldVendorSpeedTiers(
+      applyModelsDevMetadata(this.name, defs, modelsDevKeysFor(this.name, this.config.kind)),
     );
     // Recommended first so Cline's curated picks lead the picker, then the
     // rest alphabetically for a stable, scannable list.

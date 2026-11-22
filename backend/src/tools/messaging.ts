@@ -54,19 +54,24 @@ export class SendAgentMessageTool implements Tool {
   readonly name = 'send_agent_message';
   readonly role = 'any' as const;
   readonly description =
-    'Send an asynchronous message to another agent. Managers may message the manager of another open project (by project name) or any agent in their own project. Sub-agents may message agents within their own project only (their manager or a sibling worker) — reaching another project requires request_manager_relay. The message is queued and delivered when the recipient is idle; replies arrive in your inbox (list_agent_messages).';
+    'Send an asynchronous message to another agent. You may message the manager or a named sub-agent of any other chat (by project name, or by exact chat id via toSessionId — use list_sessions to find chat ids, or an id the user pasted), and any agent in your own chat. Messages to other chats may need user approval depending on the permission mode; messaging within your own chat is always allowed. Replies arrive in your inbox (list_agent_messages). To ask your manager to forward a request instead, use request_manager_relay.';
   readonly inputSchema = {
     type: 'object',
     properties: {
+      toSessionId: {
+        type: 'string',
+        description:
+          'Exact chat id, e.g. one the user pasted or from list_sessions. Takes precedence over toProject.',
+      },
       toProject: {
         type: 'string',
         description:
-          'Target project name (or session id). Required when messaging outside your own project. Omit to target an agent in your own project.',
+          'Target project name (or exact chat id). Required when messaging outside your own project. Omit to target an agent in your own project.',
       },
       toAgent: {
         type: 'string',
         description:
-          "Optional target agent inside the receiving project: 'manager' (default) or a worker label.",
+          "Optional target agent inside the receiving chat: 'manager' (default) or a sub-agent label in that chat.",
       },
       subject: { type: 'string', description: 'Short summary of the request' },
       body: { type: 'string', description: 'Full message content for the receiving agent' },
@@ -80,6 +85,7 @@ export class SendAgentMessageTool implements Tool {
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const input = call.input as {
+      toSessionId?: string;
       toProject?: string;
       toAgent?: string;
       subject?: string;
@@ -101,6 +107,7 @@ export class SendAgentMessageTool implements Tool {
         fromAgentId: ctx.agentId ?? (role === 'manager' ? 'kory-manager' : 'worker'),
         fromRole: role,
         fromLabel: callerLabel(ctx, role),
+        toSessionId: input.toSessionId,
         toProject: input.toProject,
         toAgent,
         subject: input.subject ?? '(no subject)',
@@ -109,7 +116,7 @@ export class SendAgentMessageTool implements Tool {
       });
       const suffix =
         message.status === 'pending_approval'
-          ? 'queued for user approval (cross-project policy)'
+          ? 'held for user approval (inter-agent messaging policy)'
           : message.status === 'delivered'
             ? 'delivered'
             : 'queued';

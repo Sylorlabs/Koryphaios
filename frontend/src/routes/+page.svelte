@@ -22,7 +22,7 @@
   import AgentThreadFeed from '$lib/components/AgentThreadFeed.svelte';
   import CommandInput from '$lib/components/CommandInput.svelte';
   import DiffEditor from '$lib/components/DiffEditor.svelte';
-  import type { ChatFindingInput } from '@koryphaios/shared';
+  import type { FusionSelection, ChatFindingInput } from '@koryphaios/shared';
   import PermissionDialog from '$lib/components/PermissionDialog.svelte';
   import QuestionDialog from '$lib/components/QuestionDialog.svelte';
   import RewindDialog from '$lib/components/RewindDialog.svelte';
@@ -41,6 +41,7 @@
   import ThemePickerModal from '$lib/components/ThemePickerModal.svelte';
   import BackgroundShells from '$lib/components/BackgroundShells.svelte';
   import AppShell from '$lib/components/shell/AppShell.svelte';
+  import PanelErrorBoundary from '$lib/components/PanelErrorBoundary.svelte';
   import AgentRail from '$lib/components/shell/AgentRail.svelte';
   import { useAgentRail } from '$lib/components/shell/useAgentRail.svelte';
   import { useSessionSync } from '$lib/hooks/useSessionSync.svelte';
@@ -88,7 +89,11 @@
     type CacheDiagnostics,
   } from '$lib/utils/cache-diagnostics';
   import { registerEligibleEscape } from '$lib/utils/double-escape';
-  import { buildContextSegments, contextCacheStatus } from '$lib/utils/context-segments';
+  import {
+    buildContextSegments,
+    cappedHarnessHint,
+    contextCacheStatus,
+  } from '$lib/utils/context-segments';
   import {
     implementationPrompt,
     latestPlanText,
@@ -164,8 +169,10 @@
     model?: string;
     reasoningLevel?: string;
     attachments?: Array<{ type: string; data: string; name: string }>;
-    fastMode?: boolean;
+    speedTier?: string;
     imageInputMode?: ImageInputMode;
+    modelParameters?: Record<string, number | string>;
+    fusion?: FusionSelection;
   } | null>(null);
 
   let contextSegments = $derived(buildContextSegments(wsStore.contextUsage));
@@ -747,6 +754,14 @@
     if (shortcutStore.matches('toggle_zen_mode', e)) {
       e.preventDefault();
       handleMenuAction('toggle_zen_mode');
+      return;
+    }
+
+    // Reasoning panels own their open state, so the shortcut is broadcast and
+    // every visible thinking block flips together.
+    if (shortcutStore.matches('toggle_thinking', e)) {
+      e.preventDefault();
+      window.dispatchEvent(new CustomEvent('kory:toggle-thinking'));
       return;
     }
 
@@ -1643,8 +1658,10 @@
       model?: string;
       reasoningLevel?: string;
       attachments?: Array<{ type: string; data: string; name: string }>;
-      fastMode?: boolean;
+      speedTier?: string;
       imageInputMode?: ImageInputMode;
+      modelParameters?: Record<string, number | string>;
+      fusion?: FusionSelection;
     };
   } | null>(null);
 
@@ -1658,8 +1675,10 @@
       p.pending.model,
       p.pending.reasoningLevel,
       p.pending.attachments,
-      p.pending.fastMode,
+      p.pending.speedTier,
       p.pending.imageInputMode,
+      p.pending.modelParameters,
+      p.pending.fusion,
     );
     if (sent) clearComposerDraftRequest += 1;
   }
@@ -1669,8 +1688,10 @@
     model?: string,
     reasoningLevel?: string,
     attachments?: Array<{ type: string; data: string; name: string }>,
-    fastMode?: boolean,
+    speedTier?: string,
     imageInputMode?: ImageInputMode,
+    modelParameters?: Record<string, number | string>,
+    fusion?: FusionSelection,
   ): Promise<boolean> {
     if (isDemoMode) {
       composerDraft = '';
@@ -1691,8 +1712,10 @@
         model,
         reasoningLevel,
         attachments,
-        fastMode,
+        speedTier,
         imageInputMode,
+        modelParameters,
+        fusion,
       };
       return false;
     }
@@ -1718,7 +1741,16 @@
       agenticConsentPrompt = {
         provider: providerName,
         hostName: remoteProvider.remoteHostName ?? remoteProvider.label ?? 'the host',
-        pending: { message, model, reasoningLevel, attachments, fastMode, imageInputMode },
+        pending: {
+          message,
+          model,
+          reasoningLevel,
+          attachments,
+          speedTier,
+          imageInputMode,
+          modelParameters,
+          fusion,
+        },
       };
       return false;
     }
@@ -1753,8 +1785,10 @@
       model,
       reasoningLevel,
       attachments,
-      fastMode,
+      speedTier,
       imageInputMode,
+      modelParameters,
+      fusion,
     );
   }
 
@@ -1767,8 +1801,10 @@
     model?: string,
     reasoningLevel?: string,
     attachments?: Array<{ type: string; data: string; name: string }>,
-    fastMode?: boolean,
+    speedTier?: string,
     imageInputMode?: ImageInputMode,
+    modelParameters?: Record<string, number | string>,
+    fusion?: FusionSelection,
   ): Promise<boolean> {
     if (isDemoMode) {
       void import('$lib/demo.svelte').then((m) => {
@@ -1795,8 +1831,10 @@
       model,
       reasoningLevel,
       attachments,
-      fastMode,
+      speedTier,
       imageInputMode,
+      modelParameters,
+      fusion,
     );
   }
 
@@ -1848,12 +1886,12 @@
   );
   let connectionDot = $derived(
     isDemoMode
-      ? 'bg-emerald-500'
+      ? 'bg-[var(--color-success)]'
       : wsStore.status === 'connected'
-        ? 'bg-emerald-500'
+        ? 'bg-[var(--color-success)]'
         : wsStore.status === 'connecting'
-          ? 'bg-amber-500 animate-pulse'
-          : 'bg-red-500',
+          ? 'bg-[var(--color-warning)] animate-pulse'
+          : 'bg-[var(--color-error)]',
   );
   let connectionStatusLabel = $derived(
     isDemoMode
@@ -1891,7 +1929,6 @@
   onSidebarAction={handleMenuAction}
   onHideSidebar={() => (showSidebar = false)}
   onShowSidebar={() => (showSidebar = true)}
-  onCloseNotes={() => (showNotes = false)}
   {startDragging}
 >
   {#snippet menubar()}
@@ -1990,7 +2027,7 @@
             class="mx-auto mb-5 max-w-md text-sm leading-relaxed"
             style="color: var(--color-text-secondary);"
           >
-            Open a folder or choose a recent project to start a session.
+            Open a project or choose a recent one to start a session.
           </p>
 
           {#if projectStore.unavailablePath}
@@ -2034,30 +2071,30 @@
               type="button"
               class="flex items-center justify-center gap-3 rounded-md px-2 py-2 text-sm font-semibold transition-colors hover:bg-[var(--color-surface-3)]"
               style="color: var(--color-text-primary);"
-              onclick={() => handleMenuAction('open_project_folder')}
-            >
-              <FolderOpen size={18} />
-              <span>Open Folder</span>
-            </button>
-
-            <button
-              type="button"
-              class="flex items-center justify-center gap-3 rounded-md px-2 py-2 text-sm font-medium transition-colors hover:bg-[var(--color-surface-3)]"
-              style="color: var(--color-text-secondary);"
-              onclick={() => handleMenuAction('open_workspace')}
+              onclick={() => handleMenuAction('new_project')}
             >
               <FolderPlus size={18} />
-              <span>Open Workspace</span>
+              <span>New Project</span>
             </button>
 
             <button
               type="button"
               class="flex items-center justify-center gap-3 rounded-md px-2 py-2 text-sm font-semibold transition-colors hover:bg-[var(--color-surface-3)]"
               style="color: var(--color-text-primary);"
-              onclick={() => handleMenuAction('new_project')}
+              onclick={() => handleMenuAction('open_project_folder')}
+            >
+              <FolderOpen size={18} />
+              <span>Open Project</span>
+            </button>
+
+            <button
+              type="button"
+              class="flex items-center justify-center gap-3 rounded-md px-2 py-2 text-sm font-semibold transition-colors hover:bg-[var(--color-surface-3)]"
+              style="color: var(--color-text-primary);"
+              onclick={() => handleMenuAction('open_workspace')}
             >
               <FolderPlus size={18} />
-              <span>New Project</span>
+              <span>Open Workspace</span>
             </button>
           </div>
 
@@ -2164,7 +2201,9 @@
         onClose={() => void agentRail.closeAgent(agentRail.selectedAgentId)}
       />
     {:else}
-      <ManagerFeed onUseSuggestion={loadSuggestionIntoComposer} centered={startWindowOnly} />
+      <PanelErrorBoundary label="Chat history">
+        <ManagerFeed onUseSuggestion={loadSuggestionIntoComposer} centered={startWindowOnly} />
+      </PanelErrorBoundary>
     {/if}
   {/snippet}
 
@@ -2181,15 +2220,27 @@
         role="group"
         onmouseenter={() => (contextBarHover = true)}
         onmouseleave={() => (contextBarHover = false)}
+        onfocusin={() => (contextBarHover = true)}
+        onfocusout={() => (contextBarHover = false)}
       >
-        <div class="context-bar-summary flex min-w-0 items-center gap-2 sm:gap-3" role="group" aria-label="Context window usage">
-          <span
-            class="w-[74px] shrink-0 context-bar-label"
+        <!-- One quiet line by default: meter, total, and this turn's cache read.
+             Breakdown, estimate notes and cache diagnostics appear on hover or
+             keyboard focus, so the chat is never stacked with telemetry rows. -->
+        <div
+          class="context-bar-summary flex min-w-0 items-center gap-2 sm:gap-3"
+          role="group"
+          aria-label="Context window usage"
+        >
+          <button
+            type="button"
+            class="w-[74px] shrink-0 text-left context-bar-label"
             style="font-size: var(--text-xs); color: var(--color-text-muted);"
-            title="How much of the model's context window this session is using. The bar splits that total by what fills it. Hover to see every part."
+            title="How much of the model's context window this session is using. The bar splits that total by what fills it. Hover or select to see every part."
+            aria-expanded={contextBarHover}
+            onclick={() => (contextBarHover = !contextBarHover)}
           >
             Context
-          </span>
+          </button>
           <div
             class="relative min-w-8 flex-1 rounded-full overflow-hidden flex context-bar-meter"
             style="height: 6px; background: var(--color-surface-3);"
@@ -2213,9 +2264,9 @@
                 style="width: {wsStore.contextUsage
                   .percent}%; transition-duration: var(--duration-slower); background: {wsStore
                   .contextUsage.percent > 85
-                  ? '#ef4444'
+                  ? 'var(--color-error)'
                   : wsStore.contextUsage.percent > 65
-                    ? '#f59e0b'
+                    ? 'var(--color-warning)'
                     : 'var(--color-accent)'};"
               ></div>
             {/if}
@@ -2224,7 +2275,7 @@
             <span
               class="shrink-0 tabular-nums context-bar-value"
               style="font-size: var(--text-xs); color: {!wsStore.contextUsage.estimated && wsStore.contextUsage.percent > 85
-                ? '#ef4444'
+                ? 'var(--color-error)'
                 : 'var(--color-text-muted)'};"
             >
               {#if wsStore.contextUsage.estimated}
@@ -2242,7 +2293,9 @@
                 ? 'The provider reported turn-level usage, but did not establish exact live occupancy or a verified window.'
                 : 'The provider reported usage but no verified window size for this model.'}
             >
-              {#if wsStore.contextUsage.estimated}
+              {#if wsStore.contextUsage.carried}
+                ~{formatTokenCount(wsStore.contextUsage.used)} estimate · window not reported yet
+              {:else if wsStore.contextUsage.estimated}
                 live context not reported · window unknown
               {:else}
                 {formatTokenCount(wsStore.contextUsage.used)} used · window not reported by provider
@@ -2273,7 +2326,16 @@
               awaiting provider token report
             </span>
           {/if}
-        </div      >
+          {#if cacheTurnReceipt && !contextBarHover}
+            <span
+              class="hidden min-w-0 truncate tabular-nums sm:inline"
+              style="font-size: var(--text-xs); color: var(--color-text-muted); opacity: 0.8;"
+              title={cacheTurnReceipt}
+            >
+              · {cacheTurnReceipt}
+            </span>
+          {/if}
+        </div>
         {#if contextSegments && contextBarHover}
           <div class="flex items-center gap-4 flex-wrap" style="padding-top: var(--space-2);">
             {#each contextSegments as seg (seg.key)}
@@ -2296,12 +2358,21 @@
             {/if}
           </div>
         {/if}
-        {#if wsStore.contextUsage.estimated}
+        {#if wsStore.contextUsage.estimated && contextBarHover}
           <div style="padding-top: var(--space-1); font-size: var(--text-xs); color: var(--color-text-muted);">
-            Provider totals may span multiple internal requests · category breakdown is estimated
+            {#if wsStore.contextUsage.carried}
+              Last known context for this chat · replaced by the selected model's first report
+            {:else}
+              Provider totals may span multiple internal requests · category breakdown is estimated
+            {/if}
           </div>
+          {#if wsStore.contextUsage.harnessCapped}
+            <div style="padding-top: var(--space-1); font-size: var(--text-xs); color: var(--color-text-muted);">
+              {cappedHarnessHint(wsStore.contextUsage.harnessCap)}
+            </div>
+          {/if}
         {/if}
-        {#if contextCache.label}
+        {#if contextCache.label && contextBarHover}
           <div title={contextCache.hint} style="padding-top: var(--space-1); font-size: var(--text-xs); color: var(--color-text-muted);">
             {contextCache.label}
           </div>
@@ -2310,7 +2381,7 @@
              meter stays the one thing read at a glance. The per-turn receipt
              is the only part visible by default; the harness/30d breakdown is
              hover-only, and every part of it is omitted while it reads zero. -->
-        {#if cacheTurnReceipt || (contextBarHover && (cacheFabricLabel || cacheLastBust || cacheProviderScorecard.length > 0))}
+        {#if contextBarHover && (cacheTurnReceipt || cacheFabricLabel || cacheLastBust || cacheProviderScorecard.length > 0)}
           <div
             class="flex flex-col gap-1"
             style="margin-top: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--color-border); font-size: var(--text-xs); color: var(--color-text-muted);"
@@ -2357,13 +2428,15 @@
 
   {#snippet composer()}
     {#if !startWindowOnly && !collaborationStore.activeJoinedSession && (deviceStore.activeChat || !(projectStore.workspaceRoot && !sessionStore.activeSessionId))}
-      <WorkflowPanel
-        open={showWorkflows}
-        sessionId={sessionStore.activeSessionId}
-        initialTask={workflowTask}
-        onclose={() => (showWorkflows = false)}
-        onchange={() => void refreshActiveWorkflow()}
-      />
+      <PanelErrorBoundary label="Workflow panel">
+        <WorkflowPanel
+          open={showWorkflows}
+          sessionId={sessionStore.activeSessionId}
+          initialTask={workflowTask}
+          onclose={() => (showWorkflows = false)}
+          onchange={() => void refreshActiveWorkflow()}
+        />
+      </PanelErrorBoundary>
       <CommandInput
         bind:inputRef
         bind:value={composerDraft}
@@ -2441,7 +2514,9 @@
 
 <PermissionDialog />
 <QuestionDialog />
-<TimeTravelPanel bind:open={showTimeTravel} />
+<PanelErrorBoundary label="Time travel">
+  <TimeTravelPanel bind:open={showTimeTravel} />
+</PanelErrorBoundary>
 <RewindDialog />
 {#if saveFinding}
   <SaveFindingDialog finding={saveFinding} onClose={() => (saveFinding = null)} />
@@ -2458,7 +2533,7 @@
     <AlertTriangle size={15} aria-hidden="true" />
     <span>Unresolved Git conflicts</span>
     <span
-      class="min-w-5 rounded-full px-1.5 py-0.5 text-center text-[10px]"
+      class="min-w-5 rounded-full px-1.5 py-0.5 text-center text-[11px]"
       style="background: color-mix(in srgb, var(--color-error) 16%, transparent);"
     >
       {gitStore.state.conflicts.length}
@@ -2494,7 +2569,7 @@
         <button
           type="button"
           class="w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors"
-          style="background: var(--color-accent); color: var(--color-surface-0);"
+          style="background: var(--color-accent); color: var(--color-on-accent);"
           onclick={() => {
             composerDraft = noProjectPrompt?.message ?? '';
             noProjectPrompt = null;
@@ -2558,7 +2633,7 @@
         <button
           type="button"
           class="rounded-xl px-4 py-2 text-sm font-semibold transition-colors disabled:opacity-50"
-          style="background: var(--color-accent); color: var(--color-surface-0);"
+          style="background: var(--color-accent); color: var(--color-on-accent);"
           disabled={!newProjectNameInput.trim()}
           onclick={() => void confirmNewProjectName()}
         >
@@ -2608,7 +2683,7 @@
         <button
           type="button"
           class="rounded-xl px-4 py-2 text-sm font-semibold transition-colors disabled:opacity-50"
-          style="background: var(--color-accent); color: var(--color-surface-0);"
+          style="background: var(--color-accent); color: var(--color-on-accent);"
           disabled={!newWorkspaceNameInput.trim()}
           onclick={() => void confirmNewWorkspaceName()}
         >
@@ -2653,7 +2728,7 @@
         <button
           type="button"
           class="rounded-xl px-4 py-2 text-sm font-semibold transition-colors"
-          style="background: var(--color-accent); color: var(--color-surface-0);"
+          style="background: var(--color-accent); color: var(--color-on-accent);"
           onclick={() => void confirmAgenticConsent()}
         >
           Send my files &amp; run
@@ -2679,15 +2754,19 @@
     }}
   />
 {/if}
-<SettingsDrawer
-  open={showSettings}
-  initialTab={settingsInitialTab}
-  initialAgentSection={settingsInitialAgentSection}
-  onClose={() => {
-    showSettings = false;
-    settingsInitialTab = undefined;
-    settingsInitialAgentSection = undefined;
-  }}
-/>
-<CommandPalette bind:open={showCommandPalette} onAction={handleMenuAction} />
+<PanelErrorBoundary label="Settings">
+  <SettingsDrawer
+    open={showSettings}
+    initialTab={settingsInitialTab}
+    initialAgentSection={settingsInitialAgentSection}
+    onClose={() => {
+      showSettings = false;
+      settingsInitialTab = undefined;
+      settingsInitialAgentSection = undefined;
+    }}
+  />
+</PanelErrorBoundary>
+<PanelErrorBoundary label="Command palette">
+  <CommandPalette bind:open={showCommandPalette} onAction={handleMenuAction} />
+</PanelErrorBoundary>
 <ToastContainer />

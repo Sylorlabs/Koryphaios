@@ -47,9 +47,9 @@
     {#if gitStore.state.currentDiff && gitStore.state.currentDiff.trim() !== ""}
       {#each lines as line}
         <div class="whitespace-pre-wrap {
-          line.type === 'add' ? 'bg-green-500/10 text-green-400' :
-          line.type === 'remove' ? 'bg-red-500/10 text-red-400' :
-          line.type === 'header' ? 'text-blue-400 opacity-70' :
+          line.type === 'add' ? 'bg-[var(--color-success-bg)] text-[var(--color-success)]' :
+          line.type === 'remove' ? 'bg-[var(--color-error-bg)] text-[var(--color-error)]' :
+          line.type === 'header' ? 'text-[var(--color-info)] opacity-70' :
           'text-[var(--color-text-secondary)]'
         }">
           {line.text}

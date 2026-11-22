@@ -2,13 +2,13 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
+import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
 import { loadV5SkillPackages } from '../skill-packages';
 import {
   SYSTEMS_PROTOCOL_CONCEPTS,
   SYSTEMS_PROTOCOL_SKILL_EVAL_MATERIALIZERS,
   SYSTEMS_PROTOCOL_SKILL_EVAL_SCORERS,
-} from '../skill-eval-systems-protocol-concept-fixtures';
+} from '../../eval/skills/skill-eval-systems-protocol-concept-fixtures';
 
 const definition = SYSTEMS_PROTOCOL_CONCEPTS.find(
   (item) => item.id === 'ml-evaluation-full-task-1-individual',
@@ -77,11 +77,11 @@ async function score(root: string, source: string) {
 }
 
 describe('ml-evaluation evaluator contract', () => {
-  test('generation 3 README and scorer share the exact cutoff/train/rows contract', async () => {
+  test('generation 4 README and scorer share the exact cutoff/train/rows contract', async () => {
     const root = await setup();
-    expect(definition.generation).toBe(3);
-    expect(materializer.id).toEndWith('/concept@3');
-    expect(scorer.id).toEndWith('/concept-scorer@3');
+    expect(definition.generation).toBe(4);
+    expect(materializer.id).toEndWith('/concept@4');
+    expect(scorer.id).toEndWith('/concept-scorer@4');
     const readme = readFileSync(join(root, 'README.md'), 'utf8');
     expect(readme).toContain(definition.contract);
     expect(readme).toContain('Input is exactly {cutoff,reviewCapacity,train,rows}');

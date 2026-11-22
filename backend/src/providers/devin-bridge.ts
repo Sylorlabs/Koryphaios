@@ -120,7 +120,7 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
       supportsMcp: caps?.supportsMcp ?? false,
       supportsRules: caps?.supportsRules ?? false,
       supportsSkills: caps?.supportsSkills ?? false,
-      supportsHooks: true, // .devin/hooks.v1.json — present in 3000.3.22
+      supportsHooks: true, // <DEVIN_CONFIG_DIR>/devin/config.json `hooks` — verified live
       probedAt: caps?.probedAt ?? 0,
     };
   }
@@ -190,25 +190,40 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
     const hookScript = process.env.KORY_HOOK_BRIDGE_SCRIPT;
     if (!hookScript) return null;
     if (!ctx.sessionId) return null;
+    // UserPromptSubmit is intentionally absent: a fail-closed hook that drops
+    // the prompt kills the whole headless turn silently, and the bridge's
+    // context-injection channel is unused on this vocabulary. Keep the events
+    // that gate tool calls and turn lifecycle instead.
     const events = [
       'PreToolUse',
       'PostToolUse',
       'PermissionRequest',
-      'UserPromptSubmit',
       'Stop',
     ] as const;
     const actionForEvent: Record<(typeof events)[number], BridgeGrantAction> = {
       PreToolUse: 'hook:pre-tool',
       PostToolUse: 'hook:post-tool',
       PermissionRequest: 'hook:permission',
-      UserPromptSubmit: 'hook:prompt-submit',
       Stop: 'hook:stop',
     };
+    // Spawn through the bridge runtime: a packaged .js bundle targets bun, and
+    // bare `node` cannot run the source .ts either — the hook would error and
+    // silently drop the enforcement layer.
+    const hookCommand =
+      process.env.KORY_HOOK_BRIDGE_COMMAND ||
+      process.env.KORY_MCP_BRIDGE_COMMAND ||
+      process.execPath;
+    // The hook is spawned by the CLI, not the backend — pass the backend URL
+    // explicitly so a non-default-port backend is reachable instead of falling
+    // back to the 127.0.0.1:3001 default and failing closed on every call.
+    const backendUrl =
+      process.env.KORY_BACKEND_URL?.trim() ||
+      `http://${process.env.KORYPHAIOS_HOST ?? '127.0.0.1'}:${process.env.KORYPHAIOS_PORT ?? '3001'}`;
     return events.map((event) => {
       const grant = ctx.bridgeGrantLease
         ? ctx.bridgeGrantLease.grant([actionForEvent[event]])
         : getKoryBridgeGrant(ctx.sessionId!, ctx.role, [actionForEvent[event]]);
-      const command = `node ${JSON.stringify(hookScript)} --auth-file ${JSON.stringify(grant.path)} --event ${event}`;
+      const command = `${JSON.stringify(hookCommand)} ${JSON.stringify(hookScript)} --auth-file ${JSON.stringify(grant.path)} --backend-url ${JSON.stringify(backendUrl)} --event ${event} --provider devin`;
       return { events: [event], command, matcher: '' };
     });
   }
@@ -233,8 +248,10 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
 
   buildMcpConfig(ctx: CliBridgeContext): CliMcpServerConfig[] | null {
     // Always configure the kory MCP server — this is how Devin accesses
-    // Koryphaios tools instead of its own native tools.
-    if (!this.cached?.supportsMcp) return null;
+    // Koryphaios tools instead of its own native tools. The mcp_config.json
+    // discovery contract does not depend on the `devin mcp` management
+    // subcommand the supportsMcp probe checks for; gating on it could leave a
+    // managed turn with every native tool denied and no kory__ tools.
     return buildKoryCliMcpConfig(ctx, 'devin');
   }
 
@@ -266,8 +283,69 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
     writeManagedCliFile(configPath, JSON.stringify(existing, null, 2), { encoding: 'utf8' });
   }
 
+  /** Bare tool names denied via Devin's documented tool-name permission
+   *  grammar (`"deny": ["edit", "exec"]`). The authoritative list published by
+   *  the CLI is short (`read`, `edit`, `grep`, `glob`, `exec`); unknown names
+   *  are inert, so the full observed native surface goes in — the signed hook
+   *  bridge is the second layer that default-denies anything the config
+   *  grammar did not catch. kory__ MCP calls are unaffected: they are
+   *  `mcp__kory__*` names, not these names. */
+  private static readonly NATIVE_TOOL_DENIES = [
+    'read',
+    'write',
+    'edit',
+    'exec',
+    'grep',
+    'glob',
+    'find_file_by_name',
+    'webfetch',
+    'web_fetch',
+    'web_search',
+    'read_page_content',
+    'apply_patch',
+    'patch',
+    'notebook_read',
+    'notebook_edit',
+    'request_scope',
+    'run_subagent',
+    'read_subagent',
+    'task',
+    'spawn',
+    'browser_preview',
+    'get_output',
+    'kill_shell',
+    'write_to_process',
+    'mcp_call_tool',
+    'ask_user_question',
+  ];
+
   writeHooksConfig(hooks: CliHookConfig[], homeDir: string): void {
     if (!hooks.length) return;
+    this.writeManagedUserConfig(null, hooks, homeDir);
+  }
+
+  /** Write the managed user config at `<home>/devin/config.json` — the file
+   *  the CLI honours at `DEVIN_CONFIG_DIR` (verified: `devin doctor` resolves
+   *  it, hook events fire, deny rules block). Besides the signed-grant hooks,
+   *  this lays down the declarative enforcement the missing `--agent-config`
+   *  flag cannot carry:
+   *    - `permissions`: allow `mcp__kory__*` only, deny the authority-bearing
+   *      native tools plus the sandbox-derived scopes, keep `ask` entries
+   *    - `subagents_enabled: false` — removes run_subagent/read_subagent
+   *      entirely rather than merely denying them
+   *    - `read_config_from` — disables every cross-tool import that could add
+   *      MCP servers or rules the managed turn never asked for; the project's
+   *      own AGENTS.md stays (`agents_standard`)
+   *    - `auto_update`/`notify` — headless hygiene so a managed turn never
+   *      mutates the install or rings the user's terminal
+   *  A stale `hooks` block from an earlier session is removed when no hooks
+   *  are supplied: its grant files are gone, so keeping it would only jam the
+   *  turn on fail-closed hook errors. */
+  writeManagedUserConfig(
+    ctx: CliBridgeContext | null,
+    hooks: CliHookConfig[],
+    homeDir: string,
+  ): void {
     const configPath = join(getDevinUserConfigDir(homeDir), 'config.json');
     let existing: Record<string, unknown> = {};
     if (existsSync(configPath)) {
@@ -278,7 +356,36 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
         providerLog.debug({}, 'Devin bridge: existing user config parse failed — will overwrite');
       }
     }
-    existing.hooks = JSON.parse(this.serializeHooks(hooks));
+    if (hooks.length > 0) {
+      existing.hooks = JSON.parse(this.serializeHooks(hooks));
+    } else {
+      delete existing.hooks;
+    }
+    const scopes = ctx ? this.buildPermissionScopes(ctx) : { allow: [], deny: [], ask: [] };
+    existing.permissions = {
+      allow: [...new Set(['mcp__kory__*', ...scopes.allow])],
+      deny: [...new Set([...DevinCliBridge.NATIVE_TOOL_DENIES, ...scopes.deny])],
+      ask: scopes.ask,
+    };
+    existing.subagents_enabled = false;
+    existing.auto_update = false;
+    existing.notify = 'never';
+    existing.read_config_from = {
+      // The workspace's own AGENTS.md is the repo's contract — still honored.
+      agents_standard: true,
+      // Everything else imports foreign rules/skills/MCP servers (claude,
+      // cursor, windsurf, opencode, zed, cloud plugins). A managed turn must
+      // only see the kory server and the mirrored manifests.
+      cursor: false,
+      windsurf: false,
+      claude: false,
+      copilot: false,
+      codex: false,
+      kiro: false,
+      opencode: false,
+      zed: false,
+      cloud: false,
+    };
     ensureManagedCliDirectory(dirname(configPath));
     writeManagedCliFile(configPath, JSON.stringify(existing, null, 2), { encoding: 'utf8' });
   }
@@ -450,6 +557,21 @@ export function trajectoryToEvents(t: CliTrajectory): ProviderEvent[] {
       events.push({ type: 'content_delta', content: step.message });
     }
   }
+  // ATIF step metrics are per model request: `prompt_tokens` is that request's
+  // whole input (cached_tokens is a subset of it). `final_metrics` totals are
+  // summed over every step of the exported session (a measured ATIF-v1.7
+  // export: total_prompt_tokens 14,466,544 is exactly the sum of its 135 agent
+  // steps' prompt_tokens; the last step was 154,111), so they are billing
+  // evidence only. The latest agent step is the live occupancy.
+  const latest = latestStepUsage(t.steps);
+  if (latest) {
+    events.push({
+      type: 'usage_update',
+      tokensIn: latest.promptTokens,
+      tokensOut: latest.completionTokens,
+      ...(latest.cachedTokens !== undefined ? { tokensCacheRead: latest.cachedTokens } : {}),
+    });
+  }
   const m = t.finalMetrics;
   if (m && (m.promptTokens || m.completionTokens)) {
     events.push({
@@ -457,9 +579,37 @@ export function trajectoryToEvents(t: CliTrajectory): ProviderEvent[] {
       tokensIn: m.promptTokens ?? 0,
       tokensOut: m.completionTokens ?? 0,
       tokensCacheRead: m.cachedTokens,
+      // Cumulative over every request: never occupancy. Without a per-step
+      // snapshot above, the meter shows it as an estimate and bounds it.
+      estimated: true,
+      billingTokensIn: m.promptTokens ?? 0,
+      billingTokensOut: m.completionTokens ?? 0,
     });
   }
   return events;
+}
+
+function numericMetric(metrics: Record<string, unknown> | undefined, key: string): number | undefined {
+  const value = metrics?.[key];
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+/** The last agent step that reported its own request usage. */
+function latestStepUsage(
+  steps: CliTrajectory['steps'],
+): { promptTokens: number; completionTokens: number; cachedTokens?: number } | undefined {
+  for (let i = steps.length - 1; i >= 0; i--) {
+    const step = steps[i];
+    if (step.source !== 'agent') continue;
+    const promptTokens = numericMetric(step.metrics, 'prompt_tokens');
+    if (promptTokens === undefined || promptTokens <= 0) continue;
+    return {
+      promptTokens,
+      completionTokens: numericMetric(step.metrics, 'completion_tokens') ?? 0,
+      cachedTokens: numericMetric(step.metrics, 'cached_tokens'),
+    };
+  }
+  return undefined;
 }
 
 // ─── Session-isolated Devin home ───────────────────────────────────────────

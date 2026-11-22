@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from 'bun:test';
+import { afterEach, expect, mock, spyOn, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -106,15 +106,445 @@ test('Critic Off releases the answer without review', async () => {
   expect(f.events.some((event) => event.type === 'stream.delta')).toBe(true);
 });
 
-test('Auto does not invoke Critic for a trivial readiness test message', async () => {
+test('Auto asks the agent even for a readiness message and honors its decline', async () => {
   const f = await fixture();
   await f.sessions.update(f.session.id, { agentOverrides: { criticMode: 'auto' } });
   const review = mock(async () => ({ passed: true }));
   f.internal.runCriticGate = review;
+  const decisions: StreamRequest[] = [];
+  f.provider.streamResponse = mock(async function* (request: StreamRequest) {
+    decisions.push(request);
+    yield { type: 'content_delta', content: '{"review":false,"reason":"Nothing to verify."}' };
+  });
   await reply(f, 'act', 'test');
+  expect(decisions).toHaveLength(1);
   expect(review).not.toHaveBeenCalled();
-  expect(f.events.some((event) => event.type === 'system.info' && event.payload.message.includes('Critic Auto'))).toBe(false);
+  expect(f.events.some((event) => event.type === 'system.info' && event.payload.message.includes('Critic Auto · review required'))).toBe(false);
   expect(f.events.filter((event) => event.type === 'stream.delta').map((event) => event.payload.content)).toEqual(['A cache reuses previous results.']);
+});
+
+test('Auto retries an invalid decision with a correction and honors the follow-up choice', async () => {
+  const f = await fixture();
+  await f.sessions.update(f.session.id, { agentOverrides: { criticMode: 'auto' } });
+  writeFileSync(join(f.root, 'koryphaios.json'), JSON.stringify({ agentSettings: {
+    criticMode: 'auto', designDiscovery: false, intentInterview: 'off',
+    managerModelAccess: { critic: ['openai:critic-a', 'openai:critic-b'] },
+  } }));
+  const review = mock(async (..._args: unknown[]) => ({ passed: true }));
+  f.internal.runCriticGate = review;
+  const decisions: StreamRequest[] = [];
+  f.provider.streamResponse = mock(async function* (request: StreamRequest) {
+    decisions.push(request);
+    yield {
+      type: 'content_delta',
+      content:
+        decisions.length === 1
+          ? 'not json at all'
+          : JSON.stringify({ review: true, reason: 'Needs a second look.', model: 'openai:critic-b' }),
+    };
+  });
+  await reply(f);
+  expect(decisions).toHaveLength(2);
+  const retryMessages = decisions[1]!.messages;
+  expect(retryMessages.at(-1)).toMatchObject({ role: 'user' });
+  expect(String(retryMessages.at(-1)?.content)).toContain('Your previous reply was invalid');
+  expect(retryMessages.at(-2)).toMatchObject({ role: 'assistant', content: 'not json at all' });
+  expect(review).toHaveBeenCalledTimes(1);
+  expect(review.mock.calls[0]?.[7]).toMatchObject({ criticModel: 'openai:critic-b' });
+});
+
+test('Auto gives up deciding after three invalid replies and runs no review', async () => {
+  const f = await fixture();
+  await f.sessions.update(f.session.id, { agentOverrides: { criticMode: 'auto' } });
+  const review = mock(async () => ({ passed: true }));
+  f.internal.runCriticGate = review;
+  const decisions: StreamRequest[] = [];
+  f.provider.streamResponse = mock(async function* (request: StreamRequest) {
+    decisions.push(request);
+    yield { type: 'content_delta', content: 'this is not the decision schema' };
+  });
+  await reply(f);
+  expect(decisions).toHaveLength(3);
+  expect(review).not.toHaveBeenCalled();
+  expect(
+    f.events.some(
+      (event) =>
+        event.type === 'system.info' &&
+        event.payload.message.includes('decision unavailable after 3 attempts'),
+    ),
+  ).toBe(true);
+  expect(f.events.filter((event) => event.type === 'stream.delta').map((event) => event.payload.content)).toEqual(['A cache reuses previous results.']);
+});
+
+test('Auto asks the session manager when the producer provider cannot be asked', async () => {
+  const f = await fixture();
+  await f.sessions.update(f.session.id, { agentOverrides: { criticMode: 'auto' } });
+  f.internal.runtimes.get(f.session.id).managerRouting = {
+    provider: 'anthropic',
+    model: 'manager-model',
+  };
+  // The producer's provider is missing from the available list; only the
+  // manager's provider can answer a decision request.
+  f.providers.getAvailable = () => [{ name: 'anthropic' } as Provider];
+  const decisions: StreamRequest[] = [];
+  f.provider.streamResponse = mock(async function* (request: StreamRequest) {
+    decisions.push(request);
+    yield { type: 'content_delta', content: '{"review":false,"reason":"Manager declines."}' };
+  });
+  const gate = await f.manager.runCriticGate(
+    f.session.id,
+    [{ role: 'assistant', content: 'Implemented caching.' }],
+    'openai:producer',
+    'Implement caching',
+    f.root,
+    { provider: 'openai', model: 'producer' },
+  );
+  expect(gate).toMatchObject({ passed: true, skipped: true });
+  expect(decisions).toHaveLength(1);
+  expect(decisions[0]?.model).toBe('manager-model');
+});
+
+test('Auto runs no review when neither producer nor manager can be asked', async () => {
+  const f = await fixture();
+  await f.sessions.update(f.session.id, { agentOverrides: { criticMode: 'auto' } });
+  f.providers.getAvailable = () => [];
+  const decisions: StreamRequest[] = [];
+  f.provider.streamResponse = mock(async function* (request: StreamRequest) {
+    decisions.push(request);
+    yield { type: 'content_delta', content: '{"review":false,"reason":"x"}' };
+  });
+  const gate = await f.manager.runCriticGate(
+    f.session.id,
+    [{ role: 'assistant', content: 'Implemented caching.' }],
+    'openai:producer',
+    'Implement caching',
+    f.root,
+    { provider: 'openai', model: 'producer' },
+  );
+  expect(gate).toMatchObject({ passed: true, skipped: true });
+  expect(decisions).toHaveLength(0);
+  expect(f.events.some((event) => event.type === 'agent.spawned')).toBe(false);
+  expect(
+    f.events.some(
+      (event) =>
+        event.type === 'system.info' &&
+        event.payload.message.includes('no agent is available to decide'),
+    ),
+  ).toBe(true);
+});
+
+test('Always retries a crashed Critic on another route and passes', async () => {
+  const f = await fixture();
+  writeFileSync(join(f.root, 'koryphaios.json'), JSON.stringify({ agentSettings: {
+    criticMode: 'always', designDiscovery: false, intentInterview: 'off',
+    managerModelAccess: { critic: ['openai:critic-a', 'openai:critic-b'] },
+  } }));
+  const attempted: string[] = [];
+  (f.providers as any).executeWithRetry = mock(async function* (request: StreamRequest) {
+    if (attempted.push(request.model) === 1) {
+      yield { type: 'error', error: 'critic provider exploded' };
+      return;
+    }
+    yield { type: 'content_delta', content: JSON.stringify({
+      verdict: 'PASS', findings: [], checksReviewed: ['inspection'],
+      unmetCriteria: [], skillReviews: [],
+      verifierAssessment: { status: 'supported', evidence: 'Looks right' },
+    }) };
+  });
+  const gate = await f.manager.runCriticGate(
+    f.session.id,
+    [{ role: 'assistant', content: 'Explained caching.' }],
+    'openai:producer',
+    'Explain caching',
+    f.root,
+    { provider: 'openai', model: 'producer' },
+  );
+  expect(gate.passed).toBe(true);
+  expect(attempted).toHaveLength(2);
+  expect(attempted[0]).not.toBe(attempted[1]);
+  expect(
+    f.internal.runtimes.peek(f.session.id)?.failedCriticRoutes.has(`openai:${attempted[0]}`),
+  ).toBe(true);
+  expect(
+    f.events.some(
+      (event) =>
+        event.type === 'system.info' &&
+        event.payload.message.includes('Retrying with another Critic'),
+    ),
+  ).toBe(true);
+});
+
+test('a malformed Critic report is retried on another route', async () => {
+  const f = await fixture();
+  writeFileSync(join(f.root, 'koryphaios.json'), JSON.stringify({ agentSettings: {
+    criticMode: 'always', designDiscovery: false, intentInterview: 'off',
+    managerModelAccess: { critic: ['openai:critic-a', 'openai:critic-b'] },
+  } }));
+  const attempted: string[] = [];
+  (f.providers as any).executeWithRetry = mock(async function* (request: StreamRequest) {
+    if (attempted.push(request.model) === 1) {
+      yield { type: 'content_delta', content: 'I inspected it and it looked fine to me.' };
+      return;
+    }
+    yield { type: 'content_delta', content: JSON.stringify({
+      verdict: 'PASS', findings: [], checksReviewed: ['inspection'],
+      unmetCriteria: [], skillReviews: [],
+      verifierAssessment: { status: 'supported', evidence: 'Looks right' },
+    }) };
+  });
+  const gate = await f.manager.runCriticGate(
+    f.session.id,
+    [{ role: 'assistant', content: 'Explained caching.' }],
+    'openai:producer',
+    'Explain caching',
+    f.root,
+    { provider: 'openai', model: 'producer' },
+  );
+  expect(gate.passed).toBe(true);
+  expect(attempted).toHaveLength(2);
+  expect(
+    f.events.some(
+      (event) =>
+        event.type === 'system.info' &&
+        event.payload.message.includes('malformed report'),
+    ),
+  ).toBe(true);
+});
+
+test('Auto re-asks the deciding agent with the failed route excluded and reports it', async () => {
+  const f = await fixture();
+  await f.sessions.update(f.session.id, { agentOverrides: { criticMode: 'auto' } });
+  writeFileSync(join(f.root, 'koryphaios.json'), JSON.stringify({ agentSettings: {
+    criticMode: 'auto', designDiscovery: false, intentInterview: 'off',
+    managerModelAccess: { critic: ['openai:critic-a', 'openai:critic-b'] },
+  } }));
+  const attempted: string[] = [];
+  (f.providers as any).executeWithRetry = mock(async function* (request: StreamRequest) {
+    if (request.model === 'critic-a') {
+      attempted.push(request.model);
+      yield { type: 'error', error: 'critic-a exploded' };
+      return;
+    }
+    attempted.push(request.model);
+    yield { type: 'content_delta', content: JSON.stringify({
+      verdict: 'PASS', findings: [], checksReviewed: ['inspection'],
+      unmetCriteria: [], skillReviews: [],
+      verifierAssessment: { status: 'supported', evidence: 'Looks right' },
+    }) };
+  });
+  const decisions: StreamRequest[] = [];
+  f.provider.streamResponse = mock(async function* (request: StreamRequest) {
+    decisions.push(request);
+    yield {
+      type: 'content_delta',
+      content: JSON.stringify(
+        decisions.length === 1
+          ? { review: true, reason: 'Verify it.', model: 'openai:critic-a' }
+          : { review: true, reason: 'Try another route.', model: 'openai:critic-b' },
+      ),
+    };
+  });
+  const gate = await f.manager.runCriticGate(
+    f.session.id,
+    [{ role: 'assistant', content: 'Explained caching.' }],
+    'openai:producer',
+    'Explain caching',
+    f.root,
+    { provider: 'openai', model: 'producer' },
+  );
+  expect(gate.passed).toBe(true);
+  expect(decisions).toHaveLength(2);
+  const retryPayload = JSON.parse(String(decisions[1]?.messages[0]?.content));
+  expect(retryPayload.criticModels).toEqual(['openai:critic-b']);
+  expect(retryPayload.failedCritics).toEqual([
+    expect.objectContaining({ route: 'openai:critic-a' }),
+  ]);
+  expect(attempted).toEqual(['critic-a', 'critic-b']);
+});
+
+test('Auto re-runs an explicitly re-picked route when every enabled Critic already failed', async () => {
+  const f = await fixture();
+  await f.sessions.update(f.session.id, { agentOverrides: { criticMode: 'auto' } });
+  writeFileSync(join(f.root, 'koryphaios.json'), JSON.stringify({ agentSettings: {
+    criticMode: 'auto', designDiscovery: false, intentInterview: 'off',
+    managerModelAccess: { critic: ['openai:critic-a'] },
+  } }));
+  const attempted: string[] = [];
+  (f.providers as any).executeWithRetry = mock(async function* (request: StreamRequest) {
+    attempted.push(request.model);
+    if (attempted.length === 1) {
+      yield { type: 'error', error: 'critic-a exploded' };
+      return;
+    }
+    yield { type: 'content_delta', content: JSON.stringify({
+      verdict: 'PASS', findings: [], checksReviewed: ['inspection'],
+      unmetCriteria: [], skillReviews: [],
+      verifierAssessment: { status: 'supported', evidence: 'Looks right' },
+    }) };
+  });
+  const decisions: StreamRequest[] = [];
+  f.provider.streamResponse = mock(async function* (request: StreamRequest) {
+    decisions.push(request);
+    yield {
+      type: 'content_delta',
+      content: JSON.stringify({ review: true, reason: 'Retry the same route.', model: 'openai:critic-a' }),
+    };
+  });
+  const gate = await f.manager.runCriticGate(
+    f.session.id,
+    [{ role: 'assistant', content: 'Explained caching.' }],
+    'openai:producer',
+    'Explain caching',
+    f.root,
+    { provider: 'openai', model: 'producer' },
+  );
+  expect(gate.passed).toBe(true);
+  expect(decisions).toHaveLength(2);
+  const retryPayload = JSON.parse(String(decisions[1]?.messages[0]?.content));
+  // The failed route stays offered — re-picking it is an explicit retry, and
+  // the decider is told it can retry or decline.
+  expect(retryPayload.criticModels).toEqual(['openai:critic-a']);
+  expect(retryPayload.failedCritics).toEqual([
+    expect.objectContaining({ route: 'openai:critic-a' }),
+  ]);
+  expect(String(decisions[1]?.systemPrompt)).toContain('Every enabled Critic has already failed');
+  // The re-picked route really ran again, not a recorded failure shortcut.
+  expect(attempted).toEqual(['critic-a', 'critic-a']);
+  expect(
+    f.internal.runtimes.peek(f.session.id)?.failedCriticRoutes.has('openai:critic-a'),
+  ).toBe(false);
+});
+
+test('a session-remembered failed route still runs when the agent explicitly picks it', async () => {
+  const f = await fixture();
+  await f.sessions.update(f.session.id, { agentOverrides: { criticMode: 'auto' } });
+  writeFileSync(join(f.root, 'koryphaios.json'), JSON.stringify({ agentSettings: {
+    criticMode: 'auto', designDiscovery: false, intentInterview: 'off',
+    managerModelAccess: { critic: ['openai:critic-a'] },
+  } }));
+  // A previous turn within the TTL crashed on this route.
+  f.internal.runtimes.get(f.session.id).failedCriticRoutes.set('openai:critic-a', {
+    failedAt: Date.now(),
+    error: 'previous crash',
+  });
+  const attempted: string[] = [];
+  (f.providers as any).executeWithRetry = mock(async function* (request: StreamRequest) {
+    attempted.push(request.model);
+    yield { type: 'content_delta', content: JSON.stringify({
+      verdict: 'PASS', findings: [], checksReviewed: ['inspection'],
+      unmetCriteria: [], skillReviews: [],
+      verifierAssessment: { status: 'supported', evidence: 'Looks right' },
+    }) };
+  });
+  const decisions: StreamRequest[] = [];
+  f.provider.streamResponse = mock(async function* (request: StreamRequest) {
+    decisions.push(request);
+    yield {
+      type: 'content_delta',
+      content: JSON.stringify({ review: true, reason: 'Give it another shot.', model: 'openai:critic-a' }),
+    };
+  });
+  const gate = await f.manager.runCriticGate(
+    f.session.id,
+    [{ role: 'assistant', content: 'Explained caching.' }],
+    'openai:producer',
+    'Explain caching',
+    f.root,
+    { provider: 'openai', model: 'producer' },
+  );
+  expect(gate.passed).toBe(true);
+  expect(decisions).toHaveLength(1);
+  // The explicit pick was honored: the Critic stream really ran instead of the
+  // pin being short-circuited by session failure memory.
+  expect(attempted).toEqual(['critic-a']);
+  expect(
+    f.internal.runtimes.peek(f.session.id)?.failedCriticRoutes.has('openai:critic-a'),
+  ).toBe(false);
+});
+
+test('a Critic that cannot run ships the manager answer as unverified, not as a rejection', async () => {
+  const f = await fixture();
+  writeFileSync(join(f.root, 'koryphaios.json'), JSON.stringify({ agentSettings: {
+    criticMode: 'always', designDiscovery: false, intentInterview: 'off',
+    managerModelAccess: { critic: ['openai:critic-a', 'openai:critic-b'] },
+  } }));
+  (f.providers as any).executeWithRetry = mock(async function* (request: StreamRequest) {
+    if (request.model === 'producer') {
+      yield { type: 'content_delta', content: 'A cache reuses previous results.' };
+      return;
+    }
+    yield { type: 'error', error: 'critic provider exploded' };
+  });
+  await reply(f);
+  const answer = f.events
+    .filter((event) => event.type === 'stream.delta' && event.payload.agentId === 'kory-manager')
+    .map((event) => event.payload.content)
+    .join('');
+  expect(answer).toContain('A cache reuses previous results.');
+  expect(answer).toContain('UNVERIFIED: Critic could not run');
+  expect(f.events.some((event) =>
+    event.type === 'stream.delta' && String(event.payload.content).includes('CRITIC REQUIRES REPAIR'),
+  )).toBe(false);
+  const assistant = (await f.messages.getAll(f.session.id)).filter(
+    (message) => message.role === 'assistant',
+  );
+  expect(assistant).toHaveLength(1);
+  expect(String(assistant[0]?.content)).toContain('UNVERIFIED: Critic could not run');
+  expect(String(assistant[0]?.content)).not.toContain('QUALITY GATE FAILED');
+});
+
+test('every Critic route failing returns criticUnavailable, skipped and not passed', async () => {
+  const f = await fixture();
+  writeFileSync(join(f.root, 'koryphaios.json'), JSON.stringify({ agentSettings: {
+    criticMode: 'always', designDiscovery: false, intentInterview: 'off',
+    managerModelAccess: { critic: ['openai:critic-a', 'openai:critic-b'] },
+  } }));
+  (f.providers as any).executeWithRetry = mock(async function* () {
+    yield { type: 'error', error: 'critic provider exploded' };
+  });
+  const gate = await f.manager.runCriticGate(
+    f.session.id,
+    [{ role: 'assistant', content: 'Implemented caching.' }],
+    'openai:producer',
+    'Implement caching',
+    f.root,
+    { provider: 'openai', model: 'producer' },
+  );
+  expect(gate).toMatchObject({ passed: false, skipped: true, criticUnavailable: true });
+  expect(String(gate.feedback)).toContain('Critic could not run');
+});
+
+test('the decision pool excludes a recently failed Critic route and restores it after the TTL', async () => {
+  const f = await fixture();
+  writeFileSync(join(f.root, 'koryphaios.json'), JSON.stringify({ agentSettings: {
+    criticMode: 'auto', designDiscovery: false, intentInterview: 'off',
+    managerModelAccess: { critic: ['openai:critic-a', 'openai:critic-b'] },
+  } }));
+  const decisions: StreamRequest[] = [];
+  f.provider.streamResponse = mock(async function* (request: StreamRequest) {
+    decisions.push(request);
+    yield { type: 'content_delta', content: '{"review":false,"reason":"Not needed."}' };
+  });
+  const ask = () =>
+    f.internal.askForCriticDecision(
+      f.session.id,
+      [],
+      'Check work',
+      f.root,
+      { provider: 'openai', model: 'producer' },
+    );
+  const poolOf = (request: StreamRequest) =>
+    JSON.parse(String(request.messages[0]?.content)).criticModels;
+  f.internal.recordCriticRouteFailure(f.session.id, 'openai:critic-a', 'provider exploded');
+  await ask();
+  expect(poolOf(decisions[0]!)).toEqual(['openai:critic-b']);
+  const nowSpy = spyOn(Date, 'now').mockReturnValue(Date.now() + 11 * 60 * 1000);
+  try {
+    await ask();
+    expect(poolOf(decisions[1]!)).toEqual(['openai:critic-a', 'openai:critic-b']);
+  } finally {
+    nowSpy.mockRestore();
+  }
 });
 
 test('Auto asks the finishing manager and honors its chosen critic model', async () => {
@@ -338,14 +768,22 @@ test('preserves Critic errors and partial output when the provider fails after s
     { provider: 'openai', model: 'producer' },
   );
 
+  // The only route keeps failing, so the gate retried it until the attempt
+  // cap and reported the Critic as unavailable — with every attempt's
+  // error and partial output preserved in its own tool_result.
   expect(result.passed).toBe(false);
+  expect(result.skipped).toBe(true);
+  expect(result.criticUnavailable).toBe(true);
+  expect(result.feedback).toContain('Critic could not run');
   expect(result.feedback).toContain('upstream stream closed after response bytes');
-  expect(result.feedback).toContain('Partial critic output');
-  const toolResult = f.events.find(
+  const toolResults = f.events.filter(
     (event) => event.type === 'stream.tool_result' && event.payload.toolResult.name === 'critic_review',
   );
-  expect(toolResult?.payload.toolResult.criticOutcome).toBe('run_failed_after_output');
-  expect(toolResult?.payload.toolResult.output).toContain('Partial critic output');
+  expect(toolResults).toHaveLength(3);
+  for (const toolResult of toolResults) {
+    expect(toolResult.payload.toolResult.criticOutcome).toBe('run_failed_after_output');
+    expect(toolResult.payload.toolResult.output).toContain('Partial critic output');
+  }
 });
 
 test('stopping a held manager response does not publish or persist an unreviewed answer', async () => {

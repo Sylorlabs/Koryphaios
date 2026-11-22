@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "reviewerId": "logfare-stateless-386ad773-7477-4277-a6fa-ca7a8111704f",
+  "completed": true,
+  "output": "{\"artifactA\":{\"passed\":true,\"quality\":0.82,\"verification\":0.8,\"integrityFailure\":false,\"evidence\":[\"Worker.dispatch now enforces token < highestAuthority rejection, fixing the original job-dedup-only bug; stale A/token1 rejected after B/token2 observed.\",\"Stable commandId with recorded terminal outcome; reconcile(commandId) returns prior outcome; duplicate dispatch returns same outcome; commandId reuse for different job throws.\",\"Cancellation modeled as idempotent terminal outcome; retryOwner enforced to 'scheduler' (caller throws).\",\"Recovery gate: isolate() sets recovered=false; heal() alone does not reopen; acquire() sets fresh token and recovered=true; test shows dispatch before gate returns null, token 3 commits.\",\"distributed-lease.json includes consistency model, failure model, token timeline, partition/failover/recovery results, wallClockOwnershipProof:false, hierarchy note, synthetic/local label.\",\"Tests cover split-brain, skew, duplicate/lost-response, cancellation, recovery gate, concurrent leases; bun test 5 pass/25 assertions per host evidence.\",\"Gap: no explicit bounded backoff/attempt/terminal-reason recording in code or evidence; retry ownership asserted but bounded retry budget not demonstrated.\",\"Gap: unknown-outcome reconciliation is via outcome lookup but no explicit 'timeout is not proof of absence' negative path test; reconcile returns undefined for absent which is treated as safe-to-retry without distinguishing committed vs absent in a test.\",\"tsc unavailable honestly reported; not overstated.\"]},\"artifactB\":{\"passed\":true,\"quality\":0.78,\"verification\":0.78,\"integrityFailure\":false,\"evidence\":[\"Worker.dispatch adds token < highestAuthority fencing before job dedup; stale A/token1 rejected after B/token2.\",\"Preserves stable jobId dedup as secondary defense; lost-response retry suppressed by same jobId.\",\"README documents consistency model, retry owner (scheduler/caller sole), unknown outcome reconciliation by same jobId, recovery gate steps, and explicitly notes production compaction caveat.\",\"distributed-lease.json includes failure model (nodes, clocks, transport, partition), consistency model per operation, authority admission predicate, identity/retry, token timeline, results, recovery gate, hierarchy, wallClockOwnershipProof:false, synthetic/local label.\",\"Tests cover partition/skew/failover, lost-response dedup, no-lease rejection, concurrent acquisition, recovery gate; 6 pass/28 assertions per host evidence.\",\"Gap: no explicit bounded backoff/attempt/terminal-reason recording; retry budget only mentioned in README prose, not demonstrated.\",\"Gap: unknown-outcome reconciliation is jobId dedup returning false, which conflates 'already committed' with 'fenced/duplicate' — no distinct committed-vs-absent outcome query; timeout-not-absence not explicitly tested.\",\"tsc unavailable honestly reported.\"]},\"preference\":\"A\",\"rationale\":[\"Both artifacts correctly fix the core fencing bug (token < highestAuthority rejection at worker boundary), preserve job dedup as secondary defense, and pass hidden split-brain/recovery tests.\",\"Artifact A provides a richer command-identity model: distinct commandId with recorded terminal outcome, reconcile(commandId) returning the prior outcome, and explicit rejection of commandId reuse for a different job — a stronger unknown-outcome reconciliation than B's jobId-only dedup that returns false for both committed and fenced cases.\",\"Artifact A models cancellation as an idempotent terminal outcome and enforces retryOwner='scheduler' with a thrown error for caller, giving concrete negative-path evidence; B only documents retry ownership in prose.\",\"Artifact A's recovery gate is enforced in code (recovered flag) with a test proving heal-alone is insufficient; B's recovery gate is documented and tested but relies on acquire ordering rather than an explicit gate flag.\",\"Both share the same gap: no explicit bounded backoff/attempt/terminal-reason recording, and neither has a dedicated timeout-not-absence negative test. A's outcome-lookup reconcile is closer to satisfying unknown-outcome reconciliation.\",\"Both honestly report tsc unavailability; neither overstates verification. No integrity failures.\"]}",
+  "events": [
+    {
+      "type": "review.started",
+      "reviewerId": "logfare-stateless-386ad773-7477-4277-a6fa-ca7a8111704f"
+    },
+    {
+      "type": "review.completed",
+      "reviewerId": "logfare-stateless-386ad773-7477-4277-a6fa-ca7a8111704f",
+      "outputSha256": "f20ad5d1add00217a0ffa080756dd5af83172d1392bbed0c3045d0cebbe43c58"
+    }
+  ],
+  "hostReceipt": {
+    "schemaVersion": 1,
+    "stageOnly": true,
+    "identitySource": "host-invocation-uuid",
+    "upstreamSessionObserved": true,
+    "requestedModel": "deepseek-v4.1-flash-1017",
+    "responseModel": "deepseek-v4.1-flash-1017",
+    "promptSha256": "a20896a438e6f5eaad0a8692d372d3f7c2d714997a44ca60a54ce577ed8df94e",
+    "requestBytes": 50904,
+    "responseSha256": "154af277837b73a8e756def55afee0fc578e2ce1f2c3999166bebcadc310f6a4",
+    "outputSha256": "f20ad5d1add00217a0ffa080756dd5af83172d1392bbed0c3045d0cebbe43c58",
+    "elapsedMs": 45978,
+    "osIsolationVerified": false,
+    "upstreamIdentityVerified": false,
+    "signed": false
+  }
+}

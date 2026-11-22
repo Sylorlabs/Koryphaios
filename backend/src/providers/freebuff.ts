@@ -1113,15 +1113,26 @@ function buildCustomToolDefinitions(toolCtx: ToolContext): CustomToolDefinition[
       inputSchema: z.object({
         task: z.string().describe('Clear task description for the worker'),
         domain: z.string().optional().describe('Optional: ui | backend | general | test | review'),
+        worktree: z
+          .boolean()
+          .optional()
+          .describe('false for read-only research; true for file edits; omit to follow the chat setting'),
       }),
       description:
-        "Delegate a task to a specialist worker (sub-agent). The worker runs through Koryphaios's worker pipeline with its own model pool and permission gating.",
+        "Delegate a task to a specialist worker (sub-agent). The worker runs through Koryphaios's worker pipeline with its own model pool, dedicated context and permission gating.",
       endsAgentStep: true,
       execute: async (input) => {
         if (!toolCtx.delegateToWorker) {
           return [{ type: 'json', value: { error: 'Delegation not available in this context.' } }];
         }
-        const output = await toolCtx.delegateToWorker(input.task, input.domain);
+        const output = await toolCtx.delegateToWorker(
+          input.task,
+          input.domain,
+          undefined,
+          undefined,
+          undefined,
+          input.worktree,
+        );
         return [{ type: 'json', value: { result: output } }];
       },
     }),

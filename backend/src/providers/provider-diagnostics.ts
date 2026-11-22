@@ -412,6 +412,7 @@ function providerLabel(provider: string): string {
     claude: 'Claude Code',
     cline: 'Cline',
     codex: 'Codex CLI',
+    beam: 'Reflection AI',
     copilot: 'GitHub Copilot',
     cursor: 'Cursor',
     devin: 'Devin',

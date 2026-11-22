@@ -35,6 +35,28 @@ describe('provider icon assets', () => {
     expect(source).toMatch(/commandcode:\s*\['commandcode'\]/);
   });
 
+  it('ships the 100MillionSeek and Numes marks as transparent, themeable assets', () => {
+    // Both provider-display entries point at these exact paths, and
+    // ProviderIcon.svelte rejects local candidates missing from the manifest.
+    // The official marks ship without their opaque favicon backgrounds and use
+    // currentColor, so the dark-mode inversion styles them correctly.
+    for (const [slug, viewBox] of [
+      ['hundredmillionseek', '0 0 32 32'],
+      ['numes', '0 0 219 167'],
+    ] as const) {
+      const path = `/provider-icons/${slug}.svg`;
+      expect(EXISTING_PROVIDER_ICON_PATHS.has(path)).toBe(true);
+      const source = readFileSync(join(process.cwd(), `static${path}`), 'utf8');
+      const svg = new DOMParser().parseFromString(source, 'image/svg+xml');
+      expect(svg.querySelector('parsererror')).toBeNull();
+      expect(svg.documentElement.getAttribute('viewBox')).toBe(viewBox);
+      // A raster or an opaque canvas would defeat the cut-out requirement.
+      expect(svg.querySelector('image, style, foreignObject')).toBeNull();
+      expect(source).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+      expect(source).toMatch(/currentColor/);
+    }
+  });
+
   it('ships the first-party UnoRouter logomark in the generated manifest', () => {
     // backend/src/providers/provider-display.ts points UnoRouter at this exact
     // path. ProviderIcon.svelte rejects any local candidate missing from this

@@ -15,7 +15,7 @@ import type { ModelQuota } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
 import { providerLog } from '../logger';
 import { whichBinary } from './cli-detection';
-import { getSafeSubprocessEnv } from '../runtime/safe-env';
+import { antigravityProbeEnv, hasAntigravityPortableLogin } from './cli-bridges';
 
 /** Quota info for a group of models (e.g. "Gemini Models", "Claude and GPT models"). */
 export interface AntigravityQuotaGroup {
@@ -61,10 +61,16 @@ interface AgyUsageResponse {
  *  command fails. The caller maps models to groups and attaches the more
  *  restrictive (lower) of the weekly and 5-hour remaining fractions. */
 export async function fetchAntigravityQuotaGroups(
-  timeoutMs = 8_000,
+  options: { timeoutMs?: number; home?: string } = {},
 ): Promise<AntigravityQuotaGroup[] | null> {
   const bin = whichBinary('agy');
   if (!bin) return null;
+  // Quota is read through the CLI, so this is a spawn. Never do it without a
+  // staged portable login: agy would reach for the host keychain (a macOS
+  // consent prompt from a passive poll) and fall back to a browser sign-in
+  // when that fails. An explicit `home` is the test seam.
+  if (!hasAntigravityPortableLogin(options.home)) return null;
+  const timeoutMs = options.timeoutMs ?? 8_000;
 
   return new Promise((resolve) => {
     let settled = false;
@@ -76,7 +82,7 @@ export async function fetchAntigravityQuotaGroups(
     };
     const child = spawn(bin, ['--print', '/usage', '--output-format', 'json'], {
       stdio: ['ignore', 'pipe', 'ignore'],
-      env: getSafeSubprocessEnv(),
+      env: antigravityProbeEnv(options.home),
     });
 
     // The agy CLI can hang on network/auth prompts. Never let one stuck

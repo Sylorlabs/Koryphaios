@@ -9,6 +9,8 @@ Complete requested code and tests before optional analysis. If the task requests
 
 When tests are requested, treat the test diff as a required deliverable. Do not emit the final patch until at least one executable test file has been added or changed and those tests fail against the known broken behavior while passing the repair.
 
+The tests you add are part of the deliverable and they run in the same invocation as the implementation, so a test that is red for any reason fails the task even when the resolver is correct. Write assertions against the observable contract only: what the loader batched for one request, which keys were fetched again by a later request, and how a per-key failure surfaced. Do not assert wall-clock timing, do not depend on network access, do not import a helper the reference implementation does not export, and do not leave a test that documents an alternative design you did not build. Run the suite once before you finish and fix or delete anything that fails, because an aspirational test is scored as a broken bundle rather than a plan.
+
 ## Responsibility
 
 Design schemas from durable domain semantics and client needs. Keep resolver ownership, batching, nullability, pagination, authorization, deprecation, and federation boundaries explicit. Authorize at data or action boundaries.

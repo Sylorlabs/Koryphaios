@@ -1,0 +1,223 @@
+SNAPSHOT HASH DOMAINS: beforeSha256/afterSha256 identify complete workspace entries, using SHA256("file\0" + original file bytes), or SHA256("symlink\0" + link target). Scorer artifactSHA and durable artifact hashes use SHA256(raw bytes), without that tag. These different hash domains must not be compared as if identical. Visible beforeText/afterText may be bounded or privacy-scrubbed; they are not the original complete bytes to hash.
+
+You are an independent blind semantic evaluator.
+Two anonymous agents attempted the same task. You are not told which agent received any extra guidance, and you must not infer or speculate about that hidden condition.
+Judge each artifact independently against the task contract. Do not reward matching wording, verbosity, or references to a skill. Focus on behavioral correctness, scope discipline, evidence quality, preservation of required facts, negative paths, recovery behavior, and whether completion claims are actually supported.
+The artifact bundle may include harness captured execution evidence and before and after file snapshots. Treat that as observed evidence, not as an agent claim.
+PUBLIC CANDIDATE CONTRACT SNAPSHOT is the exact task prompt and allowlisted README.md/contract.json bytes visible to the candidate before execution. Hashes are verified by the harness. If an entry says UNAVAILABLE, do not reconstruct it from the current repository or treat current files as historical proof.
+executionEvidence is supplied by the host after the agent attempt, including deterministic scorer observations. An agent can truthfully report that it could not run a check even when the host subsequently runs that check successfully. Those observations have different owners and times; that difference alone is not an integrity failure.
+Attribute a completion claim to its actual source. Penalize an agent for fabricated or overstated verification only when its finalOutput or authored file content makes that unsupported claim. Do not attribute a host scorer statement to the agent, require the agent to predict later host results, or treat an honest statement of limited access as contradicting later host verification.
+Host evidence is not infallible. If a scorer result conflicts with concrete artifact behavior, identify the disputed check and evidence as a possible verifier defect. Keep instrument uncertainty separate from an agent integrity finding; a score label alone does not prove the task succeeded.
+Treat afterText JSON strings as literal source bytes. Before claiming a URL or origin is malformed or Markdown-formatted, inspect and quote the exact JSON value. Do not transform plain URL strings into Markdown hyperlinks and then mistake that display formatting for the original value.
+The PAIR EXECUTION EVIDENCE section is evaluator owned evidence. It certifies that Artifact A and Artifact B are the two randomized arms of one matched same model comparison for this exact scenario and evaluation contract.
+When REQUIRED EVIDENCE or REQUIRED ARTIFACTS asks for paired skill and no skill run artifacts, paired evaluation evidence, or an equivalent pair label, the anonymous A and B bundle plus PAIR EXECUTION EVIDENCE satisfies the existence and provenance of that pair. Do not require either agent output to claim, create, or narrate evaluator owned pair evidence.
+The REQUIRED ARTIFACTS entries below are evaluation evidence labels for the overall harness. They are not literal filenames the agent was instructed to create unless the task itself says so. Judge whether the bundle substantively supplies the required evidence; do not require those exact label strings to appear.
+Routing and hierarchy selection are evaluated independently by the harness. Do not require the agent to narrate which skill was selected or provide meta level specialist selection rationale when the artifact itself respects the requested scope and neighboring responsibility boundaries.
+Never lower passed, quality, verification, or integrity because an artifact omits hierarchy narration, specialist selection rationale, skill names, or evaluator owned paired A/B evidence. If a draft criticism relies on one of those omissions, remove that criticism and score only the concrete task behavior and evidence.
+If a REQUIRED EVIDENCE or REQUIRED ARTIFACTS label describes routing, hierarchy selection, specialist selection, or paired skill versus no skill provenance, treat that meta level requirement as evaluator owned. The harness evidence in this prompt is authoritative for those concerns.
+When choosing preference A, B, or tie, compare concrete task behavior and evidence only. Evaluator-owned hierarchy or specialist narration, skill-guidance scope, filenames, and paired-run provenance must not affect the preference comparison.
+Treat genuinely missing task evidence as missing. Do not assume unshown commands or tests passed.
+Return JSON only, with this exact shape:
+{"artifactA":{"passed":true,"quality":0.0,"verification":0.0,"integrityFailure":false,"evidence":["..."]},"artifactB":{"passed":true,"quality":0.0,"verification":0.0,"integrityFailure":false,"evidence":["..."]},"preference":"A","rationale":["..."]}
+
+TASK
+Model workspace membership history where a user can leave and later rejoin, role changes must be auditable, and at most one active membership may exist per user/workspace at a time. Define keys, temporal representation, constraints/indexes, update transaction semantics, and migration from a current `memberships(user_id, workspace_id, role, active)` table. Verify duplicate active insert, leave/rejoin, role history, and rollback.
+
+FALSIFIABLE CHECKS
+[
+  {
+    "id": "scope-and-hierarchy",
+    "assertion": "The result must establish the actual relational-data-modeling boundary and relevant environment before acting, preserve the hierarchy relationship (broader=backend-engineering; children=mysql-engineering,postgres-engineering,sqlite-engineering; near-neighbor=mongodb-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+  },
+  {
+    "id": "operating-contract",
+    "assertion": "Start from entities, identities, invariants, lifecycle, cardinality, ownership, retention, and access patterns."
+  },
+  {
+    "id": "execution-invariant",
+    "assertion": "Keys and constraints encode the declared entity/temporal invariants so concurrent writes cannot create two active memberships and history is not reconstructed from overwritten state."
+  },
+  {
+    "id": "verification-discipline",
+    "assertion": "Validate representative inserts, updates, deletes, concurrent transactions, migrations, uniqueness, referential integrity, and high-value query plans against realistic data shapes."
+  },
+  {
+    "id": "anti-pattern-resistance",
+    "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not use JSON columns to postpone every modeling decision, rely solely on application validation for database invariants, or choose surrogate keys without understanding natural uniqueness."
+  },
+  {
+    "id": "evidence-and-uncertainty",
+    "assertion": "Every material completion claim must map to observable evidence (relational-data-modeling decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+  }
+]
+
+REQUIRED EVIDENCE
+[
+  "membership-temporal-constraint scenario evidence",
+  "relational-data-modeling decision and boundary evidence",
+  "Hierarchy boundary and selected specialist rationale",
+  "hierarchy boundary and selected specialist rationale",
+  "paired skill/no-skill run artifacts",
+  "explicit unavailable, simulated, inferred, or stale evidence labels"
+]
+
+REQUIRED ARTIFACTS
+[
+  "relational-data-modeling-individual-scenario-1-result",
+  "relational-data-modeling-individual-scenario-1-verification",
+  "relational-data-modeling-individual-scenario-1-paired-evaluation"
+]
+
+PUBLIC CANDIDATE CONTRACT SNAPSHOT
+{
+  "taskPrompt": {
+    "available": true,
+    "sha256": "a8cb179d8d95993646d5dd7e0fad6663f216dc6e991d246d6f8e243150fadedb",
+    "byteLength": 431,
+    "text": "Model workspace membership history where a user can leave and later rejoin, role changes must be auditable, and at most one active membership may exist per user/workspace at a time. Define keys, temporal representation, constraints/indexes, update transaction semantics, and migration from a current `memberships(user_id, workspace_id, role, active)` table. Verify duplicate active insert, leave/rejoin, role history, and rollback."
+  },
+  "fixtureFiles": {
+    "README.md": {
+      "available": true,
+      "sha256": "cb422434628baab6fc6945e21ce8f8365b50c1d88396d0885ec1d7253263fddf",
+      "byteLength": 867,
+      "text": "# Relational membership-history fixture\n\nReplace `schema.sql` with the post-migration relational model. Preserve every membership tenure and role transition as history rather than overwriting one row. Each history row needs stable identity, `user_id`, `workspace_id`, role, start time and nullable end time. Enforce at the database level that at most one row with no end time exists per user/workspace, including concurrent inserts. Leave/rejoin creates a new history row; role change closes the old row and opens the next in one transaction.\n\nUse explicit foreign/uniqueness/index constraints where relevant. Write `.kory-eval/rel-membership.json` with old→new migration, transactional update semantics, rollback, high-value lookup index/query-plan evidence, broader backend-engineering, relational children (MySQL/Postgres/SQLite), and MongoDB neighbor boundary.\n"
+    },
+    "contract.json": {
+      "available": false,
+      "sha256": null,
+      "byteLength": 0,
+      "text": null,
+      "reason": "not-present"
+    }
+  }
+}
+
+PAIR EXECUTION EVIDENCE
+{
+  "matchedPair": true,
+  "sameScenario": true,
+  "sameProviderModel": true,
+  "sameHarness": true,
+  "sameEvaluationContract": true,
+  "sameMaterializer": true,
+  "sameDeterministicScorer": true,
+  "randomizedArmIdentity": true,
+  "evidenceOwner": "evaluation-harness"
+}
+
+ARTIFACT A
+{
+  "finalOutput": "Implemented the membership history model in [schema.sql](<redacted-path>) and documented migration, transaction semantics, and backend-engineering boundaries in [rel-membership.json](<redacted-path>).\n\nEach row represents a tenure with a stable ID, role, start time, and nullable end time. A partial unique index permits at most one open tenure per user/workspace; leave/rejoin and role changes preserve prior rows. Migration notes call out that the legacy table lacks dates and prior history, so those cannot be reconstructed.\n\nSQLite verification passed: duplicate open insert rejected; leave/rejoin retained both tenures; role change retained both roles; a failed transition rolled back and kept the prior row open. `EXPLAIN QUERY PLAN` used the history index, and the JSON parsed successfully.",
+  "executionEvidence": [
+    "Codex CLI completed successfully in 139740ms",
+    "temporal relational constraints: fail",
+    "migration/hierarchy evidence: present",
+    "Traceback (most recent call last):\n  File \"<redacted-path>\", line 23, in <module>\n    assert rows==[('member',1,3),('admin',4,None)], rows\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: [('member', '1', '3'), ('admin', '4', None)]"
+  ],
+  "publicContract": {
+    "taskPrompt": {
+      "available": true,
+      "sha256": "a8cb179d8d95993646d5dd7e0fad6663f216dc6e991d246d6f8e243150fadedb",
+      "byteLength": 431,
+      "text": "Model workspace membership history where a user can leave and later rejoin, role changes must be auditable, and at most one active membership may exist per user/workspace at a time. Define keys, temporal representation, constraints/indexes, update transaction semantics, and migration from a current `memberships(user_id, workspace_id, role, active)` table. Verify duplicate active insert, leave/rejoin, role history, and rollback."
+    },
+    "fixtureFiles": {
+      "README.md": {
+        "available": true,
+        "sha256": "cb422434628baab6fc6945e21ce8f8365b50c1d88396d0885ec1d7253263fddf",
+        "byteLength": 867,
+        "text": "# Relational membership-history fixture\n\nReplace `schema.sql` with the post-migration relational model. Preserve every membership tenure and role transition as history rather than overwriting one row. Each history row needs stable identity, `user_id`, `workspace_id`, role, start time and nullable end time. Enforce at the database level that at most one row with no end time exists per user/workspace, including concurrent inserts. Leave/rejoin creates a new history row; role change closes the old row and opens the next in one transaction.\n\nUse explicit foreign/uniqueness/index constraints where relevant. Write `.kory-eval/rel-membership.json` with old→new migration, transactional update semantics, rollback, high-value lookup index/query-plan evidence, broader backend-engineering, relational children (MySQL/Postgres/SQLite), and MongoDB neighbor boundary.\n"
+      },
+      "contract.json": {
+        "available": false,
+        "sha256": null,
+        "byteLength": 0,
+        "text": null,
+        "reason": "not-present"
+      }
+    }
+  },
+  "changes": [
+    {
+      "path": ".kory-eval/rel-membership.json",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "c496d1c78a616b9d86192276c5243ffbbfc53c10771ce63b660ebace2c81fa4a",
+      "afterText": "{\n  \"task\": \"Relational membership history with leave/rejoin, auditable role changes, and at most one active membership per user/workspace\",\n  \"engine\": \"SQLite\",\n  \"model\": {\n    \"table\": \"memberships\",\n    \"key\": \"id (stable surrogate primary key)\",\n    \"columns\": {\n      \"user_id\": \"required foreign key to users(id)\",\n      \"workspace_id\": \"required foreign key to workspaces(id)\",\n      \"role\": \"required non-empty role for this tenure\",\n      \"started_at\": \"UTC ISO-8601 text; inclusive tenure start\",\n      \"ended_at\": \"nullable UTC ISO-8601 text; exclusive tenure end; NULL means current\"\n    },\n    \"checks\": [\n      \"role is non-empty after trim\",\n      \"ended_at is NULL or strictly greater than started_at\"\n    ],\n    \"active_uniqueness\": \"Unique partial index on (user_id, workspace_id) WHERE ended_at IS NULL; index rejects duplicate current rows atomically, including concurrent writers.\",\n    \"indexes\": [\n      {\n        \"name\": \"memberships_user_workspace_history\",\n        \"columns\": [\"user_id\", \"workspace_id\", \"started_at DESC\", \"id DESC\"],\n        \"purpose\": \"Fetch a pair's complete tenure/role history in chronological order.\"\n      },\n      {\n        \"name\": \"memberships_workspace_roster\",\n        \"columns\": [\"workspace_id\", \"user_id\", \"started_at DESC\"],\n        \"predicate\": \"ended_at IS NULL\",\n        \"purpose\": \"List current members of a workspace.\"\n      }\n    ],\n    \"query_plan_evidence\": {\n      \"query\": \"SELECT id, role, started_at, ended_at FROM memberships WHERE user_id = ? AND workspace_id = ? ORDER BY started_at DESC, id DESC\",\n      \"evidence\": \"EXPLAIN QUERY PLAN uses memberships_user_workspace_history for the equality lookup and ordering.\"\n    }\n  },\n  \"migration\": {\n    \"from\": \"memberships(user_id, workspace_id, role, active), primary key (user_id, workspace_id)\",\n    \"to\": \"users, workspaces, and memberships history table\",\n    \"steps\": [\n      \"Begin one migration transaction with foreign key enforcement enabled.\",\n      \"Insert distinct legacy user_id and workspace_id values into parent tables.\",\n      \"Copy each legacy row to one history row, retaining role; map active=1 to ended_at NULL.\",\n      \"Map active=0 to a closed historical tenure using its true start/end if available; otherwise use an explicitly documented migration timestamp and flag that legacy duration is unknown.\",\n      \"Validate row counts, roles, foreign key check, and at most one open row per pair before cutover; preserve/rename legacy table for rollback until validated.\"\n    ],\n    \"limitation\": \"The legacy schema has no timestamps or prior role/tenure records. It cannot reconstruct leave dates, join dates, or prior role changes. Each legacy row seeds only one tenure; no missing history is fabricated.\"\n  },\n  \"transactions\": {\n    \"leave\": \"BEGIN IMMEDIATE; update the one open row's ended_at to a supplied UTC timestamp; require exactly one changed row; COMMIT. Roll back if zero or multiple rows match.\",\n    \"rejoin\": \"BEGIN IMMEDIATE; insert a new row with new stable id, role, started_at, and NULL ended_at; COMMIT. A unique-index violation rejects rejoin while an open tenure exists.\",\n    \"role_change\": \"BEGIN IMMEDIATE; close the open row at timestamp T; require one row changed; insert the new role tenure with started_at=T and ended_at NULL; COMMIT. The old role remains auditable.\",\n    \"rollback\": \"Any failed insert/update, constraint violation, or application error rolls back the whole transaction; role changes cannot leave only the old tenure closed. Use the same timestamp T for both sides of a role transition.\"\n  },\n  \"verification\": {\n    \"duplicate_active_insert\": \"Verified: a second open row for the same user/workspace is rejected by memberships_one_open_per_pair.\",\n    \"leave_rejoin\": \"Verified: closing tenure A permits insertion of tenure B; both rows remain in history and only B is open.\",\n    \"role_history\": \"Verified: role update closes old-role row and inserts new-role row atomically; both roles remain queryable.\",\n    \"rollback\": \"Verified: forcing a role transition insert failure after closing the previous row and rolling back restores the previous open row and adds no new row.\",\n    \"query_plan\": \"Verified with EXPLAIN QUERY PLAN that pair-history query uses memberships_user_workspace_history.\"\n  },\n  \"backend_engineering\": {\n    \"focus\": \"Database-backed lifecycle state, durable audit history, transaction boundaries, concurrency invariants, migration reconciliation, and index-backed access patterns.\",\n    \"relational_children\": {\n      \"postgresql\": \"Use timestamptz and a partial unique index WHERE ended_at IS NULL; transactions and unique index enforce the same invariant.\",\n      \"sqlite\": \"Use the included schema, UTC ISO-8601 timestamps, partial unique index, foreign_keys=ON, and BEGIN IMMEDIATE for write serialization.\",\n      \"mysql\": \"Use DATETIME(6) UTC and a generated nullable active key or equivalent unique-key strategy because partial indexes are unavailable in common MySQL versions; verify exact version semantics and transaction behavior.\"\n    },\n    \"neighbor_boundary\": \"MongoDB is a neighboring persistence model. Equivalent history documents and unique partial indexes are possible, but it is not a relational child and lacks relational foreign-key constraints; do not substitute it for the requested relational schema.\"\n  }\n}\n"
+    },
+    {
+      "path": "schema.sql",
+      "change": "modified",
+      "beforeSha256": "8367866106481fd1a78eb50028ea20dd461d30ab7a91195f08cc27b0a0b5334e",
+      "afterSha256": "7f621a629689cda609c796460ab2a6e67d49fc23f2bb7a691b7509c62d555318",
+      "beforeText": "CREATE TABLE memberships (\n  user_id TEXT NOT NULL,\n  workspace_id TEXT NOT NULL,\n  role TEXT NOT NULL,\n  active INTEGER NOT NULL DEFAULT 1,\n  PRIMARY KEY (user_id, workspace_id)\n);\n",
+      "afterText": "-- SQLite post-migration membership history model.\n-- A membership row represents one continuous tenure under one role.\nCREATE TABLE workspaces (\n  id TEXT PRIMARY KEY\n);\n\nCREATE TABLE users (\n  id TEXT PRIMARY KEY\n);\n\nCREATE TABLE memberships (\n  id INTEGER PRIMARY KEY,\n  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,\n  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE RESTRICT,\n  role TEXT NOT NULL CHECK (length(trim(role)) > 0),\n  started_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),\n  ended_at TEXT,\n  CHECK (ended_at IS NULL OR ended_at > started_at)\n);\n\n-- Partial uniqueness also arbitrates concurrent attempts to create an open\n-- tenure for the same pair. Historical rows remain unrestricted.\nCREATE UNIQUE INDEX memberships_one_open_per_pair\n  ON memberships(user_id, workspace_id)\n  WHERE ended_at IS NULL;\n\n-- Supports a user's chronological workspace history and workspace rosters.\nCREATE INDEX memberships_user_workspace_history\n  ON memberships(user_id, workspace_id, started_at DESC, id DESC);\nCREATE INDEX memberships_workspace_roster\n  ON memberships(workspace_id, user_id, started_at DESC)\n  WHERE ended_at IS NULL;\n\n-- Legacy migration (run with foreign_keys enabled, inside one transaction).\n-- The old table has no timestamps, so its real tenure dates cannot be recovered.\n-- Create users/workspaces from distinct legacy identifiers, then choose an\n-- explicit migration timestamp :migration_at (UTC ISO-8601) and map legacy\n-- active=1 rows to an open tenure starting at :migration_at. Map active=0 rows\n-- to a closed tenure ending at :migration_at, with a documented synthetic\n-- start time earlier than :migration_at (or omit inactive rows if policy says\n-- the table only represented present-day members). Never set start=end because\n-- the interval check requires positive duration. Validate row counts and\n-- foreign_key_check before cutover; retain the old table until reconciled.\n\n-- Transaction semantics:\n-- Leave: BEGIN IMMEDIATE; UPDATE memberships SET ended_at=:at\n--   WHERE user_id=:user AND workspace_id=:workspace AND ended_at IS NULL;\n--   require changes()=1; COMMIT.\n-- Rejoin: BEGIN IMMEDIATE; INSERT a new memberships row with ended_at=NULL;\n--   COMMIT. A unique-index conflict means an open tenure already exists.\n-- Role change: BEGIN IMMEDIATE; SAVEPOINT transition; UPDATE current row\n--   SET ended_at=:at ...; require changes()=1; INSERT new row with new role,\n--   started_at=:at; RELEASE transition; COMMIT. On any error, ROLLBACK the\n--   transaction (or ROLLBACK TO transition before any further work). Use one UTC\n--   timestamp for both sides; serialize writes (SQLite BEGIN IMMEDIATE) and\n--   let the unique index enforce the invariant across connections.\n"
+    }
+  ]
+}
+
+ARTIFACT B
+{
+  "finalOutput": "Implemented the SQLite membership history model, migration, and verification script. Membership rows now represent individual tenures with stable IDs, UTC start times, nullable end times, and immutable role history. A partial unique index enforces at most one open tenure per user/workspace.\n\n`sqlite3 :memory: < verify.sql` completed successfully. It showed legacy rows preserved, duplicate-open preconditions blocked, leave/rejoin and role history recorded, rollback retaining one open tenure, and both query plans using the intended indexes. The JSON modeling record also parses successfully.\n\nFiles: [schema.sql](<redacted-path>), [migration.sql](<redacted-path>), [verify.sql](<redacted-path>), and [.kory-eval/rel-membership.json](<redacted-path>).\n\nThe legacy schema has no timestamps, so migration uses an explicit cutover time; inactive rows become closed snapshots at that time.",
+  "executionEvidence": [
+    "Codex CLI completed successfully in 161253ms",
+    "temporal relational constraints: fail",
+    "migration/hierarchy evidence: present",
+    "Traceback (most recent call last):\n  File \"<redacted-path>\", line 23, in <module>\n    assert rows==[('member',1,3),('admin',4,None)], rows\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: [('member', '1', '3'), ('admin', '4', None)]"
+  ],
+  "publicContract": {
+    "taskPrompt": {
+      "available": true,
+      "sha256": "a8cb179d8d95993646d5dd7e0fad6663f216dc6e991d246d6f8e243150fadedb",
+      "byteLength": 431,
+      "text": "Model workspace membership history where a user can leave and later rejoin, role changes must be auditable, and at most one active membership may exist per user/workspace at a time. Define keys, temporal representation, constraints/indexes, update transaction semantics, and migration from a current `memberships(user_id, workspace_id, role, active)` table. Verify duplicate active insert, leave/rejoin, role history, and rollback."
+    },
+    "fixtureFiles": {
+      "README.md": {
+        "available": true,
+        "sha256": "cb422434628baab6fc6945e21ce8f8365b50c1d88396d0885ec1d7253263fddf",
+        "byteLength": 867,
+        "text": "# Relational membership-history fixture\n\nReplace `schema.sql` with the post-migration relational model. Preserve every membership tenure and role transition as history rather than overwriting one row. Each history row needs stable identity, `user_id`, `workspace_id`, role, start time and nullable end time. Enforce at the database level that at most one row with no end time exists per user/workspace, including concurrent inserts. Leave/rejoin creates a new history row; role change closes the old row and opens the next in one transaction.\n\nUse explicit foreign/uniqueness/index constraints where relevant. Write `.kory-eval/rel-membership.json` with old→new migration, transactional update semantics, rollback, high-value lookup index/query-plan evidence, broader backend-engineering, relational children (MySQL/Postgres/SQLite), and MongoDB neighbor boundary.\n"
+      },
+      "contract.json": {
+        "available": false,
+        "sha256": null,
+        "byteLength": 0,
+        "text": null,
+        "reason": "not-present"
+      }
+    }
+  },
+  "changes": [
+    {
+      "path": ".kory-eval/rel-membership.json",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "3d372146a4b3c23226cb5904bc03db677c8eb82cf47ee6711d09bd8f2583fa10",
+      "afterText": "{\n  \"engine\": \"SQLite 3.51.0 observed locally\",\n  \"model\": {\n    \"entity\": \"membership tenure; each row records one continuous interval at one role\",\n    \"primary_key\": \"membership_id INTEGER PRIMARY KEY\",\n    \"natural_key\": \"(user_id, workspace_id) identifies the relationship across multiple tenure rows, not a row\",\n    \"temporal_representation\": \"started_at is required UTC ISO-8601 text; ended_at is nullable and means currently open when NULL; intervals are [started_at, ended_at)\",\n    \"foreign_keys\": \"user_id -> users(user_id), workspace_id -> workspaces(workspace_id), both ON DELETE RESTRICT\",\n    \"invariants\": [\n      \"ended_at is null or ended_at >= started_at\",\n      \"a partial unique index on (user_id, workspace_id) WHERE ended_at IS NULL permits at most one open tenure per relationship, including concurrent writers\",\n      \"role is immutable historical fact by write-path contract; a role change closes the row and inserts a successor\"\n    ],\n    \"indexes\": [\n      \"memberships_one_open_tenure (user_id, workspace_id) WHERE ended_at IS NULL for current membership lookup and uniqueness\",\n      \"memberships_history (user_id, workspace_id, started_at, membership_id) for ordered tenure and role history\"\n    ]\n  },\n  \"transaction_semantics\": {\n    \"leave\": \"BEGIN IMMEDIATE; update exactly one open row's ended_at; require changes()=1; otherwise rollback; commit\",\n    \"rejoin\": \"Insert a new row with a new membership_id and ended_at NULL; the unique index arbitrates races; duplicate conflict rolls back\",\n    \"role_change\": \"BEGIN IMMEDIATE; close exactly one open row; require changes()=1; insert successor with new role and same transition timestamp; commit; any error rolls back both statements\",\n    \"concurrency\": \"SQLite serializes writers; BEGIN IMMEDIATE acquires the reserved write lock before the transition. The partial unique index remains the database invariant for every writer.\"\n  },\n  \"migration\": {\n    \"from\": \"memberships(user_id, workspace_id, role, active)\",\n    \"mapping\": \"Rebuild table transactionally. Copy every legacy row, retaining user/workspace/role. Bind an explicit UTC migration_time: started_at=migration_time; ended_at=NULL when active=1 and ended_at=migration_time when active=0. This preserves state and snapshots without inventing historical timestamps.\",\n    \"ordering\": \"Enable foreign_keys; begin immediate; create replacement with checks/FKs; copy and validate legacy data; drop old; rename replacement; create indexes; commit. Existing duplicate relationship rows cannot exist under the legacy primary key.\"\n  },\n  \"verification\": {\n    \"command\": \"sqlite3 :memory: < verify.sql\",\n    \"observed\": [\n      \"Migration preserved two rows: one open active row and one closed inactive snapshot.\",\n      \"Duplicate open precondition was rejected by checking that an open row exists; the unique index enforces the same invariant for inserts and concurrent writers.\",\n      \"Leave/rejoin and role change produced member closed, member closed, admin open history rows.\",\n      \"A forced successor-write failure followed by transaction rollback left exactly one open predecessor row.\",\n      \"EXPLAIN QUERY PLAN used memberships_one_open_tenure for current lookup and memberships_history for relationship history ordering.\"\n    ],\n    \"limitations\": \"Duplicate insert enforcement follows directly from the partial unique index; the sqlite3 CLI verification script checks the precondition because it aborts input after constraint errors even when .bail is off. No concurrent multi-connection stress test was run.\"\n  },\n  \"product_semantics_to_confirm\": [\n    \"Whether historical rows may be physically purged; current foreign keys restrict deletion of referenced users/workspaces.\",\n    \"Whether a legacy inactive snapshot should be retained as a zero-length cutover interval or imported through a separate legacy snapshot representation.\",\n    \"All timestamps must be normalized UTC with consistent precision by writers.\"\n  ],\n  \"routing\": {\n    \"broader\": \"backend-engineering for application transaction/write-path integration\",\n    \"relational_children\": [\"mysql-engineering\", \"postgres-engineering\", \"sqlite-engineering\"],\n    \"selected_child\": \"sqlite-engineering\",\n    \"neighbor_boundary\": \"MongoDB is a document-database neighbor; use its own modeling guidance only if the persistence engine changes, not for this relational schema.\"\n  }\n}\n"
+    },
+    {
+      "path": "migration.sql",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "5e52e8bf17955216281dbe660deacf154a1ccd71b0c710b5a781e62d986e4a0b",
+      "afterText": "-- SQLite migration from memberships(user_id, workspace_id, role, active).\n-- A legacy table cannot reveal when membership began/ended. The supplied\n-- migration_time is an explicit UTC cutover timestamp, not reconstructed time.\n-- Run in one connection with foreign_keys enabled and a bound :migration_time.\nPRAGMA foreign_keys = ON;\nBEGIN IMMEDIATE;\n\nCREATE TABLE memberships_new (\n  membership_id INTEGER PRIMARY KEY,\n  user_id TEXT NOT NULL,\n  workspace_id TEXT NOT NULL,\n  role TEXT NOT NULL,\n  started_at TEXT NOT NULL,\n  ended_at TEXT,\n  FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE RESTRICT,\n  FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id) ON DELETE RESTRICT,\n  CHECK (ended_at IS NULL OR ended_at >= started_at)\n);\n\n-- active=1 becomes open; active=0 becomes a closed legacy snapshot at cutover.\n-- This preserves all rows and roles but does not claim to recover real tenure.\nINSERT INTO memberships_new(user_id, workspace_id, role, started_at, ended_at)\nSELECT user_id, workspace_id, role, :migration_time,\n       CASE WHEN active = 1 THEN NULL ELSE :migration_time END\nFROM memberships;\n\nDROP TABLE memberships;\nALTER TABLE memberships_new RENAME TO memberships;\n\nCREATE UNIQUE INDEX memberships_one_open_tenure\n  ON memberships(user_id, workspace_id)\n  WHERE ended_at IS NULL;\nCREATE INDEX memberships_history\n  ON memberships(user_id, workspace_id, started_at, membership_id);\n\nCOMMIT;\n"
+    },
+    {
+      "path": "schema.sql",
+      "change": "modified",
+      "beforeSha256": "8367866106481fd1a78eb50028ea20dd461d30ab7a91195f08cc27b0a0b5334e",
+      "afterSha256": "5a174ad537f9c5fb744b08673c0d7990182f20269e5c0a347e6b59839aaaca0e",
+      "beforeText": "CREATE TABLE memberships (\n  user_id TEXT NOT NULL,\n  workspace_id TEXT NOT NULL,\n  role TEXT NOT NULL,\n  active INTEGER NOT NULL DEFAULT 1,\n  PRIMARY KEY (user_id, workspace_id)\n);\n",
+      "afterText": "-- SQLite membership tenure and role history model.\n-- Apply migration.sql to an existing legacy memberships table.\nCREATE TABLE memberships (\n  membership_id INTEGER PRIMARY KEY,\n  user_id TEXT NOT NULL,\n  workspace_id TEXT NOT NULL,\n  role TEXT NOT NULL,\n  started_at TEXT NOT NULL,\n  ended_at TEXT,\n  FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE RESTRICT,\n  FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id) ON DELETE RESTRICT,\n  CHECK (ended_at IS NULL OR ended_at >= started_at)\n);\n\n-- Natural identity is retained while allowing multiple sequential tenures.\nCREATE UNIQUE INDEX memberships_one_open_tenure\n  ON memberships(user_id, workspace_id)\n  WHERE ended_at IS NULL;\n\n-- Supports a user's/workspace's chronological membership and role history.\nCREATE INDEX memberships_history\n  ON memberships(user_id, workspace_id, started_at, membership_id);\n\n-- Current membership lookup is served by memberships_one_open_tenure.\n\n-- Atomic leave: close exactly one currently open tenure.\n-- Example transaction semantics (bind a single UTC timestamp consistently):\n-- BEGIN IMMEDIATE;\n-- UPDATE memberships SET ended_at = :at\n--  WHERE user_id = :user_id AND workspace_id = :workspace_id AND ended_at IS NULL;\n-- Require changes() = 1, otherwise ROLLBACK; then COMMIT.\n\n-- Atomic rejoin: insert a fresh row after leave has committed (or after its\n-- update in the same transaction). The partial unique index arbitrates races.\n-- BEGIN IMMEDIATE;\n-- INSERT INTO memberships(user_id, workspace_id, role, started_at, ended_at)\n-- VALUES (:user_id, :workspace_id, :role, :at, NULL);\n-- COMMIT; on any error ROLLBACK.\n\n-- Atomic role change: close current tenure and open successor in one write\n-- transaction. A failed insert rolls back the close, preserving the old role.\n-- BEGIN IMMEDIATE;\n-- UPDATE memberships SET ended_at = :at\n--  WHERE user_id = :user_id AND workspace_id = :workspace_id AND ended_at IS NULL;\n-- Require changes() = 1, otherwise ROLLBACK;\n-- INSERT INTO memberships(user_id, workspace_id, role, started_at, ended_at)\n-- VALUES (:user_id, :workspace_id, :new_role, :at, NULL);\n-- COMMIT; on any error ROLLBACK.\n"
+    },
+    {
+      "path": "verify.sql",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "1d9ed103193af379366f1324616806ea6869ce29b44948d5091cadf08c96f216",
+      "afterText": ".bail off\nPRAGMA foreign_keys = ON;\nCREATE TABLE users(user_id TEXT PRIMARY KEY);\nCREATE TABLE workspaces(workspace_id TEXT PRIMARY KEY);\nINSERT INTO users VALUES ('u1'), ('u2');\nINSERT INTO workspaces VALUES ('w1');\n\n-- Exercise the migration from the exact legacy shape, including inactive data.\nCREATE TABLE memberships (\n  user_id TEXT NOT NULL,\n  workspace_id TEXT NOT NULL,\n  role TEXT NOT NULL,\n  active INTEGER NOT NULL DEFAULT 1,\n  PRIMARY KEY (user_id, workspace_id)\n);\nINSERT INTO memberships VALUES ('u1', 'w1', 'member', 1);\nINSERT INTO memberships VALUES ('u2', 'w1', 'guest', 0);\n.parameter init\n.parameter set :migration_time '2026-11-07T12:00:00Z'\n-- Inline migration body so expected constraint failures below can be handled\n-- by this CLI script without aborting a nested .read script.\nPRAGMA foreign_keys = ON;\nBEGIN IMMEDIATE;\nCREATE TABLE memberships_new (\n  membership_id INTEGER PRIMARY KEY,\n  user_id TEXT NOT NULL,\n  workspace_id TEXT NOT NULL,\n  role TEXT NOT NULL,\n  started_at TEXT NOT NULL,\n  ended_at TEXT,\n  FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE RESTRICT,\n  FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id) ON DELETE RESTRICT,\n  CHECK (ended_at IS NULL OR ended_at >= started_at)\n);\nINSERT INTO memberships_new(user_id, workspace_id, role, started_at, ended_at)\nSELECT user_id, workspace_id, role, :migration_time,\n       CASE WHEN active = 1 THEN NULL ELSE :migration_time END\nFROM memberships;\nDROP TABLE memberships;\nALTER TABLE memberships_new RENAME TO memberships;\nCREATE UNIQUE INDEX memberships_one_open_tenure\n  ON memberships(user_id, workspace_id) WHERE ended_at IS NULL;\nCREATE INDEX memberships_history\n  ON memberships(user_id, workspace_id, started_at, membership_id);\nCOMMIT;\n\nSELECT 'migration rows/open/closed', count(*),\n       sum(ended_at IS NULL), sum(ended_at IS NOT NULL)\nFROM memberships;\n\n-- Verify duplicate-open rejection without aborting sqlite3's input stream.\nCREATE TEMP TABLE duplicate_result(ok INTEGER NOT NULL CHECK(ok = 1));\nINSERT OR IGNORE INTO duplicate_result\nSELECT CASE WHEN EXISTS (\n  SELECT 1 FROM memberships\n  WHERE user_id='u1' AND workspace_id='w1' AND ended_at IS NULL\n) THEN 0 ELSE 1 END;\nSELECT 'duplicate open precondition blocked' AS check_name\nWHERE NOT EXISTS (SELECT 1 FROM duplicate_result);\nDROP TABLE duplicate_result;\n\n-- Leave and rejoin create distinct tenure identities.\nBEGIN IMMEDIATE;\nUPDATE memberships SET ended_at = '2026-11-07T13:00:00Z'\nWHERE user_id='u1' AND workspace_id='w1' AND ended_at IS NULL;\nINSERT INTO memberships(user_id, workspace_id, role, started_at, ended_at)\nVALUES ('u1', 'w1', 'member', '2026-11-07T14:00:00Z', NULL);\nCOMMIT;\n\n-- Role change closes old tenure and creates a successor atomically.\nBEGIN IMMEDIATE;\nUPDATE memberships SET ended_at = '2026-11-07T15:00:00Z'\nWHERE user_id='u1' AND workspace_id='w1' AND ended_at IS NULL;\nINSERT INTO memberships(user_id, workspace_id, role, started_at, ended_at)\nVALUES ('u1', 'w1', 'admin', '2026-11-07T15:00:00Z', NULL);\nCOMMIT;\nSELECT 'u1 role history', group_concat(role || ':' || started_at || ':' || coalesce(ended_at, 'open'), ' | ')\nFROM (SELECT role, started_at, ended_at FROM memberships\n      WHERE user_id='u1' AND workspace_id='w1' ORDER BY started_at);\n\n-- Force a successor insert failure and verify rollback restores the open row.\nSAVEPOINT role_rollback;\nUPDATE memberships SET ended_at = '2026-11-07T16:00:00Z'\nWHERE user_id='u1' AND workspace_id='w1' AND ended_at IS NULL;\n-- Simulate the successor write failing a precondition before insertion.\n-- The caller rolls the full transition back on any insert error.\nROLLBACK TO role_rollback;\nRELEASE role_rollback;\nSELECT 'rollback open rows', count(*) FROM memberships\nWHERE user_id='u1' AND workspace_id='w1' AND ended_at IS NULL;\n\nEXPLAIN QUERY PLAN SELECT role FROM memberships\nWHERE user_id='u1' AND workspace_id='w1' AND ended_at IS NULL;\nEXPLAIN QUERY PLAN SELECT role, started_at, ended_at FROM memberships\nWHERE user_id='u1' AND workspace_id='w1' ORDER BY started_at, membership_id;\n"
+    }
+  ]
+}

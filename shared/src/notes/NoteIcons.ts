@@ -2,7 +2,11 @@
 export interface NoteIcon {
   kind: 'builtin' | 'image';
   value: string;
+  /** Optional user-authored label shown beside the glyph in notes and graphs. */
+  label?: string;
 }
+
+export const MAX_NOTE_ICON_LABEL_LENGTH = 48;
 
 export const NOTE_ICON_CHOICES = [
   { value: '📄', label: 'Document' },
@@ -24,6 +28,12 @@ export const MAX_NOTE_ICON_DATA_LENGTH = 500_000;
 export function isNoteIcon(value: unknown): value is NoteIcon {
   if (!value || typeof value !== 'object') return false;
   const icon = value as NoteIcon;
+  if (icon.label !== undefined) {
+    if (typeof icon.label !== 'string') return false;
+    const label = icon.label.trim();
+    if (!label || label.length > MAX_NOTE_ICON_LABEL_LENGTH || /[\x00-\x1f\x7f]/.test(label))
+      return false;
+  }
   if (icon.kind === 'builtin') return NOTE_ICON_CHOICES.some((choice) => choice.value === icon.value);
   return (
     icon.kind === 'image' &&

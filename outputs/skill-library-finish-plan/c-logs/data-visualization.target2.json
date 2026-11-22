@@ -1,0 +1,31 @@
+{"type":"progress","complete":1,"failed":0,"totalQueued":6,"skill":"data-visualization","scenarioId":"data-visualization-full-task-1-individual","pairId":"data-visualization-full-task-1-individual:095ad974-ddb0-4d26-bab2-7e6ffbc1a849","withSkill":false,"withoutSkill":false,"withSkillInfrastructureFailure":false,"withoutSkillInfrastructureFailure":false,"infrastructureFailure":false,"integrityFailure":false}
+{"type":"progress","complete":2,"failed":0,"totalQueued":6,"skill":"data-visualization","scenarioId":"data-visualization-full-task-1-individual","pairId":"data-visualization-full-task-1-individual:9f061d0e-3d17-49e5-ae3c-b6b0c1ffb037","withSkill":true,"withoutSkill":false,"withSkillInfrastructureFailure":false,"withoutSkillInfrastructureFailure":false,"infrastructureFailure":false,"integrityFailure":false}
+{"type":"progress","complete":3,"failed":0,"totalQueued":6,"skill":"data-visualization","scenarioId":"data-visualization-full-task-1-individual","pairId":"data-visualization-full-task-1-individual:2f4df309-afe2-4c50-849f-3f514d656cfc","withSkill":true,"withoutSkill":false,"withSkillInfrastructureFailure":false,"withoutSkillInfrastructureFailure":false,"infrastructureFailure":false,"integrityFailure":false}
+{"type":"progress","complete":4,"failed":0,"totalQueued":6,"skill":"data-visualization","scenarioId":"data-visualization-full-task-2-individual","pairId":"data-visualization-full-task-2-individual:422a6049-74d9-4a0a-9435-d42519e4a3b4","withSkill":false,"withoutSkill":false,"withSkillInfrastructureFailure":false,"withoutSkillInfrastructureFailure":false,"infrastructureFailure":false,"integrityFailure":false}
+{"type":"progress","complete":5,"failed":0,"totalQueued":6,"skill":"data-visualization","scenarioId":"data-visualization-full-task-2-individual","pairId":"data-visualization-full-task-2-individual:1c4d9018-3ff4-421a-9ff9-8db2c004f4a3","withSkill":false,"withoutSkill":false,"withSkillInfrastructureFailure":false,"withoutSkillInfrastructureFailure":false,"infrastructureFailure":false,"integrityFailure":false}
+{"type":"progress","complete":6,"failed":0,"totalQueued":6,"skill":"data-visualization","scenarioId":"data-visualization-full-task-2-individual","pairId":"data-visualization-full-task-2-individual:5df5a7a9-38f5-4ef1-ad15-d566129939f7","withSkill":false,"withoutSkill":false,"withSkillInfrastructureFailure":false,"withoutSkillInfrastructureFailure":false,"infrastructureFailure":false,"integrityFailure":false}
+{
+  "schemaVersion": 1,
+  "executor": {
+    "mode": "codex",
+    "id": "codex-cli-isolated:codex-cli 0.167.0:reasoning=none:multi-turn",
+    "subject": "codex",
+    "provider": "codex",
+    "model": "gpt-6-luna",
+    "runtimeIdentity": "codex-cli 0.167.0:reasoning=none:multi-turn",
+    "executionMode": "multi-turn",
+    "reasoningEffort": "none",
+    "concurrency": 1,
+    "wallClockMs": 420000
+  },
+  "selectedSkills": 1,
+  "readyScenarios": 2,
+  "environmentBlockedScenarios": 0,
+  "skippedComplete": 0,
+  "queued": 6,
+  "completed": 6,
+  "failed": 0,
+  "failedScenarios": [],
+  "stoppedReason": null,
+  "notStarted": 0
+}

@@ -39,6 +39,10 @@ import { buildProviderCliEnv } from './cli-environment';
 import { wrapCommand, inferenceSandboxPolicy } from '../collaboration/sandbox-runner';
 import { getCliBridge } from './cli-bridges';
 import {
+  koryBridgeUnavailableError,
+  resolveKoryBridgeScript,
+} from './kory-cli-mcp-config';
+import {
   createDesktopRuntimeSession,
   desktopRuntimeTmpDir,
   findRunningDesktopSidecar,
@@ -83,6 +87,9 @@ function refreshModelsInBackground(): Promise<void> {
   if (refreshInProgress) return refreshPromise ?? Promise.resolve();
   refreshInProgress = true;
   refreshPromise = (async () => {
+    // Stamp the attempt before discovery: an uninstalled (or half-installed)
+    // app must not be re-probed on every status render either.
+    cachedModelsAt = Date.now();
     const app = locateWorkBuddyDesktopApp();
     const runtime = app ? resolveWorkBuddyDesktopRuntime(app) : null;
     if (!runtime) return;
@@ -488,6 +495,14 @@ export class WorkBuddyDesktopProvider implements Provider {
     if (hasTools) {
       try {
         const mcpConfigs = buddyBridge?.buildMcpConfig(bridgeCtx);
+        if (
+          bridgeCtx.sessionId &&
+          (!mcpConfigs || mcpConfigs.length === 0) &&
+          !resolveKoryBridgeScript()
+        ) {
+          yield { type: 'error', error: koryBridgeUnavailableError('workbuddy-desktop') };
+          return;
+        }
         if (mcpConfigs && mcpConfigs.length > 0) {
           const servers: Record<string, unknown> = {};
           for (const srv of mcpConfigs) {
@@ -558,9 +573,11 @@ export class WorkBuddyDesktopProvider implements Provider {
     // is closed, fall back to a directly spawned runtime using staged desktop
     // config/auth state.
     let handle: DesktopRuntimeHandle;
+    let attachedViaSidecar = false;
     try {
       const sidecar = findRunningDesktopSidecar(runtime.configDir);
       if (sidecar) {
+        attachedViaSidecar = true;
         const pooled = sidecarRuntimePool.get(cwd);
         if (pooled) {
           pooled.lastUsedAt = Date.now();
@@ -776,18 +793,22 @@ export class WorkBuddyDesktopProvider implements Provider {
         );
       }
 
-      // Permission mode: critic stays read-only (plan), manager/worker accept
-      // edits. The runtime reports the dial either as `modes` or as a `mode`
+      // Permission mode: critic stays read-only (plan), manager/worker bypass —
+      // Kory is the permission authority and the ACP interruption path already
+      // auto-allows, so a prompt-capable mode only adds a stall risk headless.
+      // The runtime reports the dial either as `modes` or as a `mode`
       // config option (real 5.8.4 runtime: configOptions id "mode" with
       // default/acceptEdits/plan/auto/dontAsk/bypassPermissions/fullAccess).
-      const wantedMode = request.harnessRole === 'critic' ? 'plan' : 'acceptEdits';
+      const wantedMode = request.harnessRole === 'critic' ? 'plan' : 'bypassPermissions';
       const modes = session.modes?.availableModes ?? [];
       if (modes.length > 0) {
         const resolved =
           modes.find((m) => m.id === wantedMode)?.id ??
           (request.harnessRole === 'critic'
             ? (modes.find((m) => /read|plan/i.test(m.id))?.id ?? 'default')
-            : (modes.find((m) => /accept/i.test(m.id))?.id ?? modes[0]?.id ?? 'default'));
+            : (modes.find((m) => /bypass|accept|fullAccess|dontAsk/i.test(m.id))?.id ??
+              modes[0]?.id ??
+              'default'));
         try {
           await acp.setMode(sessionId, resolved);
         } catch (modeErr: unknown) {
@@ -920,7 +941,18 @@ export class WorkBuddyDesktopProvider implements Provider {
         return;
       }
       if (result.stopReason === 'refusal') {
-        yield { type: 'error', error: refusalMessage(result) };
+        const message = refusalMessage(result);
+        // A directly spawned bundled runtime has no desktop credential
+        // bootstrap, so it authenticates as nobody no matter how the rest of
+        // the turn is wired. Say that precisely instead of relaying the
+        // runtime's bare "Authentication required".
+        yield {
+          type: 'error',
+          error:
+            !attachedViaSidecar && /auth|login|credential|sign in/i.test(message)
+              ? `${message} — Koryphaios must attach to WorkBuddy AI's own host runtime, which only exists while the app is running a chat. Open a WorkBuddy conversation (or keep one open), leave the app running, then retry.`
+              : message,
+        };
         return;
       }
       if (!emittedComplete) yield { type: 'complete', finishReason: 'end_turn' };

@@ -39,6 +39,8 @@ describe('MCP bridge delegation', () => {
           requestToolApproval: async () => 'Allow',
           hasActiveSessionExecution: () => true,
           tryAcquireSessionMutationBarrier: () => null,
+        isWorkspaceRebindPending: () => false,
+        markWorkspaceMutatedThisTurn: () => undefined,
           runWorkerPipeline,
           renameSession: async () => 'renamed',
         },

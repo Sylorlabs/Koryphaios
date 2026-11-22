@@ -8,8 +8,8 @@ import {
   codexSkillEvalNetworkPolicy,
   createIsolatedCodexSkillEvalExecutor,
   createTextOnlyPatchSkillEvalExecutor,
-} from '../skill-eval-codex';
-import type { SkillEvalExperimentV3, SkillEvalScenarioV3 } from '../skill-eval-harness';
+} from '../../eval/skills/skill-eval-codex';
+import type { SkillEvalExperimentV3, SkillEvalScenarioV3 } from '../../eval/skills/skill-eval-harness';
 
 describe('Codex evaluator infrastructure boundary', () => {
   const classify = (stderr: string, overrides: Record<string, unknown> = {}) =>

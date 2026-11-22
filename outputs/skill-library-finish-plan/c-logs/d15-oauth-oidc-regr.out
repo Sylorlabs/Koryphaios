@@ -1,0 +1,34 @@
+[16:14:51] warn  [server] Multiple koryphaios.json files found in parent directories; using the innermost. The outer file(s) are ignored. {"chosen":"/Users/Shared/micah/Documents/koryphaios","shadowed":["/Users/Shared/micah/Documents","/Users/Shared/micah"]}
+{"type":"progress","complete":0,"failed":1,"totalQueued":1,"skill":"oauth-oidc","scenarioId":"oauth-oidc-full-task-2","pairId":"oauth-oidc-full-task-2:77e425e5-445d-4e52-aba0-24ad15814f6d","withSkill":false,"withoutSkill":false,"withSkillInfrastructureFailure":false,"withoutSkillInfrastructureFailure":false,"infrastructureFailure":false,"integrityFailure":true,"withoutSkillIntegrityEvidence":"Evaluator integrity: unchanged. Hidden test completion: missing or failed. Public tests: passed or absent.\nbun test v1.3.14 (d1632b29)\nKORY_EVAL_COMPLETED_2b7a5ceebe084f2c91b0de1f8a83d714\n\n\n../kory-skill-eval-pair-V2wzUo/without-skill/tests/__kory_hidden_eval_2b7a5ceebe084f2c91b0de1f8a83d714.test.ts:\n(pass) hidden: mix-up/JWKS/token validation corpus fails closed [0.40ms]\n1 | import{expect,test}from'bun:test';import{readFileSync}from'node:fs';import{acceptIdToken,apiAccepts,type OidcSpec,type IdTokenAttempt}from'../src/oauth-policy';const s=JSON.parse(readFileSync('.kory-eval/oidc-rp.json','utf8')) as OidcSpec;const c=JSON.parse(readFileSync('evidence/oauth-corpus.json','utf8')) as any;const"}
+{
+  "schemaVersion": 1,
+  "executor": {
+    "mode": "codex",
+    "id": "codex-cli-isolated:codex-cli 0.167.0:reasoning=none:multi-turn",
+    "subject": "codex",
+    "provider": "codex",
+    "model": "gpt-6-luna",
+    "runtimeIdentity": "codex-cli 0.167.0:reasoning=none:multi-turn",
+    "executionMode": "multi-turn",
+    "reasoningEffort": "none",
+    "concurrency": 1,
+    "wallClockMs": 900000
+  },
+  "selectedSkills": 1,
+  "readyScenarios": 2,
+  "environmentBlockedScenarios": 0,
+  "skippedComplete": 0,
+  "queued": 1,
+  "completed": 0,
+  "failed": 1,
+  "failedScenarios": [
+    {
+      "skill": "oauth-oidc",
+      "scenarioId": "oauth-oidc-full-task-2",
+      "regressionId": "oauth-oidc-full-task-2:2fd5e1fe-9e89-462e-ac29-99d459c2e784:with-skill",
+      "detail": "without-skill evaluator integrity failure: Evaluator integrity: unchanged. Hidden test completion: missing or failed. Public tests: passed or absent.\nbun test v1.3.14 (d1632b29)\nKORY_EVAL_COMPLETED_2b7a5ceebe084f2c91b0de1f8a83d714\n\n\n../kory-skill-eval-pair-V2wzUo/without-skill/tests/__kory_hidden_eval_2b7a5ceebe084f2c91b0de1f8a83d714.test.ts:\n(pass) hidden: mix-up/JWKS/token validation corpus fails closed [0.40ms]\n1 | import{expect,test}from'bun:test';import{readFileSync}from'node:fs';import{acceptIdToken,apiAccepts,type OidcSpec,type IdTokenAttempt}from'../src/oauth-policy';const s=JSON.parse(readFileSync('.kory-eval/oidc-rp.json','utf8')) as OidcSpec;const c=JSON.parse(readFileSync('evidence/oauth-corpus.json','utf8')) as any;const"
+    }
+  ],
+  "stoppedReason": null,
+  "notStarted": 0
+}

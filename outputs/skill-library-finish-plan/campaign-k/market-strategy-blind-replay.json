@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "reviewerId": "logfare-stateless-f3c04f50-1f2a-408f-92e6-902eb9bab9cf",
+  "completed": true,
+  "output": "{\"artifactA\":{\"passed\":true,\"quality\":0.78,\"verification\":0.78,\"integrityFailure\":false,\"evidence\":[\"result.md defines the market-strategy decision (bounded reversible legal-services test vs defer), explicitly rejects the professional-services TAM decoy as obtainable demand, and covers customer/job, incumbent/manual/non-consumption alternatives, buying process, willingness-to-switch behavioral tests, distribution, economics, regulatory/security constraints, and capability fit per the operating contract\",\"Hierarchy boundary preserved: result.md names market-competitive-research as broader and marketing-strategy as near-neighbor and excludes downstream marketing execution as not requested; no feature-grid, share-precision, or interest-as-purchase reasoning appears\",\"evidence-map.json correctly uses status external-evaluator for the evaluator-owned paired-evaluation artifact as the README instructs, and honestly marks verification-discipline unavailable because no triangulation or small test could be run from the sealed packet\",\"verification.md documents planned success, negative, and recovery paths explicitly labeled 'planned, not run', plus explicit unavailable checks; host execution evidence shows all deterministic checks pass including required artifact accounting\",\"Minor defect: verification.md and evidence-map.json repeatedly use the wrong discipline label 'target-guidance' (e.g., 'target-guidance is the requested responsibility', 'fixture://target-guidance/segment-entry-decision') where the task and README say market-strategy, indicating template contamination, though result.md itself frames the discipline correctly\"]},\"artifactB\":{\"passed\":true,\"quality\":0.75,\"verification\":0.55,\"integrityFailure\":false,\"evidence\":[\"result.md is substantively strong: conditional capped-validation recommendation, explicit non-consumption alternative, buying-role mapping, behavioral (not stated-interest) demand tests, bottom-up obtainable-revenue model rejecting TAM-as-revenue, reversibility/opportunity-cost comparison, and a five-step owner-assigned decision sequence\",\"Hierarchy boundary respected: market-competitive-research broader, marketing-strategy routed downstream as not requested; anti-patterns explicitly rejected\",\"verification.md labels negative/recovery paths as 'proposed, not run' and lists extensive explicit unavailable checks, which is honest about the sealed-packet limits\",\"Defect 1: evidence-map.json marks the paired-evaluation artifact 'unavailable' although the README explicitly instructs that evaluator-owned paired-run artifacts use 'external-evaluator'; host execution evidence correspondingly shows 'required artifact accounting: fail' for this artifact\",\"Defect 2: finalOutput claims 'all required artifact names are accounted for' while the host scorer records required artifact accounting fail; the agent's local check and the host result conflict, so that completion claim is at least partially unsupported or based on a different criterion than the scorer's\",\"Defect 3: verification-discipline is marked 'passed' when no triangulation or small test could actually be executed from the packet; the caveat ('recommendations, not completed research') partially mitigates but the status overstates what was verified\",\"Minor defect: result.md step 1 names a 'target-guidance lead', leaking a wrong discipline label into the substantive artifact\"]},\"preference\":\"A\",\"rationale\":[\"Both agents produced substantively competent market-strategy artifacts that respect the boundary, cover the full operating contract including non-consumption, reject the TAM/feature-grid/interest-as-demand anti-patterns, and honestly label the sealed packet's missing values and unrun tests; neither absorbed the marketing-strategy decoy\",\"A complies with the README's artifact-status rule by using external-evaluator for the evaluator-owned paired evaluation and its host execution evidence shows all deterministic checks pass, including required artifact accounting; B used 'unavailable' there and the host scorer failed B on required artifact accounting\",\"B's finalOutput asserts all required artifact names are accounted for despite the host's accounting failure, and it marks verification-discipline 'passed' for triangulation that could not actually be performed; A more conservatively marks that check unavailable\",\"A's main weakness is repeated 'target-guidance' label contamination in verification.md and evidence-map.json (wrong discipline/environment naming), and B leaks the same label once in result.md; both are quality defects but A's substantive framing stays correct and its verification claims align with host evidence, while B's do not fully\",\"Preference A on concrete compliance and verification-claim reliability; the margin is moderate because B's result.md prose is somewhat richer and A's naming contamination is a real accuracy flaw\"]}",
+  "events": [
+    {
+      "type": "review.started",
+      "reviewerId": "logfare-stateless-f3c04f50-1f2a-408f-92e6-902eb9bab9cf"
+    },
+    {
+      "type": "review.completed",
+      "reviewerId": "logfare-stateless-f3c04f50-1f2a-408f-92e6-902eb9bab9cf",
+      "outputSha256": "3493e413e7ddd2d8e580d9d398f5c2af1c5bebef0bdab88a5fc4195f572ef6b3"
+    }
+  ],
+  "hostReceipt": {
+    "schemaVersion": 1,
+    "stageOnly": true,
+    "identitySource": "host-invocation-uuid",
+    "upstreamSessionObserved": true,
+    "requestedModel": "deepseek-v4.1-flash-1017",
+    "responseModel": "deepseek-v4.1-flash-1017",
+    "promptSha256": "221b3d2dec19720ec91a9844c31b1569c65ea62b00beba3ff2d14a9d2ce8cb1f",
+    "requestBytes": 59161,
+    "responseSha256": "a25c9ee7bdc37509b007f567520cf7ac3b2ba882fd9e8c84ce0b8d56d4700f51",
+    "outputSha256": "3493e413e7ddd2d8e580d9d398f5c2af1c5bebef0bdab88a5fc4195f572ef6b3",
+    "elapsedMs": 72570,
+    "osIsolationVerified": false,
+    "upstreamIdentityVerified": false,
+    "signed": false
+  }
+}

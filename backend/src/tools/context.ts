@@ -90,6 +90,85 @@ export class FetchContextTool implements Tool {
   }
 }
 
+export class ManageContextTool implements Tool {
+  readonly name = 'manage_context';
+  readonly description =
+    'Decide what tool output stays in YOUR context. Actions: report (see what is prunable and ' +
+    'which policies are active), hide (agent sees only the tool name, time and size), summarize ' +
+    '(replace an output with your own summary, or with a model-written one when summary is omitted), ' +
+    'restore (bring a hidden output back), set_policy (set a per-tool mode: full, summary, hidden), ' +
+    'compact (compact now instead of waiting for the automatic threshold). The full output always ' +
+    'stays in the transcript and archive; this only changes what the model sees. A Manager controls ' +
+    'this chat; a Worker or Critic controls only its own private context.';
+  readonly inputSchema = {
+    type: 'object',
+    properties: {
+      action: {
+        type: 'string',
+        enum: ['report', 'hide', 'summarize', 'restore', 'set_policy', 'compact'],
+        description: 'What to do',
+      },
+      ids: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Archive ids (e.g. ["cx_3"]) from fetch_context or a context-status report',
+      },
+      summary: {
+        type: 'string',
+        description:
+          'For summarize with a single id: the summary to keep. Omit to have a model write it.',
+      },
+      summaries: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: { id: { type: 'string' }, summary: { type: 'string' } },
+          required: ['id', 'summary'],
+        },
+        description: 'For summarize with several ids and your own summaries',
+      },
+      tool: {
+        type: 'string',
+        description: 'For set_policy: the tool name whose context mode you are choosing',
+      },
+      mode: {
+        type: 'string',
+        enum: ['full', 'summary', 'hidden'],
+        description: 'For set_policy: how much of that tool output you want to see',
+      },
+      reason: { type: 'string', description: 'For compact: why you are compacting early' },
+    },
+    required: ['action'],
+  };
+  readonly role = 'any' as const;
+
+  async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
+    const fail = (output: string): ToolCallOutput => ({
+      callId: call.id,
+      name: this.name,
+      output,
+      isError: true,
+      durationMs: 0,
+    });
+    if (!ctx.manageContext) {
+      return fail(
+        'Context control is not available for this agent. Use prune_context to reclaim space.',
+      );
+    }
+    try {
+      return {
+        callId: call.id,
+        name: this.name,
+        output: await ctx.manageContext(call.input),
+        isError: false,
+        durationMs: 0,
+      };
+    } catch (error) {
+      return fail(error instanceof Error ? error.message : String(error));
+    }
+  }
+}
+
 export class PruneContextTool implements Tool {
   readonly name = 'prune_context';
   readonly description =

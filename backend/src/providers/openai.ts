@@ -3,7 +3,13 @@
 
 import OpenAI, { AzureOpenAI } from 'openai';
 import { userConfirmedImageInput } from './attachment-admission';
-import type { ProviderConfig, ProviderName, ModelDef } from '@koryphaios/shared';
+import type {
+  ModelParameterKey,
+  ProviderConfig,
+  ProviderName,
+  ModelDef,
+} from '@koryphaios/shared';
+import { sanitizeModelParameterValues } from '@koryphaios/shared';
 
 import {
   type Provider,
@@ -39,8 +45,27 @@ import {
 import { promptCacheMaintenance } from './cache-maintenance';
 import { promptCacheDiagnostics } from './cache-fabric';
 import { resolvePricing } from '../pricing';
+import {
+  foldVendorSpeedTiers,
+  resolveSpeedVariant,
+  SPEED_TIER_PRIORITY_OPENAI,
+} from './speed-tiers';
 import { normalizeToolArguments } from './tool-arguments';
-import { AnthropicProvider } from './anthropic';
+
+const ALL_MODEL_PARAMETER_KEYS: ReadonlySet<ModelParameterKey> = new Set([
+  'temperature',
+  'top_p',
+  'top_k',
+  'min_p',
+  'top_a',
+  'frequency_penalty',
+  'presence_penalty',
+  'repetition_penalty',
+  'seed',
+  'max_tokens',
+  'verbosity',
+]);
+const GWARDEN_FORWARDED_PARAMETERS: ReadonlySet<ModelParameterKey> = new Set(['max_tokens']);
 
 export class OpenAIProvider implements Provider {
   readonly imageInputTransport = 'native' as const;
@@ -161,7 +186,10 @@ export class OpenAIProvider implements Provider {
     return undefined;
   }
 
-  private isChatModelCandidate(raw: unknown, id: string): boolean {
+  /** Whether a catalog row is a chat model. Protected so a gateway whose
+   *  catalog mixes chat with image, video, audio or embedding rows can
+   *  exclude them instead of offering a model that cannot answer a message. */
+  protected isChatModelCandidate(raw: unknown, id: string): boolean {
     if (!isLikelyChatModelId(id, this.name)) return false;
     if (this.name !== 'cohere') return true;
 
@@ -206,11 +234,22 @@ export class OpenAIProvider implements Provider {
             this.enrichDiscoveredModel(model, modelFromRemoteId(id, this.name, fallback)),
           );
         }
-        this.cachedModels = applyModelsDevMetadata(
-          this.name,
-          mergeModelLists(fallback, discovered),
-          modelsDevKeysFor(this.name, this.config.kind),
+        // Fold vendor-confirmed same-model speed variants (MiniMax
+        // `-highspeed`, MiMo `-ultraspeed`) so every OpenAIProvider-based
+        // catalog exposes them as `speedTiers` on the base model instead of
+        // look-alike entries. OpenAI's own catalog all supports the `priority`
+        // service tier, so those models carry it as a tier too.
+        const speedFolded = foldVendorSpeedTiers(
+          applyModelsDevMetadata(
+            this.name,
+            mergeModelLists(fallback, discovered),
+            modelsDevKeysFor(this.name, this.config.kind),
+          ),
         );
+        this.cachedModels =
+          this.name === 'openai'
+            ? speedFolded.map((m) => ({ ...m, speedTiers: [SPEED_TIER_PRIORITY_OPENAI] }))
+            : speedFolded;
         this.modelCatalogAuthoritative = true;
         this.modelDiscoveryError = undefined;
         this.modelDiscoveryHttpStatus = undefined;
@@ -252,6 +291,12 @@ export class OpenAIProvider implements Provider {
     // response with a small compatibility fallback. Custom endpoints have no
     // such entitlement fallback, so their successful response is authoritative.
     return this.config.custom === true && this.modelCatalogAuthoritative;
+  }
+
+  /** OpenAI-compatible bodies take every tunable key; gwarden rejects extra
+   * parameters outright, so only `max_tokens` may ever reach it. */
+  forwardedModelParameters(): ReadonlySet<ModelParameterKey> {
+    return this.name === 'gwarden' ? GWARDEN_FORWARDED_PARAMETERS : ALL_MODEL_PARAMETER_KEYS;
   }
 
   getModelDiscoveryError(): string | undefined {
@@ -318,7 +363,7 @@ export class OpenAIProvider implements Provider {
       yield {
         type: 'error',
         error:
-          'Beam requires the original reasoning for every prior assistant message. This history is missing reasoning; start a new chat or retry the affected turn.',
+          'Reflection AI requires the original reasoning for every prior assistant message. This history is missing reasoning; start a new chat or retry the affected turn.',
       };
       return;
     }
@@ -409,6 +454,22 @@ export class OpenAIProvider implements Provider {
       ...(liveDef?.reasoningLevels ?? []).map((level) => level.toLowerCase()),
     ]);
 
+    // Composer "Model settings" overrides — sanitized against the model's own
+    // declared parameter list AND this adapter's forwarding set (gwarden only
+    // takes max_tokens) so a key that never reaches the wire is never sent.
+    const forwarded = this.forwardedModelParameters();
+    const modelParams = sanitizeModelParameterValues(
+      liveDef?.parameters?.filter((def) => forwarded.has(def.key)),
+      request.modelParameters,
+    );
+    const paramMaxTokens =
+      typeof modelParams.max_tokens === 'number' ? modelParams.max_tokens : undefined;
+    const effectiveMaxTokens = paramMaxTokens ?? request.maxTokens;
+    const effectiveTemperature =
+      typeof modelParams.temperature === 'number'
+        ? modelParams.temperature
+        : request.temperature;
+
     const params: OpenAI.ChatCompletionCreateParamsStreaming & {
       service_tier?: string;
       thinking?: { type: string };
@@ -420,7 +481,10 @@ export class OpenAIProvider implements Provider {
       prompt_cache_options?: { mode: 'implicit'; ttl: '30m' };
       session_id?: string;
     } = {
-      model: modelDef?.apiModelId ?? request.model,
+      model:
+        resolveSpeedVariant(liveDef, request.speedTier, request.reasoningLevel) ??
+        modelDef?.apiModelId ??
+        request.model,
       messages: this.name === 'openrouter' ? markOpenRouterTailCacheBreakpoint(messages) : messages,
       stream: true,
       // Gwarden's gateway rejects `stream_options` (and only accepts the
@@ -428,11 +492,16 @@ export class OpenAIProvider implements Provider {
       ...(this.name !== 'gwarden' && { stream_options: { include_usage: true } }),
       // Gwarden rejects extra parameters; send only the core request fields.
       ...(this.name === 'gwarden'
-        ? { max_tokens: request.maxTokens && request.maxTokens > 0 ? request.maxTokens : 4096 }
-        : request.maxTokens
-          ? { max_completion_tokens: request.maxTokens }
+        ? { max_tokens: effectiveMaxTokens && effectiveMaxTokens > 0 ? effectiveMaxTokens : 4096 }
+        : effectiveMaxTokens
+          ? { max_completion_tokens: effectiveMaxTokens }
           : {}),
-      ...(request.temperature !== undefined && { temperature: request.temperature }),
+      ...(effectiveTemperature !== undefined && { temperature: effectiveTemperature }),
+      ...Object.fromEntries(
+        Object.entries(modelParams).filter(
+          ([key]) => key !== 'max_tokens' && key !== 'temperature',
+        ),
+      ),
       ...(tools?.length && { tools }),
     };
 
@@ -500,7 +569,7 @@ export class OpenAIProvider implements Provider {
     // This is deliberately API Priority, not Codex Fast mode. Fast is a
     // ChatGPT-credit feature; API projects use the documented `priority`
     // service tier when the customer has enabled it for their project.
-    if (this.name === 'openai' && request.fastMode) {
+    if (this.name === 'openai' && request.speedTier === 'priority') {
       (params as unknown as Record<string, unknown>).service_tier = 'priority';
     }
 
@@ -1244,41 +1313,6 @@ export class OpenRouterProvider extends OpenAIProvider {
   }
 }
 
-/**
- * AgentRouter provides OpenAI Chat Completions and a separate Anthropic Messages
- * surface on the chosen gateway origin. Keep the credential scoped to that
- * origin when dispatching a Claude model; do not fall through to Anthropic's
- * public API or use the wrong protocol for that model family.
- */
-export class AgentRouterProvider extends OpenAIProvider {
-  constructor(config: ProviderConfig) {
-    super(config, 'agentrouter', config.baseUrl || 'https://agentrouter.org/v1');
-  }
-
-  override async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
-    if (!/^claude(?:[-/]|$)/i.test(request.model)) {
-      yield* super.streamResponse(request);
-      return;
-    }
-
-    const baseUrl = this.config.baseUrl || 'https://agentrouter.org/v1';
-    const anthropicBase = baseUrl.replace(/\/v1\/?$/, '').replace(/\/$/, '');
-    const provider = new AnthropicProvider(
-      {
-        ...this.config,
-        apiKey: undefined,
-        authToken: this.config.apiKey || this.config.authToken,
-        baseUrl: anthropicBase,
-        // An OpenAI-specific Authorization override must not displace the
-        // selected gateway token on the Anthropic-compatible surface.
-        headers: undefined,
-      },
-      'agentrouter',
-    );
-    yield* provider.streamResponse(request);
-  }
-}
-
 export class XAIProvider extends OpenAIProvider {
   constructor(config: ProviderConfig) {
     super(config, 'xai', 'https://api.x.ai/v1');
@@ -1469,7 +1503,7 @@ export class ExperientialLabsProvider extends OpenAIProvider {
           defs.push(this.explabsModelDef(slug, rawById.get(slug), rows.get(slug)));
         }
         if (defs.length > 0) {
-          this.explabsModels = defs;
+          this.explabsModels = foldVendorSpeedTiers(defs);
           providerLog.debug(
             { provider: this.name, count: defs.length },
             'Model list refreshed from Experiential Labs catalog',

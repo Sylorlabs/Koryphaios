@@ -2,12 +2,12 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildSkillEvalSuiteV3 } from '../skill-eval-harness';
-import { writeFixtureFile } from '../skill-eval-fixture-helpers';
+import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
+import { writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
 import {
   BACKEND_STATE_SKILL_EVAL_MATERIALIZERS,
   BACKEND_STATE_SKILL_EVAL_SCORERS,
-} from '../skill-eval-backend-state-fixtures';
+} from '../../eval/skills/skill-eval-backend-state-fixtures';
 import { loadV5SkillPackages } from '../skill-packages';
 
 const SCENARIO_ID = 'in-process-backend-full-task-1-individual';

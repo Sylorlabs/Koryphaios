@@ -1,7 +1,14 @@
 // Provider abstraction layer — modeled after OpenCode's baseProvider pattern.
 // Each provider implements a uniform streaming interface regardless of underlying API.
 
-import type { ModelDef, ProviderConfig, ProviderName } from '@koryphaios/shared';
+import type {
+  ModelDef,
+  ModelParameterKey,
+  FusionSelection,
+  ModelParameterValues,
+  ProviderConfig,
+  ProviderName,
+} from '@koryphaios/shared';
 
 // Export model catalog and helpers from the new modular structure
 export * from './models';
@@ -177,8 +184,21 @@ export interface StreamRequest {
   /** For reasoning models — never restrict this. Can be "low"|"medium"|"high" or provider-specific like "8192" */
   reasoningLevel?: string;
   /** Request accelerated processing when the selected route actually supports it.
-   * Providers must translate this into their own documented service-tier control. */
+   * Providers must translate this into their own documented service-tier control.
+   * Kept for backward compatibility — the API boundary normalizes it to `speedTier`. */
   fastMode?: boolean;
+  /** The vendor-confirmed faster serving tier chosen in the composer — an id from
+   * the model's `speedTiers` ('fast', 'priority', 'highspeed', 'ultraspeed', …).
+   * Providers translate it into their own service-tier field or variant slug. */
+  speedTier?: string;
+  /** User-tunable request parameter overrides chosen in the composer's Model
+   * settings panel — already sanitized against the model's `parameters`
+   * before an adapter reads them. Unset keys mean the provider's own
+   * default applies. */
+  modelParameters?: ModelParameterValues;
+  /** Devin Fusion slot selection (lead + sidekick) — only for the `fusion`
+   * model; the provider validates it against the catalog's pairing matrix. */
+  fusion?: FusionSelection;
   /** Explicit image capability correction, bound to the authorized route so
    * provider fallback never inherits another model's override. */
   imageInputOverride?: { provider: string; model: string };
@@ -246,10 +266,70 @@ export interface PromptCachePlan {
   estimatedStableTokens: number;
 }
 
+// ─── Provider lifecycle contract ────────────────────────────────────────────
+
+/**
+ * What an adapter can actually do with a turn after it has started. Every flag
+ * must be backed by code in that adapter (cite it at the flag). The manager
+ * branches on these flags, never on provider names (docs/architecture/provider-lifecycle.md).
+ */
+export interface LifecycleCapabilities {
+  version: 1;
+  /** Can stop an in-flight turn and report it as interrupted. */
+  interrupt: boolean;
+  /** Can continue a prior provider conversation from a stored handle. */
+  resume: boolean;
+  /** That handle survives a Koryphaios backend restart. */
+  resumeAfterRestart: boolean;
+  /** Can inject input into a running turn without restarting it. */
+  steerInFlight: boolean;
+  /** Can drop the last N turns from the provider-side conversation. */
+  rollback: boolean;
+  /** Can branch a provider conversation natively. */
+  fork: boolean;
+  /** How reliably the provider reports turn end. */
+  terminalStatusQuality: 'strong' | 'weak' | 'none';
+}
+
+/** A provider-owned conversation id, scoped to the provider that issued it. */
+export interface ProviderResumeHandle {
+  provider: string;
+  kind: string;
+  value: string;
+  createdAt: number;
+}
+
+export interface ProviderLifecycle {
+  capabilities(): LifecycleCapabilities;
+  /** Handle for the conversation a just-finished or in-flight turn used, if any. */
+  resumeHandle?(sessionId: string): ProviderResumeHandle | null;
+}
+
+/**
+ * Capabilities for a provider. An adapter without `lifecycle` declares nothing,
+ * so the conservative default is returned: no operation is claimed and terminal
+ * status is treated as weak.
+ */
+export function lifecycleCapabilities(provider: Pick<Provider, 'lifecycle'>): LifecycleCapabilities {
+  if (provider.lifecycle) return provider.lifecycle.capabilities();
+  return {
+    version: 1,
+    interrupt: false,
+    resume: false,
+    resumeAfterRestart: false,
+    steerInFlight: false,
+    rollback: false,
+    fork: false,
+    terminalStatusQuality: 'weak',
+  };
+}
+
 // ─── Provider interface ─────────────────────────────────────────────────────
 
 export interface Provider {
   readonly name: ProviderName;
+  /** Optional lifecycle contract. Absent means the conservative default (see lifecycleCapabilities). */
+  readonly lifecycle?: ProviderLifecycle;
   readonly config: ProviderConfig;
   /**
    * Whether nonlinear regeneration can be served from the supplied messages
@@ -282,6 +362,10 @@ export interface Provider {
 
   /** True after a successful provider catalog response, including an empty one. */
   isModelCatalogAuthoritative?: () => boolean;
+
+  /** The request-parameter keys this adapter actually forwards. Absent means
+   * none — the composer then hides model settings for every model here. */
+  forwardedModelParameters?: () => ReadonlySet<ModelParameterKey>;
 
   /** Native CLI commands exposed by this provider when available. */
   getCliCommands?: () => CliCommand[];

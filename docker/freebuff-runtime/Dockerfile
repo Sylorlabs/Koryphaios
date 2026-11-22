@@ -1,20 +1,30 @@
 # Build context must be this directory, never the repository or a user's HOME.
 FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171 AS download
 ARG TARGETARCH
+ARG FREEBUFF_VERSION
+ARG FREEBUFF_SHA256
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl unzip && rm -rf /var/lib/apt/lists/*
 WORKDIR /download
-# Official npm freebuff 0.0.173 launcher stageBinary() release URLs. The x64
+# Official npm freebuff launcher stageBinary() release URLs. The x64
 # baseline avoids AVX2 requirements; ARM64 is native on Apple Silicon Docker.
-RUN target="${TARGETARCH:-$(dpkg --print-architecture)}"; \
- if [ "$target" = "arm64" ]; then \
-      url='https://codebuff.com/api/releases/download/0.2.16/freebuff-linux-arm64.tar.gz'; \
-      sha='3d5e9049da25d176eedd8193aef12c1c485096c6a42d3927c3e183c38c62adc1'; \
+# Kory tracks the latest release like the official launcher. A known archive
+# hash is verified; an unknown version is trust-on-first-use (the launcher
+# itself verifies no hash), and the downloaded hash is recorded into the image.
+RUN case "$FREEBUFF_VERSION" in \
+      '') echo 'FREEBUFF_VERSION build arg is required' >&2; exit 1;; \
+    esac; \
+    echo "$FREEBUFF_VERSION" | grep -Eq '^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}$' \
+      || { echo 'FREEBUFF_VERSION must be a numeric dotted-triplet' >&2; exit 1; }; \
+    target="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    if [ "$target" = "arm64" ]; then \
+      file='freebuff-linux-arm64.tar.gz'; \
     else \
-      url='https://codebuff.com/api/releases/download/0.2.16/freebuff-linux-x64-baseline.tar.gz'; \
-      sha='bc6fce99050823b9fdcc9b64a9993525b0c478c45b3bd4460cbab55d9afaf3f3'; \
+      file='freebuff-linux-x64-baseline.tar.gz'; \
     fi \
- && curl -fsSL --proto '=https' --proto-redir '=https' "$url" -o freebuff.tar.gz \
- && echo "$sha  freebuff.tar.gz" | sha256sum -c - \
+ && curl -fsSL --proto '=https' --proto-redir '=https' \
+      "https://codebuff.com/api/releases/download/${FREEBUFF_VERSION}/${file}" -o freebuff.tar.gz \
+ && if [ -n "$FREEBUFF_SHA256" ]; then echo "$FREEBUFF_SHA256  freebuff.tar.gz" | sha256sum -c -; fi \
+ && sha256sum freebuff.tar.gz | cut -d' ' -f1 > ARCHIVE_SHA256 \
  && mkdir freebuff && tar -xzf freebuff.tar.gz -C freebuff
 RUN target="${TARGETARCH:-$(dpkg --print-architecture)}"; \
  if [ "$target" = "arm64" ]; then \
@@ -30,17 +40,19 @@ RUN target="${TARGETARCH:-$(dpkg --print-architecture)}"; \
  && find /download -type f -name bun -exec cp {} /download/bun \; \
  && test -x /download/bun
 FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
+ARG FREEBUFF_VERSION
 RUN apt-get update && apt-get install -y --no-install-recommends bubblewrap tmux ca-certificates git procps \
  && rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /opt/kory
 COPY --from=download /download/freebuff/ /opt/kory/freebuff/
+COPY --from=download /download/ARCHIVE_SHA256 /opt/kory/freebuff/ARCHIVE_SHA256
 COPY --from=download /download/bun /opt/kory/bun
 RUN chmod 755 /opt/kory/freebuff/freebuff /opt/kory/bun \
  && mkdir /tmp/version-home \
- && HOME=/tmp/version-home /opt/kory/freebuff/freebuff --version | grep -F '0.2.16' \
+ && HOME=/tmp/version-home /opt/kory/freebuff/freebuff --version | grep -F "$FREEBUFF_VERSION" \
  && /opt/kory/bun --version | grep -Fx '1.3.14' \
  && rm -rf /tmp/version-home
-LABEL org.koryphaios.freebuff.version="0.2.16" org.koryphaios.freebuff.wrapper-version="0.0.173"
+LABEL org.koryphaios.freebuff.version="${FREEBUFF_VERSION}"
 ENV PATH=/opt/kory:/usr/local/bin:/usr/bin:/bin
 # Default is unprivileged. Runtime's trusted bwrap controller overrides this,
 # then irreversibly drops CLI identity/capabilities inside the sandbox (see README).

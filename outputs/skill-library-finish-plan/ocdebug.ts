@@ -1,0 +1,11 @@
+import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { createOpenCodeLogfareAgenticExecutor } from '../../backend/src/kory/skill-eval-opencode-agentic';
+const workspace = mkdtempSync(join(tmpdir(), 'oc-dbg-'));
+const fake = join(mkdtempSync(join(tmpdir(), 'oc-fake-')), 'opencode');
+writeFileSync(fake, '#!/bin/sh\necho "Error: provider became unavailable" >&2\nexit 1\n');
+chmodSync(fake, 0o755);
+const ex = createOpenCodeLogfareAgenticExecutor({ model: 'auto', binary: fake, wallClockMs: 30000, preflight: null });
+const obs = await ex.execute({ experiment: {} as never, scenario: { id: 's', skill: 'k' } as never, workingDirectory: workspace, taskPrompt: 'x', skillContext: null });
+console.log(JSON.stringify(obs).slice(0, 800));

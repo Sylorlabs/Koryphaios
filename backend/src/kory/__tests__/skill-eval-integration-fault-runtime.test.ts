@@ -6,7 +6,7 @@ import {
   integrationFaultScenario2Readiness,
   runIntegrationFaultScenario1Runtime,
   runIntegrationFaultScenario2Runtime,
-} from '../skill-eval-integration-fault-runtime';
+} from '../../eval/skills/skill-eval-integration-fault-runtime';
 
 function available(blockers: readonly string[]): boolean {
   if (blockers.length === 0) return true;

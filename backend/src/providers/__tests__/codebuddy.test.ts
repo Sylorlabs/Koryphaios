@@ -67,7 +67,7 @@ describe('codebuddy adapter offline contracts', () => {
     expect(new Set(models.map((m) => m.name)).size).toBe(models.length);
     expect(models.map((m) => m.name)).toEqual([
       'Deepseek-V4.1-Flash (free)',
-      'Deepseek-V4.1-Flash (x0.03 credits)',
+      'Deepseek-V4.1-Flash (0.03x)',
       'Hy4 preview (hy4-preview)',
       'Hy4 preview (hy4-preview-x)',
       'Fast (default)',
@@ -88,7 +88,8 @@ describe('codebuddy adapter offline contracts', () => {
       'fast-model',
     ]);
     expect(models[0].creditsLabel).toBe('free');
-    expect(models[1].creditsLabel).toBe('x0.03 credits');
+    expect(models[1].creditsLabel).toBe('0.03x');
+    expect(models[2].creditsLabel).toBe('0.29x');
   });
 
   it('shows the CLI’s real context tiers and defaults the budget to the maximum', () => {

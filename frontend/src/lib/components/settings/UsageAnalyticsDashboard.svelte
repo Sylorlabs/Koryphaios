@@ -5,6 +5,7 @@
   import RefreshCw from 'lucide-svelte/icons/refresh-cw';
   import Shield from 'lucide-svelte/icons/shield';
   import ProviderIcon from '../icons/ProviderIcon.svelte';
+  import { SETTINGS_CATALOG } from '$lib/utils/settings-catalog';
   import { deviceStore } from '$lib/stores/devices.svelte';
   import {
     buildUsageChartGeometry,
@@ -36,6 +37,12 @@
     onRefresh,
     onOpenSafetyLimits,
   }: Props = $props();
+
+  const billingEntry = SETTINGS_CATALOG.find((entry) => entry.id === 'billing');
+  const pageTitle = billingEntry?.label ?? 'Usage & billing';
+  const pageDescription = billingEntry?.description ?? '';
+  const uid = $props.id();
+  const headingId = `usage-billing-${uid}`;
 
   let timeWindow = $state<UsageWindowKey>('24h');
   let breakdownTab = $state<UsageBreakdownTab>('model');
@@ -182,11 +189,17 @@
 
 <svelte:window onclick={handleWindowClick} />
 
-<div class="usage-analytics-surface w-full">
+<section class="usage-analytics-surface usage-page w-full" aria-labelledby={headingId}>
+  <!-- Page header: same metrics as the shared SettingsPage shell. -->
+  <header class="usage-page-header">
+    <h2 id={headingId}>{pageTitle}</h2>
+    {#if pageDescription}<p>{pageDescription}</p>{/if}
+  </header>
+
   <!-- Top T3-Style Usage Filter & Mode Bar -->
   <div
     data-usage-filter-bar
-    class="sticky top-0 z-20 mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface-0)]/95 px-6 py-2.5 backdrop-blur-sm"
+    class="sticky top-0 z-20 flex w-full flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface-0)]/95 py-2.5 backdrop-blur-sm"
   >
     <!-- Breadcrumb + Inline Selectors + Date Range -->
     <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
@@ -370,7 +383,7 @@
   </div>
 
   <!-- Centered T3-Style Editorial Content Column -->
-  <div class="mx-auto w-full max-w-5xl space-y-8 px-6 pb-8 pt-6">
+  <div class="w-full space-y-8 pb-8 pt-6">
     <!-- Top Row: Hero Headline + Provider Breakdown (Left) | Smooth Area Chart (Right) -->
     <div class="grid grid-cols-1 items-start gap-6 lg:grid-cols-12">
       <!-- Left Column: Hero Figure & Provider List -->
@@ -407,7 +420,7 @@
               </span>
               {#if showSubscriptionApiEquivalent && usageView.totalApiEquivalentUsd > 0}
                 <span
-                  class="rounded-full bg-[var(--color-accent)]/10 px-2 py-0.5 text-[10px] font-medium tabular-nums text-[var(--color-accent)]"
+                  class="rounded-full bg-[var(--color-accent)]/10 px-2 py-0.5 text-[11px] font-medium tabular-nums text-[var(--color-accent)]"
                   title="Estimated raw API equivalent value of flat-rate CLI subscription tokens"
                 >
                   +{formatUsdClean(usageView.totalApiEquivalentUsd)} CLI equiv.
@@ -454,11 +467,7 @@
                         ? 'var(--color-warning)'
                         : 'var(--color-text-secondary)'};"
                   ></span>
-                  <span
-                    class="flex h-4 w-4 shrink-0 items-center justify-center rounded bg-[var(--color-surface-3)] p-0.5"
-                  >
-                    <ProviderIcon provider={prov.name} size={12} />
-                  </span>
+                  <ProviderIcon provider={prov.name} size={14} class="shrink-0" />
                   <span class="font-medium text-[var(--color-text-primary)] truncate">
                     {getProviderDisplayLabel(prov.name)}
                   </span>
@@ -501,7 +510,7 @@
           </span>
           {#if hoveredPoint}
             <span
-              class="rounded-md bg-[var(--color-surface-2)] px-2 py-0.5 text-[10px] font-mono tabular-nums text-[var(--color-text-secondary)]"
+              class="rounded-md bg-[var(--color-surface-2)] px-2 py-0.5 text-[11px] font-mono tabular-nums text-[var(--color-text-secondary)]"
             >
               {formatBucketDetailLabel(
                 hoveredPoint.point.ts,
@@ -520,7 +529,7 @@
         <div class="flex items-stretch">
           <!-- Y-axis labels -->
           <div
-            class="flex w-11 shrink-0 flex-col justify-between pr-2.5 text-right font-mono text-[10px] tabular-nums text-[var(--color-text-muted)] select-none"
+            class="flex w-11 shrink-0 flex-col justify-between pr-2.5 text-right font-mono text-[11px] tabular-nums text-[var(--color-text-muted)] select-none"
             style="height: 148px;"
           >
             {#each chartGeometry.yTicks as tick (tick.y)}
@@ -598,7 +607,7 @@
               {@const midBucket = usageView.series[Math.floor(usageView.series.length / 2)]}
               {@const lastBucket = usageView.series[usageView.series.length - 1]}
               <div
-                class="mt-1.5 flex items-center justify-between text-[10px] tabular-nums text-[var(--color-text-muted)] select-none"
+                class="mt-1.5 flex items-center justify-between text-[11px] tabular-nums text-[var(--color-text-muted)] select-none"
               >
                 <span>{firstBucket?.label ?? ''}</span>
                 <span>{midBucket?.label ?? ''}</span>
@@ -767,11 +776,7 @@
                     <td class="py-3 pr-4">
                       <div class="inline-flex flex-col gap-1 min-w-[160px] max-w-full">
                         <div class="flex items-center gap-2">
-                          <span
-                            class="flex h-4 w-4 shrink-0 items-center justify-center rounded bg-[var(--color-surface-3)] p-0.5"
-                          >
-                            <ProviderIcon provider={row.provider} size={12} />
-                          </span>
+                          <ProviderIcon provider={row.provider} size={14} class="shrink-0" />
                           <span class="font-medium text-[var(--color-text-primary)] truncate">
                             {row.model}
                           </span>
@@ -798,7 +803,7 @@
                           Unpriced
                         </span>
                         {#if showSubscriptionApiEquivalent && row.apiEquivalentUsd != null && row.apiEquivalentUsd > 0}
-                          <span class="block text-[9px] text-[var(--color-accent)]/85">
+                          <span class="block text-[11px] text-[var(--color-accent)]/85">
                             ~{formatUsdClean(row.apiEquivalentUsd)} eq.
                           </span>
                         {/if}
@@ -881,7 +886,7 @@
 
     {#if viewMode === 'limits' && onOpenSafetyLimits}
       <div
-        class="flex items-center justify-between gap-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-xs"
+        class="flex items-center justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] px-4 py-3 text-xs"
       >
         <div class="flex items-center gap-2.5 min-w-0">
           <Shield size={15} class="shrink-0 text-[var(--color-accent)]" />
@@ -900,4 +905,41 @@
       </div>
     {/if}
   </div>
-</div>
+</section>
+
+<style>
+  /* Same column and header metrics as SettingsPage width="wide": the title,
+     the filter toolbar and the dashboard body share one left edge. */
+  .usage-page {
+    max-width: calc(1080px + 64px);
+    margin: 0 auto;
+    padding: 0 32px;
+    min-width: 0;
+  }
+  .usage-page-header {
+    padding-top: 28px;
+    margin-bottom: 16px;
+  }
+  .usage-page-header h2 {
+    margin: 0;
+    font-size: 20px;
+    line-height: 1.3;
+    font-weight: 600;
+    color: var(--color-text-primary);
+  }
+  .usage-page-header p {
+    margin: 4px 0 0;
+    max-width: 64ch;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--color-text-muted);
+  }
+  @media (max-width: 640px) {
+    .usage-page {
+      padding: 0 16px;
+    }
+    .usage-page-header {
+      padding-top: 20px;
+    }
+  }
+</style>

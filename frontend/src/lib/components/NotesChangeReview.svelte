@@ -250,7 +250,7 @@
             </button>
             {#if row.stale}
               <span
-                class="rounded px-1.5 py-0.5 text-[10px]"
+                class="rounded px-1.5 py-0.5 text-[11px]"
                 style="background: var(--color-warning-bg, var(--color-surface-3)); color: var(--color-warning, var(--color-text-secondary));"
                 >endpoints changed</span
               >
@@ -377,7 +377,7 @@
         >
           <span class="truncate font-medium">{draft.title}</span>
           <span
-            class="rounded px-1.5 py-0.5 text-[10px]"
+            class="rounded px-1.5 py-0.5 text-[11px]"
             style="background: var(--color-surface-3); color: var(--color-text-muted);"
             >draft of revision {draft.baseRevision} · {draft.state}</span
           >

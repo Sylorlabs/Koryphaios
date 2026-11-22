@@ -17,6 +17,7 @@ import {
 } from '../../runs/session-run-store';
 import { KoryManager } from '../manager';
 import type { ManagerRunHandle, ManagerRunLifecycle } from './ManagerRunLifecycle';
+import { agentSteeringStore } from '../../stores/agent-steering-store';
 
 const directories: string[] = [];
 
@@ -57,7 +58,7 @@ function createRunCoordinator(
     'INSERT INTO sessions (id, title, created_at, updated_at) VALUES (?, ?, 1, 1)',
   );
   for (const sessionId of ids) insertSession.run(sessionId, 'Admission test');
-  for (const version of ['0032', '0033', '0037', '0038', '0043']) {
+  for (const version of ['0032', '0033', '0037', '0038', '0043', '0056']) {
     const migration = MIGRATIONS.find((candidate) => candidate.version === version);
     if (!migration) throw new Error(`Migration ${version} is missing`);
     sqlite.exec(migration.up);
@@ -343,10 +344,14 @@ describe('KoryManager turn admission', () => {
     let completion: Promise<void> | undefined;
     try {
       const first = await manager.reserveSessionTurn(sessionId, 'image_turn');
-      completion = manager.dispatchAdmittedWork(first!, async () => {
-        workEntered.resolve();
-        await workRelease.promise;
-      }, 'work_completed');
+      completion = manager.dispatchAdmittedWork(
+        first!,
+        async () => {
+          workEntered.resolve();
+          await workRelease.promise;
+        },
+        'work_completed',
+      );
       await workEntered.promise;
       expect(await manager.reserveSessionTurn(sessionId, 'user_turn')).toBeNull();
       expect(first!.signal.aborted).toBe(false);
@@ -460,7 +465,7 @@ describe('KoryManager turn admission', () => {
     try {
       const first = await manager.startSessionTurn(command);
       expect(first.accepted).toBe(true);
-      if (!first.accepted) throw new Error('Expected first command to be admitted');
+      if (first.accepted !== true) throw new Error('Expected first command to be admitted');
       await expect(first.completion).resolves.toMatchObject({
         runId: first.runId,
         status: 'failed',
@@ -477,6 +482,8 @@ describe('KoryManager turn admission', () => {
       const replay = await manager.startSessionTurn(command);
       expect(replay).toMatchObject({
         accepted: false,
+        replay: 'terminal',
+        userMessageId: persisted[0]?.id,
         result: {
           runId: first.runId,
           status: 'failed',
@@ -529,7 +536,7 @@ describe('KoryManager turn admission', () => {
         userMessage: 'This must remain retryable.',
       });
       expect(accepted.accepted).toBe(true);
-      if (accepted.accepted) await accepted.completion;
+      if (accepted.accepted === true) await accepted.completion;
       expect(addIdempotent).toHaveBeenCalledTimes(1);
     } finally {
       await manager.shutdown();
@@ -551,11 +558,11 @@ describe('KoryManager turn admission', () => {
     try {
       const first = await manager.startSessionTurn({ sessionId: firstSession, ...base });
       expect(first.accepted).toBe(true);
-      if (first.accepted) await first.completion;
+      if (first.accepted === true) await first.completion;
 
       const second = await manager.startSessionTurn({ sessionId: secondSession, ...base });
       expect(second.accepted).toBe(true);
-      if (second.accepted) await second.completion;
+      if (second.accepted === true) await second.completion;
 
       const userRows = [...records.values()].filter((message) => message.role === 'user');
       expect(userRows).toHaveLength(2);
@@ -642,6 +649,7 @@ describe('KoryManager turn admission', () => {
 
       await expect(manager.startSessionTurn(command)).resolves.toMatchObject({
         accepted: false,
+        replay: 'completed',
         result: {
           runId: begun.command.runId,
           status: 'completed',
@@ -652,6 +660,7 @@ describe('KoryManager turn admission', () => {
       records.set(user.id, { ...user, content: 'corrupted different input' });
       await expect(manager.startSessionTurn(command)).resolves.toMatchObject({
         accepted: false,
+        replay: 'terminal',
         result: { status: 'failed', reason: 'command_completion_projection_missing_or_corrupt' },
       });
     } finally {
@@ -719,6 +728,7 @@ describe('KoryManager turn admission', () => {
 
       await expect(manager.startSessionTurn(command)).resolves.toMatchObject({
         accepted: false,
+        replay: 'terminal',
         result: {
           runId: begun.command.runId,
           status: 'cancelled',
@@ -766,7 +776,7 @@ describe('KoryManager turn admission', () => {
     }
   });
 
-  test('direct agent follow-up rejects while another SessionRun is active and never piggybacks', async () => {
+  test('direct agent follow-up queues behind a live SessionRun and dispatches when it releases', async () => {
     const sessionId = 'agent-followup-busy';
     const agentId = 'critic-followup-busy';
     const { sqlite, coordinator } = createRunCoordinator(sessionId);
@@ -776,9 +786,14 @@ describe('KoryManager turn admission', () => {
       const owner = await manager.reserveSessionTurn(sessionId, 'user_turn');
       expect(owner).not.toBeNull();
 
-      await expect(
-        manager.sendMessageToAgent(sessionId, agentId, 'Do not borrow the manager run.'),
-      ).rejects.toThrow(/Wait for chat lifecycle work to finish/);
+      // A busy session is a queue, never a rejection: the message persists as
+      // a steering command instead of borrowing the owner run or erroring out.
+      const queued = await manager.sendMessageToAgent(
+        sessionId,
+        agentId,
+        'Do not borrow the manager run.',
+      );
+      expect(queued).toMatchObject({ status: 'queued' });
 
       expect(provider.providerEntered()).toBe(false);
       expect(provider.getThread()?.busy).toBe(false);
@@ -786,7 +801,17 @@ describe('KoryManager turn admission', () => {
         runId: owner!.runId,
         status: 'active',
       });
+
+      // Releasing the blocking run re-fires the drain and the follow-up runs
+      // under its own SessionRun — never piggybacking on the released one.
       await manager.rejectSessionTurn(owner!, 'test_owner_released');
+      await provider.started;
+
+      expect(provider.providerEntered()).toBe(true);
+      expect(provider.getThread()?.busy).toBe(true);
+      const followUpRun = coordinator.get(sessionId);
+      expect(followUpRun?.runId).not.toBe(owner!.runId);
+      expect(followUpRun?.status).toBe('active');
     } finally {
       provider.release();
       await manager.shutdown();
@@ -894,7 +919,9 @@ describe('KoryManager turn admission', () => {
       await never.promise;
     }) as never;
     internal.waitForSessionExecutionToSettle = async () => {
-      throw new Error(`Session ${sessionId} cancellation timed out waiting for active work to settle`);
+      throw new Error(
+        `Session ${sessionId} cancellation timed out waiting for active work to settle`,
+      );
     };
     setSystemTime(start);
     let completion: ReturnType<KoryManager['dispatchAdmittedTask']> | undefined;
@@ -919,6 +946,281 @@ describe('KoryManager turn admission', () => {
       setSystemTime();
       never.resolve();
       await completion;
+      await manager.shutdown();
+      sqlite.close();
+    }
+  });
+
+  test('a user send terminalizes a durable orphan run instead of rejecting as busy', async () => {
+    const sessionId = 'send-orphaned-run';
+    const { sqlite, coordinator } = createRunCoordinator(sessionId);
+    const { store, addIdempotent } = createMessageStore();
+    const manager = createManager(coordinator, store);
+    let submission: Awaited<ReturnType<KoryManager['startSessionTurn']>> | undefined;
+    try {
+      // The state a restart leaves behind: a live durable run whose local
+      // execution stack no longer exists.
+      const orphan = await coordinator.start(sessionId, 'user_turn');
+      expect(orphan.status).toBe('active');
+
+      submission = await manager.startSessionTurn({
+        sessionId,
+        source: 'user',
+        sourceCommandId: 'send-after-restart',
+        userMessage: 'Message after the backend came back.',
+      });
+
+      expect(submission.accepted).toBe(true);
+      if (submission.accepted !== true) throw new Error('Expected the send to be admitted');
+      expect(submission.runId).not.toBe(orphan.runId);
+      expect(addIdempotent).toHaveBeenCalledTimes(1);
+      const orphanTerminal = sqlite
+        .query<{ count: number }, []>(
+          `SELECT COUNT(*) AS count FROM session_run_events
+            WHERE json_extract(payload, '$.transition.command') = 'fail'
+              AND json_extract(payload, '$.transition.reason') = 'orphaned_active_run_recovered'`,
+        )
+        .get()?.count;
+      expect(orphanTerminal).toBe(1);
+      expect(coordinator.get(sessionId)).toMatchObject({
+        runId: submission.runId,
+        status: 'active',
+      });
+      await expect(submission.completion).resolves.toMatchObject({
+        runId: submission.runId,
+        status: 'failed',
+      });
+    } finally {
+      if (submission?.accepted === true) await submission.completion.catch(() => undefined);
+      await manager.shutdown();
+      sqlite.close();
+    }
+  });
+
+  test('a user send supersedes a durable question wait and cancels its pending question', async () => {
+    const sessionId = 'send-over-question-wait';
+    const { sqlite, coordinator } = createRunCoordinator(sessionId);
+    const { store } = createMessageStore();
+    const manager = createManager(coordinator, store);
+    let submission: Awaited<ReturnType<KoryManager['startSessionTurn']>> | undefined;
+    try {
+      const started = await coordinator.start(sessionId, 'user_turn');
+      const parked = await coordinator.waitForQuestion(
+        sessionId,
+        started.runId!,
+        started.revision,
+        {
+          question: 'Which option should I take?',
+          options: ['first', 'second'],
+          allowOther: true,
+        },
+      );
+      expect(parked.snapshot.status).toBe('waiting');
+
+      // A restart drops the parked stack; the wait and its question are
+      // durable. A plain user message must steer rather than reject forever.
+      submission = await manager.startSessionTurn({
+        sessionId,
+        source: 'user',
+        sourceCommandId: 'send-instead-of-answer',
+        userMessage: 'Never mind the question, do this instead.',
+      });
+
+      expect(submission.accepted).toBe(true);
+      if (submission.accepted !== true) throw new Error('Expected the send to be admitted');
+      expect(submission.runId).not.toBe(started.runId);
+      const question = sqlite
+        .query<{ status: string }, [string, string]>(
+          'SELECT status FROM user_inputs WHERE id = ? AND session_id = ?',
+        )
+        .get(parked.question.questionId!, sessionId);
+      expect(question?.status).toBe('cancelled');
+      expect(coordinator.get(sessionId)).toMatchObject({
+        runId: submission.runId,
+        status: 'active',
+      });
+    } finally {
+      if (submission?.accepted === true) await submission.completion.catch(() => undefined);
+      await manager.shutdown();
+      sqlite.close();
+    }
+  });
+
+  test('a user send queues behind a live run while internal producers still reject', async () => {
+    const sessionId = 'send-steers-live-run';
+    const { sqlite, coordinator } = createRunCoordinator(sessionId);
+    const { store, records } = createMessageStore();
+    const manager = createManager(coordinator, store);
+    let submission: Awaited<ReturnType<KoryManager['startSessionTurn']>> | undefined;
+    try {
+      const owner = await manager.reserveSessionTurn(sessionId, 'user_turn');
+      expect(owner).not.toBeNull();
+
+      const internalRejected = await manager.startSessionTurn({
+        sessionId,
+        source: 'internal',
+        sourceCommandId: 'monitor-during-live-run',
+        userMessage: 'Internal work must still wait.',
+      });
+      expect(internalRejected).toMatchObject({
+        accepted: false,
+        result: { status: 'rejected', reason: 'session_busy' },
+      });
+
+      submission = await manager.startSessionTurn({
+        sessionId,
+        source: 'user',
+        sourceCommandId: 'steer-during-live-run',
+        userMessage: 'Steer the running turn with this instead.',
+      });
+
+      // A live run is steered, not killed: the send parks behind it durably,
+      // its message is already persisted, and the owner is never aborted.
+      expect(owner!.signal.aborted).toBe(false);
+      if (submission.accepted !== 'queued') throw new Error('Expected the send to queue');
+      const parkedMessage = records.get(submission.userMessageId);
+      expect(parkedMessage).toMatchObject({
+        role: 'user',
+        content: 'Steer the running turn with this instead.',
+      });
+      const queuedSteers = await agentSteeringStore.list(sessionId, 'kory-manager');
+      expect(queuedSteers).toHaveLength(1);
+      expect(queuedSteers[0]).toMatchObject({
+        id: submission.steeringCommandId,
+        content: 'Steer the running turn with this instead.',
+        status: 'queued',
+      });
+      // Replaying the same producer id returns the same parked receipt.
+      const replay = await manager.startSessionTurn({
+        sessionId,
+        source: 'user',
+        sourceCommandId: 'steer-during-live-run',
+        userMessage: 'Steer the running turn with this instead.',
+      });
+      expect(replay).toMatchObject({
+        accepted: 'queued',
+        steeringCommandId: submission.steeringCommandId,
+        userMessageId: submission.userMessageId,
+      });
+      expect(coordinator.get(sessionId)).toMatchObject({
+        runId: owner!.runId,
+        status: 'active',
+      });
+
+      // When the run releases, the drain admits the parked send as the next
+      // turn through the normal command-ledger path.
+      await manager.rejectSessionTurn(owner!, 'test_owner_released');
+      const identity = deriveSessionTurnCommandIdentity({
+        sessionId,
+        source: 'user',
+        sourceCommandId: 'steer-during-live-run',
+      });
+      for (let attempt = 0; attempt < 50; attempt++) {
+        if (coordinator.getSessionTurnCommand(identity.commandKey)) break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(coordinator.getSessionTurnCommand(identity.commandKey)).toBeTruthy();
+      expect(records.get(identity.userMessageId)).toBeTruthy();
+    } finally {
+      await agentSteeringStore
+        .remove(`usrsteer_${sessionId}_steer-during-live-run`)
+        .catch(() => undefined);
+      await manager.shutdown();
+      sqlite.close();
+    }
+  });
+
+  test('a stop cancels a queued user steer so it never dispatches', async () => {
+    const sessionId = 'stop-cancels-queued-steer';
+    const { sqlite, coordinator } = createRunCoordinator(sessionId);
+    const { store, records } = createMessageStore();
+    const manager = createManager(coordinator, store);
+    try {
+      const owner = await manager.reserveSessionTurn(sessionId, 'user_turn');
+      expect(owner).not.toBeNull();
+      const submission = await manager.startSessionTurn({
+        sessionId,
+        source: 'user',
+        sourceCommandId: 'steer-cancelled-by-stop',
+        userMessage: 'Never mind, stop everything.',
+      });
+      if (submission.accepted !== 'queued') throw new Error('Expected the send to queue');
+
+      const internal = manager as unknown as {
+        performSessionCancellation(id: string): Promise<void>;
+        waitForSessionExecutionToSettle(): Promise<void>;
+      };
+      internal.waitForSessionExecutionToSettle = async () => {};
+      await internal.performSessionCancellation(sessionId);
+
+      expect(
+        await agentSteeringStore.getById(`usrsteer_${sessionId}_steer-cancelled-by-stop`),
+      ).toMatchObject({ status: 'cancelled' });
+
+      // Releasing the run fires the deferred drain; the cancelled row must
+      // never dispatch — stop cannot resurrect a parked send.
+      await manager.rejectSessionTurn(owner!, 'test_owner_released').catch(() => undefined);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      const identity = deriveSessionTurnCommandIdentity({
+        sessionId,
+        source: 'user',
+        sourceCommandId: 'steer-cancelled-by-stop',
+      });
+      expect(coordinator.getSessionTurnCommand(identity.commandKey)).toBeFalsy();
+      // The eagerly persisted user message stays — it was real input.
+      expect(records.get(identity.userMessageId)).toBeTruthy();
+    } finally {
+      await manager.shutdown();
+      sqlite.close();
+    }
+  });
+
+  test('a queued steer survives losing its parked input and drains from the durable row', async () => {
+    const sessionId = 'restart-drains-queued-steer';
+    const { sqlite, coordinator } = createRunCoordinator(sessionId);
+    const { store, records } = createMessageStore();
+    const manager = createManager(coordinator, store);
+    try {
+      const owner = await manager.reserveSessionTurn(sessionId, 'user_turn');
+      expect(owner).not.toBeNull();
+      const submission = await manager.startSessionTurn({
+        sessionId,
+        source: 'user',
+        sourceCommandId: 'steer-survives-restart',
+        userMessage: 'Deliver me after the restart.',
+      });
+      if (submission.accepted !== 'queued') throw new Error('Expected the send to queue');
+
+      // A restart drops the process-local parked input; the durable row must
+      // carry enough to dispatch the same command with the same identity.
+      const internal = manager as unknown as {
+        runtimes: {
+          peek(id: string): { pendingSteerInputs: Map<string, unknown> } | undefined;
+        };
+      };
+      internal.runtimes.peek(sessionId)?.pendingSteerInputs.clear();
+
+      await manager.rejectSessionTurn(owner!, 'test_owner_released');
+      const identity = deriveSessionTurnCommandIdentity({
+        sessionId,
+        source: 'user',
+        sourceCommandId: 'steer-survives-restart',
+      });
+      for (let attempt = 0; attempt < 50; attempt++) {
+        if (coordinator.getSessionTurnCommand(identity.commandKey)) break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      const command = coordinator.getSessionTurnCommand(identity.commandKey);
+      expect(command).toBeTruthy();
+      expect(command!.userMessageId).toBe(identity.userMessageId);
+      expect(records.get(identity.userMessageId)).toMatchObject({
+        role: 'user',
+        content: 'Deliver me after the restart.',
+      });
+    } finally {
+      await agentSteeringStore
+        .remove(`usrsteer_${sessionId}_steer-survives-restart`)
+        .catch(() => undefined);
       await manager.shutdown();
       sqlite.close();
     }

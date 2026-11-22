@@ -25,17 +25,6 @@ export function decideCriticReview(mode: CriticMode, evidence: CriticEvidence): 
   return { review: false, reason: 'Agent declined Critic review.' };
 }
 
-/** A bare readiness probe ("test", "are you there") is not a review request by
- *  itself. Spending a model turn to decide whether it needs independent
- *  verification makes a handshake look like work, so the host skips the Critic
- *  Auto decision entirely for these messages. */
-const READINESS_PROBE =
-  /^\s*(test|testing|ping|pong|hello|hi|hey|are you (there|ready|working|alive)|ready\?|you there|ok|okay|thanks)\s*[.?!]*\s*$/iu;
-
-export function isReadinessProbeTask(task: string): boolean {
-  return READINESS_PROBE.test(task);
-}
-
 /** Unknown/external tools are conservative: they may mutate outside recorded file edits. */
 export function isConsequentialCriticTool(name: string): boolean {
   return !new Set([

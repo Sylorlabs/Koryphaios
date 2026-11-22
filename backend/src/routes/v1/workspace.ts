@@ -20,7 +20,11 @@ import {
   ProjectIdentityConflictError,
   ProjectIdentityStore,
 } from '../../stores/project-identity-store';
-import { deleteProjectIcon, readProjectIcon, storeProjectIcon } from '../../projects/project-icons';
+import {
+  readProjectIcon,
+  releaseReplacedProjectIcon,
+  storeProjectIcon,
+} from '../../projects/project-icons';
 import { SourceControlScopeStore } from '../../stores/source-control-scope-store';
 
 const SKIP_SEGMENTS = new Set([
@@ -156,8 +160,7 @@ export const workspaceRoutes = new Elysia({ prefix: '/api/workspace' })
         }),
         expectedRevision: identity.revision,
       });
-      if (identity.icon.mode === 'image')
-        await deleteProjectIcon(identity.id, identity.icon.assetId);
+      await releaseReplacedProjectIcon(identity, updated);
       const snapshot = new WorkspaceNavigationStore(getDb()).snapshot();
       broadcastWorkspaceUpdate(snapshot);
       return {
@@ -228,7 +231,7 @@ export const workspaceRoutes = new Elysia({ prefix: '/api/workspace' })
       };
     }
   })
-  .put('/project-identity', ({ request, body, set }) => {
+  .put('/project-identity', async ({ request, body, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     try {
       const root = getRequestProjectRoot(request);
@@ -239,11 +242,14 @@ export const workspaceRoutes = new Elysia({ prefix: '/api/workspace' })
       };
       const expectedRevision =
         input.expectedRevision === undefined ? undefined : Number(input.expectedRevision);
-      const identity = new ProjectIdentityStore(getDb()).update(root, {
+      const identityStore = new ProjectIdentityStore(getDb());
+      const before = identityStore.getWithRevision(root);
+      const identity = identityStore.update(root, {
         name: input.name,
         icon: input.icon,
         expectedRevision,
       });
+      await releaseReplacedProjectIcon(before, identity);
       const snapshot = new WorkspaceNavigationStore(getDb()).snapshot();
       broadcastWorkspaceUpdate(snapshot);
       return { ok: true, data: identity };
@@ -268,7 +274,7 @@ export const workspaceRoutes = new Elysia({ prefix: '/api/workspace' })
         root,
         Number.isFinite(expectedRevision) ? expectedRevision : undefined,
       );
-      if (before.icon.mode === 'image') await deleteProjectIcon(before.id, before.icon.assetId);
+      await releaseReplacedProjectIcon(before, identity);
       const snapshot = new WorkspaceNavigationStore(getDb()).snapshot();
       broadcastWorkspaceUpdate(snapshot);
       return { ok: true, data: identity };

@@ -31,7 +31,7 @@
 >
   <div class="flex items-center justify-between gap-3">
     <span class="font-semibold text-[var(--color-text-secondary)]">Hours</span>
-    <span class="text-[10px] text-[var(--color-text-muted)]">
+    <span class="text-[11px] text-[var(--color-text-muted)]">
       {account?.status === 'fresh'
         ? 'Live account hours'
         : account?.status === 'stale'
@@ -98,12 +98,12 @@
       </div>
     {/if}
     {#if balance.quotaExempt}
-      <p class="text-[10px] text-[var(--color-text-muted)]">
+      <p class="text-[11px] text-[var(--color-text-muted)]">
         This account is exempt from hour quota enforcement.
       </p>
     {/if}
     {#if account?.updatedAt}
-      <p class="text-[10px] text-[var(--color-text-muted)]">
+      <p class="text-[11px] text-[var(--color-text-muted)]">
         Reported {new Date(account.updatedAt).toLocaleString()}.{baseRate === undefined
           ? ' Freebuff has not reported a rate for this account yet, so these are the provider Freebucks.'
           : ' Converted with the account’s live 1× model rate.'}
@@ -111,7 +111,7 @@
     {/if}
   {/if}
   {#if account?.note || !account}
-    <p class="text-[10px] text-[var(--color-text-muted)]">
+    <p class="text-[11px] text-[var(--color-text-muted)]">
       {account?.note ?? 'Refresh billing to retrieve this CLI account’s hour balance.'}
     </p>
   {/if}

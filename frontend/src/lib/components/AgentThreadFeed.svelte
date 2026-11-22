@@ -17,12 +17,6 @@
   import { agentStore } from '$lib/stores/agents.svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
-  import { providersStore } from '$lib/stores/providers.svelte';
-  import KorySelect, { type KorySelectOption } from './KorySelect.svelte';
-  import ProviderIcon from './icons/ProviderIcon.svelte';
-  import BrainIcon from './icons/BrainIcon.svelte';
-  import Settings2 from 'lucide-svelte/icons/settings-2';
-  import Scissors from 'lucide-svelte/icons/scissors';
   import X from 'lucide-svelte/icons/x';
   import { apiUrl } from '$lib/utils/api-url';
   import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
@@ -40,9 +34,6 @@
   }
 
   let { agent, feed, isStreaming = false, onClose }: Props = $props();
-  let controlsOpen = $state(false);
-  let controlsBusy = $state(false);
-  let pruneBusy = $state(false);
   let queue = $derived(agentStore.getAgentSteeringQueue(agent.sessionId, agent.identity.id));
   let expandedSteering = $state<string | null>(null);
   let editingSteering = $state<string | null>(null);
@@ -59,38 +50,6 @@
       if (import.meta.env.DEV) console.warn('Failed to load steering queue', error);
     });
   });
-
-  let modelOptions = $derived.by(() => {
-    const values = providersStore.statusList
-      .filter((provider) => provider.enabled && (provider.adapterAvailable ?? provider.authenticated))
-      .flatMap((provider) => {
-        const models = provider.selectedModels?.length ? provider.selectedModels : provider.models;
-        return models.map((model) => ({
-          value: `${provider.name}:${model}`,
-          label: `${provider.label ?? provider.name} · ${model}`,
-          provider: provider.name,
-        }));
-      });
-    const current = `${agent.identity.provider}:${agent.identity.model}`;
-    if (!values.some((option) => option.value === current)) {
-      values.unshift({ value: current, label: current, provider: agent.identity.provider });
-    }
-    return values;
-  });
-
-  let currentModel = $derived(`${agent.identity.provider}:${agent.identity.model}`);
-  let modelDefinition = $derived.by(() => {
-    const provider = providersStore.statusList.find((item) => item.name === agent.identity.provider);
-    return provider?.allAvailableModels?.find(
-      (model) => model.id === agent.identity.model || model.apiModelId === agent.identity.model,
-    );
-  });
-  let reasoningOptions = $derived<KorySelectOption[]>(
-    (modelDefinition?.reasoningLevels ?? []).map((level) => ({
-      value: level,
-      label: level.charAt(0).toUpperCase() + level.slice(1),
-    })),
-  );
 
   let feedContainer = $state<HTMLDivElement>();
   let virtualList = $state<VirtualList<FeedEntryLocal>>();
@@ -121,6 +80,9 @@
     void key;
     untrack(() => {
       landedThreadKey = '';
+      // Opening a thread is not following a live agent. The list positions the
+      // transcript; autoscroll stays inert until the open has landed.
+      autoScrollCtl.setSuspended(true);
       autoScrollCtl.setFollow(true);
     });
   });
@@ -133,6 +95,8 @@
 
   function handleTranscriptLanded() {
     landedThreadKey = untrack(() => threadViewKey);
+    // The transcript is placed. From here autoscroll may follow the agent.
+    autoScrollCtl.setSuspended(false);
   }
 
   // Per-token streaming signal: tracks the text length of the last
@@ -200,6 +164,12 @@
     if (provider === 'xai') return 'xAI';
     if (provider === 'openrouter') return 'OpenRouter';
     if (provider === 'unorouter') return 'UnoRouter';
+    if (provider === 'hundredmillionseek') return '100MillionSeek';
+    if (provider === 'numes') return 'Numes';
+    if (provider === 'coarena') return 'Coarena';
+    if (provider === 'crowllm') return 'CrowLLM';
+    if (provider === 'radeon') return 'AMD Radeon Cloud';
+    if (provider === 'runcrate') return 'Runcrate';
     if (provider === 'tokenharbor') return 'Token Harbor';
     if (provider === 'logfare') return 'Logfare';
     if (provider === 'apinex') return 'APInex';
@@ -209,45 +179,8 @@
     if (provider === 'copilot') return 'Copilot';
     if (provider === 'kimicode') return 'Kimi Code';
     if (provider === 'opencode') return 'OpenCode';
+    if (provider === 'beam') return 'Reflection AI';
     return provider.charAt(0).toUpperCase() + provider.slice(1);
-  }
-
-  async function updateControls(patch: { model?: string; reasoningLevel?: string }) {
-    if (!agent.identity.id || !agent.sessionId || controlsBusy || isStreaming) return;
-    controlsBusy = true;
-    try {
-      const response = await apiFetch(apiUrl(`/api/agent/${encodeURIComponent(agent.identity.id)}/controls`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: agent.sessionId, ...patch }),
-      });
-      const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(response);
-      if (!response.ok || data.ok === false) throw new Error(data.error ?? 'Worker controls could not be updated.');
-      toastStore.success('Worker controls updated for the next turn.');
-    } catch (error) {
-      toastStore.error(error instanceof Error ? error.message : 'Worker controls could not be updated.');
-    } finally {
-      controlsBusy = false;
-    }
-  }
-
-  async function pruneWorkerContext() {
-    if (!agent.identity.id || !agent.sessionId || pruneBusy || isStreaming) return;
-    pruneBusy = true;
-    try {
-      const response = await apiFetch(apiUrl(`/api/agent/${encodeURIComponent(agent.identity.id)}/prune-context`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: agent.sessionId, keepRecent: 12 }),
-      });
-      const data = await parseJsonResponse<{ ok?: boolean; error?: string; data?: { removed?: number } }>(response);
-      if (!response.ok || data.ok === false) throw new Error(data.error ?? 'Worker context could not be pruned.');
-      toastStore.success(data.data?.removed ? `Pruned ${data.data.removed} older worker messages.` : 'Worker context is already compact.');
-    } catch (error) {
-      toastStore.error(error instanceof Error ? error.message : 'Worker context could not be pruned.');
-    } finally {
-      pruneBusy = false;
-    }
   }
 
   async function queueRequest(path: string, init: RequestInit) {
@@ -302,68 +235,11 @@
         </div>
       </div>
     </div>
-    <div class="ml-4 flex shrink-0 items-center gap-2 rounded-lg border px-3 py-1.5" style="border-color: var(--color-border); background: var(--color-surface-2);">
-      <AnimatedStatusIcon status={agent.status} size={12} isManager={false} />
-      <span class="text-[10px] font-bold uppercase tracking-wider" style="color: {agent.status === 'error' ? 'var(--color-error)' : agent.status === 'done' ? 'var(--color-success)' : 'var(--color-accent)'};">{agent.status.replace('_', ' ')}</span>
-      <span class="h-3 w-px" style="background: var(--color-border);"></span>
-      <Send size={11} style="color: var(--color-accent);" />
-      <span class="text-[10px]" style="color: var(--color-text-secondary);">Composer steers this agent directly</span>
-    </div>
-  </div>
-
-  <div class="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2" style="border-color: var(--color-border); background: var(--color-surface-1);">
-    <div class="flex items-center gap-2 text-[10px]" style="color: var(--color-text-muted);">
-      <Settings2 size={13} />
-      <span>Worker controls</span>
-      {#if isStreaming}<span>Stop the worker before changing controls.</span>{/if}
-    </div>
-    <div class="flex items-center gap-1.5">
-      {#if controlsOpen}
-        <div class="flex min-w-[220px] items-center gap-1.5">
-          <KorySelect
-            compact
-            dense
-            searchable
-            label="Worker model"
-            value={currentModel}
-            options={modelOptions}
-            disabled={controlsBusy || isStreaming}
-            onchange={(value) => updateControls({ model: value })}
-          >
-            {#snippet leading(option)}
-              {#if option?.provider}<ProviderIcon provider={option.provider} size={15} />{/if}
-            {/snippet}
-          </KorySelect>
-          {#if reasoningOptions.length > 0}
-            <KorySelect
-              compact
-              dense
-              label="Reasoning"
-              value={agent.reasoningLevel ?? ''}
-              options={reasoningOptions}
-              disabled={controlsBusy || isStreaming}
-              placeholder="Reasoning"
-              onchange={(value) => updateControls({ reasoningLevel: value })}
-            >
-              {#snippet leading()}
-                <BrainIcon reasoningLevel={agent.reasoningLevel ?? ''} size={15} />
-              {/snippet}
-            </KorySelect>
-          {/if}
-        </div>
-      {/if}
-      <button type="button" class="worker-control-button" disabled={controlsBusy || isStreaming} onclick={() => void pruneWorkerContext()} title="Prune older worker context">
-        <Scissors size={13} /> Prune context
+    {#if onClose}
+      <button type="button" class="worker-control-button danger ml-4 shrink-0" onclick={() => onClose?.()} title="Stop and close worker">
+        <X size={13} /> Close worker
       </button>
-      <button type="button" class="worker-control-button" aria-pressed={controlsOpen} onclick={() => (controlsOpen = !controlsOpen)} title="Change worker model or reasoning level">
-        <Settings2 size={13} /> Controls
-      </button>
-      {#if onClose}
-        <button type="button" class="worker-control-button danger" onclick={() => onClose?.()} title="Stop and close worker">
-          <X size={13} /> Close worker
-        </button>
-      {/if}
-    </div>
+    {/if}
   </div>
 
   {#if queue.length > 0}
@@ -492,23 +368,23 @@
     border-radius: 6px;
     padding: 4px 7px;
     color: var(--color-text-secondary);
-    font-size: 10px;
+    font-size: 11px;
   }
   .worker-control-button:hover { background: var(--color-surface-2); color: var(--color-text-primary); }
   .worker-control-button:disabled { cursor: default; opacity: 0.45; }
   .worker-control-button.danger:hover { color: var(--color-error); }
   .steering-queue { padding: 10px 16px; border-bottom: 1px solid var(--color-border); background: color-mix(in srgb, var(--color-accent) 5%, var(--color-surface-1)); }
-  .queue-count, .queue-hint, .queue-meta { color: var(--color-text-muted); font-size: 10px; }
+  .queue-count, .queue-hint, .queue-meta { color: var(--color-text-muted); font-size: 11px; }
   .queue-hint { opacity: .8; }
   .queue-stack { display: flex; gap: 6px; margin-top: 8px; overflow: visible; }
   .queue-item { min-width: 132px; max-width: 220px; flex: 1; border: 1px solid var(--color-border); border-radius: 10px; padding: 7px; background: var(--color-surface-2); transition: transform 160ms ease, box-shadow 160ms ease, max-width 180ms ease; box-shadow: 0 3px 10px rgba(0,0,0,.16); }
   .queue-item:hover, .queue-item:focus-visible, .queue-item.expanded { transform: translateY(-2px); max-width: 360px; box-shadow: 0 8px 24px rgba(0,0,0,.25); outline: none; }
   .queue-item-main { display: flex; align-items: flex-start; gap: 7px; }
-  .queue-index { display: grid; place-items: center; width: 18px; height: 18px; flex: 0 0 auto; border-radius: 50%; background: var(--color-accent); color: var(--color-surface-0); font-size: 10px; font-weight: 700; }
+  .queue-index { display: grid; place-items: center; width: 18px; height: 18px; flex: 0 0 auto; border-radius: 50%; background: var(--color-accent); color: var(--color-on-accent); font-size: 10px; font-weight: 700; }
   .queue-preview { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; color: var(--color-text-primary); font-size: 11px; line-height: 1.35; }
   .queue-item:hover .queue-preview, .queue-item:focus-visible .queue-preview, .queue-item.expanded .queue-preview { -webkit-line-clamp: 8; }
   .queue-actions { display: flex; gap: 3px; margin-top: 5px; }
-  .queue-actions button { border: 1px solid var(--color-border); border-radius: 5px; padding: 2px 5px; color: var(--color-text-secondary); font-size: 10px; }
+  .queue-actions button { border: 1px solid var(--color-border); border-radius: 5px; padding: 2px 5px; color: var(--color-text-secondary); font-size: 11px; }
   .queue-actions button:hover:not(:disabled) { color: var(--color-text-primary); background: var(--color-surface-3); }
   .queue-actions button:disabled { opacity: .35; }
   .queue-editor { width: 100%; min-height: 60px; resize: vertical; border: 1px solid var(--color-accent); border-radius: 6px; padding: 5px; background: var(--color-surface-1); color: var(--color-text-primary); font-size: 11px; }

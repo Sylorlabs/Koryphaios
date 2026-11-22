@@ -32,7 +32,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const PROJECT_ROOT = resolve(import.meta.dir, '..');
@@ -88,8 +88,11 @@ function sourceDigest(projectRoot: string, files: readonly string[]): string {
 
     const stat = lstatSync(absolutePath);
     if (stat.isSymbolicLink()) {
+      // Git stores a symlink's target path as its blob. Hash that string
+      // rather than following the link: a link pointing at a directory would
+      // throw EISDIR, and reading through it could leave the worktree.
       digest.update('<symlink>');
-      digest.update(readFileSync(absolutePath));
+      digest.update(readlinkSync(absolutePath));
     } else {
       digest.update(readFileSync(absolutePath));
     }

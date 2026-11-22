@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { inspectReactNativeExpoReadiness } from '../skill-eval-react-native-expo-readiness';
+import { inspectReactNativeExpoReadiness } from '../../eval/skills/skill-eval-react-native-expo-readiness';
 
 const locate = (binary: string) => `/tools/${binary}`;
 

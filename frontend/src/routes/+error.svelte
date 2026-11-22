@@ -24,7 +24,7 @@
   <a
     href="/"
     class="mt-4 rounded-lg px-4 py-2 text-sm font-medium transition-colors"
-    style="background: var(--color-accent, #6366f1); color: white;"
+    style="background: var(--color-accent, #6366f1); color: var(--color-on-accent, #fff);"
   >
     Back to app
   </a>

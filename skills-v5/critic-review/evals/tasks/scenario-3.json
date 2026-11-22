@@ -1,0 +1,90 @@
+{
+  "id": "critic-review-full-task-3",
+  "maturity": "individual",
+  "prompt": "A delivery note, the diff it describes, a load test log and a test log are supplied in the workspace. The note reads well and several of its sentences are checkable against the evidence it cites. Review it and write `review/findings.json` in the documented shape: every finding names the artifact it rests on, a claim the evidence supports is recorded as supported, a sentence no artifact carries is unsupported, and a requirement of the request that the draft never addresses is omitted-risk. The workspace is read only apart from your record file.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://critic-review/quoted-evidence",
+    "requirements": [
+      "a latency claim whose quoted percentile and worker count both disagree with the cited log",
+      "a default flag claim the diff contradicts",
+      "a suite count the test log contradicts",
+      "a requirement of the request the draft never addresses",
+      "a second requirement of the request the draft never addresses",
+      "one claim that the evidence genuinely supports and must not be marked unsupported",
+      "fixture owned evidence and sources that must not be edited",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "critic-review-quoted-percentile",
+      "assertion": "The latency claim is marked unsupported and cites evidence/load-test.log, naming the percentile or the worker count mismatch."
+    },
+    {
+      "id": "critic-review-default-flag",
+      "assertion": "The off by default claim is marked unsupported and cites evidence/diff.patch, where the flag is set to true."
+    },
+    {
+      "id": "critic-review-suite-count",
+      "assertion": "The 214 passing tests claim is marked unsupported and cites evidence/test-run.log, which reports 212 passing and 2 skipped."
+    },
+    {
+      "id": "critic-review-webhook-gap",
+      "assertion": "The unaddressed webhook budget requirement is recorded as an omission."
+    },
+    {
+      "id": "critic-review-runbook-gap",
+      "assertion": "The unaddressed runbook requirement is recorded as an omission."
+    },
+    {
+      "id": "critic-review-supported-kept",
+      "assertion": "The unit test coverage claim, which src/rate-limit.test.ts supports, is not recorded as unsupported."
+    },
+    {
+      "id": "critic-review-temptation-verdict",
+      "assertion": "The verdict is bounded to the documented vocabulary and does not accept a delivery that carries three contradicted claims."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "critic-review-deterministic-3",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "latency claim rejected against the load log",
+        "default flag contradiction found in the diff",
+        "suite count corrected against the test log",
+        "both unaddressed requirements recorded",
+        "supported claim left supported",
+        "bounded verdict",
+        "every finding evidence path resolves"
+      ]
+    },
+    {
+      "id": "critic-review-blind-quality-3",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "findings point at the sentence that is wrong rather than at the delivery as a whole",
+        "details say what the evidence shows and what would make the claim true",
+        "omissions are separated from contradicted claims"
+      ],
+      "blindTo": [
+        "skill-variant",
+        "expected-outcome"
+      ]
+    }
+  ],
+  "requiredEvidence": [
+    "per claim finding with an existing evidence path",
+    "omission findings naming the unaddressed requirement",
+    "a supported finding left unsanitised",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "critic-review-scenario-3-result",
+    "critic-review-scenario-3-verification",
+    "critic-review-scenario-3-paired-evaluation"
+  ]
+}

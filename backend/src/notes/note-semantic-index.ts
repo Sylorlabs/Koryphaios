@@ -10,6 +10,7 @@ import {
 import { resolveProjectIdentity } from '../runtime/request-project';
 import { PROJECT_ROOT } from '../runtime/paths';
 import { checkNoteToolPermission, loadNotesSettings } from './notes-settings';
+import { readNoteBody } from './note-document';
 
 /** One bounded representation per note. Coverage counts notes, not complete document chunks. */
 export const NOTE_SEMANTIC_REPRESENTATION_CHARS = 8000;
@@ -115,7 +116,9 @@ function current(database: Database, root: string, id: string): Note | undefined
       `SELECT id,title,content,revision,project_root AS projectRoot FROM notes WHERE id=? AND trashed_at IS NULL AND ${scope(root)}`,
     )
     .get(id, root);
-  return row && visible(row, root) ? row : undefined;
+  // The vector/hash always describes the resolved body, never the (possibly
+  // empty) stored column.
+  return row && visible(row, root) ? { ...row, content: readNoteBody(row) } : undefined;
 }
 function hash(note: Note) {
   return createHash('sha256')

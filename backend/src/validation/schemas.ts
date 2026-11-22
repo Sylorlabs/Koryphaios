@@ -27,6 +27,12 @@ export const ProviderNameSchema = z.enum([
   'openrouter',
   'unorouter',
   'experientiallabs',
+  'hundredmillionseek',
+  'numes',
+  'coarena',
+  'crowllm',
+  'radeon',
+  'runcrate',
   'tokenharbor',
   'logfare',
   'apinex',
@@ -130,9 +136,41 @@ export const CreateSessionRequestSchema = z.object({
 export const SendMessageRequestSchema = z.object({
   sessionId: SessionIdSchema,
   content: ContentSchema,
+  /** Client-minted id for idempotent retries; the server replays the first result. */
+  clientMessageId: z
+    .string()
+    .min(8)
+    .max(64)
+    .regex(/^[A-Za-z0-9_-]+$/)
+    .optional(),
   model: z.string().optional(),
   reasoningLevel: z.string().optional(),
   fastMode: z.boolean().optional(),
+  speedTier: z.string().optional(),
+  modelParameters: z
+    .strictObject({
+      temperature: z.union([z.number(), z.string()]).optional(),
+      top_p: z.union([z.number(), z.string()]).optional(),
+      top_k: z.union([z.number(), z.string()]).optional(),
+      min_p: z.union([z.number(), z.string()]).optional(),
+      top_a: z.union([z.number(), z.string()]).optional(),
+      frequency_penalty: z.union([z.number(), z.string()]).optional(),
+      presence_penalty: z.union([z.number(), z.string()]).optional(),
+      repetition_penalty: z.union([z.number(), z.string()]).optional(),
+      seed: z.union([z.number(), z.string()]).optional(),
+      max_tokens: z.union([z.number(), z.string()]).optional(),
+      verbosity: z.union([z.number(), z.string()]).optional(),
+    })
+    .optional(),
+  fusion: z
+    .strictObject({
+      lead: z.string().max(256),
+      leadEffort: z.string().max(32),
+      leadFast: z.boolean(),
+      sidekick: z.string().max(256),
+      sidekickEffort: z.string().max(32).nullable(),
+    })
+    .optional(),
   imageInputMode: z.enum(['reject', 'omit', 'allow']).optional(),
   attachments: z
     .array(

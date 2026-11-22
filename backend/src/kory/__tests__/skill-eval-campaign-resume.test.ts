@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { hasCompleteCurrentSkillPair } from '../skill-eval-campaign-resume';
+import { hasCompleteCurrentSkillPair } from '../../eval/skills/skill-eval-campaign-resume';
 import type { SkillEvaluationRun } from '../skill-evaluations';
 
 const expected = {

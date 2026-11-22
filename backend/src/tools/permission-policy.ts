@@ -26,20 +26,47 @@ export interface ResolvedSandboxOptions {
 
 let warnedSandboxUnavailable = false;
 
+/** How much confinement a permission preset asks for.
+ *
+ *  The permission presets are the user's own statement about how much they want
+to be asked, so they are also where confinement strictness belongs. Guarded is
+the strict end: every agent shell is confined and the two settings that open
+reach beyond the workspace, network and path escape, are forced closed. Yolo is
+the permissive end: the user has said the run is unconstrained. Custom keeps
+exactly the granular settings the user chose.
+ *
+ *  This never removes a capability the permission policy grants. Computer use
+ *  is allowed by policy and its window allowance is added by
+ *  `OsSandboxOptions.allowWindowCapture`, so a guarded session can still drive a
+ *  window: strictness narrows reach, it does not contradict a grant. */
+export type SandboxPosture = 'strict' | 'standard' | 'unconstrained';
+
+export function sandboxPostureForPermissionMode(
+  mode: PermissionMode | undefined,
+): SandboxPosture {
+  if (mode === 'guarded') return 'strict';
+  if (mode === 'yolo') return 'unconstrained';
+  return 'standard';
+}
+
 /** Resolve the effective sandbox flags for a tool execution context.
  *
- *  Confinement and approval are deliberately independent. A permission mode
- *  controls *whether the user is asked*; `workspace.sandbox` controls *what the
- *  process can reach*. YOLO therefore no longer disables the sandbox: a worker
- *  running autonomously is exactly the case where kernel confinement matters
- *  most, and the worktree grant is only meaningful if it is enforced.
+ *  Confinement and approval used to be fully independent, and the granular
+ *  `sandbox` settings still describe the standard posture. The permission preset
+ *  now sets the end of the range: guarded forces confinement and closes network
+ *  and path reach, yolo runs the shell unconfined because the user asked for an
+ *  unconstrained run, and every other preset keeps the granular settings. The
+ *  preset can only ever be outranked by `workspace.sandbox === 'always'`, which
+ *  is the explicit request to confine even a yolo run.
  *
  *  `naturalSandboxed` is whether the execution path would normally be
  *  sandboxed (plan/critic/worker = true, direct manager = false). The
  *  configured `sandbox.mode` overrides this:
- *  - 'off'    → never sandbox (isSandboxed = false, granular flags inert)
+ *  - 'off'    → never sandbox (isSandboxed = false, granular flags inert),
+ *               even under guarded, because the user turned it off explicitly
  *  - 'always' → sandbox every agent bash call
- *  - 'auto'   → honor the natural per-path behavior
+ *  - 'auto'   → guarded confines, yolo does not, everything else honors the
+ *               natural per-path behavior
  *
  *  `workspaceSandbox` is the user's delegated-agent policy:
  *  - 'off'    → workers are never confined
@@ -54,12 +81,20 @@ export function resolveSandboxOptions(
   workspaceSandbox: WorkspaceSandboxMode = 'auto',
 ): ResolvedSandboxOptions {
   const sandbox: SandboxSettings = settings?.sandbox ?? DEFAULT_SANDBOX_SETTINGS;
+  const posture = sandboxPostureForPermissionMode(settings?.permissionMode);
 
   let requested: boolean;
-  if (workspaceSandbox === 'off') requested = false;
+  if (workspaceSandbox === 'always') requested = true;
+  else if (workspaceSandbox === 'off') requested = false;
   else if (sandbox.mode === 'off') requested = false;
-  else if (workspaceSandbox === 'always' || sandbox.mode === 'always') requested = true;
+  else if (sandbox.mode === 'always') requested = true;
+  else if (posture === 'unconstrained') requested = false;
+  else if (posture === 'strict') requested = true;
   else requested = naturalSandboxed;
+
+  // A workspace policy of 'always' is an explicit request for confinement and
+  // outranks the preset in both directions; it is the only thing that confines
+  // a yolo run.
 
   // 'always' keeps requesting confinement even without an engine; the bash tool
   // refuses those commands rather than running them unconfined.
@@ -78,8 +113,8 @@ export function resolveSandboxOptions(
     isSandboxed,
     commandWhitelist: sandbox.commandWhitelist,
     metacharacters: sandbox.metacharacters,
-    pathConfinement: sandbox.pathConfinement,
-    network: sandbox.network,
+    pathConfinement: posture === 'strict' ? true : sandbox.pathConfinement,
+    network: posture === 'strict' ? false : sandbox.network,
     containerTools: sandbox.containerTools,
     degraded,
   };
@@ -137,14 +172,17 @@ export function resolveSubAgentPermissionPolicy(
 
 /** Resolve the effective sandbox options for a sub-agent (worker).
  *
- *  The sub-agent's approval mode governs prompts only. It is intentionally NOT
- *  folded into the permission mode here: rewriting it to `yolo` used to
- *  short-circuit `resolveSandboxOptions` and strip kernel confinement from
- *  workers, which is precisely backwards — the more autonomous the run, the
- *  more the worktree grant needs to be enforced rather than merely intended.
+ *  The chat's durable approval preset decides confinement. YOLO is the user's
+ *  explicit unconstrained choice for this chat, and it covers delegated
+ *  workers exactly the way it covers the manager: `resolveSandboxOptions`
+ *  maps the unconstrained posture to no kernel sandbox and the tool layer
+ *  drops the workspace pin, so file tools and bash behave like the manager's.
+ *  Every other preset keeps the worker confined to its workspace grant no
+ *  matter how autonomous the run is.
  *
- *  `subAgentApproval` is accepted so callers can keep passing their resolved
- *  approval posture, but it does not affect confinement. */
+ *  `subAgentApproval` governs approval prompts only and does not affect
+ *  confinement; it is accepted so callers can keep passing their resolved
+ *  posture. */
 export function resolveSubAgentSandboxOptions(
   baseSettings: AgentSettings,
   _subAgentApproval: SubAgentApprovalMode | undefined,
@@ -162,7 +200,35 @@ export type ToolPermissionDecision =
 // These tools only update conversation control-plane state. They never touch
 // the workspace or external systems, so they remain available regardless of
 // permission mode or an action-tool blocklist.
-const INTERACTION_TOOLS = new Set(['ask_user', 'ask_manager', 'rename_session', 'request_critic_review']);
+const INTERACTION_TOOLS = new Set([
+  'ask_user',
+  'ask_manager',
+  'rename_session',
+  'request_critic_review',
+  // Only reshapes what this chat's agent sees; never touches the workspace.
+  'manage_context',
+  // Only reshapes what the feeder injects into this chat's system prompt;
+  // never touches the workspace.
+  'manage_skill_feeding',
+]);
+
+/**
+ * Plan mode restricts workspace mutation, not agent orchestration.
+ *
+ * Delegation and agent messaging schedule other agents; they do not write to
+ * the workspace themselves, and each worker still runs under its own host
+ * permission policy and worktree grant. Classifying them as write-capable made
+ * Plan mode silently unable to use subagents, even though parallel
+ * investigation is exactly what planning benefits from.
+ */
+const PLAN_MODE_ORCHESTRATION_TOOLS = new Set([
+  'delegate_to_worker',
+  'manage_agents',
+  'manage_review_agents',
+  'send_agent_message',
+  'request_manager_relay',
+  'schedule_monitor',
+]);
 
 export const READ_ONLY_TOOLS = new Set([
   'list_mcp_tools',
@@ -182,6 +248,8 @@ export const READ_ONLY_TOOLS = new Set([
   'computer_key',
   'computer_scroll',
   'computer_focus',
+  'computer_place_window',
+  'computer_sequence',
   'read_file',
   'grep',
   'glob',
@@ -191,6 +259,8 @@ export const READ_ONLY_TOOLS = new Set([
   'web_fetch',
   'view_image',
   'fetch_context',
+  'list_sessions',
+  'read_session',
   'get_resource_budget',
   'load_skill_detail',
   'list_notes',
@@ -218,6 +288,13 @@ export const FILE_EDIT_TOOLS = new Set([
   'move_file',
 ]);
 
+/** Tools the user always approves except in YOLO, whatever the preset's
+ *  default for a generic non-read action would be. merge_chat_back writes the
+ *  chat's work into the shared folder: in YOLO the merge runs without asking,
+ *  in every other mode the user approves it first. Explicit block/ask/allow
+ *  lists and Plan mode keep their existing precedence (checked earlier). */
+export const APPROVAL_UNLESS_YOLO_TOOLS = new Set(['merge_chat_back']);
+
 const RISKY_TOOLS = new Set([
   'computer_click',
   'computer_double_click',
@@ -227,6 +304,8 @@ const RISKY_TOOLS = new Set([
   'computer_key',
   'computer_scroll',
   'computer_focus',
+  'computer_place_window',
+  'computer_sequence',
   'delete_file',
   'delete_note',
   'shell_manage',
@@ -275,10 +354,15 @@ export function decideToolPermission(
   }
 
   // Planning is an interaction posture the host enforces itself: while the user
-  // is still planning, nothing that can mutate state may run, whatever the
-  // preset, allowlist, or per-tier Ask/Allow lists say. Reads stay available so
-  // the agent can investigate before proposing a plan.
-  if (policy.interactionMode === 'plan' && !READ_ONLY_TOOLS.has(toolName)) {
+  // is still planning, nothing that can mutate the workspace may run, whatever
+  // the preset, allowlist, or per-tier Ask/Allow lists say. Reads stay available
+  // so the agent can investigate before proposing a plan, and orchestration
+  // tools stay available because delegating investigation is part of planning.
+  if (
+    policy.interactionMode === 'plan' &&
+    !READ_ONLY_TOOLS.has(toolName) &&
+    !PLAN_MODE_ORCHESTRATION_TOOLS.has(toolName)
+  ) {
     return {
       action: 'deny',
       reason: 'Planning mode blocked write-capable tool: switch to Act to make changes',
@@ -316,6 +400,12 @@ export function decideToolPermission(
   //
   if (policy.mode === 'yolo') {
     return { action: 'allow', reason: 'YOLO mode bypasses local approval prompts' };
+  }
+  if (APPROVAL_UNLESS_YOLO_TOOLS.has(toolName)) {
+    return {
+      action: 'ask',
+      reason: "Merging this chat's copy back into the folder needs your approval",
+    };
   }
   if (policy.mode === 'sub-agent-user') {
     // Sub-agent "I decide" mode: reads and searches are free, everything that

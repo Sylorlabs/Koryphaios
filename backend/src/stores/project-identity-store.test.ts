@@ -35,12 +35,12 @@ describe('ProjectIdentityStore', () => {
     const first = store.get(root, 'Project');
     const updated = store.update(root, {
       name: '🧪 Lab',
-      icon: { mode: 'emoji', value: '🧪' },
+      icon: { mode: 'monogram', value: '🧪' },
       expectedRevision: 1,
     });
     expect(updated.revision).toBe(2);
     expect(updated.name).toBe('🧪 Lab');
-    expect(store.get(root).icon).toEqual({ mode: 'emoji', value: '🧪' });
+    expect(store.get(root).icon).toEqual({ mode: 'monogram', value: '🧪' });
     expect(() => store.update(root, { expectedRevision: first ? 1 : 0 })).toThrow(
       ProjectIdentityConflictError,
     );
@@ -72,6 +72,21 @@ describe('ProjectIdentityStore', () => {
       shape: 'circle',
     });
     expect(new ProjectIdentityStore(database).get(root).icon).toEqual(updated.icon);
+    database.close();
+  });
+
+  test('persists transparent shape and coerces it away for color tiles', () => {
+    const { root, database, store } = fixture();
+    const transparent = store.update(root, {
+      icon: { mode: 'monogram', value: 'DL', shape: 'transparent' },
+      expectedRevision: 1,
+    });
+    expect(transparent.icon.shape).toBe('transparent');
+    const colorTile = store.update(root, {
+      icon: { mode: 'color', color: 'accent', shape: 'transparent' },
+      expectedRevision: 2,
+    });
+    expect(colorTile.icon).toEqual({ mode: 'color', color: 'accent', shape: 'rounded-square' });
     database.close();
   });
 });

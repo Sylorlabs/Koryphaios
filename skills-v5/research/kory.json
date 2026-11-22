@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "research",
-  "version": "5.0.1",
+  "version": "5.2.1",
   "skillKind": "orchestrator",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",

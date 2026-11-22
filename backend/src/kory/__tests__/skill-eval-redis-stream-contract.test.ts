@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import {
   DATABASE_SKILL_EVAL_MATERIALIZERS,
   DATABASE_SKILL_EVAL_SCORERS,
-} from '../skill-eval-database-fixtures';
+} from '../../eval/skills/skill-eval-database-fixtures';
 
 const scenarioId = 'redis-engineering-full-task-2-individual';
 const materializer = DATABASE_SKILL_EVAL_MATERIALIZERS.find((item) =>

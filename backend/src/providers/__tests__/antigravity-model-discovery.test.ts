@@ -1,9 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AntigravityProvider } from '../antigravity';
-import { getKoryphaiosAntigravityHome } from '../cli-bridges';
+import { fetchAntigravityQuotaGroups } from '../antigravity-quota';
+import {
+  antigravityProbeEnv,
+  getKoryphaiosAntigravityHome,
+  hasAntigravityPortableLogin,
+} from '../cli-bridges';
 
 const ISOLATED_HOME_MARKER = '.koryphaios/antigravity-home';
 
@@ -15,6 +20,7 @@ function fakeAgy(dir: string, body: string): void {
 
 describe('Antigravity model discovery environment', () => {
   let workdir: string;
+  let hostHome: string;
   let originalPath: string | undefined;
   let originalHome: string | undefined;
 
@@ -22,6 +28,14 @@ describe('Antigravity model discovery environment', () => {
     workdir = mkdtempSync(join(tmpdir(), 'agy-discovery-'));
     originalPath = process.env.PATH;
     originalHome = process.env.HOME;
+    // Passive discovery now requires a staged portable login, so the fixture
+    // supplies one in a temp host home. Writing it here (never into the real
+    // managed home) also proves the gate reads the managed home, not the shell.
+    hostHome = mkdtempSync(join(tmpdir(), 'agy-host-home-'));
+    process.env.HOME = hostHome;
+    const staged = join(getKoryphaiosAntigravityHome(), '.gemini', 'antigravity-cli');
+    mkdirSync(staged, { recursive: true });
+    writeFileSync(join(staged, 'antigravity-oauth-token'), '{}');
   });
 
   afterEach(() => {
@@ -30,6 +44,7 @@ describe('Antigravity model discovery environment', () => {
     if (originalHome === undefined) delete process.env.HOME;
     else process.env.HOME = originalHome;
     rmSync(workdir, { recursive: true, force: true });
+    rmSync(hostHome, { recursive: true, force: true });
   });
 
   it('serves a cold catalog without blocking and coalesces failed discovery', async () => {
@@ -74,7 +89,6 @@ describe('Antigravity model discovery environment', () => {
         '" ]; then printf "gemini-3.8-flash-high\\tGemini 3.8 Flash (High)\\n"; else echo "Error: Please sign in to view available models." >&2; exit 1; fi',
     );
     process.env.PATH = `${workdir}:${originalPath ?? ''}`;
-    process.env.HOME = homedir();
 
     const provider = new AntigravityProvider({
       name: 'antigravity',
@@ -85,6 +99,37 @@ describe('Antigravity model discovery environment', () => {
     const models = await provider.refreshModels();
     const ids = models.map((m) => m.apiModelId);
     expect(ids).toContain('gemini-3.8-flash-high');
+  });
+
+  it('requires a staged portable login before any passive probe', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'agy-gate-'));
+    try {
+      expect(hasAntigravityPortableLogin(home)).toBe(false);
+      mkdirSync(join(home, '.gemini', 'antigravity-cli'), { recursive: true });
+      writeFileSync(join(home, '.gemini', 'antigravity-cli', 'antigravity-oauth-token'), '{}');
+      expect(hasAntigravityPortableLogin(home)).toBe(true);
+      // Pins the managed-home env, which is what keeps agy off the host keychain.
+      expect(antigravityProbeEnv(home).HOME).toBe(home);
+      expect(antigravityProbeEnv(home).GEMINI_DIR).toBe(join(home, '.gemini'));
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('never spawns agy for quota when no portable login is staged', async () => {
+    const attempts = join(workdir, 'quota-attempts');
+    fakeAgy(
+      workdir,
+      `if [ "$1" = "--print" ]; then printf 'spawned\\n' >> "${attempts}"; fi\nprintf '{}\\n'`,
+    );
+    process.env.PATH = `${workdir}:${originalPath ?? ''}`;
+    const emptyHome = mkdtempSync(join(tmpdir(), 'agy-empty-home-'));
+    try {
+      expect(await fetchAntigravityQuotaGroups({ home: emptyHome })).toBeNull();
+      expect(existsSync(attempts)).toBe(false);
+    } finally {
+      rmSync(emptyHome, { recursive: true, force: true });
+    }
   });
 
   it('does not launch discovery under the isolated per-turn HOME', () => {

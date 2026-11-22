@@ -5,6 +5,8 @@ import {
   searchNoteSemanticIndex,
   type NoteSemanticIndexStatus,
 } from './note-semantic-index';
+import { readNoteBody } from './note-document';
+import { NOTES_FTS_JOIN } from './note-search-index';
 import { resolveProjectIdentity } from '../runtime/request-project';
 import { PROJECT_ROOT } from '../runtime/paths';
 
@@ -158,7 +160,7 @@ function assertActive(signal?: AbortSignal) {
 }
 
 /** Apply both stored scope and encoded project-document identity, including legacy rows. */
-function visible(note: Snapshot, root: string): boolean {
+function visible(note: Pick<Snapshot, 'id' | 'projectRoot'>, root: string): boolean {
   if (note.id.startsWith('project-document:')) {
     try {
       const identity: unknown = JSON.parse(
@@ -190,31 +192,39 @@ function readSnapshots(
   anchor: string,
 ): Snapshot[] {
   if (!ids.length) return [];
-  // Search the body in SQLite, but transfer only one bounded query-centered window per note.
+  // Bodies are file-backed, so the SQL side transfers only metadata; the
+  // query-centered window is cut in JavaScript on the resolved body.
   const rows = database
-    .query<Snapshot, any[]>(
+    .query<
+      Pick<Snapshot, 'id' | 'title' | 'revision' | 'projectRoot'> & { content: string },
+      any[]
+    >(
       `
     SELECT n.id, substr(n.title, 1, 300) AS title, n.revision, n.project_root AS projectRoot,
-      length(n.content) AS contentLength,
-      max(0, instr(lower(n.content), ?) - 1 - 1000) AS windowStart,
-      substr(n.content, max(1, instr(lower(n.content), ?) - 1000), ?) AS content
+      n.content AS content
     FROM notes n WHERE n.id IN (${ids.map(() => '?').join(',')})
       AND n.trashed_at IS NULL AND ${scope(root)}
   `,
     )
-    .all(anchor, anchor, NOTE_CONTEXT_LIMITS.candidateChars, ...ids, root);
+    .all(...ids, root);
   return rows
     .filter((row) => visible(row, root))
-    .map((row) => ({
-      ...row,
-      // SQLite substr counts Unicode code points; the public character budgets use
-      // JavaScript UTF-16 units, so astral characters must not double the work cap.
-      windowTruncated:
-        row.windowStart > 0 ||
-        row.contentLength > Array.from(row.content).length ||
-        row.content.length > NOTE_CONTEXT_LIMITS.candidateChars,
-      content: row.content.slice(0, NOTE_CONTEXT_LIMITS.candidateChars),
-    }));
+    .map((row) => {
+      const body = readNoteBody({ id: row.id, content: row.content });
+      const anchorAt = body.toLowerCase().indexOf(anchor.toLowerCase());
+      const windowStart = anchorAt < 0 ? 0 : Math.max(0, anchorAt - 1000);
+      const windowed = body.slice(windowStart, windowStart + NOTE_CONTEXT_LIMITS.candidateChars);
+      return {
+        id: row.id,
+        title: row.title,
+        revision: row.revision,
+        projectRoot: row.projectRoot,
+        contentLength: Array.from(body).length,
+        windowStart,
+        windowTruncated: windowStart > 0 || windowed.length < Array.from(body).length,
+        content: windowed,
+      } satisfies Snapshot;
+    });
 }
 
 function lexicalIds(database: Database, query: string, root: string): string[] {
@@ -222,9 +232,9 @@ function lexicalIds(database: Database, query: string, root: string): string[] {
   if (!tokens.length) return [];
   try {
     const statement = database.query<{ id: string }, any[]>(`
-      SELECT n.id FROM notes_fts JOIN notes n ON n.id = notes_fts.note_id
-      WHERE notes_fts MATCH ? AND n.trashed_at IS NULL AND ${scope(root)}
-      ORDER BY bm25(notes_fts), n.id LIMIT ?
+      SELECT notes.id ${NOTES_FTS_JOIN}
+      WHERE notes_fts MATCH ? AND notes.trashed_at IS NULL AND ${scope(root, 'notes')}
+      ORDER BY bm25(notes_fts), notes.id LIMIT ?
     `);
     const limit = NOTE_CONTEXT_LIMITS.lexicalCandidates + 1;
     const expressions = tokens.map((token) => `${token}*`);
@@ -278,18 +288,9 @@ function lexicalIds(database: Database, query: string, root: string): string[] {
       .map((row) => row.id);
     return [...new Set([...exact, ...broad])].slice(0, limit);
   } catch {
-    // Pre-FTS databases retain read-only search. Escape LIKE wildcards supplied by the caller.
-    const term = `%${query.replace(/[\\%_]/g, '\\$&')}%`;
-    return database
-      .query<{ id: string }, any[]>(
-        `
-      SELECT n.id FROM notes n WHERE n.trashed_at IS NULL AND ${scope(root)}
-        AND (n.title LIKE ? ESCAPE '\\' OR n.content LIKE ? ESCAPE '\\' OR n.tags LIKE ? ESCAPE '\\')
-      ORDER BY n.updated_at DESC, n.id LIMIT ?
-    `,
-      )
-      .all(root, term, term, term, NOTE_CONTEXT_LIMITS.lexicalCandidates + 1)
-      .map((row) => row.id);
+    // notes_fts always exists post-migration; a malformed MATCH degrades to no
+    // lexical candidates rather than a content-column LIKE scan.
+    return [];
   }
 }
 

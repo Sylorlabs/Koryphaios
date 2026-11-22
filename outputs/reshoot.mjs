@@ -1,0 +1,31 @@
+import { chromium } from 'playwright';
+const browser = await chromium.launch();
+const page = await (await browser.newContext({ viewport: { width: 1800, height: 1043 } })).newPage();
+await page.addInitScript(() => {
+  localStorage.setItem('koryphaios-onboarding-v1', JSON.stringify({ outcome: 'skipped', finishedAt: Date.now(), version: 1 }));
+  localStorage.setItem('koryphaios-navigation-preferences-v1', JSON.stringify({ lastSessionId: 'qSeVO9t_Wg_6', sessionScope: 'project' }));
+});
+await page.goto('http://127.0.0.1:3003', { waitUntil: 'domcontentloaded' });
+await page.waitForTimeout(8000);
+await page.locator('[data-testid="composer-model-control"] button').first().click();
+await page.waitForTimeout(400);
+await page.getByLabel('Search quick models').fill('weaver');
+await page.waitForTimeout(900);
+await page.getByRole('button', { name: /weaver/i }).first().click();
+await page.waitForTimeout(800);
+const noImg = page.getByRole('button', { name: /Continue without images/ });
+if (await noImg.isVisible().catch(() => false)) { await noImg.click(); await page.waitForTimeout(500); }
+await page.keyboard.press('Escape');
+await page.mouse.click(20, 20);
+await page.waitForTimeout(400);
+const chip = page.getByTestId('composer-model-params-control');
+await chip.waitFor({ state: 'visible', timeout: 15000 });
+await chip.locator('button').first().click();
+const panel = page.getByRole('dialog');
+await panel.waitFor({ state: 'visible', timeout: 8000 });
+const temp = panel.getByRole('slider', { name: 'Temperature' });
+if (await temp.count()) await temp.press('End');
+await page.waitForTimeout(900);
+await page.screenshot({ path: 'outputs/ui-critique/params-panel-clean.png' });
+await browser.close();
+console.log('done');

@@ -102,6 +102,20 @@ function normalizeNotesSettings(input?: Partial<NotesSettings> | null): NotesSet
         ),
       ),
     ),
+    indexScanLimitEnabled:
+      typeof input?.indexScanLimitEnabled === 'boolean'
+        ? input.indexScanLimitEnabled
+        : DEFAULT_NOTES_SETTINGS.indexScanLimitEnabled,
+    indexScanLimit: Math.round(
+      Math.min(
+        1_000_000,
+        Math.max(1_000, finiteNumber(input?.indexScanLimit, DEFAULT_NOTES_SETTINGS.indexScanLimit)),
+      ),
+    ),
+    hideIndexLimitNotice:
+      typeof input?.hideIndexLimitNotice === 'boolean'
+        ? input.hideIndexLimitNotice
+        : DEFAULT_NOTES_SETTINGS.hideIndexLimitNotice,
     graphPhysics: {
       gravity: Math.min(
         0,

@@ -219,7 +219,7 @@
         </div>
         <div class="flex items-center gap-2">
           <span
-            class="hidden rounded-md border border-[var(--color-border)] bg-[var(--color-surface-1)] px-2 py-1 font-mono text-[9px] text-[var(--color-text-muted)] sm:block"
+            class="hidden rounded-md border border-[var(--color-border)] bg-[var(--color-surface-1)] px-2 py-1 font-mono text-[11px] text-[var(--color-text-muted)] sm:block"
             >ESC</span
           >
           <button
@@ -236,7 +236,7 @@
           class="grid grid-cols-3 gap-px border-b border-[var(--color-border)] bg-[var(--color-border)]"
         >
           <div class="bg-[var(--color-surface-1)] px-4 py-3">
-            <p class="text-[9px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
+            <p class="text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
               Recorded states
             </p>
             <p class="mt-1 font-mono text-sm text-[var(--color-text-primary)]">
@@ -244,7 +244,7 @@
             </p>
           </div>
           <div class="bg-[var(--color-surface-1)] px-4 py-3">
-            <p class="text-[9px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
+            <p class="text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
               Recorded cost
             </p>
             <p class="mt-1 font-mono text-sm text-[var(--color-text-primary)]">
@@ -252,7 +252,7 @@
             </p>
           </div>
           <div class="bg-[var(--color-surface-1)] px-4 py-3">
-            <p class="text-[9px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
+            <p class="text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
               Navigation
             </p>
             <p class="mt-1 text-xs text-[var(--color-text-primary)]">
@@ -353,16 +353,16 @@
                         >{title}</span
                       >
                       {#if isCurrent}<span
-                          class="rounded bg-[var(--color-success-bg)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[var(--color-success)]"
+                          class="rounded bg-[var(--color-success-bg)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--color-success)]"
                           >Current</span
                         >{/if}
                       {#if entry.hasRichMetadata}<span
-                          class="rounded bg-[var(--color-surface-3)] px-1 py-0.5 text-[8px] font-medium text-[var(--color-text-muted)]"
+                          class="rounded bg-[var(--color-surface-3)] px-1 py-0.5 text-[11px] font-medium text-[var(--color-text-muted)]"
                           title="Has expandable metadata">rich</span
                         >{/if}
                     </span>
                     <span
-                      class="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-[var(--color-text-muted)]"
+                      class="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-[var(--color-text-muted)]"
                     >
                       <span>{formatTimestamp(entry.timestamp)}</span><span>{source.label}</span
                       ><span>{checkpointLabel(entry.checkpointType)}</span>
@@ -375,7 +375,7 @@
                       <span class="mt-1 flex flex-wrap gap-1">
                         {#each badges as badge}
                           <span
-                            class="rounded bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[9px] font-medium text-[var(--color-text-muted)]"
+                            class="rounded bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--color-text-muted)]"
                             >{badge}</span
                           >
                         {/each}
@@ -400,7 +400,7 @@
       <footer
         class="flex items-center justify-between gap-3 border-t border-[var(--color-border)] bg-[var(--color-surface-2)] px-5 py-3"
       >
-        <p class="text-[10px] text-[var(--color-text-muted)]">
+        <p class="text-[11px] text-[var(--color-text-muted)]">
           {loadError
             ? 'Retry after resolving the repository or backend error.'
             : sessionBusy

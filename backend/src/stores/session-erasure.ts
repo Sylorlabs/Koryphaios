@@ -5,6 +5,8 @@ const DIRECT_SESSION_TABLES = [
   'active_workers',
   'messages',
   'ordered_session_events',
+  // One row per chat at most; erasing the chat must drop its prune mark too.
+  'ordered_session_prune_marks',
   'replay_events',
   'routing_audit_log',
   'session_feed_entries',

@@ -275,8 +275,9 @@ export const TIMEOUT = {
  * Used by WorkspaceManager for parallel agent isolation
  */
 export const WORKSPACE = {
-  /** Default max concurrent worktrees */
-  DEFAULT_WORKTREE_LIMIT: 4,
+  /** Default worktree admission. 0 = no host-imposed limit (hardware is the
+   *  ceiling). A positive value is a user-chosen cap; extra work queues. */
+  DEFAULT_WORKTREE_LIMIT: 0,
   /** Default worktree directory (relative to repo root) */
   DEFAULT_WORKTREE_DIR: '.trees',
   /** Default: don't copy .env files to worktrees (security) */

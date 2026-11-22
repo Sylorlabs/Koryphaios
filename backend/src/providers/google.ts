@@ -2,7 +2,13 @@
 // Uses Google's GenAI SDK for direct API access.
 // Model list is refreshed from the Gemini API when available; static list is fallback only.
 
-import type { ProviderConfig, ProviderName, ModelDef } from '@koryphaios/shared';
+import type {
+  ModelParameterKey,
+  ProviderConfig,
+  ProviderName,
+  ModelDef,
+} from '@koryphaios/shared';
+import { sanitizeModelParameterValues } from '@koryphaios/shared';
 import { type Provider, type ProviderEvent, type StreamRequest, resolveModel } from './types';
 import { GEMINI_V1BETA_BASE } from './api-endpoints';
 import { userConfirmedImageInput } from './attachment-admission';
@@ -121,6 +127,20 @@ export class GoogleProvider implements Provider {
     if (this.cachedModels && isModelListCacheFresh(this.lastFetch)) return this.cachedModels;
     this.refreshModelsInBackground(fallback);
     return this.cachedModels ?? [];
+  }
+
+  /** generationConfig takes temperature/topP/topK/maxOutputTokens/seed and the
+   * two penalties — mapped in streamResponse. */
+  forwardedModelParameters(): ReadonlySet<ModelParameterKey> {
+    return new Set([
+      'temperature',
+      'top_p',
+      'top_k',
+      'max_tokens',
+      'seed',
+      'presence_penalty',
+      'frequency_penalty',
+    ]);
   }
 
   private refreshModelsInBackground(fallback: ModelDef[]) {
@@ -320,13 +340,36 @@ export class GoogleProvider implements Provider {
 
     // SDK generateContent config accepts a broad shape; we populate the known
     // fields and conditionally add thinkingConfig below.
+    const modelDef = resolveModel(request.model);
+    const liveDef = this.listModels().find(
+      (m) => m.id === request.model || m.apiModelId === request.model,
+    );
+    // Composer "Model settings" overrides, sanitized against the model's own
+    // declared parameter list.
+    const modelParams = sanitizeModelParameterValues(
+      liveDef?.parameters ?? modelDef?.parameters,
+      request.modelParameters,
+    );
     const generationConfig: Record<string, unknown> = {
       systemInstruction: request.systemPrompt,
-      maxOutputTokens: request.maxTokens ?? 65_536,
-      temperature: request.temperature,
+      maxOutputTokens:
+        (typeof modelParams.max_tokens === 'number' ? modelParams.max_tokens : undefined) ??
+        request.maxTokens ??
+        65_536,
+      temperature:
+        (typeof modelParams.temperature === 'number' ? modelParams.temperature : undefined) ??
+        request.temperature,
+      ...(typeof modelParams.top_p === 'number' && { topP: modelParams.top_p }),
+      ...(typeof modelParams.top_k === 'number' && { topK: modelParams.top_k }),
+      ...(typeof modelParams.seed === 'number' && { seed: modelParams.seed }),
+      ...(typeof modelParams.presence_penalty === 'number' && {
+        presencePenalty: modelParams.presence_penalty,
+      }),
+      ...(typeof modelParams.frequency_penalty === 'number' && {
+        frequencyPenalty: modelParams.frequency_penalty,
+      }),
     };
 
-    const modelDef = resolveModel(request.model);
     const apiModel = modelDef?.apiModelId || request.model;
     const isGemini3 = /gemini-3/i.test(request.model) || /gemini-3/i.test(apiModel ?? '');
 

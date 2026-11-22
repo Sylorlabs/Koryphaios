@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "reviewerId": "logfare-stateless-fac7cd52-ce0a-4c76-8676-25caa7c4d5a1",
+  "completed": true,
+  "output": "{\"artifactA\":{\"passed\":true,\"quality\":0.72,\"verification\":0.6,\"integrityFailure\":false,\"evidence\":[\"Produced market-research.json, result.md, verification.md plus raw HTTP bodies/headers/hashes under evidence/ for all nine first-party sources (amplitude/mixpanel/posthog pricing, product, terms).\",\"Final output claims 9/9 sources HTTP 200 and 9/9 archived SHA-256 matches; host executionEvidence reports 'posthog-pricing: source exceeds size limit' as an authoritative verification failure, so the agent's '9/9 authoritative HTTPS sources returned HTTP 200' claim is not fully corroborated by the host scorer.\",\"PostHog estimate correctly left unavailable because no usable overage rate was exposed in retrieved bytes — respects the 'estimate MUST be null and status unavailable' rule.\",\"Controlled negative path (404 twice) and recovery (200 with matching body hash) demonstrated with evidence artifacts (negative-1/2, recovery.body).\",\"No builder/validator scripts; verification is described in prose rather than reproducible tooling, weakening execution-invariant reproducibility.\",\"Evidence directory uses flat evidence/ layout; hashes present for bodies but headers for some sources (mixpanel-pricing.headers) lack afterText, limiting independent re-verification.\"]},\"artifactB\":{\"passed\":true,\"quality\":0.8,\"verification\":0.72,\"integrityFailure\":false,\"evidence\":[\"Produced market-research.json, result.md, verification.md plus reproducible build-report.py and verify-report.py scripts, and evidence under .kory-tmp/evidence/ with .body/.headers/.meta/.txt per source.\",\"Final output claims '9 sources, 9 claims, 3 comparisons, estimate invariants, and controlled recovery verified' via validator; host executionEvidence still reports 'posthog-pricing: source exceeds size limit' as authoritative verification failure, so the 'all nine required first-party HTTPS sources returned HTTP 200' claim is not fully corroborated.\",\"PostHog 2M estimate left unavailable because a sufficient paid unit was not established from captured bytes — respects the null-estimate rule.\",\"Controlled failure demonstrated as curl exit 7/HTTP 000 with successful retry HTTP 200 matching SHA-256 (recovery-1.stderr, recovery-2.body, recovery.log) — a genuine negative/recovery path.\",\"Decision uses Mixpanel annual $185/month tier as paid benchmark and Amplitude $0/2M boundary; pricing normalization present.\",\"Reproducible builder/validator scripts strengthen execution-invariant and verification-discipline claims relative to A.\"]},\"preference\":\"B\",\"rationale\":[\"Both artifacts satisfy the core market-competitive-research contract: decision/dimensions defined, nine claim-ledger records, three comparisons, null PostHog estimate with unavailable status, and controlled negative/recovery evidence.\",\"Both share the same host-observed verification failure (posthog-pricing exceeds size limit), so neither fully earns the '9/9 sources 200' claim; this is a shared limitation, not a differentiator.\",\"Artifact B adds reproducible build-report.py and verify-report.py scripts, giving stronger execution-invariant and verification-discipline evidence than A's prose-only verification.\",\"Artifact B's recovery evidence (curl exit 7/HTTP 000 then 200 with matching hash) is a more explicit controlled-outage demonstration than A's 404-twice path, though both are valid.\",\"Artifact B's per-source .txt extracted text and .meta files improve provenance traceability; A's flat evidence layout with some missing header text is weaker.\",\"Neither shows integrity failure; both honestly label unknowns and leave PostHog unavailable rather than guessing.\"]}",
+  "events": [
+    {
+      "type": "review.started",
+      "reviewerId": "logfare-stateless-fac7cd52-ce0a-4c76-8676-25caa7c4d5a1"
+    },
+    {
+      "type": "review.completed",
+      "reviewerId": "logfare-stateless-fac7cd52-ce0a-4c76-8676-25caa7c4d5a1",
+      "outputSha256": "a659b9eac858b3c14a708169e659f59f69aec7ce555e1269be32b124ad104300"
+    }
+  ],
+  "hostReceipt": {
+    "schemaVersion": 1,
+    "stageOnly": true,
+    "identitySource": "host-invocation-uuid",
+    "upstreamSessionObserved": true,
+    "requestedModel": "deepseek-v4.1-flash-1017",
+    "responseModel": "deepseek-v4.1-flash-1017",
+    "promptSha256": "8d4568a38eab0c07b761c0d7805d2add1856eb0434ef1f40162f34e69ae20b56",
+    "requestBytes": 207640,
+    "responseSha256": "a230a8f61d67735bbe1bfc474df2cf78a2aa7a0dc8eef358aad0e7d070ddffd1",
+    "outputSha256": "a659b9eac858b3c14a708169e659f59f69aec7ce555e1269be32b124ad104300",
+    "elapsedMs": 4240,
+    "osIsolationVerified": false,
+    "upstreamIdentityVerified": false,
+    "signed": false
+  }
+}

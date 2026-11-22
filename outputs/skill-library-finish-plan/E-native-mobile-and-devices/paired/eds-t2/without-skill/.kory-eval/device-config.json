@@ -1,0 +1,73 @@
+{
+  "interfaces": {
+    "swd": [
+      "normal:no-debug-attach",
+      "normal:no-firmware-readout",
+      "normal:no-secret-readout",
+      "physical-possession:authenticated-recovery-entry",
+      "physical-possession:no-unrestricted-firmware-readout",
+      "physical-possession:no-secret-export",
+      "physical-possession:no-flash-write",
+      "physical-possession:no-rollback-state-clear"
+    ],
+    "uart": [
+      "normal:read-only-boot-log",
+      "normal:no-image-install",
+      "normal:no-credential-readout",
+      "physical-possession:read-only-boot-log",
+      "physical-possession:authenticated-recovery-entry",
+      "physical-possession:no-image-install",
+      "physical-possession:no-secret-readout",
+      "physical-possession:no-rollback-state-clear"
+    ],
+    "romUsb": [
+      "normal:no-rom-download-mode",
+      "normal:no-image-install",
+      "physical-possession:authenticated-recovery-entry",
+      "physical-possession:authenticated-image-install",
+      "physical-possession:no-unrestricted-firmware-readout",
+      "physical-possession:no-unsigned-image-install",
+      "physical-possession:no-downgrade",
+      "physical-possession:no-secret-readout",
+      "physical-possession:no-rollback-state-clear"
+    ]
+  },
+  "swdReadoutLocked": true,
+  "observedProductionLockState": true,
+  "authorizedRecoveryOnly": true,
+  "credentialHardwareBacked": true,
+  "credentialExportable": false,
+  "resetDestroysOrInvalidatesCredential": true,
+  "decommissionDestroysCredential": true,
+  "fleetRevocationCheckedOnRecovery": true,
+  "algorithmOwnedBy": "applied-cryptography",
+  "invasiveResistanceClaimed": false,
+  "faultInjectionResistanceClaimed": false,
+  "binding": {
+    "board": "mcu-rev-c",
+    "product": "device-x",
+    "productionKeyHash": "prod-key-hash-2026",
+    "applicationVersion": 7,
+    "minimumVersion": 7,
+    "corpusObservedOnHardware": [
+      "serialBootLog",
+      "keyHashFuseRecord",
+      "productionLockRegister"
+    ],
+    "emulatorCannotProve": [
+      "physicalFuseProof",
+      "debugLockProof"
+    ],
+    "credentialSlot": "secure-slot-0: hardware-backed, non-exportable, the only copy of the per-device credential",
+    "deviceIdentity": "device-x:mcu-rev-c:0007: immutable across factory reset, because fleet revocation is keyed to it",
+    "authorityTokenGrammar": "<state>:<privilege>, with state normal or physical-possession and a no- prefix marking an explicit denial; interfaceCan() answers whether the exact token is enumerated",
+    "rationale": [
+      "board, product and productionKeyHash are taken from the fixed corpus (board mcu-rev-c, product device-x, keyHash prod-key-hash-2026) rather than assumed",
+      "applicationVersion and minimumVersion are 7, the version of the board-observed deployed image, so the correctly signed older image is a rollback rejection",
+      "observedProductionLockState is true because the corpus records observed.productionLockRegister=true for this board",
+      "swdReadoutLocked and authorizedRecoveryOnly are true because the production lock register read on the board leaves only the explicitly authenticated recovery path",
+      "credentialExportable is false because the slot is non-exportable; invasive and fault-injection resistance stay false because neither was exercised",
+      "algorithmOwnedBy is applied-cryptography: this policy records how the credential is provisioned and enforced, not how the algorithm works"
+    ]
+  }
+}

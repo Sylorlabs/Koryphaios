@@ -192,6 +192,71 @@ describe('tool input validation', () => {
     if (!invalid.valid) expect(invalid.error).toContain('must');
   });
 
+  test('rescues a JSON-encoded array sent as a string', async () => {
+    const schema = {
+      type: 'object',
+      properties: { skills: { type: 'array', items: { type: 'string' } } },
+      required: ['skills'],
+    };
+    // The exact form a flash model sent four times in a row during the live
+    // skill-feeder smoke test.
+    expect(
+      await validateToolInputAgainstSchema(schema, { skills: '["response-style"]' }),
+    ).toEqual({ valid: true, value: { skills: ['response-style'] } });
+  });
+
+  test('rescues a bare string where string items are expected', async () => {
+    const schema = {
+      type: 'object',
+      properties: { skills: { type: 'array', items: { type: 'string' } } },
+      required: ['skills'],
+    };
+    expect(await validateToolInputAgainstSchema(schema, { skills: 'response-style' })).toEqual({
+      valid: true,
+      value: { skills: ['response-style'] },
+    });
+  });
+
+  test('rescues through an anyOf array branch when no branch takes a string', async () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        skills: {
+          anyOf: [
+            { type: 'array', items: { type: 'string' } },
+            { type: 'number' },
+          ],
+        },
+      },
+      required: ['skills'],
+    };
+    // The raw string matches no branch (not an array, not a number), so the
+    // rescue pass must parse it into the array branch.
+    expect(
+      await validateToolInputAgainstSchema(schema, { skills: '["plan-mode", "critic-review"]' }),
+    ).toEqual({ valid: true, value: { skills: ['plan-mode', 'critic-review'] } });
+  });
+
+  test('rescues a JSON-encoded array of objects', async () => {
+    const schema = {
+      type: 'object',
+      properties: { files: { type: 'array', items: { type: 'object' } } },
+      required: ['files'],
+    };
+    const rescued = await validateToolInputAgainstSchema(schema, { files: '[{"path":"a"}]' });
+    expect(rescued).toEqual({ valid: true, value: { files: [{ path: 'a' }] } });
+  });
+
+  test('leaves genuine type errors untouched', async () => {
+    const schema = {
+      type: 'object',
+      properties: { path: { type: 'string' }, count: { type: 'number' } },
+      required: ['count'],
+    };
+    const invalid = await validateToolInputAgainstSchema(schema, { count: 'lots' });
+    expect(invalid.valid).toBe(false);
+  });
+
   test('guidance names the tool and its required keys', () => {
     const schema = { type: 'object', required: ['objective', 'scope'] };
     const guidance = toolSchemaGuidance('create_goal', schema, 'missing objective');

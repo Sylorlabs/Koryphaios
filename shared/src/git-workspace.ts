@@ -37,6 +37,19 @@ export interface CreatedGitWorkspace {
   selection?: import('./chat-git').ChatGitSelectionRecord;
   /** Revision-picker chats own independent Git metadata, not a shared worktree commondir. */
   isolation?: 'independent-repository';
+  /** Set only by isolate_chat: the chat moved itself out of its folder into an
+   *  independent copy mid-conversation. Records what merge_chat_back needs to
+   *  return the work. Revision-picker chats never have this field. */
+  autoIsolated?: {
+    /** Canonical folder the chat left; merge target on merge_chat_back. */
+    sourceDirectory: string;
+    /** Branch the folder was on when the chat isolated; merge refuses otherwise. */
+    sourceBranch: string;
+    /** Commit the copy cloned from; distinguishes real work from a no-op merge. */
+    sourceHead: string;
+    reason: string;
+    isolatedAt: number;
+  };
   path: string;
   branch: string;
   baseCommit: string;

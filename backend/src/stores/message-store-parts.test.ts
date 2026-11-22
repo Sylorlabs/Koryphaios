@@ -104,7 +104,8 @@ describe('messages route display parts', () => {
       id: 'a', sessionId: 's', role: 'assistant', content: 'Text', reasoningContent: 'Why', createdAt: 5,
     });
     expect(legacy.parts).toEqual([
-      { kind: 'reasoning', text: 'Why', startedAt: 5, endedAt: 5 },
+      // A legacy row stored the reasoning but never how long it took.
+      { kind: 'reasoning', text: 'Why', startedAt: 5, endedAt: 5, timeUnknown: true },
       { kind: 'text', text: 'Text', startedAt: 5 },
     ]);
     const stored = withDisplayParts({

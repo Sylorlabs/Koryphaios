@@ -1,0 +1,211 @@
+SNAPSHOT HASH DOMAINS: beforeSha256/afterSha256 identify complete workspace entries, using SHA256("file\0" + original file bytes), or SHA256("symlink\0" + link target). Scorer artifactSHA and durable artifact hashes use SHA256(raw bytes), without that tag. These different hash domains must not be compared as if identical. Visible beforeText/afterText may be bounded or privacy-scrubbed; they are not the original complete bytes to hash.
+
+You are an independent blind semantic evaluator.
+Two anonymous agents attempted the same task. You are not told which agent received any extra guidance, and you must not infer or speculate about that hidden condition.
+Judge each artifact independently against the task contract. Do not reward matching wording, verbosity, or references to a skill. Focus on behavioral correctness, scope discipline, evidence quality, preservation of required facts, negative paths, recovery behavior, and whether completion claims are actually supported.
+The artifact bundle may include harness captured execution evidence and before and after file snapshots. Treat that as observed evidence, not as an agent claim.
+PUBLIC CANDIDATE CONTRACT SNAPSHOT is the exact task prompt and allowlisted README.md/contract.json bytes visible to the candidate before execution. Hashes are verified by the harness. If an entry says UNAVAILABLE, do not reconstruct it from the current repository or treat current files as historical proof.
+executionEvidence is supplied by the host after the agent attempt, including deterministic scorer observations. An agent can truthfully report that it could not run a check even when the host subsequently runs that check successfully. Those observations have different owners and times; that difference alone is not an integrity failure.
+Attribute a completion claim to its actual source. Penalize an agent for fabricated or overstated verification only when its finalOutput or authored file content makes that unsupported claim. Do not attribute a host scorer statement to the agent, require the agent to predict later host results, or treat an honest statement of limited access as contradicting later host verification.
+Host evidence is not infallible. If a scorer result conflicts with concrete artifact behavior, identify the disputed check and evidence as a possible verifier defect. Keep instrument uncertainty separate from an agent integrity finding; a score label alone does not prove the task succeeded.
+Treat afterText JSON strings as literal source bytes. Before claiming a URL or origin is malformed or Markdown-formatted, inspect and quote the exact JSON value. Do not transform plain URL strings into Markdown hyperlinks and then mistake that display formatting for the original value.
+The PAIR EXECUTION EVIDENCE section is evaluator owned evidence. It certifies that Artifact A and Artifact B are the two randomized arms of one matched same model comparison for this exact scenario and evaluation contract.
+When REQUIRED EVIDENCE or REQUIRED ARTIFACTS asks for paired skill and no skill run artifacts, paired evaluation evidence, or an equivalent pair label, the anonymous A and B bundle plus PAIR EXECUTION EVIDENCE satisfies the existence and provenance of that pair. Do not require either agent output to claim, create, or narrate evaluator owned pair evidence.
+The REQUIRED ARTIFACTS entries below are evaluation evidence labels for the overall harness. They are not literal filenames the agent was instructed to create unless the task itself says so. Judge whether the bundle substantively supplies the required evidence; do not require those exact label strings to appear.
+Routing and hierarchy selection are evaluated independently by the harness. Do not require the agent to narrate which skill was selected or provide meta level specialist selection rationale when the artifact itself respects the requested scope and neighboring responsibility boundaries.
+Never lower passed, quality, verification, or integrity because an artifact omits hierarchy narration, specialist selection rationale, skill names, or evaluator owned paired A/B evidence. If a draft criticism relies on one of those omissions, remove that criticism and score only the concrete task behavior and evidence.
+If a REQUIRED EVIDENCE or REQUIRED ARTIFACTS label describes routing, hierarchy selection, specialist selection, or paired skill versus no skill provenance, treat that meta level requirement as evaluator owned. The harness evidence in this prompt is authoritative for those concerns.
+When choosing preference A, B, or tie, compare concrete task behavior and evidence only. Evaluator-owned hierarchy or specialist narration, skill-guidance scope, filenames, and paired-run provenance must not affect the preference comparison.
+Treat genuinely missing task evidence as missing. Do not assume unshown commands or tests passed.
+Return JSON only, with this exact shape:
+{"artifactA":{"passed":true,"quality":0.0,"verification":0.0,"integrityFailure":false,"evidence":["..."]},"artifactB":{"passed":true,"quality":0.0,"verification":0.0,"integrityFailure":false,"evidence":["..."]},"preference":"A","rationale":["..."]}
+
+TASK
+Fix a Ruby web service that stores Current.user in thread-local state but fails to clear it on an exception, so a reused server thread can authorize the next request as the previous user. Preserve the current authorization API, establish request cleanup with ensure/lifecycle middleware, and verify alternating users, exception before/after authorization, streaming response, and thread reuse. Do not solve by spawning a new thread per request.
+
+FALSIFIABLE CHECKS
+[
+  {
+    "id": "scope-and-hierarchy",
+    "assertion": "The result must establish the actual ruby-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=implementation; near-neighbor=c-cpp-systems-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+  },
+  {
+    "id": "operating-contract",
+    "assertion": "Confirm Ruby and gem versions, runtime entry points, dependency ownership, mutation patterns, and concurrency assumptions."
+  },
+  {
+    "id": "execution-invariant",
+    "assertion": "Request-scoped context is established and cleared in one guaranteed lifecycle boundary; no reusable thread can carry identity across requests after success or failure."
+  },
+  {
+    "id": "verification-discipline",
+    "assertion": "Run the project test suite and linting only as configured, reproduce behavior under the supported Ruby version, and cover transaction rollback, nil handling, time, encoding, and concurrency when relevant."
+  },
+  {
+    "id": "anti-pattern-resistance",
+    "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not patch global classes for local convenience, rescue Exception broadly, depend on load order accidentally, or let implicit ActiveSupport behavior leak into library contracts."
+  },
+  {
+    "id": "evidence-and-uncertainty",
+    "assertion": "Every material completion claim must map to observable evidence (ruby-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+  }
+]
+
+REQUIRED EVIDENCE
+[
+  "thread-local-request-leak scenario evidence",
+  "ruby-engineering decision and boundary evidence",
+  "Hierarchy boundary and selected specialist rationale",
+  "hierarchy boundary and selected specialist rationale",
+  "paired skill/no-skill run artifacts",
+  "explicit unavailable, simulated, inferred, or stale evidence labels"
+]
+
+REQUIRED ARTIFACTS
+[
+  "ruby-engineering-individual-scenario-1-result",
+  "ruby-engineering-individual-scenario-1-verification",
+  "ruby-engineering-individual-scenario-1-paired-evaluation"
+]
+
+PUBLIC CANDIDATE CONTRACT SNAPSHOT
+{
+  "taskPrompt": {
+    "available": true,
+    "sha256": "071106ced6ff0342e46645a678c7f42bd035b8c0a35cafc513df1cecbf3863f7",
+    "byteLength": 444,
+    "text": "Fix a Ruby web service that stores Current.user in thread-local state but fails to clear it on an exception, so a reused server thread can authorize the next request as the previous user. Preserve the current authorization API, establish request cleanup with ensure/lifecycle middleware, and verify alternating users, exception before/after authorization, streaming response, and thread reuse. Do not solve by spawning a new thread per request."
+  },
+  "fixtureFiles": {
+    "README.md": {
+      "available": true,
+      "sha256": "96e6457058d0fc21dc6bf130bd89850c0e15c78afdee7d4743b151335316bdfa",
+      "byteLength": 244,
+      "text": "# Ruby request context lifetime\n\nCurrent.user is request-scoped. The middleware must clear it on every terminal path using a guaranteed lifecycle boundary. Streaming responses must not depend on leaked thread-local identity after call returns.\n"
+    },
+    "contract.json": {
+      "available": false,
+      "sha256": null,
+      "byteLength": 0,
+      "text": null,
+      "reason": "not-present"
+    }
+  }
+}
+
+PAIR EXECUTION EVIDENCE
+{
+  "matchedPair": true,
+  "sameScenario": true,
+  "sameProviderModel": true,
+  "sameHarness": true,
+  "sameEvaluationContract": true,
+  "sameMaterializer": true,
+  "sameDeterministicScorer": true,
+  "randomizedArmIdentity": true,
+  "evidenceOwner": "evaluation-harness"
+}
+
+ARTIFACT A
+{
+  "finalOutput": "Implemented request cleanup in [request_middleware.rb](<redacted-path>) and added regression coverage in [context_test.rb](<redacted-path>).\n\nThe middleware now clears `Current.user` in `ensure` after the app call, preserving the existing authorization API. Streaming bodies rebind the captured user during iteration and clear context after normal completion, exceptions, or explicit close. Partial iteration clears the worker thread’s context while leaving the body available for its lifecycle owner to close.\n\nVerification on Ruby 2.6.10: **7 tests, 24 assertions, 0 failures or errors**; both Ruby syntax checks passed. The same-thread tests cover alternating users, exceptions before and after authorization, streaming, partial consumption, and thread reuse. This workspace has no Git repository.",
+  "executionEvidence": [
+    "Codex CLI completed successfully in 159575ms",
+    "Ruby request lifetime checks: fail",
+    "regression coverage: missing",
+    "\n<redacted-path> `assert': stream must not depend on leaked thread-local state (RuntimeError)\n\tfrom <redacted-path> `<main>'\n"
+  ],
+  "publicContract": {
+    "taskPrompt": {
+      "available": true,
+      "sha256": "071106ced6ff0342e46645a678c7f42bd035b8c0a35cafc513df1cecbf3863f7",
+      "byteLength": 444,
+      "text": "Fix a Ruby web service that stores Current.user in thread-local state but fails to clear it on an exception, so a reused server thread can authorize the next request as the previous user. Preserve the current authorization API, establish request cleanup with ensure/lifecycle middleware, and verify alternating users, exception before/after authorization, streaming response, and thread reuse. Do not solve by spawning a new thread per request."
+    },
+    "fixtureFiles": {
+      "README.md": {
+        "available": true,
+        "sha256": "96e6457058d0fc21dc6bf130bd89850c0e15c78afdee7d4743b151335316bdfa",
+        "byteLength": 244,
+        "text": "# Ruby request context lifetime\n\nCurrent.user is request-scoped. The middleware must clear it on every terminal path using a guaranteed lifecycle boundary. Streaming responses must not depend on leaked thread-local identity after call returns.\n"
+      },
+      "contract.json": {
+        "available": false,
+        "sha256": null,
+        "byteLength": 0,
+        "text": null,
+        "reason": "not-present"
+      }
+    }
+  },
+  "changes": [
+    {
+      "path": "lib/request_middleware.rb",
+      "change": "modified",
+      "beforeSha256": "891b16f2b1f6cbc0cfe9ca285fb9d3cf98d5f6039382577bce00317655b4a548",
+      "afterSha256": "e1e31788e07b4a540ac09e9c9efbda59a549c5f082b3fb574de8ab705a5fc71e",
+      "beforeText": "module Current\n  def self.user=(value)\n    Thread.current[:kory_current_user] = value\n  end\n  def self.user\n    Thread.current[:kory_current_user]\n  end\n  def self.clear\n    Thread.current[:kory_current_user] = nil\n  end\nend\n\nclass RequestMiddleware\n  def initialize(app)\n    @app = app\n  end\n\n  def call(user)\n    Current.user = user\n    response = @app.call\n    Current.clear\n    response\n  end\nend\n",
+      "afterText": "module Current\n  def self.user=(value)\n    Thread.current[:kory_current_user] = value\n  end\n  def self.user\n    Thread.current[:kory_current_user]\n  end\n  def self.clear\n    Thread.current[:kory_current_user] = nil\n  end\nend\n\n# A response body may do its work only when the server consumes it. Keep the\n# request identity bound for that work, and release it when iteration finishes\n# or the server abandons the body and calls close.\nclass RequestBody\n  def initialize(body, user)\n    @body = body\n    @user = user\n    @closed = false\n  end\n\n  def each\n    return enum_for(:each) unless block_given?\n\n    Current.user = @user\n    completed = false\n    begin\n      @body.each { |part| yield part }\n      completed = true\n    ensure\n      if completed\n        close\n      else\n        Current.clear\n      end\n    end\n  end\n\n  def close\n    return if @closed\n\n    @closed = true\n    begin\n      @body.close if @body.respond_to?(:close)\n    ensure\n      Current.clear\n    end\n  end\n\n  attr_reader :user\nend\n\nclass RequestBodyEnumerator\n  def initialize(body)\n    @body = body\n    @enumerator = @body.each\n    @finished = false\n  end\n\n  def next\n    Current.user = @body.user\n    raise StopIteration if @finished\n\n    @enumerator.next\n  rescue StopIteration\n    finish\n    raise\n  rescue StandardError\n    finish\n    raise\n  ensure\n    Current.clear if @finished\n  end\n\n  def close\n    finish\n  end\n\n  private\n\n  def finish\n    return if @finished\n\n    @finished = true\n    @body.close\n  end\nend\n\nclass RequestMiddleware\n  def initialize(app)\n    @app = app\n  end\n\n  def call(user)\n    Current.user = user\n    response = @app.call\n\n    # Rack-style responses are [status, headers, body]. Their body is lazy,\n    # so its request context must remain bound until the body is consumed or\n    # closed. Other response values are complete at return from @app.call.\n    if response.is_a?(Array) && response.length == 3 && response[2].respond_to?(:each)\n      [response[0], response[1], RequestBody.new(response[2], user)]\n    else\n      response\n    end\n  ensure\n    # For streaming responses the wrapper rebinds the captured user during\n    # iteration; the worker thread must be clean between call and iteration.\n    Current.clear\n  end\nend\n"
+    },
+    {
+      "path": "tests/context_test.rb",
+      "change": "modified",
+      "beforeSha256": "d4773991f8b2eb7cde0cfda34701c221c57f8cca26e35a04bcf66cd800e3012c",
+      "afterSha256": "e7ed14a1bf8f8808e29fd5b1368296d2a841aa798ac2b4418437fd91224398b9",
+      "beforeText": "# Add ensure/exception cleanup, alternating user, thread reuse, and stream regressions.\n",
+      "afterText": "require 'minitest/autorun'\nrequire_relative '../lib/request_middleware'\n\nclass RequestMiddlewareTest < Minitest::Test\n  def test_alternating_users_on_one_reused_thread\n    seen = []\n    app = lambda { seen << Current.user; [200, {}, ['ok']] }\n    middleware = RequestMiddleware.new(app)\n\n    thread = Thread.new do\n      middleware.call(:alice)\n      assert_nil Current.user\n      middleware.call(:bob)\n      assert_nil Current.user\n    end\n    thread.join\n\n    assert_equal [:alice, :bob], seen\n  end\n\n  def test_exception_before_authorization_clears_context\n    app = lambda { raise 'before authorization' }\n    middleware = RequestMiddleware.new(app)\n    thread = Thread.new do\n      assert_raises(RuntimeError) { middleware.call(:alice) }\n      assert_nil Current.user\n    end\n    thread.join\n  end\n\n  def test_exception_after_authorization_clears_context\n    app = lambda do\n      raise 'after authorization' unless Current.user == :alice\n      raise 'after authorization'\n    end\n    middleware = RequestMiddleware.new(app)\n    thread = Thread.new do\n      assert_raises(RuntimeError) { middleware.call(:alice) }\n      assert_nil Current.user\n    end\n    thread.join\n  end\n\n  def test_stream_binds_request_user_during_consumption_and_clears_afterward\n    seen = []\n    body = Object.new\n    body.define_singleton_method(:each) do |&block|\n      seen << Current.user\n      block.call('chunk')\n      seen << Current.user\n    end\n    middleware = RequestMiddleware.new(lambda { [200, {}, body] })\n\n    thread = Thread.new do\n      response = middleware.call(:alice)\n      assert_nil Current.user\n      chunks = []\n      response[2].each { |chunk| chunks << chunk; assert_equal :alice, Current.user }\n      assert_equal ['chunk'], chunks\n      assert_nil Current.user\n    end\n    thread.join\n    assert_equal [:alice, :alice], seen\n  end\n\n  def test_exception_while_streaming_clears_context_and_allows_thread_reuse\n    body = Object.new\n    body.define_singleton_method(:each) do |&block|\n      raise 'stream failed' unless Current.user == :alice\n      block.call('partial')\n      raise 'stream failed'\n    end\n    middleware = RequestMiddleware.new(lambda { [200, {}, body] })\n    later_user = nil\n\n    thread = Thread.new do\n      response = middleware.call(:alice)\n      assert_nil Current.user\n      assert_raises(RuntimeError) { response[2].each { |_chunk| } }\n      assert_nil Current.user\n\n      middleware2 = RequestMiddleware.new(lambda { later_user = Current.user; [200, {}, ['ok']] })\n      middleware2.call(:bob)\n      assert_nil Current.user\n    end\n    thread.join\n    assert_equal :bob, later_user\n  end\n\n  def test_closing_unconsumed_stream_clears_context_and_closes_body\n    closed = false\n    body = Object.new\n    body.define_singleton_method(:each) { |_block| flunk 'body should not be consumed' }\n    body.define_singleton_method(:close) { closed = true }\n    middleware = RequestMiddleware.new(lambda { [200, {}, body] })\n\n    thread = Thread.new do\n      response = middleware.call(:alice)\n      assert_nil Current.user\n      response[2].close\n      assert_nil Current.user\n    end\n    thread.join\n    assert closed\n  end\n\n  def test_partial_enumerator_keeps_context_until_closed\n    body = Object.new\n    body.define_singleton_method(:each) do |&block|\n      block.call('first')\n      block.call('second')\n    end\n    closed = false\n    body.define_singleton_method(:close) { closed = true }\n    middleware = RequestMiddleware.new(lambda { [200, {}, body] })\n\n    thread = Thread.new do\n      response = middleware.call(:alice)\n      response[2].each do |chunk|\n        assert_equal 'first', chunk\n        assert_equal :alice, Current.user\n        break\n      end\n      assert_nil Current.user\n    end\n    thread.join\n    refute closed\n  end\nend\n"
+    }
+  ]
+}
+
+ARTIFACT B
+{
+  "finalOutput": "Added guaranteed request cleanup with `ensure` in [request_middleware.rb](<redacted-path>), preserving the existing authorization API. Added regressions for alternating users, exceptions before and after authorization, streaming responses, and reuse of the same server thread in [context_test.rb](<redacted-path>).\n\nVerification: `ruby -Itest tests/context_test.rb` passed (5 tests, 14 assertions); both Ruby syntax checks passed. The workspace isn’t a Git repository, so Git diff checks weren’t available.",
+  "executionEvidence": [
+    "Codex CLI completed successfully in 43360ms",
+    "Ruby request lifetime checks: fail",
+    "regression coverage: missing",
+    "\n<redacted-path> `assert': stream must not depend on leaked thread-local state (RuntimeError)\n\tfrom <redacted-path> `<main>'\n"
+  ],
+  "publicContract": {
+    "taskPrompt": {
+      "available": true,
+      "sha256": "071106ced6ff0342e46645a678c7f42bd035b8c0a35cafc513df1cecbf3863f7",
+      "byteLength": 444,
+      "text": "Fix a Ruby web service that stores Current.user in thread-local state but fails to clear it on an exception, so a reused server thread can authorize the next request as the previous user. Preserve the current authorization API, establish request cleanup with ensure/lifecycle middleware, and verify alternating users, exception before/after authorization, streaming response, and thread reuse. Do not solve by spawning a new thread per request."
+    },
+    "fixtureFiles": {
+      "README.md": {
+        "available": true,
+        "sha256": "96e6457058d0fc21dc6bf130bd89850c0e15c78afdee7d4743b151335316bdfa",
+        "byteLength": 244,
+        "text": "# Ruby request context lifetime\n\nCurrent.user is request-scoped. The middleware must clear it on every terminal path using a guaranteed lifecycle boundary. Streaming responses must not depend on leaked thread-local identity after call returns.\n"
+      },
+      "contract.json": {
+        "available": false,
+        "sha256": null,
+        "byteLength": 0,
+        "text": null,
+        "reason": "not-present"
+      }
+    }
+  },
+  "changes": [
+    {
+      "path": "lib/request_middleware.rb",
+      "change": "modified",
+      "beforeSha256": "891b16f2b1f6cbc0cfe9ca285fb9d3cf98d5f6039382577bce00317655b4a548",
+      "afterSha256": "c347dce8482523e0b6c854663e3fc4a6ff9aeda378c8154399f8915a80981d64",
+      "beforeText": "module Current\n  def self.user=(value)\n    Thread.current[:kory_current_user] = value\n  end\n  def self.user\n    Thread.current[:kory_current_user]\n  end\n  def self.clear\n    Thread.current[:kory_current_user] = nil\n  end\nend\n\nclass RequestMiddleware\n  def initialize(app)\n    @app = app\n  end\n\n  def call(user)\n    Current.user = user\n    response = @app.call\n    Current.clear\n    response\n  end\nend\n",
+      "afterText": "module Current\n  def self.user=(value)\n    Thread.current[:kory_current_user] = value\n  end\n  def self.user\n    Thread.current[:kory_current_user]\n  end\n  def self.clear\n    Thread.current[:kory_current_user] = nil\n  end\nend\n\nclass RequestMiddleware\n  def initialize(app)\n    @app = app\n  end\n\n  def call(user)\n    Current.user = user\n    @app.call\n  ensure\n    Current.clear\n  end\nend\n"
+    },
+    {
+      "path": "tests/context_test.rb",
+      "change": "modified",
+      "beforeSha256": "d4773991f8b2eb7cde0cfda34701c221c57f8cca26e35a04bcf66cd800e3012c",
+      "afterSha256": "f8ded499453164d1a04daaf07793513683733f30054e931324575515acbaa279",
+      "beforeText": "# Add ensure/exception cleanup, alternating user, thread reuse, and stream regressions.\n",
+      "afterText": "require 'minitest/autorun'\nrequire_relative '../lib/request_middleware'\n\nclass RequestMiddlewareTest < Minitest::Test\n  def test_alternating_users_on_reused_thread\n    observed = []\n    app = proc { observed << Current.user; [200, {}, []] }\n    middleware = RequestMiddleware.new(app)\n\n    middleware.call(:alice)\n    middleware.call(:bob)\n\n    assert_equal [:alice, :bob], observed\n    assert_nil Current.user\n  end\n\n  def test_exception_before_authorization_clears_user\n    app = proc do\n      raise 'failed before authorization' if Current.user == :alice\n      [200, {}, []]\n    end\n    middleware = RequestMiddleware.new(app)\n\n    assert_raises(RuntimeError) { middleware.call(:alice) }\n    assert_nil Current.user\n    assert_equal 200, middleware.call(:bob).first\n  end\n\n  def test_exception_after_authorization_clears_user\n    authorized_as = nil\n    app = proc do\n      authorized_as = Current.user\n      raise 'failed after authorization'\n    end\n    middleware = RequestMiddleware.new(app)\n\n    assert_raises(RuntimeError) { middleware.call(:alice) }\n    assert_equal :alice, authorized_as\n    assert_nil Current.user\n  end\n\n  def test_streaming_response_does_not_retain_request_user\n    body = Class.new do\n      def each\n        yield Current.user.inspect\n      end\n    end.new\n    middleware = RequestMiddleware.new(proc { [200, {}, body] })\n\n    response = middleware.call(:alice)\n\n    assert_nil Current.user\n    chunks = []\n    response.last.each { |chunk| chunks << chunk }\n    assert_equal ['nil'], chunks\n  end\n\n  def test_exception_does_not_leak_to_next_request_on_same_server_thread\n    seen = []\n    app = proc do\n      seen << Current.user\n      raise 'request failed' if Current.user == :alice\n      [200, {}, []]\n    end\n    middleware = RequestMiddleware.new(app)\n\n    thread = Thread.new do\n      assert_raises(RuntimeError) { middleware.call(:alice) }\n      assert_equal 200, middleware.call(:bob).first\n      assert_nil Current.user\n    end\n    thread.join\n\n    assert_equal [:alice, :bob], seen\n  end\nend\n"
+    }
+  ]
+}

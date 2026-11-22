@@ -27,6 +27,7 @@ Reconcile the plan when evidence, dependencies, or authority change. Mark estima
 ## Completion evidence
 
 - Current-state evidence, decision rationale, and unresolved assumptions
+- A machine readable plan whose phases each carry an identifier, owners, prerequisites, a gate and a rollback, with the dependency graph expressed through those prerequisites rather than prose
 - Dependency-ordered work with observable acceptance and recovery boundaries
 - Proposed verification separated from checks actually performed during discovery
 

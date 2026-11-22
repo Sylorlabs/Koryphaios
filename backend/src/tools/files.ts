@@ -214,6 +214,7 @@ export class WriteFileTool implements Tool {
     }
 
     try {
+      ctx.signal?.throwIfAborted();
       if (!ctx.requiredWorkspaceRoot) mkdirSync(dirname(absPath), { recursive: true });
 
       // Stream content to UI in chunks for Cursor-style live preview.
@@ -221,6 +222,8 @@ export class WriteFileTool implements Tool {
         await streamFileToUI(ctx.emitFileEdit, absPath, content, 'create');
       }
 
+      // The preview must never be followed by a real write after Stop.
+      ctx.signal?.throwIfAborted();
       await writeFileContent(ctx, absPath, content, true);
       const lines = content.split('\n').length;
 
@@ -347,6 +350,7 @@ export class EditFileTool implements Tool {
         await streamFileToUI(ctx.emitFileEdit, absPath, new_str, 'edit', old_str);
       }
 
+      ctx.signal?.throwIfAborted();
       await writeFileContent(ctx, absPath, newContent);
 
       if (ctx.emitFileComplete) {
@@ -495,9 +499,11 @@ export class BatchEditTool implements Tool {
     // ── Phase 2: apply + stream a full-file diff per file for the live preview. ──
     const summary: string[] = [];
     for (const st of staged) {
+      ctx.signal?.throwIfAborted();
       if (ctx.emitFileEdit) {
         await streamFileToUI(ctx.emitFileEdit, st.absPath, st.newContent, 'edit', st.oldContent);
       }
+      ctx.signal?.throwIfAborted();
       try {
         await writeFileContent(ctx, st.absPath, st.newContent);
       } catch (err: unknown) {
@@ -1024,6 +1030,7 @@ export class DeleteFileTool implements Tool {
             durationMs: 0,
           };
         }
+        ctx.signal?.throwIfAborted();
         if (ctx.requiredWorkspaceRoot) {
           await mutateFileConfined(
             ctx.requiredWorkspaceRoot,
@@ -1046,6 +1053,7 @@ export class DeleteFileTool implements Tool {
       const content = await Bun.file(absPath).text();
       const lines = content.split('\n').length;
 
+      ctx.signal?.throwIfAborted();
       if (ctx.requiredWorkspaceRoot) {
         await mutateFileConfined(
           ctx.requiredWorkspaceRoot,
@@ -1138,6 +1146,7 @@ export class MoveFileTool implements Tool {
     }
 
     try {
+      ctx.signal?.throwIfAborted();
       if (ctx.requiredWorkspaceRoot) {
         await mutateFileConfined(
           ctx.requiredWorkspaceRoot,
@@ -1483,6 +1492,7 @@ export class PatchTool implements Tool {
         content = content.replace(edit.old_str, edit.new_str);
       }
 
+      ctx.signal?.throwIfAborted();
       await writeFileContent(ctx, absPath, content);
 
       if (ctx.recordChange) {

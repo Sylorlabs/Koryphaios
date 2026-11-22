@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "reviewerId": "logfare-stateless-b5db599f-d009-4007-b69a-74e3fb71639d",
+  "completed": true,
+  "output": "{\"artifactA\":{\"passed\":false,\"quality\":0.55,\"verification\":0.6,\"integrityFailure\":false,\"evidence\":[\"Live compatibility schema passes and hidden old/new/unknown-enum wire behavior passes, so the core codec migration is functional.\",\"Post-window message identity FAILS and post-window reservation schema FAILS: the added proto/job_post_window.proto changes package to kory.jobs.v2, forking descriptor identity instead of retaining kory.jobs.v1.StartJobRequest. This violates descriptor-identity and the post-window reservation requirement.\",\"The post-window file does reserve field 2 and name 'urgent', but the package change means the reservation is on a different fully-qualified message, so the required reservation on the real message is not demonstrated.\",\"Agent claims 'Both protobuf schemas compiled successfully with protoc' and '6 passed' — the test count matches public tests, but the post-window schema identity/reservation checks fail in host evidence, so the completion claim overstates schema correctness.\",\"Codec correctly dual-writes HIGH, preserves unknown enum numerics (150) and unknown fields, and prefers present field 3 over legacy field 2.\",\"No explicit unavailable/simulated labels; agent presents protoc compilation as verified without distinguishing descriptor identity checks.\"]},\"artifactB\":{\"passed\":true,\"quality\":0.9,\"verification\":0.9,\"integrityFailure\":false,\"evidence\":[\"All host checks pass: live message identity, live compatibility schema, post-window message identity, post-window reservation schema, and hidden old/new/unknown-enum wire behavior.\",\"Post-window schema retains package kory.jobs.v1 and message StartJobRequest, reserving field 2 and name 'urgent' — correct descriptor identity and reservation.\",\"Codec distinguishes explicit UNSPECIFIED (0) from absent priority fallback, prefers present field 3 over legacy field 2, dual-writes HIGH/NORMAL for old readers, and preserves unknown enum numerics (300) and unknown fields through decode/re-encode.\",\"Staged rollout documented without lockstep; separates binary from ProtoJSON compatibility explicitly.\",\"Agent honestly labels TypeScript static type-check as unavailable ('TypeScript compiler was not locally installed'), satisfying evidence-and-uncertainty discipline.\",\"7 public tests pass plus 6 hidden tests; claims of descriptor inspection and protoc compilation are consistent with host pass results.\"]},\"preference\":\"B\",\"rationale\":[\"Artifact B passes all host schema checks including post-window message identity and reservation; Artifact A fails both post-window checks because it forks the package to kory.jobs.v2, breaking descriptor identity.\",\"Artifact B correctly keeps kory.jobs.v1.StartJobRequest identity in the post-window schema and reserves field 2 and name 'urgent' on the real message.\",\"Artifact B additionally handles explicit UNSPECIFIED vs absent fallback and labels the unavailable TypeScript type-check honestly, while Artifact A overstates schema verification.\",\"Both codecs pass hidden wire behavior, but B's schema-level correctness and evidence discipline make it the stronger artifact.\"]}",
+  "events": [
+    {
+      "type": "review.started",
+      "reviewerId": "logfare-stateless-b5db599f-d009-4007-b69a-74e3fb71639d"
+    },
+    {
+      "type": "review.completed",
+      "reviewerId": "logfare-stateless-b5db599f-d009-4007-b69a-74e3fb71639d",
+      "outputSha256": "a3011b129038740924f67b99cf18c94d379ffc992f8a7417405f304b1bf55fc5"
+    }
+  ],
+  "hostReceipt": {
+    "schemaVersion": 1,
+    "stageOnly": true,
+    "identitySource": "host-invocation-uuid",
+    "upstreamSessionObserved": true,
+    "requestedModel": "deepseek-v4.1-flash-1017",
+    "responseModel": "deepseek-v4.1-flash-1017",
+    "promptSha256": "c2aeaddc641b5ceea634c8232933d634f6bfb0831530a008d1e47a59e2433359",
+    "requestBytes": 49642,
+    "responseSha256": "99b9021d6e3d8368ff5f84646bef5f39e61178009ec4d7df80380b1688be0983",
+    "outputSha256": "a3011b129038740924f67b99cf18c94d379ffc992f8a7417405f304b1bf55fc5",
+    "elapsedMs": 38998,
+    "osIsolationVerified": false,
+    "upstreamIdentityVerified": false,
+    "signed": false
+  }
+}

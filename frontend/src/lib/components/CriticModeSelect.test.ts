@@ -27,3 +27,21 @@ it('keeps Off, Auto, Always in order without descriptions for every selection', 
     await fireEvent.keyDown(screen.getByRole('combobox', { name: /Critic mode/ }), { key: 'Escape' });
   }
 });
+
+it('shows short words on the composer trigger only when shortLabels is set', async () => {
+  const view = render(CriticModeSelect, { value: 'always', compact: true, shortLabels: true, onchange: vi.fn() });
+  const trigger = screen.getByRole('combobox', { name: /Critic mode/ });
+  expect(trigger.closest('[data-testid="composer-critic-control"]')).not.toBeNull();
+  expect(trigger.querySelector('.kory-select-label-short')?.textContent).toBe('On');
+  expect(trigger.getAttribute('title')).toBe('Critic: Always');
+  await view.rerender({ value: 'auto', compact: true, shortLabels: true, onchange: vi.fn() });
+  expect(trigger.querySelector('.kory-select-label-short')?.textContent).toBe('Auto');
+  await view.rerender({ value: 'off', compact: true, shortLabels: true, onchange: vi.fn() });
+  expect(trigger.querySelector('.kory-select-label-short')?.textContent).toBe('Off');
+});
+
+it('leaves the trigger unchanged when shortLabels is not set', () => {
+  const { container } = render(CriticModeSelect, { value: 'always', compact: true, onchange: vi.fn() });
+  expect(container.querySelector('.kory-select-label-short')).toBeNull();
+  expect(container.querySelector('[data-testid="composer-critic-control"]')).toBeNull();
+});

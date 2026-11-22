@@ -6,7 +6,7 @@ import {
   runSearchAnalyzerVersioningRuntime,
   runSearchTenantAuthorizationRuntime,
   searchIndexRuntimeReadiness,
-} from '../skill-eval-search-index-runtime';
+} from '../../eval/skills/skill-eval-search-index-runtime';
 
 function runtimeAvailable(): boolean {
   const blockers = searchIndexRuntimeReadiness();

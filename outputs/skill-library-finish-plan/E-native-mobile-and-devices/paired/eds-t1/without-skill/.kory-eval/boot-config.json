@@ -1,0 +1,10 @@
+{
+  "productionKeyHash": "prod-key-hash-2026",
+  "product": "device-x",
+  "minimumVersion": 7,
+  "bootloaderVerifiesSignature": true,
+  "bootloaderVerifiesProduct": true,
+  "rollbackStateProtected": true,
+  "recoveryRequiresAuthorization": true,
+  "debugFuseObserved": false
+}

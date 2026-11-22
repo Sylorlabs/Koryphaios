@@ -14,12 +14,14 @@ import type {
   StreamUsagePayload,
   ContextBreakdown,
   KoryAskUserPayload,
+  KorySkillUse,
   AgentIdentity,
 } from '@koryphaios/shared';
 import { resolveTrustedContextWindow } from '../../providers';
 import { wsBroker } from '../../pubsub';
 import { koryLog } from '../../logger';
 import { TurnTranscriptRecorder } from './TurnTranscriptRecorder';
+import { ToolCallIdentity } from './ToolCallIdentity';
 
 export interface EventEmitterServiceConfig {
   managerAgentId: string;
@@ -55,11 +57,18 @@ export type WorkflowHook = (context: {
 export class EventEmitterService {
   private managerAgentId: string;
   private workflowHooks = new Map<WorkflowHookEvent, Set<WorkflowHook>>();
+  /** Per-(session, agent) tool call ids. Native ids are evidence; app ids are identity. */
+  private readonly toolIds = new ToolCallIdentity();
   /** Allocates each manager turn's message id and folds its parts. Manager-only. */
-  readonly transcript = new TurnTranscriptRecorder();
+  readonly transcript: TurnTranscriptRecorder;
 
   constructor(config: EventEmitterServiceConfig) {
     this.managerAgentId = config.managerAgentId;
+    this.transcript = new TurnTranscriptRecorder({
+      // A new manager turn starts with no remembered manager tool ids.
+      onTurnBegin: (sessionId) => this.toolIds.forget(sessionId, this.managerAgentId),
+      onDispose: (sessionId) => this.toolIds.forget(sessionId),
+    });
   }
 
   registerWorkflowHook(event: WorkflowHookEvent, hook: WorkflowHook): () => void {
@@ -99,6 +108,16 @@ export class EventEmitterService {
     });
   }
 
+  /**
+   * Skills the turn actually injected into its compiled prompt. This is the
+   * only per-turn record of skill use: skills are guidance delivered through
+   * the system prompt, so nothing else in the transcript shows them.
+   */
+  emitSkills(sessionId: string, skills: readonly KorySkillUse[], agentId = this.managerAgentId): void {
+    if (skills.length === 0) return;
+    this.emit(sessionId, 'kory.skill', { agentId, skills: [...skills] });
+  }
+
   emitAskUser(sessionId: string, question: string, options: string[], allowOther = true): void {
     this.emit(sessionId, 'kory.ask_user', {
       question,
@@ -131,6 +150,19 @@ export class EventEmitterService {
     tokensOut: number,
   ): void {
     this.emit(sessionId, 'stream.complete', { agentId, model, tokensIn, tokensOut });
+  }
+
+  /**
+   * The manager's final provider call for a turn has ended. Carries the turn's
+   * message id explicitly (stream.* events are stamped by the recorder; this one is not).
+   */
+  emitTurnProviderCompleted(sessionId: string, messageId: string, runId?: string): void {
+    this.emit(sessionId, 'turn.provider_completed', {
+      agentId: this.managerAgentId,
+      messageId,
+      ...(runId ? { runId } : {}),
+      completedAt: Date.now(),
+    });
   }
 
   emitStreamClear(sessionId: string, agentId: string): void {
@@ -264,10 +296,13 @@ export class EventEmitterService {
    */
   emit(sessionId: string, type: string, payload: WSMessage['payload']): void {
     const timestamp = Date.now();
+    // Ids are assigned before the recorder folds the event, so the persisted
+    // parts and the live event carry the same app-owned callId.
+    const identified = this.withAppToolCallId(sessionId, type, payload);
     const published = this.transcript.observe({
       sessionId,
       type,
-      payload,
+      payload: identified,
       timestamp,
       managerAgentId: this.managerAgentId,
     }) as WSMessage['payload'];
@@ -278,6 +313,43 @@ export class EventEmitterService {
       sessionId,
       agentId: this.managerAgentId,
     });
+  }
+
+  /**
+   * Replace a tool call's or result's provider-native id with the app id, keeping
+   * the native id as `nativeRef`. Other events pass through unchanged.
+   */
+  private withAppToolCallId(
+    sessionId: string,
+    type: string,
+    payload: WSMessage['payload'],
+  ): WSMessage['payload'] {
+    if (type !== 'stream.tool_call' && type !== 'stream.tool_result') return payload;
+    if (typeof payload !== 'object' || payload === null) return payload;
+    const record = payload as unknown as Record<string, unknown>;
+    const agentId = typeof record.agentId === 'string' ? record.agentId : this.managerAgentId;
+
+    if (type === 'stream.tool_call') {
+      const call = record.toolCall;
+      if (typeof call !== 'object' || call === null) return payload;
+      const { appId, nativeRef } = this.toolIds.issueCall(
+        sessionId,
+        agentId,
+        (call as { id?: unknown }).id,
+      );
+      const toolCall = { ...call, id: appId, ...(nativeRef ? { nativeRef } : {}) };
+      return { ...record, toolCall } as unknown as WSMessage['payload'];
+    }
+
+    const result = record.toolResult;
+    if (typeof result !== 'object' || result === null) return payload;
+    const { appId, nativeRef } = this.toolIds.resolveResult(
+      sessionId,
+      agentId,
+      (result as { callId?: unknown }).callId,
+    );
+    const toolResult = { ...result, callId: appId, ...(nativeRef ? { nativeRef } : {}) };
+    return { ...record, toolResult } as unknown as WSMessage['payload'];
   }
 
   // ─── Logging Utilities ───────────────────────────────────────────────────────

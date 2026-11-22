@@ -30,9 +30,18 @@ export const PROVIDER_BASE_URLS: Partial<Record<ProviderName, string>> = {
   moonshot: 'https://api.moonshot.ai/v1',
   groq: 'https://api.groq.com/openai/v1',
   openrouter: 'https://openrouter.ai/api/v1',
-  agentrouter: 'https://agentrouter.org/v1',
   unorouter: 'https://api.unorouter.com/v1',
   experientiallabs: 'https://api.experientiallabs.ai/v1',
+  hundredmillionseek: 'https://100milionseek.top/v1',
+  numes: 'https://api.numes.ai/api/v1',
+  coarena: 'https://coarena.ai/api/v1',
+  crowllm: 'https://crowllm.com/v1',
+  // AMD Radeon Cloud Token Factory — OpenAI-compatible, one rc- key for the
+  // whole catalog. Offered on the China site only.
+  radeon: 'https://developer.amd.com.cn/radeon/api/v1',
+  // Runcrate inference API — OpenAI-compatible chat on one `rc_live_…` key.
+  // The public catalog at /v1/models carries limits, modalities and prices.
+  runcrate: 'https://api.runcrate.ai/v1',
   tokenharbor: 'https://tokenharbor.ai/v1',
   logfare: 'https://logfare.ai/v1',
   apinex: 'https://api.apinex.bond/v1',
@@ -155,9 +164,14 @@ export function buildAuthHeaders(
     case 'groq':
     case 'xai':
     case 'openrouter':
-    case 'agentrouter':
     case 'unorouter':
     case 'experientiallabs':
+    case 'hundredmillionseek':
+    case 'numes':
+    case 'coarena':
+    case 'crowllm':
+    case 'radeon':
+    case 'runcrate':
     case 'tokenharbor':
     case 'logfare':
     case 'apinex':
@@ -224,9 +238,14 @@ export function getVerifyUrl(
     case 'groq':
     case 'xai':
     case 'openrouter':
-    case 'agentrouter':
     case 'unorouter':
     case 'experientiallabs':
+    case 'hundredmillionseek':
+    case 'numes':
+    case 'coarena':
+    case 'crowllm':
+    case 'radeon':
+    case 'runcrate':
     case 'tokenharbor':
     case 'logfare':
     case 'apinex':

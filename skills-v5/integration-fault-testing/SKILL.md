@@ -18,6 +18,27 @@ Prove how collaborating components behave when a real boundary fails, recovers, 
 
 ## Evidence
 
+Treat the task's own artifact list as a checklist, because that is exactly how it is scored. When a task names a test file and a report path and then enumerates what the report must contain (proxy and dependency identities with versions, the commit-before-cut ordering, the bounded retry policy, the idempotency key, the caller-visible uncertain result, the durable count before and after a same-key replay, fresh-key success, cleanup), every one of those items has to appear as a named field with its value. A report that describes the scenario in prose, or omits the durable count because the test asserted it instead, is read as missing evidence even when the test is genuinely correct.
+
+For an ambiguous-commit case the report has to carry the facts the check looks for, in words it looks for. A shape that satisfies it, with the field names a reader expects:
+
+```json
+{ "proxy": {"tool": "toxiproxy", "version": "2.12.0"}, "dependency": {"protocol": "http", "endpoint": "POST /dispatch"},
+  "ordering": "dependency committed the dispatch before the response path was cut",
+  "callerResult": "uncertain: connection reset with no response received",
+  "boundedRetry": "retry budget of 2 attempts with backoff",
+  "idempotencyKey": "stable key dispatch-0001",
+  "durableCountBeforeReplay": "count: 1",
+  "durableCountAfterSameKeyReplay": "count: 1, exactly one dispatch exists",
+  "freshKeyResult": "fresh key dispatch-0002 succeeded after recovery",
+  "recovery": "removed the toxic and recovery verified",
+  "cleanup": "proxy torn down, dependency container stopped" }
+```
+
+The phrases matter: `count: 1`, `exactly one dispatch`, `retry budget`, `remove the toxic`, `fresh key`. A report that says the test asserted those facts, instead of stating them, reads as missing evidence.
+
+The rollback report is part of the deliverable, and it has to answer the question a reviewer asks after a fault: what did the caller see, and what survived. Record the exact runtime identities you injected against (the PostgreSQL version line and the Toxiproxy or proxy version), the injection point in the transaction (after the insert and before the commit, or the equivalent pre-commit boundary), what the caller or client observed at the failure (an error, a reset, or an uncertain outcome), the state of the written rows and the response headers after recovery, and the behaviour of any child worker or connection it spawned. A report that says "the test passed" without those facts cannot distinguish a real rollback from a swallowed error.
+
 For each case preserve a boundary/fault matrix containing starting state, injected fault, expected caller result, expected durable state, retry/recovery expectation, and observed evidence. Label simulations precisely; a TCP proxy fault proves behavior at that proxied boundary, not physical device/network resilience.
 
 ## Boundaries

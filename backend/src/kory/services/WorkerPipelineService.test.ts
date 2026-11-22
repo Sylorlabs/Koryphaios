@@ -88,6 +88,7 @@ function createHost(
     resolveSessionWorkingDirectoryPublic: async () => sessionRoot,
     getWorkerReasoningLevel: () => 'medium',
     getQualityPolicy: () => ({ gateStrictness: 'strict', maxCriticIterations: 1 }),
+    getWorktreeMode: () => 'auto' as const,
     waitForUserInput: async () => 'Allow once',
     emitThought: () => undefined,
     updateWorkflowState: async (_sessionId, state) => {
@@ -255,6 +256,144 @@ describe('WorkerPipelineService project ownership and checkpoint acknowledgement
     expect(workflowStates.at(-1)).toBe('idle');
   });
 
+  test('runs a non-isolated worker in the chat checkout without a worktree', async () => {
+    const repo = makeRepo('kory-worker-direct');
+    const state = new SessionStateService();
+    const workflowStates: string[] = [];
+    const host = createHost(repo, repo, workflowStates);
+    host.getWorktreeMode = () => 'never' as const;
+    const service = new WorkerPipelineService({
+      providers: createProviders(),
+      state,
+      git: new GitManager(repo),
+      workspaceManager: null,
+      snapshotManager: new SnapshotManager(repo),
+      host,
+    });
+
+    const result = await service.runWorkerPipeline('session-direct', 'Implement the direct file');
+
+    expect(result).toContain('PASS');
+    expect(readFileSync(join(repo, 'worker-output.txt'), 'utf8')).toContain('session worker');
+    expect(gitOutput(repo, 'worktree', 'list', '--porcelain').match(/^worktree /gm) ?? []).toHaveLength(
+      1,
+    );
+    expect(existsSync(join(repo, '.trees'))).toBe(false);
+    expect(workflowStates.at(-1)).toBe('idle');
+  });
+
+  test('delivers worker output once and unverified when the Critic cannot run', async () => {
+    const repo = makeRepo('kory-worker-critic-unavailable');
+    const state = new SessionStateService();
+    const workflowStates: string[] = [];
+    const host = createHost(repo, repo, workflowStates);
+    host.getWorktreeMode = () => 'never' as const;
+    host.runCriticGate = async () => ({
+      passed: false,
+      skipped: true,
+      criticUnavailable: true,
+      feedback: 'Critic could not run after 3 attempt(s):\n- openai:critic-a: provider exploded',
+    });
+    const executions = mock(host.executeWithProvider);
+    host.executeWithProvider = executions;
+    const service = new WorkerPipelineService({
+      providers: createProviders(),
+      state,
+      git: new GitManager(repo),
+      workspaceManager: null,
+      snapshotManager: new SnapshotManager(repo),
+      host,
+    });
+
+    const result = await service.runWorkerPipeline(
+      'session-unverified',
+      'Implement the unverified file',
+    );
+
+    expect(result).toContain('UNVERIFIED: Critic could not run');
+    expect(executions).toHaveBeenCalledTimes(1);
+    expect(readFileSync(join(repo, 'worker-output.txt'), 'utf8')).toContain('session worker');
+  });
+
+  test("auto mode follows the per-task worktree argument and defaults to isolation", async () => {
+    const repo = makeRepo('kory-worker-auto');
+    const state = new SessionStateService();
+    const workflowStates: string[] = [];
+    const host = createHost(repo, repo, workflowStates);
+    host.getWorktreeMode = () => 'auto' as const;
+    const workspaceManager = new WorkspaceManager(repo);
+    await workspaceManager.init();
+    const service = new WorkerPipelineService({
+      providers: createProviders(),
+      state,
+      git: new GitManager(repo),
+      workspaceManager,
+      snapshotManager: new SnapshotManager(repo),
+      host,
+    });
+
+    // auto + explicit worktree: false → direct checkout, no worktree.
+    const direct = await service.runWorkerPipeline(
+      'session-auto-off',
+      'Implement the direct file',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+    );
+    expect(direct).toContain('PASS');
+    expect(readFileSync(join(repo, 'worker-output.txt'), 'utf8')).toContain('session worker');
+    expect(
+      gitOutput(repo, 'worktree', 'list', '--porcelain').match(/^worktree /gm) ?? [],
+    ).toHaveLength(1);
+
+    // auto + omitted argument → the default, isolated worktree.
+    const isolated = await service.runWorkerPipeline(
+      'session-auto-on',
+      'Implement the isolated file',
+    );
+    expect(isolated).toContain('PASS');
+    expect(gitOutput(repo, 'log', '-1', '--format=%s')).toContain(
+      'Implement the isolated file',
+    );
+  });
+
+  test("always mode ignores the tool's worktree argument", async () => {
+    const repo = makeRepo('kory-worker-always');
+    const state = new SessionStateService();
+    const workflowStates: string[] = [];
+    const host = createHost(repo, repo, workflowStates);
+    host.getWorktreeMode = () => 'always' as const;
+    const workspaceManager = new WorkspaceManager(repo);
+    await workspaceManager.init();
+    const service = new WorkerPipelineService({
+      providers: createProviders(),
+      state,
+      git: new GitManager(repo),
+      workspaceManager,
+      snapshotManager: new SnapshotManager(repo),
+      host,
+    });
+
+    // 'always' overrides even an explicit worktree: false from the manager.
+    const result = await service.runWorkerPipeline(
+      'session-always',
+      'Implement the forced-isolation file',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+    );
+    expect(result).toContain('PASS');
+    expect(gitOutput(repo, 'log', '-1', '--format=%s')).toContain(
+      'Implement the forced-isolation file',
+    );
+  });
+
   test('refuses non-Git delegated writes before provider execution or false snapshots', async () => {
     const project = makeDirectory('kory-worker-non-git');
     writeFileSync(join(project, 'seed.txt'), 'uncommitted project\n');
@@ -357,7 +496,6 @@ describe('WorkerPipelineService fails closed on isolation failure', () => {
     'unavailable',
     'not initialized',
     'init rejected',
-    'capacity',
     'spawn null',
     'spawn throws',
   ] as const) {
@@ -372,11 +510,7 @@ describe('WorkerPipelineService fails closed on isolation failure', () => {
           ? null
           : new WorkspaceManager(
               repo,
-              failure === 'init rejected'
-                ? { worktreeDir: '..' }
-                : failure === 'capacity'
-                  ? { worktreeLimit: 0 }
-                  : undefined,
+              failure === 'init rejected' ? { worktreeDir: '..' } : undefined,
             );
       if (manager && failure === 'init rejected') await expect(manager.init()).rejects.toThrow();
       else if (manager && failure !== 'not initialized') await manager.init();
@@ -600,9 +734,9 @@ describe('WorkerPipelineService workspace configuration', () => {
       service.runWorkerPipeline('session-limit-2', 'Implement safely'),
     ]);
 
-    // With worktreeLimit: 1 the second task must be refused at capacity rather
-    // than quietly receiving a second slot from the default of 4.
-    expect(results.some((r) => r.includes('at capacity'))).toBe(true);
+    // With worktreeLimit: 1 the second task queues behind the first rather
+    // than quietly receiving a second slot from the default of unlimited.
+    expect(results.some((r) => r.includes('at capacity'))).toBe(false);
     // And the worktrees live in the configured directory, not the default.
     expect(existsSync(join(sessionRoot, '.agent-trees'))).toBe(true);
     expect(existsSync(join(sessionRoot, '.trees'))).toBe(false);
@@ -634,5 +768,69 @@ describe('WorkerPipelineService workspace configuration', () => {
     expect(
       gitOutput(sessionRoot, 'worktree', 'list', '--porcelain').match(/^worktree /gm),
     ).toHaveLength(1);
+  });
+});
+
+describe('worker fallback chain', () => {
+  test('fails over to the next route only after a quota failure', async () => {
+    const repo = makeRepo('kory-worker-fallback');
+    const state = new SessionStateService();
+    const workflowStates: string[] = [];
+    const host = createHost(repo, repo, workflowStates);
+    host.getWorktreeMode = () => 'never' as const;
+    host.getQualityPolicy = () => ({ gateStrictness: 'off', maxCriticIterations: 1 });
+    host.resolveActiveRouting = (preferredModel) => ({
+      model: preferredModel ?? 'primary-model',
+      provider: 'openai',
+    });
+    const calls: Array<{ model: string; reasoningLevel?: string }> = [];
+    host.executeWithProvider = async (
+      _sessionId,
+      _provider,
+      model,
+      _message,
+      _domain,
+      reasoningLevel,
+      _auto,
+      allowedPaths,
+    ) => {
+      calls.push({ model, ...(reasoningLevel ? { reasoningLevel } : {}) });
+      if (calls.length === 1) return { success: false, error: '429 rate limited' };
+      writeFileSync(join(allowedPaths[0], 'worker-output.txt'), 'created by fallback\n');
+      return {
+        success: true,
+        workerMessages: [{ role: 'assistant', content: 'Implemented the requested file.' }],
+        usage: { tokensIn: 12, tokensOut: 8 },
+      };
+    };
+    const providers = createProviders();
+    providers.isQuotaError = () => true;
+    const service = new WorkerPipelineService({
+      providers,
+      state,
+      git: new GitManager(repo),
+      workspaceManager: null,
+      snapshotManager: new SnapshotManager(repo),
+      host,
+    });
+
+    const result = await service.runWorkerPipelineDetailed(
+      'session-fallback',
+      'Implement the change',
+      'primary-model',
+      'low',
+      'backend',
+      undefined,
+      undefined,
+      false,
+      [{ model: 'fallback-model', reasoningLevel: 'high' }],
+    );
+
+    expect(result.success).toBe(true);
+    expect(calls).toEqual([
+      { model: 'primary-model', reasoningLevel: 'low' },
+      { model: 'fallback-model', reasoningLevel: 'high' },
+    ]);
+    expect(readFileSync(join(repo, 'worker-output.txt'), 'utf8')).toContain('fallback');
   });
 });

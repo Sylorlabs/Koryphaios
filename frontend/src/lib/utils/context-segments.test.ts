@@ -74,3 +74,22 @@ describe('context cache overlap', () => {
     expect(contextCacheStatus(usage).label).toBe('');
   });
 });
+
+describe('cumulative CLI totals', () => {
+  it('caps CLI runtime overhead and explains the cap in the segment tooltip', () => {
+    const segments = buildContextSegments({
+      used: 200 + 200 + 50,
+      max: 10_000,
+      isReliable: true,
+      estimated: true,
+      provider: 'codex',
+      breakdown,
+      harnessCapped: true,
+      harnessCap: 8_000,
+    })!;
+    const harness = segments.find((s) => s.key === 'cliHarness')!;
+    expect(harness.tokens).toBe(200);
+    expect(harness.hint).toContain('cumulative total');
+    expect(harness.hint).toContain('8,000');
+  });
+});

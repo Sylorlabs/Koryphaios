@@ -5,6 +5,7 @@
   import ChevronDown from 'lucide-svelte/icons/chevron-down';
   import ChevronRight from 'lucide-svelte/icons/chevron-right';
   import Sparkles from 'lucide-svelte/icons/sparkles';
+  import { agentModeMetaFor } from '$lib/utils/agent-mode-meta';
   import Square from 'lucide-svelte/icons/square';
   import PauseCircle from 'lucide-svelte/icons/pause-circle';
   import Users from 'lucide-svelte/icons/users';
@@ -31,6 +32,8 @@
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
   import { formatChord, formatShortcut } from '$lib/utils/platform';
+  import { mergeTranscript, sliceAudioChunks, transcriptWords } from '$lib/utils/voice-transcript';
+  import { toolbarCollapse } from '$lib/utils/toolbar-density';
   import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
   import {
     buildReasoningConfigFromLevels,
@@ -79,15 +82,46 @@
     saveComposerDraft,
     type ComposerDraftAttachment,
   } from '$lib/stores/composer-drafts';
-  import { loadComposerPreference, saveComposerPreference } from '$lib/stores/composer-preferences';
-  import type { FreebuffAccountSnapshot, SessionAgentOverrides } from '@koryphaios/shared';
   import {
+    initialFusionSelection,
+    initialSpeedTier,
+    initialModelParameters,
+    loadComposerPreference,
+    saveComposerPreference,
+  } from '$lib/stores/composer-preferences';
+  import type {
+    FreebuffAccountSnapshot,
+    FusionCatalog,
+    FusionSelection,
+    ModelSpeedTier,
+    ModelParameterDef,
+    ModelParameterKey,
+    ModelParameterValues,
+    SessionAgentOverrides,
+  } from '@koryphaios/shared';
+  import {
+    adjustFusionSelection,
+    availableSidekicks,
+    fusionPairingKey,
+    fusionSidekickSpeedLabel,
+    isFusionPairingAvailable,
+    leadFastAvailable,
+    parseFusionSlug,
+    sanitizeModelParameterValues,
+  } from '@koryphaios/shared';
+  import {
+    clearComposerApprovalState,
+    composerApprovalDefaults,
     loadComposerSessionState,
     saveComposerSessionState,
   } from '$lib/stores/composer-session-state';
   import KorySelect from './KorySelect.svelte';
+  import KorySlider from './KorySlider.svelte';
+  import NumberStepper from './NumberStepper.svelte';
   import CriticModeSelect from './CriticModeSelect.svelte';
   import { CRITIC_MODE_OPTIONS, resolveCriticMode, type CriticMode } from '@koryphaios/shared';
+  import { providerPermissionEnforcement } from '@koryphaios/shared';
+  import { runStateStore } from '$lib/stores/run-state.svelte';
   import MediaAttachment from './MediaAttachment.svelte';
   import { createVoiceTap, type VoiceTap } from '$lib/utils/voice-tap';
   import { voiceRecorder } from '$lib/stores/voice-recorder.svelte';
@@ -233,8 +267,10 @@
       model?: string,
       reasoningLevel?: string,
       attachments?: Attachment[],
-      fastMode?: boolean,
+      speedTier?: string,
       imageInputMode?: ImageInputMode,
+      modelParameters?: ModelParameterValues,
+      fusion?: FusionSelection,
     ) => Promise<boolean> | boolean;
     /** Submit an instruction to the active run. The parent cancels the current
      * provider turn and starts the continuation only after cancellation settles. */
@@ -243,8 +279,10 @@
       model?: string,
       reasoningLevel?: string,
       attachments?: Attachment[],
-      fastMode?: boolean,
+      speedTier?: string,
       imageInputMode?: ImageInputMode,
+      modelParameters?: ModelParameterValues,
+      fusion?: FusionSelection,
     ) => Promise<boolean> | boolean;
     onExecuteCommand?: (command: string) => Promise<boolean> | boolean;
     /** When true, the primary action is Steer when the composer has input and
@@ -467,7 +505,30 @@
       } catch {}
     }
     if (saved.reasoningLevel !== undefined) reasoningLevel = saved.reasoningLevel;
-    if (typeof saved.fastMode === 'boolean') fastMode = saved.fastMode;
+    let scopeDef = findModelDef(currentProvider, currentModel);
+    // A chat saved on a legacy per-pairing `devin:fusion-…` id restores onto
+    // the single `devin:fusion` model with its slot selection prefilled.
+    if (
+      scopeDef?.fusion &&
+      currentModel &&
+      currentModel !== 'fusion' &&
+      currentModel.startsWith('fusion-')
+    ) {
+      const legacySel = parseFusionSlug(currentModel);
+      selectedModel = `${currentProvider}:${scopeDef.id}`;
+      scopeDef = findModelDef(currentProvider, currentModel);
+      if (legacySel) fusionSelection = legacySel;
+      // The canonical model id differs from the saved legacy id — retarget the
+      // suppress flag so the preference-restore effect doesn't overwrite the
+      // parsed slot prefill with the model's global defaults.
+      suppressPreferenceRestoreFor = selectedModel;
+    }
+    fusionSelection ??= initialFusionSelection(saved, scopeDef?.fusion);
+    speedTier = scopeDef
+      ? initialSpeedTier(saved, scopeDef.speedTiers ?? [])
+      : (saved.speedTier ?? null);
+    speedTierPendingLegacy = !scopeDef && saved.fastMode === true;
+    modelParameterValues = initialModelParameters(saved, scopeDef?.parameters);
   }
 
   // A worker tab pins the composer to that worker's own model. Leaving the tab
@@ -492,7 +553,19 @@
     const scope = currentDraftKey();
     if (hydratedDraftKey !== scope) return;
     if (forcedModel || !selectedModel) return;
-    saveComposerSessionState(scope, { model: selectedModel, reasoningLevel, fastMode });
+    saveComposerSessionState(scope, {
+      model: selectedModel,
+      reasoningLevel,
+      speedTier,
+      modelParameters: modelParameterValues,
+      // The don't-overwrite-while-def-unknown rule: while the catalog can't
+      // confirm devin:fusion, keep the chat's stored slot selection.
+      fusion:
+        fusionSelection ??
+        (currentModel === 'fusion' && !fusionCatalog
+          ? loadComposerSessionState(scope).fusion
+          : undefined),
+    });
   });
 
   $effect(() => {
@@ -573,6 +646,16 @@
   let voiceStarting = $state(false);
   let activeRecorder: MediaRecorder | null = null;
   let activeLocalRecorder: LocalPcmRecorder | null = null;
+  // Live transcription while speaking: the local model has no streaming API,
+  // so it is re-run on a cadence over a sliding window instead of the whole
+  // capture. Both cursors are in source-rate frames.
+  let localPartialTimer: ReturnType<typeof setInterval> | null = null;
+  let localPartialInFlight = false;
+  let localPartialCommitted = '';
+  let localPartialConsumedFrames = 0;
+  let liveTranscript: string[] = [];
+  // True while the push-to-talk binding is physically held down.
+  let voiceHeld = false;
   let activeSpeechRecognition: BrowserSpeechRecognition | null = null;
   // Wall-clock ms the current recording has been running, for the timer.
   let recordingStartedAt = 0;
@@ -763,6 +846,12 @@
     if (provider === 'xai') return 'xAI';
     if (provider === 'openrouter') return 'OpenRouter';
     if (provider === 'unorouter') return 'UnoRouter';
+    if (provider === 'hundredmillionseek') return '100MillionSeek';
+    if (provider === 'numes') return 'Numes';
+    if (provider === 'coarena') return 'Coarena';
+    if (provider === 'crowllm') return 'CrowLLM';
+    if (provider === 'radeon') return 'AMD Radeon Cloud';
+    if (provider === 'runcrate') return 'Runcrate';
     if (provider === 'tokenharbor') return 'Token Harbor';
     if (provider === 'logfare') return 'Logfare';
     if (provider === 'apinex') return 'APInex';
@@ -773,6 +862,7 @@
     if (provider === 'kimicode') return 'Kimi Code';
     if (provider === 'grok') return 'Grok Build';
     if (provider === 'opencode') return 'OpenCode';
+    if (provider === 'beam') return 'Reflection AI';
     return provider.charAt(0).toUpperCase() + provider.slice(1);
   }
 
@@ -800,6 +890,43 @@
       : (parseProviderModelSelection(selectedModel, providerNames).provider ?? fallbackProvider),
   );
   let currentModel = $derived(parseProviderModelSelection(selectedModel, providerNames).model);
+  /** Who actually enforces the permission mode for the selected provider. A
+   *  mode is never a silent promise: when Kory is not in the tool path, the
+   *  picker says so instead of quietly downgrading. */
+  let permissionEnforcement = $derived(
+    providerPermissionEnforcement(
+      selectedModel ? currentProvider : '',
+      currentProvider ? providerLabel(currentProvider) : undefined,
+    ),
+  );
+  /** The model finished its answer and the run is settling follow-up work
+   *  (critic, checkpoint). Stop still works, but nothing is being written. */
+  let isFinalizing = $derived(
+    isRunning && runStateStore.getPhase(sessionStore.activeSessionId) === 'finalizing',
+  );
+  /** The last run was cut off by a backend restart. Kory cannot resume a
+   *  provider stream across a restart, so offer one explicit continuation. */
+  const RESTART_INTERRUPTED_REASON = 'backend_restarted_during_active_run';
+  const RESUME_PROMPT = 'Continue where you left off before Koryphaios restarted.';
+  let dismissedInterruptedRunId = $state<string | null>(null);
+  let interruptedRunId = $derived.by(() => {
+    const sid = sessionStore.activeSessionId;
+    if (!sid || isRunning || isWaiting) return null;
+    if (runStateStore.getTerminalReason(sid) !== RESTART_INTERRUPTED_REASON) return null;
+    const runId = runStateStore.getRunId(sid);
+    return runId && runId !== dismissedInterruptedRunId ? runId : null;
+  });
+
+  async function resumeInterruptedTurn() {
+    const draft = value;
+    value = RESUME_PROMPT;
+    await send();
+    if (draft.trim() && !value.trim()) value = draft;
+  }
+
+  let permissionEnforced = $derived(
+    permissionEnforcement.level === 'kory' || permissionEnforcement.level === 'kory-hooks',
+  );
 
   /** A model's own live-reported effort levels (e.g. Codex's supported_reasoning_levels)
    *  are the sole source of reasoning config. There are no static fallback tables —
@@ -815,6 +942,9 @@
         canReason?: boolean;
         supportsFastMode?: boolean;
         supportsAttachments?: boolean;
+        speedTiers?: ModelSpeedTier[];
+        parameters?: ModelParameterDef[];
+        fusion?: FusionCatalog;
         vision?: boolean;
         accountId?: string;
         apiModelId?: string;
@@ -832,6 +962,9 @@
           canReason?: boolean;
           supportsFastMode?: boolean;
           supportsAttachments?: boolean;
+          speedTiers?: ModelSpeedTier[];
+          parameters?: ModelParameterDef[];
+          fusion?: FusionCatalog;
           vision?: boolean;
           accountId?: string;
           apiModelId?: string;
@@ -887,7 +1020,14 @@
     }
     const saved = loadComposerPreference(model);
     if (saved.reasoningLevel) reasoningLevel = saved.reasoningLevel;
-    if (typeof saved.fastMode === 'boolean') fastMode = saved.fastMode;
+    const def = findModelDef(currentProvider, currentModel);
+    speedTier = def
+      ? initialSpeedTier(saved, def.speedTiers ?? [])
+      : (saved.speedTier ?? null);
+    speedTierPendingLegacy = !def && saved.fastMode === true;
+    modelParameterValues = initialModelParameters(saved, def?.parameters);
+    fusionSelection = initialFusionSelection(saved, def?.fusion);
+    fusionAdjustedNote = null;
   });
 
   $effect(() => {
@@ -898,23 +1038,22 @@
     );
     if (next !== reasoningLevel) reasoningLevel = next;
   });
-  let fastMode = $state(false);
-  let fastModeSupported = $derived(
-    !!selectedModel &&
-      (currentProvider === 'openai' ||
-        ((currentProvider === 'codex' || currentProvider === 'codex-auth') &&
-          findModelDef(currentProvider, currentModel)?.supportsFastMode === true)),
-  );
-  let fastModeLabel = $derived(currentProvider === 'openai' ? 'Priority' : 'Fast');
-  let fastModeHint = $derived(
-    currentProvider === 'openai'
-      ? 'API Priority processing. Requires Priority access on this OpenAI project.'
-      : '1.5× faster Codex service tier. Uses ChatGPT credits at a higher rate.',
-  );
+  // The speed control is data-driven: the vendor-confirmed faster serving
+  // tiers ship on the model's catalog entry, so the chip appears only for
+  // models that genuinely offer one and labels/descriptions come straight
+  // from the catalog (no provider-name conditionals).
+  let speedTier = $state<string | null>(null);
+  let speedTierPendingLegacy = $state(false);
+  let speedTiers = $derived(findModelDef(currentProvider, currentModel)?.speedTiers ?? []);
+  let activeSpeedTier = $derived(speedTiers.find((tier) => tier.id === speedTier));
+  let speedTierLabel = $derived(activeSpeedTier?.label ?? speedTiers[0]?.label ?? 'Fast');
+  let showFastMenu = $state(false);
 
-  $effect(() => {
-    if (!fastModeSupported) fastMode = false;
-  });
+  function cycleSpeedTier(): void {
+    if (speedTiers.length === 0) return;
+    const index = speedTiers.findIndex((tier) => tier.id === speedTier);
+    speedTier = speedTiers[index + 1]?.id ?? null;
+  }
 
   $effect(() => {
     const model = selectedModel;
@@ -924,9 +1063,202 @@
 
   $effect(() => {
     const model = selectedModel;
-    if (!model || !fastModeSupported) return;
-    saveComposerPreference(model, { fastMode });
+    // Never write over a stored choice while the catalog can't confirm this
+    // model's tiers — a def that hasn't loaded yet would erase a saved tier.
+    if (!model || speedTiers.length === 0) return;
+    saveComposerPreference(model, { speedTier });
   });
+
+  // Re-resolve a tier restored before the catalog arrived: an unknown id is
+  // not the user's intent, and a legacy `fastMode: true` maps onto the first
+  // tier only once the model's real tier list is known.
+  $effect(() => {
+    const tiers = speedTiers;
+    if (!selectedModel || tiers.length === 0) return;
+    if (speedTier && !tiers.some((tier) => tier.id === speedTier)) speedTier = null;
+    if (speedTierPendingLegacy) {
+      speedTierPendingLegacy = false;
+      speedTier ??= tiers[0].id;
+    }
+  });
+
+  // Model settings: provider-reported tunable parameters, already filtered to
+  // what this adapter actually sends. The chip renders only when the model
+  // declares at least one, and only overridden keys ever reach the request.
+  let modelParameterValues = $state<ModelParameterValues>({});
+  let modelParameters = $derived(
+    findModelDef(currentProvider, currentModel)?.parameters ?? [],
+  );
+  let sanitizedModelParameters = $derived(
+    sanitizeModelParameterValues(modelParameters, modelParameterValues),
+  );
+  let modelParameterOverrideCount = $derived(
+    Object.keys(sanitizedModelParameters).length,
+  );
+  let showModelParametersMenu = $state(false);
+
+  $effect(() => {
+    const model = selectedModel;
+    // Never write over stored overrides while the catalog can't confirm this
+    // model's parameter list — same race as the speed tier.
+    if (!model || modelParameters.length === 0) return;
+    saveComposerPreference(model, { modelParameters: modelParameterValues });
+  });
+
+  // Devin Fusion: ONE model whose composer edits two slots (lead + sidekick).
+  // When the selected model's def carries a `fusion` catalog the normal
+  // reasoning/speed/settings chips hide and two slot chips appear; the whole
+  // pairing matrix is vendor data, nothing is hard-coded.
+  let fusionSelection = $state<FusionSelection | null>(null);
+  let fusionCatalog = $derived(findModelDef(currentProvider, currentModel)?.fusion);
+  let fusionAdjustedNote = $state<string | null>(null);
+  let showFusionSlot1Menu = $state(false);
+  let showFusionSlot2Menu = $state(false);
+  let fusionLeadDef = $derived(
+    fusionCatalog?.leads.find((l) => l.id === fusionSelection?.lead),
+  );
+  let fusionSidekickDef = $derived(
+    fusionCatalog?.sidekicks.find((sk) => sk.id === fusionSelection?.sidekick),
+  );
+  let fusionAvailableSidekicks = $derived(
+    fusionCatalog && fusionSelection
+      ? new Set(
+          availableSidekicks(fusionCatalog, fusionSelection.lead, fusionSelection.leadFast),
+        )
+      : new Set<string>(),
+  );
+  let fusionAnyFastPairing = $derived(
+    fusionCatalog && fusionSelection
+      ? availableSidekicks(fusionCatalog, fusionSelection.lead, true).length > 0
+      : false,
+  );
+  let fusionSidekickPriorityLabel = $derived(
+    fusionCatalog && fusionSelection
+      ? fusionSidekickSpeedLabel(fusionSelection.sidekick, fusionSelection.leadFast, fusionCatalog)
+      : null,
+  );
+  /** Whether the sidekick family has a `-priority` variant anywhere in the
+   *  catalog — controls the read-only Fast row on the slot-2 panel. */
+  let fusionSidekickHasPriority = $derived.by(() => {
+    if (!fusionCatalog || !fusionSelection) return false;
+    const needle = `|${fusionSelection.sidekick}|`;
+    return Object.keys(fusionCatalog.pairings).some(
+      (key) => key.includes('|fast|') && key.endsWith(needle),
+    );
+  });
+  let fusionPairingMeta = $derived.by(() => {
+    if (!fusionCatalog || !fusionSelection) return undefined;
+    const cell =
+      fusionCatalog.pairings[
+        fusionPairingKey(
+          fusionSelection.lead,
+          fusionSelection.leadFast,
+          fusionSelection.sidekick,
+          fusionSelection.sidekickEffort,
+        )
+      ];
+    if (!cell || cell[fusionSelection.leadEffort] === undefined) return undefined;
+    return fusionCatalog.meta[
+      fusionPairingKey(
+        fusionSelection.lead,
+        fusionSelection.leadFast,
+        fusionSelection.sidekick,
+        fusionSelection.sidekickEffort,
+      )
+    ];
+  });
+
+  function fusionEffortLabel(effort: string): string {
+    const labels: Record<string, string> = {
+      none: 'None',
+      minimal: 'Minimal',
+      low: 'Low',
+      medium: 'Medium',
+      high: 'High',
+      xhigh: 'XHigh',
+      ultra: 'Ultra',
+      max: 'Max',
+      fast: 'Fast',
+      slow: 'Slow',
+    };
+    return labels[effort] ?? effort.charAt(0).toUpperCase() + effort.slice(1);
+  }
+
+  /** Full chip text for tooltips/aria — survives the collapsed icon-only state. */
+  function fusionSlotChipLabel(slot: 1 | 2): string {
+    const sel = fusionSelection;
+    if (!sel) return slot === 1 ? 'Fusion 1' : 'Fusion 2';
+    if (slot === 1) {
+      const parts = [fusionLeadDef?.name ?? sel.lead, fusionEffortLabel(sel.leadEffort)];
+      if (sel.leadFast) parts.push('Fast');
+      return `Fusion 1: ${parts.join(' · ')}`;
+    }
+    const parts = [fusionSidekickDef?.name ?? sel.sidekick];
+    if (sel.sidekickEffort) parts.push(fusionEffortLabel(sel.sidekickEffort));
+    return `Fusion 2: ${parts.join(' · ')}`;
+  }
+
+  function fusionContextLabel(tokens: number): string {
+    if (tokens >= 1_000_000) {
+      const m = tokens / 1_000_000;
+      return `${Number.isInteger(m) ? m : m.toFixed(1)}M`;
+    }
+    return `${Math.round(tokens / 1000)}k`;
+  }
+
+  /** Footer line for a slot panel: "1M context · $4 in / $20 out per 1M",
+   *  cached price only when the vendor reports one. */
+  function fusionMetaSummary(): string | null {
+    const meta = fusionPairingMeta;
+    if (!meta) return null;
+    const parts = [`${fusionContextLabel(meta.contextWindow)} context`];
+    if (meta.costPerMInputTokens !== undefined && meta.costPerMOutputTokens !== undefined) {
+      parts.push(`$${meta.costPerMInputTokens} in / $${meta.costPerMOutputTokens} out per 1M`);
+      if (meta.costPerMInputCached !== undefined) {
+        parts.push(`$${meta.costPerMInputCached} cached`);
+      }
+    }
+    return parts.join(' · ');
+  }
+
+  /** Apply one slot edit, letting the shared helper repair the pairing when
+   *  the vendor doesn't offer the combination. */
+  function applyFusionChange(
+    changed: 'lead' | 'leadFast' | 'sidekick' | 'sidekickEffort' | 'leadEffort',
+    patch: Partial<FusionSelection>,
+  ): void {
+    if (!fusionCatalog || !fusionSelection) return;
+    const adjusted = adjustFusionSelection(
+      fusionCatalog,
+      { ...fusionSelection, ...patch },
+      changed,
+    );
+    fusionSelection = adjusted.selection;
+    fusionAdjustedNote = adjusted.adjustedNote ?? null;
+    if (adjusted.adjustedNote) toastStore.info(adjusted.adjustedNote);
+  }
+
+  $effect(() => {
+    const model = selectedModel;
+    // Same don't-overwrite race as the speed tier: only persist once the
+    // catalog confirms this model IS the fusion model.
+    if (!model || !fusionCatalog || !fusionSelection) return;
+    saveComposerPreference(model, { fusion: fusionSelection });
+  });
+
+  function setModelParameter(key: ModelParameterKey, value: number | string): void {
+    modelParameterValues = { ...modelParameterValues, [key]: value };
+  }
+
+  function resetModelParameter(key: ModelParameterKey): void {
+    const next = { ...modelParameterValues };
+    delete next[key];
+    modelParameterValues = next;
+  }
+
+  function resetAllModelParameters(): void {
+    modelParameterValues = {};
+  }
 
   let showPermissionMenu = $state(false);
 
@@ -991,6 +1323,38 @@
     if (pending && pending.scope === scope) return pending.overrides;
     return sessionStore.activeSessionId ? sessionAgentOverrides : loadComposerSessionState(scope);
   });
+  /** Delegated-worker isolation preset for this chat: the manager decides on
+   *  Auto, while Always/Never are the user's fixed choice. A chat that never
+   *  chose inherits the project default, which each choice updates so the
+   *  pick carries into new chats. */
+  let worktreeMode = $derived(
+    chatAgentOverrides.worktreeMode ??
+      // Durable overrides written before the preset existed only carry the
+      // checkbox: on was the manager-decides default, off meant Never.
+      (typeof chatAgentOverrides.worktreeIsolation === 'boolean'
+        ? chatAgentOverrides.worktreeIsolation
+          ? 'auto'
+          : 'never'
+        : undefined) ??
+      agentSettingsStore.settings.worktreeMode ??
+      'auto',
+  );
+  const WORKTREE_MODES = ['auto', 'always', 'never'] as const;
+  function cycleWorktreeMode() {
+    const idx = WORKTREE_MODES.indexOf(worktreeMode as (typeof WORKTREE_MODES)[number]);
+    const next = WORKTREE_MODES[(idx + 1) % WORKTREE_MODES.length];
+    setChatAgentOverrides({ worktreeMode: next });
+  }
+  function worktreeModeLabel(): string {
+    return worktreeMode === 'always' ? 'On' : worktreeMode === 'never' ? 'Off' : 'Auto';
+  }
+  function worktreeModeTitle(): string {
+    if (worktreeMode === 'always')
+      return 'Worktree: On. Every delegated worker runs in an isolated git worktree.';
+    if (worktreeMode === 'never')
+      return 'Worktree: Off. Delegated workers write directly into this chat checkout.';
+    return 'Worktree: Auto. The manager decides isolation per task (worktrees merge back).';
+  }
 
   function setChatAgentOverrides(patch: SessionAgentOverrides) {
     // Enabling the gate without naming a mode must mean Auto, not the legacy
@@ -1006,11 +1370,19 @@
     saveComposerSessionState(scope, {
       ...(next.permissionMode ? { permissionMode: next.permissionMode } : {}),
       ...(next.agentExecutionMode ? { agentExecutionMode: next.agentExecutionMode } : {}),
+      ...(next.worktreeMode ? { worktreeMode: next.worktreeMode } : {}),
       ...(next.criticMode ? { criticMode: next.criticMode } : {}),
       ...(typeof next.criticGateEnabled === 'boolean'
         ? { criticGateEnabled: next.criticGateEnabled }
         : {}),
     });
+    // Every posture change here also becomes the project default, so the next
+    // new chat starts from what the user just picked. Model and reasoning are
+    // excluded by composerApprovalDefaults: those stay chat-local.
+    const projectDefaults = composerApprovalDefaults(normalizedPatch);
+    if (Object.keys(projectDefaults).length > 0) {
+      void agentSettingsStore.saveSettings(projectDefaults, { quietSuccess: true });
+    }
     const sessionId = sessionStore.activeSessionId;
     if (!sessionId) return;
     void sessionStore.setSessionAgentOverrides(sessionId, normalizedPatch).then(() => {
@@ -1036,6 +1408,10 @@
     pendingOverridesAppliedTo = sessionId;
     pendingAgentOverrides = null;
     void sessionStore.setSessionAgentOverrides(sessionId, pending.overrides);
+    // The session row owns these choices now. A leftover draft entry would
+    // shadow the project default and make the next new chat open with the old
+    // posture (e.g. YOLO here, Ask there).
+    clearComposerApprovalState(pending.scope);
   });
 
   let permissionMode = $derived(
@@ -1056,6 +1432,7 @@
   function selectPermissionMode(next: PermissionMode) {
     showPermissionMenu = false;
     if (permissionMode !== next) {
+      // Also becomes the project default; setChatAgentOverrides does both.
       setChatAgentOverrides({ permissionMode: next });
     }
     if (next === 'custom' && !isGuidedDemo) onOpenSettings?.('agent', 'permissions');
@@ -1094,6 +1471,7 @@
       freebuckCost?: number;
       reasoningLevels?: string[];
       maxOutputTokens?: number;
+      fusion?: FusionCatalog;
     }> = [];
     for (const p of wsStore.providers) {
       if (p.enabled && (p.adapterAvailable ?? p.authenticated)) {
@@ -1111,6 +1489,7 @@
               freebuckCost?: number;
               reasoningLevels?: string[];
               maxOutputTokens?: number;
+              fusion?: FusionCatalog;
             }>
           | undefined;
         if (catalog && catalog.length > 0) {
@@ -1128,6 +1507,7 @@
                 freebuckCost: m.freebuckCost,
                 reasoningLevels: m.reasoningLevels,
                 maxOutputTokens: m.maxOutputTokens,
+                fusion: m.fusion,
                 // Verified window size kept internally for the switch-overflow
                 // guard — deliberately NOT shown in the picker.
                 contextWindow: m.contextVerified ? m.contextWindow : undefined,
@@ -1294,6 +1674,14 @@
     const modelDef = findModelDef(parsed.provider, parsed.model);
     if (modelDef?.name) return `(${providerLabel(parsed.provider)}) ${modelDef.name}`;
     return parsed.model;
+  });
+  /** The composer button sits next to the provider's icon, so it names only the
+   *  model; the tooltip and announcements keep the provider-qualified label. */
+  let selectedModelShortLabel = $derived.by(() => {
+    if (!selectedModel) return 'Select model';
+    const parsed = parseProviderModelSelection(selectedModel, providerNames);
+    if (!parsed.model || !parsed.provider) return selectedModel;
+    return findModelDef(parsed.provider, parsed.model)?.name ?? parsed.model;
   });
 
   let contextPreviewGeneration = 0;
@@ -1533,15 +1921,56 @@
     if (!trimmed.startsWith('/')) return false;
     const fast = trimmed.match(/^\/fast(?:\s+(on|off|status))?$/i);
     if (fast) {
-      if (!fastModeSupported) {
-        toastStore.error(
-          'Fast mode is only available for Fast-capable ChatGPT Codex models or OpenAI API Priority processing.',
+      const arg = fast[1]?.toLowerCase();
+      if (fusionCatalog && fusionSelection) {
+        // Fusion owns its Fast switch on slot 1 (`leadFast`); the sidekick's
+        // -priority tier follows automatically per the pairing matrix.
+        const sel = fusionSelection;
+        if (arg === 'status') {
+          toastStore.info(`Fusion 1 Fast is ${sel.leadFast ? 'on' : 'off'}.`);
+        } else if (
+          (arg === 'on' || !arg) &&
+          !sel.leadFast &&
+          !leadFastAvailable(fusionCatalog, sel.lead, sel.sidekick, sel.sidekickEffort) &&
+          !fusionAnyFastPairing
+        ) {
+          toastStore.error('Devin offers no fast pairing for this lead.');
+        } else {
+          const nextFast = arg === 'on' ? true : arg === 'off' ? false : !sel.leadFast;
+          const adjusted = adjustFusionSelection(
+            fusionCatalog,
+            { ...sel, leadFast: nextFast },
+            'leadFast',
+          );
+          fusionSelection = adjusted.selection;
+          toastStore.info(
+            adjusted.adjustedNote ??
+              (nextFast ? 'Fusion 1 Fast enabled.' : 'Fusion 1 Fast disabled.'),
+          );
+        }
+        value = '';
+        resizeToMin();
+        return true;
+      }
+      if (speedTiers.length === 0) {
+        toastStore.error('This model has no vendor-confirmed faster serving tier.');
+      } else if (arg === 'status') {
+        toastStore.info(
+          `${speedTierLabel} is ${activeSpeedTier ? 'on' : 'off'}. ${activeSpeedTier?.description ?? speedTiers[0].description}`,
         );
-      } else if (fast[1]?.toLowerCase() === 'status') {
-        toastStore.info(`${fastModeLabel} is ${fastMode ? 'on' : 'off'}. ${fastModeHint}`);
+      } else if (arg === 'on') {
+        speedTier = speedTiers[0].id;
+        toastStore.info(`${speedTiers[0].label} enabled. ${speedTiers[0].description}`);
+      } else if (arg === 'off') {
+        speedTier = null;
+        toastStore.info(`${speedTierLabel} disabled.`);
       } else {
-        fastMode = fast[1] ? fast[1].toLowerCase() === 'on' : !fastMode;
-        toastStore.info(`${fastModeLabel} ${fastMode ? 'enabled' : 'disabled'}. ${fastModeHint}`);
+        cycleSpeedTier();
+        toastStore.info(
+          activeSpeedTier
+            ? `${activeSpeedTier.label} enabled. ${activeSpeedTier.description}`
+            : `${speedTierLabel} disabled.`,
+        );
       }
       value = '';
       resizeToMin();
@@ -1780,8 +2209,12 @@
           modelValue,
           reasoningLevel,
           outgoingAttachments,
-          fastMode,
+          speedTier && speedTiers.some((tier) => tier.id === speedTier) ? speedTier : undefined,
           imageInputMode,
+          Object.keys(sanitizedModelParameters).length > 0
+            ? sanitizedModelParameters
+            : undefined,
+          fusionCatalog && fusionSelection ? fusionSelection : undefined,
         )) !== false;
     } catch (error) {
       toastStore.error(error instanceof Error ? error.message : 'Could not send message');
@@ -1949,11 +2382,10 @@
 
   function primaryAction() {
     if (isStopping) return;
-    if (isRunning) {
+    if (isRunning || isWaiting) {
       if (canSend) void send();
       else stop();
-    } else if (isWaiting) stop();
-    else void send();
+    } else void send();
   }
 
   const BASE_MIN_HEIGHT_PX = 88;
@@ -2040,17 +2472,20 @@
   async function transcribeLocalRecording(
     samples: Float32Array,
     language: string,
-    elapsedMs: number,
+    committed = '',
   ) {
     isTranscribing = true;
     try {
-      const pcmBase64 = await pcm16Base64(samples);
-      const result = await invoke<{ text: string }>('transcribe_local_voice', {
-        pcmBase64,
-        language,
-      });
-      if (!result.text?.trim()) throw new Error('No speech was detected');
-      appendTranscription(result.text);
+      const text = samples.length
+        ? ((await invoke<{ text: string }>('transcribe_local_voice', {
+            pcmBase64: await pcm16Base64(samples),
+            language,
+            prompt: localTranscriptionPrompt(committed),
+          })).text ?? '')
+        : '';
+      const transcript = mergeTranscript(committed, text);
+      if (!transcript.trim()) throw new Error('No speech was detected');
+      appendTranscription(transcript);
     } catch (error) {
       toastStore.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -2059,7 +2494,92 @@
     }
   }
 
+  const LOCAL_PARTIAL_INTERVAL_MS = 900;
+  const LOCAL_PARTIAL_MIN_NEW_SECONDS = 0.35;
+  const LOCAL_PARTIAL_OVERLAP_SECONDS = 0.4;
+  /** A capture this short is transcribed in one pass, which is the most accurate. */
+  const LOCAL_ONE_SHOT_MAX_MS = 30_000;
+  const VOICE_VOCABULARY_KEY = 'koryphaios.voice-vocabulary';
+
+  function stopLocalPartialLoop() {
+    if (localPartialTimer !== null) {
+      clearInterval(localPartialTimer);
+      localPartialTimer = null;
+    }
+    localPartialInFlight = false;
+  }
+
+  /** Names and jargon to spell the user's way, read when a pass is sent. */
+  function storedVoiceVocabulary(): string {
+    try {
+      return typeof localStorage === 'undefined'
+        ? ''
+        : (localStorage.getItem(VOICE_VOCABULARY_KEY) ?? '').replace(/\s+/g, ' ').trim();
+    } catch {
+      return '';
+    }
+  }
+
+  /**
+   * `initial_prompt` text for a pass: the glossary, plus the words already
+   * committed so a chunk that starts mid-sentence keeps the same voice. Whisper
+   * formats use it to bias decoding; other local runtimes ignore it.
+   */
+  function localTranscriptionPrompt(committed = ''): string | undefined {
+    const prompt = [storedVoiceVocabulary(), transcriptWords(committed).slice(-14).join(' ')]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+    return prompt ? prompt.slice(-480) : undefined;
+  }
+
+  function resetLiveTranscript() {
+    localPartialCommitted = '';
+    localPartialConsumedFrames = 0;
+    voiceRecorder.setPartialText('');
+  }
+
+  /**
+   * Transcribe the audio since the last pass and publish the running transcript.
+   *
+   * Only the new audio plus a short overlap is sent, so the work per pass stays
+   * constant for the whole dictation instead of growing with it — the old pass
+   * re-sent every word already spoken, so each caption took longer than the one
+   * before. The overlap keeps a word that straddles two passes intact, and
+   * `mergeTranscript` removes the words both passes heard.
+   */
+  async function publishLiveLocalTranscript(recorder: LocalPcmRecorder) {
+    if (localPartialInFlight || activeLocalRecorder !== recorder) return;
+    const captured = recorder.chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+    const requiredNew = Math.floor(recorder.sampleRate * LOCAL_PARTIAL_MIN_NEW_SECONDS);
+    if (captured - localPartialConsumedFrames < requiredNew) return;
+    const overlapFrames = Math.floor(recorder.sampleRate * LOCAL_PARTIAL_OVERLAP_SECONDS);
+    const from = Math.max(0, localPartialConsumedFrames - overlapFrames);
+    localPartialInFlight = true;
+    try {
+      const samples = resampleTo16Khz(
+        sliceAudioChunks(recorder.chunks, from),
+        recorder.sampleRate,
+      );
+      const result = await invoke<{ text: string }>('transcribe_local_voice', {
+        pcmBase64: await pcm16Base64(samples),
+        language: recorder.language,
+        prompt: localTranscriptionPrompt(localPartialCommitted),
+      });
+      if (activeLocalRecorder === recorder && isRecording) {
+        localPartialCommitted = mergeTranscript(localPartialCommitted, result.text ?? '');
+        localPartialConsumedFrames = captured;
+        voiceRecorder.setPartialText(localPartialCommitted);
+      }
+    } catch {
+      // Best effort; the release pass still covers everything uncommitted.
+    } finally {
+      localPartialInFlight = false;
+    }
+  }
+
   function releaseLocalRecorder(recorder: LocalPcmRecorder) {
+    stopLocalPartialLoop();
     recorder.processor.onaudioprocess = null;
     recorder.source.disconnect();
     recorder.processor.disconnect();
@@ -2129,12 +2649,25 @@
     const waveformAnalyser = recorder.tap?.analyser ?? null;
     releaseLocalRecorder(recorder);
     const samples = resampleTo16Khz(combineAudioChunks(recorder.chunks), recorder.sampleRate);
+    // A short capture is worth one careful pass. A long one has already been
+    // transcribed as it was spoken, so only its uncommitted tail is left to do;
+    // re-sending ten minutes of audio would make the final caption the slowest
+    // one of all.
+    const committed = localPartialCommitted.trim();
+    const oneShot = !committed || elapsedMs <= LOCAL_ONE_SHOT_MAX_MS;
+    const consumed16k = Math.round(
+      (localPartialConsumedFrames * 16_000) / Math.max(1, recorder.sampleRate),
+    );
+    const from = oneShot
+      ? 0
+      : Math.max(0, consumed16k - Math.floor(16_000 * LOCAL_PARTIAL_OVERLAP_SECONDS));
     if (transcribe && samples.length) {
       beginTranscriptionUi(waveformAnalyser, elapsedMs);
-      void transcribeLocalRecording(samples, recorder.language, elapsedMs);
+      void transcribeLocalRecording(samples.slice(from), recorder.language, oneShot ? '' : committed);
     } else {
       endRecordingUi();
     }
+    resetLiveTranscript();
   }
 
   async function startLocalRecording(settings: VoiceSettings) {
@@ -2176,7 +2709,12 @@
       tap: tapped?.tap ?? null,
     };
     isRecording = true;
+    resetLiveTranscript();
     beginRecordingUi(tapped?.tap ?? null, 'recording');
+    localPartialTimer = setInterval(() => {
+      const recorder = activeLocalRecorder;
+      if (recorder) void publishLiveLocalTranscript(recorder);
+    }, LOCAL_PARTIAL_INTERVAL_MS);
   }
 
   async function loadComposerVoiceSettings(): Promise<VoiceSettings> {
@@ -2306,12 +2844,21 @@
     const recognition = new Recognition();
     recognition.lang = settings.input.language;
     recognition.continuous = true;
-    recognition.interimResults = false;
+    // Interim results are what make dictation readable as it is spoken.
+    recognition.interimResults = true;
     recognition.onresult = (event) => {
+      let interim = '';
       for (let index = event.resultIndex; index < event.results.length; index += 1) {
         const result = event.results[index];
-        if (result?.isFinal) appendTranscription(result[0].transcript);
+        if (!result) continue;
+        const transcript = result[0]?.transcript ?? '';
+        if (result.isFinal) {
+          if (transcript.trim()) appendTranscription(transcript);
+        } else {
+          interim += transcript;
+        }
       }
+      voiceRecorder.setPartialText(interim.trim());
     };
     recognition.onerror = (event) => {
       if (event.error !== 'aborted' && event.error !== 'no-speech')
@@ -2385,17 +2932,37 @@
     }
   }
 
-  /** The voice shortcut is also a press-to-toggle action, including on macOS. */
-  async function toggleVoiceShortcut() {
+  /**
+   * Push-to-talk: the shortcut records only while it is held. A release that
+   * arrives before the microphone finished opening cancels nothing — the
+   * capture is stopped as soon as startup settles, so a tap cannot leave a
+   * recorder running in the background.
+   */
+  async function beginVoiceHold() {
+    if (voiceHeld) return;
     if (disabled || imageAdmissionPending || configurationWarning || isTranscribing) return;
-    if (stopRecording()) return;
-    if (voiceStarting) return;
+    if (isRecording || voiceStarting) return;
+    voiceHeld = true;
     voiceStarting = true;
     try {
-      await startRecording(true);
+      await startRecording(true, () => voiceHeld);
     } finally {
       voiceStarting = false;
     }
+    if (!isRecording) {
+      // The hold ended without a capture (declined consent, uninstalled local
+      // model, or released while starting). Do not leave the binding latched.
+      voiceHeld = false;
+      return;
+    }
+    if (!voiceHeld) stopRecording();
+  }
+
+  function endVoiceHold() {
+    voiceHeld = false;
+    // A start still in flight checks `voiceHeld` when it settles.
+    if (voiceStarting) return;
+    stopRecording();
   }
 
   async function startRecording(enableVoiceMode = false, stillWanted = () => true) {
@@ -2482,6 +3049,22 @@
 
     // Global Esc listener to stop running agent
     const handleGlobalEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && showFastMenu) {
+        showFastMenu = false;
+        return;
+      }
+      if (e.key === 'Escape' && showModelParametersMenu) {
+        showModelParametersMenu = false;
+        return;
+      }
+      if (e.key === 'Escape' && showFusionSlot1Menu) {
+        showFusionSlot1Menu = false;
+        return;
+      }
+      if (e.key === 'Escape' && showFusionSlot2Menu) {
+        showFusionSlot2Menu = false;
+        return;
+      }
       if (
         e.key === 'Escape' &&
         isRunning &&
@@ -2505,11 +3088,28 @@
       if (e.repeat || !shortcutStore.matches('voice_mode', e)) return;
       if (voiceBlocked()) return;
       e.preventDefault();
-      void toggleVoiceShortcut();
+      void beginVoiceHold();
+    };
+    // Releasing either half of the chord ends the hold. Requiring the exact
+    // chord here would leave the capture running whenever the user let go of
+    // the modifier before the target key.
+    const handleVoiceShortcutUp = (e: KeyboardEvent) => {
+      if (!voiceHeld) return;
+      const keys = shortcutStore.keys('voice_mode').map((key) => key.toLowerCase());
+      if (!keys.includes(e.key.toLowerCase())) return;
+      e.preventDefault();
+      endVoiceHold();
+    };
+    // A release outside the window never reaches a keyup listener; without this
+    // the microphone would stay open after an alt-tab.
+    const handleVoiceBlur = () => {
+      if (voiceHeld) endVoiceHold();
     };
     window.addEventListener('keydown', handleVoiceShortcutDown);
+    window.addEventListener('keyup', handleVoiceShortcutUp);
+    window.addEventListener('blur', handleVoiceBlur);
     // macOS never delivers fn/Globe to a webview, so the Tauri shell can still
-    // relay a customized Fn binding. It follows toggle semantics as well.
+    // relay a customized Fn binding. Both edges are relayed for hold-to-talk.
     const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
     const nativeUnlisteners: (() => void)[] = [];
     if (inTauri) {
@@ -2520,7 +3120,10 @@
           else nativeUnlisteners.push(unlisten);
         };
         void listen('voice://fn-down', () => {
-          if (voiceOnNativeFn()) void toggleVoiceShortcut();
+          if (voiceOnNativeFn()) void beginVoiceHold();
+        }).then(retain);
+        void listen('voice://fn-up', () => {
+          if (voiceOnNativeFn()) endVoiceHold();
         }).then(retain);
       });
     }
@@ -2546,6 +3149,8 @@
       window.removeEventListener('resize', handleWindowResize);
       window.removeEventListener('keydown', handleGlobalEsc);
       window.removeEventListener('keydown', handleVoiceShortcutDown);
+      window.removeEventListener('keyup', handleVoiceShortcutUp);
+      window.removeEventListener('blur', handleVoiceBlur);
       window.removeEventListener('koryphaios:voice-settings-changed', handleVoiceSettingsChanged);
       nativeUnlisteners.forEach((unlisten) => unlisten());
       activeSpeechRecognition?.abort();
@@ -2744,6 +3349,25 @@
     showReasoningMenu = false;
   }
 
+  function selectSpeedTier(next: string | null): void {
+    speedTier = next;
+    showFastMenu = false;
+  }
+
+  function modelParameterNumber(def: ModelParameterDef): number {
+    const v = modelParameterValues[def.key];
+    if (typeof v === 'number') return v;
+    if (typeof def.default === 'number') return def.default;
+    return def.min ?? 0;
+  }
+
+  /** The value as the slider readout shows it — the override or, when unset,
+   *  the default in the same numeric format. */
+  function modelParameterFormattedValue(def: ModelParameterDef): string {
+    const v = modelParameterNumber(def);
+    return def.kind === 'float' ? v.toFixed(2) : String(Math.round(v));
+  }
+
   function reasoningLabel(value: string): string {
     const config = effectiveReasoningConfig(currentProvider, currentModel);
     if (config) {
@@ -2781,6 +3405,10 @@
     if (!target.closest('.model-picker') && !target.closest('.git-workspace'))
       showModelPicker = false;
     if (!target.closest('.reasoning-picker')) showReasoningMenu = false;
+    if (!target.closest('.fast-mode-picker')) showFastMenu = false;
+    if (!target.closest('.model-params-picker')) showModelParametersMenu = false;
+    if (!target.closest('.fusion-slot-1-picker')) showFusionSlot1Menu = false;
+    if (!target.closest('.fusion-slot-2-picker')) showFusionSlot2Menu = false;
     if (!target.closest('.reference-picker')) showReferenceMenu = false;
     if (!target.closest('.permission-picker')) showPermissionMenu = false;
     if (!target.closest('.agent-mode-picker')) showAgentModeMenu = false;
@@ -2850,34 +3478,7 @@
       });
   }
 
-  let agentExecutionModeMeta = $derived.by(() => {
-    const mode = effectiveAgentExecutionMode;
-    if (mode === 'multi') {
-      return {
-        label: 'Multi-Agent',
-        title: 'Agent Mode: Multi-Agent',
-        icon: Users,
-        className:
-          'bg-[var(--color-info-bg)] text-[var(--color-info)] border border-[var(--color-info)]/30',
-      };
-    }
-    if (mode === 'single') {
-      return {
-        label: 'Single Agent',
-        title: 'Agent Mode: Single Agent',
-        icon: User,
-        className:
-          'bg-[var(--color-surface-3)] text-[var(--color-text-secondary)] border border-[var(--color-border)] hover:brightness-110',
-      };
-    }
-    return {
-      label: 'Auto',
-      title: 'Agent Mode: Auto',
-      icon: Sparkles,
-      className:
-        'bg-[var(--color-success-bg)] text-[var(--color-success)] border border-[var(--color-success)]/25 hover:brightness-110',
-    };
-  });
+  let agentExecutionModeMeta = $derived(agentModeMetaFor(effectiveAgentExecutionMode));
 
   function formatFileReference(path: string): string {
     return path.includes(' ') ? `@"${path}"` : `@${path}`;
@@ -3216,6 +3817,29 @@
   {/if}
 
   <!-- No provider: show blocking setup state -->
+  {#if !disabled && !configurationWarning && interruptedRunId}
+    <div
+      class="mb-2 flex flex-wrap items-center gap-2 rounded-md px-3 py-2"
+      style="background: var(--color-surface-2); border: 1px solid var(--color-border);"
+      data-testid="composer-restart-resume"
+    >
+      <span class="min-w-48 flex-1 text-xs text-[var(--color-text-secondary)]"
+        >The last turn stopped when Koryphaios restarted.</span
+      >
+      <button
+        type="button"
+        class="shrink-0 rounded px-2 py-1 text-xs font-medium text-[var(--color-accent)] hover:bg-[var(--color-surface-3)]"
+        onclick={() => void resumeInterruptedTurn()}
+        title={RESUME_PROMPT}>Resume</button
+      >
+      <button
+        type="button"
+        class="shrink-0 rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]"
+        aria-label="Dismiss"
+        onclick={() => (dismissedInterruptedRunId = interruptedRunId)}><X size={13} /></button
+      >
+    </div>
+  {/if}
   {#if !disabled && configurationWarning}
     <div
       class="mb-2 flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-md"
@@ -3291,14 +3915,14 @@
               onchange={(value) => (goalScope = value as GoalScope)}
             />
           </div>
-          <p class="min-w-0 flex-1 text-[10px] text-[var(--color-text-muted)]">
+          <p class="min-w-0 flex-1 text-[11px] text-[var(--color-text-muted)]">
             {agentSettingsStore.settings.automaticGoalDriving
               ? 'Starts automatically with the selected composer model and continues until done, paused, stopped, or genuinely blocked.'
               : 'Automatic start is off. The goal will wait until you press Start.'}
           </p>
         </div>
         {#if goalDraftRecovered}
-          <p class="mt-1.5 text-[10px] text-[var(--color-success)]">
+          <p class="mt-1.5 text-[11px] text-[var(--color-success)]">
             Recovered unsent goal draft on this device.
           </p>
         {/if}
@@ -3323,7 +3947,7 @@
         <span class="min-w-0 flex-1"
           ><span class="block truncate text-xs font-semibold text-[var(--color-text-primary)]"
             >{workflowStatus.name} · {workflowStatus.stage}</span
-          ><span class="block truncate text-[10px] text-[var(--color-text-muted)]"
+          ><span class="block truncate text-[11px] text-[var(--color-text-muted)]"
             >{workflowStatus.status} · {workflowStatus.task}</span
           ></span
         >
@@ -3457,6 +4081,7 @@
     <div
       class="composer-config-row mt-3 flex flex-wrap items-center gap-2"
       data-testid="composer-config-row"
+      use:toolbarCollapse
     >
       <!-- Model selector -->
       <div class="relative model-picker" data-testid="composer-model-control">
@@ -3464,6 +4089,8 @@
           type="button"
           class="model-picker-trigger flex min-h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors hover:brightness-110"
           aria-expanded={showModelPicker}
+          aria-label={selectedModel ? `Model: ${selectedModelLabel}` : 'Select model'}
+          title={selectedModel ? `Model: ${selectedModelLabel}` : 'Select model'}
           style="background: var(--color-surface-2); color: {selectedModel
             ? 'var(--color-text-primary)'
             : 'var(--color-text-muted)'}; border: 1px solid var(--color-border);"
@@ -3478,8 +4105,17 @@
           {#if selectedModel}
             <ProviderIcon provider={currentProvider} size={16} class="shrink-0" />
           {/if}
-          <span class="composer-control-label">{selectedModelLabel}</span>
-          <ChevronDown size={14} class="text-text-muted" />
+          <!-- Rank 9 hides the whole name and its chevron; rank 8 only caps the
+               name's width first. The outer span is what rank 9 hides, so the
+               inner truncation never has to undo a hide. -->
+          <span class="composer-model-name" data-collapse-rank="9">
+            <span
+              class="composer-control-label composer-model-label"
+              data-collapse-rank="8"
+              data-collapse-mode="truncate">{selectedModelShortLabel}</span
+            >
+          </span>
+          <ChevronDown size={14} class="text-text-muted" data-collapse-rank="9" />
         </button>
 
         {#if showModelPicker}
@@ -3599,11 +4235,25 @@
                                 : 'var(--color-text-secondary)'};"
                               onclick={() => selectModel(model.value)}
                             >
-                              <span class="min-w-0 flex-1 truncate">{model.name}</span>
+                              <span class="min-w-0 flex-1 truncate">
+                                {model.name}
+                                {#if model.fusion}
+                                  <span
+                                    class="block truncate text-[11px] font-normal"
+                                    style="color: var(--color-text-muted);"
+                                  >
+                                    Two models: lead + sidekick{#if fusionSelection}
+                                      {' '}· {model.fusion.leads.find((l) => l.id === fusionSelection?.lead)
+                                        ?.name ?? fusionSelection.lead} + {model.fusion.sidekicks.find(
+                                        (sk) => sk.id === fusionSelection?.sidekick,
+                                      )?.name ?? fusionSelection.sidekick}{/if}
+                                  </span>
+                                {/if}
+                              </span>
                               {#if model.provider === 'freebuff'}
                                 {#if providerRate !== undefined}
                                   <span
-                                    class="shrink-0 text-right text-[10px] font-medium text-[var(--color-accent)]"
+                                    class="shrink-0 text-right text-[11px] font-medium text-[var(--color-accent)]"
                                     title="Provider-reported model rate"
                                   >
                                     {providerRate}
@@ -3626,28 +4276,336 @@
         {/if}
       </div>
 
+      <!-- Devin Fusion: one model, two editable slots -->
+      {#if fusionCatalog && fusionSelection}
+        {@const sel = fusionSelection}
+        <div class="relative fusion-slot-1-picker" data-testid="fusion-slot-1">
+          <button
+            type="button"
+            class="fast-mode-control flex min-h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors hover:brightness-110"
+            style="background: var(--color-surface-3); color: var(--color-text-primary); border: 1px solid var(--color-border);"
+            aria-haspopup="dialog"
+            aria-expanded={showFusionSlot1Menu}
+            aria-label={fusionSlotChipLabel(1)}
+            title={fusionSlotChipLabel(1)}
+            onclick={() => {
+              showFusionSlot1Menu = !showFusionSlot1Menu;
+              showFusionSlot2Menu = false;
+            }}
+          >
+            <span class="fusion-slot-badge" aria-hidden="true"
+              >1{#if sel.leadFast}<Zap size={9} fill="currentColor" />{/if}</span
+            >
+            <span class="composer-control-label" data-collapse-rank="3"
+              >{fusionLeadDef?.name ?? sel.lead} · {fusionEffortLabel(sel.leadEffort)}</span
+            >
+            <ChevronDown size={14} class="text-text-muted" data-collapse-rank="3" />
+          </button>
+
+          {#if showFusionSlot1Menu}
+            <div
+              class="absolute bottom-full left-0 mb-2 w-[min(22rem,calc(100vw-2rem))] rounded-xl border shadow-2xl z-50 overflow-hidden backdrop-blur-md"
+              style="background: var(--color-surface-2); border-color: var(--color-border);"
+              role="dialog"
+              aria-label="Fusion 1 · Lead"
+            >
+              <div
+                class="px-4 py-2.5 text-xs font-medium"
+                style="color: var(--color-text-secondary); border-bottom: 1px solid var(--color-border);"
+              >
+                Fusion 1 · Lead
+              </div>
+              <div class="max-h-[60vh] overflow-y-auto px-4 py-3 space-y-4">
+                <div>
+                  <div class="text-xs font-medium text-[var(--color-text-primary)]">Model</div>
+                  <div class="mt-1.5 space-y-0.5">
+                    {#each fusionCatalog.leads as lead (lead.id)}
+                      <button
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={sel.lead === lead.id}
+                        class="w-full text-left rounded-lg px-2.5 py-2 text-sm transition-colors hover:bg-[var(--color-surface-3)] {sel.lead ===
+                        lead.id
+                          ? 'text-[var(--color-accent)]'
+                          : 'text-[var(--color-text-primary)]'}"
+                        onclick={() => applyFusionChange('lead', { lead: lead.id })}
+                      >
+                        <div class="flex items-center justify-between">
+                          <span class="font-medium">{lead.name}</span>
+                          {#if sel.lead === lead.id}
+                            <Check size={14} class="text-[var(--color-accent)]" />
+                          {/if}
+                        </div>
+                      </button>
+                    {/each}
+                  </div>
+                </div>
+                <div>
+                  <div class="text-xs font-medium text-[var(--color-text-primary)]">
+                    Reasoning
+                  </div>
+                  {#if fusionLeadDef && fusionLeadDef.efforts.length > 1}
+                    <div
+                      class="mt-1.5 flex rounded-lg p-0.5"
+                      style="background: var(--color-surface-3);"
+                      role="radiogroup"
+                      aria-label="Fusion 1 reasoning"
+                    >
+                      {#each fusionLeadDef.efforts as effort (effort)}
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={sel.leadEffort === effort}
+                          class="flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors {sel.leadEffort ===
+                          effort
+                            ? 'text-[var(--color-accent)]'
+                            : 'text-[var(--color-text-secondary)]'}"
+                          style={sel.leadEffort === effort
+                            ? 'background: var(--color-surface-2);'
+                            : ''}
+                          onclick={() => applyFusionChange('leadEffort', { leadEffort: effort })}
+                        >
+                          {fusionEffortLabel(effort)}
+                        </button>
+                      {/each}
+                    </div>
+                  {:else if fusionLeadDef && fusionLeadDef.efforts.length === 1}
+                    <div class="mt-1.5 text-xs" style="color: var(--color-text-muted);">
+                      {fusionEffortLabel(fusionLeadDef.efforts[0])} · set by Devin
+                    </div>
+                  {:else}
+                    <div class="mt-1.5 text-xs" style="color: var(--color-text-muted);">
+                      No reasoning tier
+                    </div>
+                  {/if}
+                </div>
+                <div>
+                  <div class="text-xs font-medium text-[var(--color-text-primary)]">Fast</div>
+                  {#if fusionAnyFastPairing}
+                    <div
+                      class="mt-1.5 flex rounded-lg p-0.5"
+                      style="background: var(--color-surface-3);"
+                      role="radiogroup"
+                      aria-label="Fusion 1 Fast"
+                    >
+                      {#each [false, true] as on (String(on))}
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={sel.leadFast === on}
+                          class="flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors {sel.leadFast ===
+                          on
+                            ? 'text-[var(--color-accent)]'
+                            : 'text-[var(--color-text-secondary)]'}"
+                          style={sel.leadFast === on ? 'background: var(--color-surface-2);' : ''}
+                          onclick={() => applyFusionChange('leadFast', { leadFast: on })}
+                        >
+                          {on ? 'On' : 'Off'}
+                        </button>
+                      {/each}
+                    </div>
+                  {:else}
+                    <div class="mt-1.5 text-xs" style="color: var(--color-text-muted);">
+                      No fast pairing for this lead.
+                    </div>
+                  {/if}
+                </div>
+                {#if fusionAdjustedNote}
+                  <div
+                    class="rounded-lg border border-[var(--color-info)]/30 bg-[var(--color-info-bg)]/40 px-2.5 py-2 text-xs text-[var(--color-text-primary)]"
+                  >
+                    {fusionAdjustedNote}
+                  </div>
+                {/if}
+              </div>
+              {#if fusionMetaSummary()}
+                <div
+                  class="px-4 py-2 text-[11px]"
+                  style="color: var(--color-text-muted); border-top: 1px solid var(--color-border);"
+                >
+                  {fusionMetaSummary()}
+                </div>
+              {/if}
+            </div>
+          {/if}
+        </div>
+
+        <div class="relative fusion-slot-2-picker" data-testid="fusion-slot-2">
+          <button
+            type="button"
+            class="fast-mode-control flex min-h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors hover:brightness-110"
+            style="background: var(--color-surface-3); color: var(--color-text-primary); border: 1px solid var(--color-border);"
+            aria-haspopup="dialog"
+            aria-expanded={showFusionSlot2Menu}
+            aria-label={fusionSlotChipLabel(2)}
+            title={fusionSlotChipLabel(2)}
+            onclick={() => {
+              showFusionSlot2Menu = !showFusionSlot2Menu;
+              showFusionSlot1Menu = false;
+            }}
+          >
+            <span class="fusion-slot-badge" aria-hidden="true">2</span>
+            <span class="composer-control-label" data-collapse-rank="5"
+              >{fusionSidekickDef?.name ?? sel.sidekick}{#if sel.sidekickEffort}
+                {' '}· {fusionEffortLabel(sel.sidekickEffort)}{/if}</span
+            >
+            <ChevronDown size={14} class="text-text-muted" data-collapse-rank="5" />
+          </button>
+
+          {#if showFusionSlot2Menu}
+            <div
+              class="absolute bottom-full left-0 mb-2 w-[min(22rem,calc(100vw-2rem))] rounded-xl border shadow-2xl z-50 overflow-hidden backdrop-blur-md"
+              style="background: var(--color-surface-2); border-color: var(--color-border);"
+              role="dialog"
+              aria-label="Fusion 2 · Sidekick"
+            >
+              <div
+                class="px-4 py-2.5 text-xs font-medium"
+                style="color: var(--color-text-secondary); border-bottom: 1px solid var(--color-border);"
+              >
+                Fusion 2 · Sidekick
+              </div>
+              <div class="max-h-[60vh] overflow-y-auto px-4 py-3 space-y-4">
+                <div>
+                  <div class="text-xs font-medium text-[var(--color-text-primary)]">Model</div>
+                  <div class="mt-1.5 space-y-0.5">
+                    {#each fusionCatalog.sidekicks as sidekick (sidekick.id)}
+                      {@const offered = fusionAvailableSidekicks.has(sidekick.id)}
+                      <button
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={sel.sidekick === sidekick.id}
+                        aria-disabled={!offered}
+                        class="w-full text-left rounded-lg px-2.5 py-2 text-sm transition-colors hover:bg-[var(--color-surface-3)] {sel.sidekick ===
+                        sidekick.id
+                          ? 'text-[var(--color-accent)]'
+                          : 'text-[var(--color-text-primary)]'}"
+                        style={offered ? '' : 'opacity: 0.55;'}
+                        onclick={() =>
+                          applyFusionChange('sidekick', {
+                            sidekick: sidekick.id,
+                            sidekickEffort: sidekick.defaultEffort,
+                          })}
+                      >
+                        <div class="flex items-center justify-between">
+                          <span class="font-medium">{sidekick.name}</span>
+                          {#if sel.sidekick === sidekick.id}
+                            <Check size={14} class="text-[var(--color-accent)]" />
+                          {/if}
+                        </div>
+                        {#if !offered}
+                          <div class="text-[11px]" style="color: var(--color-text-muted);">
+                            Not offered with {sel.leadFast ? 'Fast ' : ''}{fusionLeadDef?.name ??
+                              sel.lead}
+                          </div>
+                        {/if}
+                      </button>
+                    {/each}
+                  </div>
+                </div>
+                <div>
+                  <div class="text-xs font-medium text-[var(--color-text-primary)]">
+                    Reasoning
+                  </div>
+                  {#if fusionSidekickDef && fusionSidekickDef.efforts.length > 1}
+                    <div
+                      class="mt-1.5 flex rounded-lg p-0.5"
+                      style="background: var(--color-surface-3);"
+                      role="radiogroup"
+                      aria-label="Fusion 2 reasoning"
+                    >
+                      {#each fusionSidekickDef.efforts as effort (effort)}
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={sel.sidekickEffort === effort}
+                          class="flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors {sel.sidekickEffort ===
+                          effort
+                            ? 'text-[var(--color-accent)]'
+                            : 'text-[var(--color-text-secondary)]'}"
+                          style={sel.sidekickEffort === effort
+                            ? 'background: var(--color-surface-2);'
+                            : ''}
+                          onclick={() =>
+                            applyFusionChange('sidekickEffort', { sidekickEffort: effort })}
+                        >
+                          {fusionEffortLabel(effort)}
+                        </button>
+                      {/each}
+                    </div>
+                  {:else if fusionSidekickDef && fusionSidekickDef.efforts.length === 1}
+                    <div class="mt-1.5 text-xs" style="color: var(--color-text-muted);">
+                      {fusionEffortLabel(fusionSidekickDef.efforts[0])} · set by Devin
+                    </div>
+                  {:else}
+                    <div class="mt-1.5 text-xs" style="color: var(--color-text-muted);">
+                      No reasoning tier
+                    </div>
+                  {/if}
+                </div>
+                {#if fusionSidekickPriorityLabel}
+                  <div>
+                    <div class="text-xs font-medium text-[var(--color-text-primary)]">Fast</div>
+                    <div class="mt-1.5 text-xs" style="color: var(--color-text-muted);">
+                      {fusionSidekickPriorityLabel} · follows Fusion 1 Fast
+                    </div>
+                  </div>
+                {:else if sel.leadFast || fusionSidekickHasPriority}
+                  <div>
+                    <div class="text-xs font-medium text-[var(--color-text-primary)]">Fast</div>
+                    <div class="mt-1.5 text-xs" style="color: var(--color-text-muted);">
+                      No fast tier
+                    </div>
+                  </div>
+                {/if}
+                {#if fusionAdjustedNote}
+                  <div
+                    class="rounded-lg border border-[var(--color-info)]/30 bg-[var(--color-info-bg)]/40 px-2.5 py-2 text-xs text-[var(--color-text-primary)]"
+                  >
+                    {fusionAdjustedNote}
+                  </div>
+                {/if}
+              </div>
+              {#if fusionMetaSummary()}
+                <div
+                  class="px-4 py-2 text-[11px]"
+                  style="color: var(--color-text-muted); border-top: 1px solid var(--color-border);"
+                >
+                  {fusionMetaSummary()}
+                </div>
+              {/if}
+            </div>
+          {/if}
+        </div>
+      {/if}
+
       <!-- Reasoning toggle - shows/hides based on provider+model -->
-      {#if reasoningSupported && reasoningConfig}
+      {#if reasoningSupported && reasoningConfig && !fusionCatalog}
         <div class="relative reasoning-picker" data-testid="composer-reasoning-control">
           <button
             type="button"
             class="reasoning-picker-trigger flex min-h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors hover:brightness-110"
             aria-expanded={showReasoningMenu}
+            aria-label={reasoningIsValid
+              ? `Reasoning: ${reasoningLabel(reasoningLevel)}`
+              : 'Choose reasoning effort for this model'}
             style="background: var(--color-surface-2); color: {reasoningIsValid
               ? 'var(--color-text-primary)'
               : 'var(--color-text-muted)'}; border: 1px solid var(--color-border);"
             onclick={() => (showReasoningMenu = !showReasoningMenu)}
-            title={reasoningIsValid ? 'Set reasoning' : 'Choose reasoning effort for this model'}
+            title={reasoningIsValid
+              ? `Reasoning: ${reasoningLabel(reasoningLevel)}`
+              : 'Choose reasoning effort for this model'}
           >
             <BrainIcon
               reasoningLevel={reasoningIsValid ? reasoningLevel : ''}
               size={20}
               class="text-[var(--color-accent)]"
             />
-            <span class="composer-control-label"
+            <span class="composer-control-label" data-collapse-rank="7"
               >{reasoningIsValid ? reasoningLabel(reasoningLevel) : 'Choose reasoning'}</span
             >
-            <ChevronDown size={14} class="text-text-muted" />
+            <ChevronDown size={14} class="text-text-muted" data-collapse-rank="7" />
           </button>
 
           {#if showReasoningMenu}
@@ -3693,24 +4651,249 @@
         </div>
       {/if}
 
-      {#if fastModeSupported}
-        <button
-          type="button"
-          class="fast-mode-control flex min-h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors hover:brightness-110"
-          style="background: {fastMode
-            ? 'color-mix(in srgb, var(--color-accent) 22%, var(--color-surface-3))'
-            : 'var(--color-surface-3)'}; color: {fastMode
-            ? 'var(--color-accent)'
-            : 'var(--color-text-primary)'}; border: 1px solid {fastMode
-            ? 'color-mix(in srgb, var(--color-accent) 65%, var(--color-border))'
-            : 'var(--color-border)'};"
-          onclick={() => (fastMode = !fastMode)}
-          aria-pressed={fastMode}
-          title={fastModeHint}
-        >
-          <Zap size={17} fill={fastMode ? 'currentColor' : 'none'} />
-          <span class="composer-control-label">{fastModeLabel}</span>
-        </button>
+      {#if speedTiers.length > 0 && !fusionCatalog}
+        <div class="relative fast-mode-picker" data-testid="composer-fast-control">
+          <div
+            class="fast-mode-control flex min-h-9 items-stretch rounded-lg text-sm font-medium transition-colors hover:brightness-110"
+            style="background: {activeSpeedTier
+              ? 'color-mix(in srgb, var(--color-accent) 14%, var(--color-surface-3))'
+              : 'var(--color-surface-3)'}; color: {activeSpeedTier
+              ? 'var(--color-accent)'
+              : 'var(--color-text-primary)'}; border: 1px solid {activeSpeedTier
+              ? 'var(--color-accent)'
+              : 'var(--color-border)'};"
+          >
+            <button
+              type="button"
+              class="flex items-center gap-2 pl-3 pr-1.5"
+              onclick={cycleSpeedTier}
+              aria-label={`${speedTierLabel}: ${activeSpeedTier ? 'on' : 'off'}`}
+            >
+              <Zap size={17} fill={activeSpeedTier ? 'currentColor' : 'none'} />
+              <span class="composer-control-label" data-collapse-rank="2">{speedTierLabel}</span>
+            </button>
+            <button
+              type="button"
+              class="flex items-center px-1.5"
+              onclick={() => (showFastMenu = !showFastMenu)}
+              aria-haspopup="menu"
+              aria-expanded={showFastMenu}
+              aria-label={`${speedTierLabel} options`}
+            >
+              <ChevronDown size={14} class="text-text-muted" data-collapse-rank="2" />
+            </button>
+          </div>
+
+          {#if showFastMenu}
+            <div
+              class="absolute bottom-full left-0 mb-2 w-64 rounded-xl border shadow-2xl z-50 overflow-hidden backdrop-blur-md"
+              style="background: var(--color-surface-2); border-color: var(--color-border);"
+              role="menu"
+              aria-label={speedTierLabel}
+            >
+              <div
+                class="px-4 py-2.5 text-xs font-medium"
+                style="color: var(--color-text-secondary); border-bottom: 1px solid var(--color-border);"
+              >
+                {`${modelDisplayName} · Speed`}
+              </div>
+              <div class="py-1">
+                <button
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={!activeSpeedTier}
+                  class="w-full text-left px-4 py-2.5 transition-all hover:bg-[var(--color-surface-3)]"
+                  onclick={() => selectSpeedTier(null)}
+                >
+                  <div class="flex items-center justify-between">
+                    <span
+                      class="text-sm font-semibold {!activeSpeedTier
+                        ? 'text-[var(--color-accent)]'
+                        : 'text-[var(--color-text-primary)]'}"
+                    >
+                      Off
+                    </span>
+                    {#if !activeSpeedTier}
+                      <Check size={15} class="text-[var(--color-accent)]" />
+                    {/if}
+                  </div>
+                </button>
+                {#each speedTiers as tier (tier.id)}
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={speedTier === tier.id}
+                    class="w-full text-left px-4 py-2.5 transition-all hover:bg-[var(--color-surface-3)]"
+                    onclick={() => selectSpeedTier(tier.id)}
+                  >
+                    <div class="flex items-center justify-between">
+                      <span
+                        class="text-sm font-semibold {speedTier === tier.id
+                          ? 'text-[var(--color-accent)]'
+                          : 'text-[var(--color-text-primary)]'}"
+                      >
+                        {tier.label}
+                      </span>
+                      {#if speedTier === tier.id}
+                        <Check size={15} class="text-[var(--color-accent)]" />
+                      {/if}
+                    </div>
+                    <div class="mt-0.5 text-xs leading-relaxed" style="color: var(--color-text-muted);">
+                      {tier.description}
+                    </div>
+                  </button>
+                {/each}
+              </div>
+            </div>
+          {/if}
+        </div>
+      {/if}
+
+      {#if modelParameters.length > 0 && !fusionCatalog}
+        <div class="relative model-params-picker" data-testid="composer-model-params-control">
+          <button
+            type="button"
+            class="fast-mode-control flex min-h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors hover:brightness-110"
+            style="background: var(--color-surface-3); color: var(--color-text-primary); border: 1px solid var(--color-border);"
+            aria-haspopup="dialog"
+            aria-expanded={showModelParametersMenu}
+            aria-label="Model settings"
+            onclick={() => (showModelParametersMenu = !showModelParametersMenu)}
+          >
+            <SlidersHorizontal
+              size={17}
+              color={modelParameterOverrideCount > 0 ? 'var(--color-accent)' : 'currentColor'}
+            />
+            <span class="composer-control-label" data-collapse-rank="4">Model settings</span>
+            <ChevronDown size={14} class="text-text-muted" data-collapse-rank="4" />
+          </button>
+
+          {#if showModelParametersMenu}
+            <div
+              class="absolute bottom-full left-0 mb-2 w-[min(22rem,calc(100vw-2rem))] rounded-xl border shadow-2xl z-50 overflow-hidden backdrop-blur-md"
+              style="background: var(--color-surface-2); border-color: var(--color-border);"
+              role="dialog"
+              aria-label="Model settings"
+            >
+              <div
+                class="px-4 py-2.5 text-xs font-medium"
+                style="color: var(--color-text-secondary); border-bottom: 1px solid var(--color-border);"
+              >
+                {`${modelDisplayName} · Model settings`}
+              </div>
+              <div class="max-h-[60vh] overflow-y-auto py-1">
+                {#each modelParameters as def (def.key)}
+                  {@const bounded =
+                    def.kind !== 'enum' && def.min !== undefined && def.max !== undefined}
+                  {@const overridden = modelParameterValues[def.key] !== undefined}
+                  <div
+                    class="px-4 py-2"
+                    style="border-bottom: 1px solid color-mix(in srgb, var(--color-border) 45%, transparent);"
+                  >
+                    {#if bounded}
+                      <KorySlider
+                        id={`model-param-${def.key}`}
+                        label={def.label}
+                        description={def.description}
+                        displayValue={modelParameterFormattedValue(def)}
+                        valueTone={overridden ? 'accent' : 'muted'}
+                        value={modelParameterNumber(def)}
+                        min={def.min!}
+                        max={def.max!}
+                        step={def.step ?? 1}
+                        onchange={(v) => setModelParameter(def.key, v)}
+                        compact
+                      />
+                    {:else if def.kind === 'enum'}
+                      <div
+                        class="text-xs font-medium {overridden
+                          ? 'text-[var(--color-accent)]'
+                          : 'text-[var(--color-text-primary)]'}"
+                      >
+                        {def.label}
+                      </div>
+                      <div
+                        class="mt-1.5 flex rounded-lg p-0.5"
+                        style="background: var(--color-surface-3);"
+                        role="radiogroup"
+                        aria-label={def.label}
+                      >
+                        {#each def.options ?? [] as option (option)}
+                          <button
+                            type="button"
+                            role="radio"
+                            aria-checked={modelParameterValues[def.key] === option}
+                            class="flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors {modelParameterValues[
+                              def.key
+                            ] === option
+                              ? 'text-[var(--color-accent)]'
+                              : 'text-[var(--color-text-secondary)]'}"
+                            style={modelParameterValues[def.key] === option
+                              ? 'background: var(--color-surface-2);'
+                              : ''}
+                            onclick={() =>
+                              modelParameterValues[def.key] === option
+                                ? resetModelParameter(def.key)
+                                : setModelParameter(def.key, option)}
+                          >
+                            {option}
+                          </button>
+                        {/each}
+                      </div>
+                      <div
+                        class="mt-1 text-[11px] leading-snug line-clamp-2"
+                        style="color: var(--color-text-muted);"
+                      >
+                        {def.description}
+                      </div>
+                    {:else}
+                      <div class="flex items-center justify-between gap-3">
+                        <span
+                          class="shrink-0 whitespace-nowrap text-xs font-medium {overridden
+                            ? 'text-[var(--color-accent)]'
+                            : 'text-[var(--color-text-primary)]'}"
+                        >
+                          {def.label}
+                        </span>
+                        <NumberStepper
+                          value={modelParameterNumber(def)}
+                          min={def.min ?? 0}
+                          max={Number.MAX_SAFE_INTEGER}
+                          step={def.step ?? 1}
+                          label={def.label}
+                          onchange={(v) => setModelParameter(def.key, v)}
+                          compact
+                          quiet
+                        />
+                      </div>
+                      <div
+                        class="mt-1 text-[11px] leading-snug line-clamp-2"
+                        style="color: var(--color-text-muted);"
+                      >
+                        {def.description}
+                      </div>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
+              {#if modelParameterOverrideCount > 0}
+                <div
+                  class="flex items-center justify-end px-4 py-2"
+                  style="border-top: 1px solid var(--color-border);"
+                >
+                  <button
+                    type="button"
+                    class="text-xs font-medium transition-colors hover:brightness-125"
+                    style="color: var(--color-accent);"
+                    onclick={resetAllModelParameters}
+                  >
+                    Reset all
+                  </button>
+                </div>
+              {/if}
+            </div>
+          {/if}
+        </div>
       {/if}
       <button
         type="button"
@@ -3721,6 +4904,7 @@
             : 'border-[var(--color-border)] bg-[var(--color-surface-3)] text-[var(--color-text-primary)]'}"
         aria-pressed={!isGuidedDemo && interactionMode === 'plan'}
         aria-disabled={isGuidedDemo}
+        aria-label={isGuidedDemo ? 'Plan mode (not available in this demo)' : 'Plan mode'}
         onclick={() =>
           isGuidedDemo
             ? toastStore.info('Not available in this demo')
@@ -3730,7 +4914,7 @@
           : 'Plan mode keeps project files unchanged and preserves a planning note between restarts'}
       >
         <ClipboardList size={17} />
-        <span class="composer-control-label"
+        <span class="composer-control-label" data-collapse-rank="3"
           >{isGuidedDemo
             ? 'Not available in this demo'
             : interactionMode === 'plan'
@@ -3743,13 +4927,19 @@
           type="button"
           class="permission-picker-trigger flex min-h-9 items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 text-sm font-medium text-[var(--color-text-primary)] transition-colors hover:brightness-110"
           onclick={() => (showPermissionMenu = !showPermissionMenu)}
-          title={`Permissions: ${permissionModeMeta.label}`}
+          title={`Permissions: ${permissionModeMeta.label} · ${permissionEnforcement.label}`}
           aria-haspopup="menu"
           aria-expanded={showPermissionMenu}
+          aria-label={`Permissions: ${permissionModeMeta.label}`}
         >
-          <permissionModeMeta.icon size={17} class={permissionModeMeta.tone} />
-          <span class="composer-control-label">{permissionModeMeta.label}</span>
-          <ChevronDown size={14} class="text-text-muted" />
+          <span class="relative inline-flex">
+            <permissionModeMeta.icon size={17} class={permissionModeMeta.tone} />
+            {#if selectedModel && !permissionEnforced}
+              <span class="permission-unenforced-dot" aria-hidden="true"></span>
+            {/if}
+          </span>
+          <span class="composer-control-label" data-collapse-rank="6">{permissionModeMeta.label}</span>
+          <ChevronDown size={14} class="text-text-muted" data-collapse-rank="6" />
         </button>
         {#if showPermissionMenu}
           <div
@@ -3772,6 +4962,25 @@
                 }}
                 title="Open permission settings"><Settings size={13} /> Settings</button
               >
+            </div>
+            <div
+              class="flex items-start gap-2.5 border-b border-[var(--color-border)] px-4 py-2.5"
+              data-testid="permission-enforcement"
+              data-level={permissionEnforcement.level}
+            >
+              {#if permissionEnforced}
+                <ShieldCheck size={15} class="mt-0.5 shrink-0 text-[var(--color-success)]" />
+              {:else}
+                <ShieldAlert size={15} class="mt-0.5 shrink-0 text-[var(--color-warning)]" />
+              {/if}
+              <span class="min-w-0">
+                <span class="block text-xs font-semibold text-[var(--color-text-primary)]"
+                  >{permissionEnforcement.label}</span
+                >
+                <span class="block text-[11px] leading-relaxed text-[var(--color-text-muted)]"
+                  >{permissionEnforcement.detail}</span
+                >
+              </span>
             </div>
             <div class="py-1">
               {#each PERMISSION_OPTIONS as option (option.value)}
@@ -3806,21 +5015,45 @@
       </div>
 
       {#if sessionStore.activeSessionId}
-        <GitWorkspaceControl
-          sessionId={sessionStore.activeSessionId}
-          revision={sessionStore.sessions.find(
-            (session) => session.id === sessionStore.activeSessionId,
-          )?.version ?? 0}
-          placement="composer"
-          busy={isRunning || isWaiting}
-        />
+        <!-- Rank 10 hides the branch name and chevron inside GitWorkspaceControl.
+             A flex box, not display: contents: lineItems() skips zero-size
+             boxes, and a contents wrapper would drop the git control from the fit. -->
+        <div class="composer-git-slot" data-collapse-rank="10" data-collapse-mode="branch">
+          <GitWorkspaceControl
+            sessionId={sessionStore.activeSessionId}
+            revision={sessionStore.sessions.find(
+              (session) => session.id === sessionStore.activeSessionId,
+            )?.version ?? 0}
+            placement="composer"
+            busy={isRunning || isWaiting}
+          />
+        </div>
+        <!-- Per-chat isolation preset. Click cycles Auto → On → Off; on Auto
+             the manager picks per task, On forces isolated worktrees, Off has
+             workers write straight into this checkout. -->
+        <button
+          type="button"
+          class="composer-worktree-toggle"
+          aria-label="Worker isolation preset for delegated agents"
+          data-testid="composer-worktree-toggle"
+          data-collapse-rank="9"
+          title={worktreeModeTitle()}
+          onclick={cycleWorktreeMode}
+        >
+          <span class="composer-control-label" data-collapse-rank="9"
+            >Worktree: {worktreeModeLabel()}</span
+          >
+        </button>
       {/if}
       <div
         class="composer-action-row ml-auto flex max-w-full flex-wrap items-center justify-end gap-2"
         data-testid="composer-action-row"
+        data-collapse-group
       >
         {#if value.length > 0}
-          <span class="text-xs text-[var(--color-text-muted)]">{value.length} chars</span>
+          <span class="text-xs text-[var(--color-text-muted)]" data-collapse-rank="1"
+            >{value.length} chars</span
+          >
         {/if}
         <div class="flex shrink-0 items-center gap-0.5 reference-picker">
           <input
@@ -4003,7 +5236,7 @@
                   ? 'Transcribing…'
                   : isRecording
                     ? 'Stop recording and transcribe'
-                    : `Click to record${voiceShortcutHint ? ` · ${voiceShortcutHint} starts and stops recording` : ''}`}
+                    : `Click to record${voiceShortcutHint ? ` · hold ${voiceShortcutHint} to talk` : ''}`}
               >
                 <Mic size={16} class={isRecording || isTranscribing ? 'animate-pulse' : ''} />
               </button>
@@ -4018,10 +5251,11 @@
             title={agentExecutionModeMeta.title}
             aria-haspopup="menu"
             aria-expanded={showAgentModeMenu}
+            aria-label={`Agent mode: ${agentExecutionModeMeta.label}`}
           >
             <agentExecutionModeMeta.icon size={12} />
-            <span class="composer-control-label">{agentExecutionModeMeta.label}</span>
-            <ChevronDown size={10} class="opacity-60" />
+            <span class="composer-control-label" data-collapse-rank="5">{agentExecutionModeMeta.label}</span>
+            <ChevronDown size={10} class="opacity-60" data-collapse-rank="5" />
           </button>
           {#if showAgentModeMenu}
             <div
@@ -4049,7 +5283,7 @@
                       style="color: {active ? 'var(--color-accent)' : 'var(--color-text-primary)'};"
                       >{option.label}</span
                     >
-                    <span class="block text-[10px]" style="color: var(--color-text-muted);"
+                    <span class="block text-[11px]" style="color: var(--color-text-muted);"
                       >{option.description}</span
                     >
                   </span>
@@ -4062,11 +5296,15 @@
           {/if}
         </div>
 
-        <CriticModeSelect
-          compact
-          value={effectiveCriticMode}
-          onchange={(criticMode) => selectCriticMode(criticMode)}
-        />
+        <!-- Rank 11 (last to collapse): the critic trigger swaps to its short word. -->
+        <div class="composer-critic-slot" data-collapse-rank="11" data-collapse-mode="swap">
+          <CriticModeSelect
+            compact
+            shortLabels
+            value={effectiveCriticMode}
+            onchange={(criticMode) => selectCriticMode(criticMode)}
+          />
+        </div>
         {#if interactionMode === 'plan' && planReady}
           <button
             type="button"
@@ -4084,9 +5322,9 @@
             imageAdmissionPending ||
             (!isRunning && !isWaiting && !canSend)}
           class="btn flex shrink-0 items-center justify-center gap-2 {isStopping ||
-          (isRunning && !canSend)
+          ((isRunning || isWaiting) && !canSend)
             ? 'stop-btn'
-            : isRunning && canSend
+            : (isRunning || isWaiting) && canSend
               ? 'steer-btn'
               : isWaiting
                 ? 'waiting-btn'
@@ -4102,24 +5340,32 @@
             : imageAdmissionPending
               ? 'Checking image input support'
               : isRunning && canSend
-                ? 'Steer the running model'
-                : isRunning
+                ? 'Steer the running model at its next safe point'
+                : isFinalizing
+                  ? 'Answer complete, finishing follow-up work. Stop'
+                  : isRunning
                   ? 'Stop the running model'
-                  : isWaiting
-                    ? 'Kory is waiting. Click to cancel'
-                    : 'Send message'}
+                  : isWaiting && canSend
+                    ? 'Send message and cancel the wait'
+                    : isWaiting
+                      ? 'Kory is waiting. Click to cancel'
+                      : 'Send message'}
           title={isStopping
             ? 'Waiting for the current run to stop'
             : imageAdmissionPending
               ? 'Checking active image context before sending'
               : isRunning && canSend
-                ? 'Steer the running model with this message'
-                : isRunning
+                ? 'Queue this message. The running turn finishes its current step, then your message takes over. Stop cancels immediately'
+                : isFinalizing
+                  ? 'The answer is complete; Kory is finishing follow-up work such as review and checkpoints. Click to stop (Esc)'
+                  : isRunning
                   ? 'Stop (Esc)'
-                  : isWaiting
-                    ? waitingReason
-                      ? `Waiting on ${waitingReason}. Click to cancel`
-                      : 'Kory is waiting. Click to cancel'
+                  : isWaiting && canSend
+                    ? 'Send message and cancel the wait'
+                    : isWaiting
+                      ? waitingReason
+                        ? `Waiting on ${waitingReason}. Click to cancel`
+                        : 'Kory is waiting. Click to cancel'
                     : !canSend
                       ? 'Type a message to send'
                       : configurationWarning
@@ -4133,12 +5379,18 @@
             <span>Stopping…</span>
           {:else if isRunning && canSend}
             <Send size={18} aria-hidden="true" />
-            <span>Steer</span>
+            <span data-collapse-rank="4">Steer</span>
+          {:else if isFinalizing}
+            <Square size={10} fill="currentColor" strokeWidth={0} aria-hidden="true" />
+            <span>Finalizing</span>
           {:else if isRunning}
             <span class="stop-pulse" aria-hidden="true">
               <Square size={10} fill="currentColor" strokeWidth={0} />
             </span>
             <span>Stop</span>
+          {:else if isWaiting && canSend}
+            <Send size={18} aria-hidden="true" />
+            <span data-collapse-rank="4">Steer</span>
           {:else if isWaiting}
             <PauseCircle size={18} class="animate-pulse" aria-hidden="true" />
             <span>Waiting{waitingReason ? ` · ${waitingReason}` : '…'}</span>
@@ -4147,7 +5399,7 @@
                  for Kory genuinely parked on something external, so an idle
                  app never reads as a busy app. -->
             <Send size={18} />
-            Send
+            <span data-collapse-rank="4">Send</span>
           {/if}
         </button>
       </div>
@@ -4215,7 +5467,7 @@
           </p>
           <p class="text-xs text-[var(--color-text-muted)]">Image preview</p>
         </div>
-        <span class="hidden text-[10px] text-[var(--color-text-muted)] sm:block">Esc to close</span>
+        <span class="hidden text-[11px] text-[var(--color-text-muted)] sm:block">Esc to close</span>
         <button
           type="button"
           class="rounded-lg p-2 text-[var(--color-text-muted)] outline-none transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
@@ -4449,11 +5701,133 @@
     container: composer / inline-size;
   }
 
+  /* Progressive collapse (utils/toolbar-density.ts). Each collapsible element
+     has data-collapse-rank; the toolbar sets data-collapsed on the ones it
+     collapses, and data-collapse-mode says what that means. Order, lowest rank
+     first: 1 char count, 2 Fast, 3 Plan, 4 Send/Steer text, 5 agent mode,
+     6 permissions, 7 reasoning, 8 model name truncated, 9 model name and
+     chevron, 10 git branch, 11 critic short word. Stop, Waiting, Stopping and
+     Finalizing keep their text. Every tooltip and aria-label keeps the full name.
+     Attributes are set at runtime, so these selectors are :global under
+     .command-input, which keeps them scoped to the composer. */
+  .command-input :global(.composer-config-row [data-collapsed]:not([data-collapse-mode])) {
+    display: none;
+  }
+
+  /* truncate: the model name caps its width and ellipsises. */
+  .command-input :global(.composer-config-row [data-collapse-mode='truncate'][data-collapsed]) {
+    max-width: 9rem;
+  }
+
+  /* branch: git hides its branch name and chevron; the tab keeps its icon. */
+  .command-input
+    :global(.composer-config-row [data-collapse-mode='branch'][data-collapsed] :is(.branch-name, .toggle-chevron)) {
+    display: none;
+  }
+  .command-input
+    :global(.composer-config-row [data-collapse-mode='branch'][data-collapsed] .git-toggle) {
+    padding-inline: 0.625rem;
+  }
+
+  /* swap: the critic trigger shows its short word instead of "Critic: X" and drops its chevron. */
+  .command-input
+    :global(
+      .composer-config-row [data-collapse-mode='swap'][data-collapsed]
+        :is(.kory-select-label-full, .kory-select-chevron)
+    ) {
+    display: none;
+  }
+  .command-input
+    :global(.composer-config-row [data-collapse-mode='swap'][data-collapsed] .kory-select-label-short) {
+    display: inline;
+  }
+
+  /* A trigger whose label group has collapsed becomes a compact icon square.
+     px-2.5 and gap-1.5 keep the Model settings icon and chevron contained. */
+  .command-input
+    :global(
+      .composer-config-row
+        :is(
+          .fast-mode-control,
+          .composer-control-button,
+          .reasoning-picker-trigger,
+          .permission-picker-trigger,
+          .agent-mode-trigger,
+          .model-picker-trigger
+        ):has(> [data-collapsed])
+    ) {
+    min-width: 2.25rem;
+    justify-content: center;
+    padding-inline: 0.625rem;
+    column-gap: 0.375rem;
+  }
+
+  .permission-unenforced-dot {
+    position: absolute;
+    top: -2px;
+    right: -3px;
+    width: 7px;
+    height: 7px;
+    border-radius: 9999px;
+    background: var(--color-warning);
+    box-shadow: 0 0 0 2px var(--color-surface-2);
+  }
+
+  /* Fusion slot chips keep this numbered badge when the label collapses, so the
+     icon-only state still reads as "1" / "2" (plus the lead's Zap glyph). */
+  .fusion-slot-badge {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    min-width: 1.15rem;
+    height: 1.15rem;
+    padding-inline: 0.3rem;
+    border-radius: 5px;
+    background: color-mix(in srgb, var(--color-accent) 18%, var(--color-surface-3));
+    color: var(--color-accent);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .composer-model-name {
+    display: inline-flex;
+    min-width: 0;
+  }
+
+  .composer-model-label {
+    max-width: 16rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Flex boxes, not display: contents, so the fit can still measure them. */
+  .composer-git-slot,
+  .composer-critic-slot {
+    display: flex;
+    min-width: 0;
+  }
+
+  .composer-worktree-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-height: var(--size-button-height-lg);
+    padding: 0 var(--space-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface-2);
+    color: var(--color-text-primary);
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+  }
+
+
   @container composer (max-width: 760px) {
     .composer-action-row {
-      margin-left: 0;
-      width: 100%;
-      justify-content: flex-start;
       gap: 0.375rem;
     }
 
@@ -4470,16 +5844,6 @@
       gap: 0.375rem;
       padding-inline: 0.5rem;
       font-size: 0.75rem;
-    }
-  }
-
-  @container composer (max-width: 600px) {
-    .composer-control-label {
-      display: none;
-    }
-
-    .composer-action-row > :global(.reference-picker) {
-      margin-left: 0;
     }
   }
 

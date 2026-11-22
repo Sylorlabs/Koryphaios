@@ -31,10 +31,10 @@ describe('request_critic_review', () => {
 
 describe('delegate_to_worker skill assignment', () => {
   test('passes model and reasoning with normalized worker and critic skill pins', async () => {
-    let received: { task: string; domain?: string; skills?: SkillAssignment; model?: string; reasoningLevel?: string } | undefined;
+    let received: { task: string; domain?: string; skills?: SkillAssignment; model?: string; reasoningLevel?: string; worktree?: boolean } | undefined;
     const ctx = {
-      delegateToWorker: async (task: string, domain?: string, skills?: SkillAssignment, model?: string, reasoningLevel?: string) => {
-        received = { task, domain, skills, model, reasoningLevel };
+      delegateToWorker: async (task: string, domain?: string, skills?: SkillAssignment, model?: string, reasoningLevel?: string, worktree?: boolean) => {
+        received = { task, domain, skills, model, reasoningLevel, worktree };
         return 'completed';
       },
     } as ToolContext;
@@ -48,6 +48,7 @@ describe('delegate_to_worker skill assignment', () => {
         criticSkills: ['testing-engineering', 'testing-engineering'],
         model: 'openai:gpt-test',
         reasoningLevel: 'high',
+        worktree: false,
       },
     });
     expect(result.isError).toBe(false);
@@ -57,7 +58,42 @@ describe('delegate_to_worker skill assignment', () => {
       skills: { worker: ['verification'], critic: ['testing-engineering'] },
       model: 'openai:gpt-test',
       reasoningLevel: 'high',
+      worktree: false,
     });
+  });
+
+  test('passes an ordered fallback chain with per-step reasoning to the host', async () => {
+    let receivedFallbacks: unknown;
+    const ctx = {
+      delegateToWorker: async (
+        _task: string,
+        _domain?: string,
+        _skills?: SkillAssignment,
+        _model?: string,
+        _reasoningLevel?: string,
+        _worktree?: boolean,
+        fallbacks?: unknown,
+      ) => {
+        receivedFallbacks = fallbacks;
+        return 'completed';
+      },
+    } as ToolContext;
+    const result = await new DelegateToWorkerTool().run(ctx, {
+      id: 'delegate-fallback',
+      name: 'delegate_to_worker',
+      input: {
+        task: 'Implement the change',
+        fallbacks: [
+          { model: 'openai:gpt-fallback', reasoningLevel: 'high' },
+          { model: 'anthropic:claude-fallback', reasoningLevel: 'low' },
+        ],
+      },
+    });
+    expect(result.isError).toBe(false);
+    expect(receivedFallbacks).toEqual([
+      { model: 'openai:gpt-fallback', reasoningLevel: 'high' },
+      { model: 'anthropic:claude-fallback', reasoningLevel: 'low' },
+    ]);
   });
 });
 
@@ -78,6 +114,9 @@ describe('manager worker controls', () => {
         agentId: 'worker-1',
         model: 'openai:gpt-test',
         reasoningLevel: 'high',
+        fallbacks: [
+          { model: 'openai:gpt-fallback', reasoningLevel: 'medium' },
+        ],
       },
     });
     expect(result.isError).toBe(false);
@@ -86,6 +125,9 @@ describe('manager worker controls', () => {
       agentId: 'worker-1',
       model: 'openai:gpt-test',
       reasoningLevel: 'high',
+      fallbacks: [
+        { model: 'openai:gpt-fallback', reasoningLevel: 'medium' },
+      ],
     });
   });
 });

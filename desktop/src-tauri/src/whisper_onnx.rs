@@ -9,6 +9,7 @@
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
+    sync::{Mutex, OnceLock},
 };
 
 use ort::{
@@ -17,7 +18,7 @@ use ort::{
 };
 use rustfft::{num_complex::Complex, FftPlanner};
 
-use crate::local_voice::InstalledVoiceModel;
+use crate::local_voice::{with_cached_model, CachedModel, InstalledVoiceModel};
 
 const SAMPLE_RATE: usize = 16_000;
 const N_FFT: usize = 400;
@@ -196,23 +197,32 @@ fn num_mel_bins_from(primary: &Path) -> usize {
     80
 }
 
+static ONNX_VOICE_CONTEXT: OnceLock<Mutex<Option<CachedModel<OnnxVoiceModel>>>> = OnceLock::new();
+
 pub fn transcribe(
     model: &InstalledVoiceModel,
     samples: &[f32],
     language: &str,
 ) -> Result<String, String> {
-    let mut loaded = load(model)?;
-    let mut text = String::new();
-    for chunk in pad_or_trim(samples) {
-        let piece = loaded.transcribe_chunk(&chunk, language)?;
-        if !piece.is_empty() {
-            if !text.is_empty() {
-                text.push(' ');
+    let key = model.primary.to_string_lossy().into_owned();
+    with_cached_model(
+        &ONNX_VOICE_CONTEXT,
+        &key,
+        || load(model),
+        |loaded| {
+            let mut text = String::new();
+            for chunk in pad_or_trim(samples) {
+                let piece = loaded.transcribe_chunk(&chunk, language)?;
+                if !piece.is_empty() {
+                    if !text.is_empty() {
+                        text.push(' ');
+                    }
+                    text.push_str(&piece);
+                }
             }
-            text.push_str(&piece);
-        }
-    }
-    Ok(text.trim().to_string())
+            Ok(text.trim().to_string())
+        },
+    )
 }
 
 impl OnnxVoiceModel {

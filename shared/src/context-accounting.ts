@@ -62,3 +62,49 @@ export function reconcileContextBreakdown(
   }
   return result;
 }
+
+/** Band for a CLI's own native prefix (system prompt, tool schemas, MCP
+ * instructions). Matches the 8k floor / 48k ceiling Kory already reserves for
+ * Antigravity's native prefix (`antigravityPromptBudget`). */
+export const CLI_HARNESS_ESTIMATE_FLOOR_TOKENS = 8_000;
+export const CLI_HARNESS_ESTIMATE_CEILING_TOKENS = 48_000;
+
+export interface BoundedOpaqueOccupancy {
+  /** Occupancy to display: `used` unless the CLI harness remainder was capped. */
+  used: number;
+  /** True when `used` was lowered because the remainder could only be a
+   * cumulative multi-request total, not one request's context. */
+  harnessCapped: boolean;
+  /** The cap applied to the CLI runtime overhead category, when capped. */
+  harnessCap?: number;
+}
+
+/** Bound an opaque CLI's occupancy when the CLI only reported a cumulative
+ * (estimated) turn total. That total counts the same prefix once per internal
+ * request, so everything beyond Kory's measured categories would otherwise land
+ * in `cliHarness` and balloon. The harness may be at most as large as what Kory
+ * measured itself, kept inside the 8k–48k native-prefix band. Exact per-request
+ * occupancy, non-CLI providers, and snapshots without a measured breakdown are
+ * returned unchanged. */
+export function boundOpaqueCumulativeOccupancy(
+  breakdown: ContextBreakdown | undefined,
+  used: number,
+  provider: string | undefined,
+  estimated: boolean | undefined,
+): BoundedOpaqueOccupancy {
+  const total = tokens(used);
+  if (estimated !== true || !hasOpaqueContextHarness(provider) || !breakdown) {
+    return { used: total, harnessCapped: false };
+  }
+  const measured = INPUT_KEYS.reduce((sum, key) => sum + tokens(breakdown[key]), 0);
+  if (measured <= 0) return { used: total, harnessCapped: false };
+  const output = Math.min(total, tokens(breakdown.output));
+  const input = total - output;
+  const harness = Math.max(0, input - measured);
+  const cap = Math.min(
+    CLI_HARNESS_ESTIMATE_CEILING_TOKENS,
+    Math.max(CLI_HARNESS_ESTIMATE_FLOOR_TOKENS, measured),
+  );
+  if (harness <= cap) return { used: total, harnessCapped: false };
+  return { used: measured + cap + output, harnessCapped: true, harnessCap: cap };
+}

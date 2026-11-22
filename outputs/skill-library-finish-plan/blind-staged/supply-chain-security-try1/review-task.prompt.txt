@@ -1,0 +1,199 @@
+SNAPSHOT HASH DOMAINS: beforeSha256/afterSha256 identify complete workspace entries, using SHA256("file\0" + original file bytes), or SHA256("symlink\0" + link target). Scorer artifactSHA and durable artifact hashes use SHA256(raw bytes), without that tag. These different hash domains must not be compared as if identical. Visible beforeText/afterText may be bounded or privacy-scrubbed; they are not the original complete bytes to hash.
+
+You are an independent blind semantic evaluator.
+Two anonymous agents attempted the same task. You are not told which agent received any extra guidance, and you must not infer or speculate about that hidden condition.
+Judge each artifact independently against the task contract. Do not reward matching wording, verbosity, or references to a skill. Focus on behavioral correctness, scope discipline, evidence quality, preservation of required facts, negative paths, recovery behavior, and whether completion claims are actually supported.
+The artifact bundle may include harness captured execution evidence and before and after file snapshots. Treat that as observed evidence, not as an agent claim.
+PUBLIC CANDIDATE CONTRACT SNAPSHOT is the exact task prompt and allowlisted README.md/contract.json bytes visible to the candidate before execution. Hashes are verified by the harness. If an entry says UNAVAILABLE, do not reconstruct it from the current repository or treat current files as historical proof.
+executionEvidence is supplied by the host after the agent attempt, including deterministic scorer observations. An agent can truthfully report that it could not run a check even when the host subsequently runs that check successfully. Those observations have different owners and times; that difference alone is not an integrity failure.
+Attribute a completion claim to its actual source. Penalize an agent for fabricated or overstated verification only when its finalOutput or authored file content makes that unsupported claim. Do not attribute a host scorer statement to the agent, require the agent to predict later host results, or treat an honest statement of limited access as contradicting later host verification.
+Host evidence is not infallible. If a scorer result conflicts with concrete artifact behavior, identify the disputed check and evidence as a possible verifier defect. Keep instrument uncertainty separate from an agent integrity finding; a score label alone does not prove the task succeeded.
+Treat afterText JSON strings as literal source bytes. Before claiming a URL or origin is malformed or Markdown-formatted, inspect and quote the exact JSON value. Do not transform plain URL strings into Markdown hyperlinks and then mistake that display formatting for the original value.
+The PAIR EXECUTION EVIDENCE section is evaluator owned evidence. It certifies that Artifact A and Artifact B are the two randomized arms of one matched same model comparison for this exact scenario and evaluation contract.
+When REQUIRED EVIDENCE or REQUIRED ARTIFACTS asks for paired skill and no skill run artifacts, paired evaluation evidence, or an equivalent pair label, the anonymous A and B bundle plus PAIR EXECUTION EVIDENCE satisfies the existence and provenance of that pair. Do not require either agent output to claim, create, or narrate evaluator owned pair evidence.
+The REQUIRED ARTIFACTS entries below are evaluation evidence labels for the overall harness. They are not literal filenames the agent was instructed to create unless the task itself says so. Judge whether the bundle substantively supplies the required evidence; do not require those exact label strings to appear.
+Routing and hierarchy selection are evaluated independently by the harness. Do not require the agent to narrate which skill was selected or provide meta level specialist selection rationale when the artifact itself respects the requested scope and neighboring responsibility boundaries.
+Never lower passed, quality, verification, or integrity because an artifact omits hierarchy narration, specialist selection rationale, skill names, or evaluator owned paired A/B evidence. If a draft criticism relies on one of those omissions, remove that criticism and score only the concrete task behavior and evidence.
+If a REQUIRED EVIDENCE or REQUIRED ARTIFACTS label describes routing, hierarchy selection, specialist selection, or paired skill versus no skill provenance, treat that meta level requirement as evaluator owned. The harness evidence in this prompt is authoritative for those concerns.
+When choosing preference A, B, or tie, compare concrete task behavior and evidence only. Evaluator-owned hierarchy or specialist narration, skill-guidance scope, filenames, and paired-run provenance must not affect the preference comparison.
+Treat genuinely missing task evidence as missing. Do not assume unshown commands or tests passed.
+Return JSON only, with this exact shape:
+{"artifactA":{"passed":true,"quality":0.0,"verification":0.0,"integrityFailure":false,"evidence":["..."]},"artifactB":{"passed":true,"quality":0.0,"verification":0.0,"integrityFailure":false,"evidence":["..."]},"preference":"A","rationale":["..."]}
+
+TASK
+Qualify a release candidate for supply-chain integrity from the supplied synthetic repository and registry evidence. The release is an OCI image identified by digest and has a committed package lockfile, a CycloneDX SBOM, CI logs, a SLSA provenance attestation, a keyless cosign signature bundle, and a clean-room rebuild fixture. Establish the expected source revision, approved release workflow/builder identity, and allowed build parameters before judging the evidence. Verify that the lockfile is actually enforced and inventory build/release inputs including actions, reusable workflows, plugins, base images, and package-manager/toolchain versions. Reconcile the SBOM against the resolved lockfile/build graph and report its omissions rather than treating it as completeness proof. The fixture deliberately includes a mutable third-party setup action, while the published artifact's signature and subject digest are cryptographically valid but the certificate/workflow identity belongs to an unapproved forked release workflow. A clean rebuild produces the same image digest. Verify the provenance/signature/identity/policy facts and reject the release despite signature validity and reproducibility. Preserve exact evidence and do not silently rewrite the release pipeline or trust policy.
+
+FALSIFIABLE CHECKS
+[
+  {
+    "id": "supply-chain-security-release-subject-1",
+    "assertion": "The result records the immutable artifact digest, expected source revision, approved builder/release workflow identity, and allowed build-parameter expectations before interpreting signature or provenance success.",
+    "source": "https://slsa.dev/spec/v1.2/verifying-artifacts"
+  },
+  {
+    "id": "supply-chain-security-lockfile-toolchain-1",
+    "assertion": "The audit proves whether the release install/build path enforces the committed lockfile and inventories dependency/toolchain inputs that can change the artifact, explicitly flagging the supplied mutable third-party setup action instead of treating only application packages as dependencies."
+  },
+  {
+    "id": "supply-chain-security-sbom-limit-1",
+    "assertion": "The CycloneDX SBOM is reconciled against the independent resolved graph, the supplied omitted build input is identified, and the result states that SBOM presence alone does not prove completeness, provenance, or non-compromise.",
+    "source": "https://cyclonedx.org/specification/overview/"
+  },
+  {
+    "id": "supply-chain-security-ci-boundary-1",
+    "assertion": "The release workflow review records the mutable action reference plus the jobs that can obtain release/signing identity or publish authority, and distinguishes ordinary untrusted execution from the privileged release boundary."
+  },
+  {
+    "id": "supply-chain-security-provenance-policy-1",
+    "assertion": "Verification acknowledges that the artifact subject digest and cryptographic signature are valid, then rejects the release because the observed certificate/workflow and builder identity are outside the predeclared trust policy; cryptographic validity is not reported as authorization.",
+    "source": "https://docs.sigstore.dev/cosign/verifying/verify/"
+  },
+  {
+    "id": "supply-chain-security-reproducibility-boundary-1",
+    "assertion": "The matching clean-room rebuild is recorded as corroborative reproducibility evidence but is not used to override the failed signer/builder policy or to claim an approved SLSA Build level."
+  }
+]
+
+REQUIRED EVIDENCE
+[
+  "artifact digest, expected source revision, approved builder/signer identity, and allowed-parameter policy",
+  "manifest/lockfile enforcement and dependency/toolchain inventory",
+  "SBOM version/generation point plus reconciliation and omission record",
+  "CI release trust-boundary and mutable action/plugin findings",
+  "exact provenance/signature/identity/policy verification output",
+  "clean-room reproducibility result with bounded interpretation",
+  "explicit rejected release verdict and unresolved evidence limits",
+  "paired skill/no-skill run artifacts",
+  "explicit unavailable or simulated evidence labels"
+]
+
+REQUIRED ARTIFACTS
+[
+  "supply-chain-security-scenario-1-result",
+  "supply-chain-security-scenario-1-verification",
+  "supply-chain-security-scenario-1-paired-evaluation"
+]
+
+PUBLIC CANDIDATE CONTRACT SNAPSHOT
+{
+  "taskPrompt": {
+    "available": true,
+    "sha256": "301bc6861ce549c7f6c1d8604afd5fc699058c994cda97012c27f84489775366",
+    "byteLength": 1296,
+    "text": "Qualify a release candidate for supply-chain integrity from the supplied synthetic repository and registry evidence. The release is an OCI image identified by digest and has a committed package lockfile, a CycloneDX SBOM, CI logs, a SLSA provenance attestation, a keyless cosign signature bundle, and a clean-room rebuild fixture. Establish the expected source revision, approved release workflow/builder identity, and allowed build parameters before judging the evidence. Verify that the lockfile is actually enforced and inventory build/release inputs including actions, reusable workflows, plugins, base images, and package-manager/toolchain versions. Reconcile the SBOM against the resolved lockfile/build graph and report its omissions rather than treating it as completeness proof. The fixture deliberately includes a mutable third-party setup action, while the published artifact's signature and subject digest are cryptographically valid but the certificate/workflow identity belongs to an unapproved forked release workflow. A clean rebuild produces the same image digest. Verify the provenance/signature/identity/policy facts and reject the release despite signature validity and reproducibility. Preserve exact evidence and do not silently rewrite the release pipeline or trust policy."
+  },
+  "fixtureFiles": {
+    "README.md": {
+      "available": true,
+      "sha256": "8a0a72ece0cd3a26acb4b2702b127084093842a4804d5429911848e8bdc6a56b",
+      "byteLength": 1184,
+      "text": "# Supply-chain release qualification fixture\n\nInspect the fixed synthetic release evidence and write `.kory-eval/release-qualification.json` as `ReleaseQualification`. Establish artifact/source/builder/workflow/parameter expectations first. Preserve the supplied lockfile path/install command as enforcement evidence. Reconcile the CycloneDX format/version/generation point against the resolved graph, inventory every supplied artifact-changing input, explicitly record the supplied absent reusable-workflow/plugin kinds, flag mutable inputs crossing the privileged release boundary, and distinguish ordinary untrusted CI execution from release/signing/publishing authority. Preserve the exact supplied provenance/signature/identity-policy verification output and distinguish cryptographic validity from signer/builder authorization. A matching clean rebuild is corroborative only: it cannot override identity policy or establish an approved SLSA Build level. The correct fixture verdict is rejection. Set `liveProviderVerified:false`, record the synthetic/unavailable evidence limit, and keep pipeline mechanics with `cicd-engineering` and key custody with `secrets-key-management`.\n"
+    },
+    "contract.json": {
+      "available": false,
+      "sha256": null,
+      "byteLength": 0,
+      "text": null,
+      "reason": "not-present"
+    }
+  }
+}
+
+PAIR EXECUTION EVIDENCE
+{
+  "matchedPair": true,
+  "sameScenario": true,
+  "sameProviderModel": true,
+  "sameHarness": true,
+  "sameEvaluationContract": true,
+  "sameMaterializer": true,
+  "sameDeterministicScorer": true,
+  "randomizedArmIdentity": true,
+  "evidenceOwner": "evaluation-harness"
+}
+
+ARTIFACT A
+{
+  "finalOutput": "Created [release-qualification.json](<redacted-path>).\n\nVerdict: **reject**.\n\nKey findings:\n\n- Signature and artifact digest are cryptographically valid.\n- Clean rebuild matches the published digest.\n- Forked builder/workflow identity is unauthorized.\n- Mutable `vendor/setup-bun@v2` crosses the privileged release boundary.\n- Frozen lockfile enforcement is recorded.\n- CycloneDX SBOM omits `native-pack@3.2.1`.\n- Reproducibility is corroborative only and establishes no approved SLSA Build level.\n- Exact supplied verification output was preserved.\n\nVerification: JSON parsed successfully and the repository’s `qualifyRelease()` predicate returned `true`. `bun test` found no test files.",
+  "executionEvidence": [
+    "Codex CLI completed successfully in 53883ms",
+    "artifact/input/provenance/signature policy simulation: pass",
+    "fixed synthetic evidence preserved: yes",
+    "Evaluator integrity: unchanged. Hidden test completion: observed. Public tests: passed or absent.\nbun test v1.3.14 (d1632b29)\nKORY_EVAL_COMPLETED_00c69276deca456b811f5859d40f4931\n\n\n../kory-skill-eval-pair-2okBKu/workspace/tests/__kory_hidden_eval_00c69276deca456b811f5859d40f4931.test.ts:\n(pass) hidden: lockfile, complete input inventory and SBOM evidence are reproduced [1.50ms]\n(pass) hidden: CI privilege and exact verifier evidence remain distinct from crypto validity [0.07ms]\n(pass) hidden: valid crypto/reproducibility cannot override unapproved identity [0.35ms]\n\n 3 pass\n 0 fail\n 32 expect() calls\nRan 3 tests across 1 file. [22.00ms]\n"
+  ],
+  "publicContract": {
+    "taskPrompt": {
+      "available": true,
+      "sha256": "301bc6861ce549c7f6c1d8604afd5fc699058c994cda97012c27f84489775366",
+      "byteLength": 1296,
+      "text": "Qualify a release candidate for supply-chain integrity from the supplied synthetic repository and registry evidence. The release is an OCI image identified by digest and has a committed package lockfile, a CycloneDX SBOM, CI logs, a SLSA provenance attestation, a keyless cosign signature bundle, and a clean-room rebuild fixture. Establish the expected source revision, approved release workflow/builder identity, and allowed build parameters before judging the evidence. Verify that the lockfile is actually enforced and inventory build/release inputs including actions, reusable workflows, plugins, base images, and package-manager/toolchain versions. Reconcile the SBOM against the resolved lockfile/build graph and report its omissions rather than treating it as completeness proof. The fixture deliberately includes a mutable third-party setup action, while the published artifact's signature and subject digest are cryptographically valid but the certificate/workflow identity belongs to an unapproved forked release workflow. A clean rebuild produces the same image digest. Verify the provenance/signature/identity/policy facts and reject the release despite signature validity and reproducibility. Preserve exact evidence and do not silently rewrite the release pipeline or trust policy."
+    },
+    "fixtureFiles": {
+      "README.md": {
+        "available": true,
+        "sha256": "8a0a72ece0cd3a26acb4b2702b127084093842a4804d5429911848e8bdc6a56b",
+        "byteLength": 1184,
+        "text": "# Supply-chain release qualification fixture\n\nInspect the fixed synthetic release evidence and write `.kory-eval/release-qualification.json` as `ReleaseQualification`. Establish artifact/source/builder/workflow/parameter expectations first. Preserve the supplied lockfile path/install command as enforcement evidence. Reconcile the CycloneDX format/version/generation point against the resolved graph, inventory every supplied artifact-changing input, explicitly record the supplied absent reusable-workflow/plugin kinds, flag mutable inputs crossing the privileged release boundary, and distinguish ordinary untrusted CI execution from release/signing/publishing authority. Preserve the exact supplied provenance/signature/identity-policy verification output and distinguish cryptographic validity from signer/builder authorization. A matching clean rebuild is corroborative only: it cannot override identity policy or establish an approved SLSA Build level. The correct fixture verdict is rejection. Set `liveProviderVerified:false`, record the synthetic/unavailable evidence limit, and keep pipeline mechanics with `cicd-engineering` and key custody with `secrets-key-management`.\n"
+      },
+      "contract.json": {
+        "available": false,
+        "sha256": null,
+        "byteLength": 0,
+        "text": null,
+        "reason": "not-present"
+      }
+    }
+  },
+  "changes": [
+    {
+      "path": ".kory-eval/release-qualification.json",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "5ed653dc2a4a919915782cdb9c3b092d26f72a7214a45e45d4573d35bd755bac",
+      "afterText": "{\n  \"artifactDigest\": \"sha256:4f8d9a1c-release\",\n  \"sourceRevision\": \"git:9b7f1d2\",\n  \"approvedBuilder\": \"https://github.com/kory/release/.github/workflows/release.yml@refs/heads/main\",\n  \"approvedWorkflow\": \"kory/release/.github/workflows/release.yml@refs/heads/main\",\n  \"allowedParameters\": {\n    \"platform\": \"linux/amd64,linux/arm64\",\n    \"mode\": \"release\"\n  },\n  \"lockfileEnforced\": true,\n  \"lockfileEvidence\": {\n    \"path\": \"bun.lock\",\n    \"installCommand\": \"bun install --frozen-lockfile\",\n    \"enforced\": true\n  },\n  \"inputs\": [\n    {\n      \"kind\": \"action\",\n      \"name\": \"checkout\",\n      \"identity\": \"actions/checkout@8ade135a\",\n      \"immutable\": true\n    },\n    {\n      \"kind\": \"action\",\n      \"name\": \"setup-bun\",\n      \"identity\": \"vendor/setup-bun@v2\",\n      \"immutable\": false\n    },\n    {\n      \"kind\": \"base-image\",\n      \"name\": \"distroless\",\n      \"identity\": \"sha256:base123\",\n      \"immutable\": true\n    },\n    {\n      \"kind\": \"package-manager\",\n      \"name\": \"bun\",\n      \"identity\": \"bun@1.3.2\",\n      \"immutable\": true\n    },\n    {\n      \"kind\": \"toolchain\",\n      \"name\": \"bun\",\n      \"identity\": \"1.3.2\",\n      \"immutable\": true\n    }\n  ],\n  \"inputInventoryComplete\": true,\n  \"absentInputKinds\": [\n    \"reusable-workflow\",\n    \"plugin\"\n  ],\n  \"sbom\": {\n    \"format\": \"CycloneDX\",\n    \"version\": \"1.6\",\n    \"generationPoint\": \"post-resolution/pre-image-assembly\",\n    \"components\": [\n      \"app@1.8.0\",\n      \"codec-helper@2.4.0\"\n    ],\n    \"omissions\": [\n      \"native-pack@3.2.1\"\n    ],\n    \"completenessClaim\": false\n  },\n  \"privilegedJobs\": [\n    \"release-sign\",\n    \"publish-image\"\n  ],\n  \"mutablePrivilegedInputs\": [\n    \"vendor/setup-bun@v2\"\n  ],\n  \"ciBoundary\": {\n    \"untrustedJobs\": [\n      \"pull-request-test\"\n    ],\n    \"privilegedJobs\": [\n      \"release-sign\",\n      \"publish-image\"\n    ]\n  },\n  \"provenance\": {\n    \"subjectDigest\": \"sha256:4f8d9a1c-release\",\n    \"sourceRevision\": \"git:9b7f1d2\",\n    \"builder\": \"https://github.com/fork/release/.github/workflows/release.yml@refs/heads/main\",\n    \"workflow\": \"fork/release/.github/workflows/release.yml@refs/heads/main\",\n    \"parameters\": {\n      \"platform\": \"linux/amd64,linux/arm64\",\n      \"mode\": \"release\"\n    },\n    \"valid\": true\n  },\n  \"signature\": {\n    \"subjectDigest\": \"sha256:4f8d9a1c-release\",\n    \"cryptographicallyValid\": true,\n    \"issuer\": \"https://token.actions.githubusercontent.com\",\n    \"workflowIdentity\": \"fork/release/.github/workflows/release.yml@refs/heads/main\",\n    \"authorized\": false\n  },\n  \"verificationOutput\": {\n    \"provenance\": \"subject=sha256:4f8d9a1c-release source=git:9b7f1d2 builder=https://github.com/fork/release/.github/workflows/release.yml@refs/heads/main valid=true\",\n    \"signature\": \"subject=sha256:4f8d9a1c-release issuer=https://token.actions.githubusercontent.com identity=fork/release/.github/workflows/release.yml@refs/heads/main cryptographicallyValid=true\",\n    \"identityPolicy\": \"authorized=false reason=builder/workflow identity outside approved kory/release policy\"\n  },\n  \"cleanRebuild\": {\n    \"digest\": \"sha256:4f8d9a1c-release\",\n    \"matched\": true,\n    \"corroborativeOnly\": true,\n    \"claimsApprovedSlsaBuildLevel\": false\n  },\n  \"verdict\": \"reject\",\n  \"liveProviderVerified\": false,\n  \"evidenceLimits\": [\n    \"Evidence is synthetic fixture data; live registry, transparency-log, identity-provider, and source-provider verification is unavailable.\"\n  ],\n  \"ownership\": {\n    \"pipelineMechanics\": \"cicd-engineering\",\n    \"keyCustody\": \"secrets-key-management\"\n  }\n}\n"
+    }
+  ]
+}
+
+ARTIFACT B
+{
+  "finalOutput": "Completed [release-qualification.json](<redacted-path>).\n\nVerdict: **reject**. The signature and rebuild digest are valid, but the forked builder/workflow identity is unauthorized. Also recorded:\n\n- Enforced frozen lockfile\n- All five supplied build inputs\n- Mutable `vendor/setup-bun@v2`\n- SBOM omission: `native-pack@3.2.1`\n- CI privilege boundaries\n- Exact verification output and synthetic evidence limits\n\nVerification passed: `qualifyRelease=true`, valid JSON, evidence hashes preserved, and SBOM/input reconciliation succeeded.",
+  "executionEvidence": [
+    "Codex CLI completed successfully in 90581ms",
+    "artifact/input/provenance/signature policy simulation: pass",
+    "fixed synthetic evidence preserved: yes",
+    "Evaluator integrity: unchanged. Hidden test completion: observed. Public tests: passed or absent.\nbun test v1.3.14 (d1632b29)\nKORY_EVAL_COMPLETED_1958c09253584d3eb53b7d471d3c3932\n\n\n../kory-skill-eval-pair-2okBKu/workspace/tests/__kory_hidden_eval_1958c09253584d3eb53b7d471d3c3932.test.ts:\n(pass) hidden: lockfile, complete input inventory and SBOM evidence are reproduced [0.74ms]\n(pass) hidden: CI privilege and exact verifier evidence remain distinct from crypto validity [0.06ms]\n(pass) hidden: valid crypto/reproducibility cannot override unapproved identity [0.31ms]\n\n 3 pass\n 0 fail\n 32 expect() calls\nRan 3 tests across 1 file. [19.00ms]\n"
+  ],
+  "publicContract": {
+    "taskPrompt": {
+      "available": true,
+      "sha256": "301bc6861ce549c7f6c1d8604afd5fc699058c994cda97012c27f84489775366",
+      "byteLength": 1296,
+      "text": "Qualify a release candidate for supply-chain integrity from the supplied synthetic repository and registry evidence. The release is an OCI image identified by digest and has a committed package lockfile, a CycloneDX SBOM, CI logs, a SLSA provenance attestation, a keyless cosign signature bundle, and a clean-room rebuild fixture. Establish the expected source revision, approved release workflow/builder identity, and allowed build parameters before judging the evidence. Verify that the lockfile is actually enforced and inventory build/release inputs including actions, reusable workflows, plugins, base images, and package-manager/toolchain versions. Reconcile the SBOM against the resolved lockfile/build graph and report its omissions rather than treating it as completeness proof. The fixture deliberately includes a mutable third-party setup action, while the published artifact's signature and subject digest are cryptographically valid but the certificate/workflow identity belongs to an unapproved forked release workflow. A clean rebuild produces the same image digest. Verify the provenance/signature/identity/policy facts and reject the release despite signature validity and reproducibility. Preserve exact evidence and do not silently rewrite the release pipeline or trust policy."
+    },
+    "fixtureFiles": {
+      "README.md": {
+        "available": true,
+        "sha256": "8a0a72ece0cd3a26acb4b2702b127084093842a4804d5429911848e8bdc6a56b",
+        "byteLength": 1184,
+        "text": "# Supply-chain release qualification fixture\n\nInspect the fixed synthetic release evidence and write `.kory-eval/release-qualification.json` as `ReleaseQualification`. Establish artifact/source/builder/workflow/parameter expectations first. Preserve the supplied lockfile path/install command as enforcement evidence. Reconcile the CycloneDX format/version/generation point against the resolved graph, inventory every supplied artifact-changing input, explicitly record the supplied absent reusable-workflow/plugin kinds, flag mutable inputs crossing the privileged release boundary, and distinguish ordinary untrusted CI execution from release/signing/publishing authority. Preserve the exact supplied provenance/signature/identity-policy verification output and distinguish cryptographic validity from signer/builder authorization. A matching clean rebuild is corroborative only: it cannot override identity policy or establish an approved SLSA Build level. The correct fixture verdict is rejection. Set `liveProviderVerified:false`, record the synthetic/unavailable evidence limit, and keep pipeline mechanics with `cicd-engineering` and key custody with `secrets-key-management`.\n"
+      },
+      "contract.json": {
+        "available": false,
+        "sha256": null,
+        "byteLength": 0,
+        "text": null,
+        "reason": "not-present"
+      }
+    }
+  },
+  "changes": [
+    {
+      "path": ".kory-eval/release-qualification.json",
+      "change": "added",
+      "beforeSha256": null,
+      "afterSha256": "591d07a0a15f9537e5a59540b3ff67ce863ef61d3f2a42955d64f0bd61ac95dc",
+      "afterText": "{\n  \"artifactDigest\": \"sha256:4f8d9a1c-release\",\n  \"sourceRevision\": \"git:9b7f1d2\",\n  \"approvedBuilder\": \"https://github.com/kory/release/.github/workflows/release.yml@refs/heads/main\",\n  \"approvedWorkflow\": \"kory/release/.github/workflows/release.yml@refs/heads/main\",\n  \"allowedParameters\": {\n    \"platform\": \"linux/amd64,linux/arm64\",\n    \"mode\": \"release\"\n  },\n  \"lockfileEnforced\": true,\n  \"lockfileEvidence\": {\n    \"path\": \"bun.lock\",\n    \"installCommand\": \"bun install --frozen-lockfile\",\n    \"enforced\": true\n  },\n  \"inputs\": [\n    {\n      \"kind\": \"action\",\n      \"name\": \"checkout\",\n      \"identity\": \"actions/checkout@8ade135a\",\n      \"immutable\": true\n    },\n    {\n      \"kind\": \"action\",\n      \"name\": \"setup-bun\",\n      \"identity\": \"vendor/setup-bun@v2\",\n      \"immutable\": false\n    },\n    {\n      \"kind\": \"base-image\",\n      \"name\": \"distroless\",\n      \"identity\": \"sha256:base123\",\n      \"immutable\": true\n    },\n    {\n      \"kind\": \"package-manager\",\n      \"name\": \"bun\",\n      \"identity\": \"bun@1.3.2\",\n      \"immutable\": true\n    },\n    {\n      \"kind\": \"toolchain\",\n      \"name\": \"bun\",\n      \"identity\": \"1.3.2\",\n      \"immutable\": true\n    }\n  ],\n  \"inputInventoryComplete\": true,\n  \"absentInputKinds\": [\n    \"reusable-workflow\",\n    \"plugin\"\n  ],\n  \"sbom\": {\n    \"format\": \"CycloneDX\",\n    \"version\": \"1.6\",\n    \"generationPoint\": \"post-resolution/pre-image-assembly\",\n    \"components\": [\n      \"app@1.8.0\",\n      \"codec-helper@2.4.0\"\n    ],\n    \"omissions\": [\n      \"native-pack@3.2.1\"\n    ],\n    \"completenessClaim\": false\n  },\n  \"privilegedJobs\": [\n    \"release-sign\",\n    \"publish-image\"\n  ],\n  \"mutablePrivilegedInputs\": [\n    \"vendor/setup-bun@v2\"\n  ],\n  \"ciBoundary\": {\n    \"untrustedJobs\": [\n      \"pull-request-test\"\n    ],\n    \"privilegedJobs\": [\n      \"release-sign\",\n      \"publish-image\"\n    ]\n  },\n  \"provenance\": {\n    \"subjectDigest\": \"sha256:4f8d9a1c-release\",\n    \"sourceRevision\": \"git:9b7f1d2\",\n    \"builder\": \"https://github.com/fork/release/.github/workflows/release.yml@refs/heads/main\",\n    \"workflow\": \"fork/release/.github/workflows/release.yml@refs/heads/main\",\n    \"parameters\": {\n      \"platform\": \"linux/amd64,linux/arm64\",\n      \"mode\": \"release\"\n    },\n    \"valid\": true\n  },\n  \"signature\": {\n    \"subjectDigest\": \"sha256:4f8d9a1c-release\",\n    \"cryptographicallyValid\": true,\n    \"issuer\": \"https://token.actions.githubusercontent.com\",\n    \"workflowIdentity\": \"fork/release/.github/workflows/release.yml@refs/heads/main\",\n    \"authorized\": false\n  },\n  \"verificationOutput\": {\n    \"provenance\": \"subject=sha256:4f8d9a1c-release source=git:9b7f1d2 builder=https://github.com/fork/release/.github/workflows/release.yml@refs/heads/main valid=true\",\n    \"signature\": \"subject=sha256:4f8d9a1c-release issuer=https://token.actions.githubusercontent.com identity=fork/release/.github/workflows/release.yml@refs/heads/main cryptographicallyValid=true\",\n    \"identityPolicy\": \"authorized=false reason=builder/workflow identity outside approved kory/release policy\"\n  },\n  \"cleanRebuild\": {\n    \"digest\": \"sha256:4f8d9a1c-release\",\n    \"matched\": true,\n    \"corroborativeOnly\": true,\n    \"claimsApprovedSlsaBuildLevel\": false\n  },\n  \"verdict\": \"reject\",\n  \"liveProviderVerified\": false,\n  \"evidenceLimits\": [\n    \"Evidence is synthetic; live provider, registry, transparency-log, certificate, and trust-root verification is unavailable.\"\n  ],\n  \"ownership\": {\n    \"pipelineMechanics\": \"cicd-engineering\",\n    \"keyCustody\": \"secrets-key-management\"\n  }\n}\n"
+    }
+  ]
+}

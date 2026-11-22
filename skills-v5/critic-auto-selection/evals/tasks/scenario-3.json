@@ -1,0 +1,88 @@
+{
+  "id": "critic-auto-selection-full-task-3",
+  "maturity": "individual",
+  "prompt": "Six turn endings are supplied in `cases/cases.json`. Each answer reads as thorough and confident, and several of them are wrong in a way that survives a skim: a number measured on the wrong population, a check that does not test the thing that was asked for, a fix claimed for the reported case while an unmeasured variant is waved through, a restatement of the user's own words, work that an earlier review already covered, and a trivial calculation. Make the final Critic Auto decision for each turn ending and record it with the reason and, where a review is requested, the specific concern. Every decision must quote the part of the case text it rests on in `basis`. The workspace is read only apart from your record file.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://critic-auto-selection/evidence-basis",
+    "requirements": [
+      "one answer whose metric was measured on a different population than the one asked about",
+      "one answer that restates the user's own assertion back to them",
+      "one answer that offers a lint and type check as evidence for a behavioural fix",
+      "one answer that claims a fix and waves through an unmeasured variant as probably the same path",
+      "one answer that reports an earlier review already covered the artifact",
+      "one answer to a trivial calculation",
+      "every decision carries a basis quote that appears verbatim in the case text",
+      "fixture owned case file that must not be edited",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "critic-auto-selection-wrong-population",
+      "assertion": "The throughput answer requests a review whose concern names the payload mismatch between the measurement and the question."
+    },
+    {
+      "id": "critic-auto-selection-restatement",
+      "assertion": "The answer that only repeats the user's own assertion does not request a review."
+    },
+    {
+      "id": "critic-auto-selection-unrelated-check",
+      "assertion": "The behavioural fix whose evidence is a lint run requests a review."
+    },
+    {
+      "id": "critic-auto-selection-unmeasured-variant",
+      "assertion": "The fix that rules out an unmeasured variant as probably the same path requests a review whose concern is that unmeasured variant."
+    },
+    {
+      "id": "critic-auto-selection-covered-earlier",
+      "assertion": "The answer reporting an earlier completed review does not request another one."
+    },
+    {
+      "id": "critic-auto-selection-basis",
+      "assertion": "Every decision quotes a basis that appears verbatim in the supplied case text."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "critic-auto-selection-deterministic-3",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "payload mismatch case requests review with a matching concern",
+        "restatement case skipped",
+        "lint-for-behaviour case requests review",
+        "unmeasured variant case requests review with a matching concern",
+        "already reviewed case skipped",
+        "trivial calculation case skipped",
+        "every basis is verbatim case text"
+      ]
+    },
+    {
+      "id": "critic-auto-selection-blind-quality-3",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "decisions separate the subtly wrong answers from the harmless ones",
+        "each basis quote points at the sentence that actually drove the decision",
+        "concerns name the defect rather than restating the answer"
+      ],
+      "blindTo": [
+        "skill-variant",
+        "expected-outcome"
+      ]
+    }
+  ],
+  "requiredEvidence": [
+    "per turn decision record",
+    "a verbatim basis quote for every decision",
+    "named concern for each requested review",
+    "reason for each skipped review",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "critic-auto-selection-scenario-3-result",
+    "critic-auto-selection-scenario-3-verification",
+    "critic-auto-selection-scenario-3-paired-evaluation"
+  ]
+}
