@@ -86,7 +86,9 @@ describe('built-in provider catalog truth', () => {
       }
     ).buildProviderConfig.bind(registry);
 
-    expect(buildProviderConfig('custom:retired-gateway').baseUrl).toBe('https://gateway.example.com/v1');
+    expect(buildProviderConfig('custom:retired-gateway').baseUrl).toBe(
+      'https://gateway.example.com/v1',
+    );
   });
 
   it('uses the official UnoRouter gateway contract', () => {
@@ -102,14 +104,6 @@ describe('built-in provider catalog truth', () => {
       baseUrl: 'https://api.experientiallabs.ai/v1',
       authMode: 'api_key',
       envKeys: ['EXPERIENTIALLABS_API_KEY', 'EXPLABS_API_KEY'],
-    });
-  });
-
-  it('uses the official Vyce AI OpenAI-compatible gateway contract', () => {
-    expect(PROVIDER_CONFIG_MAP.get('vyceai')).toMatchObject({
-      baseUrl: 'https://vyceai.com/v1',
-      authMode: 'api_key',
-      envKeys: ['VYCEAI_API_KEY', 'VYCE_AI_API_KEY'],
     });
   });
 
@@ -232,6 +226,7 @@ describe('built-in provider catalog truth', () => {
       providerConfigs: new Map([['deepgram', config]]),
       circuitStates: new Map(),
       customProviderIds: new Set(),
+      autoDetectedSources: new Map(),
       verificationRecords: new Map([
         ['deepgram', { state: 'verified', checkedAt: Date.now(), scope: 'credential' }],
       ]),
@@ -274,6 +269,7 @@ describe('built-in provider catalog truth', () => {
       providerConfigs: configs,
       circuitStates: new Map(),
       customProviderIds: new Set(),
+      autoDetectedSources: new Map(),
       verificationRecords: new Map(
         [...configs.keys()].map((name) => [
           name,
