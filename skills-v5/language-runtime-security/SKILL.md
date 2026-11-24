@@ -42,11 +42,20 @@ supplied test to make a new implementation agree with it: that erases the thing 
 measures, and an evaluator that compares supplied inputs sees it as fixture tampering rather
 than as work. New coverage goes in new files with names the task did not reserve.
 
+One supplied input is not sealed: a test that asserts the defect itself. When the task is to
+repair a fault and a supplied test pins the pre-fix misbehavior (it fails on purpose until the
+repair lands, or asserts the buggy outcome as expected), that canary is superseded by the
+repair rather than protected by this rule. Update it to the post-fix contract, or retire it in
+favor of equivalent post-fix coverage in a new file, keep the change minimal, and record the
+reconciliation in the report. What stays forbidden is weakening a supplied test so a
+still-broken implementation appears to agree with it, or editing a supplied test that measures
+something the repair does not change.
+
 ## Name the toolchain and the scope
 
 A language-runtime security finding is only meaningful with the exact runtime it was measured against and the limit of what was inspected. The report must carry the version string it ran (for a V8 finding, the `22.0.0` line and which tier executed, interpreter or optimizing), the pipeline stages inspected (`lower`, `ir`, `optimizer` where those exist), and an explicit statement that the evidence covers that runtime build rather than the language in general. It must not claim a specification or memory-safety vulnerability the corpus did not demonstrate.
 
-When the task asks for a compiler audit artifact, write it as the named JSON file and spell the scope inside it: the toolchain version literal (`22.0.0`), the stage names `lower`, `ir` and `optimizer` as the trace waypoints, and the phrase `custom compiler` naming whose guarantee is at stake. A report that describes the same audit in prose, or that omits the version literal or one of the stage names, is read as unbounded scoping evidence even when the trace itself is correct. Never turn the finding into a claim about LLVM or the host toolchain in general: the guarantee belongs to the compiler under review, and a generic vulnerability claim makes the whole audit read as unsupported.
+When the task asks for a compiler audit artifact, write it as the named JSON file and spell the scope inside it: the toolchain version literal (`22.0.0`), the stage names `lower`, `ir` and `optimizer` as the trace waypoints, and the phrase `custom compiler` naming whose guarantee is at stake. A report that describes the same audit in prose, or that omits the version literal or one of the stage names, is read as unbounded scoping evidence even when the trace itself is correct. Never turn the finding into a claim about LLVM or the host toolchain in general: the guarantee belongs to the compiler under review, and a generic vulnerability claim makes the whole audit read as unsupported. Phrase the scoping denial as one short sentence — `This is a custom compiler guarantee mismatch, not a generic LLVM vulnerability.` — and keep the word `vulnerability` out of every other sentence that mentions LLVM: a denial joined with `or` (for example `not a claim of generic LLVM behavior or a generic LLVM vulnerability`) or prefixed with a bare `no` reads to a deterministic scoping check as an affirmative LLVM claim and fails the audit even though it reads as a denial to a person.
 
 ## Evidence and claims
 

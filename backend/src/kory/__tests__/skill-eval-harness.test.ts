@@ -28,7 +28,9 @@ let skillsHome = '';
 
 function currentTaskIdentity(skill: string, scenarioId: string) {
   const pkg = loadV5SkillPackages().packages.find((item) => item.sidecar.name === skill)!;
-  const contract = currentV5SkillEvaluationContracts(pkg, CURRENT_SKILL_EVAL_CONTRACT_VERSION).get(scenarioId)!;
+  const contract = currentV5SkillEvaluationContracts(pkg, CURRENT_SKILL_EVAL_CONTRACT_VERSION).get(
+    scenarioId,
+  )!;
   return {
     evaluationContractVersion: contract.evaluationContractVersion,
     evaluationContractHash: contract.evaluationContractHash,
@@ -678,6 +680,80 @@ describe('V5 evaluation harness', () => {
     );
   });
 
+  test('blocks promotion when an active provenanced blind review passes below the 0.9 quality bar', () => {
+    const skill = listSkills(root).find((item) => item.name === 'skill-authoring-evaluation')!;
+    const steward = ensureSkillSteward(root, skill.name);
+    const scenario = buildSkillEvaluationCard(root, skill).suite.categories.positive[0]!;
+    recordSkillEvaluationRun(root, {
+      id: 'blind-sub-bar-pass',
+      skill: skill.name,
+      revisionHash: skill.hash,
+      caseId: scenario.id,
+      provider: 'test-provider',
+      model: 'judge-model',
+      harnessVersion: 'v5-blind-subbar@99',
+      role: 'critic',
+      evaluator: 'blind-review',
+      passed: true,
+      quality: 0.85,
+      verification: 0.8,
+      integrityFailure: false,
+      evidence: ['review passed the pair but scored the with-skill artifact 0.85'],
+      recordedAt: '2026-09-01T12:30:00Z',
+      protocolVersion: 3,
+      variant: 'with-skill',
+      caseCategory: 'positive',
+      comparisonId: 'blind-sub-bar-pair',
+      routing: { expectedSelection: true, selected: true },
+      evaluatorProvenance: {
+        evaluatorId: 'independent-reviewer',
+        kind: 'model',
+        provider: 'independent-agent',
+        model: 'beam/Beam-1.0-501B-A23B',
+        agentId: `${steward.agentId}:independent`,
+        assignmentId: 'blind-sub-bar-assignment',
+        blindTo: ['skill-variant', 'expected-outcome'],
+        evidence: ['blind assignment'],
+      },
+      suiteId: 'skill-authoring-evaluation:v5.0.0:held-out',
+      scenarioId: scenario.id,
+      experimentId: 'blind-sub-bar-pass',
+    });
+    for (const variant of ['with-skill', 'without-skill'] as const) {
+      recordSkillEvaluationRun(root, {
+        id: `blind-sub-bar-deterministic-${variant}`,
+        skill: skill.name,
+        revisionHash: skill.hash,
+        caseId: scenario.id,
+        provider: 'test-provider',
+        model: 'subject-model',
+        harnessVersion: 'blind-sub-bar-execution@1',
+        role: 'worker',
+        evaluator: 'deterministic',
+        passed: true,
+        quality: variant === 'with-skill' ? 1 : 0.9,
+        verification: 1,
+        integrityFailure: false,
+        evidence: [`blind-sub-bar-deterministic-${variant}`],
+        recordedAt: '2026-09-01T12:00:00Z',
+        protocolVersion: 3,
+        variant,
+        caseCategory: 'positive',
+        comparisonId: 'blind-sub-bar-pair',
+        routing: { expectedSelection: true, selected: true },
+        suiteId: 'skill-authoring-evaluation:v5.0.0:held-out',
+        scenarioId: scenario.id,
+        experimentId: `blind-sub-bar-deterministic-${variant}`,
+      });
+    }
+    const gate = evaluateSkillPromotion(root, skill.name, skill.hash);
+    expect(gate.status).toBe('blocked');
+    expect(gate.provenancedBlindReviews).toBe(1);
+    expect(gate.reasons).toContain(
+      '1 active provenanced blind review(s) passed but scored below the 0.9 quality bar; rework the skill rather than re-grading the pair.',
+    );
+  });
+
   test.each([
     ['@', '@'],
     ['-v', '-v'],
@@ -688,7 +764,10 @@ describe('V5 evaluation harness', () => {
     (oldSuffix, newSuffix) => {
       // Generic contracts still select the newest observed generation; V5 source
       // freshness has separate exact-registry coverage.
-      const skill = { ...listSkills(root).find((item) => item.name === 'skill-authoring-evaluation')!, name: 'generic-contract-test' };
+      const skill = {
+        ...listSkills(root).find((item) => item.name === 'skill-authoring-evaluation')!,
+        name: 'generic-contract-test',
+      };
       const scenario = buildSkillEvaluationCard(root, skill).suite.categories['full-task'][0]!;
 
       const recordPair = (input: {
@@ -768,7 +847,10 @@ describe('V5 evaluation harness', () => {
   );
 
   test('generic qualification prefers the newest global evaluation-contract epoch', () => {
-    const skill = { ...listSkills(root).find((item) => item.name === 'skill-authoring-evaluation')!, name: 'generic-contract-test' };
+    const skill = {
+      ...listSkills(root).find((item) => item.name === 'skill-authoring-evaluation')!,
+      name: 'generic-contract-test',
+    };
     const scenario = buildSkillEvaluationCard(root, skill).suite.categories['full-task'][0]!;
     const recordPair = (version: number, hash: string, candidatePassed: boolean) => {
       for (const variant of ['with-skill', 'without-skill'] as const) {
@@ -815,7 +897,10 @@ describe('V5 evaluation harness', () => {
   });
 
   test('generic qualification allows revision-bound contract hashes to differ across skill revisions', () => {
-    const skill = { ...listSkills(root).find((item) => item.name === 'skill-authoring-evaluation')!, name: 'generic-contract-test' };
+    const skill = {
+      ...listSkills(root).find((item) => item.name === 'skill-authoring-evaluation')!,
+      name: 'generic-contract-test',
+    };
     const scenario = buildSkillEvaluationCard(root, skill).suite.categories['full-task'][0]!;
     const recordPair = (revisionHash: string, contractHash: string) => {
       for (const variant of ['with-skill', 'without-skill'] as const) {
