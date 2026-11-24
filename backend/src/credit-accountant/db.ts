@@ -185,8 +185,14 @@ type UsageCostBreakdownDbRow = {
   unknown_rows: number;
 };
 
-/** Provider/model/session billing truth without collapsing unknown price to zero. */
-export function getUsageCostBreakdown(sessionId?: string): UsageCostBreakdownRow[] {
+/**
+ * Provider/model/session billing truth without collapsing unknown price to zero.
+ * `sinceMs` (exclusive of older rows) bounds the window; omitted or 0 means all time.
+ */
+export function getUsageCostBreakdown(
+  sessionId?: string,
+  sinceMs = 0,
+): UsageCostBreakdownRow[] {
   const d = getCreditDb();
   const projection = `SELECT session_id, provider, model,
       SUM(tokens_in) AS tokens_in,
@@ -200,12 +206,21 @@ export function getUsageCostBreakdown(sessionId?: string): UsageCostBreakdownRow
   const suffix = `AND (tokens_in > 0 OR tokens_out > 0)
     GROUP BY session_id, provider, model
     ORDER BY known_cost_usd DESC, provider, model`;
-  const rows =
-    sessionId === undefined
-      ? d.query<UsageCostBreakdownDbRow, []>(`${projection} WHERE 1 = 1 ${suffix}`).all()
-      : d
-          .query<UsageCostBreakdownDbRow, [string]>(`${projection} WHERE session_id = ? ${suffix}`)
-          .all(sessionId);
+  const conditions: string[] = ['1 = 1'];
+  const params: Array<string | number> = [];
+  if (sessionId !== undefined) {
+    conditions.push('session_id = ?');
+    params.push(sessionId);
+  }
+  if (sinceMs > 0) {
+    conditions.push('ts >= ?');
+    params.push(sinceMs);
+  }
+  const rows = d
+    .query<UsageCostBreakdownDbRow, Array<string | number>>(
+      `${projection} WHERE ${conditions.join(' AND ')} ${suffix}`,
+    )
+    .all(...params);
 
   return rows.map((row) => ({
     sessionId: row.session_id,

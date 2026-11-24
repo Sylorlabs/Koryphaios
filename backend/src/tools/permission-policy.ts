@@ -262,6 +262,8 @@ export const READ_ONLY_TOOLS = new Set([
   'list_sessions',
   'read_session',
   'get_resource_budget',
+  'get_model_pricing',
+  'get_usage_summary',
   'load_skill_detail',
   'list_notes',
   'search_notes',

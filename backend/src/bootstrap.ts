@@ -70,6 +70,8 @@ import {
   UpdateWorkflowTool,
   CreateWorkflowDraftTool,
   GetResourceBudgetTool,
+  GetModelPricingTool,
+  GetUsageSummaryTool,
   ScheduleMonitorTool,
 } from './tools';
 import { initMCP } from './mcp/client';
@@ -469,6 +471,8 @@ export async function initTools(providers: ProviderRegistry) {
     new UpdateWorkflowTool(),
     new CreateWorkflowDraftTool(),
     new GetResourceBudgetTool(providers),
+    new GetModelPricingTool(providers),
+    new GetUsageSummaryTool(providers),
     new ScheduleMonitorTool(),
   ];
 

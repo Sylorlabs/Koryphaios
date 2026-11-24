@@ -92,6 +92,8 @@ const OBSERVATION_TOOLS = new Set([
   'load_skill_detail',
   'fetch_context',
   'get_resource_budget',
+  'get_model_pricing',
+  'get_usage_summary',
   ...NOTE_TOOL_DEFINITIONS.filter((tool) => tool.category === 'read').map((tool) => tool.name),
 ]);
 

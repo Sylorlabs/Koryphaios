@@ -1041,6 +1041,32 @@ export const KORY_TOOLS: KoryToolDef[] = [
     inputSchema: { type: 'object', properties: {} },
     role: 'any',
   },
+  {
+    name: 'kory__get_model_pricing',
+    description:
+      'Read per-model price facts before choosing a route: input, output and cache prices per 1M tokens, context window, and the price source (catalog, models.dev, provider-reported, openrouter-equivalent, or unknown). Pass models as provider:model ids, or a provider to list its catalog. Unknown prices are null, never zero.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        models: { type: 'array', items: { type: 'string' } },
+        provider: { type: 'string' },
+      },
+    },
+    role: 'any',
+  },
+  {
+    name: 'kory__get_usage_summary',
+    description:
+      'Read spend so far: USD where prices are known (tokens always), per provider and model, enforced spend caps and current windows, and subscription or balance states with freshness. scope: session (default), project, today or month; sessionId picks the chat. Unknown values are null, never zero.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scope: { type: 'string', enum: ['session', 'project', 'today', 'month'] },
+        sessionId: { type: 'string' },
+      },
+    },
+    role: 'any',
+  },
 
   // ── Skills ──
   {
