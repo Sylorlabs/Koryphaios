@@ -1263,4 +1263,66 @@ describe('KoryManager turn admission', () => {
       sqlite.close();
     }
   });
+
+  test('admission re-checks a cached provider failure before refusing the turn', async () => {
+    const sessionId = 'admission-recheck';
+    const { sqlite, coordinator } = createRunCoordinator(sessionId);
+    const { store } = createMessageStore();
+    (store as unknown as { getContextMessages(): Promise<never[]> }).getContextMessages =
+      async () => [];
+    const manager = createManager(coordinator, store);
+    const internal = manager as unknown as {
+      providers: {
+        resolveProvider: ReturnType<typeof mock>;
+        executeWithRetry: ReturnType<typeof mock>;
+        get?: (name: string) => unknown;
+      };
+    };
+    // Model Freebuff's contract: the synchronous gate serves a cached probe
+    // failure until refreshAvailability re-probes and flips it.
+    let available = false;
+    const refreshAvailability = mock(async () => {
+      available = true;
+      return true;
+    });
+    let streamed = false;
+    const provider = {
+      name: 'openai',
+      refreshAvailability,
+      isAvailable: () => available,
+      streamResponse: () => {
+        streamed = true;
+        return (async function* () {
+          yield { type: 'text', text: 'ok' };
+        })();
+      },
+    };
+    internal.providers.get = () => provider;
+    internal.providers.resolveProvider = mock(async () => (available ? provider : undefined));
+    internal.providers.executeWithRetry = mock(() => {
+      streamed = true;
+      return (async function* () {
+        yield { type: 'text', text: 'ok' };
+      })();
+    });
+    try {
+      const turn = await manager.startSessionTurn({
+        sessionId,
+        source: 'user',
+        sourceCommandId: 'admission-recheck-cmd',
+        userMessage: 'Run after a transient probe failure.',
+      });
+      expect(turn.accepted).toBe(true);
+      if (turn.accepted !== true) throw new Error('Expected the turn to be admitted');
+      const result = await turn.completion;
+      expect(refreshAvailability).toHaveBeenCalledTimes(1);
+      // The cached failure must not be what ends the turn: resolveProvider saw
+      // the refreshed adapter and the stream was entered.
+      expect(streamed).toBe(true);
+      expect(result).not.toMatchObject({ status: 'failed', reason: 'provider_unavailable' });
+    } finally {
+      await manager.shutdown();
+      sqlite.close();
+    }
+  });
 });

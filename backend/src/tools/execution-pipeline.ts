@@ -15,11 +15,19 @@ import { canonicalizePath, isContainedBy } from '../runtime/platform';
 import { tryAcquireWorkspaceOperation } from './workspace-operation-gate';
 import { roleIncludesTool } from './tool-roles';
 import type { Tool, ToolCallInput, ToolCallOutput, ToolContext } from './registry';
-import { FILESYSTEM_TOOLS, FILE_MUTATING_TOOLS, WORKSPACE_MUTATING_TOOLS, FilePathScope, bindFilePathScope } from './external-paths';
+import {
+  FILESYSTEM_TOOLS,
+  FILE_MUTATING_TOOLS,
+  WORKSPACE_MUTATING_TOOLS,
+  FilePathScope,
+  bindFilePathScope,
+} from './external-paths';
 
 function approvalSubject(ctx: ToolContext): string {
-  if (ctx.callerDomain) return `${ctx.callerDomain[0].toUpperCase()}${ctx.callerDomain.slice(1)} worker`;
+  if (ctx.callerDomain)
+    return `${ctx.callerDomain[0].toUpperCase()}${ctx.callerDomain.slice(1)} worker`;
   if (ctx.callerRole === 'manager') return 'Kory';
+  if (ctx.callerRole === 'critic') return 'Critic';
   return ctx.agentName ?? 'Backend';
 }
 
@@ -188,7 +196,9 @@ export async function executeTool(
   // than the owning chat checkout. Clone rather than mutate the caller's ctx.
   try {
     const owner = sessionWorkspaceOwnership(ctx.workingDirectory);
-    const reviewRoot = ctx.reviewWorkspaceRoot ? canonicalizePath(ctx.reviewWorkspaceRoot) : undefined;
+    const reviewRoot = ctx.reviewWorkspaceRoot
+      ? canonicalizePath(ctx.reviewWorkspaceRoot)
+      : undefined;
     // canonicalizePath resolves symlinks and therefore throws on a missing
     // path; a vanished grant is the same "no longer available" failure.
     let grantRoot: string | undefined;
@@ -202,7 +212,8 @@ export async function executeTool(
         throw new Error('Owned workspace is no longer available');
       }
     }
-    const cwd = owner || reviewRoot || grantRoot ? canonicalizePath(ctx.workingDirectory) : undefined;
+    const cwd =
+      owner || reviewRoot || grantRoot ? canonicalizePath(ctx.workingDirectory) : undefined;
     if (reviewRoot && (!cwd || !isContainedBy(reviewRoot, cwd)))
       throw new Error('Verification cwd escaped its disposable grant');
     if (owner && cwd) {
@@ -221,14 +232,18 @@ export async function executeTool(
     }
     // A manager opened on a repository subdirectory still owns that chat's
     // independent Git metadata. Workers retain only their task checkout.
-    const root = reviewRoot ?? (owner ? (ctx.callerRole === 'manager' ? owner.checkout : cwd) : grantRoot);
+    const root =
+      reviewRoot ?? (owner ? (ctx.callerRole === 'manager' ? owner.checkout : cwd) : grantRoot);
     if (grantRoot && root !== grantRoot) {
       throw new Error('The pinned workspace grant was redirected');
     }
     if (root || ctx.requiredWorkspaceRoot) {
       ctx.requiredWorkspaceRoot = root;
       ctx.approvedToolCallIds ??= new Set();
-      ctx = deriveToolContext(ctx, { requiredWorkspaceRoot: root, ...(cwd ? { workingDirectory: cwd } : {}) });
+      ctx = deriveToolContext(ctx, {
+        requiredWorkspaceRoot: root,
+        ...(cwd ? { workingDirectory: cwd } : {}),
+      });
     }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
@@ -266,13 +281,9 @@ export async function executeTool(
   const input = call.input as Record<string, unknown>;
   const files = Array.isArray(input.files) ? (input.files as Array<Record<string, unknown>>) : [];
   const edits = Array.isArray(input.edits) ? (input.edits as Array<Record<string, unknown>>) : [];
-  const paths = [
-    input.path,
-    input.oldPath,
-    input.newPath,
-    input.source,
-    input.destination,
-  ].filter((value): value is string => typeof value === 'string' && value.length > 0);
+  const paths = [input.path, input.oldPath, input.newPath, input.source, input.destination].filter(
+    (value): value is string => typeof value === 'string' && value.length > 0,
+  );
   for (const file of [...files, ...edits]) {
     if (typeof file.path === 'string') paths.push(file.path);
   }
@@ -293,11 +304,7 @@ export async function executeTool(
     input.newStr,
     input.new_str,
     input.new_string,
-    ...operations.flatMap((operation) => [
-      operation.content,
-      operation.newStr,
-      operation.new_str,
-    ]),
+    ...operations.flatMap((operation) => [operation.content, operation.newStr, operation.new_str]),
     ...nestedEdits.map((edit) => edit.new_str),
   ].filter((value): value is string => typeof value === 'string');
   const change = {
@@ -305,15 +312,23 @@ export async function executeTool(
     linesChanged: lineSources.reduce((total, value) => total + value.split('\n').length, 0),
   };
   let fileScope: FilePathScope | undefined;
-  const hardWriteRoot = () => ctx.requiredWorkspaceRoot &&
+  const hardWriteRoot = () =>
+    ctx.requiredWorkspaceRoot &&
     (ctx.callerRole !== 'manager' || ctx.reviewWorkspaceRoot || !fileScope?.externalPaths.length)
-    ? ctx.requiredWorkspaceRoot : undefined;
+      ? ctx.requiredWorkspaceRoot
+      : undefined;
   const checkWriteBoundary = () => {
     const root = hardWriteRoot();
     if (!root || !FILE_MUTATING_TOOLS.has(call.name)) return;
-    if (canonicalizePath(root) !== root || paths.some((path) =>
-      !validatePathAccess(resolve(ctx.workingDirectory, path), [root], { followSymlinks: true }).allowed,
-    )) throw new Error('Access denied: file mutation is outside the mandatory workspace boundary.');
+    if (
+      canonicalizePath(root) !== root ||
+      paths.some(
+        (path) =>
+          !validatePathAccess(resolve(ctx.workingDirectory, path), [root], { followSymlinks: true })
+            .allowed,
+      )
+    )
+      throw new Error('Access denied: file mutation is outside the mandatory workspace boundary.');
   };
   // A host-side invocation scope requires an existing cwd. Permission-only
   // registry fixtures may use a synthetic, not-yet-created cwd; let their
@@ -328,10 +343,14 @@ export async function executeTool(
       call = fileScope.call;
     } catch (error) {
       return {
-        callId: call.id, name: call.name, isError: true, durationMs: performance.now() - start,
-        output: hardWriteRoot() && FILE_MUTATING_TOOLS.has(call.name)
-          ? 'Access denied: file mutation is outside the mandatory workspace boundary.'
-          : `Access denied: ${error instanceof Error ? error.message : 'Cannot verify filesystem paths'}`,
+        callId: call.id,
+        name: call.name,
+        isError: true,
+        durationMs: performance.now() - start,
+        output:
+          hardWriteRoot() && FILE_MUTATING_TOOLS.has(call.name)
+            ? 'Access denied: file mutation is outside the mandatory workspace boundary.'
+            : `Access denied: ${error instanceof Error ? error.message : 'Cannot verify filesystem paths'}`,
       };
     }
   }
@@ -375,8 +394,15 @@ export async function executeTool(
   };
   const decidePermission = () => {
     const decision = decideBasePermission();
-    if (decision.action !== 'deny' && fileScope?.externalPaths.length && ctx.permissionPolicy?.mode !== 'yolo')
-      return { action: 'ask' as const, reason: 'Outside-directory filesystem access requires human approval' };
+    if (
+      decision.action !== 'deny' &&
+      fileScope?.externalPaths.length &&
+      ctx.permissionPolicy?.mode !== 'yolo'
+    )
+      return {
+        action: 'ask' as const,
+        reason: 'Outside-directory filesystem access requires human approval',
+      };
     if (decision.action !== 'allow' || !ctx.requestToolApproval) return decision;
     return READ_ONLY_TOOLS.has(call.name) || call.name === 'ask_manager' || call.name === 'ask_user'
       ? decision
@@ -394,8 +420,13 @@ export async function executeTool(
   }
   let humanApproved = false;
   if (fileScope?.externalPaths.length && permission.action === 'ask') {
-    const question = `${approvalSubject(ctx)} is requesting ${call.name} outside the working directory.\n\n` +
-      fileScope.targets.map(({ literal, canonical }) => literal === canonical ? canonical : `${literal} → ${canonical}`).join('\n') +
+    const question =
+      `${approvalSubject(ctx)} is requesting ${call.name} outside the working directory.\n\n` +
+      fileScope.targets
+        .map(({ literal, canonical }) =>
+          literal === canonical ? canonical : `${literal} → ${canonical}`,
+        )
+        .join('\n') +
       '\n\nAllow this invocation only?';
     let selection: string;
     try {
@@ -403,17 +434,24 @@ export async function executeTool(
       selection = ctx.waitForToolApproval
         ? await ctx.waitForToolApproval(ctx, call, question, ['Allow once', 'Reject'], ctx.signal)
         : ctx.waitForUserInput
-          ? await ctx.waitForUserInput(question, ['Allow once', 'Reject'], { allowOther: false, allowKeepChatting: false })
+          ? await ctx.waitForUserInput(question, ['Allow once', 'Reject'], {
+              allowOther: false,
+              allowKeepChatting: false,
+            })
           : '__unavailable__';
     } catch {
       selection = '__cancelled__';
     }
     if (selection !== 'Allow once' || ctx.signal?.aborted) {
       return {
-        callId: call.id, name: call.name, isError: true, durationMs: performance.now() - start,
-        output: selection === '__unavailable__'
-          ? 'Outside-directory access requires approval, but no human approval channel is available.'
-          : 'Outside-directory access was not approved by the user.',
+        callId: call.id,
+        name: call.name,
+        isError: true,
+        durationMs: performance.now() - start,
+        output:
+          selection === '__unavailable__'
+            ? 'Outside-directory access requires approval, but no human approval channel is available.'
+            : 'Outside-directory access was not approved by the user.',
       };
     }
     humanApproved = true;
@@ -426,11 +464,21 @@ export async function executeTool(
     ctx.requestToolApproval &&
     (!tool.name.startsWith('computer_') || tool.name === 'computer_status')
   ) {
-    const approved = await ctx.requestToolApproval(call, permission.reason);
+    let approved: boolean;
+    try {
+      approved = await ctx.requestToolApproval(call, permission.reason);
+    } catch {
+      // A critic review channel that throws has no approver on the other end;
+      // treat it the same as a refusal rather than a transport fault.
+      approved = false;
+    }
     if (!approved || ctx.signal?.aborted || decidePermission().action === 'deny') {
       return {
-        callId: call.id, name: call.name, output: 'Critic action was not approved.',
-        isError: true, durationMs: performance.now() - start,
+        callId: call.id,
+        name: call.name,
+        output: 'Critic action was not approved.',
+        isError: true,
+        durationMs: performance.now() - start,
       };
     }
     (ctx.approvedToolCallIds ??= new Set()).add(call.id);
@@ -442,18 +490,24 @@ export async function executeTool(
     ctx.waitForToolApproval &&
     (!tool.name.startsWith('computer_') || tool.name === 'computer_status')
   ) {
-    const selection = await ctx.waitForToolApproval(
-      ctx,
-      call,
-      approvalQuestion(ctx, call),
-      ['Allow once', 'Reject'],
-      ctx.signal,
-    );
+    let selection: string;
+    try {
+      selection = await ctx.waitForToolApproval(
+        ctx,
+        call,
+        approvalQuestion(ctx, call),
+        ['Allow once', 'Reject'],
+        ctx.signal,
+      );
+    } catch {
+      selection = '__cancelled__';
+    }
     if (selection !== 'Allow once') {
       return {
         callId: call.id,
         name: call.name,
-        output: selection === '__cancelled__' ? 'Tool approval was cancelled.' : 'Tool rejected by user.',
+        output:
+          selection === '__cancelled__' ? 'Tool approval was cancelled.' : 'Tool rejected by user.',
         isError: true,
         durationMs: performance.now() - start,
       };
@@ -505,6 +559,9 @@ export async function executeTool(
         );
       }
     });
+    // An approval channel that throws (no live turn to park a prompt on) is
+    // the same "no approver available" outcome as a missing channel — the
+    // tool must return an error result, not fault the transport.
     const selection = await Promise.race([
       ctx.waitForUserInput(
         `${permission.reason}. Allow ${call.name} once?`,
@@ -512,8 +569,17 @@ export async function executeTool(
         { allowOther: false, allowKeepChatting: false },
       ),
       liveRace,
-    ]);
+    ]).catch(() => '__unavailable__');
     if (poll) clearInterval(poll);
+    if (selection === '__unavailable__') {
+      return {
+        callId: call.id,
+        name: call.name,
+        output: `${permission.reason}, but no human approval channel is available.`,
+        isError: true,
+        durationMs: performance.now() - start,
+      };
+    }
     if (selection === '__LIVE_ALLOW__') {
       (ctx.approvedToolCallIds ??= new Set()).add(call.id);
     } else if (selection === '__LIVE_DENY__') {

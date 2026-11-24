@@ -84,4 +84,11 @@ describe('session-scoped agent settings root', () => {
       setSessionAgentOverrides('sess-b', undefined);
     }
   });
+
+  test('the manager row reports the route this chat is live on, not the global default', () => {
+    manager['runtimes'].get('sess-c').workingDir = projectA;
+    manager['runtimes'].get('sess-c').managerRouting = { model: 'swe-2', provider: 'devin' };
+    const mgr = manager.agentControlSnapshots('sess-c').find((s) => s.role === 'manager');
+    expect(mgr).toMatchObject({ model: 'swe-2', provider: 'devin' });
+  });
 });

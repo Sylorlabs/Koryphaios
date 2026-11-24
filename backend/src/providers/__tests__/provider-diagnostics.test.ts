@@ -10,6 +10,7 @@ import {
   transientExhaustedMessage,
 } from '../provider-diagnostics';
 import { isParameterRejectionError } from '../openai';
+import { isRetriableProviderFailure } from '../provider-retry';
 
 describe('provider diagnostics upstream detail', () => {
   it('extracts and bounds the upstream reason from an OpenAI SDK error', () => {
@@ -266,5 +267,38 @@ describe('parameter rejection detection', () => {
     expect(
       isParameterRejectionError(Object.assign(new Error('unauthorized'), { status: 401 })),
     ).toBe(false);
+  });
+});
+
+describe('usage-limit classification', () => {
+  const liveText = 'Internal error: Free usage limit reached. Free models work in…';
+
+  it('classifies provider usage caps as usage_limit, never transient', () => {
+    expect(classifyProviderDiagnostic(liveText)).toBe('usage_limit');
+    expect(isTransientStreamErrorText(liveText)).toBe(false);
+    // A cap wrapped in a 500-class status is still not retryable.
+    expect(isTransientStreamErrorText(liveText, 500)).toBe(false);
+    expect(classifyProviderDiagnostic('insufficient credits on account')).toBe('usage_limit');
+    expect(classifyProviderDiagnostic('quota exceeded for this model')).toBe('usage_limit');
+  });
+
+  it('emits the switch-provider message and stays non-retriable', () => {
+    const diagnostic = safeProviderDiagnostic('opencode', 'stderr', liveText);
+    expect(diagnostic.category).toBe('usage_limit');
+    expect(diagnostic.transient).toBe(false);
+    const message = safeProviderFailureMessage('opencode', diagnostic);
+    expect(message).toContain('OpenCode reports a usage limit for this model');
+    expect(message).toContain('"Internal error: Free usage limit reached');
+    expect(message).toContain('Pick another model or provider, or wait for the limit to reset.');
+    expect(message).not.toContain('temporary upstream service error');
+    expect(isRetriableProviderFailure(liveText)).toBe(false);
+    expect(isRetriableProviderFailure(Object.assign(new Error(liveText), { status: 500 }))).toBe(
+      false,
+    );
+  });
+
+  it('keeps true rate limits and unrelated transient blips unchanged', () => {
+    expect(classifyProviderDiagnostic('too many requests', 429)).toBe('rate_limit');
+    expect(isTransientStreamErrorText('Internal error: temporary service interruption')).toBe(true);
   });
 });

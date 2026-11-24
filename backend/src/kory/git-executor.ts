@@ -639,6 +639,18 @@ async function readStreamText(
         }
         if (result.value.byteLength > remaining) truncated = true;
       }
+      if (truncated) {
+        // Oversized output is discarded anyway; draining it to completion would
+        // pin the event loop for the whole flood (e.g. `git status` pointed at
+        // a home-directory repository emits hundreds of megabytes). Cancelling
+        // the reader closes the pipe so the process dies on its next write.
+        try {
+          await reader.cancel('git output exceeded the safety limit');
+        } catch {
+          /* stream may already be closed */
+        }
+        break;
+      }
     }
   } catch {
     // Stream may be broken (e.g. process killed) or aborted — return what we have.

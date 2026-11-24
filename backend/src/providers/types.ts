@@ -310,7 +310,9 @@ export interface ProviderLifecycle {
  * so the conservative default is returned: no operation is claimed and terminal
  * status is treated as weak.
  */
-export function lifecycleCapabilities(provider: Pick<Provider, 'lifecycle'>): LifecycleCapabilities {
+export function lifecycleCapabilities(
+  provider: Pick<Provider, 'lifecycle'>,
+): LifecycleCapabilities {
   if (provider.lifecycle) return provider.lifecycle.capabilities();
   return {
     version: 1,
@@ -351,6 +353,12 @@ export interface Provider {
   /** Check if this provider is configured and authenticated. */
   isAvailable(): boolean;
 
+  /** Optional async re-check for adapters whose synchronous isAvailable()
+   * serves a cached probe result. Turn admission awaits this before refusing
+   * a turn so one transient failure cannot lock the provider out;
+   * implementations must stay coalesced and rate-limited. */
+  refreshAvailability?: () => Promise<boolean>;
+
   /** List models available for this provider. */
   listModels(): ModelDef[];
 
@@ -359,6 +367,10 @@ export interface Provider {
 
   /** Why live model discovery is unavailable. Never substitute guessed models. */
   getModelDiscoveryError?: () => string | undefined;
+
+  /** True while a live catalog request is in flight, so a status projection can
+   *  avoid reporting "no models" for a catalog that is still loading. */
+  isModelDiscoveryInFlight?: () => boolean;
 
   /** True after a successful provider catalog response, including an empty one. */
   isModelCatalogAuthoritative?: () => boolean;

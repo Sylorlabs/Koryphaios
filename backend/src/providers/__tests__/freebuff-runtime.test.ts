@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -18,8 +19,10 @@ import {
   forceFreebuffRuntimeUpdate,
   freebuffRuntimeImageTag,
   findNativeFreebuffProbeBinary,
+  reapFreebuffRuntimeArtifacts,
   scheduleFreebuffRuntimeUpdate,
   getFreebuffRuntimeStatus,
+  probeFreebuffRuntime,
   refreshFreebuffRuntimeStatus,
   resetFreebuffRuntimeStateForTests,
   validateFreebuffRuntimePaths,
@@ -59,22 +62,29 @@ describe('Freebuff runtime security contract', () => {
     freebuffRuntimeImageTag(version, arch);
   const tagName = (version: string, arch: 'amd64' | 'arm64' = 'amd64') =>
     tag(version, arch).split(':').at(-1)!;
-  function ensureDeps(overrides: {
-    tags?: string[];
-    latest?: string | null;
-    buildImpl?: (env: NodeJS.ProcessEnv, version: string, sha: string) => Promise<{ version: string; image: string }>;
-    probeRuntime?: (target?: { version: string; image: string }) => Promise<FreebuffRuntimeStatus>;
-    environment?: () => Promise<NodeJS.ProcessEnv>;
-    command?: (file: string, args: string[]) => Promise<string>;
-  } = {}) {
+  function ensureDeps(
+    overrides: {
+      tags?: string[];
+      latest?: string | null;
+      buildImpl?: (
+        env: NodeJS.ProcessEnv,
+        version: string,
+        sha: string,
+      ) => Promise<{ version: string; image: string }>;
+      probeRuntime?: (target?: {
+        version: string;
+        image: string;
+      }) => Promise<FreebuffRuntimeStatus>;
+      environment?: () => Promise<NodeJS.ProcessEnv>;
+      command?: (file: string, args: string[]) => Promise<string>;
+    } = {},
+  ) {
     const env = { HOME: '/synthetic/docker-home', DOCKER_CONTEXT: 'chosen-x64' };
     const environment = mock(overrides.environment ?? (async () => env));
     const command = mock(
       overrides.command ??
         (async (_file: string, args: string[]) =>
-          args[0] === 'image' && args[1] === 'ls'
-            ? (overrides.tags ?? []).join('\n')
-            : 'ready'),
+          args[0] === 'image' && args[1] === 'ls' ? (overrides.tags ?? []).join('\n') : 'ready'),
     );
     const build = mock(
       overrides.buildImpl ??
@@ -109,14 +119,29 @@ describe('Freebuff runtime security contract', () => {
       });
       const command = mock(async (_file: string, args: string[]) =>
         args[0] === 'list'
-          ? JSON.stringify({ name: 'default', arch: 'x86_64', runtime: 'docker', status: 'Stopped' })
+          ? JSON.stringify({
+              name: 'default',
+              arch: 'x86_64',
+              runtime: 'docker',
+              status: 'Stopped',
+            })
           : args[0] === 'image' && args[1] === 'ls'
             ? tagName(FREEBUFF_MIN_RUNTIME_VERSION)
-            : 'ready');
+            : 'ready',
+      );
       const build = mock(async () => ({ version: '', image: '' }));
-      await ensureFreebuffRuntimeImage({ environment, command, build, resolveLatest: mock(async () => FREEBUFF_MIN_RUNTIME_VERSION) });
-      expect(command.mock.calls.some(([file, args]) => file === 'colima' &&
-        args.join(' ') === 'start default --activate=false')).toBe(true);
+      await ensureFreebuffRuntimeImage({
+        environment,
+        command,
+        build,
+        resolveLatest: mock(async () => FREEBUFF_MIN_RUNTIME_VERSION),
+      });
+      expect(
+        command.mock.calls.some(
+          ([file, args]) =>
+            file === 'colima' && args.join(' ') === 'start default --activate=false',
+        ),
+      ).toBe(true);
       expect(process.env.DOCKER_CONTEXT).toBeUndefined();
       expect(build).not.toHaveBeenCalled();
     } finally {
@@ -235,8 +260,7 @@ describe('Freebuff runtime security contract', () => {
       },
     });
     await ensureFreebuffRuntimeImage(dependencies);
-    for (let attempt = 0; attempt < 100 && removed.length === 0; attempt += 1)
-      await Bun.sleep(10);
+    for (let attempt = 0; attempt < 100 && removed.length === 0; attempt += 1) await Bun.sleep(10);
     expect(getFreebuffRuntimeStatus().version).toBe('0.2.38');
     // Current 0.2.38 and previous 0.2.37 stay; 0.2.36 is removed. The below-MIN
     // 0.2.35 tag is foreign to the versioned scheme and is never touched.
@@ -288,8 +312,7 @@ describe('Freebuff runtime security contract', () => {
       // The candidate stays the proven image; the newer tag only swaps after
       // its own probe succeeds, and no build runs for an existing local tag.
       expect(candidate).toEqual({ version: '0.2.36', image: tag('0.2.36') });
-      for (let attempt = 0; attempt < 100 && !releaseProbe; attempt += 1)
-        await Bun.sleep(10);
+      for (let attempt = 0; attempt < 100 && !releaseProbe; attempt += 1) await Bun.sleep(10);
       expect(probeRuntime).toHaveBeenCalledTimes(1);
       expect(getFreebuffRuntimeStatus().version).toBe('0.2.36');
       expect(build).not.toHaveBeenCalled();
@@ -299,7 +322,11 @@ describe('Freebuff runtime security contract', () => {
         version: '0.2.37',
         image: tag('0.2.37'),
       });
-      for (let attempt = 0; attempt < 100 && getFreebuffRuntimeStatus().version !== '0.2.37'; attempt += 1)
+      for (
+        let attempt = 0;
+        attempt < 100 && getFreebuffRuntimeStatus().version !== '0.2.37';
+        attempt += 1
+      )
         await Bun.sleep(10);
       expect(getFreebuffRuntimeStatus().version).toBe('0.2.37');
       expect(probeRuntime).toHaveBeenCalledTimes(1);
@@ -375,8 +402,7 @@ describe('Freebuff runtime security contract', () => {
       });
       const callerA = forceFreebuffRuntimeUpdate('0.2.36', controller.signal, dependencies);
       const callerB = forceFreebuffRuntimeUpdate('0.2.36', undefined, dependencies);
-      for (let attempt = 0; attempt < 100 && !releaseBuild; attempt += 1)
-        await Bun.sleep(10);
+      for (let attempt = 0; attempt < 100 && !releaseBuild; attempt += 1) await Bun.sleep(10);
       controller.abort();
       releaseBuild!();
       // Caller A's abort is never observed by the shared build: both promises
@@ -421,9 +447,9 @@ describe('Freebuff runtime security contract', () => {
   test('forced update fails when latest is not newer than the rejected version', async () => {
     await asMac(async () => {
       const { dependencies } = ensureDeps({ tags: [], latest: '0.2.36' });
-      await expect(
-        forceFreebuffRuntimeUpdate('0.2.36', undefined, dependencies),
-      ).rejects.toThrow(/latest published release v0\.2\.36/);
+      await expect(forceFreebuffRuntimeUpdate('0.2.36', undefined, dependencies)).rejects.toThrow(
+        /latest published release v0\.2\.36/,
+      );
     });
   });
 
@@ -446,6 +472,98 @@ describe('Freebuff runtime security contract', () => {
       expect(probeRuntime).toHaveBeenCalledTimes(1);
     });
   });
+
+  const CATALOG_PROBE_OUTPUT = `CODEBUFF_CLI_VERSION:"0.2.36";${[
+    '"x-freebuff-catalog-protocol"',
+    '"/api/v1/freebuff/models"',
+    '"freebuff_catalog_stale"',
+    'recommendedKey:',
+    'fallbackKey:',
+    'freebuffModelKey',
+    'freebuffCatalogReasoningEfforts',
+  ].join(';')}`;
+
+  function probeCommand(handlers: {
+    imageId?: () => string;
+    catalog?: () => Promise<string>;
+    isolation?: () => Promise<string>;
+  }) {
+    const counts = { catalog: 0, isolation: 0 };
+    const command = mock(async (file: string, args: string[]) => {
+      if (file !== 'docker') return '';
+      if (args[0] === 'info') return 'aarch64';
+      if (args[0] === 'image' && args[1] === 'inspect')
+        return handlers.imageId?.() ?? 'sha256:image-a';
+      if (args[0] === 'run' || args[0] === 'rm') return '';
+      if (args[0] === 'exec') {
+        const joined = args.join(' ');
+        if (args.includes('-e') && joined.includes('/opt/kory/freebuff/freebuff')) {
+          counts.catalog += 1;
+          return handlers.catalog ? handlers.catalog() : CATALOG_PROBE_OUTPUT;
+        }
+        if (joined.includes('isolation-ok')) {
+          counts.isolation += 1;
+          return handlers.isolation ? handlers.isolation() : 'isolation-ok';
+        }
+        return '';
+      }
+      return '';
+    });
+    return { command: command as never, counts };
+  }
+
+  test('the catalog extraction is cached by image ID and re-extracts on a new artifact', async () => {
+    await asMac(async () => {
+      let imageId = 'sha256:image-a';
+      const { command, counts } = probeCommand({ imageId: () => imageId });
+      const target = { version: '0.2.36', image: 'koryphaios/freebuff-runtime:test' };
+      expect((await probeFreebuffRuntime(target, { command })).available).toBe(true);
+      expect(counts.catalog).toBe(1);
+      // Same image ID: the heavyweight extraction is skipped while isolation
+      // checks still run on every probe.
+      expect((await probeFreebuffRuntime(target, { command })).available).toBe(true);
+      expect(counts.catalog).toBe(1);
+      expect(counts.isolation).toBe(2);
+      imageId = 'sha256:image-b';
+      await probeFreebuffRuntime(target, { command });
+      expect(counts.catalog).toBe(2);
+    });
+  });
+
+  test('a single exit 137 in the catalog extraction is retried once', async () => {
+    await asMac(async () => {
+      let attempts = 0;
+      const { command, counts } = probeCommand({
+        catalog: async () => {
+          if (++attempts === 1) throw Object.assign(new Error('killed'), { code: 137 });
+          return CATALOG_PROBE_OUTPUT;
+        },
+      });
+      const status = await probeFreebuffRuntime(
+        { version: '0.2.36', image: 'koryphaios/freebuff-runtime:test' },
+        { command },
+      );
+      expect(status.available).toBe(true);
+      expect(counts.catalog).toBe(2);
+    });
+  });
+
+  test('an exit 137 in an isolation check is never retried', async () => {
+    await asMac(async () => {
+      const { command, counts } = probeCommand({
+        isolation: async () => {
+          throw Object.assign(new Error('killed'), { code: 137 });
+        },
+      });
+      await expect(
+        probeFreebuffRuntime(
+          { version: '0.2.36', image: 'koryphaios/freebuff-runtime:test' },
+          { command },
+        ),
+      ).rejects.toThrow();
+      expect(counts.isolation).toBe(1);
+    });
+  });
   test('uses a native Docker architecture without changing the selected global context', async () => {
     const keys = ['DOCKER_HOST', 'DOCKER_CONTEXT', 'KORY_FREEBUFF_DOCKER_CONTEXT'];
     const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
@@ -460,10 +578,12 @@ describe('Freebuff runtime security contract', () => {
       expect(nativeArm.KORY_FREEBUFF_DOCKER_ARCH).toBe('arm64');
       expect(process.env.DOCKER_CONTEXT).toBeUndefined();
       expect(probe).toHaveBeenCalledTimes(1);
-      const offlineDefault = mock(async (_file: string, _args: string[], _timeout?: number, env?: NodeJS.ProcessEnv) => {
-        if (env?.DOCKER_CONTEXT === 'colima') return 'x86_64';
-        throw new Error('default daemon offline');
-      });
+      const offlineDefault = mock(
+        async (_file: string, _args: string[], _timeout?: number, env?: NodeJS.ProcessEnv) => {
+          if (env?.DOCKER_CONTEXT === 'colima') return 'x86_64';
+          throw new Error('default daemon offline');
+        },
+      );
       expect((await freebuffDockerEnvironment(offlineDefault)).DOCKER_CONTEXT).toBe('colima');
       process.env.KORY_FREEBUFF_DOCKER_CONTEXT = 'chosen-arm-context';
       const chosenArm = await freebuffDockerEnvironment(probe);
@@ -565,6 +685,44 @@ function dirnameOutside(root: string) {
   return join(root, '..', 'outside');
 }
 
+test('a failed status re-probes on the next refresh after the failure window', async () => {
+  let now = 1_000_000;
+  const available: FreebuffRuntimeStatus = {
+    available: true,
+    kind: 'native',
+    version: FREEBUFF_MIN_RUNTIME_VERSION,
+  };
+  const probeRuntime = mock(async () => available);
+  const failProbe = mock(async (): Promise<FreebuffRuntimeStatus> => {
+    throw Object.assign(new Error('runtime command exit 137'), { code: 137 });
+  });
+  const first = await refreshFreebuffRuntimeStatus(true, undefined, {
+    probeRuntime: failProbe,
+    now: () => now,
+  });
+  expect(first.available).toBe(false);
+  // Within 10s of a failure the cached failure is served (rate limit), not a new probe.
+  now += 5_000;
+  const second = await refreshFreebuffRuntimeStatus(false, undefined, {
+    probeRuntime,
+    now: () => now,
+  });
+  expect(second.available).toBe(false);
+  expect(probeRuntime).toHaveBeenCalledTimes(0);
+  // Past the window the next refresh re-probes and the turn can proceed.
+  now += 6_000;
+  const third = await refreshFreebuffRuntimeStatus(false, undefined, {
+    probeRuntime,
+    now: () => now,
+  });
+  expect(third).toEqual(available);
+  expect(probeRuntime).toHaveBeenCalledTimes(1);
+  // Success then caches for the full minute.
+  now += 30_000;
+  await refreshFreebuffRuntimeStatus(false, undefined, { probeRuntime, now: () => now });
+  expect(probeRuntime).toHaveBeenCalledTimes(1);
+});
+
 // Explicit opt-in: credential-free kernel, real native binary and real private PTY tests.
 // Never reads account credentials and never sends a prompt or logs into Freebuff.
 test.skipIf(process.env.KORY_FREEBUFF_RUNTIME_SMOKE !== '1')(
@@ -594,11 +752,12 @@ test.skipIf(process.env.KORY_FREEBUFF_RUNTIME_SMOKE !== '1')(
       expect(caps).toMatch(/NoNewPrivs:\s+1\n/);
       await runtime.exec('/bin/sh', [
         '-ec',
-        'printf allowed > "$1"; ! (printf denied > /usr/denied) 2>/dev/null',
+        'printf allowed > "$1"; ! (printf denied > /usr/denied) 2>/dev/null; ! (printf denied > "$2") 2>/dev/null',
         'probe',
-        join(options.workspace, 'allowed'),
+        join(options.runRoot, 'allowed'),
+        join(options.workspace, 'denied'),
       ]);
-      expect(readFileSync(join(options.workspace, 'allowed'), 'utf8')).toBe('allowed');
+      expect(readFileSync(join(options.runRoot, 'allowed'), 'utf8')).toBe('allowed');
       // Reproduce Colima's stale readdir cache: a new host script appears after
       // a Linux listing. exec must invalidate only the private staging directory.
       await runtime.exec('/bin/ls', ['-a', options.runRoot]);
@@ -635,3 +794,134 @@ test.skipIf(process.env.KORY_FREEBUFF_RUNTIME_SMOKE !== '1')(
   },
   120_000,
 );
+
+describe('Freebuff artifact reaper', () => {
+  /** Build a temp runs/slots root pair plus a scripted docker command. */
+  function reaperFixture(containers: { name: string; created: string; mounts?: string[] }[]) {
+    const base = mkdtempSync(join(realpathSync(tmpdir()), 'reaper-'));
+    roots.push(base);
+    const runsRoot = join(base, 'freebuff-runs');
+    const slotsRoot = join(base, 'freebuff-slots');
+    mkdirSync(runsRoot, { recursive: true });
+    mkdirSync(slotsRoot, { recursive: true });
+    const dockerCalls: string[][] = [];
+    const command = async (file: string, args: string[]) => {
+      expect(file).toBe('docker');
+      dockerCalls.push(args);
+      if (args[0] === 'ps') return containers.map((container) => container.name).join('\n');
+      if (args[0] === 'inspect') {
+        const name = args.at(-1)!;
+        const found = containers.find((container) => container.name === name);
+        if (!found) throw new Error('no such container');
+        return `${found.created} ${JSON.stringify(
+          (found.mounts ?? []).map((Source) => ({ Source })),
+        )}`;
+      }
+      if (args[0] === 'rm') return '';
+      throw new Error(`unexpected docker call: ${args.join(' ')}`);
+    };
+    return { runsRoot, slotsRoot, command, dockerCalls };
+  }
+  let runDirSuffix = 0;
+  const runDir = (root: string, ms: number) => {
+    runDirSuffix += 1;
+    const dir = join(root, `${ms}-deadbeef${runDirSuffix.toString(16).padStart(8, '0')}`);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'stale'), 'x');
+    return dir;
+  };
+  const slotDir = (root: string, name: string, info: object) => {
+    const dir = join(root, name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'info.json'), JSON.stringify(info));
+    return dir;
+  };
+  const age = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+  const exists = (path: string) => existsSync(path);
+
+  test('removes only stale foreign kory-freebuff containers', async () => {
+    const { runsRoot, slotsRoot, command, dockerCalls } = reaperFixture([
+      { name: 'kory-freebuff-deadbeef', created: age(60) }, // stale zombie → rm
+      { name: 'kory-freebuff-beeff00d', created: age(2) }, // young → keep
+      { name: 'kory-freebuff-nothex!', created: age(60) }, // off-pattern → keep
+      { name: 'other-container', created: age(60) }, // foreign → keep
+    ]);
+    await reapFreebuffRuntimeArtifacts({}, command, { runsRoot, slotsRoot });
+    const removed = dockerCalls.filter((args) => args[0] === 'rm').map((args) => args.at(-1));
+    expect(removed).toEqual(['kory-freebuff-deadbeef']);
+  });
+
+  test('removes old run roots but never a mounted or young one', async () => {
+    const base = mkdtempSync(join(realpathSync(tmpdir()), 'reaper-runs-'));
+    roots.push(base);
+    const runsRoot = join(base, 'freebuff-runs');
+    mkdirSync(runsRoot, { recursive: true });
+    const oldMounted = runDir(runsRoot, Date.now() - 2 * 24 * 60 * 60_000);
+    const oldFree = runDir(runsRoot, Date.now() - 2 * 24 * 60 * 60_000);
+    const youngFree = runDir(runsRoot, Date.now() - 60_000);
+    const offPattern = join(runsRoot, 'kory-freebuff-probe-abcdef');
+    mkdirSync(offPattern);
+    const { command } = reaperFixture([
+      {
+        name: 'kory-freebuff-facefeed',
+        created: age(1),
+        mounts: [oldMounted],
+      },
+    ]);
+    const slotsRoot = join(base, 'freebuff-slots');
+    mkdirSync(slotsRoot, { recursive: true });
+    await reapFreebuffRuntimeArtifacts({}, command, {
+      runsRoot,
+      slotsRoot,
+      now: () => Date.now(),
+    });
+    expect(exists(oldMounted)).toBe(true); // mounted: never touched
+    expect(exists(oldFree)).toBe(false); // old, unmounted: reaped
+    expect(exists(youngFree)).toBe(true); // fresh: kept
+    expect(exists(offPattern)).toBe(true); // not <ms>-<hex>: kept
+  });
+
+  test('removes slot lease dirs whose holder pid is dead', async () => {
+    const base = mkdtempSync(join(realpathSync(tmpdir()), 'reaper-slots-'));
+    roots.push(base);
+    const runsRoot = join(base, 'freebuff-runs');
+    const slotsRoot = join(base, 'freebuff-slots');
+    mkdirSync(runsRoot, { recursive: true });
+    mkdirSync(slotsRoot, { recursive: true });
+    const dead = slotDir(slotsRoot, 'deadbeef', {
+      pid: 424242,
+      sessionId: 's',
+      role: 'manager',
+      startedAt: 0,
+    });
+    const alive = slotDir(slotsRoot, 'alivebeef', {
+      pid: 424243,
+      sessionId: 's',
+      role: 'manager',
+      startedAt: 0,
+    });
+    const corrupt = slotDir(slotsRoot, 'corruptxx', {});
+    const { command } = reaperFixture([]);
+    await reapFreebuffRuntimeArtifacts({}, command, {
+      runsRoot,
+      slotsRoot,
+      kill: (pid) => {
+        if (pid === 424242) throw Object.assign(new Error('gone'), { code: 'ESRCH' });
+        if (pid === 424243) return; // alive
+      },
+    });
+    expect(exists(dead)).toBe(false);
+    expect(exists(alive)).toBe(true);
+    expect(exists(corrupt)).toBe(true); // unreadable is the slot layer's job
+  });
+
+  test('swallows a failing docker ps and reaps nothing', async () => {
+    const { runsRoot, slotsRoot } = reaperFixture([]);
+    const command = async () => {
+      throw new Error('docker daemon gone');
+    };
+    const dir = runDir(runsRoot, Date.now() - 2 * 24 * 60 * 60_000);
+    await reapFreebuffRuntimeArtifacts({}, command, { runsRoot, slotsRoot });
+    expect(exists(dir)).toBe(true); // still removed? no: mount unknown → kept
+  });
+});

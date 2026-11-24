@@ -3,20 +3,38 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  getFreebuffModelCatalog, parseFreebuffAccountCatalog, resetFreebuffModelCatalogCacheForTests,
+  getFreebuffModelCatalog,
+  parseFreebuffAccountCatalog,
+  resetFreebuffModelCatalogCacheForTests,
   type FreebuffModelCatalogDependencies,
 } from '../freebuff-model-catalog';
 
 const NOW = 1_790_000_000_000;
 const TOKEN = 'synthetic-private-token';
 const roots: string[] = [];
-const row = { key: 'm-fixture', handle: 'private-handle', displayName: 'Real account model',
-  access: 'open', multimodal: true, contextWindow: 1_000_000, efforts: ['low', 'high'], sortOrder: 1 };
-const payload = () => ({ protocol: 1, version: 'fixture-v1', issuedAt: NOW, refreshAt: NOW + 60_000,
-  fetchId: 'private-fetch-id', authToken: TOKEN, rows: [row,
+const row = {
+  key: 'm-fixture',
+  handle: 'private-handle',
+  displayName: 'Real account model',
+  access: 'open',
+  multimodal: true,
+  contextWindow: 1_000_000,
+  efforts: ['low', 'high'],
+  sortOrder: 1,
+};
+const payload = () => ({
+  protocol: 1,
+  version: 'fixture-v1',
+  issuedAt: NOW,
+  refreshAt: NOW + 60_000,
+  fetchId: 'private-fetch-id',
+  authToken: TOKEN,
+  rows: [
+    row,
     { ...row, key: 'm-locked', access: 'locked' },
     { ...row, key: 'm-future', opensAt: NOW + 1 },
-  ] });
+  ],
+});
 function profile() {
   const root = mkdtempSync(join(tmpdir(), 'freebuff-models-test-'));
   roots.push(root);
@@ -34,19 +52,74 @@ afterEach(() => {
 describe('Freebuff authenticated account catalog', () => {
   it('uses accessible issued rows and separates stable picker IDs from private root evidence', () => {
     const result = parseFreebuffAccountCatalog(payload());
-    expect(result.models).toEqual([{ id: 'freebuff/catalog-m-fixture', name: row.displayName,
-      multimodal: true, contextWindow: 1_000_000, reasoningLevels: ['low', 'high'], handle: row.handle }]);
+    expect(result.models).toEqual([
+      {
+        id: 'freebuff/catalog-m-fixture',
+        name: row.displayName,
+        multimodal: true,
+        contextWindow: 1_000_000,
+        reasoningLevels: ['low', 'high'],
+        handle: row.handle,
+      },
+    ]);
     expect(JSON.stringify(result)).not.toContain(TOKEN);
     expect(JSON.stringify(result)).not.toContain('private-fetch-id');
-    const missing = parseFreebuffAccountCatalog({ ...payload(), rows: [{ ...row, contextWindow: undefined, efforts: undefined }] });
+    const missing = parseFreebuffAccountCatalog({
+      ...payload(),
+      rows: [{ ...row, contextWindow: undefined, efforts: undefined }],
+    });
     expect(missing.models[0]?.contextWindow).toBeUndefined();
     expect(missing.models[0]?.reasoningLevels).toBeUndefined();
+    // Fixed-effort rows (no efforts array) still advertise their single level,
+    // and the compaction contract is the context source when the row omits a
+    // window — the live Slow tier sends exactly this shape.
+    const fixed = parseFreebuffAccountCatalog({
+      ...payload(),
+      rows: [
+        {
+          ...row,
+          contextWindow: undefined,
+          efforts: undefined,
+          reasoningEffort: 'low',
+          compaction: { cacheExpiryMs: 900_000, maxContextLength: 375_000 },
+        },
+      ],
+    });
+    expect(fixed.models[0]?.reasoningLevels).toEqual(['low']);
+    expect(fixed.models[0]?.contextWindow).toBe(375_000);
+    // legacyDigests ride along as backend-only price-join evidence — the same
+    // use the bundled picker makes of them.
+    const digested = parseFreebuffAccountCatalog({
+      ...payload(),
+      rows: [
+        {
+          ...row,
+          legacyDigests: ['1e303ac563a6f9cc'],
+        },
+      ],
+    });
+    expect(digested.models[0]?.legacyDigests).toEqual(['1e303ac563a6f9cc']);
   });
   it('fails closed on protocol drift, duplicate keys and malformed access/capabilities', () => {
-    for (const value of [null, { ...payload(), protocol: 2 }, { ...payload(), rows: [row, row] },
-      ...[{ key: 'bad/key' }, { handle: '\nprivate' }, { access: 'unknown' }, { multimodal: 'yes' },
-        { contextWindow: -1 }, { efforts: ['\nprivate'] }].map((change) => ({ ...payload(), rows: [{ ...row, ...change }] })),
-    ]) expect(() => parseFreebuffAccountCatalog(value)).toThrow('invalid account model catalog');
+    for (const value of [
+      null,
+      { ...payload(), protocol: 2 },
+      { ...payload(), rows: [row, row] },
+      ...[
+        { key: 'bad/key' },
+        { handle: '\nprivate' },
+        { access: 'unknown' },
+        { multimodal: 'yes' },
+        { contextWindow: -1 },
+        { efforts: ['\nprivate'] },
+        { reasoningEffort: 7 },
+        { legacyDigests: 'x' },
+        { legacyDigests: [7] },
+        { compaction: 'x' },
+        { compaction: { maxContextLength: -1 } },
+      ].map((change) => ({ ...payload(), rows: [{ ...row, ...change }] })),
+    ])
+      expect(() => parseFreebuffAccountCatalog(value)).toThrow('invalid account model catalog');
   });
   it('makes only a canonical-host GET and coalesces forced requests, respecting server refresh time', async () => {
     const root = profile();
@@ -60,7 +133,10 @@ describe('Freebuff authenticated account catalog', () => {
       return Response.json(payload());
     });
     const deps = dependencies(fetcher as unknown as typeof fetch);
-    const results = await Promise.all([getFreebuffModelCatalog(root, true, deps), getFreebuffModelCatalog(root, true, deps)]);
+    const results = await Promise.all([
+      getFreebuffModelCatalog(root, true, deps),
+      getFreebuffModelCatalog(root, true, deps),
+    ]);
     expect(results[0]).toEqual(results[1]);
     await getFreebuffModelCatalog(root, false, deps);
     expect(fetcher).toHaveBeenCalledTimes(1);
@@ -73,9 +149,13 @@ describe('Freebuff authenticated account catalog', () => {
     const fetcher = mock(async () => Response.json(payload()));
     const deps = dependencies(fetcher as unknown as typeof fetch);
     await getFreebuffModelCatalog(root, true, deps);
-    fetcher.mockImplementation(async () => { throw new Error(TOKEN); });
+    fetcher.mockImplementation(async () => {
+      throw new Error(TOKEN);
+    });
     for (const force of [true, false]) {
-      await expect(getFreebuffModelCatalog(root, force, deps)).rejects.toThrow('account models could not be refreshed');
+      await expect(getFreebuffModelCatalog(root, force, deps)).rejects.toThrow(
+        'account models could not be refreshed',
+      );
     }
     expect(fetcher).toHaveBeenCalledTimes(2);
     fetcher.mockImplementation(async () => Response.json(payload()));
@@ -91,7 +171,9 @@ describe('Freebuff authenticated account catalog', () => {
     writeFileSync(join(root, 'credentials.json'), 'a different login revision');
     fetcher.mockImplementation(async () => new Response(TOKEN, { status: 401 }));
     for (const path of [root, other]) {
-      await expect(getFreebuffModelCatalog(path, false, deps)).rejects.toThrow('account models could not be refreshed');
+      await expect(getFreebuffModelCatalog(path, false, deps)).rejects.toThrow(
+        'account models could not be refreshed',
+      );
     }
     expect(fetcher).toHaveBeenCalledTimes(3);
   });

@@ -15,7 +15,12 @@ import type { ModelQuota } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
 import { providerLog } from '../logger';
 import { whichBinary } from './cli-detection';
-import { antigravityProbeEnv, hasAntigravityPortableLogin } from './cli-bridges';
+import {
+  antigravityProbeAuthBlocked,
+  antigravityProbeEnv,
+  hasAntigravityPortableLogin,
+  markAntigravityProbeAuthBlocked,
+} from './cli-bridges';
 
 /** Quota info for a group of models (e.g. "Gemini Models", "Claude and GPT models"). */
 export interface AntigravityQuotaGroup {
@@ -70,6 +75,9 @@ export async function fetchAntigravityQuotaGroups(
   // consent prompt from a passive poll) and fall back to a browser sign-in
   // when that fails. An explicit `home` is the test seam.
   if (!hasAntigravityPortableLogin(options.home)) return null;
+  // A previous probe already learned this credential set can't satisfy agy —
+  // re-spawning here would re-enter the OAuth flow and block on its callback.
+  if (antigravityProbeAuthBlocked(options.home)) return null;
   const timeoutMs = options.timeoutMs ?? 8_000;
 
   return new Promise((resolve) => {
@@ -81,7 +89,7 @@ export async function fetchAntigravityQuotaGroups(
       resolve(value);
     };
     const child = spawn(bin, ['--print', '/usage', '--output-format', 'json'], {
-      stdio: ['ignore', 'pipe', 'ignore'],
+      stdio: ['ignore', 'pipe', 'pipe'],
       env: antigravityProbeEnv(options.home),
     });
 
@@ -99,9 +107,19 @@ export async function fetchAntigravityQuotaGroups(
     timer.unref?.();
 
     let out = '';
+    let errOut = '';
     child.stdout.on('data', (c: Buffer) => (out += c.toString()));
+    child.stderr?.on('data', (c: Buffer) => {
+      if (errOut.length < 4096) errOut += c.toString();
+    });
     child.once('error', () => finish(null));
-    child.once('exit', () => {
+    child.once('exit', (code) => {
+      if (
+        code !== 0 &&
+        /sign in|not signed in|authentication required|login required/i.test(errOut)
+      ) {
+        markAntigravityProbeAuthBlocked(options.home);
+      }
       try {
         const parsed = JSON.parse(out) as AgyUsageResponse;
         const groups = parsed.command?.data?.groups;

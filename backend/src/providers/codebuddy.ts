@@ -31,10 +31,7 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { whichBinary } from './cli-detection';
 import { getCliBridge, getKoryphaiosCodeBuddyHome } from './cli-bridges';
-import {
-  koryBridgeUnavailableError,
-  resolveKoryBridgeScript,
-} from './kory-cli-mcp-config';
+import { koryBridgeUnavailableError, resolveKoryBridgeScript } from './kory-cli-mcp-config';
 import type { Provider, ProviderEvent, ProviderMessage, StreamRequest, CliCommand } from './types';
 import { wrapCommand, inferenceSandboxPolicy } from '../collaboration/sandbox-runner';
 import { providerLog } from '../logger';
@@ -420,9 +417,12 @@ function buildCliCommands(names: string[]): CliCommand[] {
   }));
 }
 
-// Pre-approved native toolset so a headless `-p` run never blocks; native
-// subagents stay hard-blocked (delegation is Koryphaios's job).
-const ALLOWED_TOOLS = [
+// Koryphaios owns ALL tool execution. Native host tools are hard-blocked via
+// --disallowedTools (the same deny surface Claude Code exposes) and only the
+// kory MCP server plus TodoWrite (planning aid, no side effects) are
+// pre-approved. Native subagents and the native question tool stay hidden so
+// delegation and questions route through Kory's control plane.
+const DISALLOWED_TOOLS = [
   'Read',
   'Edit',
   'Write',
@@ -432,10 +432,13 @@ const ALLOWED_TOOLS = [
   'Glob',
   'Grep',
   'LS',
-  'TodoWrite',
   'WebFetch',
   'WebSearch',
+  'Task',
+  'Agent',
+  'AskUserQuestion',
 ].join(',');
+const ALLOWED_TOOLS = ['TodoWrite'].join(',');
 const HARNESS_SYSTEM_NOTE =
   'You are running inside the Koryphaios orchestrator. Never spawn sub-agents or delegate ' +
   'with native Task/Agent tools (they are disabled); if work should be parallelized or ' +
@@ -700,10 +703,10 @@ export class CodeBuddyProvider implements Provider {
     const sandbox = request.sandbox;
     const disallowed = researchOnly
       ? ['Bash', 'Read', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Task', 'Agent']
-      : ['Task', 'Agent'];
+      : DISALLOWED_TOOLS.split(',');
     // Headless `-p` cannot answer a permission prompt, so the kory MCP server
-    // must be pre-approved alongside the native toolset. Claude Code's tool
-    // allowlist form for a whole MCP server is the bare `mcp__<server>` prefix.
+    // is pre-approved. Claude Code's tool allowlist form for a whole MCP
+    // server is the bare `mcp__<server>` prefix.
     const allowedTools = researchOnly ? 'WebSearch,WebFetch' : `${ALLOWED_TOOLS},mcp__kory`;
 
     const researchRoot = researchOnly
@@ -718,8 +721,8 @@ export class CodeBuddyProvider implements Provider {
       '--model',
       cliModel,
       // Kory is the permission authority: bypass the CLI's approval layer
-      // (CodeBuddy shares Claude Code's mode enum). --disallowedTools still
-      // hides native tools and --allowedTools pre-approves the kory set; a
+      // (CodeBuddy shares Claude Code's mode enum). --disallowedTools hides
+      // native tools and --allowedTools pre-approves the kory set; a
       // residual prompt would hang a headless turn.
       '--permission-mode',
       'bypassPermissions',

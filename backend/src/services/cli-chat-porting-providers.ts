@@ -166,18 +166,23 @@ function textOf(events: readonly TurnEvent[]): string {
     .join('\n\n');
 }
 
-function userRow(text: string, ts: number | undefined, extra: Partial<PortedMessage> = {}): PortedMessage {
+function userRow(
+  text: string,
+  ts: number | undefined,
+  extra: Partial<PortedMessage> = {},
+): PortedMessage {
   const row: PortedMessage = { role: 'user', content: text, createdAt: ts ?? 0, ...extra };
   if (ts === undefined) row.timeUnknown = true;
   return row;
 }
 
-function assistantRow(
-  events: TurnEvent[],
-  ts: number | undefined,
-  model?: string,
-): PortedMessage {
-  const row: PortedMessage = { role: 'assistant', content: textOf(events), createdAt: ts ?? 0, events };
+function assistantRow(events: TurnEvent[], ts: number | undefined, model?: string): PortedMessage {
+  const row: PortedMessage = {
+    role: 'assistant',
+    content: textOf(events),
+    createdAt: ts ?? 0,
+    events,
+  };
   if (model) row.model = model;
   if (ts === undefined) row.timeUnknown = true;
   return row;
@@ -200,7 +205,11 @@ function toolResult(input: {
     isError: input.isError === true,
     timestamp: input.timestamp,
   };
-  if (input.durationMs !== undefined && Number.isFinite(input.durationMs) && input.durationMs >= 0) {
+  if (
+    input.durationMs !== undefined &&
+    Number.isFinite(input.durationMs) &&
+    input.durationMs >= 0
+  ) {
     event.durationMs = Math.round(input.durationMs);
   } else {
     event.timeUnknown = true;
@@ -215,7 +224,13 @@ function knownDuration(start: number | undefined, end: number | undefined): numb
 }
 
 /** A source-shown system notice (API error, malformed call): display-only, never assistant text. */
-function noticeEvents(key: string, kind: string, text: string, ts: number, isError = true): TurnEvent[] {
+function noticeEvents(
+  key: string,
+  kind: string,
+  text: string,
+  ts: number,
+  isError = true,
+): TurnEvent[] {
   const callId = `notice:${key}`;
   return [
     { type: 'tool_call', callId, name: 'notice', input: { kind }, timestamp: ts },
@@ -239,7 +254,11 @@ function reasoningEvent(text: string, ts: number, thinkingTokens?: number): Turn
  * (or after the chat start), and stamp every event of an unknown row with it.
  * Known rows keep their source time. Never uses the import time.
  */
-export function assignOrderingTimes(rows: PortedMessage[], chatStartMs?: number, chatEndMs?: number): PortedMessage[] {
+export function assignOrderingTimes(
+  rows: PortedMessage[],
+  chatStartMs?: number,
+  chatEndMs?: number,
+): PortedMessage[] {
   let i = 0;
   while (i < rows.length) {
     if (!rows[i].timeUnknown) {
@@ -305,7 +324,10 @@ export function subagentFromRows(
 
   const flush = () => {
     if (!pendingOpen) return;
-    const parts = reduceTurnEvents([...pendingEvents, { type: 'complete', timestamp: pendingLastAt }]);
+    const parts = reduceTurnEvents([
+      ...pendingEvents,
+      { type: 'complete', timestamp: pendingLastAt },
+    ]);
     if (parts.length > 0) {
       turns.push(
         pendingCreatedAt === undefined
@@ -317,15 +339,28 @@ export function subagentFromRows(
     pendingOpen = false;
   };
 
+  // Several providers store the spawn prompt twice: as the sub-agent's task
+  // field and again as its first user turn. The header already shows the task,
+  // so a first user row that restates it verbatim would render it twice.
+  let taskConsumed = false;
   for (const row of rows) {
     if (row.role === 'user') {
       flush();
       if (!row.content.trim()) continue;
-      turns.push(row.timeUnknown ? { role: 'user', text: row.content } : { role: 'user', text: row.content, createdAt: row.createdAt });
+      if (!taskConsumed && meta.task !== undefined && row.content.trim() === meta.task.trim()) {
+        taskConsumed = true;
+        continue;
+      }
+      turns.push(
+        row.timeUnknown
+          ? { role: 'user', text: row.content }
+          : { role: 'user', text: row.content, createdAt: row.createdAt },
+      );
       continue;
     }
     const events: TurnEvent[] =
-      row.events ?? (row.content.trim() ? [{ type: 'text', text: row.content, timestamp: row.createdAt }] : []);
+      row.events ??
+      (row.content.trim() ? [{ type: 'text', text: row.content, timestamp: row.createdAt }] : []);
     if (events.length === 0) continue;
     if (!pendingOpen) {
       pendingOpen = true;
@@ -563,15 +598,25 @@ export function loadAntigravityConversation(
   const depth = opts.depth ?? 0;
 
   const steps = parseJsonLines(raw)
-    .map((step, index) => ({ step, index, stepIndex: num(step.step_index) ?? Number.POSITIVE_INFINITY }))
+    .map((step, index) => ({
+      step,
+      index,
+      stepIndex: num(step.step_index) ?? Number.POSITIVE_INFINITY,
+    }))
     .sort((a, b) => (a.stepIndex === b.stepIndex ? a.index - b.index : a.stepIndex - b.stepIndex))
     .map((entry) => entry.step);
 
   const rows: PortedMessage[] = [];
   const pendingByStep = new Map<number, { callId: string; name: string; args: unknown }>();
   const unresolved: Array<{ callId: string; name: string; args: unknown }> = [];
-  const runningTasks = new Map<string, { event: ToolResultEvent; body: string; startedAt?: number }>();
-  const spawned = new Map<string, { event: ToolResultEvent; name?: string; model?: string; task?: string }>();
+  const runningTasks = new Map<
+    string,
+    { event: ToolResultEvent; body: string; startedAt?: number }
+  >();
+  const spawned = new Map<
+    string,
+    { event: ToolResultEvent; name?: string; model?: string; task?: string }
+  >();
 
   for (const step of steps) {
     const type = str(step.type) ?? '';
@@ -643,13 +688,15 @@ export function loadAntigravityConversation(
       }
       if (name === 'swarm') {
         const args = rec(pending?.args) ?? {};
-        const parsed = rec((() => {
-          try {
-            return JSON.parse(body) as unknown;
-          } catch {
-            return undefined;
-          }
-        })());
+        const parsed = rec(
+          (() => {
+            try {
+              return JSON.parse(body) as unknown;
+            } catch {
+              return undefined;
+            }
+          })(),
+        );
         const childId = str(parsed?.conversation_id);
         if (childId) {
           spawned.set(childId, {
@@ -697,7 +744,10 @@ export function loadAntigravityConversation(
     if (type === 'ERROR_MESSAGE') {
       const text = str(step.error) ?? content;
       if (text.trim()) {
-        const row = assistantRow(noticeEvents(`${convId}:${stepIndex}`, 'error', text.trim(), at), ts);
+        const row = assistantRow(
+          noticeEvents(`${convId}:${stepIndex}`, 'error', text.trim(), at),
+          ts,
+        );
         row.content = '';
         rows.push(row);
       }
@@ -818,8 +868,13 @@ export function parseCodeBuddyTranscript(
   let codeBuddyFormat = false;
   for (const entry of entries) {
     const type = entry.type;
-    if (type === 'function_call' || type === 'function_call_result' || type === 'reasoning') codeBuddyFormat = true;
-    if (type === 'message' && (entry.role === 'user' || entry.role === 'assistant') && !entry.message) {
+    if (type === 'function_call' || type === 'function_call_result' || type === 'reasoning')
+      codeBuddyFormat = true;
+    if (
+      type === 'message' &&
+      (entry.role === 'user' || entry.role === 'assistant') &&
+      !entry.message
+    ) {
       codeBuddyFormat = true;
     }
     if (type !== 'function_call') continue;
@@ -866,24 +921,32 @@ export function parseCodeBuddyTranscript(
     }
 
     if (type === 'message' && entry.role === 'assistant') {
-      const text = h.cleanMessageText(codeBuddyTexts(entry.content, ['output_text', 'text']).join('\n\n'));
+      const text = h.cleanMessageText(
+        codeBuddyTexts(entry.content, ['output_text', 'text']).join('\n\n'),
+      );
       const error = rec(providerData.error);
       if (error) {
         const message = str(error.message) ?? text;
         if (message) {
-          const row = assistantRow(noticeEvents(str(entry.id) ?? `${stem}:${rows.length}`, 'error', message, at), ts, rowModel);
+          const row = assistantRow(
+            noticeEvents(str(entry.id) ?? `${stem}:${rows.length}`, 'error', message, at),
+            ts,
+            rowModel,
+          );
           row.content = '';
           rows.push(row);
         }
         continue;
       }
-      if (text) rows.push(assistantRow([{ type: 'text', text, timestamp: at }], ts, rowModel ?? model));
+      if (text)
+        rows.push(assistantRow([{ type: 'text', text, timestamp: at }], ts, rowModel ?? model));
       continue;
     }
 
     if (type === 'reasoning') {
       const texts = codeBuddyTexts(entry.rawContent, ['reasoning_text', 'text']);
-      if (texts.length === 0) texts.push(...codeBuddyTexts(entry.content, ['reasoning_text', 'input_text', 'text']));
+      if (texts.length === 0)
+        texts.push(...codeBuddyTexts(entry.content, ['reasoning_text', 'input_text', 'text']));
       const text = texts.join('\n\n').trim();
       if (text) rows.push(assistantRow([reasoningEvent(text, at)], ts, rowModel ?? model));
       continue;
@@ -937,14 +1000,18 @@ export function parseCodeBuddyTranscript(
         const subPath = join(subagentsDir, `${subSessionId}.jsonl`);
         if (existsSync(subPath) && !state.linked.has(subPath)) {
           state.linked.add(subPath);
-          const nested = parseCodeBuddyTranscript(subPath, h, { depth: state.depth + 1, linked: state.linked });
+          const nested = parseCodeBuddyTranscript(subPath, h, {
+            depth: state.depth + 1,
+            linked: state.linked,
+          });
           if (nested && nested.messages.length > 0) {
             const args = h.toolInputRecord(call?.args);
             const descriptor = rec(subAgent?.descriptor);
             event.subagent = subagentFromRows(
               {
                 agentId: subSessionId,
-                name: str(args.name) ?? str(args.description) ?? str(descriptor?.role) ?? 'subagent',
+                name:
+                  str(args.name) ?? str(args.description) ?? str(descriptor?.role) ?? 'subagent',
                 task: str(args.prompt) ?? str(args.description) ?? str(descriptor?.description),
                 model: str(args.model) ?? nested.messages.find((m) => m.model)?.model,
                 provider: 'codebuddy',
@@ -1008,11 +1075,19 @@ export function parseCodeBuddyTranscript(
 
 // ─── 3. Omnirush agent sessions (pi format: agent/sessions/--slug--/*.jsonl) ─
 
-function piImageAttachment(block: Record<string, unknown>, index: number): MessageAttachment | null {
+function piImageAttachment(
+  block: Record<string, unknown>,
+  index: number,
+): MessageAttachment | null {
   const data = str(block.data);
   if (!data) return null;
   const mimeType = str(block.mimeType) ?? str(block.mime_type) ?? 'image/png';
-  return { type: 'image', data, name: `image-${index + 1}.${mimeType.split('/')[1] ?? 'png'}`, mimeType };
+  return {
+    type: 'image',
+    data,
+    name: `image-${index + 1}.${mimeType.split('/')[1] ?? 'png'}`,
+    mimeType,
+  };
 }
 
 /**
@@ -1110,7 +1185,11 @@ export function parsePiSessionEntries(
         if (block.type === 'text' && typeof block.text === 'string') {
           const text = h.cleanMessageText(block.text);
           if (text) events.push({ type: 'text', text, timestamp: at });
-        } else if (block.type === 'thinking' && typeof block.thinking === 'string' && block.thinking.trim()) {
+        } else if (
+          block.type === 'thinking' &&
+          typeof block.thinking === 'string' &&
+          block.thinking.trim()
+        ) {
           if (block.redacted !== true) events.push(reasoningEvent(block.thinking, at));
         } else if (block.type === 'toolCall') {
           const callId = str(block.id);
@@ -1127,7 +1206,14 @@ export function parsePiSessionEntries(
       }
       const errorMessage = str(message.errorMessage);
       if (errorMessage && (message.stopReason === 'error' || message.stopReason === 'aborted')) {
-        events.push(...noticeEvents(str(entry.id) ?? `pi:${rows.length}`, String(message.stopReason), errorMessage, at));
+        events.push(
+          ...noticeEvents(
+            str(entry.id) ?? `pi:${rows.length}`,
+            String(message.stopReason),
+            errorMessage,
+            at,
+          ),
+        );
       }
       if (events.length > 0) rows.push(assistantRow(events, ts, rowModel));
       continue;
@@ -1247,8 +1333,14 @@ export function genericMessageEvents(
       } else if (type === 'thinking' || type === 'reasoning' || type === 'think') {
         const text = str(block.thinking) ?? str(block.text) ?? str(block.think);
         if (text) events.push(reasoningEvent(text, at));
-      } else if (type === 'tool_use' || type === 'tool-call' || type === 'toolCall' || type === 'function_call') {
-        const callId = str(block.id) ?? str(block.toolCallId) ?? str(block.call_id) ?? `${idPrefix}:${index}`;
+      } else if (
+        type === 'tool_use' ||
+        type === 'tool-call' ||
+        type === 'toolCall' ||
+        type === 'function_call'
+      ) {
+        const callId =
+          str(block.id) ?? str(block.toolCallId) ?? str(block.call_id) ?? `${idPrefix}:${index}`;
         events.push({
           type: 'tool_call',
           callId,
@@ -1256,12 +1348,18 @@ export function genericMessageEvents(
           input: h.toolInputRecord(block.input ?? block.args ?? block.arguments),
           timestamp: at,
         });
-      } else if (type === 'tool_result' || type === 'tool-result' || type === 'function_call_output') {
+      } else if (
+        type === 'tool_result' ||
+        type === 'tool-result' ||
+        type === 'function_call_output'
+      ) {
         const callId = str(block.tool_use_id) ?? str(block.toolCallId) ?? str(block.call_id);
         if (!callId) return;
         const output = rec(block.output);
         const value =
-          block.content ?? block.result ?? (output && 'value' in output ? output.value : block.output);
+          block.content ??
+          block.result ??
+          (output && 'value' in output ? output.value : block.output);
         events.push(
           toolResult({
             callId,
@@ -1332,7 +1430,10 @@ export function genericMessagesToRows(
           : Array.isArray(content)
             ? content
                 .map((block) => rec(block))
-                .filter((block): block is Record<string, unknown> => !!block && typeof block.text === 'string')
+                .filter(
+                  (block): block is Record<string, unknown> =>
+                    !!block && typeof block.text === 'string',
+                )
                 .map((block) => String(block.text))
                 .join('\n\n')
             : '';
@@ -1353,7 +1454,9 @@ export function genericMessagesToRows(
 // ─── 4. Cursor CLI (chats/<hash>/<agentId>/store.db + meta.json) ────────────
 
 /** Minimal protobuf field reader: (field number, wire type, value). */
-function readProtoFields(buf: Uint8Array): Array<{ field: number; wire: number; value: number | Uint8Array }> {
+function readProtoFields(
+  buf: Uint8Array,
+): Array<{ field: number; wire: number; value: number | Uint8Array }> {
   const out: Array<{ field: number; wire: number; value: number | Uint8Array }> = [];
   let i = 0;
   const varint = (): number => {
@@ -1385,7 +1488,9 @@ function readProtoFields(buf: Uint8Array): Array<{ field: number; wire: number; 
   return out;
 }
 
-function protoFields(buf: Uint8Array | undefined): Array<{ field: number; wire: number; value: number | Uint8Array }> {
+function protoFields(
+  buf: Uint8Array | undefined,
+): Array<{ field: number; wire: number; value: number | Uint8Array }> {
   if (!buf) return [];
   try {
     return readProtoFields(buf);
@@ -1395,7 +1500,9 @@ function protoFields(buf: Uint8Array | undefined): Array<{ field: number; wire: 
 }
 
 function protoBytes(fields: ReturnType<typeof protoFields>, field: number): Uint8Array[] {
-  return fields.filter((f) => f.field === field && f.value instanceof Uint8Array).map((f) => f.value as Uint8Array);
+  return fields
+    .filter((f) => f.field === field && f.value instanceof Uint8Array)
+    .map((f) => f.value as Uint8Array);
 }
 
 function protoNumber(fields: ReturnType<typeof protoFields>, field: number): number | undefined {
@@ -1418,7 +1525,20 @@ export function parseCursorPromptTimestamp(text: string): number | undefined {
     /<timestamp>\s*(?:\w+,\s*)?(\w{3})\w*\s+(\d{1,2}),\s*(\d{4}),\s*(\d{1,2}):(\d{2})\s*(AM|PM)\s*\(UTC([+-]\d{1,2})(?::?(\d{2}))?\)\s*<\/timestamp>/i,
   );
   if (!match) return undefined;
-  const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  const months = [
+    'jan',
+    'feb',
+    'mar',
+    'apr',
+    'may',
+    'jun',
+    'jul',
+    'aug',
+    'sep',
+    'oct',
+    'nov',
+    'dec',
+  ];
   const month = months.indexOf(match[1].toLowerCase());
   if (month < 0) return undefined;
   let hour = Number(match[4]) % 12;
@@ -1441,14 +1561,19 @@ interface CursorStepTiming {
  * AI-SDK JSON blobs) and the UI turns (field 8). Turn step blobs record the
  * user prompt time, thinking text with its own start/end, and text times.
  */
-export function readCursorAgentStore(dbPath: string, h: PortingHelpers): {
+export function readCursorAgentStore(
+  dbPath: string,
+  h: PortingHelpers,
+): {
   messages: PortedMessage[];
   model?: string;
 } {
   const sqlite = h.openReadonlySqlite(dbPath);
   if (!sqlite) return { messages: [] };
   try {
-    const metaRow = sqlite.query("SELECT value FROM meta WHERE key = '0'").get() as { value: string } | null;
+    const metaRow = sqlite.query("SELECT value FROM meta WHERE key = '0'").get() as {
+      value: string;
+    } | null;
     if (!metaRow?.value) return { messages: [] };
     const metaText = /^[0-9a-f]+$/i.test(metaRow.value)
       ? Buffer.from(metaRow.value, 'hex').toString('utf8')
@@ -1484,7 +1609,9 @@ export function readCursorAgentStore(dbPath: string, h: PortingHelpers): {
         const userRef = protoBytes(turnFields, 1)[0];
         if (userRef) {
           const userFields = protoFields(blob(hex(userRef)));
-          timing.userAt = h.sourceTimestampMs(protoNumber(userFields, 25) ?? protoNumber(userFields, 26));
+          timing.userAt = h.sourceTimestampMs(
+            protoNumber(userFields, 25) ?? protoNumber(userFields, 26),
+          );
         }
         for (const stepRef of protoBytes(turnFields, 2)) {
           const stepFields = protoFields(blob(hex(stepRef)));
@@ -1525,7 +1652,10 @@ export function readCursorAgentStore(dbPath: string, h: PortingHelpers): {
             : Array.isArray(content)
               ? content
                   .map((block) => rec(block))
-                  .filter((block): block is Record<string, unknown> => !!block && typeof block.text === 'string')
+                  .filter(
+                    (block): block is Record<string, unknown> =>
+                      !!block && typeof block.text === 'string',
+                  )
                   .map((block) => String(block.text))
                   .join('\n\n')
               : '';
@@ -1533,7 +1663,9 @@ export function readCursorAgentStore(dbPath: string, h: PortingHelpers): {
         const text = h.cleanMessageText(hasQuery ? extractUserQuery(raw) : raw);
         if (!text || (!hasQuery && isContextPreamble(text)) || h.isNoiseUserPrompt(text)) {
           // Tool results can arrive on user messages in some AI-SDK versions.
-          const results = genericMessageEvents(message, 0, h, `cursor:${index}`).filter((e) => e.type === 'tool_result');
+          const results = genericMessageEvents(message, 0, h, `cursor:${index}`).filter(
+            (e) => e.type === 'tool_result',
+          );
           if (results.length > 0) {
             const row = assistantRow(results, undefined);
             row.content = '';
@@ -1561,13 +1693,30 @@ export function readCursorAgentStore(dbPath: string, h: PortingHelpers): {
           if (block?.type === 'reasoning') {
             // Cursor keeps the readable thinking in the UI step; the model
             // context often holds only an encrypted signature.
-            rawEvents.push({ type: 'cursor-reasoning', text: typeof block.text === 'string' ? block.text : '' });
+            rawEvents.push({
+              type: 'cursor-reasoning',
+              text: typeof block.text === 'string' ? block.text : '',
+            });
           } else {
-            rawEvents.push(...genericMessageEvents({ ...message, content: [item], tool_calls: undefined }, 0, h, `cursor:${index}:${blockIndex}`));
+            rawEvents.push(
+              ...genericMessageEvents(
+                { ...message, content: [item], tool_calls: undefined },
+                0,
+                h,
+                `cursor:${index}:${blockIndex}`,
+              ),
+            );
           }
         });
         if (Array.isArray(message.tool_calls)) {
-          rawEvents.push(...genericMessageEvents({ role, tool_calls: message.tool_calls }, 0, h, `cursor:${index}`));
+          rawEvents.push(
+            ...genericMessageEvents(
+              { role, tool_calls: message.tool_calls },
+              0,
+              h,
+              `cursor:${index}`,
+            ),
+          );
         }
       } else {
         rawEvents.push(...genericMessageEvents(message, 0, h, `cursor:${index}`));
@@ -1577,7 +1726,11 @@ export function readCursorAgentStore(dbPath: string, h: PortingHelpers): {
           const step = timing?.thinking[thinkingIndex++];
           const text = event.text.trim() ? event.text : (step?.text ?? '');
           if (!text.trim()) continue;
-          if (step?.startedAt !== undefined && step.endedAt !== undefined && step.endedAt >= step.startedAt) {
+          if (
+            step?.startedAt !== undefined &&
+            step.endedAt !== undefined &&
+            step.endedAt >= step.startedAt
+          ) {
             events.push({ type: 'reasoning', text, timestamp: step.startedAt });
             events.push({ type: 'complete', timestamp: step.endedAt });
             rowAt ??= step.startedAt;
@@ -1621,7 +1774,11 @@ export function readCursorAgentStore(dbPath: string, h: PortingHelpers): {
  * with thinking folded in and tool calls without results or times. Used only
  * when an agent has no readable store.
  */
-export function parseCursorAgentTranscript(filePath: string, h: PortingHelpers, chatStartMs?: number): PortedMessage[] {
+export function parseCursorAgentTranscript(
+  filePath: string,
+  h: PortingHelpers,
+  chatStartMs?: number,
+): PortedMessage[] {
   let raw: string;
   try {
     raw = h.readTranscriptText(filePath, true);
@@ -1633,7 +1790,10 @@ export function parseCursorAgentTranscript(filePath: string, h: PortingHelpers, 
     if (entry.type === 'turn_ended') {
       if (entry.status === 'error' || entry.status === 'aborted') {
         const text = str(entry.error) ?? `Turn ended: ${String(entry.status)}`;
-        const row = assistantRow(noticeEvents(`cursor-transcript:${index}`, String(entry.status), text, 0), undefined);
+        const row = assistantRow(
+          noticeEvents(`cursor-transcript:${index}`, String(entry.status), text, 0),
+          undefined,
+        );
         row.content = '';
         rows.push(row);
       }
@@ -1650,7 +1810,12 @@ export function parseCursorAgentTranscript(filePath: string, h: PortingHelpers, 
       rows.push(userRow(text, parseCursorPromptTimestamp(raw2)));
       return;
     }
-    const events = genericMessageEvents({ role: 'assistant', content: message.content }, 0, h, `cursor-transcript:${index}`);
+    const events = genericMessageEvents(
+      { role: 'assistant', content: message.content },
+      0,
+      h,
+      `cursor-transcript:${index}`,
+    );
     if (events.length > 0) rows.push(assistantRow(events, undefined));
   });
   return assignOrderingTimes(rows, chatStartMs);
@@ -1734,7 +1899,8 @@ function grokContentText(content: unknown): { text: string; images: MessageAttac
 }
 
 function grokToolOutput(update: Record<string, unknown>, h: PortingHelpers): string | undefined {
-  if (update.rawOutput !== undefined && update.rawOutput !== null) return h.toolOutputText(update.rawOutput);
+  if (update.rawOutput !== undefined && update.rawOutput !== null)
+    return h.toolOutputText(update.rawOutput);
   if (!Array.isArray(update.content)) return undefined;
   const pieces: string[] = [];
   for (const item of update.content) {
@@ -1760,11 +1926,24 @@ function grokToolOutput(update: Record<string, unknown>, h: PortingHelpers): str
  * `timestamp`). Chunks of one streamed message are coalesced; a tool's
  * duration comes from its `tool_call` and terminal `tool_call_update` lines.
  */
-export function parseGrokUpdates(raw: string, h: PortingHelpers): { messages: PortedMessage[]; model?: string } {
+export function parseGrokUpdates(
+  raw: string,
+  h: PortingHelpers,
+): { messages: PortedMessage[]; model?: string } {
   const rows: PortedMessage[] = [];
   let model: string | undefined;
-  let current: { kind: 'user' | 'agent' | 'thought'; marker?: string; text: string; images: MessageAttachment[]; at?: number; chunks: number } | null = null;
-  const tools = new Map<string, { started?: number; name: string; input: Record<string, unknown>; done: boolean }>();
+  let current: {
+    kind: 'user' | 'agent' | 'thought';
+    marker?: string;
+    text: string;
+    images: MessageAttachment[];
+    at?: number;
+    chunks: number;
+  } | null = null;
+  const tools = new Map<
+    string,
+    { started?: number; name: string; input: Record<string, unknown>; done: boolean }
+  >();
 
   const flushMessage = () => {
     if (!current) return;
@@ -1772,8 +1951,13 @@ export function parseGrokUpdates(raw: string, h: PortingHelpers): { messages: Po
     if (current.kind === 'user') {
       const hasQuery = /<user_query>/.test(current.text);
       const text = h.cleanMessageText(hasQuery ? extractUserQuery(current.text) : current.text);
-      if ((text && !h.isNoiseUserPrompt(text) && (hasQuery || !isContextPreamble(text))) || current.images.length > 0) {
-        rows.push(userRow(text, at, current.images.length > 0 ? { attachments: current.images } : {}));
+      if (
+        (text && !h.isNoiseUserPrompt(text) && (hasQuery || !isContextPreamble(text))) ||
+        current.images.length > 0
+      ) {
+        rows.push(
+          userRow(text, at, current.images.length > 0 ? { attachments: current.images } : {}),
+        );
       }
     } else if (current.kind === 'agent') {
       const text = h.cleanMessageText(current.text);
@@ -1797,8 +1981,17 @@ export function parseGrokUpdates(raw: string, h: PortingHelpers): { messages: Po
     const modelId = str(updateMeta.modelId) ?? str(meta.modelId);
     if (modelId) model = modelId;
 
-    if (kind === 'user_message_chunk' || kind === 'agent_message_chunk' || kind === 'agent_thought_chunk') {
-      const chunkKind = kind === 'user_message_chunk' ? 'user' : kind === 'agent_message_chunk' ? 'agent' : 'thought';
+    if (
+      kind === 'user_message_chunk' ||
+      kind === 'agent_message_chunk' ||
+      kind === 'agent_thought_chunk'
+    ) {
+      const chunkKind =
+        kind === 'user_message_chunk'
+          ? 'user'
+          : kind === 'agent_message_chunk'
+            ? 'agent'
+            : 'thought';
       const marker =
         chunkKind === 'user'
           ? String(updateMeta.promptIndex ?? meta.promptId ?? '')
@@ -1818,11 +2011,17 @@ export function parseGrokUpdates(raw: string, h: PortingHelpers): { messages: Po
       flushMessage();
       const callId = str(update.toolCallId);
       if (!callId) continue;
-      const xaiTool = rec(update['x.ai/tool']) ?? rec(updateMeta['x.ai/tool']) ?? rec(meta['x.ai/tool']);
+      const xaiTool =
+        rec(update['x.ai/tool']) ?? rec(updateMeta['x.ai/tool']) ?? rec(meta['x.ai/tool']);
       const name = str(xaiTool?.name) ?? str(update.title) ?? str(update.kind) ?? 'tool';
       let tool = tools.get(callId);
       if (!tool) {
-        tool = { started: at, name, input: h.toolInputRecord(update.rawInput ?? xaiTool?.input ?? {}), done: false };
+        tool = {
+          started: at,
+          name,
+          input: h.toolInputRecord(update.rawInput ?? xaiTool?.input ?? {}),
+          done: false,
+        };
         tools.set(callId, tool);
         const row = assistantRow(
           [{ type: 'tool_call', callId, name: tool.name, input: tool.input, timestamp: at ?? 0 }],
@@ -1863,12 +2062,19 @@ export function parseGrokUpdates(raw: string, h: PortingHelpers): { messages: Po
 }
 
 /** Fallback: Grok's `chat_history.jsonl` model log (no timestamps). */
-export function parseGrokChatHistory(raw: string, h: PortingHelpers, chatStartMs?: number): PortedMessage[] {
+export function parseGrokChatHistory(
+  raw: string,
+  h: PortingHelpers,
+  chatStartMs?: number,
+): PortedMessage[] {
   const rows: PortedMessage[] = [];
   parseJsonLines(raw).forEach((entry, index) => {
     const type = str(entry.type) ?? '';
     if (type === 'user') {
-      const rawText = typeof entry.content === 'string' ? entry.content : codeBuddyTexts(entry.content, ['text']).join('\n\n');
+      const rawText =
+        typeof entry.content === 'string'
+          ? entry.content
+          : codeBuddyTexts(entry.content, ['text']).join('\n\n');
       const hasQuery = /<user_query>/.test(rawText);
       const text = h.cleanMessageText(hasQuery ? extractUserQuery(rawText) : rawText);
       if (text && (hasQuery || !isContextPreamble(text))) rows.push(userRow(text, undefined));
@@ -1883,7 +2089,13 @@ export function parseGrokChatHistory(raw: string, h: PortingHelpers, chatStartMs
         const call = rec(item);
         const callId = str(call?.id);
         if (call && callId && !events.some((e) => e.type === 'tool_call' && e.callId === callId)) {
-          events.push({ type: 'tool_call', callId, name: str(call.name) ?? 'tool', input: h.toolInputRecord(call.arguments), timestamp: 0 });
+          events.push({
+            type: 'tool_call',
+            callId,
+            name: str(call.name) ?? 'tool',
+            input: h.toolInputRecord(call.arguments),
+            timestamp: 0,
+          });
         }
       }
       if (events.length > 0) rows.push(assistantRow(events, undefined, str(entry.model_id)));
@@ -1901,7 +2113,14 @@ export function parseGrokChatHistory(raw: string, h: PortingHelpers, chatStartMs
       const callId = str(entry.tool_call_id);
       if (!callId) return;
       const row = assistantRow(
-        [toolResult({ callId, name: 'tool', output: h.toolOutputText(entry.content), timestamp: 0 })],
+        [
+          toolResult({
+            callId,
+            name: 'tool',
+            output: h.toolOutputText(entry.content),
+            timestamp: 0,
+          }),
+        ],
         undefined,
       );
       row.content = '';
@@ -1911,7 +2130,11 @@ export function parseGrokChatHistory(raw: string, h: PortingHelpers, chatStartMs
   return assignOrderingTimes(rows, chatStartMs);
 }
 
-function loadGrokSession(dir: string, h: PortingHelpers, chatStartMs?: number): { messages: PortedMessage[]; model?: string } {
+function loadGrokSession(
+  dir: string,
+  h: PortingHelpers,
+  chatStartMs?: number,
+): { messages: PortedMessage[]; model?: string } {
   const updates = join(dir, 'updates.jsonl');
   if (existsSync(updates)) {
     try {
@@ -1924,7 +2147,9 @@ function loadGrokSession(dir: string, h: PortingHelpers, chatStartMs?: number): 
   const history = join(dir, 'chat_history.jsonl');
   if (existsSync(history)) {
     try {
-      return { messages: parseGrokChatHistory(h.readTranscriptText(history, true), h, chatStartMs) };
+      return {
+        messages: parseGrokChatHistory(h.readTranscriptText(history, true), h, chatStartMs),
+      };
     } catch {
       return { messages: [] };
     }
@@ -1943,7 +2168,12 @@ function decodeGrokCwd(encoded: string): string | null {
 
 export function scanGrokSessions(root: string, h: PortingHelpers): PortedChat[] {
   const sessionsDir = join(root, 'sessions');
-  const found: Array<{ dir: string; summary: Record<string, unknown>; groupCwd: string | null; id: string }> = [];
+  const found: Array<{
+    dir: string;
+    summary: Record<string, unknown>;
+    groupCwd: string | null;
+    id: string;
+  }> = [];
   for (const group of safeReaddir(sessionsDir)) {
     const groupDir = join(sessionsDir, group);
     if (!isDirectory(groupDir)) continue;
@@ -1956,9 +2186,15 @@ export function scanGrokSessions(root: string, h: PortingHelpers): PortedChat[] 
     for (const sessionId of safeReaddir(groupDir)) {
       const dir = join(groupDir, sessionId);
       if (!isDirectory(dir)) continue;
-      if (!existsSync(join(dir, 'updates.jsonl')) && !existsSync(join(dir, 'chat_history.jsonl'))) continue;
+      if (!existsSync(join(dir, 'updates.jsonl')) && !existsSync(join(dir, 'chat_history.jsonl')))
+        continue;
       const summary = rec(readJsonFile(join(dir, 'summary.json'))) ?? {};
-      found.push({ dir, summary, groupCwd, id: str(rec(summary.info)?.id) ?? str(summary.id) ?? sessionId });
+      found.push({
+        dir,
+        summary,
+        groupCwd,
+        id: str(rec(summary.info)?.id) ?? str(summary.id) ?? sessionId,
+      });
     }
   }
 
@@ -1984,9 +2220,14 @@ export function scanGrokSessions(root: string, h: PortingHelpers): PortedChat[] 
     childrenOf.set(parent, list);
   }
 
-  const loadWithChildren = (entry: (typeof found)[number], depth: number, visited: Set<string>): PortedMessage[] => {
+  const loadWithChildren = (
+    entry: (typeof found)[number],
+    depth: number,
+    visited: Set<string>,
+  ): PortedMessage[] => {
     visited.add(entry.id);
-    const start = h.sourceTimestampMs(entry.summary.created_at) ?? h.sourceTimestampMs(entry.summary.createdAt);
+    const start =
+      h.sourceTimestampMs(entry.summary.created_at) ?? h.sourceTimestampMs(entry.summary.createdAt);
     const rows = loadGrokSession(entry.dir, h, start).messages;
     if (depth >= MAX_SUBAGENT_DEPTH) return rows;
     for (const child of childrenOf.get(entry.id) ?? []) {
@@ -1996,7 +2237,11 @@ export function scanGrokSessions(root: string, h: PortingHelpers): PortedChat[] 
       const sub = subagentFromRows(
         {
           agentId: child.id,
-          name: str(rec(child.summary.subagent)?.name) ?? str(child.summary.agent_name) ?? str(child.summary.generated_title) ?? 'subagent',
+          name:
+            str(rec(child.summary.subagent)?.name) ??
+            str(child.summary.agent_name) ??
+            str(child.summary.generated_title) ??
+            'subagent',
           task: childRows.find((m) => m.role === 'user')?.content,
           model: str(child.summary.current_model_id) ?? childRows.find((m) => m.model)?.model,
           provider: 'grok',
@@ -2025,7 +2270,8 @@ export function scanGrokSessions(root: string, h: PortingHelpers): PortedChat[] 
     const parent = parentOf(entry.summary);
     if (parent && byId.has(parent)) continue;
     const info = rec(entry.summary.info) ?? {};
-    const sessionStart = h.sourceTimestampMs(entry.summary.created_at) ?? h.sourceTimestampMs(entry.summary.createdAt);
+    const sessionStart =
+      h.sourceTimestampMs(entry.summary.created_at) ?? h.sourceTimestampMs(entry.summary.createdAt);
     const sample = loadGrokSession(entry.dir, h, sessionStart);
     if (!sample.messages.some((m) => m.role === 'user' && m.content.trim())) continue;
     const mtime = mtimeMs(entry.dir) ?? 0;
@@ -2061,7 +2307,13 @@ function kimiUserText(input: unknown): { text: string; images: MessageAttachment
     if (part.type === 'image_url') {
       const url = str(rec(part.image_url)?.url) ?? '';
       const match = url.match(/^data:([^;]+);base64,(.+)$/);
-      if (match) images.push({ type: 'image', data: match[2], mimeType: match[1], name: `image-${index + 1}` });
+      if (match)
+        images.push({
+          type: 'image',
+          data: match[2],
+          mimeType: match[1],
+          name: `image-${index + 1}`,
+        });
     }
   });
   return { text: texts.join('\n\n'), images };
@@ -2074,7 +2326,8 @@ function kimiToolOutput(returnValue: Record<string, unknown>, h: PortingHelpers)
   else if (Array.isArray(output)) text = h.toolOutputText(output);
   const message = str(returnValue.message);
   if (!text.trim() && message) text = message;
-  else if (returnValue.is_error === true && message && !text.includes(message)) text = `${message}\n\n${text}`;
+  else if (returnValue.is_error === true && message && !text.includes(message))
+    text = `${message}\n\n${text}`;
   for (const item of Array.isArray(returnValue.display) ? returnValue.display : []) {
     const block = rec(item);
     if (block?.type === 'diff') {
@@ -2087,7 +2340,10 @@ function kimiToolOutput(returnValue: Record<string, unknown>, h: PortingHelpers)
 interface KimiWireState {
   rows: PortedMessage[];
   results: Map<string, ToolResultEvent>;
-  subagentEvents: Map<string, { agentId?: string; type?: string; records: Record<string, unknown>[] }>;
+  subagentEvents: Map<
+    string,
+    { agentId?: string; type?: string; records: Record<string, unknown>[] }
+  >;
 }
 
 /**
@@ -2098,7 +2354,10 @@ interface KimiWireState {
  */
 function foldKimiWire(records: Record<string, unknown>[], h: PortingHelpers): KimiWireState {
   const state: KimiWireState = { rows: [], results: new Map(), subagentEvents: new Map() };
-  const calls = new Map<string, { at?: number; name: string; args: string; event: ToolCallEvent }>();
+  const calls = new Map<
+    string,
+    { at?: number; name: string; args: string; event: ToolCallEvent }
+  >();
   let lastCall: { at?: number; name: string; args: string; event: ToolCallEvent } | undefined;
   let thought: { text: string; at?: number; parts: number } | null = null;
 
@@ -2107,9 +2366,17 @@ function foldKimiWire(records: Record<string, unknown>[], h: PortingHelpers): Ki
     const text = thought.text.trim();
     if (text) {
       const events: TurnEvent[] = [];
-      if (thought.parts > 1 && thought.at !== undefined && nextAt !== undefined && nextAt >= thought.at) {
+      if (
+        thought.parts > 1 &&
+        thought.at !== undefined &&
+        nextAt !== undefined &&
+        nextAt >= thought.at
+      ) {
         // Streamed think parts: the source recorded the block's first and last arrival.
-        events.push({ type: 'reasoning', text, timestamp: thought.at }, { type: 'complete', timestamp: nextAt });
+        events.push(
+          { type: 'reasoning', text, timestamp: thought.at },
+          { type: 'complete', timestamp: nextAt },
+        );
       } else {
         events.push(reasoningEvent(text, thought.at ?? 0));
       }
@@ -2149,11 +2416,18 @@ function foldKimiWire(records: Record<string, unknown>[], h: PortingHelpers): Ki
       } else if (payload.type === 'text' && typeof payload.text === 'string') {
         const last = state.rows[state.rows.length - 1];
         const lastEvent = last?.events?.[last.events.length - 1];
-        if (last && last.role === 'assistant' && lastEvent?.type === 'text' && last.events?.length === 1) {
+        if (
+          last &&
+          last.role === 'assistant' &&
+          lastEvent?.type === 'text' &&
+          last.events?.length === 1
+        ) {
           lastEvent.text += payload.text;
           last.content = lastEvent.text;
         } else {
-          state.rows.push(assistantRow([{ type: 'text', text: payload.text, timestamp: at ?? 0 }], at));
+          state.rows.push(
+            assistantRow([{ type: 'text', text: payload.text, timestamp: at ?? 0 }], at),
+          );
         }
       }
       continue;
@@ -2169,8 +2443,14 @@ function foldKimiWire(records: Record<string, unknown>[], h: PortingHelpers): Ki
         input: {},
         timestamp: at ?? 0,
       };
-      const call = { at, name: event.name, args: typeof fn.arguments === 'string' ? fn.arguments : '', event };
-      if (fn.arguments && typeof fn.arguments !== 'string') call.args = JSON.stringify(fn.arguments);
+      const call = {
+        at,
+        name: event.name,
+        args: typeof fn.arguments === 'string' ? fn.arguments : '',
+        event,
+      };
+      if (fn.arguments && typeof fn.arguments !== 'string')
+        call.args = JSON.stringify(fn.arguments);
       calls.set(callId, call);
       lastCall = call;
       const row = assistantRow([event], at);
@@ -2179,7 +2459,8 @@ function foldKimiWire(records: Record<string, unknown>[], h: PortingHelpers): Ki
       continue;
     }
     if (type === 'ToolCallPart') {
-      if (lastCall && typeof payload.arguments_part === 'string') lastCall.args += payload.arguments_part;
+      if (lastCall && typeof payload.arguments_part === 'string')
+        lastCall.args += payload.arguments_part;
       continue;
     }
     if (type === 'ToolResult') {
@@ -2213,7 +2494,16 @@ function foldKimiWire(records: Record<string, unknown>[], h: PortingHelpers): Ki
       continue;
     }
     if (type === 'StepInterrupted') {
-      const row = assistantRow(noticeEvents(`kimi:${state.rows.length}`, 'interrupted', 'Step interrupted', at ?? 0, false), at);
+      const row = assistantRow(
+        noticeEvents(
+          `kimi:${state.rows.length}`,
+          'interrupted',
+          'Step interrupted',
+          at ?? 0,
+          false,
+        ),
+        at,
+      );
       row.content = '';
       state.rows.push(row);
     }
@@ -2237,7 +2527,10 @@ export function loadKimiSession(
 ): PortedMessage[] {
   const wire = join(dir, 'wire.jsonl');
   let rows: PortedMessage[] = [];
-  let subagentEvents = new Map<string, { agentId?: string; type?: string; records: Record<string, unknown>[] }>();
+  let subagentEvents = new Map<
+    string,
+    { agentId?: string; type?: string; records: Record<string, unknown>[] }
+  >();
   let results = new Map<string, ToolResultEvent>();
   if (existsSync(wire)) {
     try {
@@ -2269,26 +2562,36 @@ export function loadKimiSession(
       usedDirs.add(bucket.agentId);
       childRows = loadKimiSession(join(subagentsDir, bucket.agentId), h, depth + 1);
     }
-    if (childRows.length === 0) childRows = assignOrderingTimes(foldKimiWire(bucket.records, h).rows);
+    if (childRows.length === 0)
+      childRows = assignOrderingTimes(foldKimiWire(bucket.records, h).rows);
     if (childRows.length === 0) continue;
     const resultEvent = results.get(parentCallId);
     const callRow = rows.find((row) =>
       row.events?.some((event) => event.type === 'tool_call' && event.callId === parentCallId),
     );
     const callEvent = callRow?.events?.find(
-      (event): event is ToolCallEvent => event.type === 'tool_call' && event.callId === parentCallId,
+      (event): event is ToolCallEvent =>
+        event.type === 'tool_call' && event.callId === parentCallId,
     );
     const sub = subagentFromRows(
       {
         agentId: bucket.agentId ?? parentCallId,
-        name: str(callEvent?.input.subagent_name) ?? str(callEvent?.input.description) ?? bucket.type ?? 'subagent',
+        name:
+          str(callEvent?.input.subagent_name) ??
+          str(callEvent?.input.description) ??
+          bucket.type ??
+          'subagent',
         task: str(callEvent?.input.prompt) ?? childRows.find((m) => m.role === 'user')?.content,
         provider: 'kimicode',
       },
       childRows,
     );
     if (resultEvent) resultEvent.subagent = sub;
-    else insertChronologically(rows, synthesizedSubagentRow(bucket.agentId ?? parentCallId, sub, childRows));
+    else
+      insertChronologically(
+        rows,
+        synthesizedSubagentRow(bucket.agentId ?? parentCallId, sub, childRows),
+      );
   }
   for (const agentId of safeReaddir(subagentsDir)) {
     if (usedDirs.has(agentId) || !isDirectory(join(subagentsDir, agentId))) continue;
@@ -2296,7 +2599,12 @@ export function loadKimiSession(
     const childRows = loadKimiSession(join(subagentsDir, agentId), h, depth + 1);
     if (childRows.length === 0) continue;
     const sub = subagentFromRows(
-      { agentId, name: 'subagent', task: childRows.find((m) => m.role === 'user')?.content, provider: 'kimicode' },
+      {
+        agentId,
+        name: 'subagent',
+        task: childRows.find((m) => m.role === 'user')?.content,
+        provider: 'kimicode',
+      },
       childRows,
     );
     insertChronologically(rows, synthesizedSubagentRow(agentId, sub, childRows));

@@ -21,10 +21,7 @@ import {
 } from './types';
 import { providerLog } from '../logger';
 import { getCliBridge, getKoryphaiosCodexHome, serializeCodexMcpProfile } from './cli-bridges';
-import {
-  koryBridgeUnavailableError,
-  resolveKoryBridgeScript,
-} from './kory-cli-mcp-config';
+import { koryBridgeUnavailableError, resolveKoryBridgeScript } from './kory-cli-mcp-config';
 import { buildSoftJail } from '../collaboration/sandbox-runner';
 import {
   assertPrivateValuesAbsentFromArgv,
@@ -426,15 +423,20 @@ function describeMcpItem(item: Record<string, unknown> | undefined): {
   const server =
     asText(record.server_name) ?? asText(record.server) ?? asText(record.server_label) ?? 'server';
   const tool = recordedToolName(record) ?? recordedToolName({ name: record.tool });
-  const name = tool ? tool.startsWith('mcp__') ? tool : `mcp__${server}__${tool}` : undefined;
+  const name = tool ? (tool.startsWith('mcp__') ? tool : `mcp__${server}__${tool}`) : undefined;
   const inputValue = record.arguments ?? record.input ?? record.parameters;
   const outputValue = record.result ?? record.output ?? record.response ?? record.error;
-  const result = outputValue && typeof outputValue === 'object' ? outputValue as Record<string, unknown> : {};
+  const result =
+    outputValue && typeof outputValue === 'object' ? (outputValue as Record<string, unknown>) : {};
   return {
     name,
     input: JSON.stringify(recordedToolInput(inputValue)),
     output: recordedToolOutput(outputValue).slice(0, 4_000),
-    isError: record.status === 'error' || record.is_error === true || record.error != null || result.isError === true,
+    isError:
+      record.status === 'error' ||
+      record.is_error === true ||
+      record.error != null ||
+      result.isError === true,
   };
 }
 
@@ -813,7 +815,9 @@ export class CodexCliProvider implements Provider {
     // Expiry decoded from a cached JWT is only a hint. The official CLI owns
     // refresh and can still have a valid session, so do not hide a discovered
     // profile before the CLI itself gets a chance to report its model list.
-    const discovered = discoverCliAccounts(this.profileHome).filter((account) => account.provider === 'codex');
+    const discovered = discoverCliAccounts(this.profileHome).filter(
+      (account) => account.provider === 'codex',
+    );
     const selectedOrder = this.config.fallbackOrder ?? [];
     if (selectedOrder.length === 0) return discovered;
 
@@ -1039,7 +1043,7 @@ export class CodexCliProvider implements Provider {
     });
     const attachmentDirectories = attachmentScope.artifacts.map((artifact) => artifact.directory);
     const jail = request.sandbox
-      ? buildSoftJail(baseEnv, [codexHome, ...attachmentDirectories])
+      ? buildSoftJail(baseEnv, [codexHome, ...attachmentDirectories], {}, request.sessionId)
       : null;
     // Deliberately NO wrapCommand() (Seatbelt/bwrap) here. Codex self-sandboxes
     // its native tools (see --sandbox read-only below) and OS jails cannot
@@ -1174,13 +1178,18 @@ export class CodexCliProvider implements Provider {
       providerLog.warn(diagnostic, 'Codex CLI exited unsuccessfully');
       // Auth evidence on stderr wins over any transient-looking turn event:
       // an expired refresh token must fail closed with the login hint, not
-      // retry as a ChatGPT blip.
+      // retry as a ChatGPT blip. Marker text like "refresh token was already
+      // used" does not classify as authentication on its own, so pin the
+      // category the CLI's own auth markers identify.
       if (isCodexAuthFailure(stderr)) {
-        yield { type: 'error', error: codexAuthFailureMessage(diagnostic) };
+        yield {
+          type: 'error',
+          error: codexAuthFailureMessage({ ...diagnostic, category: 'authentication' }),
+        };
         return;
       }
       if (pendingTurnFailure) {
-        yield* pendingTurnFailure;
+        yield* pendingTurnFailure as ProviderEvent[];
         return;
       }
       if (isTransientCodexFailure(stderr)) {
@@ -1196,10 +1205,13 @@ export class CodexCliProvider implements Provider {
     if (pendingTurnFailure) {
       if (isCodexAuthFailure(stderr)) {
         const diagnostic = safeProviderDiagnostic('codex', 'stderr', stderr, { exitCode });
-        yield { type: 'error', error: codexAuthFailureMessage(diagnostic) };
+        yield {
+          type: 'error',
+          error: codexAuthFailureMessage({ ...diagnostic, category: 'authentication' }),
+        };
         return;
       }
-      yield* pendingTurnFailure;
+      yield* pendingTurnFailure as ProviderEvent[];
     }
     if (!completed)
       providerLog.warn({ provider: 'codex' }, 'Codex CLI exited without a turn.completed event');

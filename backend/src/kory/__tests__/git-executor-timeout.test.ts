@@ -118,7 +118,7 @@ esac
   );
 
   test.skipIf(process.platform === 'win32')(
-    'drains over-limit helper output, fails visibly, and releases the global queue',
+    'discards over-limit helper output early, fails visibly, and releases the global queue',
     async () => {
       const git = new GitExecutor(TEST_DIR);
       const env = {
@@ -155,8 +155,12 @@ esac
       expect(flooded.stderr).toContain('captured output was discarded');
       expect(flooded.stderr).not.toContain('oooo');
       expect(flooded.stderr).not.toContain('eeee');
-      expect(flooded.stdoutBytes).toBe(8_192);
-      expect(flooded.stderrBytes).toBe(8_192);
+      // The reader stops once the limit is exceeded rather than draining the
+      // whole flood, so the observed count only proves the cap was crossed.
+      expect(flooded.stdoutBytes).toBeGreaterThan(1_024);
+      expect(flooded.stdoutBytes).toBeLessThanOrEqual(8_192);
+      expect(flooded.stderrBytes).toBeGreaterThan(512);
+      expect(flooded.stderrBytes).toBeLessThanOrEqual(8_192);
       expect(logged.join('\n')).toContain('"command":"flood"');
       expect(logged.join('\n')).not.toContain(syntheticArgument);
 

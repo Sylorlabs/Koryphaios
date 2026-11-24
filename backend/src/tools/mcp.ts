@@ -1,5 +1,6 @@
+import { existsSync } from 'node:fs';
 import { spawn, type Subprocess, type FileSink } from 'bun';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from './registry';
 import { toolLog } from '../logger';
 import { PROJECT_ROOT } from '../runtime/paths';
@@ -8,6 +9,26 @@ import { getSafeSubprocessEnv } from '../runtime/safe-env';
 const MCP_REQUEST_TIMEOUT_MS = 30_000;
 const MAX_MCP_STDOUT_LINE_BYTES = 1024 * 1024;
 const MCP_SERVER_NAME = 'kory-mcp-server';
+
+/** The error-detection server ships as `kory-error-mcp.js` next to the packaged
+ * backend (same convention as the kory CLI bridge scripts), so resolve the
+ * bundle first. Source-tree fallbacks cover development checkouts, where
+ * import.meta.dir is backend/src/tools and PROJECT_ROOT is the repo — never
+ * the data dir, which a packaged install points PROJECT_ROOT at. */
+function resolveErrorMcpScript(): string | null {
+  const configured = process.env.KORY_ERROR_MCP_SCRIPT?.trim();
+  if (configured) return configured;
+  const candidates = [
+    join(import.meta.dir, 'kory-error-mcp.js'),
+    join(import.meta.dir, 'kory-error-mcp.ts'),
+    join(PROJECT_ROOT, 'mcp-server', 'dist', 'index.js'),
+    join(PROJECT_ROOT, 'mcp-server', 'src', 'index.ts'),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
 
 interface PendingRequest {
   resolve: (value: unknown) => void;
@@ -79,12 +100,19 @@ class MCPClient {
   }
 
   private async start(): Promise<void> {
-    const mcpServerPath = join(PROJECT_ROOT, 'mcp-server');
     if (!this.process || this.process.exitCode !== null) {
-      toolLog.info({ mcpServerPath }, 'Starting MCP server...');
+      const serverScript = resolveErrorMcpScript();
+      if (!serverScript) {
+        throw new Error(
+          'Error-detection MCP server is not available: no bundled kory-error-mcp.js or mcp-server sources found',
+        );
+      }
+      toolLog.info({ serverScript }, 'Starting MCP server...');
 
-      const child = spawn(['bun', '--no-env-file', 'run', 'src/index.ts'], {
-        cwd: mcpServerPath,
+      // --kory activates the full tool surface; without an activation flag the
+      // server deliberately answers as an empty passive responder.
+      const child = spawn([process.execPath, '--no-env-file', serverScript, '--kory'], {
+        cwd: dirname(serverScript),
         stdin: 'pipe',
         stdout: 'pipe',
         stderr: 'pipe',

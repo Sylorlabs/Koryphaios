@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { GitManager } from '../git-manager';
+import { homedir, tmpdir } from 'node:os';
+import { join, parse } from 'node:path';
+import { GitManager, isContainerGitRoot } from '../git-manager';
 
 let root: string;
 let repo: string;
@@ -108,5 +108,31 @@ describe('Git panel real repository workflows', () => {
     expect(await manager.getOrigin()).toBe('https://github.com/owner/repo.git');
     expect((await manager.setOrigin('git@github.com:owner/other.git')).success).toBe(true);
     expect(await manager.getOrigin()).toBe('git@github.com:owner/other.git');
+  });
+});
+
+describe('container-rooted repositories', () => {
+  test('a repository rooted at the home directory or filesystem root is never a project repository', async () => {
+    expect(isContainerGitRoot(homedir())).toBe(true);
+    expect(isContainerGitRoot(parse(homedir()).root)).toBe(true);
+    expect(isContainerGitRoot(repo)).toBe(false);
+    // Even when the opened directory IS the container root — a session whose
+    // working directory is `~` — `git status` there still scans the whole
+    // container, so it cannot serve as a usable project repository.
+    expect(new GitManager(homedir()).isGitRepo()).toBe(false);
+    await expect(new GitManager(homedir()).getStatus()).resolves.toEqual([]);
+  });
+
+  test('a subdirectory inside a container-rooted repository is not a project repository', async () => {
+    // Resolving the repository root from inside a home subdirectory reaches
+    // the container root — whether or not that root actually hosts a repo,
+    // it is never reported as this directory's project repository.
+    const nested = mkdtempSync(join(homedir(), 'kory-container-root-'));
+    try {
+      expect(new GitManager(nested).isGitRepo()).toBe(false);
+      await expect(new GitManager(nested).getStatus()).resolves.toEqual([]);
+    } finally {
+      rmSync(nested, { recursive: true, force: true });
+    }
   });
 });

@@ -381,3 +381,96 @@ describe('KoryManager ask_user wait serialization', () => {
     }
   });
 });
+
+describe('KoryManager bridge tool ledger', () => {
+  function wiredManager() {
+    const { manager } = createManager();
+    const internal = manager as unknown as {
+      runLifecycle: { handleForSession(id: string): { sessionId: string; runId: string } | null };
+      runtimes: {
+        get(id: string): { bridgeToolLedger: unknown };
+        peek(id: string):
+          | {
+              bridgeToolLedger: {
+                runId: string;
+                entries: Array<{
+                  name: string;
+                  input: string;
+                  output: string;
+                  isError: boolean;
+                  at: number;
+                }>;
+              } | null;
+            }
+          | undefined;
+      };
+    };
+    internal.runtimes.get('session-a');
+    return { manager, internal };
+  }
+
+  test('records an execution for the active run and replaces the ledger on a new run', () => {
+    const { manager, internal } = wiredManager();
+    internal.runLifecycle.handleForSession = (id: string) =>
+      id === 'session-a' ? { sessionId: id, runId: 'run-1' } : null;
+    manager.recordBridgeToolExecution('session-a', {
+      name: 'read_file',
+      input: '{"path":"src/index.ts"}',
+      output: 'file contents',
+      isError: false,
+      at: 1,
+    });
+    const ledger = internal.runtimes.peek('session-a')!.bridgeToolLedger!;
+    expect(ledger.runId).toBe('run-1');
+    expect(ledger.entries).toHaveLength(1);
+    expect(ledger.entries[0].name).toBe('read_file');
+
+    internal.runLifecycle.handleForSession = () => ({ sessionId: 'session-a', runId: 'run-2' });
+    manager.recordBridgeToolExecution('session-a', {
+      name: 'ask_user',
+      input: '{"question":"pick"}',
+      output: 'User selected: Dark',
+      isError: false,
+      at: 2,
+    });
+    const next = internal.runtimes.peek('session-a')!.bridgeToolLedger!;
+    expect(next.runId).toBe('run-2');
+    expect(next.entries).toHaveLength(1);
+    expect(next.entries[0].name).toBe('ask_user');
+  });
+
+  test('skips recording when the session has no leased run', () => {
+    const { manager, internal } = wiredManager();
+    internal.runLifecycle.handleForSession = () => null;
+    manager.recordBridgeToolExecution('session-a', {
+      name: 'read_file',
+      input: '{}',
+      output: 'x',
+      isError: false,
+      at: 1,
+    });
+    expect(internal.runtimes.peek('session-a')!.bridgeToolLedger).toBeNull();
+  });
+
+  test('the prompt suffix carries the header and entry lines only when non-empty', () => {
+    const { manager, internal } = wiredManager();
+    const suffix = (
+      manager as unknown as { bridgeToolLedgerPromptSuffix(id: string): string }
+    ).bridgeToolLedgerPromptSuffix.bind(manager);
+    expect(suffix('session-a')).toBe('');
+
+    internal.runLifecycle.handleForSession = () => ({ sessionId: 'session-a', runId: 'run-1' });
+    manager.recordBridgeToolExecution('session-a', {
+      name: 'ask_user',
+      input: '{"question":"theme?"}',
+      output: 'User selected: Dark',
+      isError: false,
+      at: 1,
+    });
+    const text = suffix('session-a');
+    expect(text).toContain(
+      'Host-recorded Kory tool executions this turn (authoritative; CLI transcripts may show only a dispatcher such as "execute" or "mcp_call_tool"):',
+    );
+    expect(text).toContain('- ask_user {"question":"theme?"} → User selected: Dark');
+  });
+});

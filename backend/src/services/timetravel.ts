@@ -16,7 +16,7 @@ import {
   type GhostCommitMetadata,
   type RecoveryOperation,
 } from '../kory/checkpoint-store';
-import { GitManager } from '../kory/git-manager';
+import { GitManager, isContainerGitRoot } from '../kory/git-manager';
 import { getContextArchive, type ContextArchiveService } from '../kory/context-archive';
 import { serverLog } from '../logger';
 import type { ConversationBoundaryReceipt, IMessageStore } from '../stores/message-store';
@@ -137,8 +137,14 @@ export class TimeTravelService {
     metadata: Omit<GhostCommitMetadata, 'id' | 'timestamp' | 'sequence'>,
   ): Promise<{ success: boolean; hash?: string; message: string }> {
     if (metadata.agentId) await this.ensureRecoveryReconciled(metadata.agentId);
-    // Only checkpoint if there are actual changes OR it's a final response point
-    const statusResult = await this.gitManager.runGit(['status', '--porcelain']);
+    // Only checkpoint if there are actual changes OR it's a final response point.
+    // A folder inside a container repository (home directory, filesystem root)
+    // is not a project repo: `git status` there would scan the whole container.
+    const top = await this.gitManager.runGit(['rev-parse', '--show-toplevel']);
+    const isProjectRepo = top.success && !isContainerGitRoot(top.output.trim());
+    const statusResult = isProjectRepo
+      ? await this.gitManager.runGit(['status', '--porcelain'])
+      : { success: false, output: '' };
     const status = statusResult.output.trim();
 
     const isFinalResponse = metadata.checkpointType === 'turn_end';

@@ -13,7 +13,15 @@
  * unchanged and reports it, so the host always knows the true enforcement level.
  */
 
-import { existsSync, mkdtempSync, mkdirSync, symlinkSync, rmSync, realpathSync, readFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  symlinkSync,
+  rmSync,
+  realpathSync,
+  readFileSync,
+} from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, basename, dirname } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
@@ -356,6 +364,32 @@ const KEEP_ENV = new Set([
 export interface SoftJail {
   env: NodeJS.ProcessEnv;
   cleanup: () => void;
+  /** The jail's private temp directory (env.TMPDIR) — the CLI's own scratch
+   *  (overflow files, caches). Read-only-allowed for managed CLI tool calls. */
+  tmp: string;
+}
+
+/** Per-session private tmp dirs owned by in-flight CLI turns, keyed by
+ *  sessionId — the bridge-side analogue of the bridge grant registry. A turn
+ *  registers on jail creation and unregisters from cleanup(). */
+const cliPrivateTmpDirs = new Map<string, Set<string>>();
+
+export function registerCliPrivateTmp(sessionId: string, dir: string): void {
+  if (!sessionId) return;
+  const set = cliPrivateTmpDirs.get(sessionId) ?? new Set<string>();
+  set.add(dir);
+  cliPrivateTmpDirs.set(sessionId, set);
+}
+
+export function unregisterCliPrivateTmp(sessionId: string, dir: string): void {
+  const set = cliPrivateTmpDirs.get(sessionId);
+  if (!set) return;
+  set.delete(dir);
+  if (set.size === 0) cliPrivateTmpDirs.delete(sessionId);
+}
+
+export function cliPrivateTmpRootsFor(sessionId: string): string[] {
+  return [...(cliPrivateTmpDirs.get(sessionId) ?? [])];
 }
 
 /** Build the soft-jail environment: a redirected HOME (exposing only the CLI's
@@ -371,6 +405,7 @@ export function buildSoftJail(
   base: NodeJS.ProcessEnv,
   configDirs: string[] = [],
   homeLinks: Record<string, string> = {},
+  sessionId?: string,
 ): SoftJail {
   const home = mkdtempSync(join(tmpdir(), 'kory-home-'));
   const tmp = join(home, '.tmp');
@@ -427,9 +462,13 @@ export function buildSoftJail(
   env.TEMP = tmp;
   env.TMP = tmp;
 
+  if (sessionId) registerCliPrivateTmp(sessionId, tmp);
+
   return {
     env,
+    tmp,
     cleanup: () => {
+      if (sessionId) unregisterCliPrivateTmp(sessionId, tmp);
       try {
         rmSync(home, { recursive: true, force: true });
       } catch (err: unknown) {

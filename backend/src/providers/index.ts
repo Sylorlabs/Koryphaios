@@ -6,7 +6,6 @@ export {
   GroqProvider,
   OpenRouterProvider,
   XAIProvider,
-  VyceAIProvider,
   AzureProvider,
 } from './openai';
 

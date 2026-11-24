@@ -8,6 +8,7 @@ import type {
 } from '@koryphaios/shared';
 import { ConflictError, ValidationError } from '../errors/types';
 import { GitExecutor } from './git-executor';
+import { isContainerGitRoot } from './git-manager';
 
 /** Persistent chat checkouts are deliberately NOT owned by WorkspaceManager:
  * its worker worktrees are disposable and automatically reconciled/removed. */
@@ -30,6 +31,20 @@ export class GitWorkspace {
             'Unable to read this Git repository. Check its permissions and Git configuration.',
           );
         }
+        return {
+          isRepo: false,
+          repositoryPath: this.directory,
+          branch: null,
+          head: null,
+          dirty: false,
+          refs: [],
+          commits: [],
+        };
+      }
+      if (isContainerGitRoot(root.stdout.trim())) {
+        // A dotfiles/scratch repository rooted at the home directory or the
+        // filesystem root is not this chat's project repository. Reporting it
+        // would make every status read scan the entire container.
         return {
           isRepo: false,
           repositoryPath: this.directory,
@@ -153,6 +168,10 @@ export class GitWorkspace {
       const root = await this.git.exec(['rev-parse', '--show-toplevel']);
       if (!root.success)
         throw new ValidationError('Open a Git repository with at least one commit first.');
+      if (isContainerGitRoot(root.stdout.trim()))
+        throw new ValidationError(
+          'This folder belongs to a repository rooted at a container directory, not a project repository.',
+        );
       const baseCommit = await this.resolveCommit(input.ref, input.expectedHash);
       const existing = await this.git.exec([
         'show-ref',

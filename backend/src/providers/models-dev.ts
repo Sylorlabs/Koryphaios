@@ -165,12 +165,6 @@ const GATEWAY_FALLBACK_PROVIDERS = new Set([
   'logfare',
   'apinex',
   'gwarden',
-  // Vyce AI is an OpenAI-compatible proxy over Claude, GPT, Gemini, DeepSeek
-  // and other upstream labs, and its authenticated /v1/models publishes the
-  // callable ids without context limits or a reasoning ladder. Without this
-  // entry every Vyce model had an estimated window and no reasoning picker;
-  // the cross-lab fallback resolves each id against its own lab's entry.
-  'vyceai',
   // Cline resells Anthropic/OpenAI/Google/xAI/DeepSeek/Mistral/Qwen models
   // under OpenRouter-style `provider/model` ids and has no models.dev key of
   // its own, so its reasoning tiers and limits resolve through the cross-lab
@@ -369,12 +363,15 @@ function levelsFromOptions(
 export function modelsDevLabKeyForNamespacedId(modelId: string): string | null {
   const slash = modelId.indexOf('/');
   if (slash <= 0) return null;
-  const namespace = modelId.slice(0, slash).toLowerCase().replace(/^[~.]+/, '');
+  const namespace = modelId
+    .slice(0, slash)
+    .toLowerCase()
+    .replace(/^[~.]+/, '');
   if (!namespace || namespace.includes(' ')) return null;
   const key =
     {
       'x-ai': 'xai',
-      'xai': 'xai',
+      xai: 'xai',
       'z-ai': 'zai',
       zai: 'zai',
       zhipu: 'zai',
@@ -414,7 +411,10 @@ export function applyModelsDevMetadata(
   // Two views per lab: exact lower-cased ids, and an id-normalized one. Labs
   // write version separators inconsistently (`claude-sonnet-5.5` on a gateway,
   // `claude-sonnet-5-5` in the lab's own catalog), and those are the same model.
-  const indexByKey = new Map<string, { exact: Map<string, ModelsDevEntry>; normalized: Map<string, ModelsDevEntry> }>();
+  const indexByKey = new Map<
+    string,
+    { exact: Map<string, ModelsDevEntry>; normalized: Map<string, ModelsDevEntry> }
+  >();
   const normalizeEntryId = (value: string): string => value.toLowerCase().replace(/[._]+/g, '-');
   const indexFor = (key: string) => {
     const cached = indexByKey.get(key);
@@ -561,8 +561,7 @@ export function applyModelsDevMetadata(
     // the composer can actually offer a reasoning picker instead of silently
     // hiding it. Context/output limits still come from the route's own entry.
     let canonicalEntry: ModelsDevEntry | undefined;
-    const canonicalId =
-      typeof e.canonical_model_id === 'string' ? e.canonical_model_id.trim() : '';
+    const canonicalId = typeof e.canonical_model_id === 'string' ? e.canonical_model_id.trim() : '';
     if (canonicalId) {
       const slash = canonicalId.indexOf('/');
       if (slash > 0) {
@@ -590,7 +589,9 @@ export function applyModelsDevMetadata(
             if (!bucket) continue;
             const hit =
               bucket[canonicalId] ??
-              Object.values(bucket).find((entry) => entry?.id?.toLowerCase() === canonicalId.toLowerCase());
+              Object.values(bucket).find(
+                (entry) => entry?.id?.toLowerCase() === canonicalId.toLowerCase(),
+              );
             if (hit) {
               canonicalEntry = hit;
               break;
@@ -599,7 +600,9 @@ export function applyModelsDevMetadata(
         }
       }
     }
-    const canonicalLevels = canonicalEntry ? levelsFromOptions(canonicalEntry.reasoning_options) : undefined;
+    const canonicalLevels = canonicalEntry
+      ? levelsFromOptions(canonicalEntry.reasoning_options)
+      : undefined;
     const canReason = e.reasoning === true || canonicalEntry?.reasoning === true;
     const levels = levelsFromOptions(e.reasoning_options) ?? canonicalLevels;
     const ctx = e.limit?.context;
@@ -671,8 +674,15 @@ export function getModelsDevPricing(
       const entry =
         entries[cand] ?? Object.values(entries).find((e) => e.id?.toLowerCase() === low);
       const c = entry?.cost;
-      if (c && typeof c.input === 'number' && Number.isFinite(c.input) && c.input >= 0 &&
-        typeof c.output === 'number' && Number.isFinite(c.output) && c.output >= 0) {
+      if (
+        c &&
+        typeof c.input === 'number' &&
+        Number.isFinite(c.input) &&
+        c.input >= 0 &&
+        typeof c.output === 'number' &&
+        Number.isFinite(c.output) &&
+        c.output >= 0
+      ) {
         return {
           inPerM: c.input,
           outPerM: c.output,

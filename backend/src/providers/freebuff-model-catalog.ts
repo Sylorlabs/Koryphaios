@@ -10,6 +10,8 @@ import {
 export interface FreebuffAccountModel extends FreebuffBundledModel {
   /** Backend-only evidence for root-model verification. Never serialize to ModelDef or logs. */
   handle: string;
+  /** Digests of this row's legacy model ids — the CLI's own catalog→price join. Backend-only. */
+  legacyDigests?: string[];
 }
 export interface FreebuffAccountCatalog {
   models: FreebuffAccountModel[];
@@ -20,8 +22,12 @@ function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 function text(value: unknown, max = 256): value is string {
-  return typeof value === 'string' && value.length > 0 && value.length <= max &&
-    !/[\x00-\x1f\x7f]/.test(value);
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= max &&
+    !/[\x00-\x1f\x7f]/.test(value)
+  );
 }
 function timestamp(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
@@ -32,34 +38,79 @@ function timestamp(value: unknown): value is number {
  * bundled fallbacks. Extra account data and catalog fetch IDs are discarded. */
 export function parseFreebuffAccountCatalog(value: unknown): FreebuffAccountCatalog {
   const invalid = () => new Error('Freebuff returned an invalid account model catalog');
-  if (!record(value) || value.protocol !== 1 || !text(value.version) ||
-    !timestamp(value.issuedAt) || !timestamp(value.refreshAt) ||
-    !Array.isArray(value.rows) || value.rows.length > 512) throw invalid();
+  if (
+    !record(value) ||
+    value.protocol !== 1 ||
+    !text(value.version) ||
+    !timestamp(value.issuedAt) ||
+    !timestamp(value.refreshAt) ||
+    !Array.isArray(value.rows) ||
+    value.rows.length > 512
+  )
+    throw invalid();
   const keys = new Set<string>();
   const models: FreebuffAccountModel[] = [];
   for (const row of value.rows) {
-    if (!record(row) || !text(row.key, 64) ||
+    if (
+      !record(row) ||
+      !text(row.key, 64) ||
       !freebuffCatalogKeyFromModelId(`${FREEBUFF_CATALOG_MODEL_PREFIX}${row.key}`) ||
-      keys.has(row.key) || !text(row.handle, 4096) || !text(row.displayName) ||
-      typeof row.multimodal !== 'boolean' || !['open', 'locked'].includes(String(row.access)) ||
-      typeof row.sortOrder !== 'number' || !Number.isFinite(row.sortOrder) ||
+      keys.has(row.key) ||
+      !text(row.handle, 4096) ||
+      !text(row.displayName) ||
+      typeof row.multimodal !== 'boolean' ||
+      !['open', 'locked'].includes(String(row.access)) ||
+      typeof row.sortOrder !== 'number' ||
+      !Number.isFinite(row.sortOrder) ||
       (row.opensAt !== undefined && !timestamp(row.opensAt)) ||
       (row.contextWindow !== undefined &&
         (!Number.isSafeInteger(row.contextWindow) || Number(row.contextWindow) <= 0)) ||
-      (row.efforts !== undefined && (!Array.isArray(row.efforts) || row.efforts.length > 16 ||
-        row.efforts.some((effort) => !text(effort, 32))))) throw invalid();
+      (row.efforts !== undefined &&
+        (!Array.isArray(row.efforts) ||
+          row.efforts.length > 16 ||
+          row.efforts.some((effort) => !text(effort, 32)))) ||
+      (row.reasoningEffort !== undefined && !text(row.reasoningEffort, 32)) ||
+      (row.legacyDigests !== undefined &&
+        (!Array.isArray(row.legacyDigests) ||
+          row.legacyDigests.length > 8 ||
+          row.legacyDigests.some((digest) => !text(digest, 32)))) ||
+      (row.compaction !== undefined &&
+        (!record(row.compaction) ||
+          (row.compaction.maxContextLength !== undefined &&
+            (!Number.isSafeInteger(row.compaction.maxContextLength) ||
+              Number(row.compaction.maxContextLength) <= 0))))
+    )
+      throw invalid();
     keys.add(row.key);
     // Matches the CLI's cY filter: opensAt is compared with the catalog's issuedAt.
     if (row.access !== 'open' || (typeof row.opensAt === 'number' && row.opensAt > value.issuedAt))
       continue;
+    // Slow-tier rows omit contextWindow entirely; their compaction contract's
+    // maxContextLength is the provider-reported operative limit and is the only
+    // context figure the account sends for them.
+    const contextWindow =
+      typeof row.contextWindow === 'number'
+        ? row.contextWindow
+        : record(row.compaction) && typeof row.compaction.maxContextLength === 'number'
+          ? row.compaction.maxContextLength
+          : undefined;
     models.push({
       id: `${FREEBUFF_CATALOG_MODEL_PREFIX}${row.key}`,
       name: row.displayName,
       handle: row.handle,
       multimodal: row.multimodal,
-      ...(typeof row.contextWindow === 'number' ? { contextWindow: row.contextWindow } : {}),
+      // Digests of this row's legacy model ids — the CLI's own join from
+      // catalog row to the legacy-keyed price table. Backend-only evidence,
+      // never serialized to the client.
+      ...(Array.isArray(row.legacyDigests) && row.legacyDigests.length
+        ? { legacyDigests: [...row.legacyDigests] as string[] }
+        : {}),
+      ...(contextWindow !== undefined ? { contextWindow } : {}),
       ...(Array.isArray(row.efforts) && row.efforts.length
-        ? { reasoningLevels: [...new Set(row.efforts as string[])] } : {}),
+        ? { reasoningLevels: [...new Set(row.efforts as string[])] }
+        : typeof row.reasoningEffort === 'string' && row.reasoningEffort.length
+          ? { reasoningLevels: [row.reasoningEffort] }
+          : {}),
     });
   }
   return { models, refreshAt: value.refreshAt };
@@ -72,12 +123,15 @@ export interface FreebuffModelCatalogDependencies {
 }
 const TTL_MS = 5 * 60_000;
 const FAILURE_TTL_MS = 30_000;
-const cache = new Map<string, {
-  revision: string;
-  expiresAt: number;
-  value?: FreebuffAccountCatalog;
-  inFlight?: Promise<FreebuffAccountCatalog>;
-}>();
+const cache = new Map<
+  string,
+  {
+    revision: string;
+    expiresAt: number;
+    value?: FreebuffAccountCatalog;
+    inFlight?: Promise<FreebuffAccountCatalog>;
+  }
+>();
 
 /** One read-only authenticated GET using exactly the CLI-owned credential.
  * No session admission, device registration, model generation or handle mutation.
@@ -91,7 +145,10 @@ export async function getFreebuffModelCatalog(
     now: Date.now,
   },
 ): Promise<FreebuffAccountCatalog> {
-  const failure = () => new Error('Freebuff account models could not be refreshed. Check the CLI login and refresh models.');
+  const failure = () =>
+    new Error(
+      'Freebuff account models could not be refreshed. Check the CLI login and refresh models.',
+    );
   let revision: string;
   try {
     const metadata = statSync(join(profileDir, 'credentials.json'));
@@ -108,25 +165,39 @@ export async function getFreebuffModelCatalog(
     throw failure();
   }
   const signal = AbortSignal.timeout(65_000); // Includes bounded Keychain consent.
-  state.inFlight = dependencies.withToken(profileDir, async (token) => {
-    const response = await dependencies.fetch('https://www.codebuff.com/api/v1/freebuff/models', {
-      method: 'GET',
-      headers: { Authorization: `Bearer ${token}`, 'x-freebuff-catalog-protocol': '1' },
-      redirect: 'error',
-      signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
+  state.inFlight = dependencies
+    .withToken(
+      profileDir,
+      async (token) => {
+        const response = await dependencies.fetch(
+          'https://www.codebuff.com/api/v1/freebuff/models',
+          {
+            method: 'GET',
+            headers: { Authorization: `Bearer ${token}`, 'x-freebuff-catalog-protocol': '1' },
+            redirect: 'error',
+            signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
+          },
+        );
+        if (!response.ok) throw failure();
+        return parseFreebuffAccountCatalog(await response.json());
+      },
+      signal,
+    )
+    .then((value) => {
+      state.value = value;
+      state.expiresAt =
+        dependencies.now() +
+        Math.min(TTL_MS, Math.max(10_000, value.refreshAt - dependencies.now()));
+      return value;
+    })
+    .catch(() => {
+      state.value = undefined;
+      state.expiresAt = dependencies.now() + FAILURE_TTL_MS;
+      throw failure(); // Never expose response bodies, headers, handles or child errors.
+    })
+    .finally(() => {
+      state.inFlight = undefined;
     });
-    if (!response.ok) throw failure();
-    return parseFreebuffAccountCatalog(await response.json());
-  }, signal).then((value) => {
-    state.value = value;
-    state.expiresAt = dependencies.now() + Math.min(TTL_MS,
-      Math.max(10_000, value.refreshAt - dependencies.now()));
-    return value;
-  }).catch(() => {
-    state.value = undefined;
-    state.expiresAt = dependencies.now() + FAILURE_TTL_MS;
-    throw failure(); // Never expose response bodies, headers, handles or child errors.
-  }).finally(() => { state.inFlight = undefined; });
   cache.set(profileDir, state);
   return state.inFlight;
 }

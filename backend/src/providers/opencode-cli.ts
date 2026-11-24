@@ -70,10 +70,7 @@ import { whichBinary } from './cli-detection';
 import { providerLog } from '../logger';
 import { isModelListCacheFresh } from './model-list-cache';
 import { getCliBridge, KORY_HARNESS_NOTE } from './cli-bridges';
-import {
-  koryBridgeUnavailableError,
-  resolveKoryBridgeScript,
-} from './kory-cli-mcp-config';
+import { koryBridgeUnavailableError, resolveKoryBridgeScript } from './kory-cli-mcp-config';
 import { createKoryBridgeGrantLease } from './bridge-grant';
 import { recordProviderModelPricing } from '../pricing';
 import {
@@ -202,7 +199,9 @@ export class OpenCodeCliProvider implements Provider {
     // owns it. Prefer an exact provider-prefixed catalog match if one exists.
     const bare = requested.includes('/')
       ? undefined
-      : models.find((m) => m.id.endsWith(`/${requested}`) || m.apiModelId?.endsWith(`/${requested}`));
+      : models.find(
+          (m) => m.id.endsWith(`/${requested}`) || m.apiModelId?.endsWith(`/${requested}`),
+        );
     return bare?.apiModelId ?? bare?.id ?? requested;
   }
 
@@ -274,12 +273,7 @@ export class OpenCodeCliProvider implements Provider {
       : [];
     // Fail closed: a session-scoped turn expecting the bridge that cannot
     // resolve its script must not spawn the CLI silently tool-less.
-    if (
-      wireKoryMcp &&
-      request.sessionId &&
-      mcpServers.length === 0 &&
-      !resolveKoryBridgeScript()
-    ) {
+    if (wireKoryMcp && request.sessionId && mcpServers.length === 0 && !resolveKoryBridgeScript()) {
       bridgeGrantLease?.cleanup();
       yield { type: 'error', error: koryBridgeUnavailableError('opencode') };
       return;
@@ -315,6 +309,7 @@ export class OpenCodeCliProvider implements Provider {
           '.local/state/opencode': join(realHome, '.local', 'state', 'opencode'),
           '.cache/opencode': join(realHome, '.cache', 'opencode'),
         },
+        request.sessionId,
       );
       spawnEnv = jail.env;
       const mounts = [jail.env.HOME as string, ...opencodeDirs];
@@ -353,8 +348,7 @@ export class OpenCodeCliProvider implements Provider {
       yield {
         type: 'error',
         error: safeProviderFailureMessage('opencode', diagnostic, {
-          authenticationAction:
-            'Make sure `opencode acp` runs on this machine, then reconnect.',
+          authenticationAction: 'Make sure `opencode acp` runs on this machine, then reconnect.',
         }),
       };
       return;
@@ -433,7 +427,12 @@ export class OpenCodeCliProvider implements Provider {
     let sawThinking = false;
     let acpStopReason: string | undefined;
     let usageFromTurn:
-      | { inputTokens?: number; outputTokens?: number; totalTokens?: number; thoughtTokens?: number }
+      | {
+          inputTokens?: number;
+          outputTokens?: number;
+          totalTokens?: number;
+          thoughtTokens?: number;
+        }
       | undefined;
     let promptError: string | undefined;
     let promptDone = false;
@@ -563,7 +562,10 @@ export class OpenCodeCliProvider implements Provider {
     request.signal?.addEventListener('abort', onAbort, { once: true });
 
     const timeout = setTimeout(() => {
-      providerLog.warn({ provider: 'opencode' }, 'OpenCode harness timed out — cancelling ACP turn');
+      providerLog.warn(
+        { provider: 'opencode' },
+        'OpenCode harness timed out — cancelling ACP turn',
+      );
       client.cancel(sessionId);
       const killer = setTimeout(() => void client.disconnect(), 5_000);
       killer.unref?.();
@@ -725,8 +727,7 @@ function execOpenCode(
       (error, stdout, stderr) => {
         if (error) {
           const detail =
-            appendPrivateDiagnostic('', Buffer.from(String(stderr ?? ''))).trim() ||
-            error.message;
+            appendPrivateDiagnostic('', Buffer.from(String(stderr ?? ''))).trim() || error.message;
           resolve({ ok: false, stdout: '', error: detail });
           return;
         }
@@ -898,7 +899,9 @@ function buildPrompt(
   // disabled with nothing to replace them. Plain turns stay plain.
   if (includeHarnessNote) {
     lines.push(
-      systemPrompt?.trim() ? `${systemPrompt.trim()}\n\n${OPENCODE_HARNESS_NOTE}` : OPENCODE_HARNESS_NOTE,
+      systemPrompt?.trim()
+        ? `${systemPrompt.trim()}\n\n${OPENCODE_HARNESS_NOTE}`
+        : OPENCODE_HARNESS_NOTE,
       '',
     );
   } else if (systemPrompt?.trim()) {
@@ -921,9 +924,10 @@ function flattenContent(content: string | ProviderContentBlock[]): string {
   for (const block of content) {
     if (block.type === 'text' && block.text) parts.push(block.text);
     else if (block.type === 'tool_use')
-      parts.push(`[tool call: ${block.toolName ?? 'tool'} ${JSON.stringify(block.toolInput ?? {})}]`);
-    else if (block.type === 'tool_result')
-      parts.push(`[tool result: ${block.toolOutput ?? ''}]`);
+      parts.push(
+        `[tool call: ${block.toolName ?? 'tool'} ${JSON.stringify(block.toolInput ?? {})}]`,
+      );
+    else if (block.type === 'tool_result') parts.push(`[tool result: ${block.toolOutput ?? ''}]`);
     else if (block.type === 'image') parts.push('[image attachment included]');
     else if (block.type === 'audio')
       parts.push('[audio attachment omitted — OpenCode harness is text/image-only]');
@@ -973,9 +977,7 @@ function extractToolOutput(event: {
   if (parts.length > 0) return parts.join('\n');
   if (event.rawOutput === undefined) return '';
   try {
-    return typeof event.rawOutput === 'string'
-      ? event.rawOutput
-      : JSON.stringify(event.rawOutput);
+    return typeof event.rawOutput === 'string' ? event.rawOutput : JSON.stringify(event.rawOutput);
   } catch {
     return String(event.rawOutput);
   }

@@ -59,11 +59,13 @@ import {
   wrapCommand,
 } from '../collaboration/sandbox-runner';
 import {
+  antigravityProbeAuthBlocked,
   antigravityProbeEnv,
   getCliBridge,
   getKoryphaiosAntigravityHome,
   hasAntigravityPortableLogin,
   KORY_CUSTOM_MCP_NOTE,
+  markAntigravityProbeAuthBlocked,
 } from './cli-bridges';
 import { buildAntigravityHooks, buildAntigravitySettings } from './antigravity-permissions';
 import {
@@ -388,6 +390,8 @@ let cachedModelsAt = 0;
 let lastModelsProbeAt = 0;
 let modelsFetchInProgress = false;
 let modelsFetchPromise: Promise<ModelDef[]> | null = null;
+/** Log the no-login probe skip once per login state, not once per tick. */
+let skippedNoLoginProbeLogged = false;
 /** Live per-group quota from the agy CLI's `/usage` command, keyed by group
  *  name. Refreshed alongside the model list and merged into ModelDef.quota. */
 let cachedQuota: Map<string, ModelQuota> | null = null;
@@ -399,17 +403,13 @@ let cachedQuotaGroups: AntigravityQuotaGroup[] | null = null;
  *  This deliberately does NOT use the Kory-managed isolated HOME that the
  *  agentic turn runs under. agy keeps its Google OAuth token in the OS
  *  credential store (macOS login keychain: service "gemini", account
- *  "antigravity"; libsecret over the D-Bus user bus on Linux). The Security
- *  framework resolves the login keychain from the *user's* home directory, so
- *  a child launched with a replaced HOME finds no keychain and reports
- *  "Please sign in to view available models" — producing a verified provider
- *  with an empty model catalog.
- *
- *  Discovery is a pure read (`agy models` lists the account's model slugs and
- *  writes nothing Koryphaios depends on), so running it under the same managed
- *  HOME as a turn is side-effect free and cannot refresh the host keychain.
- *  The credential itself is never read or copied by Koryphaios: agy reads the
- *  staged/link-only CLI record from the managed GEMINI_DIR. */
+ *  "antigravity"; libsecret over the D-Bus user bus on Linux) and resolves it
+ *  through the *user's* home directory — a child launched with a replaced HOME
+ *  finds no credential, reports "Please sign in to view available models", and
+ *  `agy --print` goes further: it enters the interactive OAuth flow that pops
+ *  a browser sign-in from a background poll. The probe env therefore keeps the
+ *  real HOME (what `agy` sees in the user's own terminal) while stripping PATH
+ *  of every browser opener so the sign-in flow can never launch a window. */
 function agyDiscoveryEnv(): NodeJS.ProcessEnv {
   return antigravityProbeEnv();
 }
@@ -460,24 +460,39 @@ function refreshModelsInBackground(forceRefresh = false): Promise<ModelDef[]> {
   const bin = whichBinary('agy');
   if (!bin) return Promise.resolve(cachedModels ?? []);
 
-  // A passive probe must never be able to start an interactive sign-in. When
-  // agy finds no credential in its home it opens the browser OAuth flow, and
-  // this provider is probed from every stale status render plus the catalog
-  // scheduler. Without a staged portable login there is nothing to discover,
-  // so record the attempt (negative cache) instead of spawning.
-  if (!hasAntigravityPortableLogin()) {
-    lastModelsProbeAt = Date.now();
-    providerLog.debug(
-      { provider: 'antigravity' },
-      'Antigravity has no staged portable login; skipped the passive `agy models` probe so it cannot launch a browser sign-in',
-    );
-    return Promise.resolve(cachedModels ?? []);
-  }
-
+  // The cooldown gate has to come first: the no-login early return used to
+  // sit above it, so the negative-cache stamp never throttled anything and
+  // the skip was re-logged on every catalog tick — thousands of lines a day.
   if (!forceRefresh && Date.now() - lastModelsProbeAt < MODELS_PROBE_FAILURE_COOLDOWN_MS) {
     return Promise.resolve(cachedModels ?? []);
   }
   lastModelsProbeAt = Date.now();
+
+  // A passive probe must never be able to start an interactive sign-in. When
+  // agy finds no credential in its home it opens the browser OAuth flow, and
+  // this provider is probed from every stale status render plus the catalog
+  // scheduler. Without login material in the probe's home there is nothing to
+  // discover, so record the attempt (negative cache) instead of spawning.
+  if (!hasAntigravityPortableLogin()) {
+    if (!skippedNoLoginProbeLogged) {
+      skippedNoLoginProbeLogged = true;
+      providerLog.debug(
+        { provider: 'antigravity' },
+        'Antigravity has no detectable login; skipped the passive `agy models` probe so it cannot launch a browser sign-in',
+      );
+    }
+    return Promise.resolve(cachedModels ?? []);
+  }
+
+  // Credential files exist but the previous probe still hit "please sign in"
+  // (revoked token, expired past refresh, a keychain item the CLI declined to
+  // read). Spawning again would re-enter agy's OAuth flow; the latch releases
+  // when the credential files change (fresh `agy login`) and a forced refresh
+  // always bypasses it.
+  if (!forceRefresh && antigravityProbeAuthBlocked()) {
+    return Promise.resolve(cachedModels ?? []);
+  }
+  skippedNoLoginProbeLogged = false;
   modelsFetchInProgress = true;
   void fetchAntigravityQuotaGroups()
     .then((groups) => {
@@ -554,13 +569,19 @@ function mergeQuotaIntoModels(
   });
 }
 
+/** agy reports a missing/unusable credential on stderr with exit 1. Matched
+ *  loosely — the strings vary between "Please sign in" and "not signed in"
+ *  across versions; the latch only needs to know auth is the blocker. */
+const AGY_SIGN_IN_PATTERN = /sign in|not signed in|authentication required|login required/i;
+
 async function fetchAgyModels(bin: string): Promise<ModelDef[]> {
   return new Promise((resolve, reject) => {
     const child = spawn(bin, ['models'], {
-      stdio: ['ignore', 'pipe', 'ignore'],
+      stdio: ['ignore', 'pipe', 'pipe'],
       env: agyDiscoveryEnv(),
     });
     let out = '';
+    let errOut = '';
     let settled = false;
     const finish = (value: ModelDef[]) => {
       if (settled) return;
@@ -573,6 +594,9 @@ async function fetchAgyModels(bin: string): Promise<ModelDef[]> {
       finish([]);
     }, AGY_MODELS_PROBE_TIMEOUT_MS);
     child.stdout.on('data', (c: Buffer) => (out += c.toString()));
+    child.stderr?.on('data', (c: Buffer) => {
+      if (errOut.length < 4096) errOut += c.toString();
+    });
     child.once('error', (err) => {
       if (settled) return;
       settled = true;
@@ -580,6 +604,11 @@ async function fetchAgyModels(bin: string): Promise<ModelDef[]> {
       reject(err);
     });
     child.once('exit', (code) => {
+      if (code !== 0 && AGY_SIGN_IN_PATTERN.test(errOut)) {
+        // Latch so the scheduler stops re-spawning a probe that can only
+        // re-enter agy's sign-in flow; releases on credential change.
+        markAntigravityProbeAuthBlocked();
+      }
       const lines = out
         .split('\n')
         .map((l) => l.trim())
@@ -1424,7 +1453,9 @@ export class AntigravityProvider implements Provider {
     // directory itself, which is what `$HOME/.gemini` must resolve to: that
     // carries the credential, the enforced permission settings, the hooks, and
     // the MCP registration in one shot.
-    const jail = request.sandbox ? buildSoftJail(baseEnv, [join(agyHome, '.gemini')]) : null;
+    const jail = request.sandbox
+      ? buildSoftJail(baseEnv, [join(agyHome, '.gemini')], {}, request.sessionId)
+      : null;
     // The isolated home carries symlinks to the real ~/.gemini OAuth material,
     // so the real config dir must be visible read-only inside the jail or the
     // links dangle and agy reports "Please sign in". homeDir keeps bwrap HOME
@@ -1527,7 +1558,10 @@ export class AntigravityProvider implements Provider {
     // Stderr diagnostics alone do not prove reasoning or tool progress.
     const idle = createIdleAbortSignal(AGY_IDLE_TIMEOUT_MS);
     const onIdleTimeout = () => {
-      providerLog.warn({ provider: 'antigravity' }, 'Antigravity harness idle timeout — killing CLI');
+      providerLog.warn(
+        { provider: 'antigravity' },
+        'Antigravity harness idle timeout — killing CLI',
+      );
       onAbort();
     };
     idle.signal.addEventListener('abort', onIdleTimeout, { once: true });

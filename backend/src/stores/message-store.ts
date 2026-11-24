@@ -1,4 +1,9 @@
-import type { MessageAttachment, StoredMessage, TranscriptPart } from '@koryphaios/shared';
+import type {
+  ImportedTokenUsage,
+  MessageAttachment,
+  StoredMessage,
+  TranscriptPart,
+} from '@koryphaios/shared';
 import {
   db,
   getDb,
@@ -179,12 +184,30 @@ function isTranscriptPartsBlock(block: unknown): block is { type: string; parts:
  */
 const MESSAGE_META_BLOCK = 'kory_message_meta';
 
-function isMessageMetaBlock(block: unknown): block is { type: string; timeUnknown?: unknown } {
+function isMessageMetaBlock(
+  block: unknown,
+): block is { type: string; timeUnknown?: unknown; importedUsage?: unknown } {
   return (
     typeof block === 'object' &&
     block !== null &&
     (block as { type?: unknown }).type === MESSAGE_META_BLOCK
   );
+}
+
+function parseImportedUsage(value: unknown): ImportedTokenUsage | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const usage = value as Record<string, unknown>;
+  const parsed: ImportedTokenUsage = {};
+  let any = false;
+  for (const key of ['input', 'output', 'cacheRead', 'cacheWrite'] as const) {
+    const n = usage[key];
+    if (typeof n === 'number' && Number.isFinite(n) && n >= 0) {
+      parsed[key] = Math.floor(n);
+      any = true;
+    }
+  }
+  if (usage.estimated === true) parsed.estimated = true;
+  return any ? parsed : undefined;
 }
 
 function parseStoredContent(raw: string): {
@@ -193,6 +216,7 @@ function parseStoredContent(raw: string): {
   reasoningContent?: string;
   parts?: TranscriptPart[];
   timeUnknown?: true;
+  importedUsage?: ImportedTokenUsage;
 } {
   try {
     const blocks = JSON.parse(raw);
@@ -220,9 +244,14 @@ function parseStoredContent(raw: string): {
         .map((block) => block.text ?? '')
         .join(''),
       attachments,
-      reasoningContent: thinking.length ? thinking.map((block) => block.thinking).join('') : undefined,
+      reasoningContent: thinking.length
+        ? thinking.map((block) => block.thinking).join('')
+        : undefined,
       parts: Array.isArray(partsBlock?.parts) ? (partsBlock.parts as TranscriptPart[]) : undefined,
       ...(metaBlock?.timeUnknown === true ? { timeUnknown: true as const } : {}),
+      ...(parseImportedUsage(metaBlock?.importedUsage)
+        ? { importedUsage: parseImportedUsage(metaBlock?.importedUsage) }
+        : {}),
     };
   } catch (err: unknown) {
     serverLog.debug(
@@ -238,8 +267,16 @@ function serializeStoredContent(
   attachments: MessageAttachment[] = [],
   reasoningContent?: string,
   parts?: TranscriptPart[],
-  timeUnknown?: boolean,
+  meta?: Pick<StoredMessage, 'timeUnknown' | 'importedUsage'>,
 ): string {
+  const metaBlock =
+    meta && (meta.timeUnknown === true || meta.importedUsage)
+      ? {
+          type: MESSAGE_META_BLOCK,
+          ...(meta.timeUnknown === true ? { timeUnknown: true } : {}),
+          ...(meta.importedUsage ? { importedUsage: meta.importedUsage } : {}),
+        }
+      : null;
   return JSON.stringify([
     ...(reasoningContent !== undefined ? [{ type: 'thinking', thinking: reasoningContent }] : []),
     { type: 'text', text: content },
@@ -259,7 +296,7 @@ function serializeStoredContent(
       return { ...attachment, mimeType };
     }),
     ...(parts !== undefined ? [{ type: TRANSCRIPT_PARTS_BLOCK, parts }] : []),
-    ...(timeUnknown === true ? [{ type: MESSAGE_META_BLOCK, timeUnknown: true }] : []),
+    ...(metaBlock ? [metaBlock] : []),
   ]);
 }
 
@@ -274,6 +311,7 @@ function toStoredMessage(m: DbMessage): StoredMessage {
     reasoningContent: stored.reasoningContent,
     parts: stored.parts,
     ...(stored.timeUnknown ? { timeUnknown: true as const } : {}),
+    ...(stored.importedUsage ? { importedUsage: stored.importedUsage } : {}),
     attachments: stored.attachments.length > 0 ? stored.attachments : undefined,
     model: m.model ?? undefined,
     provider: m.provider ?? undefined,
@@ -507,7 +545,14 @@ export class MessageStore implements IMessageStore {
       const cursorBindings =
         contextRevision === undefined
           ? [sessionId, sessionId, MAX_ACTIVE_LINEAGE_DEPTH - 1, olderThanMessageId, boundedLimit]
-          : [sessionId, sessionId, MAX_ACTIVE_LINEAGE_DEPTH - 1, contextRevision, olderThanMessageId, boundedLimit];
+          : [
+              sessionId,
+              sessionId,
+              MAX_ACTIVE_LINEAGE_DEPTH - 1,
+              contextRevision,
+              olderThanMessageId,
+              boundedLimit,
+            ];
       return (statement.all(...cursorBindings) as Array<{ id: string }>).map((row) => row.id);
     }
     return (statement.all(...bindings) as Array<{ id: string }>).map((row) => row.id);
@@ -551,7 +596,13 @@ export class MessageStore implements IMessageStore {
   }
 
   async addIdempotent(sessionId: string, msg: StoredMessage): Promise<'inserted' | 'existing'> {
-    const expectedContent = serializeStoredContent(msg.content, msg.attachments, msg.reasoningContent, msg.parts, msg.timeUnknown);
+    const expectedContent = serializeStoredContent(
+      msg.content,
+      msg.attachments,
+      msg.reasoningContent,
+      msg.parts,
+      msg,
+    );
     const assertExistingMatches = async (): Promise<boolean> => {
       const [row] = await db.select().from(messages).where(eq(messages.id, msg.id)).limit(1);
       if (!row) return false;
@@ -591,7 +642,13 @@ export class MessageStore implements IMessageStore {
     msg: StoredMessage,
     expected: MessageAppendBoundary,
   ): Promise<'inserted' | 'existing'> {
-    const content = serializeStoredContent(msg.content, msg.attachments, msg.reasoningContent, msg.parts, msg.timeUnknown);
+    const content = serializeStoredContent(
+      msg.content,
+      msg.attachments,
+      msg.reasoningContent,
+      msg.parts,
+      msg,
+    );
     const tokensIn = msg.tokensIn ?? 0;
     const tokensOut = msg.tokensOut ?? 0;
     const cost = msg.cost ?? 0;
@@ -612,12 +669,7 @@ export class MessageStore implements IMessageStore {
         throw new ConflictError('Recover this archived chat before adding messages.');
       }
 
-      const [existing] = tx
-        .select()
-        .from(messages)
-        .where(eq(messages.id, msg.id))
-        .limit(1)
-        .all();
+      const [existing] = tx.select().from(messages).where(eq(messages.id, msg.id)).limit(1).all();
       if (existing) {
         if (
           existing.sessionId !== sessionId ||
@@ -670,8 +722,7 @@ export class MessageStore implements IMessageStore {
           createdAt: new Date(msg.createdAt),
         })
         .run();
-      tx
-        .update(sessions)
+      tx.update(sessions)
         .set({
           messageCount: sql`COALESCE(${sessions.messageCount}, 0) + 1`,
           tokensIn: sql`COALESCE(${sessions.tokensIn}, 0) + ${tokensIn}`,
@@ -713,7 +764,13 @@ export class MessageStore implements IMessageStore {
           id: msg.id,
           sessionId,
           role: msg.role,
-          content: serializeStoredContent(msg.content, msg.attachments, msg.reasoningContent, msg.parts, msg.timeUnknown),
+          content: serializeStoredContent(
+            msg.content,
+            msg.attachments,
+            msg.reasoningContent,
+            msg.parts,
+            msg,
+          ),
           model: msg.model ?? null,
           provider: msg.provider ?? null,
           tokensIn: msgTokensIn,
@@ -726,8 +783,7 @@ export class MessageStore implements IMessageStore {
           createdAt: new Date(msg.createdAt),
         })
         .run();
-      tx
-        .update(sessions)
+      tx.update(sessions)
         .set({
           messageCount: sql`COALESCE(${sessions.messageCount}, 0) + 1`,
           tokensIn: sql`COALESCE(${sessions.tokensIn}, 0) + ${msgTokensIn}`,
@@ -754,7 +810,10 @@ export class MessageStore implements IMessageStore {
     return this.getDisplayMessagesFromActive(active, sessionId);
   }
 
-  private getDisplayMessagesFromActive(active: StoredMessage[], sessionId: string): StoredMessage[] {
+  private getDisplayMessagesFromActive(
+    active: StoredMessage[],
+    sessionId: string,
+  ): StoredMessage[] {
     const activeIds = new Set(active.map((message) => message.id));
     const activeProjection = active.map((message) => ({
       ...message,
@@ -991,8 +1050,7 @@ export class MessageStore implements IMessageStore {
           createdAt,
         })
         .run();
-      tx
-        .update(sessions)
+      tx.update(sessions)
         .set({
           conversationRevision: targetRevision,
           providerConversationRevision: sql`COALESCE(${sessions.providerConversationRevision}, 0) + 1`,
@@ -1224,17 +1282,15 @@ export class MessageStore implements IMessageStore {
       const pivot =
         messageId === null
           ? null
-          : (
-              tx
-                .select({
-                  sessionId: messages.sessionId,
-                  contextRevision: messages.contextRevision,
-                })
-                .from(messages)
-                .where(and(eq(messages.id, messageId), eq(messages.sessionId, sessionId)))
-                .limit(1)
-                .all()
-            )[0];
+          : tx
+              .select({
+                sessionId: messages.sessionId,
+                contextRevision: messages.contextRevision,
+              })
+              .from(messages)
+              .where(and(eq(messages.id, messageId), eq(messages.sessionId, sessionId)))
+              .limit(1)
+              .all()[0];
       if (messageId !== null && !pivot) {
         throw new Error('Conversation boundary message not found in this session');
       }
@@ -1453,8 +1509,7 @@ export class MessageStore implements IMessageStore {
 
       const groupId = target.variantGroupId ?? `response-${prompt.id}`;
       if (!target.variantGroupId) {
-        tx
-          .update(messages)
+        tx.update(messages)
           .set({ variantGroupId: groupId, variantIndex: 0 })
           .where(and(eq(messages.id, target.id), eq(messages.sessionId, input.sessionId)))
           .run();
@@ -1581,7 +1636,13 @@ export class MessageStore implements IMessageStore {
           id: message.id,
           sessionId: reservation.sessionId,
           role: 'assistant',
-          content: serializeStoredContent(message.content, message.attachments, message.reasoningContent, message.parts, message.timeUnknown),
+          content: serializeStoredContent(
+            message.content,
+            message.attachments,
+            message.reasoningContent,
+            message.parts,
+            message,
+          ),
           model: message.model ?? null,
           provider: message.provider ?? null,
           tokensIn: msgTokensIn,
@@ -1629,15 +1690,14 @@ export class MessageStore implements IMessageStore {
         .all();
       if (!session) throw new Error('Session not found');
       const stored = parseStoredContent(pivot.content);
-      tx
-        .update(messages)
+      tx.update(messages)
         .set({
           content: serializeStoredContent(
             content,
             stored.attachments,
             stored.reasoningContent,
             stored.parts,
-            stored.timeUnknown,
+            stored,
           ),
         })
         .where(and(eq(messages.id, messageId), eq(messages.sessionId, sessionId)))
@@ -1704,9 +1764,7 @@ export class MessageStore implements IMessageStore {
       const activeBranchWasPruned =
         session.activeMessageId !== null &&
         descendants.some((descendant) => descendant.id === session.activeMessageId);
-      const nextHead = activeBranchWasPruned
-        ? target.parentMessageId
-        : session.activeMessageId;
+      const nextHead = activeBranchWasPruned ? target.parentMessageId : session.activeMessageId;
       let nextContextRevision = session.contextRevision ?? 0;
       if (activeBranchWasPruned) {
         if (nextHead) {

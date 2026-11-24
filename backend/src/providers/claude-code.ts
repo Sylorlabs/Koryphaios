@@ -27,10 +27,7 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { whichBinary } from './cli-detection';
 import { getCliBridge } from './cli-bridges';
-import {
-  koryBridgeUnavailableError,
-  resolveKoryBridgeScript,
-} from './kory-cli-mcp-config';
+import { koryBridgeUnavailableError, resolveKoryBridgeScript } from './kory-cli-mcp-config';
 import { ClaudeCodeCliBridge } from './cli-bridges';
 import type { CliHookConfig } from './cli-bridge';
 import {
@@ -1040,7 +1037,7 @@ export class ClaudeCodeProvider implements Provider {
     // No-op for local turns or the "trusted" (no-isolation) preset.
     let softCleanup: (() => void) | null = null;
     if (sandbox?.filesystemIsolation) {
-      const soft = buildSoftJail(env, [env.CLAUDE_CONFIG_DIR!]);
+      const soft = buildSoftJail(env, [env.CLAUDE_CONFIG_DIR!], {}, request.sessionId);
       Object.assign(env, soft.env);
       softCleanup = soft.cleanup;
     }

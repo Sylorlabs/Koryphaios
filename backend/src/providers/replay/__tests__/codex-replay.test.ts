@@ -35,8 +35,14 @@ describe('codex replay through CodexCliProvider', () => {
     const transcript = loadTranscript(FIXTURE);
     // Only the turn process gets the recording. The model-list probe (`app-server`)
     // has no recording and exits 127, which the adapter treats as "no models".
-    const spawnChild = createReplaySpawn((_command, args) => (args.includes('exec') ? transcript : null));
-    const provider = new CodexCliProvider({ name: 'codex' } as ProviderConfig, spawnChild as never, sandbox.home);
+    const spawnChild = createReplaySpawn((_command, args) =>
+      args.includes('exec') ? transcript : null,
+    );
+    const provider = new CodexCliProvider(
+      { name: 'codex' } as ProviderConfig,
+      spawnChild as never,
+      sandbox.home,
+    );
 
     const request: StreamRequest = {
       model: 'gpt-5-codex',
@@ -56,7 +62,8 @@ describe('codex replay through CodexCliProvider', () => {
     ]);
     expect(events[0]).toEqual({
       type: 'thinking_delta',
-      thinking: '**Planning the listing**\n\nI need the contents of src/ before I can summarise main.ts.\n\n',
+      thinking:
+        '**Planning the listing**\n\nI need the contents of src/ before I can summarise main.ts.\n\n',
     });
     expect(events[1]).toEqual({
       type: 'tool_executed',
@@ -67,7 +74,8 @@ describe('codex replay through CodexCliProvider', () => {
     });
     expect(events[2]).toEqual({
       type: 'thinking_delta',
-      thinking: '**Reading the entry point**\n\nmain.ts is the likely entry point, so it is the file to summarise.\n\n',
+      thinking:
+        '**Reading the entry point**\n\nmain.ts is the likely entry point, so it is the file to summarise.\n\n',
     });
     expect(events[3]).toEqual({
       type: 'content_delta',
@@ -86,8 +94,14 @@ describe('codex replay through CodexCliProvider', () => {
   });
 
   test('spawns the turn with the codex exec argv and writes the prompt to stdin', async () => {
-    const spawnChild = createReplaySpawn((_command, args) => (args.includes('exec') ? loadTranscript(FIXTURE) : null));
-    const provider = new CodexCliProvider({ name: 'codex' } as ProviderConfig, spawnChild as never, sandbox.home);
+    const spawnChild = createReplaySpawn((_command, args) =>
+      args.includes('exec') ? loadTranscript(FIXTURE) : null,
+    );
+    const provider = new CodexCliProvider(
+      { name: 'codex' } as ProviderConfig,
+      spawnChild as never,
+      sandbox.home,
+    );
     await collect(
       provider.streamResponse({
         model: 'gpt-5-codex',
@@ -99,7 +113,66 @@ describe('codex replay through CodexCliProvider', () => {
 
     const turn = spawnChild.calls.find((call) => call.args.includes('exec'));
     expect(turn).toBeDefined();
-    expect(turn!.args).toEqual(expect.arrayContaining(['exec', '--json', '--sandbox', 'read-only', '--model', 'gpt-5-codex']));
+    expect(turn!.args).toEqual(
+      expect.arrayContaining([
+        'exec',
+        '--json',
+        '--sandbox',
+        'read-only',
+        '--model',
+        'gpt-5-codex',
+      ]),
+    );
     expect(turn!.stdin()).toContain(PROMPT);
+  });
+});
+
+describe('codex auth failure outranks transient event text', () => {
+  test('stderr refresh-token evidence turns a "stream disconnected" turn.failed into the codex-login error', async () => {
+    const transcript = {
+      header: {
+        provider: 'codex',
+        cliVersion: 'test',
+        recordedAt: '',
+        argv: [],
+        synthetic: true,
+      },
+      frames: [
+        {
+          t: 0,
+          stream: 'stdout' as const,
+          data: `${JSON.stringify({
+            type: 'turn.failed',
+            error: { message: 'stream disconnected before completion' },
+          })}\n`,
+        },
+        {
+          t: 5,
+          stream: 'stderr' as const,
+          data: 'Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again.\n401 token_expired\n',
+        },
+        { t: 10, stream: 'exit' as const, code: 1 },
+      ],
+    };
+    const spawnChild = createReplaySpawn((_command, args) =>
+      args.includes('exec') ? transcript : null,
+    );
+    const provider = new CodexCliProvider(
+      { name: 'codex' } as ProviderConfig,
+      spawnChild as never,
+      sandbox.home,
+    );
+    const request: StreamRequest = {
+      model: 'gpt-5-codex',
+      systemPrompt: '',
+      messages: [{ role: 'user', content: 'say hi' }],
+      workingDirectory: sandbox.workdir,
+    };
+    const events = await collect(provider.streamResponse(request));
+    const errors = events.filter((event) => event.type === 'error').map((e) => e.error ?? '');
+    expect(errors.length).toBeGreaterThan(0);
+    const last = errors[errors.length - 1];
+    expect(last).toContain('codex login');
+    expect(last).not.toContain('transient ChatGPT disconnect');
   });
 });

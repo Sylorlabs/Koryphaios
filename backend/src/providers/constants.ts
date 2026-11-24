@@ -98,7 +98,6 @@ export const OPENCODE_DEFAULT_BASE_URL: Partial<Record<string, string>> = {
   logfare: 'https://logfare.ai/v1',
   apinex: 'https://api.apinex.bond/v1',
   gwarden: 'https://gwarden.su/v1',
-  vyceai: 'https://vyceai.com/v1',
   respan: 'https://api.respan.ai/api/v1',
   tokenrouter: 'https://api.tokenrouter.com/v1',
   digitalocean: 'https://inference.do-ai.run/v1',

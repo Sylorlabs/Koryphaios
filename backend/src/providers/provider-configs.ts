@@ -183,14 +183,6 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     authMode: 'api_key',
     envKeys: ['GWARDEN_API_KEY'],
   },
-  // Vyce AI — OpenAI-compatible multi-model API proxy. The documented API
-  // surface is rooted at /v1 and uses a Bearer API key.
-  {
-    name: 'vyceai',
-    baseUrl: 'https://vyceai.com/v1',
-    authMode: 'api_key',
-    envKeys: ['VYCEAI_API_KEY', 'VYCE_AI_API_KEY'],
-  },
   {
     name: 'respan',
     baseUrl: 'https://api.respan.ai/api/v1',

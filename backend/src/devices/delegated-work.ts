@@ -2,6 +2,7 @@ import { readFileSync, statSync, mkdirSync, writeFileSync, realpathSync } from '
 import { spawnSync } from 'node:child_process';
 import { dirname, isAbsolute, join, normalize } from 'node:path';
 import { isContainedBy } from '../runtime/platform';
+import { isContainerGitRoot } from '../kory/git-manager';
 import {
   DELEGATION_LIMITS,
   describeReturnedWork,
@@ -82,9 +83,12 @@ export function exportWorkspaceChanges(input: {
   const files: DelegatedFileChange[] = [];
   let truncated = false;
 
-  const inside = git(root, ['rev-parse', '--is-inside-work-tree']);
-  const isGit = inside.ok && inside.out.trim() === 'true';
-  const baseCommit = isGit ? (git(root, ['rev-parse', 'HEAD']).out.trim() || null) : null;
+  const inside = git(root, ['rev-parse', '--show-toplevel']);
+  const toplevel = inside.ok ? inside.out.trim() : '';
+  // A container-rooted repository (home directory, filesystem root) is not the
+  // workspace's project; status/diff against it would scan the whole container.
+  const isGit = Boolean(toplevel) && !isContainerGitRoot(toplevel);
+  const baseCommit = isGit ? git(root, ['rev-parse', 'HEAD']).out.trim() || null : null;
 
   let patch = '';
   if (isGit) {

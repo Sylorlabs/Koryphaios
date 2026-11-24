@@ -54,7 +54,12 @@ import {
   writeManagedCliFile,
 } from './managed-cli-storage';
 import { buildProviderCliEnv } from './cli-environment';
-import { recordedToolIdentity, recordedToolInput, recordedToolName, recordedToolOutput } from './recorded-tool';
+import {
+  recordedToolIdentity,
+  recordedToolInput,
+  recordedToolName,
+  recordedToolOutput,
+} from './recorded-tool';
 
 const GROK_STREAM_TIMEOUT_MS = 300_000;
 
@@ -302,7 +307,9 @@ export class GrokBuildProvider implements Provider {
     // As with Antigravity: the soft jail replaces HOME, so link the dot-dir
     // the CLI actually resolves (`$HOME/.grok`) to the staged home holding the
     // kory MCP config and the credential links. Additive with GROK_HOME.
-    const jail = request.sandbox ? buildSoftJail(baseEnv, [join(grokHome, '.grok')]) : null;
+    const jail = request.sandbox
+      ? buildSoftJail(baseEnv, [join(grokHome, '.grok')], {}, request.sessionId)
+      : null;
     const wrapped = request.sandbox
       ? wrapCommand(bin, args, {
           cwd,
@@ -965,13 +972,18 @@ const GROK_FILE_EDIT_TOOLS = new Set(['edit', 'edit_file', 'apply_patch', 'str_r
 
 /** Correlate ACP result updates with the original call, preserving full input.
  *  Titles are human-facing; use one as a name only when it is an identifier. */
-export function parseGrokToolUpdate(update: Record<string, unknown>, calls: GrokToolTailer['calls']): ProviderEvent[] {
+export function parseGrokToolUpdate(
+  update: Record<string, unknown>,
+  calls: GrokToolTailer['calls'],
+): ProviderEvent[] {
   const id = typeof update.toolCallId === 'string' ? update.toolCallId : '';
   if (!id || !['tool_call', 'tool_call_update'].includes(String(update.sessionUpdate))) return [];
   const previous = calls.get(id);
   if (previous?.emitted) return [];
-  const title = typeof update.title === 'string' && /^[A-Za-z_][\w:./-]*$/.test(update.title)
-    ? recordedToolName({ name: update.title }) : undefined;
+  const title =
+    typeof update.title === 'string' && /^[A-Za-z_][\w:./-]*$/.test(update.title)
+      ? recordedToolName({ name: update.title })
+      : undefined;
   const input = { ...previous?.input, ...recordedToolInput(update.rawInput) };
   const identity = recordedToolIdentity(recordedToolName(update) ?? previous?.name ?? title, input);
   const call = { ...identity, emitted: false };
@@ -982,17 +994,27 @@ export function parseGrokToolUpdate(update: Record<string, unknown>, calls: Grok
   const events: ProviderEvent[] = [];
   const name = (call.name ?? '').toLowerCase();
   const path = call.input.file_path ?? call.input.target_file ?? call.input.path;
-  if (!failed && typeof path === 'string' && (GROK_FILE_WRITE_TOOLS.has(name) || GROK_FILE_EDIT_TOOLS.has(name))) {
+  if (
+    !failed &&
+    typeof path === 'string' &&
+    (GROK_FILE_WRITE_TOOLS.has(name) || GROK_FILE_EDIT_TOOLS.has(name))
+  ) {
     events.push({
-      type: 'file_edit', filePath: path,
+      type: 'file_edit',
+      filePath: path,
       fileContent: typeof call.input.content === 'string' ? call.input.content : '',
       fileOperation: GROK_FILE_WRITE_TOOLS.has(name) ? 'create' : 'edit',
     });
   }
   events.push({
-    type: 'tool_executed', toolCallId: id, toolName: call.name,
+    type: 'tool_executed',
+    toolCallId: id,
+    toolName: call.name,
     toolInput: JSON.stringify(call.input),
-    toolOutput: recordedToolOutput(update.rawOutput ?? update.content ?? update.error ?? '').slice(0, 8_000),
+    toolOutput: recordedToolOutput(update.rawOutput ?? update.content ?? update.error ?? '').slice(
+      0,
+      8_000,
+    ),
     isError: failed,
   });
   return events;

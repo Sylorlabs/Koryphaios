@@ -94,3 +94,14 @@ describe('startup status marker', () => {
     expect(existsSync(path)).toBe(true);
   });
 });
+
+describe('startup launch marker', () => {
+  test('server.ts evaluates the launch marker before every other import', () => {
+    const source = readFileSync(join(import.meta.dir, '..', 'server.ts'), 'utf8');
+    const firstImport = source
+      .split('\n')
+      .map((line) => line.trim())
+      .find((line) => line.startsWith('import'));
+    expect(firstImport).toBe("import './runtime/startup-launch-marker';");
+  });
+});

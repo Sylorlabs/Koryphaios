@@ -26,10 +26,7 @@ import {
   type StreamRequest,
 } from './types';
 import { getCliBridge, getKoryphaiosCursorHome } from './cli-bridges';
-import {
-  koryBridgeUnavailableError,
-  resolveKoryBridgeScript,
-} from './kory-cli-mcp-config';
+import { koryBridgeUnavailableError, resolveKoryBridgeScript } from './kory-cli-mcp-config';
 import { mcpConfigCandidates } from './cli-config-paths';
 import { createKoryBridgeGrantLease } from './bridge-grant';
 import {
@@ -50,7 +47,12 @@ import {
 import { appendBoundedProviderFrames } from './bounded-provider-stream';
 import { buildProviderCliEnv } from './cli-environment';
 import { applyModelsDevMetadata, refreshModelsDevCache } from './models-dev';
-import { recordedToolIdentity, recordedToolInput, recordedToolName, recordedToolOutput } from './recorded-tool';
+import {
+  recordedToolIdentity,
+  recordedToolInput,
+  recordedToolName,
+  recordedToolOutput,
+} from './recorded-tool';
 
 const CURSOR_STREAM_TIMEOUT_MS = 300_000;
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
@@ -182,14 +184,24 @@ export function parseCursorToolCalls(row: CursorStreamLine): ProviderEvent[] {
   return Object.entries(row.tool_call).map(([kind, payload]) => {
     const category = kind.replace(/ToolCall$/, '');
     const input = recordedToolInput(payload.args ?? payload.arguments ?? payload.input);
-    const tool = recordedToolIdentity(recordedToolName(payload) ?? recordedToolName({ name: category }), input);
+    const tool = recordedToolIdentity(
+      recordedToolName(payload) ?? recordedToolName({ name: category }),
+      input,
+    );
     const result = payload.result;
-    const status = result && typeof result === 'object' ? result as Record<string, unknown> : {};
+    const status = result && typeof result === 'object' ? (result as Record<string, unknown>) : {};
     return {
-      type: 'tool_executed', toolCallId: row.call_id, toolName: tool.name,
+      type: 'tool_executed',
+      toolCallId: row.call_id,
+      toolName: tool.name,
       toolInput: JSON.stringify(tool.input),
       toolOutput: recordedToolOutput(result ?? '').slice(0, 8_000),
-      isError: row.subtype === 'failed' || row.is_error === true || status.isError === true || status.is_error === true || status.error != null,
+      isError:
+        row.subtype === 'failed' ||
+        row.is_error === true ||
+        status.isError === true ||
+        status.is_error === true ||
+        status.error != null,
     };
   });
 }
@@ -544,7 +556,9 @@ export class CursorProvider implements Provider {
     // relative to $HOME. Expose the dot-directory itself so `$HOME/.cursor`
     // resolves to the staged home that holds the kory MCP config. Additive:
     // CURSOR_CONFIG_DIR still points at the staged home either way.
-    const jail = request.sandbox ? buildSoftJail(baseEnv, [join(cursorHome, '.cursor')]) : null;
+    const jail = request.sandbox
+      ? buildSoftJail(baseEnv, [join(cursorHome, '.cursor')], {}, request.sessionId)
+      : null;
     const wrapped = request.sandbox
       ? wrapCommand(bin, args, {
           cwd,

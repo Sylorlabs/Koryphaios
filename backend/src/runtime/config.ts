@@ -1,4 +1,5 @@
 import type { KoryphaiosConfig, AppConfig, ServerConfig, AgentSettings } from '@koryphaios/shared';
+import { RETIRED_PROVIDER_NAMES } from '@koryphaios/shared';
 import { existsSync, readFileSync, writeFileSync, renameSync, rmSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
@@ -108,13 +109,40 @@ export function loadConfig(projectRoot: string): BackendConfig {
   // Load infrastructure from app.config.json as base for server settings
   const appConfig = loadAppConfig(projectRoot);
 
+  // A provider that has shut down leaves its entry behind in koryphaios.json.
+  // Drop it before hydration so a retired name cannot fail config validation
+  // and make the whole app unbootable, and clear any credential the secret
+  // store still holds for it.
+  const persistedProviders = (fileConfig.providers ?? {}) as Record<string, unknown>;
+  for (const name of RETIRED_PROVIDER_NAMES) {
+    if (Object.prototype.hasOwnProperty.call(persistedProviders, name)) {
+      delete persistedProviders[name];
+      serverLog.warn({ provider: name }, 'Dropped retired provider from configuration');
+    }
+    // Clear the stored credential even when the config entry is already gone:
+    // hydration would otherwise re-add the provider from the secret store.
+    try {
+      removeProviderSecrets(projectRoot, name);
+    } catch (err: unknown) {
+      serverLog.warn(
+        { provider: name, err: err instanceof Error ? err.message : String(err) },
+        'Could not clear retired provider credentials',
+      );
+    }
+  }
+
+  // Hydration re-adds a provider entry for any credential still held in the
+  // secret store, so the retired filter runs again on the hydrated map.
+  const hydratedProviders = hydrateProviderSecrets(projectRoot, persistedProviders) as Record<
+    string,
+    unknown
+  >;
+  for (const name of RETIRED_PROVIDER_NAMES) delete hydratedProviders[name];
+
   const config: KoryphaiosConfig = {
     // Runtime gets real keys from the 0600 secret store; the on-disk
     // koryphaios.json stays credential-free.
-    providers: hydrateProviderSecrets(
-      projectRoot,
-      (fileConfig.providers ?? {}) as Record<string, unknown>,
-    ) as KoryphaiosConfig['providers'],
+    providers: hydratedProviders as KoryphaiosConfig['providers'],
     agents: fileConfig.agents ?? {
       manager: {
         model: AGENT.DEFAULT_MANAGER_MODEL,

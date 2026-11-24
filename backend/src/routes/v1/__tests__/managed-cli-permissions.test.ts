@@ -226,4 +226,21 @@ describe('managed native tool denial redirect text', () => {
       });
     }
   });
+
+  test('redirects native question tools to kory__ask_user with provider-aware text', () => {
+    for (const name of [
+      'ask_user_question',
+      'AskUserQuestion',
+      'askuserquestion',
+      'request_user_input',
+    ]) {
+      const decision = managedNativeToolDecision(name, {}, 'devin');
+      expect(decision).toMatchObject({ decision: 'block', koryEquivalent: 'kory__ask_user' });
+      // Devin's spelling must name its own dispatcher, not agy's or Claude's.
+      expect(decision.reason).toContain('mcp_call_tool');
+      expect(decision.reason).toContain('server_name="kory"');
+      expect(decision.reason).toContain('tool_name="kory__ask_user"');
+      expect(decision.reason).not.toContain('call_mcp_tool');
+    }
+  });
 });

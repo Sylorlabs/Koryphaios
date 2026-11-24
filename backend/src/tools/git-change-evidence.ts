@@ -3,6 +3,7 @@ import { constants as fsConstants } from 'node:fs';
 import { lstat, open, readlink, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
 import type { ChangeSummary } from '@koryphaios/shared';
+import { isContainerGitRoot } from '../kory/git-manager';
 import { getSafeSubprocessEnv } from '../runtime/safe-env';
 
 const GIT_TIMEOUT_MS = 2_500;
@@ -365,6 +366,12 @@ export async function captureGitChangeEvidence(
   } catch {
     return null;
   }
+
+  // A repository rooted at a container directory (the home directory or the
+  // filesystem root) is not this workspace's project. Its `status -uall`
+  // enumerates the whole container — on a home directory that is hundreds of
+  // megabytes — so it can never produce usable per-command evidence anyway.
+  if (isContainerGitRoot(repoRoot)) return null;
 
   const [statusResult, indexResult] = await Promise.all([
     runGitBounded(

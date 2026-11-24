@@ -22,7 +22,7 @@
 import type { ProviderName } from '@koryphaios/shared';
 import { basename, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
-import { existsSync, symlinkSync, rmSync, lstatSync } from 'node:fs';
+import { existsSync, symlinkSync, rmSync, lstatSync, statSync } from 'node:fs';
 import { serverLog } from '../logger';
 import {
   type CliAgentConfig,
@@ -49,6 +49,7 @@ import { ensureManagedCliDirectory } from './managed-cli-storage';
 import { credentialLinkCandidates } from './cli-config-paths';
 import { currentProviderExecutionScope } from './execution-scope';
 import { getSafeSubprocessEnv } from '../runtime/safe-env';
+import { isMac } from '../runtime/platform';
 
 // ─── Shared harness note ─────────────────────────────────────────────────────
 
@@ -97,9 +98,11 @@ export const FREEBUFF_PTY_HARNESS_NOTE =
   'workspace. The project-local "kory" MCP server exposes the authoritative, role-scoped ' +
   'Koryphaios tools. Use those kory MCP tools for every read, search, edit, command, note, ' +
   "or orchestration action that should affect the user's actual Koryphaios session. Your " +
-  'native Freebuff tools still exist, but they can see and modify only this disposable ' +
-  'workspace and are not authority for the real project. Never claim a native-only action ' +
-  "changed the user's project. Finish the requested work in this turn and return a concise " +
+  'native Freebuff tools still exist, but they can see only this disposable workspace ' +
+  'and are not authority for the real project. The workspace is mounted read-only for ' +
+  'this session, so native file edits there will not succeed; scratch space is under ' +
+  '/tmp. Never claim a native-only action changed the ' +
+  "user's project. Finish the requested work in this turn and return a concise " +
   'user-facing answer. ' +
   KORY_CUSTOM_MCP_NOTE;
 
@@ -180,9 +183,7 @@ export function buildKoryHookConfigs(ctx: CliBridgeContext): CliHookConfig[] | n
   // Same runtime rule as the MCP bridge: bare `node` cannot run the source .ts
   // or the bun-targeted packaged .js, so the hook silently no-ops.
   const hookCommand =
-    process.env.KORY_HOOK_BRIDGE_COMMAND ||
-    process.env.KORY_MCP_BRIDGE_COMMAND ||
-    process.execPath;
+    process.env.KORY_HOOK_BRIDGE_COMMAND || process.env.KORY_MCP_BRIDGE_COMMAND || process.execPath;
   return events.map((event) => {
     const grant = ctx.bridgeGrantLease
       ? ctx.bridgeGrantLease.grant([actionForEvent[event]])
@@ -247,36 +248,97 @@ const ANTIGRAVITY_CREDENTIAL_FILES = [
   'google_accounts.json',
 ] as const;
 
-/** True when a portable OAuth record is staged in the managed home.
+/** The home a passive probe hands agy — the user's real home, so the CLI
+ *  resolves the same credential it would in a terminal. Read from env at call
+ *  time (not `os.homedir()`, which is cached after first use and would pin a
+ *  test's fake home forever). */
+function antigravityRealHome(): string {
+  return process.env.HOME || process.env.USERPROFILE || homedir();
+}
+
+/** True when OAuth material is present in the home the probe will read.
  *
  *  agy answers a missing credential with its browser sign-in flow, and
  *  Koryphaios probes this provider from status renders and the catalog
  *  scheduler. This predicate is what keeps a passive probe from launching a
- *  login window: no staged credential means nothing to discover.
+ *  login window: no credential means nothing to discover. It defaults to the
+ *  real user home because that is the home `antigravityProbeEnv` hands agy.
  */
-export function hasAntigravityPortableLogin(
-  home: string = getKoryphaiosAntigravityHome(),
-): boolean {
+export function hasAntigravityPortableLogin(home: string = antigravityRealHome()): boolean {
   return ANTIGRAVITY_CREDENTIAL_FILES.some((file) => existsSync(join(home, '.gemini', file)));
 }
 
 /** Environment for a passive agy probe.
  *
- *  HOME and GEMINI_DIR point at the managed home so agy reads the staged
- *  portable login. Inheriting the host HOME instead lets agy resolve the user's
- *  login keychain, which is what produced macOS consent prompts from a routine
- *  status poll and from the billing quota scan.
+ *  HOME points at the REAL user home: agy keeps its Google OAuth credential in
+ *  the OS credential store (macOS login keychain: service "gemini", account
+ *  "antigravity") and reads `~/.gemini` through HOME. A replaced HOME sees no
+ *  credential at all — `agy models` then reports "Please sign in" forever and
+ *  `agy --print` enters the interactive OAuth flow (which is how background
+ *  polls used to pop browser sign-in windows). Reading through the real home
+ *  is exactly what `agy models` does in the user's own terminal: read-only,
+ *  silent, and owned by the CLI's ACL.
+ *
+ *  PATH is replaced with an empty private directory anyway: if the credential
+ *  is ever unusable (revoked, expired past refresh), agy starts its OAuth
+ *  sign-in flow, which execs `open` / `xdg-open` / `rundll32` resolved through
+ *  PATH to pop a browser — from a background poll the user never asked for.
+ *  With no browser opener on PATH the flow cannot launch a window no matter
+ *  which subcommand reaches it; agy itself is spawned by absolute path and
+ *  needs nothing else from PATH for these read-only probes.
  */
-export function antigravityProbeEnv(
-  home: string = getKoryphaiosAntigravityHome(),
-): NodeJS.ProcessEnv {
+export function antigravityProbeEnv(home: string = antigravityRealHome()): NodeJS.ProcessEnv {
   return {
     ...getSafeSubprocessEnv(),
     HOME: home,
     USERPROFILE: home,
     ANTIGRAVITY_HOME: home,
     GEMINI_DIR: join(home, '.gemini'),
+    PATH: antigravityProbeBinDir(),
   };
+}
+
+function antigravityProbeBinDir(): string {
+  const dir = join(getKoryphaiosAntigravityHome(), '.probe-bin');
+  try {
+    ensureManagedCliDirectory(dir);
+  } catch {
+    /* best-effort; an unwritable dir still yields a PATH with no openers */
+  }
+  return dir;
+}
+
+/** `mtime:size:count` signature across the credential files agy consults.
+ *  A fresh `agy login` rewrites them, moving this stamp even when a rewrite
+ *  lands inside the same millisecond. */
+function antigravityCredentialStamp(home: string): string {
+  let maxMtime = 0;
+  let totalSize = 0;
+  let count = 0;
+  for (const file of ANTIGRAVITY_CREDENTIAL_FILES) {
+    const stat = statSync(join(home, '.gemini', file), { throwIfNoEntry: false });
+    if (!stat) continue;
+    maxMtime = Math.max(maxMtime, stat.mtimeMs);
+    totalSize += stat.size;
+    count += 1;
+  }
+  return `${maxMtime}:${totalSize}:${count}`;
+}
+
+/** Credential-set stamp recorded when a probe answered "please sign in". */
+let agyProbeAuthBlockedStamp: string | null = null;
+
+/** True while a probe-auth latch holds: the last probe reported sign-in
+ *  required, so spawning again would re-enter the OAuth flow. The latch
+ *  releases automatically once the credential set changes — a fresh
+ *  `agy login` rewrites the markers. */
+export function antigravityProbeAuthBlocked(home: string = antigravityRealHome()): boolean {
+  if (agyProbeAuthBlockedStamp === null) return false;
+  return antigravityCredentialStamp(home) === agyProbeAuthBlockedStamp;
+}
+
+export function markAntigravityProbeAuthBlocked(home: string = antigravityRealHome()): void {
+  agyProbeAuthBlockedStamp = antigravityCredentialStamp(home);
 }
 
 export function getKoryphaiosAntigravityHome(subscope?: string): string {
@@ -308,6 +370,28 @@ export function getKoryphaiosAntigravityHome(subscope?: string): string {
         symlinkSync(src, dst);
       } catch {
         serverLog.debug({}, 'cli-bridges: antigravity credential link best-effort failed');
+      }
+    }
+    // On macOS the actual OAuth credential is the login keychain item, and the
+    // keyring resolves it through $HOME/Library/Keychains — the .gemini token
+    // file is only a marker. Without the link a jailed turn sees "unknown
+    // auth method", hits silent-auth failure, and agy opens its interactive
+    // OAuth flow (a browser popup from a headless turn).
+    if (isMac()) {
+      const realKeychains = join(homedir(), 'Library', 'Keychains');
+      const jailKeychains = join(dir, 'Library', 'Keychains');
+      if (existsSync(realKeychains)) {
+        ensureManagedCliDirectory(dirname(jailKeychains));
+        if (lstatSync(jailKeychains, { throwIfNoEntry: false })?.isSymbolicLink()) {
+          rmSync(jailKeychains, { force: true });
+        }
+        if (!existsSync(jailKeychains)) {
+          try {
+            symlinkSync(realKeychains, jailKeychains, 'dir');
+          } catch {
+            serverLog.debug({}, 'cli-bridges: antigravity keychain link best-effort failed');
+          }
+        }
       }
     }
   } catch {
@@ -1020,7 +1104,7 @@ export class GrokCliBridge extends ManagedCliBridge implements CliBridge {
       supportsAgentConfig: false,
       supportsSandbox: false,
       supportsExport: true, // --output-format streaming-json
-       supportsPermissionMode: true, // --permission-mode and --always-approve
+      supportsPermissionMode: true, // --permission-mode and --always-approve
       supportsAcp: false,
       supportsMcp: true, // grok CLI supports MCP servers via config
       supportsRules: true, // .grokrules

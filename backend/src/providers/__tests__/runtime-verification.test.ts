@@ -225,6 +225,9 @@ describe('runtime (inference) verification', () => {
       await registry.setCredentials('openai', {}, { fullCheck: true });
       urls.length = 0;
 
+      const provider = registry.get('openai');
+      expect(provider?.listModels().length).toBeGreaterThan(0);
+
       // Manage Models must stay cheap: no generation, no catalog re-probe.
       await registry.setCredentials(
         'openai',
@@ -233,6 +236,37 @@ describe('runtime (inference) verification', () => {
       );
       expect(urls.filter((u) => u.includes('/chat/completions'))).toHaveLength(0);
       expect(urls.filter((u) => u.includes('/models'))).toHaveLength(0);
+
+      // ...and it must keep the catalog already discovered. Rebuilding the
+      // adapter on a preference save emptied the picker and produced a bogus
+      // ``no models'' error until the next manual refresh.
+      expect(registry.get('openai')).toBe(provider);
+      const status = registry.getStatus().find((p) => p.name === 'openai');
+      expect(status?.allAvailableModels.length).toBeGreaterThan(0);
+      expect(status?.error).toBeUndefined();
+      expect(status?.selectedModels).toEqual(['gpt-4o-mini']);
+    });
+
+    it('does not report a missing catalog while discovery is still in flight', () => {
+      const registry = new ProviderRegistry({ providers: {} } as never);
+      const inFlight = {
+        name: 'openai',
+        config: { name: 'openai', disabled: false },
+        isAvailable: () => true,
+        listModels: () => [],
+        isModelDiscoveryInFlight: () => true,
+      } as unknown as Provider;
+      (registry as unknown as { providers: Map<string, Provider> }).providers.set(
+        'openai',
+        inFlight,
+      );
+      (
+        registry as unknown as { providerConfigs: Map<string, Record<string, unknown>> }
+      ).providerConfigs.set('openai', { name: 'openai', apiKey: 'sk-test', disabled: false });
+
+      const status = registry.getStatus().find((p) => p.name === 'openai');
+      expect(status?.allAvailableModels).toEqual([]);
+      expect(status?.error).toBeUndefined();
     });
   });
 

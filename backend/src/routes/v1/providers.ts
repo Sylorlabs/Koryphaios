@@ -38,6 +38,7 @@ import { getCatalogRefreshScheduler } from '../../providers/catalog-refresh';
 import { discoverCliAccounts, getDiscoveredCliAccount } from '../../providers/cli-accounts';
 import { discoverFreebuffAccounts } from '../../providers/auth-utils';
 import { getFreebuffAccountSnapshot } from '../../providers/freebuff-account';
+import { freebuffActiveTurnForAccount } from '../../providers/freebuff-cli';
 import {
   clearKimiCodeAuthState,
   createKimiCodeAuthMarker,
@@ -770,6 +771,7 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
         accountId: account.id,
         label: account.label,
         snapshot: await getFreebuffAccountSnapshot(account.profileDir, forceRefresh),
+        turn: freebuffActiveTurnForAccount(account.id),
       })),
     );
     return { ok: true, data };

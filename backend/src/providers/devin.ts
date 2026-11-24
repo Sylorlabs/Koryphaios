@@ -263,15 +263,12 @@ export class DevinProvider implements Provider {
       // comes from the catalog's pairing matrix, never the generic
       // effort/speed fold. A legacy `fusion-…` alias restores its own cell.
       const catalog = match.model.fusion;
-      const legacySel = modelId.startsWith('fusion-')
-        ? parseFusionSlug(modelId)
-        : undefined;
+      const legacySel = modelId.startsWith('fusion-') ? parseFusionSlug(modelId) : undefined;
       const sel = fusion ?? legacySel ?? catalog.defaultSelection;
       const slug = resolveFusionSlug(catalog, sel);
       if (!slug) {
         return {
-          error:
-            "This Fusion pairing isn't offered by Devin. Pick another Fusion 2 model.",
+          error: "This Fusion pairing isn't offered by Devin. Pick another Fusion 2 model.",
         };
       }
       return { slug };
@@ -517,14 +514,19 @@ export class DevinProvider implements Provider {
     });
     const jail =
       request.sandbox && !researchOnly
-        ? buildSoftJail(baseEnv, [devinHome ?? tmpdir()], {
-            // The jail replaces HOME and points XDG_DATA_HOME inside it, so
-            // `devin auth status` resolved credentials at
-            // <jailHome>/.local/share/devin/credentials.toml and reported "Not
-            // logged in" on every turn. The configDirs shorthand cannot express
-            // this: it links by basename, which would yield <jailHome>/share.
-            ...(devinHome ? { '.local/share': join(devinHome, '.local/share') } : {}),
-          })
+        ? buildSoftJail(
+            baseEnv,
+            [devinHome ?? tmpdir()],
+            {
+              // The jail replaces HOME and points XDG_DATA_HOME inside it, so
+              // `devin auth status` resolved credentials at
+              // <jailHome>/.local/share/devin/credentials.toml and reported "Not
+              // logged in" on every turn. The configDirs shorthand cannot express
+              // this: it links by basename, which would yield <jailHome>/share.
+              ...(devinHome ? { '.local/share': join(devinHome, '.local/share') } : {}),
+            },
+            request.sessionId,
+          )
         : null;
     const wrapped =
       request.sandbox && !researchOnly
@@ -626,9 +628,8 @@ export class DevinProvider implements Provider {
         const exportEvents = this.readExportEvents(exportPath);
         const remaining = liveTail ? liveTail.dedupeExportEvents(exportEvents) : exportEvents;
         const hasAgentContent =
-          exportEvents.some(
-            (event) => event.type === 'content_delta' && event.content?.trim(),
-          ) || liveTail?.emittedAnyContent === true;
+          exportEvents.some((event) => event.type === 'content_delta' && event.content?.trim()) ||
+          liveTail?.emittedAnyContent === true;
         if (settled.code !== 0 && !hasAgentContent) {
           const diagnostic = safeProviderDiagnostic('devin', 'stderr', stderr, {
             exitCode: settled.code,

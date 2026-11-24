@@ -44,6 +44,13 @@ import {
 } from './freebuff-bundled-catalog';
 import { getFreebuffModelCatalog } from './freebuff-model-catalog';
 import { getFreebuffAccountSnapshot } from './freebuff-account';
+import {
+  acquireFreebuffSessionSlot,
+  FreebuffSessionSlotError,
+  peekFreebuffSessionSlot,
+  type FreebuffSessionSlotHolderInfo,
+  type FreebuffSessionSlotRequest,
+} from './freebuff-session-slots';
 import type { Provider, ProviderEvent, ProviderMessage, StreamRequest } from './types';
 import { userConfirmedImageInput } from './attachment-admission';
 import { recordedToolIdentity, recordedToolInput, recordedToolName } from './recorded-tool';
@@ -259,6 +266,18 @@ visit(root);
 process.stdout.write(JSON.stringify(chunks));
 `;
 
+/** One retry for the intermittent in-container exec SIGKILL (exit 137). Only
+ * idempotent, read-only execs may use it — never tool execution or isolation
+ * assertions, where a retry could mask a real kill. */
+async function retryOnceOnExec137<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if ((error as { code?: string | number }).code !== 137) throw error;
+    return await run();
+  }
+}
+
 export async function readFreebuffLogRows(
   runtime: Pick<FreebuffTurnRuntime, 'exec' | 'bunBinary'>,
   root: string,
@@ -334,6 +353,51 @@ export function freebuffUpdateRequiredPane(pane: string): boolean {
   return /This version of Freebuff is out of date/i.test(screen);
 }
 
+/** A Freebuff account admits ONE live model session; a second admission
+ * supersedes the first, so another session already owns this account's slot —
+ * a different chat on this backend, another Koryphaios backend, a zombie turn
+ * container, the user's own CLI, or Freebuff Desktop. */
+class FreebuffSessionSlotBusyError extends FreebuffPtyError {}
+
+const FREEBUFF_SESSION_SLOT_BUSY =
+  "This Freebuff account's live-session slot is in use by another session (Freebuff CLI, Freebuff Desktop, or another Koryphaios backend). Koryphaios never takes over another session. Close that session or take it over in the Freebuff TUI, then retry.";
+const FREEBUFF_SESSION_SLOT_SUPERSEDED =
+  "This Freebuff turn's session was taken over by another session (Freebuff CLI, Freebuff Desktop, or another Koryphaios backend). Koryphaios never takes over another session. Close the other session, then retry.";
+const FREEBUFF_MANAGER_SLOT_DEADLOCK =
+  "The Freebuff manager of this chat is holding the account's only live session, so a Freebuff worker/critic can't start a second one. Assign that role to another provider, or sign in a second Freebuff account with `freebuff login` in another profile.";
+
+/** The 0.2.36 take-over prompts. Confirming one would kill the account's
+ * other live session, so the pane is always a fail-fast slot-busy error —
+ * Koryphaios never takes over another session. */
+export function freebuffTakeoverPrompt(pane: string): boolean {
+  const screen = pane.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+  return (
+    /Enter:\s*take over/i.test(screen) || /take over (?:that session|to stop|to move)/i.test(screen)
+  );
+}
+
+/** The 0.2.36 waiting room: admitted but queued for model session capacity.
+ * It is not a stuck turn — the bridge-startup deadline must ignore queued
+ * time (the turn's own runtime limit still bounds everything). */
+export function freebuffSessionQueued(pane: string): boolean {
+  const screen = pane.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+  return /in line, starting soon|starting your model session/i.test(screen);
+}
+
+/** Server-side session lifecycle codes carried on a log row's data.error —
+ * as a bare string, an {error}/{code} field, or inside its JSON responseBody. */
+export function freebuffSessionErrorCode(data: Record<string, unknown>): string | null {
+  const error = data.error;
+  if (typeof error === 'string' && error.trim()) return error.trim();
+  if (freebuffRecord(error)) {
+    for (const key of ['code', 'error']) {
+      const code = error[key];
+      if (typeof code === 'string' && code.trim()) return code.trim();
+    }
+  }
+  return freebuffUpstreamError(data)?.code ?? null;
+}
+
 interface FreebuffUpstreamError {
   statusCode?: number;
   code?: string;
@@ -368,10 +432,7 @@ function freebuffUpstreamError(data: Record<string, unknown>): FreebuffUpstreamE
   return upstream;
 }
 
-function freebuffUpdateRequiredFromRow(
-  data: Record<string, unknown>,
-  msg = '',
-): boolean {
+function freebuffUpdateRequiredFromRow(data: Record<string, unknown>, msg = ''): boolean {
   const error = data.error;
   if (!freebuffRecord(error)) return false;
   if (
@@ -476,7 +537,7 @@ export async function waitForFreebuffStartup(
   let dismissedWelcome = false;
   while (Date.now() - startedAt < timeoutMs) {
     checkAbort(signal);
-    const pane = await tmux(['capture-pane', '-p', '-J', '-t', session]);
+    const pane = await retryOnceOnExec137(() => tmux(['capture-pane', '-p', '-J', '-t', session]));
     checkAbort(signal);
     switch (freebuffStartupState(pane)) {
       case 'ready':
@@ -530,7 +591,7 @@ export async function waitForFreebuffPromptReady(
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     checkAbort(signal);
-    const pane = await tmux(['capture-pane', '-p', '-J', '-t', session]);
+    const pane = await retryOnceOnExec137(() => tmux(['capture-pane', '-p', '-J', '-t', session]));
     if (freebuffPromptReady(pane, prompt)) return;
     if (['login', 'trust'].includes(freebuffStartupState(pane))) {
       throw new FreebuffPtyError('Freebuff could not accept the prompt in its logged-in composer');
@@ -549,7 +610,7 @@ async function waitForFreebuffImageReady(
   const startedAt = Date.now();
   while (Date.now() - startedAt < 30_000) {
     checkAbort(signal);
-    const pane = await tmux(['capture-pane', '-p', '-J', '-t', session]);
+    const pane = await retryOnceOnExec137(() => tmux(['capture-pane', '-p', '-J', '-t', session]));
     const filenameIndex = pane.indexOf(filename);
     if (filenameIndex >= 0) {
       const region = pane.slice(
@@ -646,25 +707,70 @@ function catalogRevision(
   }
 }
 
-function accountCatalogModels(
+export function accountCatalogModels(
   account: FreebuffAccount,
   catalog: FreebuffBundledCatalog,
   multipleAccounts: boolean,
   prices?: Record<string, number>,
 ): ModelDef[] {
   const encodedProfile = Buffer.from(account.profileDir).toString('base64url');
-  return catalog.models.map(({ id, name, multimodal, contextWindow, reasoningLevels }) => {
+  // The cheapest reported rate is the account's 1x baseline; the multiplier is
+  // also the hourly allowance burn — a 5x model costs five session-hours per
+  // hour it runs. Never converted to a currency.
+  const baseRate =
+    prices === undefined
+      ? undefined
+      : Object.values(prices).reduce<number | undefined>(
+          (min, value) =>
+            Number.isFinite(value) && value > 0
+              ? min === undefined
+                ? value
+                : Math.min(min, value)
+              : min,
+          undefined,
+        );
+  // The price table's legacy ids are the same strings the CLI hashes into each
+  // catalog row's `legacyDigests` — digesting every price key once gives the
+  // authoritative row→price join the picker itself uses.
+  const priceByDigest = prices
+    ? new Map(Object.entries(prices).map(([key, value]) => [freebuffLegacyModelDigest(key), value]))
+    : undefined;
+  return catalog.models.map((catalogModel) => {
+    const { id, name, multimodal, contextWindow, reasoningLevels } = catalogModel;
     const model = createGenericModel(
       multipleAccounts ? `${ACCOUNT_PREFIX}${encodedProfile}:${id}` : id,
       'freebuff',
     );
     model.name = multipleAccounts ? `${name} (${account.label})` : name;
     model.apiModelId = id;
-    let freebuckCost = prices?.[id] ?? prices?.[id.replace(/^freebuff\/catalog-/, '')];
+    // The live price table is keyed by the account catalog's own identity —
+    // catalog key, full routed id, or the opaque upstream handle. The handle
+    // stays backend-only: it resolves a price row and is never serialized.
+    const handle = (catalogModel as { handle?: string }).handle;
+    let freebuckCost =
+      prices?.[id] ??
+      prices?.[id.replace(/^freebuff\/catalog-/, '')] ??
+      (typeof handle === 'string' ? prices?.[handle] : undefined);
+    if (typeof freebuckCost !== 'number' && priceByDigest) {
+      for (const digest of (catalogModel as { legacyDigests?: string[] }).legacyDigests ?? []) {
+        const hit = priceByDigest.get(digest);
+        if (hit !== undefined) {
+          freebuckCost = hit;
+          break;
+        }
+      }
+    }
     if (typeof freebuckCost !== 'number' && prices && typeof name === 'string' && name.length > 0) {
       freebuckCost = matchPriceByName(name, prices);
     }
-    if (typeof freebuckCost === 'number') model.freebuckCost = freebuckCost;
+    if (typeof freebuckCost === 'number') {
+      model.freebuckCost = freebuckCost;
+      if (freebuckCost === 0) model.creditsLabel = 'Free';
+      else if (baseRate !== undefined) {
+        const rate = Math.round((freebuckCost / baseRate) * 10) / 10;
+        model.creditsLabel = `${rate}×`;
+      }
+    }
     model.accountId = account.id;
     model.supportsAttachments = multimodal;
     model.vision = multimodal;
@@ -680,21 +786,67 @@ function accountCatalogModels(
   });
 }
 
-function normalizeKey(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]/g, '');
+/** The CLI's own catalog-row↔legacy-id join, ported from the bundled client:
+ * dual FNV-1a-32 digests of `freebuff-legacy-model:<legacyId>`, high lane
+ * (16777619) then low lane (1540483477), each hex-padded to 8 chars. Catalog
+ * `legacyDigests` entries are exactly this digest, so hashing each price-key
+ * yields the authoritative row→price mapping the picker uses. */
+function freebuffLegacyModelDigest(legacyId: string): string {
+  let hi = 2_166_136_261;
+  let lo = 1_523_705_862;
+  const input = `freebuff-legacy-model:${legacyId}`;
+  for (let i = 0; i < input.length; i++) {
+    const code = input.charCodeAt(i);
+    hi = Math.imul(hi ^ code, 16_777_619) >>> 0;
+    lo = Math.imul(lo ^ code, 1_540_483_477) >>> 0;
+  }
+  return hi.toString(16).padStart(8, '0') + lo.toString(16).padStart(8, '0');
 }
+
+/** Tokens of a display name or price-key tail: alphabetic tokens in a set,
+ * digit runs joined in order. 'v' before a digit is a version marker and is
+ * dropped, so 'DeepSeek V4.1 Flash' and 'deepseek-v4-flash' compare alike. */
+function priceMatchTokens(s: string): { alpha: Set<string>; digits: string } {
+  const raw = s
+    .toLowerCase()
+    .replace(/v(?=\d)/g, '')
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .flatMap((token) => token.split(/(?<=[a-z])(?=\d)|(?<=\d)(?=[a-z])/))
+    .filter(Boolean);
+  return {
+    alpha: new Set(raw.filter((token) => !/^\d+$/.test(token))),
+    digits: raw.filter((token) => /^\d+$/.test(token)).join(''),
+  };
+}
+
+/** Freebuff prices are keyed by legacy vendor/model ids while catalog rows use
+ * m-* keys and opaque handles, so the only join is the display name. A key
+ * tail's digit signature must equal the name's (a tail with no digits is
+ * version-agnostic); the name's alphabetic tokens must all appear in the tail.
+ * An exact alpha-set match wins over subset matches, and any ambiguity is a
+ * miss — an absent badge is honest, a wrong rate is not. */
 function matchPriceByName(displayName: string, prices: Record<string, number>): number | undefined {
-  const normalized = normalizeKey(displayName);
-  let match: number | undefined;
-  let matches = 0;
+  const name = priceMatchTokens(displayName);
+  let exact: number | undefined;
+  let exactCount = 0;
+  let subset: number | undefined;
+  let subsetCount = 0;
   for (const [key, price] of Object.entries(prices)) {
-    const normalizedKey = normalizeKey(key);
-    if (normalizedKey.includes(normalized) || normalized.includes(normalizedKey)) {
-      matches++;
-      match = price;
+    const tail = priceMatchTokens(key.split('/').pop() ?? key);
+    if (tail.digits.length > 0 && tail.digits !== name.digits) continue;
+    if (![...name.alpha].every((token) => tail.alpha.has(token))) continue;
+    if (tail.alpha.size === name.alpha.size) {
+      exact = price;
+      exactCount++;
+    } else {
+      subset = price;
+      subsetCount++;
     }
   }
-  return matches === 1 ? match : undefined;
+  if (exactCount === 1) return exact;
+  if (exactCount === 0 && subsetCount === 1) return subset;
+  return undefined;
 }
 
 /** Per-turn channel for an attempt to report a Codebuff runtime retirement to
@@ -764,10 +916,47 @@ const freebuffDependencies = {
       `${Date.now()}-${randomBytes(8).toString('hex')}`,
     ),
   readLogRows: readFreebuffLogRows,
+  // Grace before a displaced CLI session (the 'session over' startup row with
+  // no following send-message) is declared fatal during bridge readiness.
+  sessionLostGraceMs: 30_000,
+  // Per-account live-session slot: capacity 1, serialized locally because a
+  // second Freebuff admission supersedes the first instead of queueing.
+  acquireSessionSlot: (
+    accountId: string,
+    request: FreebuffSessionSlotRequest,
+  ): Promise<() => void> => acquireFreebuffSessionSlot(accountId, request),
+  peekSessionSlot: (accountId: string): FreebuffSessionSlotHolderInfo | null =>
+    peekFreebuffSessionSlot(accountId),
 };
 
 /** Injectable boundary for credential-free lifecycle tests; production uses only these safe defaults. */
 export type FreebuffProviderDependencies = typeof freebuffDependencies;
+
+export interface FreebuffActiveTurn {
+  accountId: string;
+  sessionId: string;
+  role: string;
+  startedAt: number;
+  deadlineAt: number;
+}
+
+/** Active turns keyed by account id — the per-account live-session slot unit —
+ * so the account route can surface a truthful per-turn session countdown. */
+const activeFreebuffTurns = new Map<string, FreebuffActiveTurn>();
+
+export function freebuffActiveTurnForAccount(accountId: string): FreebuffActiveTurn | null {
+  const turn = activeFreebuffTurns.get(accountId) ?? null;
+  if (turn && turn.deadlineAt <= Date.now()) {
+    activeFreebuffTurns.delete(accountId);
+    return null;
+  }
+  return turn;
+}
+
+/** Test seam: drop all tracked turns without touching the real slot map. */
+export function clearFreebuffActiveTurnsForTests(): void {
+  activeFreebuffTurns.clear();
+}
 
 /** Call and result evidence can arrive in separate log rows or polls. */
 export function freebuffToolEvents(
@@ -854,6 +1043,14 @@ export class FreebuffProvider implements Provider {
           existsSync(join(account.profileDir, 'credentials.json')) &&
           this.deps.findBinary(account.profileDir) !== null,
       );
+  }
+
+  /** A failed runtime probe is never sticky: refresh (coalesced and
+   * rate-limited inside refreshFreebuffRuntimeStatus) before a cached failure
+   * is allowed to refuse the turn at admission. */
+  async refreshAvailability(): Promise<boolean> {
+    await this.deps.refreshRuntimeStatus();
+    return this.isAvailable();
   }
 
   listModels(): ModelDef[] {
@@ -1023,8 +1220,7 @@ export class FreebuffProvider implements Provider {
     for (;;) {
       const state: FreebuffAttemptState = {};
       for await (const event of this.streamFreebuffAttempt(request, state)) {
-        if (event.type === 'content_delta' || event.type === 'tool_executed')
-          emittedPayload = true;
+        if (event.type === 'content_delta' || event.type === 'tool_executed') emittedPayload = true;
         yield event;
       }
       const required = state.updateRequired;
@@ -1063,18 +1259,14 @@ export class FreebuffProvider implements Provider {
               });
           })
         : undefined;
-      const outcome = await Promise.race(
-        abortWait ? [update, abortWait] : [update],
-      );
+      const outcome = await Promise.race(abortWait ? [update, abortWait] : [update]);
       if (outcome === 'aborted') {
         yield { type: 'error', error: 'Freebuff PTY turn cancelled.' };
         return;
       }
       if ('error' in outcome) {
         const reason =
-          outcome.error instanceof Error
-            ? outcome.error.message.split('\n')[0]!
-            : 'update failed';
+          outcome.error instanceof Error ? outcome.error.message.split('\n')[0]! : 'update failed';
         yield {
           type: 'error',
           error: `${retired} Koryphaios could not install a newer runtime: ${reason.slice(0, 240)}`,
@@ -1082,10 +1274,7 @@ export class FreebuffProvider implements Provider {
         return;
       }
       const updated = outcome.status;
-      if (
-        !failed ||
-        (updated.version && compareFreebuffVersions(updated.version, failed) > 0)
-      )
+      if (!failed || (updated.version && compareFreebuffVersions(updated.version, failed) > 0))
         continue;
       yield {
         type: 'error',
@@ -1105,7 +1294,12 @@ export class FreebuffProvider implements Provider {
     let lease: ReturnType<typeof createKoryBridgeGrantLease> | undefined;
     let runtimeCleanup: Promise<void> | undefined;
     const stopRuntime = () => (runtimeCleanup ??= runtime?.cleanup());
+    // The account live-session lease, held for the whole attempt once won.
+    let releaseSlot: (() => void) | undefined;
+    // Mirrors the won slot account so the finally path can drop the countdown row.
+    let slotAccountId: string | undefined;
     let phase = 'runtime readiness';
+    const role = request.harnessRole ?? 'manager';
     const timeout = new AbortController();
     const signal = request.signal
       ? AbortSignal.any([request.signal, timeout.signal])
@@ -1115,6 +1309,7 @@ export class FreebuffProvider implements Provider {
       Number.isFinite(requestedLimit) && requestedLimit > 0
         ? Math.min(MAX_RUNTIME_MS, requestedLimit * 1000)
         : MAX_RUNTIME_MS;
+    const attemptStartedAt = Date.now();
     const timer = setTimeout(() => timeout.abort(), runtimeMs);
     // Shared with the finally path: the graceful exit runs at most once.
     let gracefulExit: Promise<void> | undefined;
@@ -1154,18 +1349,26 @@ export class FreebuffProvider implements Provider {
       const availableModels = await this.refreshModels(true);
       const requestedSelection = parseModelSelection(request.model);
       const accounts = this.deps.discoverAccounts();
-      const selectedAccount = requestedSelection.profileDir
-        ? accounts.find(
-            (account) => resolve(account.profileDir) === resolve(requestedSelection.profileDir!),
+      // A profile-pinned selection is bound to that account; otherwise every
+      // account offering the model is a live-session candidate.
+      const candidates = requestedSelection.profileDir
+        ? accounts.filter(
+            (candidate) =>
+              resolve(candidate.profileDir) === resolve(requestedSelection.profileDir!),
           )
-        : accounts[0];
-      if (
-        !availableModels.some(
+        : accounts.filter((candidate) =>
+            availableModels.some(
+              (model) =>
+                model.apiModelId === requestedSelection.modelId && model.accountId === candidate.id,
+            ),
+          );
+      const modelOffered = candidates.some((candidate) =>
+        availableModels.some(
           (model) =>
-            model.apiModelId === requestedSelection.modelId &&
-            model.accountId === selectedAccount?.id,
-        )
-      ) {
+            model.apiModelId === requestedSelection.modelId && model.accountId === candidate.id,
+        ),
+      );
+      if (!modelOffered) {
         yield {
           type: 'error',
           error:
@@ -1174,6 +1377,112 @@ export class FreebuffProvider implements Provider {
         };
         return;
       }
+
+      // A Freebuff account admits ONE live model session; a second admission
+      // supersedes the first. Serialize on the per-account slot BEFORE any
+      // runtime work: the first candidate that can be admitted wins the turn.
+      let slotAccount: FreebuffAccount | undefined;
+      const slotErrors: FreebuffSessionSlotError[] = [];
+      for (const candidate of candidates) {
+        try {
+          releaseSlot = await this.deps.acquireSessionSlot(candidate.id, {
+            sessionId: request.sessionId,
+            role,
+            signal,
+          });
+          slotAccount = candidate;
+          break;
+        } catch (error) {
+          if (!(error instanceof FreebuffSessionSlotError)) throw error;
+          slotErrors.push(error);
+        }
+      }
+      const holderIsManagerOfThisChat = (
+        holder: FreebuffSessionSlotHolderInfo | null | undefined,
+      ) => holder != null && holder.sessionId === request.sessionId && holder.role === 'manager';
+      const managerDeadlock = () =>
+        slotErrors.some(
+          (error) => error.reason === 'deadlock' || holderIsManagerOfThisChat(error.holder),
+        ) ||
+        candidates.some((candidate) =>
+          holderIsManagerOfThisChat(this.deps.peekSessionSlot(candidate.id)),
+        );
+      if (!slotAccount) {
+        if (managerDeadlock()) {
+          // The manager is parked awaiting this delegate: waiting can never
+          // succeed, so fail fast with the actionable route out.
+          yield { type: 'error', error: FREEBUFF_MANAGER_SLOT_DEADLOCK };
+          return;
+        }
+        // Every candidate is legitimately busy: park on the first one's slot
+        // for the rest of the attempt's own runtime bound.
+        yield {
+          type: 'waiting',
+          waitingReason: "Waiting for the Freebuff account's live session…",
+        };
+        try {
+          releaseSlot = await this.deps.acquireSessionSlot(candidates[0]!.id, {
+            sessionId: request.sessionId,
+            role,
+            signal,
+            waitTimeoutMs: Math.max(1, runtimeMs - (Date.now() - attemptStartedAt)),
+          });
+          slotAccount = candidates[0];
+        } catch (error) {
+          if (!(error instanceof FreebuffSessionSlotError)) throw error;
+          slotErrors.push(error);
+          if (error.reason === 'deadlock') {
+            yield { type: 'error', error: FREEBUFF_MANAGER_SLOT_DEADLOCK };
+            return;
+          }
+          // The bound expired: rescan every candidate once more — another
+          // account may have freed its slot meanwhile.
+          if (error.reason === 'timeout') {
+            for (const candidate of candidates) {
+              try {
+                releaseSlot = await this.deps.acquireSessionSlot(candidate.id, {
+                  sessionId: request.sessionId,
+                  role,
+                  signal,
+                });
+                slotAccount = candidate;
+                break;
+              } catch (rescan) {
+                if (!(rescan instanceof FreebuffSessionSlotError)) throw rescan;
+                slotErrors.push(rescan);
+              }
+            }
+          }
+          if (!slotAccount) {
+            yield managerDeadlock()
+              ? { type: 'error', error: FREEBUFF_MANAGER_SLOT_DEADLOCK }
+              : {
+                  type: 'error',
+                  error: FREEBUFF_SESSION_SLOT_BUSY,
+                  errorTransient: true,
+                };
+            return;
+          }
+        }
+      }
+      if (!slotAccount) {
+        yield {
+          type: 'error',
+          error: 'Freebuff CLI account no longer exists. Run "freebuff login" and reconnect.',
+        };
+        return;
+      }
+      const account = slotAccount;
+      slotAccountId = account.id;
+      // The per-turn deadline budget runs from the attempt start (slot queuing
+      // included), so surface the same clock the abort timer enforces.
+      activeFreebuffTurns.set(account.id, {
+        accountId: account.id,
+        sessionId: request.sessionId,
+        role,
+        startedAt: attemptStartedAt,
+        deadlineAt: attemptStartedAt + runtimeMs,
+      });
 
       let turn: FreebuffPtyTurn;
       try {
@@ -1204,14 +1513,6 @@ export class FreebuffProvider implements Provider {
       }
 
       const selection = requestedSelection;
-      const account = selectedAccount;
-      if (!account) {
-        yield {
-          type: 'error',
-          error: 'Freebuff CLI account no longer exists. Run "freebuff login" and reconnect.',
-        };
-        return;
-      }
       // Capture private evidence for this turn before another refresh can replace
       // the account map. Never send opaque handles to the CLI settings or UI.
       const expectedModel =
@@ -1280,7 +1581,6 @@ export class FreebuffProvider implements Provider {
         ),
       );
 
-      const role = request.harnessRole ?? 'manager';
       phase = 'bridge grant setup';
       lease = this.deps.createLease(request.sessionId, role);
       const bridge = this.deps.getBridge('freebuff');
@@ -1356,7 +1656,7 @@ export class FreebuffProvider implements Provider {
       const agentConfig = bridge?.buildAgentConfig(bridgeContext);
       const transportPrompt = [
         ...(agentConfig?.systemInstructions ?? []),
-        'The connected Kory MCP server tools/list catalog defines available tools. Native Freebuff tools affect only this disposable transport workspace; use Kory MCP tools for the actual session workspace.',
+        'The connected Kory MCP server tools/list catalog defines available tools. Native Freebuff tools affect only this disposable transport workspace, which is mounted read-only for the turn; use Kory MCP tools for the actual session workspace.',
         turn.prompt,
       ]
         .filter(Boolean)
@@ -1366,7 +1666,11 @@ export class FreebuffProvider implements Provider {
       const imagePaths = materializeFreebuffImages(turn.images, workspace);
 
       phase = 'bridge catalog readiness';
-      await runtime.exec(runtime.bunBinary, prepared.probeArgs, { timeout: 35_000 });
+      // The signed catalog prefetch is idempotent; the intermittent in-container
+      // exec SIGKILL (137) gets exactly one retry.
+      await retryOnceOnExec137(() =>
+        runtime!.exec(runtime!.bunBinary, prepared!.probeArgs, { timeout: 35_000 }),
+      );
       checkAbort(signal);
       phase = 'TUI startup';
       await runtime.start(freebuffPrivateCliArgs(runRoot, workspace));
@@ -1393,46 +1697,19 @@ export class FreebuffProvider implements Provider {
       await waitForFreebuffPromptReady(tmux, session, transportPrompt, signal);
       await tmux(['send-keys', '-t', session, 'Enter']);
 
-      // The modern CLI can lazily discover MCP tools while constructing the
-      // first agent request. Preflight the signed catalog before submission,
-      // but wait for actual CLI bridge startup afterward to avoid a deadlock.
-      // No completion/content is published until this additional proof exists.
-      phase = 'CLI MCP startup';
-      const bridgeStartedAt = Date.now();
-      let sessionConfirmationSent = false;
-      while (!existsSync(prepared.readyPath)) {
-        checkAbort(signal);
-        if (Date.now() - bridgeStartedAt > 90_000) {
-          throw new FreebuffPtyError('Freebuff TUI did not load the Kory MCP bridge');
-        }
-        await tmux(['has-session', '-t', session]);
-        const pane = await tmux(['capture-pane', '-p', '-J', '-t', session]);
-        if (freebuffUpdateRequiredPane(pane))
-          throw new FreebuffUpdateRequiredError(
-            'Freebuff reported its runtime as retired',
-            attemptVersion,
-          );
-        const accountLimit = freebuffAccountLimitError(pane);
-        if (accountLimit) throw new FreebuffPtyError(accountLimit);
-        if (!sessionConfirmationSent && freebuffNeedsSessionConfirmation(pane)) {
-          await tmux(['send-keys', '-t', session, 'Enter']);
-          sessionConfirmationSent = true;
-        }
-        await waitForFreebuffPoll(250, signal);
-      }
-
       const logsRoot = join(runHome, '.config', 'manicode', 'projects');
       const offsets = new Map<string, number>();
       const emittedTools = new Set<string>();
       const pendingToolCalls = new Map<string, Record<string, unknown>>();
       const pendingToolResults = new Map<string, Record<string, unknown>>();
-      phase = 'turn completion';
       let selectedModel: string | null = null;
       let lastUpstreamError: FreebuffUpstreamError | null = null;
       const usageByModel = new Map<string, number[]>();
       let emittedContent = false;
       let complete = false;
-      let lastSessionCheck = 0;
+      // Latest waiting_room_queued row; the MCP-startup loop reads this as
+      // waiting-room evidence alongside the pane text.
+      let queuedRowsAt = 0;
       let verifiedImageCount = imagePaths.length === 0;
       const usage: FreebuffLogUsage = {
         finalContextTokens: 0,
@@ -1440,55 +1717,10 @@ export class FreebuffProvider implements Provider {
         requestCount: 0,
         requestInputTokens: [],
       };
-
-      // The runtime can die between the liveness check and the row drain (the
-      // TUI exits inside the container); both paths funnel here. A retired
-      // runtime exits its own TUI on the 410 answer, so drain the remaining
-      // log rows first — the self-heal must still see the retirement.
-      const throwRuntimeDead = async (): Promise<never> => {
-        checkAbort(signal);
-        const drained = await this.deps
-          .readLogRows(runtime!, logsRoot, offsets)
-          .catch(() => [] as { data?: unknown; msg?: unknown }[]);
-        if (
-          drained.some((row) =>
-            freebuffUpdateRequiredFromRow(
-              row.data && typeof row.data === 'object'
-                ? (row.data as Record<string, unknown>)
-                : {},
-              typeof row.msg === 'string' ? row.msg : '',
-            ),
-          )
-        )
-          throw new FreebuffUpdateRequiredError(
-            'Codebuff requires a newer Freebuff runtime',
-            attemptVersion,
-          );
-        throw new FreebuffPtyError('Freebuff TUI exited before producing a completion event');
-      };
-
-      while (!complete) {
-        checkAbort(signal);
-        if (Date.now() - lastSessionCheck > 1_000) {
-          lastSessionCheck = Date.now();
-          try {
-            await tmux(['has-session', '-t', session]);
-          } catch {
-            await throwRuntimeDead();
-          }
-          const pane = await tmux(['capture-pane', '-p', '-J', '-t', session]);
-          if (freebuffUpdateRequiredPane(pane))
-            throw new FreebuffUpdateRequiredError(
-              'Freebuff reported its runtime as retired',
-              attemptVersion,
-            );
-          const accountLimit = freebuffAccountLimitError(pane);
-          if (accountLimit) throw new FreebuffPtyError(accountLimit);
-        }
-        const rows = await this.deps
-          .readLogRows(runtime, logsRoot, offsets)
-          .catch(() => throwRuntimeDead());
-        checkAbort(signal);
+      const self = this;
+      const processRows = async function* (
+        rows: Record<string, unknown>[],
+      ): AsyncGenerator<ProviderEvent> {
         for (const row of rows) {
           const msg = typeof row.msg === 'string' ? row.msg : '';
           const data =
@@ -1498,6 +1730,23 @@ export class FreebuffProvider implements Provider {
               'Codebuff requires a newer Freebuff runtime',
               attemptVersion,
             );
+          // Server-side session lifecycle verdicts. A superseded turn is
+          // transient (the account slot freed for a retry to reclaim); a
+          // hard limit is not. Queued rows feed the waiting room state.
+          const sessionErrorCode = freebuffSessionErrorCode(data);
+          if (sessionErrorCode === 'session_superseded' || sessionErrorCode === 'session_expired') {
+            throw Object.assign(
+              new FreebuffSessionSlotBusyError(
+                sessionErrorCode === 'session_expired'
+                  ? "This Freebuff turn's session expired on the server before completing. Retry the turn."
+                  : FREEBUFF_SESSION_SLOT_SUPERSEDED,
+              ),
+              { transient: true },
+            );
+          }
+          if (sessionErrorCode === 'session_limit_reached')
+            throw new FreebuffSessionSlotBusyError(FREEBUFF_SESSION_SLOT_BUSY);
+          if (sessionErrorCode === 'waiting_room_queued') queuedRowsAt = Date.now();
           if (
             ['Error in AI SDK stream', 'Agent execution failed'].includes(msg) &&
             (data.agentId === undefined || data.agentId === 'main-agent')
@@ -1516,7 +1765,7 @@ export class FreebuffProvider implements Provider {
               selection.modelId !== FREEBUFF_CLI_DEFAULT_MODEL_ID &&
               rootModel !== expectedModel
             ) {
-              const observedModel = [...(this.modelHandles.get(account.id)?.entries() ?? [])].find(
+              const observedModel = [...(self.modelHandles.get(account.id)?.entries() ?? [])].find(
                 ([, handle]) => handle === rootModel,
               )?.[0];
               throw new FreebuffPtyError(
@@ -1559,7 +1808,12 @@ export class FreebuffProvider implements Provider {
                     lastUpstreamError.isRetryable === true ||
                     lastUpstreamError.statusCode === 429 ||
                     (lastUpstreamError.statusCode !== undefined &&
-                      lastUpstreamError.statusCode >= 500),
+                      lastUpstreamError.statusCode >= 500) ||
+                    // The upstream policy verdict varies by route and over
+                    // time — the same prompt is refused and admitted — so a
+                    // bounded same-model retry is a legitimate recovery, not a
+                    // bypass loop.
+                    lastUpstreamError.code === 'prompt_policy_refused',
                 },
               );
             }
@@ -1568,6 +1822,189 @@ export class FreebuffProvider implements Provider {
           yield* freebuffToolEvents(data, pendingToolCalls, pendingToolResults, emittedTools);
           if (completion === 'success') complete = true;
         }
+      };
+      // The runtime can die between the liveness check and the row drain (the
+      // TUI exits inside the container); both paths funnel here. Drain the
+      // remaining rows through the SAME row processing — a turn that finishes
+      // just as its TUI exits still yields its completion, a retired runtime
+      // still reaches the self-heal, and a main-agent error still reports the
+      // upstream message. Only a drain without any completion is dead.
+      const drainDeadRuntime = async function* (): AsyncGenerator<ProviderEvent> {
+        checkAbort(signal);
+        const drained = await retryOnceOnExec137(() =>
+          self.deps.readLogRows(runtime!, logsRoot, offsets),
+        ).catch(() => [] as Record<string, unknown>[]);
+        yield* processRows(drained);
+        if (!complete)
+          throw Object.assign(
+            new FreebuffPtyError('Freebuff TUI exited before producing a completion event'),
+            { transient: true },
+          );
+      };
+
+      // The modern CLI can lazily discover MCP tools while constructing the
+      // first agent request. Preflight the signed catalog before submission,
+      // but wait for actual CLI bridge startup afterward to avoid a deadlock.
+      // No completion/content is published until this additional proof exists.
+      phase = 'CLI MCP startup';
+      let bridgeStartedAt = Date.now();
+      let sessionConfirmationSent = false;
+      let submissionResent = false;
+      let promptSubmitted = false;
+      let sessionLostAt = 0;
+      let queuedAnnounced = false;
+      while (!existsSync(prepared.readyPath)) {
+        checkAbort(signal);
+        if (Date.now() - bridgeStartedAt > 90_000) {
+          throw Object.assign(
+            new FreebuffPtyError('Freebuff TUI did not load the Kory MCP bridge'),
+            { transient: true },
+          );
+        }
+        try {
+          await retryOnceOnExec137(() => tmux(['has-session', '-t', session]));
+        } catch {
+          yield* drainDeadRuntime();
+          // The drain may surface a completion, but a dead runtime can never
+          // produce the MCP ready proof — fail fast instead of spinning out
+          // the 90 s bridge-readiness timeout.
+          if (!existsSync(prepared.readyPath))
+            throw Object.assign(
+              new FreebuffPtyError('Freebuff TUI exited before the Kory MCP bridge reported ready'),
+              { transient: true },
+            );
+        }
+        const pane = await retryOnceOnExec137(() =>
+          tmux(['capture-pane', '-p', '-J', '-t', session]),
+        );
+        if (freebuffUpdateRequiredPane(pane))
+          throw new FreebuffUpdateRequiredError(
+            'Freebuff reported its runtime as retired',
+            attemptVersion,
+          );
+        // A take-over prompt means someone else owns the live session. Never
+        // confirm it — the other session would die. The failure stays
+        // transient: a bounded retry can reclaim once the zombie session
+        // clears server-side.
+        if (freebuffTakeoverPrompt(pane))
+          throw Object.assign(new FreebuffSessionSlotBusyError(FREEBUFF_SESSION_SLOT_BUSY), {
+            transient: true,
+          });
+        const accountLimit = freebuffAccountLimitError(pane);
+        if (accountLimit) throw new FreebuffPtyError(accountLimit);
+        // The waiting room is a live hold, not a stuck turn: it yields once
+        // per queued stretch, and both deadlines (bridge readiness and the
+        // displaced-session grace) count only non-queued time.
+        const queuedNow = freebuffSessionQueued(pane) || Date.now() - queuedRowsAt < 15_000;
+        if (queuedNow) {
+          sessionLostAt = 0;
+          bridgeStartedAt = Date.now();
+          if (!queuedAnnounced) {
+            queuedAnnounced = true;
+            yield {
+              type: 'waiting',
+              waitingReason: 'Freebuff is queued for model session capacity…',
+            };
+          }
+        } else {
+          queuedAnnounced = false;
+        }
+        if (!sessionConfirmationSent && freebuffNeedsSessionConfirmation(pane)) {
+          await tmux(['send-keys', '-t', session, 'Enter']);
+          sessionConfirmationSent = true;
+        }
+        // A dialog can swallow the submission Enter: the prompt then sits in
+        // the composer forever, the CLI never builds its first agent request,
+        // and the bridge never starts. The log's send-message row is the
+        // submission proof; the composer still holding the prompt is the
+        // resubmit precondition — a cleared composer means Enter landed even
+        // if the row has not flushed yet.
+        if (sessionConfirmationSent || Date.now() - bridgeStartedAt > 15_000) {
+          const pendingRows = await retryOnceOnExec137(() =>
+            this.deps.readLogRows(runtime!, logsRoot, offsets),
+          ).catch(() => [] as Record<string, unknown>[]);
+          if (
+            pendingRows.some(
+              (row) => row.msg === '[send-message] Sending message with sdk run config',
+            )
+          )
+            promptSubmitted = true;
+          yield* processRows(pendingRows);
+          if (!promptSubmitted) {
+            // A session displaced at startup never builds an agent request:
+            // no send-message row, no bridge spawn, no ready marker. The
+            // 'session over' row is also a benign join artifact, so only the
+            // persistent no-submission case is fatal — fail fast with the
+            // real cause rather than the generic readiness timeout. While the
+            // session is merely queued this check must not fire at all.
+            if (!queuedNow) {
+              if (
+                !sessionLostAt &&
+                pendingRows.some(
+                  (row) =>
+                    typeof row.msg === 'string' && /session over; holding queued/i.test(row.msg),
+                )
+              )
+                sessionLostAt = Date.now();
+              if (sessionLostAt && Date.now() - sessionLostAt > this.deps.sessionLostGraceMs)
+                throw Object.assign(
+                  new FreebuffPtyError(
+                    'Freebuff session ended before the Kory MCP bridge reported ready',
+                  ),
+                  { transient: true },
+                );
+            }
+            if (!submissionResent) {
+              const composer = await retryOnceOnExec137(() =>
+                tmux(['capture-pane', '-p', '-J', '-t', session]),
+              );
+              if (freebuffPromptReady(composer, transportPrompt)) {
+                await tmux(['send-keys', '-t', session, 'Enter']);
+                submissionResent = true;
+              }
+            }
+          }
+        }
+        await waitForFreebuffPoll(250, signal);
+      }
+
+      phase = 'turn completion';
+      let lastSessionCheck = 0;
+
+      while (!complete) {
+        checkAbort(signal);
+        if (Date.now() - lastSessionCheck > 1_000) {
+          lastSessionCheck = Date.now();
+          try {
+            await retryOnceOnExec137(() => tmux(['has-session', '-t', session]));
+          } catch {
+            yield* drainDeadRuntime();
+            continue;
+          }
+          const pane = await retryOnceOnExec137(() =>
+            tmux(['capture-pane', '-p', '-J', '-t', session]),
+          );
+          if (freebuffUpdateRequiredPane(pane))
+            throw new FreebuffUpdateRequiredError(
+              'Freebuff reported its runtime as retired',
+              attemptVersion,
+            );
+          if (freebuffTakeoverPrompt(pane))
+            throw Object.assign(new FreebuffSessionSlotBusyError(FREEBUFF_SESSION_SLOT_BUSY), {
+              transient: true,
+            });
+          const accountLimit = freebuffAccountLimitError(pane);
+          if (accountLimit) throw new FreebuffPtyError(accountLimit);
+        }
+        const rows = await retryOnceOnExec137(() =>
+          this.deps.readLogRows(runtime!, logsRoot, offsets),
+        ).catch(() => null);
+        if (!rows) {
+          yield* drainDeadRuntime();
+          continue;
+        }
+        checkAbort(signal);
+        yield* processRows(rows);
         if (!complete) await waitForFreebuffPoll(250, signal);
       }
       checkAbort(signal);
@@ -1627,8 +2064,7 @@ export class FreebuffProvider implements Provider {
                 : `Freebuff PTY failed during ${phase}. No private diagnostic output was retained.`,
         errorTransient:
           !aborted &&
-          ((err as { transient?: boolean }).transient === true ||
-            isTransientStreamErrorText(err)),
+          ((err as { transient?: boolean }).transient === true || isTransientStreamErrorText(err)),
       };
     } finally {
       clearTimeout(timer);
@@ -1643,6 +2079,15 @@ export class FreebuffProvider implements Provider {
       } catch {
         providerLog.warn({ provider: 'freebuff' }, 'Freebuff private runtime cleanup failed');
       }
+      // The slot frees only after the runtime is down: its server-side
+      // session can outlive the TUI, and a successor admitted while the old
+      // container still lives would be superseded by the zombie.
+      try {
+        releaseSlot?.();
+      } catch {
+        providerLog.warn({ provider: 'freebuff' }, 'Freebuff session slot release failed');
+      }
+      if (slotAccountId) activeFreebuffTurns.delete(slotAccountId);
       try {
         await prepared?.cleanup();
       } catch {

@@ -3,12 +3,7 @@
 
 import OpenAI, { AzureOpenAI } from 'openai';
 import { userConfirmedImageInput } from './attachment-admission';
-import type {
-  ModelParameterKey,
-  ProviderConfig,
-  ProviderName,
-  ModelDef,
-} from '@koryphaios/shared';
+import type { ModelParameterKey, ProviderConfig, ProviderName, ModelDef } from '@koryphaios/shared';
 import { sanitizeModelParameterValues } from '@koryphaios/shared';
 
 import {
@@ -303,6 +298,10 @@ export class OpenAIProvider implements Provider {
     return this.modelDiscoveryError;
   }
 
+  isModelDiscoveryInFlight(): boolean {
+    return this.refreshInProgress !== null;
+  }
+
   getModelDiscoveryHttpStatus(): number | undefined {
     return this.modelDiscoveryHttpStatus;
   }
@@ -466,9 +465,7 @@ export class OpenAIProvider implements Provider {
       typeof modelParams.max_tokens === 'number' ? modelParams.max_tokens : undefined;
     const effectiveMaxTokens = paramMaxTokens ?? request.maxTokens;
     const effectiveTemperature =
-      typeof modelParams.temperature === 'number'
-        ? modelParams.temperature
-        : request.temperature;
+      typeof modelParams.temperature === 'number' ? modelParams.temperature : request.temperature;
 
     const params: OpenAI.ChatCompletionCreateParamsStreaming & {
       service_tier?: string;
@@ -575,14 +572,15 @@ export class OpenAIProvider implements Provider {
 
     // Gwarden rejects reasoning controls; never send them for that provider.
     if (this.name !== 'gwarden') {
-    // Only send reasoning_effort if model + selected level supports it.
-    this.applyReasoningControls(params as unknown as Record<string, unknown>, {
-      canReason,
-      effort: reasoningEffort,
-      supported: this.name === 'beam' ? new Set(liveDef?.reasoningLevels ?? []) : supportedEfforts,
-      modelDef: liveDef,
-      requestModel: modelDef?.apiModelId ?? request.model,
-    });
+      // Only send reasoning_effort if model + selected level supports it.
+      this.applyReasoningControls(params as unknown as Record<string, unknown>, {
+        canReason,
+        effort: reasoningEffort,
+        supported:
+          this.name === 'beam' ? new Set(liveDef?.reasoningLevels ?? []) : supportedEfforts,
+        modelDef: liveDef,
+        requestModel: modelDef?.apiModelId ?? request.model,
+      });
     }
 
     try {
@@ -700,7 +698,7 @@ export class OpenAIProvider implements Provider {
           typeof msgContent === 'string'
             ? msgContent
             : Array.isArray(msgContent)
-              ? msgContent.map((p) => (typeof p === 'string' ? p : p?.text ?? '')).join('')
+              ? msgContent.map((p) => (typeof p === 'string' ? p : (p?.text ?? ''))).join('')
               : '';
         if (text) yield { type: 'content_delta', content: text };
         yield { type: 'complete', finishReason: 'stop' };
@@ -720,7 +718,11 @@ export class OpenAIProvider implements Provider {
           choices?: Array<{ delta?: { content?: string } }>;
         };
         let streamError: unknown = chunkRecord.error;
-        if (!streamError && typeof chunkRecord.message === 'string' && /error/i.test(chunkRecord.message)) {
+        if (
+          !streamError &&
+          typeof chunkRecord.message === 'string' &&
+          /error/i.test(chunkRecord.message)
+        ) {
           streamError = chunkRecord.message;
         }
         const firstDeltaContent = chunkRecord.choices?.[0]?.delta?.content;
@@ -804,7 +806,7 @@ export class OpenAIProvider implements Provider {
         if (Array.isArray(contentCandidate)) {
           contentCandidate = contentCandidate
             .map((part) =>
-              typeof part === 'string' ? part : (part as { text?: string })?.text ?? '',
+              typeof part === 'string' ? part : ((part as { text?: string })?.text ?? ''),
             )
             .join('');
         }
@@ -1316,17 +1318,6 @@ export class OpenRouterProvider extends OpenAIProvider {
 export class XAIProvider extends OpenAIProvider {
   constructor(config: ProviderConfig) {
     super(config, 'xai', 'https://api.x.ai/v1');
-  }
-}
-
-/**
- * Vyce AI documents the standard OpenAI SDK contract at https://vyceai.com/v1.
- * Keep a named adapter so its endpoint cannot drift into a similarly named
- * gateway, while retaining the shared message, tool, usage, and retry logic.
- */
-export class VyceAIProvider extends OpenAIProvider {
-  constructor(config: ProviderConfig) {
-    super(config, 'vyceai', 'https://vyceai.com/v1');
   }
 }
 

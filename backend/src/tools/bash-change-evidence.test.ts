@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'bun';
 import type { ChangeSummary } from '@koryphaios/shared';
 import { BashTool } from './bash';
+import { captureGitChangeEvidence } from './git-change-evidence';
 
 const IS_WIN = process.platform === 'win32';
 const testDirectories: string[] = [];
@@ -231,5 +232,13 @@ describe('Bash foreground changed-file evidence', () => {
     expect(result.isError).toBe(false);
     expect(changes).toEqual([]);
     expect(existsSync(join(root, 'plain.txt'))).toBe(true);
+  });
+
+  test('skips evidence capture for a container-rooted repository', async () => {
+    // A repository rooted at the home directory (or filesystem root) makes
+    // `status -uall` enumerate the entire container — megabytes of irrelevant
+    // porcelain per command — and its dirty set is never this workspace's
+    // change evidence. Capture must refuse it outright rather than timing out.
+    await expect(captureGitChangeEvidence(homedir())).resolves.toBeNull();
   });
 });

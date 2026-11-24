@@ -1,5 +1,12 @@
 import { Elysia, t } from 'elysia';
-import { legacyTurnParts, type StoredMessage, type ProviderName } from '@koryphaios/shared';
+import {
+  legacyTurnParts,
+  type StoredMessage,
+  type ProviderName,
+  type SubagentStub,
+  type SubagentTranscript,
+  type TranscriptPart,
+} from '@koryphaios/shared';
 import { getContext } from '../../context';
 import { nanoid } from 'nanoid';
 import { ID, MESSAGE } from '../../constants';
@@ -194,13 +201,86 @@ function reportLedgerTurnFailure(
   });
 }
 
+function subagentStubOf(
+  subagent: SubagentTranscript,
+  messageId: string,
+  path: number[],
+): SubagentStub {
+  const stub: SubagentStub = {
+    name: subagent.name,
+    turnCount: Array.isArray(subagent.turns) ? subagent.turns.length : 0,
+    ref: { messageId, path },
+  };
+  if (subagent.agentId !== undefined) stub.agentId = subagent.agentId;
+  if (subagent.task !== undefined) stub.task = subagent.task;
+  if (subagent.model !== undefined) stub.model = subagent.model;
+  if (subagent.provider !== undefined) stub.provider = subagent.provider;
+  return stub;
+}
+
+/**
+ * Replace embedded sub-agent transcripts with fetch-on-demand stubs. `basePath`
+ * is the index path of the transcript containing `parts`; a nested sub-agent at
+ * `parts[i]` is addressed by appending `i`. Returns `parts` unchanged when
+ * nothing was stripped.
+ */
+function stubSubagentParts(
+  parts: readonly TranscriptPart[],
+  messageId: string,
+  basePath: readonly number[],
+): TranscriptPart[] {
+  let changed = false;
+  const next = parts.map((part, index) => {
+    if (part.kind !== 'tool' || part.subagent === undefined) return part;
+    changed = true;
+    const { subagent: _stripped, ...rest } = part;
+    return {
+      ...rest,
+      subagentStub: subagentStubOf(part.subagent, messageId, [...basePath, index]),
+    };
+  });
+  return changed ? next : [...parts];
+}
+
+/** Strip the transcripts one level inside `subagent`; the result still has its
+ *  own turns and texts — only grandchildren become stubs with extended paths. */
+function stubNestedSubagents(
+  subagent: SubagentTranscript,
+  messageId: string,
+  basePath: readonly number[],
+): SubagentTranscript {
+  const turns = subagent.turns.map((turn, turnIndex) => {
+    if (turn.role !== 'assistant') return turn;
+    const parts = stubSubagentParts(turn.parts, messageId, [...basePath, turnIndex]);
+    return parts === turn.parts ? turn : { ...turn, parts };
+  });
+  return { ...subagent, turns };
+}
+
+/** Resolve a stub `ref.path` against a stored message's parts. */
+export function subagentAtPath(
+  message: StoredMessage,
+  path: readonly number[],
+): SubagentTranscript | undefined {
+  const first = message.parts?.[path[0]];
+  let subagent = first?.kind === 'tool' ? first.subagent : undefined;
+  for (let i = 1; i + 1 < path.length && subagent !== undefined; i += 2) {
+    const turn = subagent.turns[path[i]];
+    const part = turn?.role === 'assistant' ? turn.parts[path[i + 1]] : undefined;
+    subagent = part?.kind === 'tool' ? part.subagent : undefined;
+  }
+  return subagent;
+}
+
 export function withDisplayParts(message: StoredMessage): StoredMessage {
   if (message.role !== 'assistant') return message;
+  const parts =
+    message.parts ?? legacyTurnParts(message.content, message.reasoningContent, message.createdAt);
   return {
     ...message,
-    parts:
-      message.parts ??
-      legacyTurnParts(message.content, message.reasoningContent, message.createdAt),
+    // Imported chats embed whole sub-agent conversations in tool parts; the
+    // list payload only needs the collapsed-row header for each of them.
+    parts: stubSubagentParts(parts, message.id, []),
   };
 }
 
@@ -223,6 +303,42 @@ export const messageRoutes = new Elysia({ prefix: '/api/messages' })
       data: { ...projection, messages: projection.messages.map(withDisplayParts) },
     };
   })
+  // A stripped sub-agent transcript, fetched when its row is first expanded.
+  // `path` is the comma-separated index path from the owning message's parts
+  // (see SubagentStub.ref), e.g. ?path=2 or ?path=2,0,1 for a nested sub-agent.
+  .get(
+    '/:sessionId/subagent/:messageId',
+    async ({ request, params: { sessionId, messageId }, query, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      const { messages } = getContext();
+      const rawPath = typeof query?.path === 'string' ? query.path : '';
+      const segments = rawPath.split(',');
+      // Odd length only: the path alternates part / turn / part … and must end
+      // on a part index. Segments must be plain digits (Number('') would sneak
+      // a 0 in through an empty segment). Depth and width are capped so a
+      // crafted path cannot turn into an arbitrary traversal.
+      if (
+        segments.length % 2 === 0 ||
+        segments.length > 31 ||
+        segments.some((segment) => !/^\d{1,6}$/.test(segment))
+      ) {
+        set.status = 400;
+        return { ok: false, error: 'Invalid sub-agent path' };
+      }
+      const path = segments.map(Number);
+      const message = await messages.getById(sessionId, messageId);
+      const subagent = message ? subagentAtPath(message, path) : undefined;
+      if (!subagent) {
+        set.status = 404;
+        return { ok: false, error: 'Sub-agent transcript not found' };
+      }
+      // Grandchildren ride as stubs again — each level loads on demand.
+      return {
+        ok: true,
+        data: { subagent: stubNestedSubagents(subagent, messageId, path) },
+      };
+    },
+  )
   .post(
     '/',
     async ({ request, body, set }) => {

@@ -101,12 +101,7 @@ async function seedCatalog(): Promise<void> {
 
 describe('models.dev fallback chain', () => {
   it('routes multi-lab gateways through the common upstream labs', () => {
-    for (const gateway of [
-      'experientiallabs',
-      'commandcode',
-      'github-models',
-      'cline',
-    ]) {
+    for (const gateway of ['experientiallabs', 'commandcode', 'github-models', 'cline']) {
       const keys = modelsDevKeysFor(gateway);
       expect(keys).toContain('openai');
       expect(keys).toContain('anthropic');
@@ -180,12 +175,14 @@ describe('models.dev fallback chain', () => {
   it('keeps direct single-key mappings intact', () => {
     expect(modelsDevKeysFor('openai')).toEqual(['openai']);
     expect(modelsDevKeysFor('unorouter')).toEqual([
-      'unorouter', 'openai', 'anthropic', 'google', 'xai', 'deepseek', 'groq', 'mistral',
-    ]);
-    // Vyce AI publishes bare upstream ids with no limits or effort ladder, so
-    // it resolves through the cross-lab keys like the other resale gateways.
-    expect(modelsDevKeysFor('vyceai')).toEqual([
-      'openai', 'anthropic', 'google', 'xai', 'deepseek', 'groq', 'mistral',
+      'unorouter',
+      'openai',
+      'anthropic',
+      'google',
+      'xai',
+      'deepseek',
+      'groq',
+      'mistral',
     ]);
     expect(modelsDevKeysFor('mistral')).toEqual(['mistral']);
     expect(modelsDevKeysFor('qwen')).toEqual(['alibaba']);

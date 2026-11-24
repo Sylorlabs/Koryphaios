@@ -1,9 +1,11 @@
 import { spawnSync } from 'bun';
 import { readFileSync } from 'node:fs';
-import { resolve, relative, isAbsolute } from 'node:path';
+import { homedir } from 'node:os';
+import { resolve, relative, isAbsolute, parse } from 'node:path';
 import { koryLog, serverLog } from '../logger';
 import { GitExecutor } from './git-executor';
 import { getSafeSubprocessEnv } from '../runtime/safe-env';
+import { canonicalizePath } from '../runtime/platform';
 import { gitWorkspaceOwnership, isIndependentChatGitRepository } from './git-owned-workspace';
 
 /** Branch names: alphanumeric, hyphen, underscore, slash (for refs/heads/foo). Max 255 chars. */
@@ -16,6 +18,34 @@ export interface GitFileStatus {
   originalPath?: string;
   additions?: number;
   deletions?: number;
+}
+
+function canonicalOrResolved(path: string): string {
+  try {
+    return canonicalizePath(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+/**
+ * True when `toplevel` is a container directory rather than a project
+ * repository root: the user's home directory or the filesystem root. A
+ * dotfiles/scratch repository rooted there reports every file in that
+ * container as repository status — never the chat's own change set — and a
+ * `git status` against it can scan an entire home directory for tens of
+ * seconds and emit hundreds of megabytes of porcelain output.
+ *
+ * This holds even when the opened working directory IS the container root:
+ * opening `~` does not shrink the scan, so the repository rooted there still
+ * cannot serve as a usable project repository. Intermediate ancestors stay
+ * valid so monorepo subdirectories keep working.
+ */
+export function isContainerGitRoot(toplevel: string): boolean {
+  const canonicalTop = canonicalOrResolved(toplevel);
+  return (
+    canonicalTop === canonicalOrResolved(homedir()) || canonicalTop === parse(canonicalTop).root
+  );
 }
 
 export class GitManager {
@@ -54,7 +84,9 @@ export class GitManager {
       // through the mandatory sandbox in GitExecutor, never unrestricted Git.
       return isIndependentChatGitRepository(owner.checkout);
     }
-    return this.runGitSync(['rev-parse', '--is-inside-work-tree']).success;
+    const top = this.runGitSync(['rev-parse', '--show-toplevel']);
+    const toplevel = top.output.trim();
+    return top.success && toplevel.length > 0 && !isContainerGitRoot(toplevel);
   }
 
   async getStatus(): Promise<GitFileStatus[]> {

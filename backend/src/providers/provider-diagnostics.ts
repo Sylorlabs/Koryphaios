@@ -8,6 +8,7 @@ export type ProviderDiagnosticSource =
 export type ProviderDiagnosticCategory =
   | 'authentication'
   | 'rate_limit'
+  | 'usage_limit'
   | 'timeout'
   | 'network'
   | 'permission'
@@ -261,6 +262,17 @@ const TRANSIENT_CREDENTIAL_MARKERS = [
 ];
 
 /**
+ * Hard account/model usage caps ("usage limit reached", "quota exceeded",
+ * "insufficient credits", "out of credits"). These are NOT transient: retrying
+ * the same model cannot help and the user must switch model/provider or wait
+ * for the limit to reset. Matching this must win over generic transient
+ * phrasing — providers wrap caps in 500-class text like "Internal error: Free
+ * usage limit reached…" (observed live from OpenCode).
+ */
+export const USAGE_LIMIT_TEXT =
+  /usage limit (?:reached|exceeded)|quota (?:reached|exceeded)|insufficient (?:credits|quota|balance)|out of credits/i;
+
+/**
  * True when a failure is a transient upstream condition worth retrying the same
  * turn. Covers the case a status-based check cannot see: an `error` frame that
  * arrives on an already-open SSE stream. Anthropic's SDK throws
@@ -272,8 +284,9 @@ const TRANSIENT_CREDENTIAL_MARKERS = [
  * retryable without shrinking the prompt.
  */
 export function isTransientStreamErrorText(value: unknown, status?: number): boolean {
-  if (status === 500 || status === 502 || status === 503 || status === 504) return true;
   const text = rawDiagnosticText(value).toLowerCase();
+  if (text && USAGE_LIMIT_TEXT.test(text)) return false;
+  if (status === 500 || status === 502 || status === 503 || status === 504) return true;
   if (!text) return false;
   if (TRANSIENT_CREDENTIAL_MARKERS.some((marker) => text.includes(marker))) return false;
   return (
@@ -340,6 +353,7 @@ export function classifyProviderDiagnostic(
     )
   )
     return 'authentication';
+  if (USAGE_LIMIT_TEXT.test(text)) return 'usage_limit';
   if (status === 429 || /\b(?:rate limit|too many requests|quota exceeded)\b/.test(text))
     return 'rate_limit';
   if (status === 408 || /\b(?:timed? out|timeout|deadline exceeded)\b/.test(text)) return 'timeout';
@@ -468,6 +482,10 @@ export function safeProviderFailureMessage(
         `${label} rate limit or quota was reached. Retry later or choose another provider.`,
         diagnostic,
       );
+    case 'usage_limit': {
+      const detail = diagnostic.upstreamDetail?.slice(0, 200);
+      return `${label} reports a usage limit for this model${detail ? `: "${detail}"` : ''}. Pick another model or provider, or wait for the limit to reset.`;
+    }
     case 'timeout':
       return withUpstreamDetail(
         `${label} did not respond before the request timed out.`,

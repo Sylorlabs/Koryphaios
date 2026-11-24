@@ -1,5 +1,5 @@
 import { existsSync, lstatSync } from 'node:fs';
-import { basename, dirname, isAbsolute, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
 import { canonicalizePath, isContainedBy } from '../runtime/platform';
 import { validatePathAccess, type PathValidationResult } from '../security/path-security';
 import type { ToolCallInput, ToolContext } from './registry';
@@ -68,10 +68,37 @@ export class FilePathScope {
   readonly targets: Array<{ literal: string; canonical: string; recursive: boolean }> = [];
   readonly cwd: string;
   private readonly literalCwd: string;
+  /** Extra read roots the host explicitly granted (ctx.allowedPaths), in
+   *  canonical form — e.g. a managed CLI's private jail temp. The canonical
+   *  cwd clause remains the real escape guard; these only keep the host's own
+   *  grants from prompting as "outside the working directory", and only for
+   *  tools that cannot mutate files. */
+  private readonly allowedRoots: string[];
+  /** The producer checkout a review copy mirrors (ctx.reviewSourceRoot):
+   *  literal and canonical forms, for rewriting producer-spelled targets. */
+  private readonly reviewSource?: { literal: string; canonical: string };
 
   constructor(ctx: ToolContext, call: ToolCallInput) {
     this.literalCwd = resolve(ctx.workingDirectory);
     this.cwd = canonicalizePath(this.literalCwd);
+    this.allowedRoots = (ctx.allowedPaths ?? []).map((root) => {
+      const absolute = resolve(this.literalCwd, root);
+      try {
+        return canonicalizePath(absolute);
+      } catch {
+        return absolute;
+      }
+    });
+    if (ctx.reviewSourceRoot) {
+      const sourceLiteral = resolve(ctx.reviewSourceRoot);
+      let sourceCanonical = sourceLiteral;
+      try {
+        sourceCanonical = canonicalizePath(sourceLiteral);
+      } catch {
+        // A missing source root still maps literal spellings.
+      }
+      this.reviewSource = { literal: sourceLiteral, canonical: sourceCanonical };
+    }
     this.call = structuredClone(call);
     const input = this.call.input;
     const add = (
@@ -82,7 +109,7 @@ export class FilePathScope {
     ) => {
       const value = object[key] ?? fallback;
       if (typeof value !== 'string' || !value) throw new Error(`Missing filesystem path: ${key}`);
-      const literal = resolve(this.literalCwd, value);
+      const literal = this.mapProducerLiteral(resolve(this.literalCwd, value));
       const canonical = canonicalTarget(literal);
       this.targets.push({ literal, canonical, recursive });
       object[key] = canonical;
@@ -140,16 +167,48 @@ export class FilePathScope {
     }
   }
 
+  /** A critic works in a disposable copy, but transcripts keep spelling the
+   *  producer checkout's absolute paths. A target inside the source root —
+   *  by literal spelling, or canonically for /var↔/private/var and symlinked
+   *  roots — is rewritten to the same relative path under the critic cwd
+   *  before canonicalization and containment run, so the pipeline and the
+   *  tool see an in-copy path. Shell commands carry no path operands here. */
+  private mapProducerLiteral(literal: string): string {
+    const source = this.reviewSource;
+    if (!source) return literal;
+    // A copy nested under the producer root must not remap its own paths.
+    if (isContainedBy(this.literalCwd, literal) || isContainedBy(this.cwd, literal)) return literal;
+    if (isContainedBy(source.literal, literal))
+      return resolve(this.literalCwd, relative(source.literal, literal));
+    try {
+      const canonical = canonicalTarget(literal);
+      if (isContainedBy(source.canonical, canonical))
+        return resolve(this.literalCwd, relative(source.canonical, canonical));
+    } catch {
+      // A dangling producer path falls through unmapped; the normal
+      // literal/canonical clauses classify it.
+    }
+    return literal;
+  }
+
   get externalPaths(): string[] {
     return [
       ...new Set(
         this.targets
-          .filter(
-            (target) =>
-              !isContainedBy(this.cwd, target.canonical) ||
-              (!isContainedBy(this.literalCwd, target.literal) &&
-                !isContainedBy(this.cwd, target.literal)),
-          )
+          .filter((target) => {
+            // A host-granted root is authority only through the canonical
+            // target: a symlink inside the grant pointing outside resolves
+            // canonically outside and stays external.
+            const insideGrant =
+              !FILE_MUTATING_TOOLS.has(this.call.name) &&
+              this.allowedRoots.some((root) => isContainedBy(root, target.canonical));
+            // Containment is decided on the canonical form only: it is derived
+            // from the literal with symlink resolution, so it is the escape
+            // guard on every platform. A literal spelling check would flag
+            // inside paths spelled through an aliased root (macOS /tmp vs
+            // /private/tmp) even though they canonically resolve inside.
+            return !isContainedBy(this.cwd, target.canonical) && !insideGrant;
+          })
           .map((target) => target.canonical),
       ),
     ];

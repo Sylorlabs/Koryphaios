@@ -17,7 +17,7 @@
  */
 
 import { isTransientCodexFailure } from './codex-cli';
-import { isTransientStreamErrorText } from './provider-diagnostics';
+import { isTransientStreamErrorText, USAGE_LIMIT_TEXT } from './provider-diagnostics';
 import type { Provider, ProviderEvent, StreamRequest } from './types';
 
 /** Retries after the first attempt, for both the registry and the collector. */
@@ -42,6 +42,11 @@ export function isRetriableProviderFailure(error: unknown): boolean {
         ? errObj.statusCode
         : undefined;
   const code = String(errObj?.code || '').toUpperCase();
+
+  // A hard usage cap never recovers on a same-model retry — providers wrap it
+  // in 500-class text ("Internal error: Free usage limit reached"), so this
+  // check must precede every status-based retry path.
+  if (USAGE_LIMIT_TEXT.test(msg)) return false;
 
   // Fail-closed for auth errors even if the message mentions retryable words.
   if (

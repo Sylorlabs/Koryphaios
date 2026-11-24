@@ -20,9 +20,7 @@ export function gateModelParametersToForwarded(
   const forwarded = provider?.forwardedModelParameters?.();
   return models.map((model) => {
     if (!model.parameters?.length) return model;
-    const filtered = forwarded
-      ? model.parameters.filter((def) => forwarded.has(def.key))
-      : [];
+    const filtered = forwarded ? model.parameters.filter((def) => forwarded.has(def.key)) : [];
     if (filtered.length === model.parameters.length) return model;
     const next = { ...model };
     if (filtered.length > 0) next.parameters = filtered;
@@ -50,7 +48,6 @@ import {
   OpenRouterProvider,
   UnoRouterProvider,
   ExperientialLabsProvider,
-  VyceAIProvider,
   RespanProvider,
   XAIProvider,
   AzureProvider,
@@ -79,10 +76,7 @@ import {
 } from './workbuddy-desktop-runtime';
 import { FreebuffProvider } from './freebuff-cli';
 import { OmnirushCliProvider } from './omnirush-cli';
-import {
-  isModelEnabledInCatalog,
-  resolveEnabledModelIds,
-} from './model-availability';
+import { isModelEnabledInCatalog, resolveEnabledModelIds } from './model-availability';
 import { OpenCodeCliProvider } from './opencode-cli';
 import { FREEBUFF_CLI_DEFAULT_MODEL_ID } from './freebuff-bundled-catalog';
 import { ensureFreebuffRuntimeReady } from './freebuff-runtime';
@@ -572,8 +566,7 @@ const PROVIDER_FACTORIES: Partial<Record<ProviderName, ProviderFactory>> = {
   // Cline's hosted API — OpenAI-compatible Chat Completions on one API key.
   cline: (c) => (c.apiKey || c.authToken ? new ClineProvider(c) : null),
   // 100MillionSeek — OpenAI-compatible host; catalog owns limits and quota labels.
-  hundredmillionseek: (c) =>
-    c.apiKey || c.authToken ? new HundredMillionSeekProvider(c) : null,
+  hundredmillionseek: (c) => (c.apiKey || c.authToken ? new HundredMillionSeekProvider(c) : null),
   // Numes — OpenRouter-shaped gateway; catalog owns pricing, limits and efforts.
   numes: (c) => (c.apiKey || c.authToken ? new NumesProvider(c) : null),
   // Coarena — OpenAI-compatible Model API; public catalog, key-based usage.
@@ -612,8 +605,6 @@ const PROVIDER_FACTORIES: Partial<Record<ProviderName, ProviderFactory>> = {
   unorouter: (c) => new UnoRouterProvider(c),
   // Experiential Labs — open-source AI gateway (Bearer auth, /v1/models).
   experientiallabs: (c) => new ExperientialLabsProvider(c),
-  // Vyce AI — documented OpenAI-compatible /v1 gateway with Bearer auth.
-  vyceai: (c) => (c.apiKey || c.authToken ? new VyceAIProvider(c) : null),
   respan: (c) => (c.apiKey || c.authToken ? new RespanProvider(c) : null),
   // OpenCode Go is dual-protocol — OpenCodeGoProvider dispatches per-model.
   opencodego: (c) => new OpenCodeGoProvider(c),
@@ -1225,9 +1216,18 @@ class ProviderRegistry {
       // reported" contradiction. Discovery trouble is surfaced only when
       // there is actually nothing to offer.
       const discoveryFailure = provider?.getModelDiscoveryError?.();
+      // A cold catalog read starts discovery and returns the models already
+      // cached, which is none on the first read. Reporting that as a discovery
+      // failure made every first visit to a provider card flash "No models were
+      // reported" before the request it just started had a chance to finish.
+      const discoveryInFlight = provider?.isModelDiscoveryInFlight?.() === true;
       const modelDiscoveryError =
         providerUnavailableReason ??
-        (isEnabled && isProviderAvailable && !hideModelSelector && allModels.length === 0
+        (isEnabled &&
+        isProviderAvailable &&
+        !hideModelSelector &&
+        allModels.length === 0 &&
+        !discoveryInFlight
           ? (discoveryFailure ??
             'No models were reported by this configured provider. Refresh discovery or check its account and CLI/API authentication.')
           : undefined);
@@ -1870,7 +1870,7 @@ class ProviderRegistry {
           let accBillingTokensIn: number | undefined;
           let accBillingTokensOut: number | undefined;
           let accReportedCostUsd: number | undefined;
-      let accBillingUsageSamples: ProviderEvent['billingUsageSamples'];
+          let accBillingUsageSamples: ProviderEvent['billingUsageSamples'];
           let usageAccountId: string | undefined;
           // A yielded error event the loop chose to suppress for a same-model
           // retry (set instead of surfacing it to the caller).
@@ -1959,7 +1959,7 @@ class ProviderRegistry {
                 }
               }
               if (event.type === 'usage_update') {
-            if (event.reportedCostUsd !== undefined) accReportedCostUsd = event.reportedCostUsd;
+                if (event.reportedCostUsd !== undefined) accReportedCostUsd = event.reportedCostUsd;
                 if (typeof event.tokensIn === 'number') accTokensIn = event.tokensIn;
                 if (typeof event.tokensOut === 'number') accTokensOut = event.tokensOut;
                 if (typeof event.tokensCache === 'number') {
@@ -2777,14 +2777,6 @@ class ProviderRegistry {
             },
             'openai',
           );
-        case 'vyceai': {
-          if (!apiKey) return { success: false, error: 'Vyce AI requires an API key' };
-          const base = (baseUrl || PROVIDER_BASE_URLS.vyceai || 'https://vyceai.com/v1').replace(
-            /\/+$/,
-            '',
-          );
-          return this.verifyBearerGet(`${base}/models`, apiKey);
-        }
         case 'github-models': {
           const token = apiKey || authToken;
           if (!token) return { success: false, error: 'Missing GitHub token' };
@@ -3113,7 +3105,11 @@ class ProviderRegistry {
         this.autoDetectedSources.delete(name);
       }
       const nextAutoDetected =
-        options.autoDetected === true ? true : userSuppliedMaterial ? undefined : existing?.autoDetected;
+        options.autoDetected === true
+          ? true
+          : userSuppliedMaterial
+            ? undefined
+            : existing?.autoDetected;
 
       // Auto-detect if blank. env_auth providers (Bedrock) never auto-bake
       // machine-level AWS credentials into the persisted config — the AWS SDK
@@ -3300,7 +3296,17 @@ class ProviderRegistry {
 
       this.providerConfigs.set(name, providerConfig);
 
-      const provider = this.createProvider(name, providerConfig);
+      // A preference-only save (Manage Models, context window, selector
+      // visibility) cannot change transport, so it must keep the live adapter.
+      // Rebuilding one produced a fresh instance with an empty catalog while the
+      // deliberate no-refresh rule skipped discovery, so the card showed "No
+      // models were reported" until a manual refresh. Mutating the existing
+      // config keeps context-window readers current without discarding the
+      // catalog.
+      const provider = options.preferenceOnly
+        ? (this.providers.get(name) ?? this.createProvider(name, providerConfig))
+        : this.createProvider(name, providerConfig);
+      if (provider && options.preferenceOnly) Object.assign(provider.config, providerConfig);
       if (provider) {
         // A preference-only update (Manage Models) must not re-run catalog
         // discovery. The selection is already based on the catalog displayed
@@ -3618,9 +3624,7 @@ class ProviderRegistry {
     // canonical default applies. Explicit user URLs on live hosts still win.
     let normalizedUserBaseUrl = userConfig?.baseUrl?.replace(/\/+$/, '');
     const canonicalCustomBaseUrl =
-      false && normalizedUserBaseUrl
-        ? normalizedUserBaseUrl
-        : userConfig?.baseUrl ?? undefined;
+      false && normalizedUserBaseUrl ? normalizedUserBaseUrl : (userConfig?.baseUrl ?? undefined);
     const userBaseUrl =
       name === 'tokenrouter' &&
       (normalizedUserBaseUrl === 'https://tokenrouter.me/v1' ||

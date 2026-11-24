@@ -46,7 +46,6 @@ export const PROVIDER_BASE_URLS: Partial<Record<ProviderName, string>> = {
   logfare: 'https://logfare.ai/v1',
   apinex: 'https://api.apinex.bond/v1',
   gwarden: 'https://gwarden.su/v1',
-  vyceai: 'https://vyceai.com/v1',
   respan: 'https://api.respan.ai/api/v1',
   poe: 'https://api.poe.com/v1',
   workbuddy: 'https://tokenhub-intl.tencentcloudmaas.com/v1',
@@ -176,7 +175,6 @@ export function buildAuthHeaders(
     case 'logfare':
     case 'apinex':
     case 'gwarden':
-    case 'vyceai':
     case 'respan':
     case 'poe':
     case 'deepseek':
@@ -250,7 +248,6 @@ export function getVerifyUrl(
     case 'logfare':
     case 'apinex':
     case 'gwarden':
-    case 'vyceai':
     case 'respan':
     case 'poe':
     case 'deepseek':

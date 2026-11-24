@@ -8,6 +8,7 @@ import {
   mkdtempSync,
   readdirSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -24,7 +25,12 @@ import {
   isMac,
   isWindows,
 } from '../runtime/platform';
-import { FREEBUFF_DYNAMIC_CATALOG_PROBE, parseFreebuffBundledCatalog, type FreebuffBundledCatalog } from './freebuff-bundled-catalog';
+import {
+  FREEBUFF_DYNAMIC_CATALOG_PROBE,
+  parseFreebuffBundledCatalog,
+  type FreebuffBundledCatalog,
+} from './freebuff-bundled-catalog';
+import { freebuffSlotPidAlive, readFreebuffSlotInfo } from './freebuff-session-slots';
 import { discoverFreebuffAccounts, freebuffConfigDir } from './auth-utils';
 import {
   FREEBUFF_MIN_RUNTIME_VERSION,
@@ -142,6 +148,11 @@ let status: FreebuffRuntimeStatus = {
 let checkedAt = 0;
 let checking: Promise<FreebuffRuntimeStatus> | undefined;
 let executionCatalog: FreebuffBundledCatalog | null = null;
+/** Containers THIS process launched (recorded before docker run): the reaper
+ * below must never remove one, however old — only foreign/zombie artifacts. */
+const createdContainers = new Set<string>();
+/** The artifact reaper runs at most once per process. */
+let artifactsReaped = false;
 /** Catalog protocol measured from the actual qualified execution binary. */
 export function getFreebuffRuntimeCatalog(): FreebuffBundledCatalog | null {
   return status.available ? executionCatalog : null;
@@ -170,6 +181,9 @@ export async function resetFreebuffRuntimeStateForTests(): Promise<void> {
   imageUpdate = undefined;
   forcedUpdate = undefined;
   lastScheduleAt = 0;
+  catalogByArtifact.clear();
+  createdContainers.clear();
+  artifactsReaped = false;
 }
 
 /**
@@ -219,9 +233,17 @@ async function command(
 ): Promise<string> {
   // Drain both pipes before accepting exit. Bun's Node execFile compatibility
   // callback can precede the last Docker output chunk under heavy host load.
-  const child = Bun.spawn([file, ...args], { env, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
+  const child = Bun.spawn([file, ...args], {
+    env,
+    stdin: 'ignore',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
   let timedOut = false;
-  const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, timeout);
+  const timer = setTimeout(() => {
+    timedOut = true;
+    child.kill('SIGKILL');
+  }, timeout);
   const read = async (stream: ReadableStream<Uint8Array>): Promise<string> => {
     const reader = stream.getReader();
     const chunks: Uint8Array[] = [];
@@ -238,20 +260,29 @@ async function command(
         chunks.push(value);
       }
       return Buffer.concat(chunks).toString('utf8');
-    } finally { reader.releaseLock(); }
+    } finally {
+      reader.releaseLock();
+    }
   };
   try {
-    const [code, stdout, stderr] = await Promise.all([child.exited, read(child.stdout), read(child.stderr)]);
+    const [code, stdout, stderr] = await Promise.all([
+      child.exited,
+      read(child.stdout),
+      read(child.stderr),
+    ]);
     if (code !== 0 || timedOut) {
       const action = ['info', 'image', 'exec', 'run', 'rm', 'list', 'start'].includes(args[0] ?? '')
-        ? args[0] : 'isolated command';
+        ? args[0]
+        : 'isolated command';
       const message = timedOut
         ? `Freebuff runtime ${file === 'docker' ? 'Docker' : 'controller'} ${action} timed out`
         : 'Freebuff runtime command failed';
       throw Object.assign(new Error(message), { code: timedOut ? 'TIMEOUT' : code, stderr });
     }
     return stdout;
-  } finally { clearTimeout(timer); }
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export interface FreebuffDockerSetupDependencies {
@@ -328,17 +359,32 @@ async function freebuffDockerEnvironmentWithResume(
   } catch (error) {
     // Resume an existing, correctly sized architecture profile without
     // creating a VM or switching Docker's global context.
-    if (process.env.KORY_FREEBUFF_DOCKER_CONTEXT || process.env.DOCKER_CONTEXT || process.env.DOCKER_HOST)
+    if (
+      process.env.KORY_FREEBUFF_DOCKER_CONTEXT ||
+      process.env.DOCKER_CONTEXT ||
+      process.env.DOCKER_HOST
+    )
       throw error;
-    const profiles = (await dependencies.command('colima', ['list', '--json'], 10_000, controlEnv()))
-      .split('\n').filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
-    const existing = profiles.find((profile) =>
-      profile.name === 'default' &&
-      ['x86_64', 'aarch64', 'arm64'].includes(String(profile.arch)) &&
-      profile.runtime === 'docker' &&
-      profile.status === 'Stopped');
+    const profiles = (
+      await dependencies.command('colima', ['list', '--json'], 10_000, controlEnv())
+    )
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    const existing = profiles.find(
+      (profile) =>
+        profile.name === 'default' &&
+        ['x86_64', 'aarch64', 'arm64'].includes(String(profile.arch)) &&
+        profile.runtime === 'docker' &&
+        profile.status === 'Stopped',
+    );
     if (!existing) throw error;
-    await dependencies.command('colima', ['start', 'default', '--activate=false'], 120_000, controlEnv());
+    await dependencies.command(
+      'colima',
+      ['start', 'default', '--activate=false'],
+      120_000,
+      controlEnv(),
+    );
     return dependencies.environment();
   }
 }
@@ -371,6 +417,136 @@ async function gcFreebuffRuntimeImages(
   }
 }
 
+const FREEBUFF_CONTAINER_PREFIX = 'kory-freebuff-';
+/** Turn cap is MAX_RUNTIME_MS (9 min); a foreign container older than this is
+ * a zombie whose still-admitted CLI session would supersede a fresh turn. */
+const REAPER_CONTAINER_MIN_AGE_MS = 12 * 60_000;
+const REAPER_RUN_ROOT_MAX_AGE_MS = 24 * 60 * 60_000;
+
+export interface FreebuffReaperDeps {
+  runsRoot?: string;
+  slotsRoot?: string;
+  now?: () => number;
+  kill?: (pid: number, signal: 0) => void;
+}
+
+/**
+ * Best-effort artifact sweep: every failure is swallowed and only our own
+ * names/paths are ever touched.
+ *
+ *  - `kory-freebuff-*` containers NOT launched by this process and older than
+ *    the turn cap (12 min > 9 min max runtime) are zombie admissions: a live
+ *    one would supersede any fresh session on the account. `docker rm -f`.
+ *  - Run roots under ~/.koryphaios/freebuff-runs/<ms>-<hex> older than 24 h
+ *    that no running kory-freebuff-* container still mounts are removed.
+ *  - Slot lease dirs under ~/.koryphaios/freebuff-slots/* whose info.json
+ *    holder pid is dead are removed.
+ */
+export async function reapFreebuffRuntimeArtifacts(
+  env: NodeJS.ProcessEnv,
+  cmd: typeof command,
+  dependencies: FreebuffReaperDeps = {},
+): Promise<void> {
+  const now = dependencies.now ?? Date.now;
+  const kill = dependencies.kill ?? ((pid: number) => process.kill(pid, 0));
+  const runsRoot = dependencies.runsRoot ?? join(homedir(), '.koryphaios', 'freebuff-runs');
+  const slotsRoot = dependencies.slotsRoot ?? join(homedir(), '.koryphaios', 'freebuff-slots');
+  const mountSources = new Set<string>();
+  // Without a live container list there is no mount evidence at all — and a
+  // missing mount is the run-root GC's removal condition, so docker being
+  // down must fail the whole container/run sweep, never proceed blind.
+  let containersResolved = false;
+  try {
+    const names = (
+      await cmd(
+        'docker',
+        ['ps', '--filter', `name=${FREEBUFF_CONTAINER_PREFIX}`, '--format', '{{.Names}}'],
+        30_000,
+        env,
+      )
+    )
+      .split('\n')
+      .map((name) => name.trim())
+      .filter((name) => /^kory-freebuff-[0-9a-f]+$/i.test(name));
+    for (const name of names) {
+      try {
+        // One inspect covers both verdicts: Created is RFC3339Nano (no space),
+        // the remainder is the mounts JSON.
+        const inspected = await cmd(
+          'docker',
+          ['inspect', '-f', '{{.Created}} {{json .Mounts}}', name],
+          30_000,
+          env,
+        );
+        const space = inspected.indexOf(' ');
+        const createdAt = Date.parse(inspected.slice(0, space).trim());
+        try {
+          const mounts: unknown = JSON.parse(inspected.slice(space + 1));
+          if (Array.isArray(mounts)) {
+            for (const mount of mounts) {
+              const source = (mount as { Source?: unknown } | null)?.Source;
+              if (typeof source === 'string' && source) mountSources.add(resolve(source));
+            }
+          }
+        } catch {
+          /* Mount evidence is optional; the run-root GC is conservative. */
+        }
+        if (
+          !createdContainers.has(name) &&
+          Number.isFinite(createdAt) &&
+          now() - createdAt > REAPER_CONTAINER_MIN_AGE_MS
+        ) {
+          await cmd('docker', ['rm', '-f', name], 30_000, env).catch(() => {});
+        }
+      } catch {
+        /* One container's failure is never fatal to the sweep. */
+      }
+    }
+    containersResolved = true;
+  } catch {
+    /* docker ps failed: leave container and run-root artifacts alone. */
+  }
+  try {
+    if (!containersResolved) throw new Error('mount evidence unknown');
+    for (const entry of readdirSync(runsRoot, { withFileTypes: true })) {
+      try {
+        if (!entry.isDirectory()) continue;
+        const match = /^(\d{10,})-[0-9a-f]{8,}$/i.exec(entry.name);
+        if (!match || now() - Number(match[1]) <= REAPER_RUN_ROOT_MAX_AGE_MS) continue;
+        const dir = resolve(join(runsRoot, entry.name));
+        let mounted = false;
+        for (const source of mountSources) {
+          if (isContainedBy(dir, source) || isContainedBy(source, dir)) {
+            mounted = true;
+            break;
+          }
+        }
+        if (!mounted) rmSync(dir, { recursive: true, force: true });
+      } catch {
+        /* per-directory best effort */
+      }
+    }
+  } catch {
+    /* A missing runs root is nothing to reap. */
+  }
+  try {
+    for (const entry of readdirSync(slotsRoot, { withFileTypes: true })) {
+      try {
+        if (!entry.isDirectory()) continue;
+        const info = readFreebuffSlotInfo(join(slotsRoot, entry.name, 'info.json'));
+        // Unreadable means mid-write or corrupt: the slot layer owns that
+        // reclamation; only a proven-dead holder pid is reaped here.
+        if (!info || freebuffSlotPidAlive(info.pid, kill)) continue;
+        rmSync(join(slotsRoot, entry.name), { recursive: true, force: true });
+      } catch {
+        /* per-directory best effort */
+      }
+    }
+  } catch {
+    /* A missing slots root is nothing to reap. */
+  }
+}
+
 /**
  * Coalesced background update: build the resolved target image, prove real
  * bubblewrap isolation with it, then swap the runtime status atomically.
@@ -398,12 +574,7 @@ function scheduleFreebuffImageUpdate(
       status = next;
       selectedRuntimeImage = built;
       checkedAt = Date.now();
-      await gcFreebuffRuntimeImages(
-        dependencies.command,
-        env,
-        architecture,
-        built.version,
-      );
+      await gcFreebuffRuntimeImages(dependencies.command, env, architecture, built.version);
     } catch {
       /* Keep the proven current runtime; a failed update never downgrades it. */
     }
@@ -427,6 +598,12 @@ export function ensureFreebuffRuntimeImage(
   if (imageSetup) return imageSetup;
   imageSetup = (async () => {
     const env = await freebuffDockerEnvironmentWithResume(dependencies);
+    // Once per process, best-effort and detached: zombie turn containers,
+    // stale run roots and dead slot leases are swept without delaying turns.
+    if (!artifactsReaped) {
+      artifactsReaped = true;
+      void reapFreebuffRuntimeArtifacts(env, dependencies.command).catch(() => {});
+    }
     const architecture = dockerArchitecture(env);
     const local = await listFreebuffRuntimeImages(dependencies.command, env, architecture);
     const latest = await dependencies.resolveLatest().catch(() => null);
@@ -492,8 +669,7 @@ export function forceFreebuffRuntimeUpdate(
   const alreadyAdvanced = () =>
     status.available &&
     status.version !== undefined &&
-    (!failedVersion ||
-      compareFreebuffVersions(status.version, failedVersion) > 0);
+    (!failedVersion || compareFreebuffVersions(status.version, failedVersion) > 0);
   const begin = async (): Promise<FreebuffRuntimeStatus> => {
     // Shared across concurrent callers — it must never observe one caller's
     // signal, or cancelling that turn would fail the update for the others.
@@ -501,9 +677,7 @@ export function forceFreebuffRuntimeUpdate(
     if (imageUpdate) await imageUpdate.catch(() => {});
     if (alreadyAdvanced()) return getFreebuffRuntimeStatus();
     if (!isMac() && !isWindows()) {
-      throw new Error(
-        'the installed Freebuff CLI is retired; update it and reconnect',
-      );
+      throw new Error('the installed Freebuff CLI is retired; update it and reconnect');
     }
     const env = await dependencies.environment();
     const architecture = dockerArchitecture(env);
@@ -525,8 +699,7 @@ export function forceFreebuffRuntimeUpdate(
         KNOWN_FREEBUFF_ARCHIVE_SHA256[latest]?.[architecture] ?? '',
       ));
     const next = await (dependencies.probeRuntime ?? probeFreebuffRuntime)(built);
-    if (!next.available)
-      throw new Error('the updated Freebuff runtime failed its isolation probe');
+    if (!next.available) throw new Error('the updated Freebuff runtime failed its isolation probe');
     status = next;
     selectedRuntimeImage = built;
     checkedAt = Date.now();
@@ -551,8 +724,10 @@ export async function ensureFreebuffRuntimeReady(): Promise<FreebuffRuntimeStatu
       candidate = await ensureFreebuffRuntimeImage();
     } catch {
       return {
-        available: false, kind: 'unavailable',
-        reason: 'Freebuff could not prepare its isolated Linux runtime. Make sure Docker is running, then reconnect. Koryphaios installs the runtime automatically.',
+        available: false,
+        kind: 'unavailable',
+        reason:
+          'Freebuff could not prepare its isolated Linux runtime. Make sure Docker is running, then reconnect. Koryphaios installs the runtime automatically.',
       };
     }
     return refreshFreebuffRuntimeStatus(true, candidate);
@@ -573,7 +748,8 @@ export async function freebuffDockerEnvironment(
     delete env.DOCKER_HOST;
   }
   const architecture = await probe('docker', ['info', '--format', '{{.Architecture}}'], 30_000, env)
-    .then((value) => value.trim()).catch(() => 'unavailable');
+    .then((value) => value.trim())
+    .catch(() => 'unavailable');
   if (['x86_64', 'amd64'].includes(architecture)) {
     env.KORY_FREEBUFF_DOCKER_ARCH = 'amd64';
     return env;
@@ -703,9 +879,11 @@ async function makeRuntime(
   options: FreebuffRuntimeOptions,
   kind: 'native' | 'docker',
   image?: string,
+  dependencies: { command?: typeof command } = {},
 ): Promise<FreebuffTurnRuntime> {
   validateFreebuffRuntimePaths(options);
   const { runRoot, runHome, workspace, privateTmp } = options;
+  const cmd = dependencies.command ?? command;
   const id = randomBytes(10).toString('hex');
   const container = `kory-freebuff-${id}`;
   const session = `kory-freebuff-${id}`;
@@ -715,9 +893,9 @@ async function makeRuntime(
       ? `/tmp/kory-control-${id}`
       : mkdtempSync(join(canonicalizePath(tmpdir()), 'kory-freebuff-control-'));
   const socket = join(controlDir, 'tmux.sock');
-  const dockerEnv = kind === 'docker' ? await freebuffDockerEnvironment() : undefined;
+  const dockerEnv = kind === 'docker' ? await freebuffDockerEnvironment(cmd) : undefined;
   const dockerArch = dockerEnv ? dockerArchitecture(dockerEnv) : undefined;
-  const runImage = kind === 'docker' ? image ?? selectedRuntimeImage?.image : undefined;
+  const runImage = kind === 'docker' ? (image ?? selectedRuntimeImage?.image) : undefined;
   if (kind === 'docker' && !runImage)
     throw new Error('Freebuff runtime image is not selected; reconnect to prepare it.');
   // Windows paths cannot be used as paths inside the Linux container. Docker
@@ -728,8 +906,8 @@ async function makeRuntime(
   let closed = false;
   const raw = (file: string, args: string[], timeout?: number, env?: NodeJS.ProcessEnv) =>
     kind === 'docker'
-      ? command('docker', ['exec', container, file, ...args], timeout, dockerEnv)
-      : command(file, args, timeout, env);
+      ? cmd('docker', ['exec', container, file, ...args], timeout, dockerEnv)
+      : cmd(file, args, timeout, env);
   let freebuffBinary = '/opt/kory/freebuff/freebuff';
   let bunBinary = '/opt/kory/bun';
   const env: Record<string, string> = {
@@ -803,6 +981,11 @@ async function makeRuntime(
   for (let parent = dirname(sandboxRoot); parent !== '/'; parent = dirname(parent))
     ancestors.unshift(parent);
   for (const parent of ancestors) bwrap.push('--perms', '0755', '--dir', parent);
+  // The transport workspace mounts read-only over the writable run root:
+  // native Freebuff file tools can read it but every write fails, so durable
+  // project work can only flow through the kory MCP tools. Transient native
+  // writes still land in the private /tmp.
+  const sandboxWorkspace = runtimePath(workspace, runRoot, sandboxRoot);
   bwrap.push(
     '--proc',
     '/proc',
@@ -811,11 +994,14 @@ async function makeRuntime(
     '--bind',
     runRoot,
     sandboxRoot,
+    '--ro-bind',
+    sandboxWorkspace,
+    sandboxWorkspace,
     '--bind',
     runtimePath(privateTmp, runRoot, sandboxRoot),
     '/tmp',
     '--chdir',
-    runtimePath(workspace, runRoot, sandboxRoot),
+    sandboxWorkspace,
     '--clearenv',
   );
   for (const [key, value] of Object.entries(env)) bwrap.push('--setenv', key, value);
@@ -825,8 +1011,7 @@ async function makeRuntime(
     if (closed) return;
     closed = true;
     if (kind === 'docker') {
-      if (started)
-        await command('docker', ['rm', '-f', container], 30_000, dockerEnv).catch(() => {});
+      if (started) await cmd('docker', ['rm', '-f', container], 30_000, dockerEnv).catch(() => {});
     } else {
       await tmux(['kill-server']).catch(() => {});
       rmSync(controlDir, { recursive: true, force: true });
@@ -838,16 +1023,19 @@ async function makeRuntime(
       // Docker CLI consumes this before starting the container, not a runtime trust input.
       writeFileSync(profilePath, JSON.stringify(seccompProfile), { mode: 0o600, flag: 'wx' });
       try {
-        await command(
+        // Registered BEFORE docker run: the reaper must never remove a
+        // container this process launched, however old it looks.
+        createdContainers.add(container);
+        await cmd(
           'docker',
-           freebuffDockerRunArgs(
-             runRoot,
-             container,
-             runImage!,
-             options.allowNetwork !== false,
-             dockerArch ?? 'amd64',
-             sandboxRoot,
-           ),
+          freebuffDockerRunArgs(
+            runRoot,
+            container,
+            runImage!,
+            options.allowNetwork !== false,
+            dockerArch ?? 'amd64',
+            sandboxRoot,
+          ),
           60_000,
           dockerEnv,
         );
@@ -886,17 +1074,19 @@ async function makeRuntime(
           // sees the new file). A disposable create/unlink inside the same private
           // directory invalidates that cache. Never retry command/tool execution
           // and never read input contents or touch anything outside runRoot.
-          const staged = [file, ...args].filter(
-            (path) => isContainedBy(runRoot, path) && existsSync(path) && lstatSync(path).isFile(),
-          ).map((path) => runtimePath(path, runRoot, sandboxRoot));
+          const staged = [file, ...args]
+            .filter(
+              (path) =>
+                isContainedBy(runRoot, path) && existsSync(path) && lstatSync(path).isFile(),
+            )
+            .map((path) => runtimePath(path, runRoot, sandboxRoot));
           if (staged.length)
+            // The marker only invalidates the VM's cached directory listing; it
+            // runs at container level because the transport workspace is
+            // read-only inside bwrap by design.
             await raw(
-              'bwrap',
+              '/bin/sh',
               [
-                ...bwrap,
-                '--',
-                ...dropIdentity,
-                '/bin/sh',
                 '-ec',
                 'for file do marker=$(mktemp "$(dirname "$file")/.kory-stage-XXXXXXXX"); rm -- "$marker"; test -r "$file"; done',
                 'staged-inputs',
@@ -922,13 +1112,14 @@ async function makeRuntime(
         if (kind === 'docker') {
           // The TUI scans .agents and workspace directories itself. Invalidate
           // all staged directory listings before it starts, not just Bun entry files.
+          // Runs at container level: the workspace is read-only inside bwrap.
           const directories = [runRoot];
           for (let index = 0; index < directories.length; index++) {
             for (const entry of readdirSync(directories[index]!, { withFileTypes: true })) {
               if (entry.isDirectory()) directories.push(join(directories[index]!, entry.name));
             }
           }
-          await runtime.exec('/bin/sh', [
+          await raw('/bin/sh', [
             '-ec',
             'for dir do marker=$(mktemp "$dir/.kory-stage-XXXXXXXX"); rm -- "$marker"; done',
             'staged-directories',
@@ -944,7 +1135,14 @@ async function makeRuntime(
           '180',
           '-y',
           '50',
-           ['bwrap', ...bwrap, '--', ...dropIdentity, freebuffBinary, ...cliArgs.map((arg) => runtimePath(arg, runRoot, sandboxRoot))]
+          [
+            'bwrap',
+            ...bwrap,
+            '--',
+            ...dropIdentity,
+            freebuffBinary,
+            ...cliArgs.map((arg) => runtimePath(arg, runRoot, sandboxRoot)),
+          ]
             .map(quote)
             .join(' '),
         ]);
@@ -965,29 +1163,90 @@ async function makeRuntime(
   }
 }
 
+/** The 137MB catalog extraction is the probe's only heavyweight step. Its
+ * output is immutable per runtime artifact, so it is cached by image ID
+ * (docker) or binary identity (native); every isolation check still runs on
+ * each probe. Bounded so stale artifacts never accumulate. */
+const catalogByArtifact = new Map<string, FreebuffBundledCatalog>();
+
+async function freebuffCatalogArtifactKey(
+  kind: 'native' | 'docker',
+  image: string | undefined,
+  nativeBinary: string | undefined,
+  cmd: typeof command,
+  dockerEnv: NodeJS.ProcessEnv | undefined,
+): Promise<string | null> {
+  if (kind === 'docker') {
+    if (!image) return null;
+    const id = await cmd(
+      'docker',
+      ['image', 'inspect', '--format', '{{.Id}}', image],
+      30_000,
+      dockerEnv,
+    )
+      .then((output) => output.trim())
+      .catch(() => '');
+    return id ? `docker:${id}` : null;
+  }
+  if (!nativeBinary) return null;
+  try {
+    const stat = statSync(nativeBinary);
+    return `native:${nativeBinary}:${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}`;
+  } catch {
+    return null;
+  }
+}
+
+async function extractFreebuffCatalog(
+  extract: () => Promise<string>,
+  cacheKey: string | null,
+): Promise<FreebuffBundledCatalog> {
+  if (cacheKey) {
+    const cached = catalogByArtifact.get(cacheKey);
+    if (cached) return cached;
+  }
+  let raw: string;
+  try {
+    raw = await extract();
+  } catch (error) {
+    // The in-container SIGKILL (exit 137) is intermittent; one retry is cheap
+    // because every other probe check already ran. Isolation checks are never
+    // retried — only this heavyweight extraction.
+    if ((error as { code?: string | number }).code !== 137) throw error;
+    raw = await extract();
+  }
+  const catalog = parseFreebuffBundledCatalog(Buffer.from(raw));
+  if (cacheKey) {
+    if (catalogByArtifact.size >= 8)
+      catalogByArtifact.delete(catalogByArtifact.keys().next().value!);
+    catalogByArtifact.set(cacheKey, catalog);
+  }
+  return catalog;
+}
+
 /** Credential-free real kernel/filesystem + private tmux probe, used by readiness and setup. */
 export async function probeFreebuffRuntime(
   target?: FreebuffRuntimeImageRef,
+  dependencies: {
+    command?: typeof command;
+    makeRuntime?: typeof makeRuntime;
+  } = {},
 ): Promise<FreebuffRuntimeStatus> {
   if (!isLinux() && !isMac() && !isWindows())
     throw new Error('Freebuff requires Linux or a Docker Linux runtime');
   const kind = isLinux() ? 'native' : 'docker';
+  const cmd = dependencies.command ?? command;
   // The probe must know exactly which image it is proving: an explicit target
   // (update swap), the selected image, or the newest local versioned image.
   let probeImage = target;
   if (kind === 'docker' && !probeImage) {
     if (selectedRuntimeImage) probeImage = selectedRuntimeImage;
     else {
-      const env = await freebuffDockerEnvironment();
-      const local = await listFreebuffRuntimeImages(
-        command,
-        env,
-        dockerArchitecture(env),
-      );
+      const env = await freebuffDockerEnvironment(cmd);
+      const local = await listFreebuffRuntimeImages(cmd, env, dockerArchitecture(env));
       probeImage = local[0];
     }
-    if (!probeImage)
-      throw new Error('no Freebuff runtime image is installed');
+    if (!probeImage) throw new Error('no Freebuff runtime image is installed');
   }
   // Colima shares HOME, not Darwin's /private/var/folders temporary directory.
   // Only the fresh run subdirectory is mounted, never this parent or HOME.
@@ -1008,35 +1267,54 @@ export async function probeFreebuffRuntime(
   const sentinel = join(root, 'host-sentinel');
   writeFileSync(sentinel, 'not a credential; must remain outside isolation', { mode: 0o600 });
   let runtime: FreebuffTurnRuntime | undefined;
+  const nativeSource = kind === 'native' ? findNativeFreebuffProbeBinary() : undefined;
   try {
-    runtime = await makeRuntime(
+    runtime = await (dependencies.makeRuntime ?? makeRuntime)(
       {
         runRoot,
         runHome: join(runRoot, 'home'),
         workspace: join(runRoot, 'workspace'),
         privateTmp: join(runRoot, 'tmp'),
-        ...(kind === 'native' && { sourceBinary: findNativeFreebuffProbeBinary() }),
+        ...(nativeSource ? { sourceBinary: nativeSource } : {}),
         allowNetwork: false,
       },
       kind,
       probeImage?.image,
+      { command: cmd },
     );
     const script =
-      'test ! -e "$1"; ! cat "$1" 2>/dev/null; ! (echo denied > "$1") 2>/dev/null; ! (echo denied > /usr/kory-denied) 2>/dev/null; echo allowed > "$2"; printf isolation-ok';
+      'test ! -e "$1"; ! cat "$1" 2>/dev/null; ! (echo denied > "$1") 2>/dev/null; ! (echo denied > /usr/kory-denied) 2>/dev/null; ! (echo denied > "$2") 2>/dev/null; echo allowed > "$3"; printf isolation-ok';
     const evidence = await runtime.exec('/bin/sh', [
       '-ec',
       script,
       'probe',
       sentinel,
-      join(runRoot, 'workspace/allowed'),
+      join(runRoot, 'workspace/denied'),
+      join(runRoot, 'allowed'),
     ]);
     if (evidence !== 'isolation-ok') throw new Error('Freebuff filesystem isolation probe failed');
     // Native --version exits before its console output reliably drains through
     // Docker exec. Inspect the embedded version and protocol of the actual
     // sandbox binary instead; an empty pipe is never mistaken for a bad version.
-    const catalog = parseFreebuffBundledCatalog(Buffer.from(
-      await runtime.exec(runtime.bunBinary, ['-e', FREEBUFF_DYNAMIC_CATALOG_PROBE, runtime.freebuffBinary]),
-    ));
+    // The 137MB extraction is immutable per artifact, so it is cached by image
+    // ID (docker) or binary identity (native); every isolation check above
+    // still runs on each probe.
+    const catalogKey = await freebuffCatalogArtifactKey(
+      kind,
+      probeImage?.image,
+      nativeSource,
+      cmd,
+      kind === 'docker' ? await freebuffDockerEnvironment(cmd) : undefined,
+    );
+    const catalog = await extractFreebuffCatalog(
+      () =>
+        runtime!.exec(runtime!.bunBinary, [
+          '-e',
+          FREEBUFF_DYNAMIC_CATALOG_PROBE,
+          runtime!.freebuffBinary,
+        ]),
+      catalogKey,
+    );
     if (kind === 'docker') {
       // The probed image's own version tag is the contract; never an optimistic pass.
       if (catalog.cliVersion !== probeImage!.version)
@@ -1067,12 +1345,29 @@ export async function probeFreebuffRuntime(
 export async function refreshFreebuffRuntimeStatus(
   force = false,
   target?: FreebuffRuntimeImageRef,
+  dependencies: {
+    probeRuntime?: typeof probeFreebuffRuntime;
+    command?: typeof command;
+    now?: () => number;
+  } = {},
 ): Promise<FreebuffRuntimeStatus> {
   if (checking) return checking;
-  if (!force && checkedAt && Date.now() - checkedAt < 60_000) return getFreebuffRuntimeStatus();
+  const now = dependencies.now ?? Date.now;
+  if (!force && checkedAt) {
+    const age = now() - checkedAt;
+    // A successful probe stays fresh for a minute; a failed one is never
+    // sticky — the next turn re-probes, rate-limited to once per 10s so a
+    // genuinely down runtime is not hammered by back-to-back turns.
+    if (status.available && age < 60_000) return getFreebuffRuntimeStatus();
+    if (!status.available && age < 10_000) return getFreebuffRuntimeStatus();
+  }
   checking = (async () => {
     try {
-      status = await probeFreebuffRuntime(target);
+      status = await (
+        dependencies.probeRuntime ??
+        ((ref?: FreebuffRuntimeImageRef) =>
+          probeFreebuffRuntime(ref, { command: dependencies.command }))
+      )(target);
       if (status.available && status.image)
         selectedRuntimeImage = { version: status.version ?? '', image: status.image };
     } catch (error) {
@@ -1084,8 +1379,11 @@ export async function refreshFreebuffRuntimeStatus(
           ?.trim()
           .split('\n')
           .find((line) => /^(bwrap:|docker:|Error|error)/.test(line)) ||
-        (failed.code === 'TIMEOUT' ? failed.message :
-          failed.code ? `runtime command exit ${failed.code}` : failed.message?.split('\n')[0]) ||
+        (failed.code === 'TIMEOUT'
+          ? failed.message
+          : failed.code
+            ? `runtime command exit ${failed.code}`
+            : failed.message?.split('\n')[0]) ||
         'probe failed';
       status = {
         available: false,
@@ -1093,7 +1391,7 @@ export async function refreshFreebuffRuntimeStatus(
         reason: `Freebuff isolated runtime check failed (${detail.slice(0, 240)}). Reconnect to let Koryphaios prepare and check the runtime again.`,
       };
     }
-    checkedAt = Date.now();
+    checkedAt = now();
     return getFreebuffRuntimeStatus();
   })();
   try {

@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { writeFileSync, unlinkSync, mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { RETIRED_PROVIDER_NAMES } from '@koryphaios/shared';
 import { loadConfig } from '../config';
 
 const BASE_TEST_DIR = join(tmpdir(), 'koryphaios-config-test');
@@ -33,6 +34,27 @@ describe('Config Loading', () => {
     expect(config.safety.maxTokensPerTurn).toBe(4096);
     expect(config.safety.maxFileSizeBytes).toBe(10_000_000);
     expect(config.safety.toolExecutionTimeoutMs).toBe(60_000);
+  });
+
+  test('drops a retired provider entry instead of failing to boot', () => {
+    const retired = [...RETIRED_PROVIDER_NAMES][0];
+    writeFileSync(
+      join(TEST_DIR, 'koryphaios.json'),
+      JSON.stringify({
+        providers: {
+          [retired]: {
+            name: retired,
+            baseUrl: 'https://example.invalid/v1',
+            selectedModels: ['retired-model'],
+            disabled: false,
+          },
+        },
+      }),
+    );
+
+    const config = loadConfig(TEST_DIR);
+
+    expect(config.providers?.[retired]).toBeUndefined();
   });
 
   test('loads custom safety config', async () => {

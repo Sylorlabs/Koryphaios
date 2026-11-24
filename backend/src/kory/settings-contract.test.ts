@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { applyMemoryPromptBudget, automaticMemoryPrompt } from './settings-contract';
 
 describe('manager settings contract', () => {
-  it('uses the shared 100k safety ceiling when the custom memory cap is disabled', () => {
+  it('applies no ceiling when the custom memory cap is disabled', () => {
     const context = 'x'.repeat(12_000);
     expect(
       applyMemoryPromptBudget(context, {
@@ -23,7 +23,7 @@ describe('manager settings contract', () => {
         maxContextTokensEnabled: false,
         maxContextTokens: 500,
       }),
-    ).toHaveLength(400_000);
+    ).toHaveLength(500_000);
   });
 
   it('uses one automatic-inclusion predicate for manager, worker, and critic prompts', () => {

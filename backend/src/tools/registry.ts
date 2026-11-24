@@ -36,6 +36,10 @@ export interface ToolContext {
   requiredWorkspaceRoot?: string;
   /** Host-created disposable verification grant, never supplied by a model. */
   reviewWorkspaceRoot?: string;
+  /** The producer checkout a review copy mirrors. File-tool targets inside it
+   *  are rewritten to the same relative path under the copy's cwd, because
+   *  transcripts keep spelling the producer's absolute paths. */
+  reviewSourceRoot?: string;
   /** Canonical host-owned project root, distinct from a worker's disposable checkout. */
   settingsRoot?: string;
   signal?: AbortSignal;
@@ -84,7 +88,11 @@ export interface ToolContext {
   noteWorkspaceMutation?: () => void;
   /** Independent, invocation-bound UI queue for concurrent tool approvals. */
   waitForToolApproval?: (
-    ctx: ToolContext, call: ToolCallInput, question: string, options: string[], signal?: AbortSignal,
+    ctx: ToolContext,
+    call: ToolCallInput,
+    question: string,
+    options: string[],
+    signal?: AbortSignal,
   ) => Promise<string>;
   /** Optional manager review in Guarded; other modes use their normal policy. */
   requestToolApproval?: (call: ToolCallInput, reason: string) => Promise<boolean>;
@@ -222,7 +230,10 @@ export class ToolRegistry {
   }
 
   getAll(projectRoot = process.cwd()): Tool[] {
-    return [...this.tools.values(), ...(this.projectTools.get(mcpProjectScope(projectRoot))?.values() ?? [])];
+    return [
+      ...this.tools.values(),
+      ...(this.projectTools.get(mcpProjectScope(projectRoot))?.values() ?? []),
+    ];
   }
 
   /** Get stable provider tool definitions filtered by execution role. */

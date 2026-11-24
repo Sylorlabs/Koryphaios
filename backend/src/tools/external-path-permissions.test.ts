@@ -29,7 +29,10 @@ let root = '';
 let outside = '';
 let registry: ToolRegistry;
 
-const policy = (mode: 'yolo' | 'guarded' | 'edits' | 'ask' | 'custom', interactionMode: 'act' | 'plan' = 'act') =>
+const policy = (
+  mode: 'yolo' | 'guarded' | 'edits' | 'ask' | 'custom',
+  interactionMode: 'act' | 'plan' = 'act',
+) =>
   resolveToolPermissionPolicy({ ...DEFAULT_AGENT_SETTINGS, permissionMode: mode }, interactionMode);
 
 function context(overrides: Partial<ToolContext> = {}): ToolContext {
@@ -196,4 +199,21 @@ test('an outside grant is not persisted in the caller context', async () => {
   expect(ctx.allowedPaths).toEqual([root]);
   expect(ctx.requiredWorkspaceRoot).toBeUndefined();
   expect(readFileSync(target, 'utf8')).toContain('outside evidence');
+});
+
+test('a critic outside-path approval prompt names the Critic, not Backend', async () => {
+  const human = mock(async (question: string) => {
+    expect(question).toContain('Critic is requesting');
+    return 'Allow once';
+  });
+  const result = await registry.execute(
+    context({
+      callerRole: 'critic',
+      permissionPolicy: policy('guarded'),
+      waitForUserInput: human,
+    }),
+    call('read_file', { path: join(outside, 'secret.txt') }),
+  );
+  expect(result.isError).toBe(false);
+  expect(human).toHaveBeenCalledTimes(1);
 });

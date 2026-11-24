@@ -22,6 +22,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { nanoid } from 'nanoid';
 import {
   reduceTurnParts,
+  type ImportedTokenUsage,
   type ProviderName,
   type Session as SharedSession,
   type MessageAttachment,
@@ -32,6 +33,7 @@ import {
 } from '@koryphaios/shared';
 import { ID, MESSAGE, SESSION } from '../constants';
 import { db, messages, sessions } from '../db';
+import { estimateCharsAsTokens } from '../kory/prompts';
 import { eq } from 'drizzle-orm';
 import { serverLog } from '../logger';
 import { isContainedBy, isMac, isWindows } from '../runtime/platform';
@@ -148,6 +150,8 @@ interface ImportedCliMessage extends DiscoveredCliChatMessage {
   timeUnknown?: true;
   /** Images or files the user attached in the source (base64 payloads). */
   attachments?: MessageAttachment[];
+  /** Token usage the source CLI recorded for this row. Display-only. */
+  usage?: ImportedTokenUsage;
 }
 
 interface InternalDiscoveredChat extends DiscoveredCliChat {
@@ -260,6 +264,100 @@ function sourceTimestampMs(value: unknown): number | undefined {
   return ms === none ? undefined : ms;
 }
 
+function usageCount(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : undefined;
+}
+
+/**
+ * Token usage the source CLI recorded, normalized to `ImportedTokenUsage`.
+ * Both Claude (`input_tokens`, `cache_*_input_tokens`) and Codex
+ * (`input_tokens`, `cached_input_tokens`, `cache_write_input_tokens`,
+ * `reasoning_output_tokens`) shapes map onto it; reasoning output counts as
+ * output. Returns undefined when the source recorded nothing usable.
+ */
+function importedUsageFrom(value: unknown): ImportedTokenUsage | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const u = value as Record<string, unknown>;
+  const out: ImportedTokenUsage = {};
+  const input = usageCount(u.input_tokens ?? u.inputTokens);
+  if (input !== undefined) out.input = input;
+  const output = usageCount(u.output_tokens ?? u.outputTokens);
+  const reasoning = usageCount(u.reasoning_output_tokens ?? u.thinking_tokens);
+  const generated = (output ?? 0) + (reasoning ?? 0);
+  if (output !== undefined || reasoning !== undefined) out.output = generated;
+  const cacheRead = usageCount(u.cache_read_input_tokens ?? u.cached_input_tokens ?? u.cacheRead);
+  if (cacheRead !== undefined) out.cacheRead = cacheRead;
+  const cacheWrite = usageCount(
+    u.cache_creation_input_tokens ?? u.cache_write_input_tokens ?? u.cacheWrite,
+  );
+  if (cacheWrite !== undefined) out.cacheWrite = cacheWrite;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * Usage records arrive after the model call they meter, so they belong to the
+ * last assistant row. A rollout can record one call twice (`token_count`
+ * event and `token_usage_record` carry the same numbers) — an identical
+ * record is dropped, a different one is summed onto the row.
+ */
+function attachUsageToLastAssistant(
+  msgs: ImportedCliMessage[],
+  usage: ImportedTokenUsage | undefined,
+): void {
+  if (!usage) return;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].role !== 'assistant') continue;
+    const prev = msgs[i].usage;
+    if (!prev) {
+      msgs[i].usage = { ...usage };
+      return;
+    }
+    const keys = ['input', 'output', 'cacheRead', 'cacheWrite'] as const;
+    if (keys.every((key) => usage[key] === undefined || usage[key] === prev[key])) return;
+    const merged: ImportedTokenUsage = { ...prev };
+    for (const key of keys) {
+      if (usage[key] !== undefined) {
+        merged[key] = (prev[key] ?? 0) + (usage[key] as number);
+      }
+    }
+    msgs[i].usage = merged;
+    return;
+  }
+}
+
+/**
+ * Usage estimate for an assistant turn whose source recorded none. Produced
+ * text (reply, reasoning, tool-call arguments) counts as output and tool
+ * results as input, via the same chars/4 planning estimate Koryphaios uses
+ * for context budgeting. `estimated` lets the UI say who counted instead of
+ * pretending the source did.
+ */
+function estimateAssistantUsage(
+  parts: readonly TranscriptPart[],
+  content: string,
+): ImportedTokenUsage | undefined {
+  let outChars = content.length;
+  let inChars = 0;
+  for (const part of parts) {
+    if (part.kind === 'reasoning') {
+      outChars += part.text.length;
+    } else if (part.kind === 'tool') {
+      try {
+        outChars += JSON.stringify(part.input ?? {}).length;
+      } catch {
+        // A pathological cyclic input cannot be sized; skip it.
+      }
+      inChars += part.output?.length ?? 0;
+    }
+  }
+  const usage: ImportedTokenUsage = { estimated: true };
+  if (outChars > 0) usage.output = estimateCharsAsTokens(outChars);
+  if (inChars > 0) usage.input = estimateCharsAsTokens(inChars);
+  return usage.output !== undefined || usage.input !== undefined ? usage : undefined;
+}
+
 const realpathCache = new Map<string, string>();
 
 function canonicalizeProjectPath(rawPath: string | null | undefined, fallbackHome: string): string {
@@ -305,7 +403,7 @@ function projectNameFromPath(projectPath: string): string {
 }
 
 function cleanMessageText(raw: string): string {
-  if (!raw) return "";
+  if (!raw) return '';
   let text = raw;
 
   // Extract inner <user_request> or <USER_REQUEST> when wrapped in Antigravity/T3 harness tags.
@@ -321,11 +419,11 @@ function cleanMessageText(raw: string): string {
 
   // Strip common CLI harness wrapper blocks if still present.
   text = text
-    .replace(/<t3_code_instructions\b[^>]*>[\s\S]*?<\/t3_code_instructions>/gi, "")
-    .replace(/<pull_request_linking\b[^>]*>[\s\S]*?<\/pull_request_linking>/gi, "")
-    .replace(/<runtime_info\b[^>]*>[\s\S]*?<\/runtime_info>/gi, "")
-    .replace(/<system-reminder\b[^>]*>[\s\S]*?<\/system-reminder>/gi, "")
-    .replace(/<local-command-caveat\b[^>]*>[\s\S]*?<\/local-command-caveat>/gi, "")
+    .replace(/<t3_code_instructions\b[^>]*>[\s\S]*?<\/t3_code_instructions>/gi, '')
+    .replace(/<pull_request_linking\b[^>]*>[\s\S]*?<\/pull_request_linking>/gi, '')
+    .replace(/<runtime_info\b[^>]*>[\s\S]*?<\/runtime_info>/gi, '')
+    .replace(/<system-reminder\b[^>]*>[\s\S]*?<\/system-reminder>/gi, '')
+    .replace(/<local-command-caveat\b[^>]*>[\s\S]*?<\/local-command-caveat>/gi, '')
     .trim();
 
   // Imported text is kept whole; only a pathological value is cut, and visibly.
@@ -347,6 +445,22 @@ function isNoiseUserPrompt(text: string): boolean {
   return false;
 }
 
+/**
+ * Titles and previews render as plain text; markdown emphasis pasted into a
+ * prompt (or stored by a CLI) shows as literal `**`/backticks. Strip the
+ * formatting characters, keeping the text they wrapped. `_x_` requires a word
+ * boundary so `snake_case` names survive; `foo*bar` is left alone by requiring
+ * content between the stars.
+ */
+function stripTitleMarkdown(raw: string): string {
+  return raw
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/(^|\s)#+\s+/g, '$1')
+    .replace(/(\*\*|__|~~|`+|\*|\b_)(.*?)\1/g, '$2')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function isGenericAutoTitle(title: string): boolean {
   const lower = title.toLowerCase();
   return (
@@ -359,13 +473,11 @@ function isGenericAutoTitle(title: string): boolean {
 }
 
 function deriveChatTitle(explicitTitle: string | null | undefined, firstUserText: string): string {
-  const cleanExplicit = cleanMessageText(explicitTitle ?? '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  const cleanExplicit = stripTitleMarkdown(cleanMessageText(explicitTitle ?? ''));
   if (cleanExplicit && !isGenericAutoTitle(cleanExplicit)) {
     return cleanExplicit.slice(0, SESSION.MAX_TITLE_LENGTH);
   }
-  const cleanFirst = cleanMessageText(firstUserText).replace(/\s+/g, ' ').trim();
+  const cleanFirst = stripTitleMarkdown(cleanMessageText(firstUserText));
   if (cleanFirst) {
     return cleanFirst.length > 72 ? `${cleanFirst.slice(0, 69)}...` : cleanFirst;
   }
@@ -383,9 +495,7 @@ function derivePreview(
     msgs.find((m) => m.role === 'user' && m.content.trim())?.content ??
     msgs.find((m) => m.content.trim())?.content ??
     '';
-  const candidate = cleanMessageText(fromMessages || (explicitPreview ?? ''))
-    .replace(/\s+/g, ' ')
-    .trim();
+  const candidate = stripTitleMarkdown(cleanMessageText(fromMessages || (explicitPreview ?? '')));
   if (!candidate) return 'No message preview available';
   return candidate.length > 160 ? `${candidate.slice(0, 157)}...` : candidate;
 }
@@ -445,7 +555,10 @@ function readHeadAndTailText(filePath: string, maxBytes = MAX_DISCOVERY_JSONL_BY
  * reads the whole file so a long chat is never ported with its middle missing.
  */
 function readTranscriptText(filePath: string, forImport: boolean): string {
-  return readHeadAndTailText(filePath, forImport ? MAX_IMPORT_JSONL_BYTES : MAX_DISCOVERY_JSONL_BYTES);
+  return readHeadAndTailText(
+    filePath,
+    forImport ? MAX_IMPORT_JSONL_BYTES : MAX_DISCOVERY_JSONL_BYTES,
+  );
 }
 
 function capText(text: string, max: number): string {
@@ -543,9 +656,10 @@ function toPublicSamples(msgs: readonly ImportedCliMessage[]): DiscoveredCliChat
       role: msg.role,
       // The picker shows a three-line preview; whole messages made the
       // discovery payload several megabytes on a real machine.
-      content: msg.content.length > MAX_SAMPLE_CONTENT_CHARS
-        ? `${msg.content.slice(0, MAX_SAMPLE_CONTENT_CHARS)}…`
-        : msg.content,
+      content:
+        msg.content.length > MAX_SAMPLE_CONTENT_CHARS
+          ? `${msg.content.slice(0, MAX_SAMPLE_CONTENT_CHARS)}…`
+          : msg.content,
       createdAt: msg.createdAt,
     };
     if (msg.model) sample.model = msg.model;
@@ -565,6 +679,8 @@ interface ImportTurn {
   /** Present only when the turn has reasoning or tool activity to display. */
   parts?: TranscriptPart[];
   attachments?: MessageAttachment[];
+  /** Token usage the source CLI recorded for this turn. Display-only. */
+  usage?: ImportedTokenUsage;
 }
 
 // ─── Honest time and display helpers shared by every parser ─────────────────
@@ -728,12 +844,21 @@ function buildSubagentTranscript(
   for (const turn of buildImportTurns(raw, startMs)) {
     const createdAt = turn.timeUnknown ? undefined : turn.createdAt;
     if (turn.role === 'user') {
-      turns.push(createdAt === undefined ? { role: 'user', text: turn.content } : { role: 'user', text: turn.content, createdAt });
+      turns.push(
+        createdAt === undefined
+          ? { role: 'user', text: turn.content }
+          : { role: 'user', text: turn.content, createdAt },
+      );
       continue;
     }
     const parts: TranscriptPart[] =
-      turn.parts ?? (turn.content ? [{ kind: 'text', text: turn.content, startedAt: turn.createdAt }] : []);
-    turns.push(createdAt === undefined ? { role: 'assistant', parts } : { role: 'assistant', parts, createdAt });
+      turn.parts ??
+      (turn.content ? [{ kind: 'text', text: turn.content, startedAt: turn.createdAt }] : []);
+    turns.push(
+      createdAt === undefined
+        ? { role: 'assistant', parts }
+        : { role: 'assistant', parts, createdAt },
+    );
   }
   const sub: SubagentTranscript = { name: meta.name, turns };
   if (meta.agentId) sub.agentId = meta.agentId;
@@ -818,30 +943,35 @@ function assignOrderingTimes(
  * code that orders a live Koryphaios turn. Text stays the provider-facing
  * content; reasoning and tool activity are display-only `parts`.
  */
-function buildImportTurns(input: readonly ImportedCliMessage[], chatStartMs?: number): ImportTurn[] {
+function buildImportTurns(
+  input: readonly ImportedCliMessage[],
+  chatStartMs?: number,
+): ImportTurn[] {
   const raw = assignOrderingTimes(input, chatStartMs);
   const turns: ImportTurn[] = [];
-  let pending:
-    | {
-        parts: TranscriptPart[];
-        createdAt: number;
-        lastAt: number;
-        /** At least one of the turn's rows carries a time the source recorded. */
-        anyKnownTime: boolean;
-        model?: string;
-        /** Source call id -> call id of its most recent call in this turn. */
-        callAliases: Map<string, string>;
-      }
-    | null = null;
+  let pending: {
+    parts: TranscriptPart[];
+    createdAt: number;
+    lastAt: number;
+    /** At least one of the turn's rows carries a time the source recorded. */
+    anyKnownTime: boolean;
+    model?: string;
+    /** Source call id -> call id of its most recent call in this turn. */
+    callAliases: Map<string, string>;
+    /** Sum of the usage recorded on this turn's rows. */
+    usage?: ImportedTokenUsage;
+  } | null = null;
 
   const flush = () => {
     if (!pending) return;
     // A call the source never recorded a result for has no duration either.
-    const parts = reduceTurnParts(pending.parts, { type: 'complete', timestamp: pending.lastAt }).map(
-      (part): TranscriptPart =>
-        part.kind === 'tool' && part.endedAt === undefined && !part.timeUnknown
-          ? { ...part, timeUnknown: true }
-          : part,
+    const parts = reduceTurnParts(pending.parts, {
+      type: 'complete',
+      timestamp: pending.lastAt,
+    }).map((part): TranscriptPart =>
+      part.kind === 'tool' && part.endedAt === undefined && !part.timeUnknown
+        ? { ...part, timeUnknown: true }
+        : part,
     );
     const content = capText(
       parts
@@ -857,6 +987,14 @@ function buildImportTurns(input: readonly ImportedCliMessage[], chatStartMs?: nu
       if (!pending.anyKnownTime) turn.timeUnknown = true;
       if (pending.model) turn.model = pending.model;
       if (structured) turn.parts = parts;
+      if (pending.usage) {
+        turn.usage = pending.usage;
+      } else {
+        // The source recorded no usage for this turn. Koryphaios still counts
+        // what it has, marked estimated so the display says who counted.
+        const estimated = estimateAssistantUsage(parts, content);
+        if (estimated) turn.usage = estimated;
+      }
       turns.push(turn);
     }
     pending = null;
@@ -890,6 +1028,15 @@ function buildImportTurns(input: readonly ImportedCliMessage[], chatStartMs?: nu
     }
     if (!msg.timeUnknown) pending.anyKnownTime = true;
     if (!pending.model && msg.model) pending.model = msg.model;
+    if (msg.usage) {
+      const usage: ImportedTokenUsage = { ...pending.usage };
+      for (const key of ['input', 'output', 'cacheRead', 'cacheWrite'] as const) {
+        if (msg.usage[key] !== undefined) {
+          usage[key] = (usage[key] ?? 0) + (msg.usage[key] as number);
+        }
+      }
+      pending.usage = usage;
+    }
     for (const event of events) {
       let next = event;
       if (event.type === 'tool_call') {
@@ -1079,7 +1226,13 @@ function claudeStructuredPatchText(patch: unknown): string {
   const hunks: string[] = [];
   for (const hunk of patch) {
     if (!hunk || typeof hunk !== 'object') continue;
-    const h = hunk as { oldStart?: unknown; oldLines?: unknown; newStart?: unknown; newLines?: unknown; lines?: unknown };
+    const h = hunk as {
+      oldStart?: unknown;
+      oldLines?: unknown;
+      newStart?: unknown;
+      newLines?: unknown;
+      lines?: unknown;
+    };
     if (!Array.isArray(h.lines)) continue;
     hunks.push(
       `@@ -${String(h.oldStart ?? '?')},${String(h.oldLines ?? '?')} +${String(h.newStart ?? '?')},${String(h.newLines ?? '?')} @@\n` +
@@ -1111,11 +1264,16 @@ function claudeContentEvents(
   if (!Array.isArray(content)) return [];
   const known = opts.known !== false;
   const ctx = opts.ctx ?? newClaudeImportContext();
-  const blocks = content.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object');
+  const blocks = content.filter(
+    (item): item is Record<string, unknown> => !!item && typeof item === 'object',
+  );
   const thinkingBlocks = blocks.filter((block) => block.type === 'thinking').length;
   const resultBlocks = blocks.filter((block) => block.type === 'tool_result').length;
   const toolUseResult =
-    resultBlocks === 1 && opts.toolUseResult && typeof opts.toolUseResult === 'object' && !Array.isArray(opts.toolUseResult)
+    resultBlocks === 1 &&
+    opts.toolUseResult &&
+    typeof opts.toolUseResult === 'object' &&
+    !Array.isArray(opts.toolUseResult)
       ? (opts.toolUseResult as Record<string, unknown>)
       : undefined;
   const events: TurnEvent[] = [];
@@ -1139,12 +1297,20 @@ function claudeContentEvents(
       ctx.callNames.set(block.id, name);
       ctx.callInputs.set(block.id, input);
       events.push({ type: 'tool_call', callId: block.id, name, input, timestamp: ts });
-    } else if (block.type === 'tool_result' && typeof block.tool_use_id === 'string' && block.tool_use_id) {
+    } else if (
+      block.type === 'tool_result' &&
+      typeof block.tool_use_id === 'string' &&
+      block.tool_use_id
+    ) {
       const callId = block.tool_use_id;
-      let output = resolveClaudePersistedOutput(toolOutputText(block.content), ctx.persistedOutputRoot);
+      let output = resolveClaudePersistedOutput(
+        toolOutputText(block.content),
+        ctx.persistedOutputRoot,
+      );
       const patch = claudeStructuredPatchText(toolUseResult?.structuredPatch);
       if (patch && !output.includes(patch)) output = output ? `${output}\n\n${patch}` : patch;
-      const agentId = typeof toolUseResult?.agentId === 'string' ? toolUseResult.agentId : undefined;
+      const agentId =
+        typeof toolUseResult?.agentId === 'string' ? toolUseResult.agentId : undefined;
       const subagent = ctx.resolveSubagent?.(callId, agentId, ctx.callInputs.get(callId));
       events.push(
         toolResultEvent({
@@ -1172,11 +1338,25 @@ function claudeImageAttachments(content: unknown, keyPrefix: string): MessageAtt
   const out: MessageAttachment[] = [];
   for (const item of content) {
     if (!item || typeof item !== 'object') continue;
-    const block = item as { type?: unknown; source?: { type?: unknown; media_type?: unknown; data?: unknown } };
-    if (block.type !== 'image' || block.source?.type !== 'base64' || typeof block.source.data !== 'string') continue;
-    const mimeType = typeof block.source.media_type === 'string' ? block.source.media_type : 'image/png';
+    const block = item as {
+      type?: unknown;
+      source?: { type?: unknown; media_type?: unknown; data?: unknown };
+    };
+    if (
+      block.type !== 'image' ||
+      block.source?.type !== 'base64' ||
+      typeof block.source.data !== 'string'
+    )
+      continue;
+    const mimeType =
+      typeof block.source.media_type === 'string' ? block.source.media_type : 'image/png';
     const ext = mimeType.split('/')[1]?.replace(/[^a-z0-9]/gi, '') || 'png';
-    out.push({ type: 'image', data: block.source.data, name: `${keyPrefix}-${out.length + 1}.${ext}`, mimeType });
+    out.push({
+      type: 'image',
+      data: block.source.data,
+      name: `${keyPrefix}-${out.length + 1}.${ext}`,
+      mimeType,
+    });
   }
   return out;
 }
@@ -1222,8 +1402,10 @@ function claudeEntriesToMessages(
   let rowIndex = 0;
   let warnedRowCap = false;
   /** A compaction boundary whose summary row has not arrived yet. */
-  let openCompaction: { sub: SubagentTranscript; result: Extract<TurnEvent, { type: 'tool_result' }> } | null =
-    null;
+  let openCompaction: {
+    sub: SubagentTranscript;
+    result: Extract<TurnEvent, { type: 'tool_result' }>;
+  } | null = null;
 
   for (const entry of entries) {
     rowIndex += 1;
@@ -1243,7 +1425,8 @@ function claudeEntriesToMessages(
 
     if (type === 'session-meta' || type === 'session_meta') {
       const payload = (entry.payload as Record<string, unknown> | undefined) ?? entry;
-      if (!model && typeof payload.model === 'string' && payload.model.trim()) model = payload.model.trim();
+      if (!model && typeof payload.model === 'string' && payload.model.trim())
+        model = payload.model.trim();
       continue;
     }
 
@@ -1255,7 +1438,11 @@ function claudeEntriesToMessages(
         const taskParts = [`Context compaction (${trigger})`];
         if (typeof meta.preTokens === 'number') taskParts.push(`${meta.preTokens} tokens before`);
         if (typeof meta.postTokens === 'number') taskParts.push(`${meta.postTokens} after`);
-        const sub: SubagentTranscript = { name: 'Context compaction', task: taskParts.join(', '), turns: [] };
+        const sub: SubagentTranscript = {
+          name: 'Context compaction',
+          task: taskParts.join(', '),
+          turns: [],
+        };
         const events = synthesizedSubagentEvents(sub, rowTs, {
           key: `compaction-${rowKey}`,
           durationMs: knownDurationMs({ durationMs: meta.durationMs }),
@@ -1264,7 +1451,13 @@ function claudeEntriesToMessages(
           sub,
           result: events[1] as Extract<TurnEvent, { type: 'tool_result' }>,
         };
-        parsedMessages.push({ role: 'assistant', content: '', createdAt: rowTs, events, ...unknownFlag });
+        parsedMessages.push({
+          role: 'assistant',
+          content: '',
+          createdAt: rowTs,
+          events,
+          ...unknownFlag,
+        });
         continue;
       }
       if (subtype === 'api_error' || subtype === 'informational') {
@@ -1292,7 +1485,11 @@ function claudeEntriesToMessages(
     }
 
     // Claude Code format: type === 'user' | 'assistant' with entry.message
-    if ((type === 'user' || type === 'assistant') && entry.message && typeof entry.message === 'object') {
+    if (
+      (type === 'user' || type === 'assistant') &&
+      entry.message &&
+      typeof entry.message === 'object'
+    ) {
       if (entry.isMeta === true) continue;
       const msgObj = entry.message as Record<string, unknown>;
       const role = msgObj.role === 'assistant' || type === 'assistant' ? 'assistant' : 'user';
@@ -1312,7 +1509,11 @@ function claudeEntriesToMessages(
         if (openCompaction) {
           openCompaction.sub.turns.push(
             known
-              ? { role: 'assistant', parts: [{ kind: 'text', text: summary, startedAt: rowTs }], createdAt: rowTs }
+              ? {
+                  role: 'assistant',
+                  parts: [{ kind: 'text', text: summary, startedAt: rowTs }],
+                  createdAt: rowTs,
+                }
               : { role: 'assistant', parts: [{ kind: 'text', text: summary, startedAt: rowTs }] },
           );
           openCompaction.result.output = summary;
@@ -1320,7 +1521,9 @@ function claudeEntriesToMessages(
         } else if (summary) {
           const sub: SubagentTranscript = {
             name: 'Context compaction',
-            turns: [{ role: 'assistant', parts: [{ kind: 'text', text: summary, startedAt: rowTs }] }],
+            turns: [
+              { role: 'assistant', parts: [{ kind: 'text', text: summary, startedAt: rowTs }] },
+            ],
           };
           parsedMessages.push({
             role: 'assistant',
@@ -1360,7 +1563,16 @@ function claudeEntriesToMessages(
             .map((event) => event.text)
             .join('\n\n');
           if (events.length > 0) {
-            parsedMessages.push({ role, content: text, createdAt: rowTs, model: rowModel, events, ...unknownFlag });
+            const usage = importedUsageFrom(msgObj.usage);
+            parsedMessages.push({
+              role,
+              content: text,
+              createdAt: rowTs,
+              model: rowModel,
+              events,
+              ...(usage ? { usage } : {}),
+              ...unknownFlag,
+            });
           }
           continue;
         }
@@ -1368,7 +1580,13 @@ function claudeEntriesToMessages(
         // turn, not a user message.
         const results = events.filter((event) => event.type === 'tool_result');
         if (results.length > 0) {
-          parsedMessages.push({ role: 'assistant', content: '', createdAt: rowTs, events: results, ...unknownFlag });
+          parsedMessages.push({
+            role: 'assistant',
+            content: '',
+            createdAt: rowTs,
+            events: results,
+            ...unknownFlag,
+          });
         }
       }
       const text = cleanMessageText(extractTextFromContentField(msgObj.content));
@@ -1383,10 +1601,19 @@ function claudeEntriesToMessages(
         });
         continue;
       }
-      const attachments = forImport && role === 'user' ? claudeImageAttachments(msgObj.content, `image-${rowKey}`) : [];
+      const attachments =
+        forImport && role === 'user'
+          ? claudeImageAttachments(msgObj.content, `image-${rowKey}`)
+          : [];
       if (role === 'user' && text && isNoiseUserPrompt(text) && attachments.length === 0) continue;
       if (!text && attachments.length === 0) continue;
-      const row: ImportedCliMessage = { role, content: text, createdAt: rowTs, model: rowModel, ...unknownFlag };
+      const row: ImportedCliMessage = {
+        role,
+        content: text,
+        createdAt: rowTs,
+        model: rowModel,
+        ...unknownFlag,
+      };
       if (attachments.length > 0) row.attachments = attachments;
       parsedMessages.push(row);
       continue;
@@ -1403,7 +1630,13 @@ function claudeEntriesToMessages(
       if (!model && msgModel) model = msgModel;
       const text = cleanMessageText(extractTextFromContentField(entry.content));
       if (!text || (role === 'user' && isNoiseUserPrompt(text))) continue;
-      parsedMessages.push({ role, content: text, createdAt: rowTs, model: msgModel ?? model, ...unknownFlag });
+      parsedMessages.push({
+        role,
+        content: text,
+        createdAt: rowTs,
+        model: msgModel ?? model,
+        ...unknownFlag,
+      });
       continue;
     }
 
@@ -1416,7 +1649,13 @@ function claudeEntriesToMessages(
       if (!model && msgModel) model = msgModel;
       const text = cleanMessageText(extractTextFromContentField(msgObj.content));
       if (!text || (role === 'user' && isNoiseUserPrompt(text))) continue;
-      parsedMessages.push({ role, content: text, createdAt: rowTs, model: msgModel ?? model, ...unknownFlag });
+      parsedMessages.push({
+        role,
+        content: text,
+        createdAt: rowTs,
+        model: msgModel ?? model,
+        ...unknownFlag,
+      });
     }
   }
   return parsedMessages;
@@ -1484,7 +1723,8 @@ function createClaudeSubagentRegistry(
         let meta: Record<string, unknown> = {};
         try {
           const metaPath = join(subDir, `agent-${agentId}.meta.json`);
-          if (existsSync(metaPath)) meta = JSON.parse(readFileSync(metaPath, 'utf8')) as Record<string, unknown>;
+          if (existsSync(metaPath))
+            meta = JSON.parse(readFileSync(metaPath, 'utf8')) as Record<string, unknown>;
         } catch {
           meta = {};
         }
@@ -1639,7 +1879,11 @@ function parseClaudeOrCodeBuddyJsonlFile(
       if (ts > updatedAt) updatedAt = ts;
     }
     const type = typeof entry.type === 'string' ? entry.type : '';
-    if (type === 'custom-title' && typeof entry.customTitle === 'string' && entry.customTitle.trim()) {
+    if (
+      type === 'custom-title' &&
+      typeof entry.customTitle === 'string' &&
+      entry.customTitle.trim()
+    ) {
       explicitTitle = entry.customTitle.trim();
       continue;
     }
@@ -1654,12 +1898,14 @@ function parseClaudeOrCodeBuddyJsonlFile(
     if (type === 'session-meta' || type === 'session_meta') {
       const payload = (entry.payload as Record<string, unknown> | undefined) ?? entry;
       if (!cwd && typeof payload.cwd === 'string' && payload.cwd.trim()) cwd = payload.cwd.trim();
-      if (!model && typeof payload.model === 'string' && payload.model.trim()) model = payload.model.trim();
+      if (!model && typeof payload.model === 'string' && payload.model.trim())
+        model = payload.model.trim();
       continue;
     }
     if (type === 'assistant' && !model) {
       const msgModel = (entry.message as Record<string, unknown> | undefined)?.model;
-      if (typeof msgModel === 'string' && msgModel.trim() && msgModel !== '<synthetic>') model = msgModel.trim();
+      if (typeof msgModel === 'string' && msgModel.trim() && msgModel !== '<synthetic>')
+        model = msgModel.trim();
     }
     // A sidechain is a sub-agent's conversation, never the user's.
     if (entry.isSidechain === true) sidechainEntries.push(entry);
@@ -1671,7 +1917,13 @@ function parseClaudeOrCodeBuddyJsonlFile(
     ? createClaudeSubagentRegistry(filePath, sidechainEntries, fallbackMtimeMs, persistedOutputRoot)
     : null;
   const ctx = newClaudeImportContext(persistedOutputRoot, registry?.resolve);
-  const parsedMessages = claudeEntriesToMessages(mainEntries, fallbackMtimeMs, forImport, ctx, model);
+  const parsedMessages = claudeEntriesToMessages(
+    mainEntries,
+    fallbackMtimeMs,
+    forImport,
+    ctx,
+    model,
+  );
   if (parsedMessages.length === 0) return null;
   registry?.placeLeftovers(parsedMessages);
 
@@ -1759,9 +2011,7 @@ function scanClaudeStyleProjectsDir(
     }
   }
 
-  return discovered
-    .sort((a, b) => b.updatedAt - a.updatedAt)
-    .slice(0, maxChats);
+  return discovered.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, maxChats);
 }
 
 // ─── 2. WorkBuddy Desktop Scanner (SQLite + JSONL) ──────────────────────────
@@ -1770,7 +2020,12 @@ function scanWorkBuddyRoot(root: string, maxChats: number): InternalDiscoveredCh
   const byExternalId = new Map<string, InternalDiscoveredChat>();
 
   // First scan JSONL transcripts under projects/
-  for (const chat of scanClaudeStyleProjectsDir(root, 'workbuddy-desktop', 'WorkBuddy', maxChats * 2)) {
+  for (const chat of scanClaudeStyleProjectsDir(
+    root,
+    'workbuddy-desktop',
+    'WorkBuddy',
+    maxChats * 2,
+  )) {
     byExternalId.set(chat.externalId, chat);
   }
 
@@ -1894,7 +2149,8 @@ function parseCodexThreadItemJson(
       return { role: 'assistant', content: text, createdAt: createdAtMs };
     }
     if (itemType === 'message' || parsed.type === 'message') {
-      const role = parsed.role === 'assistant' ? 'assistant' : parsed.role === 'user' ? 'user' : null;
+      const role =
+        parsed.role === 'assistant' ? 'assistant' : parsed.role === 'user' ? 'user' : null;
       if (!role) return null;
       const text = cleanMessageText(extractTextFromContentField(parsed.content));
       if (!text || (role === 'user' && isNoiseUserPrompt(text))) return null;
@@ -2027,7 +2283,9 @@ function parseCodexRolloutJsonl(
 
   // A rollout Codex re-serialized in one go (seen on forked sub-agent threads)
   // stamps every row with the same instant: those stamps are not the rows' times.
-  const distinctStamps = new Set(entries.map((entry) => entry.timestamp).filter((stamp) => stamp !== undefined));
+  const distinctStamps = new Set(
+    entries.map((entry) => entry.timestamp).filter((stamp) => stamp !== undefined),
+  );
   const stampsAreReal = entries.length <= 2 || distinctStamps.size > 1;
 
   let warnedRowCap = false;
@@ -2038,7 +2296,10 @@ function parseCodexRolloutJsonl(
     if (msgs.length >= MAX_RAW_SOURCE_ROWS) {
       if (!warnedRowCap) {
         warnedRowCap = true;
-        serverLog.warn({ cap: MAX_RAW_SOURCE_ROWS, filePath }, 'CLI chat import hit the raw row safety cap');
+        serverLog.warn(
+          { cap: MAX_RAW_SOURCE_ROWS, filePath },
+          'CLI chat import hit the raw row safety cap',
+        );
       }
       break;
     }
@@ -2060,7 +2321,9 @@ function parseCodexRolloutJsonl(
       // A forked child inherits its parent's compactions with the history copy.
       if ((opts.skipItemIds?.size ?? 0) > 0 && !ownItemSeen) continue;
       const summary = typeof payload.message === 'string' ? payload.message.trim() : '';
-      const replaced = Array.isArray(payload.replacement_history) ? payload.replacement_history.length : 0;
+      const replaced = Array.isArray(payload.replacement_history)
+        ? payload.replacement_history.length
+        : 0;
       const text =
         summary ||
         (replaced > 0
@@ -2086,7 +2349,21 @@ function parseCodexRolloutJsonl(
       } else if (payload.type === 'error' || payload.type === 'stream_error') {
         const text = typeof payload.message === 'string' ? payload.message : '';
         if (text) pushAssistantEvents(noticeEvents(`codex-${index}`, 'error', text, ts, true));
+      } else if (payload.type === 'token_count') {
+        // The per-call usage lands on the last assistant row written so far:
+        // the record is emitted after the model call it meters.
+        attachUsageToLastAssistant(
+          msgs,
+          importedUsageFrom(
+            (payload.info as Record<string, unknown> | undefined)?.last_token_usage,
+          ),
+        );
       }
+      continue;
+    }
+    if (forImport && entry.type === 'token_usage_record') {
+      if ((opts.skipItemIds?.size ?? 0) > 0 && !ownItemSeen) continue;
+      attachUsageToLastAssistant(msgs, importedUsageFrom(payload.usage));
       continue;
     }
     if (entry.type !== 'response_item') continue;
@@ -2095,11 +2372,15 @@ function parseCodexRolloutJsonl(
     ownItemSeen = true;
 
     if (payload.type === 'message') {
-      const role = payload.role === 'assistant' ? 'assistant' : payload.role === 'user' ? 'user' : null;
+      const role =
+        payload.role === 'assistant' ? 'assistant' : payload.role === 'user' ? 'user' : null;
       if (!role) continue;
       // Skip developer/system instructions injected as user context
       const text = cleanMessageText(extractTextFromContentField(payload.content));
-      const attachments = forImport && role === 'user' ? codexImageAttachments(payload.content, `image-${index}`) : [];
+      const attachments =
+        forImport && role === 'user'
+          ? codexImageAttachments(payload.content, `image-${index}`)
+          : [];
       if (text && isCodexInjectedContext(text)) continue;
       if (role === 'user' && text && isNoiseUserPrompt(text) && attachments.length === 0) continue;
       if (!text && attachments.length === 0) continue;
@@ -2114,7 +2395,9 @@ function parseCodexRolloutJsonl(
       const summary = Array.isArray(payload.summary)
         ? payload.summary
             .map((item) =>
-              item && typeof item === 'object' && typeof (item as { text?: unknown }).text === 'string'
+              item &&
+              typeof item === 'object' &&
+              typeof (item as { text?: unknown }).text === 'string'
                 ? (item as { text: string }).text
                 : '',
             )
@@ -2124,7 +2407,19 @@ function parseCodexRolloutJsonl(
       const rawContent = extractTextFromContentField(payload.content);
       const text = summary || rawContent;
       // A reasoning item records when it was written, never how long it took.
-      if (text.trim()) pushAssistantEvents(reasoningEvents(text, { timestamp: ts }));
+      if (text.trim()) {
+        pushAssistantEvents(reasoningEvents(text, { timestamp: ts }));
+      } else if (typeof payload.encrypted_content === 'string' && payload.encrypted_content) {
+        // Codex may persist reasoning only as ciphertext we cannot decrypt.
+        pushAssistantEvents(
+          noticeEvents(
+            `codex-${index}`,
+            'info',
+            'Codex stored this reasoning encrypted; it cannot be read.',
+            ts,
+          ),
+        );
+      }
       continue;
     }
     if (
@@ -2164,9 +2459,12 @@ function parseCodexRolloutJsonl(
       typeof payload.call_id === 'string' &&
       payload.call_id
     ) {
-      const output = payload.output ?? (payload.type === 'tool_search_output' ? payload.tools : undefined);
+      const output =
+        payload.output ?? (payload.type === 'tool_search_output' ? payload.tools : undefined);
       const outputObject =
-        output && typeof output === 'object' && !Array.isArray(output) ? (output as Record<string, unknown>) : null;
+        output && typeof output === 'object' && !Array.isArray(output)
+          ? (output as Record<string, unknown>)
+          : null;
       const outputValue = outputObject && 'content' in outputObject ? outputObject.content : output;
       const callId = payload.call_id;
       const childThreadId = spawnedThreadByCall.get(callId);
@@ -2185,7 +2483,10 @@ function parseCodexRolloutJsonl(
           // A call and its output stamped in the same millisecond were written
           // together, not timed: that is no measured duration.
           durationMs: (() => {
-            const duration = knownDurationMs({ startedAt: callStarts.get(callId), endedAt: known ? ts : undefined });
+            const duration = knownDurationMs({
+              startedAt: callStarts.get(callId),
+              endedAt: known ? ts : undefined,
+            });
             return duration === 0 ? undefined : duration;
           })(),
           subagent,
@@ -2208,7 +2509,12 @@ function codexImageAttachments(content: unknown, keyPrefix: string): MessageAtta
     if (!match) continue;
     const mimeType = match[1];
     const ext = mimeType.split('/')[1]?.replace(/[^a-z0-9]/gi, '') || 'png';
-    out.push({ type: 'image', data: match[2], name: `${keyPrefix}-${out.length + 1}.${ext}`, mimeType });
+    out.push({
+      type: 'image',
+      data: match[2],
+      name: `${keyPrefix}-${out.length + 1}.${ext}`,
+      mimeType,
+    });
   }
   return out;
 }
@@ -2308,7 +2614,11 @@ function createCodexChildResolver(
   };
 
   return {
-    resolve(callId: string, threadId: string | undefined, prompt?: string): SubagentTranscript | undefined {
+    resolve(
+      callId: string,
+      threadId: string | undefined,
+      prompt?: string,
+    ): SubagentTranscript | undefined {
       void callId;
       if (!threadId || claimed.has(threadId)) return undefined;
       const row = children.get(threadId);
@@ -2395,7 +2705,9 @@ function scanCodexRoot(root: string, maxChats: number): InternalDiscoveredChat[]
         }
       }
 
-      for (const row of threads.filter((thread) => !childThreadIds.has(thread.id)).slice(0, maxChats)) {
+      for (const row of threads
+        .filter((thread) => !childThreadIds.has(thread.id))
+        .slice(0, maxChats)) {
         const createdAt = normalizeTimestampMs(row.created_at_ms ?? row.created_at);
         const updatedAt = normalizeTimestampMs(row.updated_at_ms ?? row.updated_at, createdAt);
         const firstUserClean = cleanMessageText(row.first_user_message ?? '');
@@ -2454,7 +2766,10 @@ function scanCodexRoot(root: string, maxChats: number): InternalDiscoveredChat[]
         }
 
         const resolvedPath = canonicalizeProjectPath(row.cwd, root);
-        const title = deriveChatTitle(row.title, firstUserClean || sampleMessages[0]?.content || '');
+        const title = deriveChatTitle(
+          row.title,
+          firstUserClean || sampleMessages[0]?.content || '',
+        );
         const preview = derivePreview(firstUserClean, sampleMessages);
         const threadId = row.id;
         const rolloutPath = row.rollout_path;
@@ -2554,7 +2869,10 @@ function scanCodexRoot(root: string, maxChats: number): InternalDiscoveredChat[]
 
 // ─── 4. Antigravity CLI Scanner (conversation_summaries.db + brain/*.jsonl) ─
 
-function chooseBestAntigravityWorkspace(urisRaw: string | null | undefined, fallback: string): string {
+function chooseBestAntigravityWorkspace(
+  urisRaw: string | null | undefined,
+  fallback: string,
+): string {
   if (!urisRaw) return fallback;
   try {
     const parsed = JSON.parse(urisRaw);
@@ -2565,10 +2883,7 @@ function chooseBestAntigravityWorkspace(urisRaw: string | null | undefined, fall
     if (paths.length === 0) return fallback;
     // Prefer user project folders over internal skill directories (.gemini/ or .agents/skills)
     const nonSkill = paths.find(
-      (p) =>
-        !p.includes('/.gemini/') &&
-        !p.endsWith('/.gemini') &&
-        !p.includes('/.agents/skills'),
+      (p) => !p.includes('/.gemini/') && !p.endsWith('/.gemini') && !p.includes('/.agents/skills'),
     );
     return nonSkill ?? paths[0];
   } catch {
@@ -2702,9 +3017,7 @@ function scanAntigravityRoot(root: string, maxChats: number): InternalDiscovered
             });
             if (structured.some((m) => m.role === 'user' || m.content.trim())) return structured;
             const full = parseAntigravityTranscript(transcriptPath, updatedAt);
-            return full.length > 0
-              ? full.slice(0, MAX_IMPORTED_MESSAGES_PER_CHAT)
-              : sampleMessages;
+            return full.length > 0 ? full.slice(0, MAX_IMPORTED_MESSAGES_PER_CHAT) : sampleMessages;
           },
         });
       }
@@ -2747,7 +3060,9 @@ interface DevinParsedNode {
 }
 
 function devinMetadata(msg: Record<string, unknown>): Record<string, unknown> | null {
-  return msg.metadata && typeof msg.metadata === 'object' ? (msg.metadata as Record<string, unknown>) : null;
+  return msg.metadata && typeof msg.metadata === 'object'
+    ? (msg.metadata as Record<string, unknown>)
+    : null;
 }
 
 function devinExtensions(msg: Record<string, unknown>): Record<string, unknown> {
@@ -2779,12 +3094,16 @@ interface DevinRowContext {
 }
 
 /** Convert one agent's ordered Devin chat messages into import rows. */
-function devinMessagesToRows(nodes: readonly DevinParsedNode[], ctx: DevinRowContext): ImportedCliMessage[] {
+function devinMessagesToRows(
+  nodes: readonly DevinParsedNode[],
+  ctx: DevinRowContext,
+): ImportedCliMessage[] {
   const msgs: ImportedCliMessage[] = [];
   for (const node of nodes) {
     const msg = node.msg;
     const metadata = devinMetadata(msg);
-    const sourceTs = sourceTimestampMs(metadata?.created_at) ?? sourceTimestampMs(node.rowCreatedAt);
+    const sourceTs =
+      sourceTimestampMs(metadata?.created_at) ?? sourceTimestampMs(node.rowCreatedAt);
     const known = sourceTs !== undefined;
     const ts = sourceTs ?? ctx.fallbackTs;
     const unknownFlag: { timeUnknown?: true } = known ? {} : { timeUnknown: true };
@@ -2798,7 +3117,13 @@ function devinMessagesToRows(nodes: readonly DevinParsedNode[], ctx: DevinRowCon
       if (metadata && 'is_user_input' in metadata && !metadata.is_user_input) continue;
       const text = cleanMessageText(contentText);
       if (!text || isNoiseUserPrompt(text)) continue;
-      msgs.push({ role: 'user', content: text, createdAt: ts, model: ctx.defaultModel, ...unknownFlag });
+      msgs.push({
+        role: 'user',
+        content: text,
+        createdAt: ts,
+        model: ctx.defaultModel,
+        ...unknownFlag,
+      });
       continue;
     }
 
@@ -2828,7 +3153,18 @@ function devinMessagesToRows(nodes: readonly DevinParsedNode[], ctx: DevinRowCon
         }
       }
       if (events.length > 0) {
-        msgs.push({ role: 'assistant', content: text, createdAt: ts, model: rowModel, events, ...unknownFlag });
+        // Devin records a single token count on the generated message; it is
+        // the closest thing the source stores to per-message usage.
+        const numTokens = usageCount(metadata?.num_tokens);
+        msgs.push({
+          role: 'assistant',
+          content: text,
+          createdAt: ts,
+          model: rowModel,
+          events,
+          ...(numTokens !== undefined ? { usage: { output: numTokens } } : {}),
+          ...unknownFlag,
+        });
       }
       continue;
     }
@@ -2836,10 +3172,14 @@ function devinMessagesToRows(nodes: readonly DevinParsedNode[], ctx: DevinRowCon
     if (msg.role === 'tool' && typeof msg.tool_call_id === 'string' && msg.tool_call_id) {
       const ext = devinExtensions(msg);
       const timing = (ext['chisel/tool_call_timing'] as Record<string, unknown> | undefined) ?? {};
-      const resultMeta = (ext['chisel/tool_result_meta'] as Record<string, unknown> | undefined) ?? {};
+      const resultMeta =
+        (ext['chisel/tool_result_meta'] as Record<string, unknown> | undefined) ?? {};
       const callId = msg.tool_call_id;
       const name = ctx.toolNames.get(callId) ?? 'tool';
-      const agentId = typeof ext['subagent/agent_id'] === 'string' ? (ext['subagent/agent_id'] as string) : undefined;
+      const agentId =
+        typeof ext['subagent/agent_id'] === 'string'
+          ? (ext['subagent/agent_id'] as string)
+          : undefined;
       msgs.push({
         role: 'assistant',
         content: '',
@@ -2888,7 +3228,10 @@ function readDevinMainTreeMessages(
   }>;
   if (rows.length === 0) return [];
   if (rows.length >= MAX_RAW_SOURCE_ROWS) {
-    serverLog.warn({ sessionId, cap: MAX_RAW_SOURCE_ROWS }, 'Devin import hit the raw row safety cap');
+    serverLog.warn(
+      { sessionId, cap: MAX_RAW_SOURCE_ROWS },
+      'Devin import hit the raw row safety cap',
+    );
   }
 
   let mainChainId: number | null = null;
@@ -2936,7 +3279,8 @@ function readDevinMainTreeMessages(
     return current;
   };
 
-  let mainRoot: number | null = mainChainId !== null && byId.has(mainChainId) ? rootOf(mainChainId) : null;
+  let mainRoot: number | null =
+    mainChainId !== null && byId.has(mainChainId) ? rootOf(mainChainId) : null;
   if (mainRoot === null) {
     // Older sessions without a main chain pointer: the largest tree that is not
     // a sub-agent or Summarizer run is the conversation the user drove.
@@ -2958,7 +3302,8 @@ function readDevinMainTreeMessages(
   for (const node of nodes) {
     if (node.parentId !== null && byId.has(node.parentId)) continue;
     const content = devinContentText(node.msg);
-    if (node.msg.role === 'system' && /You are a Summarizer/i.test(content)) summarizerRoots.add(node.nodeId);
+    if (node.msg.role === 'system' && /You are a Summarizer/i.test(content))
+      summarizerRoots.add(node.nodeId);
   }
 
   // Sub-agent runs: every non-main node belongs to the run of its nearest task
@@ -3011,9 +3356,12 @@ function readDevinMainTreeMessages(
   const fallbackTaskOf = (root: number): number | null => {
     const cached = fallbackTaskByRoot.get(root);
     if (cached !== undefined) return cached;
-    const first = nodes.find((candidate) => rootOf(candidate.nodeId) === root && candidate.msg.role === 'user');
+    const first = nodes.find(
+      (candidate) => rootOf(candidate.nodeId) === root && candidate.msg.role === 'user',
+    );
     const id =
-      first && !(typeof first.msg.message_id === 'string' && mainMessageIds.has(first.msg.message_id))
+      first &&
+      !(typeof first.msg.message_id === 'string' && mainMessageIds.has(first.msg.message_id))
         ? first.nodeId
         : null;
     fallbackTaskByRoot.set(root, id);
@@ -3028,11 +3376,13 @@ function readDevinMainTreeMessages(
   for (const node of nodes) {
     const root = rootOf(node.nodeId);
     if (root === mainRoot || summarizerRoots.has(root)) continue;
-    if (typeof node.msg.message_id === 'string' && mainMessageIds.has(node.msg.message_id)) continue;
+    if (typeof node.msg.message_id === 'string' && mainMessageIds.has(node.msg.message_id))
+      continue;
     const taskNodeId = taskAncestorOf(node.nodeId) ?? fallbackTaskOf(root);
     if (taskNodeId === null) continue;
     const taskNode = byId.get(taskNodeId) as DevinParsedNode;
-    const key = typeof taskNode.msg.message_id === 'string' ? taskNode.msg.message_id : `node-${taskNodeId}`;
+    const key =
+      typeof taskNode.msg.message_id === 'string' ? taskNode.msg.message_id : `node-${taskNodeId}`;
     let run = runs.get(key);
     if (!run) {
       const task = cleanMessageText(devinContentText(taskNode.msg));
@@ -3040,11 +3390,14 @@ function readDevinMainTreeMessages(
         key,
         task,
         nodes: [],
-        startMs: sourceTimestampMs(devinMetadata(taskNode.msg)?.created_at) ?? sourceTimestampMs(taskNode.rowCreatedAt),
+        startMs:
+          sourceTimestampMs(devinMetadata(taskNode.msg)?.created_at) ??
+          sourceTimestampMs(taskNode.rowCreatedAt),
       };
       runs.set(key, run);
     }
-    const messageId = typeof node.msg.message_id === 'string' ? node.msg.message_id : `node-${node.nodeId}`;
+    const messageId =
+      typeof node.msg.message_id === 'string' ? node.msg.message_id : `node-${node.nodeId}`;
     if (assignedMessageIds.has(messageId)) continue;
     assignedMessageIds.add(messageId);
     run.nodes.push(node);
@@ -3064,7 +3417,11 @@ function readDevinMainTreeMessages(
     resolveSubagent,
   });
 
-  const buildRun = (run: DevinRun, name: string, agentId: string | undefined): SubagentTranscript | undefined => {
+  const buildRun = (
+    run: DevinRun,
+    name: string,
+    agentId: string | undefined,
+  ): SubagentTranscript | undefined => {
     if (run.transcript) return run.transcript;
     if (run.building) return undefined;
     run.building = true;
@@ -3092,22 +3449,58 @@ function readDevinMainTreeMessages(
     if (!sent || (!agentId && name !== 'run_subagent' && name !== 'sidekick')) return undefined;
     const probe = cleanMessageText(sent).trim().slice(0, 400);
     if (!probe) return undefined;
-    const run = [...runs.values()].find((candidate) => !candidate.claimed && candidate.task.includes(probe));
+    const run = [...runs.values()].find(
+      (candidate) => !candidate.claimed && candidate.task.includes(probe),
+    );
     if (!run) return undefined;
     run.claimed = true;
     const label =
-      (typeof args?.title === 'string' && args.title) || (name === 'sidekick' ? 'Sidekick' : agentId ?? 'subagent');
+      (typeof args?.title === 'string' && args.title) ||
+      (name === 'sidekick' ? 'Sidekick' : (agentId ?? 'subagent'));
     return buildRun(run, label, agentId);
   }
 
+  // The conversation is the whole main-rooted tree — compaction re-roots keep
+  // the pre-compaction segment in it — but one `message_id` renders once.
+  // Re-rooted copies sit on different parents and repeat history, so the
+  // earliest node is the real occurrence. Regenerations share a parent with
+  // the copy that replaced them: those are variants of one slot, and the
+  // variant on the live chain (when there is one) is the one that ran.
+  const chainIds = new Set<number>();
+  {
+    let tip: number | null = mainChainId !== null && byId.has(mainChainId) ? mainChainId : null;
+    const seen = new Set<number>();
+    while (tip !== null && byId.has(tip) && !seen.has(tip)) {
+      seen.add(tip);
+      chainIds.add(tip);
+      tip = byId.get(tip)?.parentId ?? null;
+    }
+  }
+  const firstNodeByMessageId = new Map<string, DevinParsedNode>();
+  const chosenByMessageId = new Map<string, DevinParsedNode>();
+  for (const node of nodes) {
+    if (rootOf(node.nodeId) !== mainRoot) continue;
+    const messageId = typeof node.msg.message_id === 'string' ? node.msg.message_id : null;
+    if (!messageId) continue;
+    const first = firstNodeByMessageId.get(messageId);
+    if (!first) {
+      firstNodeByMessageId.set(messageId, node);
+      chosenByMessageId.set(messageId, node);
+      continue;
+    }
+    // A chain node on the same parent slot replaces the earlier variant.
+    if (chainIds.has(node.nodeId) && node.parentId === first.parentId) {
+      chosenByMessageId.set(messageId, node);
+    }
+  }
   const mainNodes: DevinParsedNode[] = [];
-  const seenMessageIds = new Set<string>();
   for (const node of nodes) {
     if (rootOf(node.nodeId) !== mainRoot) continue;
     const messageId = typeof node.msg.message_id === 'string' ? node.msg.message_id : null;
     if (messageId) {
-      if (seenMessageIds.has(messageId)) continue;
-      seenMessageIds.add(messageId);
+      if (firstNodeByMessageId.get(messageId) !== node) continue;
+      mainNodes.push(chosenByMessageId.get(messageId) ?? node);
+      continue;
     }
     mainNodes.push(node);
   }
@@ -3118,21 +3511,32 @@ function readDevinMainTreeMessages(
   for (const root of summarizerRoots) {
     const treeNodes = nodes.filter((node) => rootOf(node.nodeId) === root);
     const prompt = treeNodes.find((node) => node.msg.role === 'user');
-    const key = typeof prompt?.msg.message_id === 'string' ? prompt.msg.message_id : `summarizer-${root}`;
+    const key =
+      typeof prompt?.msg.message_id === 'string' ? prompt.msg.message_id : `summarizer-${root}`;
     if (seenSummaries.has(key)) continue;
     seenSummaries.add(key);
     const turns: SubagentTurn[] = [];
     let startMs: number | undefined;
     for (const node of treeNodes) {
-      const at = sourceTimestampMs(devinMetadata(node.msg)?.created_at) ?? sourceTimestampMs(node.rowCreatedAt);
+      const at =
+        sourceTimestampMs(devinMetadata(node.msg)?.created_at) ??
+        sourceTimestampMs(node.rowCreatedAt);
       const text = devinContentText(node.msg);
       if (!text.trim()) continue;
       if (node.msg.role === 'user') {
         startMs ??= at;
-        turns.push(at === undefined ? { role: 'user', text } : { role: 'user', text, createdAt: at });
+        turns.push(
+          at === undefined ? { role: 'user', text } : { role: 'user', text, createdAt: at },
+        );
       } else if (node.msg.role === 'assistant') {
-        const parts: TranscriptPart[] = [{ kind: 'text', text, startedAt: at ?? startMs ?? fallbackTs }];
-        turns.push(at === undefined ? { role: 'assistant', parts } : { role: 'assistant', parts, createdAt: at });
+        const parts: TranscriptPart[] = [
+          { kind: 'text', text, startedAt: at ?? startMs ?? fallbackTs },
+        ];
+        turns.push(
+          at === undefined
+            ? { role: 'assistant', parts }
+            : { role: 'assistant', parts, createdAt: at },
+        );
       }
     }
     if (turns.length === 0) continue;
@@ -3181,7 +3585,9 @@ function loadDevinSessionMessages(
   if (existsSync(dbPath)) {
     const sqlite = openReadonlySqlite(dbPath);
     try {
-      const msgs = sqlite ? readDevinMainTreeMessages(sqlite, sessionId, defaultModel, fallbackTs) : [];
+      const msgs = sqlite
+        ? readDevinMainTreeMessages(sqlite, sessionId, defaultModel, fallbackTs)
+        : [];
       if (msgs.length > 0) return msgs;
     } catch {
       // Fall through to ATIF JSON transcript
@@ -3205,8 +3611,7 @@ function loadDevinSessionMessages(
       };
       const msgs: DiscoveredCliChatMessage[] = [];
       for (const step of data.steps ?? []) {
-        const role =
-          step.source === 'user' ? 'user' : step.source === 'agent' ? 'assistant' : null;
+        const role = step.source === 'user' ? 'user' : step.source === 'agent' ? 'assistant' : null;
         if (!role || typeof step.message !== 'string') continue;
         const text = cleanMessageText(step.message);
         if (!text) continue;
@@ -3381,12 +3786,27 @@ function freebuffBlockEvents(blocks: FreebuffUiBlock[], ts: number): TurnEvent[]
       });
       if (block.output !== undefined) {
         events.push(
-          toolResultEvent({ callId: block.toolCallId, name, output: toolOutputText(block.output), timestamp: ts }),
+          toolResultEvent({
+            callId: block.toolCallId,
+            name,
+            output: toolOutputText(block.output),
+            timestamp: ts,
+          }),
         );
       }
-    } else if (block.type === 'ask-user' && typeof block.toolCallId === 'string' && block.toolCallId) {
+    } else if (
+      block.type === 'ask-user' &&
+      typeof block.toolCallId === 'string' &&
+      block.toolCallId
+    ) {
       const input = toolInputRecord({ questions: block.questions });
-      events.push({ type: 'tool_call', callId: block.toolCallId, name: 'ask_user', input, timestamp: ts });
+      events.push({
+        type: 'tool_call',
+        callId: block.toolCallId,
+        name: 'ask_user',
+        input,
+        timestamp: ts,
+      });
       if (block.answers !== undefined) {
         events.push(
           toolResultEvent({
@@ -3402,7 +3822,9 @@ function freebuffBlockEvents(blocks: FreebuffUiBlock[], ts: number): TurnEvent[]
       const callId = `agent-${block.agentId}`;
       const prompt = typeof block.initialPrompt === 'string' ? block.initialPrompt.trim() : '';
       const params =
-        block.params && typeof block.params === 'object' ? (block.params as Record<string, unknown>) : undefined;
+        block.params && typeof block.params === 'object'
+          ? (block.params as Record<string, unknown>)
+          : undefined;
       let task = prompt;
       if (!task && params) {
         try {
@@ -3419,11 +3841,20 @@ function freebuffBlockEvents(blocks: FreebuffUiBlock[], ts: number): TurnEvent[]
       if (task) nested.push({ role: 'user', content: task, createdAt: ts, timeUnknown: true });
       const nestedEvents = freebuffBlockEvents(block.blocks ?? [], ts);
       const finalText = cleanMessageText(block.content ?? '');
-      if (finalText && !nestedEvents.some((event) => event.type === 'text' && event.text === finalText)) {
+      if (
+        finalText &&
+        !nestedEvents.some((event) => event.type === 'text' && event.text === finalText)
+      ) {
         nestedEvents.push({ type: 'text', text: finalText, timestamp: ts });
       }
       if (nestedEvents.length > 0) {
-        nested.push({ role: 'assistant', content: '', createdAt: ts, events: nestedEvents, timeUnknown: true });
+        nested.push({
+          role: 'assistant',
+          content: '',
+          createdAt: ts,
+          events: nestedEvents,
+          timeUnknown: true,
+        });
       }
       const subagent = buildSubagentTranscript(
         { agentId: block.agentId, name, task: task || undefined, provider: 'freebuff' },
@@ -3453,15 +3884,31 @@ function freebuffUserAttachments(item: {
   const attachments: MessageAttachment[] = [];
   for (const pasted of item.textAttachments ?? []) {
     if (typeof pasted?.content !== 'string' || !pasted.content.trim()) continue;
-    const label = typeof pasted.name === 'string' ? pasted.name : typeof pasted.filename === 'string' ? pasted.filename : 'pasted text';
-    extraText.push(`[Attached text: ${label}]\n${capText(pasted.content, MAX_IMPORTED_VALUE_CHARS)}`);
+    const label =
+      typeof pasted.name === 'string'
+        ? pasted.name
+        : typeof pasted.filename === 'string'
+          ? pasted.filename
+          : 'pasted text';
+    extraText.push(
+      `[Attached text: ${label}]\n${capText(pasted.content, MAX_IMPORTED_VALUE_CHARS)}`,
+    );
   }
   for (const file of item.attachments ?? []) {
     const path = typeof file?.path === 'string' ? file.path : '';
-    const name = typeof file?.filename === 'string' ? file.filename : path ? basename(path) : 'attachment';
+    const name =
+      typeof file?.filename === 'string' ? file.filename : path ? basename(path) : 'attachment';
     const ext = name.toLowerCase().split('.').pop() ?? '';
     const mimeType =
-      ext === 'png' ? 'image/png' : ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'gif' ? 'image/gif' : ext === 'webp' ? 'image/webp' : undefined;
+      ext === 'png'
+        ? 'image/png'
+        : ext === 'jpg' || ext === 'jpeg'
+          ? 'image/jpeg'
+          : ext === 'gif'
+            ? 'image/gif'
+            : ext === 'webp'
+              ? 'image/webp'
+              : undefined;
     try {
       if (path && existsSync(path) && statSync(path).size <= MAX_IMPORTED_ATTACHMENT_BYTES) {
         attachments.push({
@@ -3475,7 +3922,9 @@ function freebuffUserAttachments(item: {
     } catch {
       // Fall through to the reference below.
     }
-    extraText.push(`[Attached ${mimeType ? 'image' : 'file'}: ${name} — the file is no longer on disk]`);
+    extraText.push(
+      `[Attached ${mimeType ? 'image' : 'file'}: ${name} — the file is no longer on disk]`,
+    );
   }
   return { extraText, attachments };
 }
@@ -3518,10 +3967,13 @@ function loadFreebuffChatMessages(chatDir: string, fallbackTs: number): Imported
           // without a day). Without it the row's time is unknown.
           const sourceTs = freebuffItemSourceTimestamp(item.id);
           const ts = sourceTs ?? fallbackTs;
-          const unknownFlag: { timeUnknown?: true } = sourceTs === undefined ? { timeUnknown: true } : {};
+          const unknownFlag: { timeUnknown?: true } =
+            sourceTs === undefined ? { timeUnknown: true } : {};
           if (role === 'user') {
             const { extraText, attachments } = freebuffUserAttachments(item);
-            const text = [cleanMessageText(item.content ?? ''), ...extraText].filter(Boolean).join('\n\n');
+            const text = [cleanMessageText(item.content ?? ''), ...extraText]
+              .filter(Boolean)
+              .join('\n\n');
             if (!text && attachments.length === 0) continue;
             const row: ImportedCliMessage = { role, content: text, createdAt: ts, ...unknownFlag };
             if (attachments.length > 0) row.attachments = attachments;
@@ -3534,7 +3986,9 @@ function loadFreebuffChatMessages(chatDir: string, fallbackTs: number): Imported
             events.push({ type: 'text', text: directText, timestamp: ts });
           }
           if (typeof item.userError === 'string' && item.userError.trim()) {
-            events.push(...noticeEvents(`${item.id ?? index}-error`, 'error', item.userError, ts, true));
+            events.push(
+              ...noticeEvents(`${item.id ?? index}-error`, 'error', item.userError, ts, true),
+            );
           }
           if (events.length === 0) continue;
           const text = events
@@ -3611,7 +4065,7 @@ function scanFreebuffRoot(root: string, maxChats: number): InternalDiscoveredCha
       const list = Array.isArray(parsed)
         ? parsed
         : Array.isArray((parsed as { projects?: unknown[] })?.projects)
-          ? ((parsed as { projects: unknown[] }).projects)
+          ? (parsed as { projects: unknown[] }).projects
           : [];
       for (const item of list) {
         const p = (item as { path?: string })?.path;
@@ -3708,9 +4162,7 @@ function scanFreebuffRoot(root: string, maxChats: number): InternalDiscoveredCha
     }
   }
 
-  return results
-    .sort((a, b) => b.updatedAt - a.updatedAt)
-    .slice(0, maxChats);
+  return results.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, maxChats);
 }
 
 // ─── 7. OpenCode / Kilo Code / Omnirush SQLite & JSONL Scanners ─────────────
@@ -3779,7 +4231,10 @@ function loadOpenCodeSessionMessages(
     part_data: string;
   }>;
   if (forImport && rows.length >= MAX_RAW_SOURCE_ROWS) {
-    serverLog.warn({ sessionId, cap: MAX_RAW_SOURCE_ROWS }, 'OpenCode import hit the raw row safety cap');
+    serverLog.warn(
+      { sessionId, cap: MAX_RAW_SOURCE_ROWS },
+      'OpenCode import hit the raw row safety cap',
+    );
   }
 
   // Child sessions a `task` tool created, for nesting.
@@ -3788,7 +4243,9 @@ function loadOpenCodeSessionMessages(
   if (forImport && depth < MAX_OPENCODE_SUBAGENT_DEPTH) {
     try {
       const childRows = conn
-        .query(`SELECT id, title, time_created FROM session WHERE parent_id = ? ORDER BY time_created ASC`)
+        .query(
+          `SELECT id, title, time_created FROM session WHERE parent_id = ? ORDER BY time_created ASC`,
+        )
         .all(sessionId) as Array<{ id: string; title: string | null; time_created: number | null }>;
       for (const child of childRows) {
         children.set(child.id, {
@@ -3801,11 +4258,22 @@ function loadOpenCodeSessionMessages(
       // No parent links in this store.
     }
   }
-  const childTranscript = (childId: string, name: string, task: string | undefined): SubagentTranscript | undefined => {
+  const childTranscript = (
+    childId: string,
+    name: string,
+    task: string | undefined,
+  ): SubagentTranscript | undefined => {
     const child = children.get(childId);
     if (!child || claimedChildren.has(childId)) return undefined;
     claimedChildren.add(childId);
-    const loaded = loadOpenCodeSessionMessages(conn, childId, limit, child.createdAt ?? defaultTs, true, depth + 1);
+    const loaded = loadOpenCodeSessionMessages(
+      conn,
+      childId,
+      limit,
+      child.createdAt ?? defaultTs,
+      true,
+      depth + 1,
+    );
     return buildSubagentTranscript(
       { agentId: childId, name, task: task || child.title || undefined, model: loaded.model },
       loaded.messages,
@@ -3861,8 +4329,15 @@ function loadOpenCodeSessionMessages(
           const err = msgObj.error;
           if (forImport && msgObj.role === 'assistant' && err) {
             const message =
-              typeof err.data?.message === 'string' ? err.data.message : typeof err.name === 'string' ? err.name : '';
-            if (message) entry.events.push(...noticeEvents(`${r.id}-error`, 'error', message, createdAt, true));
+              typeof err.data?.message === 'string'
+                ? err.data.message
+                : typeof err.name === 'string'
+                  ? err.name
+                  : '';
+            if (message)
+              entry.events.push(
+                ...noticeEvents(`${r.id}-error`, 'error', message, createdAt, true),
+              );
           }
         }
         return entry;
@@ -3889,7 +4364,9 @@ function loadOpenCodeSessionMessages(
               mimeType,
             });
           } else {
-            ensure().texts.push(`[Attached file: ${name}${partObj.url.startsWith('file:') ? ` (${partObj.url})` : ''}]`);
+            ensure().texts.push(
+              `[Attached file: ${name}${partObj.url.startsWith('file:') ? ` (${partObj.url})` : ''}]`,
+            );
           }
         }
         continue;
@@ -3910,7 +4387,13 @@ function loadOpenCodeSessionMessages(
         const callId = `${r.id}:${partObj.callID}`;
         const input = toolInputRecord(partObj.state?.input);
         const startedAt = sourceTimestampMs(partObj.state?.time?.start);
-        target.events.push({ type: 'tool_call', callId, name, input, timestamp: startedAt ?? createdAt });
+        target.events.push({
+          type: 'tool_call',
+          callId,
+          name,
+          input,
+          timestamp: startedAt ?? createdAt,
+        });
         const status = partObj.state?.status;
         if (status === 'completed' || status === 'error') {
           const metadata = partObj.state?.metadata ?? {};
@@ -3920,7 +4403,11 @@ function loadOpenCodeSessionMessages(
             subagent = childTranscript(
               childId,
               typeof input.subagent_type === 'string' ? input.subagent_type : name,
-              typeof input.prompt === 'string' ? input.prompt : typeof input.description === 'string' ? input.description : undefined,
+              typeof input.prompt === 'string'
+                ? input.prompt
+                : typeof input.description === 'string'
+                  ? input.description
+                  : undefined,
             );
           }
           const endedAt = sourceTimestampMs(partObj.state?.time?.end);
@@ -3929,7 +4416,9 @@ function loadOpenCodeSessionMessages(
               callId,
               name,
               output: toolOutputText(
-                status === 'error' ? (partObj.state?.error ?? partObj.state?.output) : partObj.state?.output,
+                status === 'error'
+                  ? (partObj.state?.error ?? partObj.state?.output)
+                  : partObj.state?.output,
               ),
               isError: status === 'error',
               timestamp: endedAt ?? createdAt,
@@ -3938,21 +4427,37 @@ function loadOpenCodeSessionMessages(
             }),
           );
         }
-      } else if (partObj.type === 'patch' && Array.isArray(partObj.files) && partObj.files.length > 0) {
+      } else if (
+        partObj.type === 'patch' &&
+        Array.isArray(partObj.files) &&
+        partObj.files.length > 0
+      ) {
         const callId = `${r.id}:patch:${partIndex}`;
         const files = partObj.files.filter((file): file is string => typeof file === 'string');
         ensure().events.push(
           { type: 'tool_call', callId, name: 'patch', input: { files }, timestamp: createdAt },
-          toolResultEvent({ callId, name: 'patch', output: files.join('\n'), timestamp: createdAt }),
+          toolResultEvent({
+            callId,
+            name: 'patch',
+            output: files.join('\n'),
+            timestamp: createdAt,
+          }),
         );
       } else if (partObj.type === 'retry') {
-        const err = partObj.error as { data?: { message?: unknown }; message?: unknown } | undefined;
+        const err = partObj.error as
+          { data?: { message?: unknown }; message?: unknown } | undefined;
         const message =
           (typeof err?.data?.message === 'string' && err.data.message) ||
           (typeof err?.message === 'string' && err.message) ||
           'Request failed';
         ensure().events.push(
-          ...noticeEvents(`${r.id}-retry-${partIndex}`, 'api_error', `${message} (retry ${String(partObj.attempt ?? '')})`.trim(), createdAt, true),
+          ...noticeEvents(
+            `${r.id}-retry-${partIndex}`,
+            'api_error',
+            `${message} (retry ${String(partObj.attempt ?? '')})`.trim(),
+            createdAt,
+            true,
+          ),
         );
       } else if (partObj.type === 'compaction') {
         const sub: SubagentTranscript = {
@@ -3960,7 +4465,9 @@ function loadOpenCodeSessionMessages(
           task: partObj.auto ? 'Automatic context compaction' : 'Context compaction',
           turns: [],
         };
-        ensure().events.push(...synthesizedSubagentEvents(sub, createdAt, { key: `compaction-${r.id}-${partIndex}` }));
+        ensure().events.push(
+          ...synthesizedSubagentEvents(sub, createdAt, { key: `compaction-${r.id}-${partIndex}` }),
+        );
       }
     } catch {
       continue;
@@ -3994,7 +4501,12 @@ function loadOpenCodeSessionMessages(
       });
     } else {
       if (!text) continue;
-      combined.push({ role: 'assistant', content: text, createdAt: item.createdAt, model: item.model ?? detectedModel });
+      combined.push({
+        role: 'assistant',
+        content: text,
+        createdAt: item.createdAt,
+        model: item.model ?? detectedModel,
+      });
     }
     if (!forImport && combined.length >= limit) break;
   }
@@ -4209,7 +4721,11 @@ function scanOmnirushRoot(root: string, maxChats: number): InternalDiscoveredCha
                 if (typeof entry.cwd === 'string') cwd = entry.cwd;
               } else if (entry.type === 'model_change' && typeof entry.modelId === 'string') {
                 model = entry.modelId;
-              } else if (entry.type === 'message' && entry.message && typeof entry.message === 'object') {
+              } else if (
+                entry.type === 'message' &&
+                entry.message &&
+                typeof entry.message === 'object'
+              ) {
                 const m = entry.message as Record<string, unknown>;
                 if (m.role !== 'user' && m.role !== 'assistant') continue;
                 const text = cleanMessageText(extractTextFromContentField(m.content));
@@ -4274,9 +4790,7 @@ function scanOmnirushRoot(root: string, maxChats: number): InternalDiscoveredCha
     }
   }
 
-  return results
-    .sort((a, b) => b.updatedAt - a.updatedAt)
-    .slice(0, maxChats);
+  return results.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, maxChats);
 }
 
 // ─── 8. Generic Multi-Format CLI Scanner (Cursor, Grok, Kimi Code, etc.) ────
@@ -4385,7 +4899,10 @@ function scanGenericCliRoot(
             data.cwd ?? data.workingDirectory ?? data.projectPath,
             root,
           );
-          const createdAt = normalizeTimestampMs(data.createdAt, parsedMsgs[0]?.createdAt ?? mtimeMs);
+          const createdAt = normalizeTimestampMs(
+            data.createdAt,
+            parsedMsgs[0]?.createdAt ?? mtimeMs,
+          );
           const updatedAt = normalizeTimestampMs(
             data.updatedAt,
             parsedMsgs[parsedMsgs.length - 1]?.createdAt ?? mtimeMs,
@@ -4425,9 +4942,7 @@ function scanGenericCliRoot(
     }
   }
 
-  return results
-    .sort((a, b) => b.updatedAt - a.updatedAt)
-    .slice(0, maxChats);
+  return results.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, maxChats);
 }
 
 // ─── Dedicated parsers (cli-chat-porting-providers.ts) ──────────────────────
@@ -4488,7 +5003,10 @@ function scanDedicatedCliRoot(
       byId.set(internal.id, internal);
     }
   } catch (err) {
-    serverLog.debug({ err, provider, root }, 'Dedicated CLI chat scan failed; using generic layouts');
+    serverLog.debug(
+      { err, provider, root },
+      'Dedicated CLI chat scan failed; using generic layouts',
+    );
   }
   for (const chat of scanGenericCliRoot(root, provider, providerDisplayName, maxChats)) {
     if (!byId.has(chat.id)) byId.set(chat.id, chat);
@@ -4644,10 +5162,7 @@ export const ALL_CLI_CHAT_PROVIDERS: readonly CliProviderCatalogEntry[] = [
     provider: 'cursor',
     displayName: 'Cursor CLI',
     resolveCandidateRoots: (home, env) => {
-      const roots = [
-        ...expandSiblingProfiles(home, '.cursor'),
-        join(home, '.config', 'cursor'),
-      ];
+      const roots = [...expandSiblingProfiles(home, '.cursor'), join(home, '.config', 'cursor')];
       if (env.CURSOR_CONFIG_DIR) roots.unshift(env.CURSOR_CONFIG_DIR);
       return [...new Set(roots)];
     },
@@ -4659,10 +5174,7 @@ export const ALL_CLI_CHAT_PROVIDERS: readonly CliProviderCatalogEntry[] = [
     provider: 'grok',
     displayName: 'Grok Build',
     resolveCandidateRoots: (home, env) => {
-      const roots = [
-        ...expandSiblingProfiles(home, '.grok'),
-        join(home, '.config', 'grok'),
-      ];
+      const roots = [...expandSiblingProfiles(home, '.grok'), join(home, '.config', 'grok')];
       if (env.GROK_CONFIG_DIR) roots.unshift(env.GROK_CONFIG_DIR);
       return [...new Set(roots)];
     },
@@ -4691,10 +5203,7 @@ export const ALL_CLI_CHAT_PROVIDERS: readonly CliProviderCatalogEntry[] = [
 function getImportedChatSessionMap(): Map<string, string> {
   const map = new Map<string, string>();
   try {
-    const rows = db
-      .select({ id: sessions.id, metadata: sessions.metadata })
-      .from(sessions)
-      .all();
+    const rows = db.select({ id: sessions.id, metadata: sessions.metadata }).from(sessions).all();
     for (const row of rows) {
       if (!row.metadata) continue;
       try {
@@ -4759,11 +5268,7 @@ function scanAllInternal(options: CliChatPortingOptions = {}): {
       }
     }
 
-    const projectSet = new Set(
-      [...providerChats.values()].map((c) =>
-        projectKey(c.projectPath),
-      ),
-    );
+    const projectSet = new Set([...providerChats.values()].map((c) => projectKey(c.projectPath)));
 
     providers.push({
       id: entry.id,
@@ -5004,7 +5509,16 @@ export async function importCliChats(
         // foreign CLI's reasoning must not be replayed to Kory's provider.
         if (msg.parts) blocks.push({ type: TRANSCRIPT_PARTS_BLOCK, parts: msg.parts });
         // The source recorded no time for this row: `createdAt` only orders it.
-        if (msg.timeUnknown) blocks.push({ type: MESSAGE_META_BLOCK, timeUnknown: true });
+        // Token usage the source recorded is display-only and lands in the same
+        // meta block — never in tokensIn/tokensOut/cost, so it can never count
+        // toward spend limits or analytics.
+        if (msg.timeUnknown || msg.usage) {
+          blocks.push({
+            type: MESSAGE_META_BLOCK,
+            ...(msg.timeUnknown ? { timeUnknown: true } : {}),
+            ...(msg.usage ? { importedUsage: msg.usage } : {}),
+          });
+        }
         tx.insert(messages)
           .values({
             id: msgId,
@@ -5064,6 +5578,9 @@ export async function importCliChats(
       messageCount: transcript.length,
       status: 'imported',
     });
+    // Each chat parses its whole transcript file into memory; collect between
+    // chats so RSS tracks the live set instead of every file's high-water mark.
+    Bun.gc(true);
   }
 
   return {

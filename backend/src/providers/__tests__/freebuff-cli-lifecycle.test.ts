@@ -33,11 +33,19 @@ import type { FreebuffAccountCatalog } from '../freebuff-model-catalog';
 import { FreebuffCliBridge } from '../cli-bridges';
 import type { FreebuffTurnRuntime, FreebuffRuntimeOptions } from '../freebuff-runtime';
 import type { PreparedFreebuffBridge } from '../freebuff-bridge-runtime';
+import {
+  acquireFreebuffSessionSlot,
+  FreebuffSessionSlotError,
+  peekFreebuffSessionSlot,
+  resetFreebuffSessionSlotsForTests,
+  type FreebuffSessionSlotRequest,
+} from '../freebuff-session-slots';
 import type { ProviderEvent, StreamRequest } from '../types';
 import { PROJECT_ROOT } from '../../runtime/paths';
 
 const temporary: string[] = [];
 afterEach(() => {
+  resetFreebuffSessionSlotsForTests();
   for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true });
 });
 const READY = 'Freebuff 0.2.12\nenter a coding task or / for commands';
@@ -58,6 +66,19 @@ function harness(
     failure?: Failure;
     settings?: string;
     pane?: string;
+    /** Optional capture-pane sequence; falls back to `pane` when exhausted. */
+    panes?: string[];
+    /** Holds the account slot before the stream, then releases after `ms`. */
+    slotPrehold?: {
+      sessionId: string;
+      role?: 'manager' | 'worker' | 'critic';
+      releaseAfterMs?: number;
+    };
+    acquireSessionSlot?: (
+      accountId: string,
+      request: FreebuffSessionSlotRequest,
+    ) => Promise<() => void>;
+    peekSessionSlot?: (accountId: string) => { sessionId: string; role: string } | null;
     rows?: Record<string, unknown>[][];
     selectedModel?: string;
     signal?: AbortSignal;
@@ -66,6 +87,9 @@ function harness(
     onRuntime?: (options: FreebuffRuntimeOptions) => void;
     noReadyMarker?: boolean;
     readyOnSubmit?: boolean;
+    readyOnEnterCount?: number;
+    dieOnStart?: boolean;
+    sessionLostGraceMs?: number;
     runtimeAvailable?: boolean;
     catalogVersion?: string;
     refreshedVersion?: string;
@@ -73,6 +97,8 @@ function harness(
     accountCatalog?: FreebuffAccountCatalog;
     accountCatalogFailure?: boolean;
     readLogRows?: () => Promise<Record<string, unknown>[]>;
+    dieAfterReads?: number;
+    probeFailOnce137?: boolean;
   } = {},
 ) {
   // Only synthetic credentials in a temporary fixture. Never discover actual CLI accounts.
@@ -92,9 +118,12 @@ function harness(
   const tmuxCalls: string[][] = [];
   let runtimeVersion = '0.2.12';
   let forcedRefreshes = 0;
+  let rowReads = 0;
   let loadedPrompt = '';
   let pastedPrompt = '';
+  let enterSubmits = 0;
   let tuiExited = false;
+  let probeFailedOnce = false;
   let runtimeOptions: FreebuffRuntimeOptions | undefined;
   const readyPath = join(runRoot, 'bridge-ready.json');
   const selectedModel = options.selectedModel ?? FREEBUFF_CLI_DEFAULT_MODEL_ID;
@@ -118,6 +147,10 @@ function harness(
     exec: mock(async (_command: string, _args: string[]) => {
       calls.push('probe');
       options.onProbe?.();
+      if (options.probeFailOnce137 && !probeFailedOnce) {
+        probeFailedOnce = true;
+        throw Object.assign(new Error('killed'), { code: 137 });
+      }
       fail('probe');
       return '{"ready":true,"toolCount":0}';
     }),
@@ -128,6 +161,7 @@ function harness(
       options.onStart?.(runRoot);
       fail('start');
       if (!options.noReadyMarker) writeFileSync(readyPath, '{"ready":true}');
+      if (options.dieOnStart) tuiExited = true;
     }),
     tmux: mock(async (args: string[]) => {
       tmuxCalls.push(args);
@@ -135,7 +169,13 @@ function harness(
         loadedPrompt = readFileSync(args.at(-1)!, 'utf8');
       }
       if (args[0] === 'paste-buffer' && loadedPrompt) pastedPrompt = loadedPrompt;
-      if (options.readyOnSubmit && args[0] === 'send-keys' && args.at(-1) === 'Enter') {
+      if (args[0] === 'send-keys' && args.at(-1) === 'Enter') enterSubmits += 1;
+      if (
+        ((options.readyOnSubmit && enterSubmits === 1) ||
+          enterSubmits === options.readyOnEnterCount) &&
+        args[0] === 'send-keys' &&
+        args.at(-1) === 'Enter'
+      ) {
         writeFileSync(readyPath, '{"ready":true}');
       }
       if (args[0] === 'send-keys' && args.at(-1) === 'C-c') {
@@ -145,7 +185,8 @@ function harness(
       if (args[0] === 'has-session' && tuiExited) throw new Error('session ended');
       if (args[0] === 'capture-pane') {
         fail('capture');
-        return `${options.pane ?? READY}\n${pastedPrompt ? (pastedPrompt.length > 2000 ? `Pasted text (${pastedPrompt.length.toLocaleString()} chars)` : pastedPrompt) : ''}`;
+        const pane = options.panes?.length ? options.panes.shift()! : options.pane;
+        return `${pane ?? READY}\n${pastedPrompt ? (pastedPrompt.length > 2000 ? `Pasted text (${pastedPrompt.length.toLocaleString()} chars)` : pastedPrompt) : ''}`;
       }
       return '';
     }),
@@ -166,7 +207,44 @@ function harness(
   bridge.buildMcpConfig = () => servers;
   bridge.buildRules = () => [];
   const rows = [...(options.rows ?? [[rootRow(), finished()]])];
+  // The real slot lease against a private temp dir: in-process holder/FIFO
+  // and the mkdir file lease both behave exactly as in production.
+  const slotsDir = mkdtempSync(join(tmpdir(), 'freebuff-test-slots-'));
+  temporary.push(slotsDir);
+  const slotEvents: string[] = [];
+  const acquireSlot = async (accountId: string, request: FreebuffSessionSlotRequest) => {
+    const release = await (
+      options.acquireSessionSlot ??
+      ((id: string, req: FreebuffSessionSlotRequest) =>
+        acquireFreebuffSessionSlot(id, req, { slotsDir }))
+    )(accountId, request);
+    slotEvents.push(`acquired:${accountId}`);
+    calls.push('slot-acquired');
+    return () => {
+      slotEvents.push(`released:${accountId}`);
+      calls.push('slot-released');
+      release();
+    };
+  };
+  const peekSlot =
+    options.peekSessionSlot ??
+    ((accountId: string) => peekFreebuffSessionSlot(accountId, { slotsDir }));
+  if (options.slotPrehold) {
+    const { sessionId, role = 'manager', releaseAfterMs = 600 } = options.slotPrehold;
+    // A foreign-style lease whose pid is alive (this process): the slot layer
+    // sees a legitimate holder until the scheduled removal frees it.
+    const leaseDir = join(slotsDir, Buffer.from('fixture').toString('base64url'));
+    mkdirSync(leaseDir, { recursive: true });
+    writeFileSync(
+      join(leaseDir, 'info.json'),
+      JSON.stringify({ pid: process.pid, sessionId, role, startedAt: Date.now() }),
+      { mode: 0o600 },
+    );
+    setTimeout(() => rmSync(leaseDir, { recursive: true, force: true }), releaseAfterMs).unref();
+  }
   const dependencies: Partial<FreebuffProviderDependencies> = {
+    acquireSessionSlot: acquireSlot,
+    peekSessionSlot: peekSlot,
     discoverAccounts: () => [
       {
         id: 'fixture',
@@ -214,7 +292,9 @@ function harness(
       };
     },
     scheduleRuntimeUpdate: () => {},
-    forceRuntimeUpdate: options.forceUpdate ??
+    sessionLostGraceMs: options.sessionLostGraceMs ?? 30_000,
+    forceRuntimeUpdate:
+      options.forceUpdate ??
       (async () => {
         throw new Error('synthetic update failure');
       }),
@@ -260,7 +340,9 @@ function harness(
         })
       : mock(async () => {
           calls.push('logs');
-          return rows.shift() ?? [];
+          const chunk = rows.shift() ?? [];
+          if (++rowReads >= (options.dieAfterReads ?? Number.POSITIVE_INFINITY)) tuiExited = true;
+          return chunk;
         }),
   };
   const provider = new FreebuffProvider({ name: 'freebuff' }, dependencies);
@@ -285,6 +367,8 @@ function harness(
     runtime,
     prepared,
     runRoot,
+    slotsDir,
+    slotEvents,
     runtimeOptions: () => runtimeOptions,
     forcedRefreshes: () => forcedRefreshes,
   };
@@ -694,7 +778,12 @@ describe('Freebuff mocked lifecycle (no login or inference)', () => {
       { type: 'complete', finishReason: 'end_turn' },
     ]);
     expect(fixture.calls.indexOf('probe')).toBeLessThan(fixture.calls.indexOf('start'));
-    expect(fixture.calls.slice(-3)).toEqual(['runtime-cleanup', 'bridge-cleanup', 'grant-cleanup']);
+    expect(fixture.calls.slice(-4)).toEqual([
+      'runtime-cleanup',
+      'slot-released',
+      'bridge-cleanup',
+      'grant-cleanup',
+    ]);
     expect(fixture.tmuxCalls.some((args) => args[0] === 'new-session')).toBe(false);
     expect(
       fixture.tmuxCalls
@@ -744,7 +833,12 @@ describe('Freebuff mocked lifecycle (no login or inference)', () => {
   it('continues grant/bridge/file cleanup even if runtime cleanup rejects', async () => {
     const fixture = harness({ failure: 'cleanup' });
     await fixture.collect();
-    expect(fixture.calls.slice(-3)).toEqual(['runtime-cleanup', 'bridge-cleanup', 'grant-cleanup']);
+    expect(fixture.calls.slice(-4)).toEqual([
+      'runtime-cleanup',
+      'slot-released',
+      'bridge-cleanup',
+      'grant-cleanup',
+    ]);
     expect(existsSync(fixture.runRoot)).toBe(false);
   });
 
@@ -1043,8 +1137,7 @@ describe('Freebuff mocked lifecycle (no login or inference)', () => {
       rows: [[retiredRow], [rootRow(), finished()]],
     });
     const collected = fixture.collect();
-    for (let attempt = 0; attempt < 100 && !releaseUpdate; attempt += 1)
-      await Bun.sleep(10);
+    for (let attempt = 0; attempt < 100 && !releaseUpdate; attempt += 1) await Bun.sleep(10);
     expect(forceUpdate).toHaveBeenCalledTimes(1);
     controller.abort();
     const events = await collected;
@@ -1109,6 +1202,159 @@ describe('Freebuff mocked lifecycle (no login or inference)', () => {
     expect(callsToDrain).toBeGreaterThanOrEqual(2);
   });
 
+  it('completes when the TUI exits after writing a success completion', async () => {
+    const fixture = harness({
+      dieAfterReads: 1,
+      rows: [[], [rootRow('Final answer'), finished()]],
+    });
+    const events = await fixture.collect();
+    expect(events.some((event) => event.type === 'error')).toBe(false);
+    expect(events.find((event) => event.type === 'content_delta')?.content).toBe('Final answer');
+    expect(events.some((event) => event.type === 'complete')).toBe(true);
+  });
+
+  it('reports the upstream error when the TUI exits after a failed completion', async () => {
+    const fixture = harness({
+      dieAfterReads: 1,
+      rows: [
+        [],
+        [
+          {
+            msg: 'Error in AI SDK stream',
+            data: {
+              error: {
+                statusCode: 503,
+                responseBody: '{"error":{"code":"upstream_down","message":"Service broken"}}',
+              },
+            },
+          },
+          finished('error'),
+        ],
+      ],
+    });
+    const events = await fixture.collect();
+    const error = events.find((event) => event.type === 'error');
+    expect(error?.error).toContain('HTTP 503');
+    expect(error?.error).toContain('Service broken');
+    expect(events.some((event) => event.type === 'complete')).toBe(false);
+  });
+
+  it('still reports a dead TUI when the final drain has no completion', async () => {
+    const fixture = harness({ dieAfterReads: 1, rows: [[], []] });
+    const events = await fixture.collect();
+    const error = events.find((event) => event.type === 'error');
+    expect(error?.error).toBe('Freebuff TUI exited before producing a completion event');
+    expect(events.some((event) => event.type === 'complete')).toBe(false);
+  });
+
+  it('fails fast when a startup drain completes without the MCP ready proof', async () => {
+    // The TUI dies during bridge startup after the turn already finished: the
+    // drain surfaces a completion, but the missing ready marker can never be
+    // produced by a dead runtime, so the turn must refuse the completion
+    // immediately instead of spinning out the readiness timeout.
+    const fixture = harness({ noReadyMarker: true, dieOnStart: true });
+    const events = await fixture.collect();
+    const error = events.find((event) => event.type === 'error');
+    expect(error?.error).toBe('Freebuff TUI exited before the Kory MCP bridge reported ready');
+    expect(events.some((event) => event.type === 'complete')).toBe(false);
+  });
+
+  it('still reports a dead TUI when the startup drain has no completion', async () => {
+    const fixture = harness({ noReadyMarker: true, dieOnStart: true, rows: [[], []] });
+    const events = await fixture.collect();
+    const error = events.find((event) => event.type === 'error');
+    expect(error?.error).toBe('Freebuff TUI exited before producing a completion event');
+    expect(events.some((event) => event.type === 'complete')).toBe(false);
+  });
+
+  it('fails fast when the CLI session is displaced before the bridge starts', async () => {
+    const fixture = harness({
+      noReadyMarker: true,
+      sessionLostGraceMs: 50,
+      pane: `${READY}\nEnter: confirm and send`,
+      rows: [
+        [{ msg: '[chat-runtime] Freebuff session over; holding queued messages until rejoin' }],
+        [],
+        [rootRow(), finished()],
+      ],
+    });
+    const events = await fixture.collect();
+    const error = events.find((event) => event.type === 'error');
+    expect(error?.error).toBe('Freebuff session ended before the Kory MCP bridge reported ready');
+    expect(events.some((event) => event.type === 'complete')).toBe(false);
+  });
+
+  it('resubmits a prompt swallowed by a startup dialog so the bridge still starts', async () => {
+    const fixture = harness({
+      noReadyMarker: true,
+      readyOnEnterCount: 3,
+      pane: `${READY}\nEnter: confirm and send`,
+      rows: [[], [rootRow(), finished()]],
+    });
+    const events = await fixture.collect();
+    const enters = fixture.tmuxCalls.filter(
+      (args) => args[0] === 'send-keys' && args.at(-1) === 'Enter',
+    );
+    // 1 submission + 1 dialog dismissal + 1 verified resubmit.
+    expect(enters).toHaveLength(3);
+    expect(events.some((event) => event.type === 'complete')).toBe(true);
+  });
+
+  it('self-heals when the final drain carries the retirement rows', async () => {
+    const forceUpdate = mock(async () => ({
+      available: true,
+      kind: 'docker' as const,
+      version: '0.2.13',
+    }));
+    const retired = {
+      msg: 'Error in AI SDK stream',
+      data: {
+        error: { statusCode: 410, responseBody: '{"error":"freebuff_update_required"}' },
+      },
+    };
+    const fixture = harness({
+      dieAfterReads: 1,
+      forceUpdate,
+      rows: [[], [retired], [rootRow(), finished()]],
+    });
+    const events = await fixture.collect();
+    expect(forceUpdate).toHaveBeenCalledTimes(1);
+    expect(events.some((event) => event.type === 'complete')).toBe(true);
+  });
+
+  it('retries a killed bridge catalog probe exec once', async () => {
+    const fixture = harness({ probeFailOnce137: true });
+    const events = await fixture.collect();
+    expect(events.some((event) => event.type === 'complete')).toBe(true);
+    expect(fixture.calls.filter((call) => call === 'probe')).toHaveLength(2);
+  });
+
+  it('retries a killed log-reader exec once and still completes', async () => {
+    let reads = 0;
+    const fixture = harness({
+      readLogRows: async () => {
+        if (++reads === 1) throw Object.assign(new Error('killed'), { code: 137 });
+        return [rootRow(), finished()];
+      },
+    });
+    const events = await fixture.collect();
+    expect(events.some((event) => event.type === 'complete')).toBe(true);
+    expect(reads).toBeGreaterThanOrEqual(2);
+  });
+
+  it('fails closed when the exec kill persists past the retry', async () => {
+    const fixture = harness({
+      readLogRows: async () => {
+        throw Object.assign(new Error('killed'), { code: 137 });
+      },
+    });
+    const events = await fixture.collect();
+    expect(events.find((event) => event.type === 'error')?.error).toBe(
+      'Freebuff TUI exited before producing a completion event',
+    );
+    expect(events.some((event) => event.type === 'complete')).toBe(false);
+  });
+
   it('sends the TUI quit before the forced teardown on cancellation', async () => {
     const controller = new AbortController();
     const fixture = harness({
@@ -1133,6 +1379,191 @@ describe('Freebuff mocked lifecycle (no login or inference)', () => {
     expect(fixture.calls).toContain('bridge-cleanup');
     expect(fixture.calls).toContain('grant-cleanup');
     expect(existsSync(fixture.runRoot)).toBe(false);
+  });
+
+  it('waits out a busy account slot, emits the waiting state, then completes', async () => {
+    const fixture = harness({
+      slotPrehold: { sessionId: 'another-chat', role: 'manager', releaseAfterMs: 900 },
+    });
+    const events = await fixture.collect();
+    const waitingIndex = events.findIndex(
+      (event) =>
+        event.type === 'waiting' &&
+        event.waitingReason === "Waiting for the Freebuff account's live session…",
+    );
+    expect(waitingIndex).toBeGreaterThanOrEqual(0);
+    const completeIndex = events.findIndex((event) => event.type === 'complete');
+    expect(completeIndex).toBeGreaterThan(waitingIndex);
+    expect(events.some((event) => event.type === 'error')).toBe(false);
+    expect(fixture.calls).toContain('runtime');
+    // The foreign lease was superseded? No: the turn waited, won the slot and
+    // released it exactly once at the end.
+    expect(fixture.slotEvents).toEqual(['acquired:fixture', 'released:fixture']);
+  });
+
+  it('fails a same-session manager→worker delegate without staging a runtime', async () => {
+    const fixture = harness({
+      slotPrehold: { sessionId: 'fixture-session', role: 'manager', releaseAfterMs: 60_000 },
+    });
+    const events = await fixture.collect({ harnessRole: 'worker' });
+    const error = events.find((event) => event.type === 'error');
+    expect(error?.error).toContain(
+      "The Freebuff manager of this chat is holding the account's only live session",
+    );
+    expect(error?.errorTransient).toBeFalsy();
+    expect(events.some((event) => event.type === 'complete')).toBe(false);
+    // Deadlock detection precedes any runtime work.
+    expect(fixture.calls).not.toContain('runtime');
+    expect(fixture.slotEvents).toEqual([]);
+  });
+
+  it('turns a take-over prompt into a slot-busy error and never confirms it', async () => {
+    const fixture = harness({
+      noReadyMarker: true,
+      panes: [READY, READY, 'This account is in use elsewhere.\nEnter: take over'],
+      pane: 'This account is in use elsewhere.\nEnter: take over',
+    });
+    const events = await fixture.collect();
+    const error = events.find((event) => event.type === 'error');
+    expect(error?.error).toContain('live-session slot is in use by another session');
+    expect(error?.error).toContain('never takes over');
+    // Transient so a bounded retry can reclaim once the other session —
+    // including a server-side zombie of a finished turn — clears.
+    expect(error?.errorTransient).toBeTruthy();
+    // Only the prompt-submission Enter was ever sent; the takeover gate was
+    // never answered.
+    const enters = fixture.tmuxCalls.filter(
+      (args) => args[0] === 'send-keys' && args.at(-1) === 'Enter',
+    );
+    expect(enters).toHaveLength(1);
+    expect(fixture.calls).toContain('runtime-cleanup');
+    expect(fixture.slotEvents).toEqual(['acquired:fixture', 'released:fixture']);
+  });
+
+  it('keeps a waiting-room session waiting instead of reporting session loss', async () => {
+    const fixture = harness({
+      noReadyMarker: true,
+      sessionLostGraceMs: 50,
+      pane: 'You are in line, starting soon',
+      panes: [READY, READY, `${READY}\nEnter: confirm and send`],
+      onStart: (root) =>
+        setTimeout(
+          () => writeFileSync(join(root, 'bridge-ready.json'), '{"ready":true}'),
+          1_100,
+        ).unref(),
+      rows: [
+        [{ msg: '[chat-runtime] Freebuff session over; holding queued messages until rejoin' }],
+        [{ msg: 'chat update', data: { error: 'waiting_room_queued' } }],
+        [],
+        [rootRow(), finished()],
+      ],
+    });
+    const events = await fixture.collect();
+    const waitingIndex = events.findIndex(
+      (event) =>
+        event.type === 'waiting' &&
+        event.waitingReason === 'Freebuff is queued for model session capacity…',
+    );
+    expect(waitingIndex).toBeGreaterThanOrEqual(0);
+    expect(
+      events.some((event) => event.type === 'error' && event.error?.includes('session ended')),
+    ).toBe(false);
+    expect(events.some((event) => event.type === 'complete')).toBe(true);
+  });
+
+  it('maps a server session_superseded row to a transient takeover error', async () => {
+    const fixture = harness({
+      rows: [
+        [
+          {
+            msg: 'session over',
+            data: { agentId: 'main-agent', error: 'session_superseded' },
+          },
+          finished(),
+        ],
+      ],
+    });
+    const events = await fixture.collect();
+    const error = events.find((event) => event.type === 'error');
+    expect(error?.error).toContain('session was taken over by another session');
+    expect(error?.errorTransient).toBe(true);
+    expect(events.some((event) => event.type === 'complete')).toBe(false);
+  });
+
+  it('maps a server session_limit_reached row to a non-transient slot-busy error', async () => {
+    const fixture = harness({
+      rows: [
+        [
+          {
+            msg: 'session rejected',
+            data: { agentId: 'main-agent', error: { code: 'session_limit_reached' } },
+          },
+          finished(),
+        ],
+      ],
+    });
+    const events = await fixture.collect();
+    const error = events.find((event) => event.type === 'error');
+    expect(error?.error).toContain('live-session slot is in use by another session');
+    expect(error?.errorTransient).toBeFalsy();
+  });
+
+  it('releases the slot after every attempt including the 410 retry', async () => {
+    const forceUpdate = mock(async () => ({
+      available: true,
+      kind: 'docker' as const,
+      version: '0.2.13',
+    }));
+    const fixture = harness({
+      forceUpdate,
+      rows: [[retiredRow], [rootRow(), finished()]],
+    });
+    const events = await fixture.collect();
+    expect(events.some((event) => event.type === 'complete')).toBe(true);
+    expect(fixture.slotEvents).toEqual([
+      'acquired:fixture',
+      'released:fixture',
+      'acquired:fixture',
+      'released:fixture',
+    ]);
+    // The slot is dropped only after its runtime is down — for both attempts.
+    const acquiredAt = fixture.calls
+      .map((call, index) => ({ call, index }))
+      .filter((entry) => entry.call === 'slot-acquired')
+      .map((entry) => entry.index);
+    const releasedAt = fixture.calls
+      .map((call, index) => ({ call, index }))
+      .filter((entry) => entry.call === 'slot-released')
+      .map((entry) => entry.index);
+    const cleanedAt = fixture.calls
+      .map((call, index) => ({ call, index }))
+      .filter((entry) => entry.call === 'runtime-cleanup')
+      .map((entry) => entry.index);
+    expect(cleanedAt[0]!).toBeLessThan(releasedAt[0]!);
+    expect(releasedAt[0]!).toBeLessThan(acquiredAt[1]!);
+    expect(cleanedAt[1]!).toBeLessThan(releasedAt[1]!);
+  });
+
+  it('emits waiting then a transient busy error when the slot never frees', async () => {
+    let attempt = 0;
+    const fixture = harness({
+      // Immediate pass is busy; the parked wait expires 'timeout'; the rescan
+      // is busy again — the turn reports the actionable transient busy error.
+      acquireSessionSlot: async () => {
+        attempt += 1;
+        throw new FreebuffSessionSlotError('held', attempt === 2 ? 'timeout' : 'busy', {
+          sessionId: 'foreign',
+          role: 'manager',
+        });
+      },
+    });
+    const events = await fixture.collect();
+    const waitingIndex = events.findIndex((event) => event.type === 'waiting');
+    expect(waitingIndex).toBeGreaterThanOrEqual(0);
+    const error = events.find((event) => event.type === 'error');
+    expect(error?.error).toContain('live-session slot is in use by another session');
+    expect(error?.errorTransient).toBe(true);
+    expect(fixture.calls).not.toContain('runtime');
   });
 });
 
