@@ -38,6 +38,9 @@ import {
   applyNotesPermissionPreset,
   detectNotesPermissionPreset,
   normalizeNotesAgentPermissions,
+  type FolderAppearance,
+  type NotesAppearanceState,
+  type TagAppearance,
 } from '@koryphaios/shared';
 import { apiUrl } from '$lib/utils/api-url';
 import { toastStore } from './toast.svelte';
@@ -658,7 +661,7 @@ function refreshOpenPanel(): Promise<void> {
     if (!(await fetchNotes(undefined, undefined, { background: hadCatalog }))) return;
     if (generation !== _projectGeneration) return;
     _hasDeferredRealtimeRefresh = false;
-    await Promise.all([fetchFolderTree(), fetchGraph()]);
+    await Promise.all([fetchFolderTree(), fetchAppearance(), fetchGraph()]);
   })().finally(() => {
     if (_panelRefreshFlight === flight) _panelRefreshFlight = null;
   });
@@ -1697,6 +1700,109 @@ async function resetAgentPermissions(): Promise<void> {
   }
 }
 
+// ── Folder and tag appearance (emoji + color), scoped to the current project ──
+let _appearance = $state.raw<NotesAppearanceState>({ folders: [], tags: [] });
+let _appearanceRequestId = 0;
+const _folderAppearanceByPath = $derived(
+  new Map<string, FolderAppearance>(_appearance.folders.map((folder) => [folder.path, folder])),
+);
+const _tagAppearanceByTag = $derived(
+  new Map<string, TagAppearance>(_appearance.tags.map((tag) => [tag.tag, tag])),
+);
+
+/** Emoji and/or color for a write. `undefined` keeps the stored field, `null` clears it. */
+export interface NoteAppearanceUpdate {
+  emoji?: string | null;
+  color?: string | null;
+}
+
+async function fetchAppearance(): Promise<boolean> {
+  if (isDemoMode) return true;
+  const requestProject = projectStore.currentPath;
+  const requestGeneration = _projectGeneration;
+  const requestId = ++_appearanceRequestId;
+  try {
+    const res = await apiFetch(apiUrl('/api/notes/appearance'));
+    if (!res.ok) return false;
+    const data = (await res.json()) as { ok?: boolean; data?: NotesAppearanceState };
+    if (
+      data.ok &&
+      data.data &&
+      requestScopeIsCurrent(requestProject, requestGeneration) &&
+      requestId === _appearanceRequestId
+    ) {
+      _appearance = data.data;
+      return true;
+    }
+  } catch (err) {
+    console.warn('[notesStore] fetchAppearance failed:', err);
+  }
+  return false;
+}
+
+async function persistAppearance(
+  request: () => Promise<Response>,
+  fallback: string,
+): Promise<boolean> {
+  const requestProject = projectStore.currentPath;
+  const requestGeneration = _projectGeneration;
+  try {
+    const res = await request();
+    if (!res.ok) throw new Error(await responseMessage(res, fallback));
+    if (requestScopeIsCurrent(requestProject, requestGeneration)) await fetchAppearance();
+    return true;
+  } catch (err) {
+    setError(err instanceof Error ? err.message : fallback);
+    return false;
+  }
+}
+
+const APPEARANCE_JSON_HEADERS = { 'Content-Type': 'application/json' };
+
+function setFolderAppearance(path: string, update: NoteAppearanceUpdate): Promise<boolean> {
+  return persistAppearance(
+    () =>
+      apiFetch(apiUrl('/api/notes/appearance/folders'), {
+        method: 'PUT',
+        headers: APPEARANCE_JSON_HEADERS,
+        body: JSON.stringify({ path, ...update }),
+      }),
+    'Failed to save folder appearance',
+  );
+}
+
+function clearFolderAppearance(path: string): Promise<boolean> {
+  return persistAppearance(
+    () =>
+      apiFetch(apiUrl(`/api/notes/appearance/folders?path=${encodeURIComponent(path)}`), {
+        method: 'DELETE',
+      }),
+    'Failed to clear folder appearance',
+  );
+}
+
+function setTagAppearance(tag: string, update: NoteAppearanceUpdate): Promise<boolean> {
+  return persistAppearance(
+    () =>
+      apiFetch(apiUrl('/api/notes/appearance/tags'), {
+        method: 'PUT',
+        headers: APPEARANCE_JSON_HEADERS,
+        body: JSON.stringify({ tag, ...update }),
+      }),
+    'Failed to save tag appearance',
+  );
+}
+
+function clearTagAppearance(tag: string): Promise<boolean> {
+  return persistAppearance(
+    () =>
+      apiFetch(apiUrl(`/api/notes/appearance/tags?tag=${encodeURIComponent(tag)}`), {
+        method: 'DELETE',
+      }),
+    'Failed to clear tag appearance',
+  );
+}
+
 /** Fetch settings from the backend (source of truth for context injection).
  *  Server values win over the localStorage mirror. */
 let _settingsFetched = $state(false);
@@ -2095,7 +2201,7 @@ async function flushRealtimeUpdates(): Promise<void> {
 
   const refreshes: Promise<boolean>[] = [];
   if (needsGraphRefresh) refreshes.push(fetchGraph());
-  if (needsFolderRefresh) refreshes.push(fetchFolderTree());
+  if (needsFolderRefresh) refreshes.push(fetchFolderTree(), fetchAppearance());
   await Promise.all(refreshes);
 }
 
@@ -2163,6 +2269,7 @@ function beginProjectTransition(): void {
   _currentNote = null;
   _graphData = { nodes: [], edges: [] };
   _folderTree = [];
+  _appearance = { folders: [], tags: [] };
   _searchResultsTruncated = false;
   _conflict = null;
   _error = null;
@@ -2221,6 +2328,15 @@ export const notesStore = {
   },
   get folderTree() {
     return _folderTree;
+  },
+  get appearance() {
+    return _appearance;
+  },
+  folderAppearance(path: string): FolderAppearance | undefined {
+    return _folderAppearanceByPath.get(path);
+  },
+  tagAppearance(tag: string): TagAppearance | undefined {
+    return _tagAppearanceByTag.get(tag);
   },
   get isLoading() {
     return _isLoading;
@@ -2314,6 +2430,11 @@ export const notesStore = {
   deleteNote,
   fetchGraph,
   fetchFolderTree,
+  fetchAppearance,
+  setFolderAppearance,
+  clearFolderAppearance,
+  setTagAppearance,
+  clearTagAppearance,
   searchNotes,
   uploadAttachment,
   setNoteIcon,

@@ -209,10 +209,13 @@ describe('Notes request identity guards', () => {
       if (url === '/api/notes/folders') {
         return Promise.resolve(jsonResponse({ ok: true, data: [] }));
       }
+      if (url === '/api/notes/appearance') {
+        return Promise.resolve(jsonResponse({ ok: true, data: { folders: [], tags: [] } }));
+      }
       throw new Error(`Unexpected bootstrap request: ${url}`);
     });
     notesStore.isPanelOpen = true;
-    await vi.waitFor(() => expect(mocks.apiFetch).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(mocks.apiFetch).toHaveBeenCalledTimes(4));
     mocks.apiFetch.mockReset();
     vi.useFakeTimers();
 
@@ -254,10 +257,13 @@ describe('Notes request identity guards', () => {
       if (url === '/api/notes/folders') {
         return Promise.resolve(jsonResponse({ ok: true, data: [] }));
       }
+      if (url === '/api/notes/appearance') {
+        return Promise.resolve(jsonResponse({ ok: true, data: { folders: [], tags: [] } }));
+      }
       throw new Error(`Unexpected bootstrap request: ${url}`);
     });
     notesStore.isPanelOpen = true;
-    await vi.waitFor(() => expect(mocks.apiFetch).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(mocks.apiFetch).toHaveBeenCalledTimes(4));
 
     mocks.apiFetch.mockReset();
     mocks.apiFetch.mockResolvedValueOnce(
@@ -317,13 +323,16 @@ describe('Notes request identity guards', () => {
       if (url === '/api/notes/folders') {
         return Promise.resolve(jsonResponse({ ok: true, data: [] }));
       }
+      if (url === '/api/notes/appearance') {
+        return Promise.resolve(jsonResponse({ ok: true, data: { folders: [], tags: [] } }));
+      }
       throw new Error(`Unexpected reopen request: ${url}`);
     });
     notesStore.isPanelOpen = true;
     await notesStore.refreshOpenPanel();
 
     expect(mocks.apiFetch.mock.calls.map(([url]) => url).sort()).toEqual(
-      ['/api/notes', '/api/notes/folders', '/api/notes/graph'].sort(),
+      ['/api/notes', '/api/notes/appearance', '/api/notes/folders', '/api/notes/graph'].sort(),
     );
     expect(notesStore.hasDeferredRealtimeRefresh).toBe(false);
   });

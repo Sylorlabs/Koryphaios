@@ -354,6 +354,7 @@ export * from './notes/NoteCanvas';
 export * from './notes/NoteWorkspaceTools';
 export * from './notes/NotePermissionPolicy';
 export * from './notes/NoteWorkspaceTemplates';
+export * from './notes/NoteAppearanceMeta';
 
 // ============== Voice Types ==============
 export type {
