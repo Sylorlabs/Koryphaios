@@ -29,7 +29,10 @@ import {
   archiveSessionCoordinated,
   restoreSessionCoordinated,
 } from '../../services/session-archive-service';
-import { forkSessionAtMessage } from '../../services/session-fork-service';
+import {
+  forkChatCoordinated,
+  mergeForkCoordinated,
+} from '../../services/session-fork-coordinator';
 import { projectRootFromRequest } from '../../runtime/source-control-scope';
 import { sourceControlService } from '../../services/source-control-service';
 
@@ -280,37 +283,44 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     '/:id/fork',
     async ({ request, params: { id }, body }) => {
       if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
-      const creationLease = tryAcquireSessionCreationLease();
-      if (!creationLease) {
-        throw new ConflictError(
-          'Session creation is temporarily blocked while delete-all is finishing.',
-        );
-      }
-      let result;
-      try {
-        result = forkSessionAtMessage({ sourceSessionId: id, messageId: body.messageId });
-      } finally {
-        creationLease.release();
-      }
-      const { session } = result;
-      try {
-        writeAllCliRulesAndSkills(session.id, '');
-      } catch (err: unknown) {
-        // Expected failure: CLI rules are supplementary, not request-critical.
-        serverLog.warn({ err, sessionId: session.id }, 'Failed to write CLI rules + skills');
-      }
-      if (session.agentOverrides) setSessionAgentOverrides(session.id, session.agentOverrides);
-      getContext().wsManager.broadcastEphemeral({
-        type: 'session.updated',
-        sessionId: session.id,
-        timestamp: Date.now(),
-        payload: { session },
+      const outcome = await forkChatCoordinated({
+        sourceSessionId: id,
+        messageId: body.messageId,
+        title: body.title,
       });
-      return { ok: true, data: session, copiedMessageCount: result.copiedMessageCount };
+      return {
+        ok: true,
+        data: outcome.session,
+        copiedMessageCount: outcome.copiedMessageCount,
+        forkMessageId: outcome.forkMessageId,
+      };
+    },
+    {
+      // Omitted messageId: fork at the source's latest finished point.
+      body: t.Object({
+        messageId: t.Optional(t.String({ minLength: 1, maxLength: 256 })),
+        title: t.Optional(t.String({ maxLength: 200 })),
+      }),
+    },
+  )
+  .post(
+    '/:id/merge-fork',
+    async ({ request, params: { id }, body }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+      const outcome = await mergeForkCoordinated({ forkSessionId: id, mode: body.mode });
+      return {
+        ok: true,
+        data: {
+          fork: outcome.fork,
+          source: outcome.source,
+          messageId: outcome.messageId,
+          mode: outcome.mode,
+        },
+      };
     },
     {
       body: t.Object({
-        messageId: t.String({ minLength: 1, maxLength: 256 }),
+        mode: t.Union([t.Literal('summary'), t.Literal('messages')]),
       }),
     },
   )

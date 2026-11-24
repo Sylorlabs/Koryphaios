@@ -50,7 +50,7 @@ export { ViewImageTool } from './image';
 export { GenerateVideoTool } from './video';
 export { ForgetTool, RecallTool, RememberTool } from './external-memory';
 export { AskUserTool, AskManagerTool, DelegateToWorkerTool, RequestCriticReviewTool } from './interaction';
-export { RenameSessionTool } from './session';
+export { RenameSessionTool, ForkChatTool } from './session';
 export { ManageReviewAgentsTool } from './review-agents';
 export { ManageAgentsTool } from './manage-agents';
 export { SendAgentMessageTool, RequestManagerRelayTool, ListAgentMessagesTool } from './messaging';

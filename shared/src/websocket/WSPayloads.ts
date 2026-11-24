@@ -565,6 +565,24 @@ export interface NativeCommandPayload {
   messageId: string;
 }
 
+/** `session.forked`: published on the source chat (sessionId = source) when a
+ *  fork is created. `session` is the new fork; `copiedMessageCount` its history. */
+export interface SessionForkedPayload {
+  sourceSessionId: string;
+  forkMessageId: string;
+  copiedMessageCount: number;
+  session: import('../types/SessionTypes').Session;
+}
+
+/** `session.merged`: published on the source chat (sessionId = source) after a
+ *  fork's result was appended to its transcript. `messageId` is that entry. */
+export interface SessionMergedPayload {
+  sourceSessionId: string;
+  forkSessionId: string;
+  mode: 'summary' | 'messages';
+  messageId: string;
+}
+
 /** `session.history_pruned`: ordered events through `throughSequence` of
  *  `epoch` were deleted by retention and can never be replayed. */
 export interface SessionHistoryPrunedPayload {

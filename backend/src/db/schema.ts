@@ -37,6 +37,15 @@ export const sessions = sqliteTable('sessions', {
    * archived but still fully recoverable; deletion remains a separate path. */
   archivedAt: integer('archived_at', { mode: 'timestamp_ms' }),
   parentId: text('parent_id'),
+  /** Fork lineage (migration 0060). A fork is a new chat whose history was copied from
+   * `forked_from_session_id` up to `forked_from_message_id`. Null for original chats. */
+  forkedFromSessionId: text('forked_from_session_id'),
+  forkedFromMessageId: text('forked_from_message_id'),
+  forkedAt: integer('forked_at', { mode: 'timestamp_ms' }),
+  /** The fork's own copy of its fork point. Merge-back covers messages after it. */
+  forkedBaseMessageId: text('forked_base_message_id'),
+  /** Set once the fork's result has been appended to its source. One merge per fork. */
+  forkedMergedAt: integer('forked_merged_at', { mode: 'timestamp_ms' }),
   messageCount: integer('message_count').default(0),
   tokensIn: integer('tokens_in').default(0),
   tokensOut: integer('tokens_out').default(0),

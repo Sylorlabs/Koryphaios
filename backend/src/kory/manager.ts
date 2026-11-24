@@ -4,6 +4,7 @@ import { validatedToolImages, withoutToolImages } from '../tools/tool-images';
 // The manager is the only agent the user talks to. Sub-agents (workers) run only when the manager
 // explicitly calls the delegate_to_worker tool; the code never auto-spawns workers.
 
+import { forkChatCoordinated } from '../services/session-fork-coordinator';
 import type {
   AgentIdentity,
   AgentStatus,
@@ -6315,6 +6316,18 @@ export class KoryManager implements WorkerPipelineHost {
         },
         manageSkillFeeding: (request) => this.manageSessionSkillFeeding(sessionId, request),
         renameSession: (title: string) => this.renameSession(sessionId, title),
+        forkChat: async (input) => {
+          const outcome = await forkChatCoordinated({
+            sourceSessionId: input.sessionId ?? sessionId,
+            messageId: input.messageId,
+            title: input.title,
+          });
+          return {
+            sessionId: outcome.session.id,
+            title: outcome.session.title,
+            copiedMessageCount: outcome.copiedMessageCount,
+          };
+        },
         noteWorkspaceMutation: () => this.markWorkspaceMutatedThisTurn(sessionId),
         requestCriticReview: (reason: string) => {
           messages.push({

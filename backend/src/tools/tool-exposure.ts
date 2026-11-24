@@ -42,6 +42,7 @@ const EXPOSURE_HINTS: Readonly<Record<string, string>> = Object.freeze({
   ask_user:
     'Ask the human whenever you are unsure; waits for the answer. params: question, options (2-4 short strings; a custom-answer box is always shown)',
   rename_session: 'Rename this chat as its topic evolves. params: title (3-6 descriptive words)',
+  fork_chat: 'Fork a chat into a new one from a finished point (default: latest). Original is unchanged. params: sessionId, messageId, title',
   request_manager_relay: 'Relay a message to the manager on another agent behalf.',
   send_agent_message: 'Send a message to another agent. params: body',
   fetch_context: 'Pull previously pruned context back into the window. params: id, query',

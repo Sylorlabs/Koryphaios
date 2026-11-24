@@ -43,6 +43,10 @@ export type WSEventType =
   // Unsequenced control row: history through payload.throughSequence was
   // pruned and can never be replayed; clients advance past it.
   | 'session.history_pruned'
+  // Chat forks: emitted on the source chat (sessionId = source) when a fork is
+  // created or its result is merged back into the source transcript.
+  | 'session.forked'
+  | 'session.merged'
   | 'run.state'
   // Provider work ended for a manager turn; follow-up work (critic, checkpoint, persistence) may still run.
   | 'turn.provider_completed'
@@ -257,6 +261,8 @@ export const SESSION_SCOPED_EVENT_TYPES: ReadonlySet<WSEventType> = new Set<WSEv
   'session.timeline_rewritten',
   'session.replay_skipped',
   'session.history_pruned',
+  'session.forked',
+  'session.merged',
   'run.state',
   'turn.provider_completed',
   'run.settled',

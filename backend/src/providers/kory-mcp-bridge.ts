@@ -680,6 +680,20 @@ export const KORY_TOOLS: KoryToolDef[] = [
     role: 'manager',
   },
   {
+    name: 'kory__fork_chat',
+    description:
+      'Fork a chat into a new chat from a finished point of its history (default: the latest finished message). The original chat is not changed. Returns the new chat id.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string' },
+        messageId: { type: 'string' },
+        title: { type: 'string' },
+      },
+    },
+    role: 'manager',
+  },
+  {
     name: 'kory__ask_user',
     description:
       "Ask the user a question and wait for their answer. Use it whenever you are unsure, the request is ambiguous, or a decision would materially change the result. Provide 2-4 short options with your recommendation first; the UI always offers a custom-answer box, so do not add an 'Other' option.",
