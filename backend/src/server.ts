@@ -48,6 +48,7 @@ import { authRoutes } from './routes/v1/auth';
 import { agentSettingsRoutes } from './routes/v1/agent-settings';
 import { createComputerUseRoutes } from './routes/v1/computer-use';
 import { gitRoutes } from './routes/v1/git';
+import { sessionReviewRoutes } from './routes/v1/session-review';
 import { memoryRoutes } from './routes/v1/memory';
 import { spendRoutes } from './routes/v1/spend';
 import { spendCapsRoutes } from './routes/v1/spend-caps';
@@ -89,6 +90,7 @@ const baseApp = new Elysia()
   .use(agentSettingsRoutes)
   .use(createComputerUseRoutes())
   .use(gitRoutes)
+  .use(sessionReviewRoutes)
   .use(memoryRoutes)
   .use(spendRoutes)
   .use(spendCapsRoutes)

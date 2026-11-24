@@ -38,6 +38,9 @@ export type WSEventType =
   | 'session.actionable_waits'
   | 'session.actionable_waits.request'
   | 'session.timeline_rewritten'
+  // Inline diff review comments and linked pull request status
+  | 'session.review_comments'
+  | 'session.pull_request_status'
   // Ephemeral replay placeholder for a filtered durable sequence position.
   | 'session.replay_skipped'
   // Unsequenced control row: history through payload.throughSequence was
@@ -256,6 +259,8 @@ export const SESSION_SCOPED_EVENT_TYPES: ReadonlySet<WSEventType> = new Set<WSEv
   'session.changes',
   'session.changes_resolved',
   'session.accept_changes',
+  'session.review_comments',
+  'session.pull_request_status',
   'session.user_message',
   'session.idle',
   'session.timeline_rewritten',
