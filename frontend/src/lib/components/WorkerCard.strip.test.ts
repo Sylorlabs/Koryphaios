@@ -51,11 +51,54 @@ describe('WorkerCard live tool icon', () => {
     expect(document.querySelector('[data-tool-icon="command"]')).toBeTruthy();
   });
 
-  it('shows the error dot and the done-opacity state without changing the icon', () => {
+  it('marks a failure with a shaped badge, not only a colour, and keeps the tool glyph', () => {
     currentTool.mockReturnValue(undefined);
-    renderCard('error');
-    expect(document.querySelector('.seg-err-dot')).toBeTruthy();
+    const { container } = renderCard('error');
+    // The glyph stays the transcript icon; the failure is an extra "!" badge.
+    expect(container.querySelector('[data-tool-icon="command"]')).toBeTruthy();
+    const badge = container.querySelector('.seg-badge');
+    expect(badge?.getAttribute('data-badge')).toBe('error');
+    expect(badge?.textContent?.trim()).toBe('!');
+    // ...and the tab announces it in words.
+    expect(screen.getByRole('tab').getAttribute('aria-label')).toBe('UI Worker, Failed');
+  });
+
+  it('dims a finished segment without adding a badge', () => {
+    currentTool.mockReturnValue(undefined);
     const { container } = renderCard('done');
     expect(container.querySelector('.seg-icon.seg-done')).toBeTruthy();
+    expect(container.querySelector('.seg-badge')).toBeNull();
+  });
+
+  it('gives waiting on the user its own "?" badge and holds the glyph still', () => {
+    currentTool.mockReturnValue({ name: 'bash', input: { command: 'ls' } });
+    const { container } = renderCard('waiting_user');
+    const badge = container.querySelector('.seg-badge');
+    expect(badge?.getAttribute('data-badge')).toBe('attention');
+    expect(badge?.textContent?.trim()).toBe('?');
+    // A parked worker is not running: its icon must not animate as busy.
+    expect(container.querySelector('[data-tool-icon]')!.getAttribute('data-tool-state')).toBe('completed');
+    expect(screen.getByRole('tab').getAttribute('aria-label')).toBe('UI Worker, Waiting on you');
+  });
+
+  it('names the current tool and its argument in the accessible name while running', () => {
+    currentTool.mockReturnValue({ name: 'bash', input: { command: 'bun run test --reporter=dot' } });
+    renderCard('tool_calling');
+    expect(screen.getByRole('tab').getAttribute('aria-label')).toBe(
+      'UI Worker, Running tool: bash · bun run test --reporter=dot',
+    );
+  });
+
+  it('keeps the segment geometry stable across status changes', async () => {
+    currentTool.mockReturnValue(undefined);
+    const { container, rerender } = renderCard('thinking');
+    const seg = container.querySelector('.agent-seg')!;
+    const before = [...seg.children].map((child) => child.className.split(' ')[0]);
+    await rerender({ agent: agent('error'), status: 'error', selected: false, onSelect: vi.fn(), onClose: vi.fn() });
+    const after = [...seg.children].map((child) => child.className.split(' ')[0]);
+    // Same row of children: the badge lives inside the icon slot, absolutely
+    // positioned, so the name and close control never shift.
+    expect(after).toEqual(before);
+    expect(seg.querySelector('.seg-icon .seg-badge')).toBeTruthy();
   });
 });

@@ -6,7 +6,6 @@
   import VirtualList from './VirtualList.svelte';
   import ChatLoading from './ChatLoading.svelte';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
-  import MessageSquare from 'lucide-svelte/icons/message-square';
   import ArrowDown from 'lucide-svelte/icons/arrow-down';
   import Send from 'lucide-svelte/icons/send';
   import { untrack } from 'svelte';
@@ -20,6 +19,14 @@
   import X from 'lucide-svelte/icons/x';
   import { apiUrl } from '$lib/utils/api-url';
   import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
+  import { TERMINAL_AGENT_STATUSES } from '$lib/stores/run-state-core';
+  import {
+    agentElapsedMs,
+    agentStatusInfo,
+    describeToolActivity,
+    formatElapsed,
+    providerLabel,
+  } from '$lib/utils/agent-presentation';
 
   interface Props {
     agent: {
@@ -27,6 +34,9 @@
       status: AgentStatus;
       sessionId: string;
       reasoningLevel?: string;
+      startedAt?: number;
+      endedAt?: number;
+      stopReason?: 'cancelled';
     };
     feed: FeedEntryLocal[];
     isStreaming?: boolean;
@@ -35,6 +45,22 @@
 
   let { agent, feed, isStreaming = false, onClose }: Props = $props();
   let queue = $derived(agentStore.getAgentSteeringQueue(agent.sessionId, agent.identity.id));
+  let statusInfo = $derived(agentStatusInfo(agent.status, { stopReason: agent.stopReason }));
+  let isTerminal = $derived(TERMINAL_AGENT_STATUSES.has(agent.status));
+  let currentActivity = $derived(
+    statusInfo.live
+      ? describeToolActivity(agentStore.getAgentCurrentTool(agent.sessionId, agent.identity.id), 64)
+      : '',
+  );
+  // Header clock: ticks once a second while the agent runs, frozen after.
+  let now = $state(Date.now());
+  $effect(() => {
+    if (isTerminal || agent.startedAt === undefined) return;
+    now = Date.now();
+    const timer = setInterval(() => (now = Date.now()), 1000);
+    return () => clearInterval(timer);
+  });
+  let elapsedLabel = $derived(formatElapsed(agentElapsedMs(agent, now)));
   let expandedSteering = $state<string | null>(null);
   let editingSteering = $state<string | null>(null);
   let editingText = $state('');
@@ -154,35 +180,6 @@
     if (sessionId) agentStore.applySessionFeedVisibility(sessionId);
   }
 
-  function providerLabel(provider: string): string {
-    if (provider === 'openai') return 'OpenAI';
-    if (provider === 'codex') return 'Codex CLI';
-    if (provider === 'codex-auth') return 'OpenAI Codex';
-    if (provider === 'anthropic') return 'Anthropic';
-    if (provider === 'google') return 'Google';
-    if (provider === 'aistudio') return 'Google AI Studio';
-    if (provider === 'xai') return 'xAI';
-    if (provider === 'openrouter') return 'OpenRouter';
-    if (provider === 'unorouter') return 'UnoRouter';
-    if (provider === 'hundredmillionseek') return '100MillionSeek';
-    if (provider === 'numes') return 'Numes';
-    if (provider === 'coarena') return 'Coarena';
-    if (provider === 'crowllm') return 'CrowLLM';
-    if (provider === 'radeon') return 'AMD Radeon Cloud';
-    if (provider === 'runcrate') return 'Runcrate';
-    if (provider === 'tokenharbor') return 'Token Harbor';
-    if (provider === 'logfare') return 'Logfare';
-    if (provider === 'apinex') return 'APInex';
-    if (provider === 'gwarden') return 'Gwarden AI';
-    if (provider === 'respan') return 'Respan';
-    if (provider === 'vertexai') return 'Vertex AI';
-    if (provider === 'copilot') return 'Copilot';
-    if (provider === 'kimicode') return 'Kimi Code';
-    if (provider === 'opencode') return 'OpenCode';
-    if (provider === 'beam') return 'Reflection AI';
-    return provider.charAt(0).toUpperCase() + provider.slice(1);
-  }
-
   async function queueRequest(path: string, init: RequestInit) {
     const response = await apiFetch(apiUrl(path), init);
     const data = await parseJsonResponse<{ ok?: boolean; data?: AgentSteeringCommand[]; error?: string }>(response);
@@ -224,20 +221,32 @@
 <div class="flex flex-col flex-1 overflow-hidden">
   <div class="panel-header flex items-center justify-between">
     <div class="flex items-center gap-3 min-w-0">
-      <AnimatedStatusIcon status={agent.status} size={16} isManager={false} />
+      <AnimatedStatusIcon status={agent.status} size={16} isStatic={!statusInfo.live} />
       <div class="min-w-0">
-        <div class="panel-title flex items-center gap-2">
-          <MessageSquare size={16} />
-          <span class="truncate">{agent.identity.name}</span>
+        <div class="panel-title flex items-center gap-2 min-w-0">
+          <span class="truncate" title={agent.identity.name}>{agent.identity.name}</span>
         </div>
-        <div class="text-xs mt-1" style="color: var(--color-text-muted);">
+        <!-- Status in words next to the glyph, then what it is doing right
+             now; fixed one-line height so a status change never shifts the
+             transcript below. -->
+        <div class="thread-status" data-testid="agent-thread-status" aria-live="polite">
+          <span class="status-label" data-tone={statusInfo.tone}>{statusInfo.label}</span>
+          {#if currentActivity}<span class="sep" aria-hidden="true">·</span><span class="activity">{currentActivity}</span>{/if}
+          {#if elapsedLabel}<span class="sep" aria-hidden="true">·</span><span class="tabular-nums">{elapsedLabel}</span>{/if}
+        </div>
+        <div class="thread-meta">
           {providerLabel(agent.identity.provider)} · {agent.identity.model} · {agent.identity.domain}
         </div>
       </div>
     </div>
     {#if onClose}
-      <button type="button" class="worker-control-button danger ml-4 shrink-0" onclick={() => onClose?.()} title="Stop and close worker">
-        <X size={13} /> Close worker
+      <button
+        type="button"
+        class="worker-control-button danger ml-4 shrink-0"
+        onclick={() => onClose?.()}
+        title={isTerminal ? `Close ${agent.identity.name}` : `Stop ${agent.identity.name} and close its card`}
+      >
+        <X size={13} /> {isTerminal ? 'Close worker' : 'Stop worker'}
       </button>
     {/if}
   </div>
@@ -254,23 +263,28 @@
       </div>
       <div class="queue-stack">
         {#each queue as item, index (item.id)}
-          <article class:expanded={expandedSteering === item.id} class="queue-item" tabindex="0" onclick={() => (expandedSteering = expandedSteering === item.id ? null : item.id)} onkeydown={(event) => event.key === 'Enter' && (expandedSteering = expandedSteering === item.id ? null : item.id)}>
+          <article class:expanded={expandedSteering === item.id} class="queue-item">
             <div class="queue-item-main">
               <span class="queue-index">{index + 1}</span>
               <div class="min-w-0 flex-1">
                 {#if editingSteering === item.id}
-                  <textarea class="queue-editor" bind:value={editingText} onclick={(event) => event.stopPropagation()}></textarea>
-                  <div class="queue-actions" onclick={(event) => event.stopPropagation()}>
+                  <textarea class="queue-editor" aria-label="Edit steering message" bind:value={editingText}></textarea>
+                  <div class="queue-actions">
                     <button type="button" onclick={() => void editSteering(item.id)}>Save</button>
                     <button type="button" onclick={() => (editingSteering = null)}>Cancel</button>
                   </div>
                 {:else}
-                  <div class="queue-preview">{item.content}</div>
+                  <button
+                    type="button"
+                    class="queue-preview"
+                    aria-expanded={expandedSteering === item.id}
+                    onclick={() => (expandedSteering = expandedSteering === item.id ? null : item.id)}
+                  >{item.content}</button>
                   <div class="queue-meta">{item.status} · {new Date(item.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div>
                 {/if}
               </div>
               {#if item.status === 'queued'}
-                <div class="queue-actions" onclick={(event) => event.stopPropagation()}>
+                <div class="queue-actions">
                   <button type="button" aria-label="Move steering up" onclick={() => void moveSteering(item.id, -1)} disabled={index === 0}>↑</button>
                   <button type="button" aria-label="Move steering down" onclick={() => void moveSteering(item.id, 1)} disabled={index === queue.length - 1}>↓</button>
                   <button type="button" aria-label="Edit steering" onclick={() => { editingSteering = item.id; editingText = item.content; }}>Edit</button>
@@ -290,14 +304,15 @@
     {:else if feed.length === 0}
     <div bind:this={feedContainer} class="absolute inset-0 overflow-y-auto p-4 feed-scroll">
       <div class="flex h-full items-center justify-center">
-        <div class="max-w-lg rounded-[20px] border px-6 py-8 text-center" style="background: var(--color-surface-2); border-color: var(--color-border);">
-          <div class="text-lg font-semibold mb-2" style="color: var(--color-text-primary);">
-            {agent.identity.name} thread
-          </div>
-          <p class="text-sm leading-relaxed" style="color: var(--color-text-secondary);">
-            Messages sent by the manager and anything you type here will appear in this transcript once the agent is used.
-          </p>
-        </div>
+        <p class="thread-empty" data-testid="agent-thread-empty">
+          {#if statusInfo.live}
+            {agent.identity.name} is starting. Its work appears here as it happens; you can steer it from the composer.
+          {:else if statusInfo.group === 'failed'}
+            {agent.identity.name} stopped with an error before writing anything. Send a message below to retry with new instructions.
+          {:else}
+            No messages yet. Anything Kory or you send {agent.identity.name} appears here.
+          {/if}
+        </p>
       </div>
     </div>
     {:else}
@@ -341,8 +356,8 @@
     >
       <button
         onclick={() => autoScrollCtl.jumpToBottom('instant')}
-        class="pointer-events-auto flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium shadow-lg backdrop-blur-sm transition-transform hover:scale-105 active:scale-95"
-        style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-secondary); box-shadow: 0 4px 16px rgba(0,0,0,0.35);"
+        class="pointer-events-auto flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium shadow-lg backdrop-blur-sm motion-safe:transition-transform motion-safe:hover:scale-105 motion-safe:active:scale-95"
+        style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-secondary); box-shadow: 0 4px 16px color-mix(in srgb, var(--color-surface-0) 55%, transparent);"
         aria-label="Scroll to bottom"
       >
         <ArrowDown size={12} />
@@ -377,12 +392,22 @@
   .queue-count, .queue-hint, .queue-meta { color: var(--color-text-muted); font-size: 11px; }
   .queue-hint { opacity: .8; }
   .queue-stack { display: flex; gap: 6px; margin-top: 8px; overflow: visible; }
-  .queue-item { min-width: 132px; max-width: 220px; flex: 1; border: 1px solid var(--color-border); border-radius: 10px; padding: 7px; background: var(--color-surface-2); transition: transform 160ms ease, box-shadow 160ms ease, max-width 180ms ease; box-shadow: 0 3px 10px rgba(0,0,0,.16); }
-  .queue-item:hover, .queue-item:focus-visible, .queue-item.expanded { transform: translateY(-2px); max-width: 360px; box-shadow: 0 8px 24px rgba(0,0,0,.25); outline: none; }
+  .queue-item { min-width: 132px; max-width: 220px; flex: 1; border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 7px; background: var(--color-surface-2); transition: max-width 180ms ease; }
+  .queue-item.expanded, .queue-item:focus-within { max-width: 360px; border-color: var(--color-border-bright); }
   .queue-item-main { display: flex; align-items: flex-start; gap: 7px; }
   .queue-index { display: grid; place-items: center; width: 18px; height: 18px; flex: 0 0 auto; border-radius: 50%; background: var(--color-accent); color: var(--color-on-accent); font-size: 10px; font-weight: 700; }
-  .queue-preview { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; color: var(--color-text-primary); font-size: 11px; line-height: 1.35; }
-  .queue-item:hover .queue-preview, .queue-item:focus-visible .queue-preview, .queue-item.expanded .queue-preview { -webkit-line-clamp: 8; }
+  .queue-preview { display: -webkit-box; width: 100%; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; text-align: left; color: var(--color-text-primary); font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
+  .queue-item.expanded .queue-preview { -webkit-line-clamp: 8; line-clamp: 8; }
+  .queue-preview:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; border-radius: var(--radius-sm); }
+  .thread-status { display: flex; align-items: center; gap: 6px; min-width: 0; height: 18px; margin-top: 2px; font-size: 12px; color: var(--color-text-secondary); white-space: nowrap; }
+  .thread-status .activity { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); font-size: 11px; color: var(--color-text-muted); }
+  .thread-status .sep { color: var(--color-text-muted); opacity: .7; }
+  .status-label { flex-shrink: 0; font-weight: 500; }
+  .status-label[data-tone='error'] { color: color-mix(in srgb, var(--color-error) 78%, var(--color-text-primary)); }
+  .status-label[data-tone='attention'] { color: color-mix(in srgb, var(--color-warning) 70%, var(--color-text-primary)); }
+  .thread-meta { margin-top: 1px; font-size: 11px; color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .thread-empty { max-width: 32rem; margin: 0; font-size: 13px; line-height: 1.6; color: var(--color-text-secondary); text-align: center; }
+  @media (prefers-reduced-motion: reduce) { .queue-item { transition: none; } }
   .queue-actions { display: flex; gap: 3px; margin-top: 5px; }
   .queue-actions button { border: 1px solid var(--color-border); border-radius: 5px; padding: 2px 5px; color: var(--color-text-secondary); font-size: 11px; }
   .queue-actions button:hover:not(:disabled) { color: var(--color-text-primary); background: var(--color-surface-3); }

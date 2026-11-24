@@ -56,6 +56,18 @@ export interface AgentState {
   /** Hidden from the Activity rail, but retained so its thread can be reopened
    * from the manager timeline after the user closes the card. */
   closed?: boolean;
+  /** When the agent was spawned (event timestamp). Display only: the rail and
+   *  the lineage view use it for elapsed/duration labels. */
+  startedAt?: number;
+  /** When the agent last reached a terminal status. Cleared if it resumes. */
+  endedAt?: number;
+  /** Agent that spawned this one, when the spawn event names it (or a Critic
+   *  review specialist, whose parent is the running Critic). Display only. */
+  parentAgentId?: string;
+  /** Why a terminal agent ended, when it was the user rather than the agent:
+   *  a cancelled worker reports `done`, and the UI must not call that a
+   *  success. */
+  stopReason?: 'cancelled';
 }
 
 // ─── Reactive State ──────────────────────────────────────────────────────────
@@ -274,6 +286,19 @@ function restorePersistedManagerContext(agent: AgentState, sessionId: string): v
 // Map reference.
 function commitAgents() {
   agents = new Map(agents);
+}
+
+/** Write a status and keep the display-only timing in step with it: a
+ *  terminal status stamps `endedAt` once, anything else clears it (the agent
+ *  resumed) along with a stale cancellation reason. */
+function applyStatus(agent: AgentState, status: AgentStatus, at: number = Date.now()): void {
+  agent.status = status;
+  if (TERMINAL_AGENT_STATUSES.has(status)) {
+    if (agent.endedAt === undefined) agent.endedAt = at;
+  } else {
+    if (agent.endedAt !== undefined) agent.endedAt = undefined;
+    if (agent.stopReason !== undefined) agent.stopReason = undefined;
+  }
 }
 
 /** The record for one chat's agent. Never falls back to another chat. */
@@ -588,8 +613,14 @@ function ensureAgentThreadFeed(sessionId: string, agentId: string) {
 
 // ─── Agent Actions ──────────────────────────────────────────────────────────
 
-export function spawnAgent(sessionId: string, identity: AgentIdentity, task: string) {
+export function spawnAgent(
+  sessionId: string,
+  identity: AgentIdentity,
+  task: string,
+  options: { parentAgentId?: string; startedAt?: number } = {},
+) {
   if (!sessionId) return;
+  const parentAgentId = options.parentAgentId ?? inferParentAgentId(sessionId, identity);
   agents.set(
     agentKey(sessionId, identity.id),
     reactiveAgent({
@@ -606,19 +637,45 @@ export function spawnAgent(sessionId: string, identity: AgentIdentity, task: str
       usageEstimated: false,
       sessionId,
       closed: false,
+      startedAt: options.startedAt ?? Date.now(),
+      ...(parentAgentId && parentAgentId !== identity.id ? { parentAgentId } : {}),
     }),
   );
   agents = new Map(agents);
+}
+
+/** The backend's spawn event does not name a parent today. One parent is
+ *  certain from the role alone: a review specialist reports to the Critic
+ *  that is running in the same chat. Everything else is a child of the
+ *  manager, which the lineage view draws as the root. */
+function inferParentAgentId(sessionId: string, identity: AgentIdentity): string | undefined {
+  if (identity.role !== 'reviewer') return undefined;
+  let parent: AgentState | undefined;
+  for (const candidate of agents.values()) {
+    if (
+      candidate.sessionId === sessionId &&
+      candidate.identity.role === 'critic' &&
+      !TERMINAL_AGENT_STATUSES.has(candidate.status)
+    ) {
+      if (!parent || (candidate.startedAt ?? 0) >= (parent.startedAt ?? 0)) parent = candidate;
+    }
+  }
+  return parent?.identity.id;
 }
 
 /** The manager object is the visible chat's projection. Background manager
  * events still populate their session/thread lanes, but cannot take over this
  * object's ownership and make the foreground context meter disappear. */
 
-export function updateAgentStatus(sessionId: string, agentId: string, status: AgentStatus) {
+export function updateAgentStatus(
+  sessionId: string,
+  agentId: string,
+  status: AgentStatus,
+  at?: number,
+) {
   const agent = ensureAgent(sessionId, agentId);
   if (agent) {
-    agent.status = status;
+    applyStatus(agent, status, at);
     commitAgents();
   }
 }
@@ -1025,7 +1082,7 @@ export function setManagerContextWindow(sessionId: string, contextWindow?: numbe
 export function completeAgent(sessionId: string, agentId: string) {
   const agent = ensureAgent(sessionId, agentId);
   if (agent) {
-    agent.status = 'done';
+    applyStatus(agent, 'done');
     commitAgents();
   }
 }
@@ -1044,7 +1101,7 @@ export function clearAgentStreamingState(sessionId: string, agentId: string) {
   const agent = ensureAgent(sessionId, agentId);
   if (agent) {
     agent.content = '';
-    agent.status = 'idle';
+    applyStatus(agent, 'idle');
     commitAgents();
   }
 }
@@ -1260,7 +1317,8 @@ export function markSessionAgentsStopped(sessionId: string) {
   let changed = false;
   for (const a of agents.values()) {
     if (a.sessionId === sessionId && a.status !== 'idle' && a.status !== 'done') {
-      a.status = 'done';
+      applyStatus(a, 'done');
+      if (a.identity.role !== 'manager') a.stopReason = 'cancelled';
       changed = true;
     }
   }
@@ -1327,7 +1385,8 @@ export function terminalizeSessionSubAgents(
     ) {
       continue;
     }
-    agent.status = terminalStatus;
+    applyStatus(agent, terminalStatus);
+    if (terminalPhase === 'cancelled') agent.stopReason = 'cancelled';
     changed++;
   }
   if (changed) commitAgents();
@@ -1338,7 +1397,8 @@ export function terminalizeSessionSubAgents(
 export function markAgentStopped(sessionId: string, agentId: string) {
   const agent = getAgent(sessionId, agentId);
   if (agent && agent.status !== 'idle' && agent.status !== 'done') {
-    agent.status = 'done';
+    applyStatus(agent, 'done');
+    agent.stopReason = 'cancelled';
     agents = new Map(agents);
   }
 }

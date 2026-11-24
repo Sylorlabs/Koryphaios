@@ -4,6 +4,8 @@
   import ToolActivityIcon from './ToolActivityIcon.svelte';
   import X from 'lucide-svelte/icons/x';
   import { agentStore } from '$lib/stores/agents.svelte';
+  import { ACTIVE_AGENT_STATUSES, TERMINAL_AGENT_STATUSES } from '$lib/stores/run-state-core';
+  import { agentStatusInfo, describeToolActivity, providerLabel } from '$lib/utils/agent-presentation';
 
   interface WorkerCardAgent {
     identity: AgentIdentity;
@@ -16,6 +18,7 @@
     contextMax: number;
     contextKnown: boolean;
     sessionId?: string;
+    stopReason?: 'cancelled';
   }
 
   let {
@@ -38,36 +41,17 @@
     tabindex?: number;
   } = $props();
 
-  function providerLabel(provider: string): string {
-    if (provider === 'openai') return 'OpenAI';
-    if (provider === 'codex') return 'Codex CLI';
-    if (provider === 'codex-auth') return 'OpenAI Codex';
-    if (provider === 'anthropic') return 'Anthropic';
-    if (provider === 'google') return 'Google';
-    if (provider === 'aistudio') return 'Google AI Studio';
-    if (provider === 'xai') return 'xAI';
-    if (provider === 'openrouter') return 'OpenRouter';
-    if (provider === 'unorouter') return 'UnoRouter';
-    if (provider === 'hundredmillionseek') return '100MillionSeek';
-    if (provider === 'numes') return 'Numes';
-    if (provider === 'coarena') return 'Coarena';
-    if (provider === 'crowllm') return 'CrowLLM';
-    if (provider === 'radeon') return 'AMD Radeon Cloud';
-    if (provider === 'runcrate') return 'Runcrate';
-    if (provider === 'tokenharbor') return 'Token Harbor';
-    if (provider === 'logfare') return 'Logfare';
-    if (provider === 'apinex') return 'APInex';
-    if (provider === 'gwarden') return 'Gwarden AI';
-    if (provider === 'respan') return 'Respan';
-    if (provider === 'vertexai') return 'Vertex AI';
-    if (provider === 'copilot') return 'Copilot';
-    if (provider === 'kimicode') return 'Kimi Code';
-    if (provider === 'opencode') return 'OpenCode';
-    if (provider === 'beam') return 'Reflection AI';
-    return provider.charAt(0).toUpperCase() + provider.slice(1);
-  }
-
-  let isActive = $derived(!['idle', 'done', 'error'].includes(status));
+  // Not terminal: the close control stops the worker before closing it.
+  let isActive = $derived(!TERMINAL_AGENT_STATUSES.has(status));
+  // Producing right now. A parked (waiting) worker is not live, so its glyph
+  // holds still instead of looking busy.
+  let isLive = $derived(ACTIVE_AGENT_STATUSES.has(status));
+  let statusInfo = $derived(agentStatusInfo(status, { stopReason: agent.stopReason }));
+  // The status badge gives the states that need a decision a shape of their
+  // own, so they never read through colour alone.
+  let badge = $derived<'error' | 'attention' | 'waiting' | null>(
+    status === 'error' ? 'error' : status === 'waiting_user' ? 'attention' : status === 'waiting' ? 'waiting' : null,
+  );
 
   let contextPercent = $derived(
     agent.contextMax > 0 ? Math.min((agent.tokensUsed / agent.contextMax) * 100, 100) : 0
@@ -87,7 +71,7 @@
     id: 'seg-icon',
     timestamp: 0,
     // 'tool_call' is the running state (animated); 'tool_result' is complete.
-    type: isActive ? 'tool_call' : 'tool_result',
+    type: isLive ? 'tool_call' : 'tool_result',
     agentId: agent.identity.id,
     agentName: agent.identity.name ?? agent.identity.id,
     glowClass: '',
@@ -99,6 +83,14 @@
 
   // The hover card stays deliberately short: which provider/model the agent
   // is burning and how much of its context window is left.
+  let activity = $derived(isLive ? describeToolActivity(currentTool) : '');
+  // The accessible name is who and what, not the model: a screen reader user
+  // hears "frontend, Running tool: bash · bun test" where the tooltip shows
+  // the provider details.
+  let accessibleName = $derived(
+    `${agent.identity.name}, ${statusInfo.label}${activity ? `: ${activity}` : ''}`,
+  );
+
   let details = $derived(
     [
       `${providerLabel(agent.identity.provider)} ${agent.identity.model}`,
@@ -117,7 +109,9 @@
   data-testid="agent-seg"
   role="tab"
   aria-selected={selected}
-  aria-label={details}
+  aria-label={accessibleName}
+  data-status={status}
+  data-tone={statusInfo.tone}
   {tabindex}
   title={details}
   onclick={() => onSelect?.()}
@@ -134,7 +128,11 @@
     aria-hidden="true"
   >
     <ToolActivityIcon entry={iconEntry} size={13} />
-    {#if status === 'error'}<span class="seg-err-dot"></span>{/if}
+    {#if badge}
+      <span class="seg-badge" data-badge={badge}>
+        {#if badge === 'waiting'}<span class="pause-bars"></span>{:else}{badge === 'error' ? '!' : '?'}{/if}
+      </span>
+    {/if}
   </span>
   <span class="seg-name">{agent.identity.name}</span>
   {#if steeringCount > 0}<span class="queue-badge" aria-label={`${steeringCount} queued steering messages`}>{steeringCount}</span>{/if}
@@ -162,7 +160,7 @@
     display: inline-flex;
     flex-shrink: 0;
     align-items: center;
-    gap: 5px;
+    gap: 7px;
     height: 100%;
     padding: 0 6px 0 7px;
     color: var(--color-text-primary);
@@ -171,8 +169,10 @@
     cursor: pointer;
     white-space: nowrap;
   }
+  /* Accent alone is a pale gold on the light theme; mixing it toward the
+     text colour keeps the selected label legible in both. */
   .agent-seg.selected {
-    color: var(--color-accent);
+    color: color-mix(in srgb, var(--color-accent) 70%, var(--color-text-primary));
   }
   .agent-seg:focus-visible {
     outline: 2px solid var(--color-accent);
@@ -189,18 +189,42 @@
   .seg-done {
     opacity: 0.6;
   }
-  .seg-err-dot {
+  /* A 9px corner badge with its own glyph: "!" failed, "?" waiting on you,
+     pause bars for a provider queue. Absolute, so a status change never moves
+     the name or the close control. */
+  .seg-badge {
     position: absolute;
-    top: -1px;
-    right: -2px;
-    width: 6px;
-    height: 6px;
+    top: -4px;
+    right: -4px;
+    display: grid;
+    place-items: center;
+    width: 10px;
+    height: 10px;
     border-radius: 50%;
-    background: var(--color-error);
     border: 1px solid var(--color-surface-2);
+    font-size: 8px;
+    font-weight: 800;
+    line-height: 1;
+    color: var(--color-on-accent);
+  }
+  .seg-badge[data-badge='error'] {
+    background: var(--color-error);
+    color: var(--color-surface-0);
+  }
+  .seg-badge[data-badge='attention'] {
+    background: var(--color-warning);
+  }
+  .seg-badge[data-badge='waiting'] {
+    background: var(--color-text-muted);
+  }
+  .pause-bars {
+    width: 4px;
+    height: 4px;
+    border-left: 1.5px solid var(--color-surface-1);
+    border-right: 1.5px solid var(--color-surface-1);
   }
   .seg-name {
-    max-width: 160px;
+    max-width: 140px;
     overflow: hidden;
     text-overflow: ellipsis;
   }
@@ -224,6 +248,9 @@
     padding: 2px;
     color: var(--color-text-muted);
     opacity: 0;
+    /* Invisible means inert: a click near a tab's edge must never stop a
+       running worker the user could not see a control for. */
+    pointer-events: none;
     transition: opacity 0.12s;
   }
   .seg-close:hover {
@@ -237,5 +264,11 @@
   .agent-seg:focus-within .seg-close,
   .seg-close.seg-close-pinned {
     opacity: 1;
+    pointer-events: auto;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .seg-close {
+      transition: none;
+    }
   }
 </style>

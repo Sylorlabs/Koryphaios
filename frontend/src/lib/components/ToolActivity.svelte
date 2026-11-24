@@ -19,6 +19,8 @@
   import { apiUrl } from '$lib/utils/api-url';
   import { formatShortcut } from '$lib/utils/platform';
   import { narrateToolGroup } from '$lib/utils/tool-narration';
+  import { agentStore } from '$lib/stores/agents.svelte';
+  import { agentStatusInfo, describeToolActivity } from '$lib/utils/agent-presentation';
   let { entry, open = $bindable(false), transcript, showIcon = true } = $props<{
     entry: FeedEntryLocal;
     open?: boolean;
@@ -38,6 +40,33 @@
       : undefined,
   );
   const spawnedAgentId = $derived(tool.name === 'delegate_to_worker' && typeof tool.input.agentId === 'string' ? tool.input.agentId : '');
+  // A delegation row follows the agent it started: while that agent works the
+  // row says what it is doing right now, so the transcript never shows a
+  // frozen "Delegating" next to a worker that has long since moved on.
+  const delegatedAgent = $derived.by(() => {
+    if (!spawnedAgentId) return undefined;
+    const owner = typeof entry.metadata?.sessionId === 'string' ? entry.metadata.sessionId : sessionStore.activeSessionId;
+    return owner ? agentStore.getAgent(owner, spawnedAgentId) : undefined;
+  });
+  const delegatedStatus = $derived.by(() => {
+    const agent = delegatedAgent;
+    if (!agent || tool.complete) return '';
+    const info = agentStatusInfo(agent.status, { stopReason: agent.stopReason });
+    const activity = info.live ? describeToolActivity(agentStore.getAgentCurrentTool(agent.sessionId, agent.identity.id), 40) : '';
+    return activity ? `${info.label}: ${activity}` : info.label;
+  });
+  const delegatedTone = $derived(
+    delegatedAgent ? agentStatusInfo(delegatedAgent.status, { stopReason: delegatedAgent.stopReason }).tone : 'muted',
+  );
+  const criticTone = $derived(
+    !criticAgentId || !tool.complete
+      ? ''
+      : criticOutcome === 'passed'
+        ? 'success'
+        : criticOutcome === 'verdict_failed' || criticOutcome === 'run_failed' || criticOutcome === 'run_failed_after_output' || tool.failed
+          ? 'error'
+          : '',
+  );
   const grouped = $derived(entry.type === 'tool_group');
   const steps: FeedEntryLocal[] = $derived(entry.entries ?? []);
   const commandDetails = $derived(!grouped && transcript === undefined && tool.kind === 'command');
@@ -245,7 +274,7 @@
   >
     {#if showIcon}<ToolActivityIcon {entry} />{/if}
     {#if criticAgentId}
-        <span class="action">Critic {tool.complete
+        <span class="action" data-tone={criticTone || undefined}>Critic {tool.complete
         ? criticOutcome === 'run_failed_after_output'
           ? 'failed after partial output'
           : criticOutcome === 'run_failed'
@@ -262,6 +291,9 @@
     {:else if spawnedAgentId}
       <span class="action">{tool.action}</span>
       <span class="target">Open {tool.target} chat</span>
+      {#if delegatedStatus}
+        <span class="delegated-status" data-tone={delegatedTone} data-testid="delegated-status">{delegatedStatus}</span>
+      {/if}
     {:else if transcript !== undefined}
       <span class="action">Completed</span><span class="target">background task</span>
     {:else if grouped && groupNarration}
@@ -443,6 +475,11 @@
   .mcp-identity { margin: 0 0 10px; font: 11px/1.6 var(--font-mono); color: var(--color-text-muted); overflow-wrap: anywhere; }
   .tool-summary:hover .target, .tool-summary:focus-visible .target { color: var(--color-accent); text-decoration-color: currentColor; }
   .failed .action { color: var(--color-error); }
+  .action[data-tone='success'] { color: color-mix(in srgb, var(--color-success) 70%, var(--color-text-primary)); }
+  .action[data-tone='error'] { color: color-mix(in srgb, var(--color-error) 78%, var(--color-text-primary)); }
+  .delegated-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--color-text-muted); }
+  .delegated-status[data-tone='attention'] { color: color-mix(in srgb, var(--color-warning) 70%, var(--color-text-primary)); font-weight: 500; }
+  .delegated-status[data-tone='error'] { color: color-mix(in srgb, var(--color-error) 78%, var(--color-text-primary)); }
   .tool-summary :global(.disclosure) { flex-shrink: 0; color: var(--color-text-muted); transition: transform 120ms ease; }
   .tool-summary :global(.disclosure.expanded) { transform: rotate(90deg); }
   .tool-detail { margin: 6px 0 12px; padding: 10px 14px 14px; border-radius: var(--radius-md); background: color-mix(in srgb, var(--color-surface-2) 65%, transparent); }

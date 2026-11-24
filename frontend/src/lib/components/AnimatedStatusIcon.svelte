@@ -9,7 +9,7 @@
     phase?: string;
   }
 
-  let { status, size = 20, isManager = false, isStatic = false, phase: _phase = undefined }: Props = $props();
+  let { status, size = 20, isManager: _isManager = false, isStatic = false, phase: _phase = undefined }: Props = $props();
 
   // The thinking bulb clips through a document-scoped `url(#...)` reference, so
   // a fixed id is shared by every status icon on screen and breaks as soon as
@@ -77,7 +77,7 @@
     </svg>
   </div>
 
-{:else if status === 'verifying'}
+{:else if status === 'verifying' || status === 'criticizing'}
   <!-- Magnifying glass scanning -->
   <div class="status-icon verifying" style="width: {size}px; height: {size}px;">
     <svg viewBox="0 0 24 24" fill="none" width={size} height={size}>
@@ -114,8 +114,10 @@
     </svg>
   </div>
 
-{:else if status === 'waiting_user' && isManager}
-  <!-- Question mark bouncing (manager only) -->
+{:else if status === 'waiting_user'}
+  <!-- Question mark: the agent is parked on the user. Workers used to fall
+       through to the idle dot here, which made "needs you" look like
+       "nothing happening". -->
   <div class="status-icon waiting-user" style="width: {size}px; height: {size}px;">
     <svg viewBox="0 0 24 24" fill="none" width={size} height={size}>
       <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5" class="text-amber-400 pulse-ring"/>
@@ -228,6 +230,13 @@
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
+  }
+
+  /* The glyph palette is tuned for the dark surfaces. On the light theme the
+     400-weight yellows, cyans and greens fall under 2:1 against white, so the
+     strokes are deepened rather than re-coloured per state. */
+  :global([data-theme='light']) .status-icon-container svg {
+    filter: brightness(0.7) saturate(1.35);
   }
 
   .static-mode *, .static-mode {
@@ -472,10 +481,17 @@
   /* Reduced motion: the tool prompt must not pulse. Every other status glyph
      already animates without a guard here, so this is scoped to the mark this
      change introduced rather than silently restyling unrelated states. */
+  /* Reduced motion: every status glyph holds still. The shape and colour
+     already say which state the agent is in; the motion is decoration. The
+     draw-on animations (done check) resolve to their final frame. */
   @media (prefers-reduced-motion: reduce) {
-    .tool-command .cmd-caret,
-    .tool-command .cmd-chevron {
-      animation: none;
+    .status-icon-container *,
+    .status-icon-container {
+      animation: none !important;
+    }
+    .done .check-circle,
+    .done .check-mark {
+      stroke-dashoffset: 0;
     }
   }
 </style>
