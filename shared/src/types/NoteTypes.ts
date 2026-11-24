@@ -154,7 +154,7 @@ export interface FolderNode {
 export interface NotesSettings {
   enabled: boolean;
   autoIncludeInContext: boolean;
-  /** When false, the product-wide hard safety ceiling is used instead of the custom limit. */
+  /** When false, no token budget bounds context injection — the user asked for the cap off. */
   maxContextTokensEnabled: boolean;
   maxContextTokens: number;
   /** Autosave is explicit and configurable for long-form editing. */
@@ -182,9 +182,10 @@ export interface NotesSettings {
 }
 
 /**
- * Product-wide context allocation contract. Memory and Notes use the same
- * bounds so disabling a custom budget means "use the safety ceiling", not
- * "send an unbounded prompt".
+ * Product-wide context allocation contract. Memory and Notes share these
+ * bounds for the configured budget. Disabling the custom budget is an
+ * explicit "no cap" request — injection is unbounded rather than silently
+ * re-capped by a hidden ceiling.
  */
 export const CONTEXT_BUDGET_MIN_TOKENS = 100;
 export const CONTEXT_BUDGET_MAX_TOKENS = 100_000;

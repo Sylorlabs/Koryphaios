@@ -31,6 +31,12 @@ export type TranscriptPart =
       timeUnknown?: true;
       /** The full conversation of a sub-agent this tool call ran (imported chats). */
       subagent?: SubagentTranscript;
+      /** Display-only stand-in for `subagent`. The API strips the transcript
+       *  out of the message payload (an imported chat can embed megabytes of
+       *  nested turns) and ships this header instead; the client fetches the
+       *  transcript on first expand. Never persisted, never produced by the
+       *  reducer — set only at the serialization edge. */
+      subagentStub?: SubagentStub;
     };
 
 /**
@@ -53,6 +59,23 @@ export interface SubagentTranscript {
 export type SubagentTurn =
   | { role: 'user'; text: string; createdAt?: number }
   | { role: 'assistant'; parts: TranscriptPart[]; createdAt?: number };
+
+/**
+ * Everything the collapsed sub-agent row needs except the transcript itself.
+ * `ref` addresses the transcript inside the owning stored message: `path`
+ * alternates part indexes and turn indexes, so `[2]` resolves
+ * `parts[2].subagent` and `[2, 0, 1]` resolves
+ * `parts[2].subagent.turns[0].parts[1].subagent`.
+ */
+export interface SubagentStub {
+  name: string;
+  agentId?: string;
+  task?: string;
+  model?: string;
+  provider?: string;
+  turnCount: number;
+  ref: { messageId: string; path: number[] };
+}
 
 export type TurnEvent =
   | {
@@ -98,7 +121,11 @@ function isOpenReasoning(part: TranscriptPart): part is ReasoningPart {
   return part.kind === 'reasoning' && part.endedAt === undefined;
 }
 
-function replaceAt(parts: readonly TranscriptPart[], index: number, part: TranscriptPart): TranscriptPart[] {
+function replaceAt(
+  parts: readonly TranscriptPart[],
+  index: number,
+  part: TranscriptPart,
+): TranscriptPart[] {
   const next = parts.slice();
   next[index] = part;
   return next;
@@ -106,9 +133,7 @@ function replaceAt(parts: readonly TranscriptPart[], index: number, part: Transc
 
 /** Close every open reasoning part at `timestamp`. Returns a new array. */
 function closeOpenReasoning(parts: readonly TranscriptPart[], timestamp: number): TranscriptPart[] {
-  return parts.map((part) =>
-    isOpenReasoning(part) ? { ...part, endedAt: timestamp } : part,
-  );
+  return parts.map((part) => (isOpenReasoning(part) ? { ...part, endedAt: timestamp } : part));
 }
 
 function maxDefined(a: number | undefined, b: number | undefined): number | undefined {
@@ -133,7 +158,11 @@ function appendReasoning(
     return replaceAt(parts, parts.length - 1, merged);
   }
 
-  const created: ReasoningPart = { kind: 'reasoning', text: event.text, startedAt: event.timestamp };
+  const created: ReasoningPart = {
+    kind: 'reasoning',
+    text: event.text,
+    startedAt: event.timestamp,
+  };
   if (tokens !== undefined) created.thinkingTokens = tokens;
   if (event.timeUnknown) created.timeUnknown = true;
   return [...parts, created];

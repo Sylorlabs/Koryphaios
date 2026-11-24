@@ -36,6 +36,7 @@ export * from './run/RunRefs';
 export * from './transcript';
 export * from './source-control';
 export * from './remote-protocol';
+export * from './updates';
 
 // ============== Agent & Worker Types ==============
 export type { AgentRole, AgentStatus, WorkerDomain, AgentIdentity } from './types/AgentTypes';
@@ -48,6 +49,7 @@ export type { ToolName, ToolCall, ToolResult } from './types/ToolTypes';
 export type {
   ContentBlockType,
   ContentBlock,
+  ImportedTokenUsage,
   Message,
   MessageAttachment,
   StoredMessage,
@@ -101,7 +103,11 @@ export type {
   ProviderConfig,
   ProviderStatus,
 } from './providers/ModelDefs';
-export type { ModelParameterKey, ModelParameterDef, ModelParameterValues } from './providers/model-parameters';
+export type {
+  ModelParameterKey,
+  ModelParameterDef,
+  ModelParameterValues,
+} from './providers/model-parameters';
 export {
   MODEL_PARAMETER_SPECS,
   HARNESS_OWNED_PARAMETER_KEYS,
@@ -160,7 +166,12 @@ export type { SandboxPreset, SandboxPolicy } from './types/SandboxTypes';
 export { SANDBOX_PRESETS, DEFAULT_SANDBOX_POLICY, tightenSandbox } from './types/SandboxTypes';
 
 // Re-export from existing providers.ts for backward compatibility
-export { IMPLEMENTED_PROVIDERS, PROVIDER_AUTH_MODES, PROVIDER_ENV_VARS } from './providers';
+export {
+  IMPLEMENTED_PROVIDERS,
+  PROVIDER_AUTH_MODES,
+  PROVIDER_ENV_VARS,
+  RETIRED_PROVIDER_NAMES,
+} from './providers';
 export type { ProviderAuthMode } from './providers';
 
 // Provider release support is intentionally separate from a machine-local
@@ -186,7 +197,12 @@ export type {
 export type { PermissionRequest, PermissionResponse } from './permissions/PermissionTypes';
 
 // ============== WebSocket Protocol ==============
-export type { WSEventType, WSMessage, WSMessagePayload, SessionWSMessage } from './websocket/WSEvents';
+export type {
+  WSEventType,
+  WSMessage,
+  WSMessagePayload,
+  SessionWSMessage,
+} from './websocket/WSEvents';
 export {
   SESSION_SCOPED_EVENT_TYPES,
   isSessionScopedEventType,

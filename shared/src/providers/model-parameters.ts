@@ -75,7 +75,8 @@ export const MODEL_PARAMETER_SPECS: Record<ModelParameterKey, Spec> = {
     max: 1,
     step: 0.01,
     documentedDefault: 1,
-    description: 'Nucleus sampling: only the most likely tokens whose mass sums to this value are considered.',
+    description:
+      'Nucleus sampling: only the most likely tokens whose mass sums to this value are considered.',
   },
   top_k: {
     key: 'top_k',
@@ -157,7 +158,8 @@ export const MODEL_PARAMETER_SPECS: Record<ModelParameterKey, Spec> = {
     kind: 'enum',
     options: ['low', 'medium', 'high', 'xhigh', 'max'],
     documentedDefault: 'medium',
-    description: 'How detailed the model keeps its responses.',
+    description:
+      'How long and detailed replies are. Separate from reasoning effort, which controls how much the model thinks before answering.',
   },
 };
 
@@ -181,10 +183,7 @@ const PARAMETER_ALIASES: Record<string, ModelParameterKey> = {
   max_completion_tokens: 'max_tokens',
 };
 
-function providerDefaultInRange(
-  spec: Spec,
-  value: unknown,
-): number | string | undefined {
+function providerDefaultInRange(spec: Spec, value: unknown): number | string | undefined {
   if (spec.kind === 'enum') {
     return typeof value === 'string' && spec.options?.includes(value) ? value : undefined;
   }

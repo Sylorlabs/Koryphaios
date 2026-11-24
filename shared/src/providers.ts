@@ -23,7 +23,6 @@ export const ProviderName = {
   Logfare: 'logfare',
   APInex: 'apinex',
   Gwarden: 'gwarden',
-  VyceAI: 'vyceai',
   Respan: 'respan',
   Groq: 'groq',
   DigitalOcean: 'digitalocean',
@@ -132,7 +131,6 @@ export const IMPLEMENTED_PROVIDERS: ProviderName[] = [
   'logfare',
   'apinex',
   'gwarden',
-  'vyceai',
   'respan',
   'groq',
   'digitalocean',
@@ -182,6 +180,13 @@ export const IMPLEMENTED_PROVIDERS: ProviderName[] = [
   'workbuddy',
   'workbuddy-desktop',
 ];
+
+/**
+ * Built-in providers that have shut down and been removed. A persisted entry
+ * for one of these is dropped at config load instead of failing validation, so
+ * an upgrade cannot leave the app unbootable because of a dead provider.
+ */
+export const RETIRED_PROVIDER_NAMES: ReadonlySet<string> = new Set(['vyceai']);
 
 export type ModelTier = 'flagship' | 'fast' | 'cheap' | 'reasoning';
 
@@ -262,7 +267,6 @@ export const PROVIDER_AUTH_MODES: Record<ProviderName, ProviderAuthMode> = {
   logfare: 'api_key',
   apinex: 'api_key',
   gwarden: 'api_key',
-  vyceai: 'api_key',
   respan: 'api_key',
   groq: 'api_key',
   digitalocean: 'api_key',
@@ -347,7 +351,6 @@ export const PROVIDER_ENV_VARS: Record<
   logfare: { apiKey: 'LOGFARE_API_KEY' },
   apinex: { apiKey: 'APINEX_API_KEY' },
   gwarden: { apiKey: 'GWARDEN_API_KEY' },
-  vyceai: { apiKey: 'VYCEAI_API_KEY' },
   respan: { apiKey: 'RESPAN_API_KEY' },
   groq: { apiKey: 'GROQ_API_KEY' },
   digitalocean: { apiKey: 'DIGITALOCEAN_API_KEY' },

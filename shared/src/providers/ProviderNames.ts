@@ -24,7 +24,6 @@ export const ProviderName = {
   Logfare: 'logfare',
   APInex: 'apinex',
   Gwarden: 'gwarden',
-  VyceAI: 'vyceai',
   Respan: 'respan',
   Groq: 'groq',
   DigitalOcean: 'digitalocean',

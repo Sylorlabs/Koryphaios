@@ -9,4 +9,5 @@ export type {
   TurnEvent,
   SubagentTranscript,
   SubagentTurn,
+  SubagentStub,
 } from './TranscriptParts';

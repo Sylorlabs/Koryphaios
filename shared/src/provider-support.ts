@@ -134,17 +134,12 @@ export const PROVIDER_SUPPORT: Readonly<Record<string, ProviderSupportRecord>> =
   tokenharbor: compatible(
     ['chat', 'gateway'],
     'openai-compatible-contract',
-    'Live-verified against tokenharbor.ai/v1 with a real thk_live_ key: the 84-model catalog reports context limits, per-1M USD prices and reasoning_effort ladders, and chat, SSE streaming, reasoning_content, tool calls and the Anthropic /v1/messages shape all work, including :free ids. The free-tier allowance is read from the gateway\'s own X-TH-* response headers; there is no key-based wallet-balance endpoint, so paid wallet balances are dashboard-only and never invented.',
+    "Live-verified against tokenharbor.ai/v1 with a real thk_live_ key: the 84-model catalog reports context limits, per-1M USD prices and reasoning_effort ladders, and chat, SSE streaming, reasoning_content, tool calls and the Anthropic /v1/messages shape all work, including :free ids. The free-tier allowance is read from the gateway's own X-TH-* response headers; there is no key-based wallet-balance endpoint, so paid wallet balances are dashboard-only and never invented.",
   ),
   logfare: compatible(['chat', 'gateway'], 'openai-compatible-contract'),
   apinex: compatible(['chat', 'gateway'], 'openai-compatible-contract'),
   gwarden: compatible(['chat', 'gateway'], 'openai-compatible-contract'),
   respan: compatible(['chat', 'gateway'], 'openai-compatible-contract'),
-  vyceai: compatible(
-    ['chat', 'gateway'],
-    'openai-compatible-contract',
-    'Vyce AI exposes the documented OpenAI-compatible /v1/models and /v1/chat/completions APIs with Bearer API-key authentication. Its /v1/models publishes the callable ids, so context windows and reasoning tiers are resolved per model from the upstream lab’s models.dev entry when Vyce itself reports neither.',
-  ),
   groq: compatible(['chat'], 'openai-compatible-contract'),
   digitalocean: compatible(['chat'], 'openai-compatible-contract'),
   commandcode: compatible(['chat', 'gateway'], 'openai-compatible-contract'),
@@ -238,7 +233,7 @@ export const PROVIDER_SUPPORT: Readonly<Record<string, ProviderSupportRecord>> =
   opencode: preview(
     ['chat', 'coding-agent'],
     'cli-contract',
-    'OpenCode is a moving external CLI (ACP v1). Koryphaios reads its authenticated live model catalog (`opencode api model.list`) at runtime for real model ids, context windows, output limits, and reasoning-effort ladders, then routes host actions through the session-scoped Kory MCP bridge passed per ACP session. Native tool permissions stay with the user\'s OpenCode configuration; anything that asks is vetoed by Koryphaios.',
+    "OpenCode is a moving external CLI (ACP v1). Koryphaios reads its authenticated live model catalog (`opencode api model.list`) at runtime for real model ids, context windows, output limits, and reasoning-effort ladders, then routes host actions through the session-scoped Kory MCP bridge passed per ACP session. Native tool permissions stay with the user's OpenCode configuration; anything that asks is vetoed by Koryphaios.",
   ),
   codebuff: preview(
     ['chat', 'coding-agent'],
