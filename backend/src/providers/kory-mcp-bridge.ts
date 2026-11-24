@@ -744,7 +744,7 @@ export const KORY_TOOLS: KoryToolDef[] = [
       },
       required: ['task'],
     },
-    role: 'manager',
+    role: 'any',
   },
   {
     name: 'kory__wait_for_agents',
