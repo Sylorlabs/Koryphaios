@@ -56,6 +56,7 @@ import {
 } from '../../providers/bridge-grant';
 import type { SessionToken } from '../../auth/local-auth';
 import { safeProviderDiagnostic } from '../../providers/provider-diagnostics';
+import { redactSecretsInText } from '../../security';
 import {
   antigravityNativeToolEquivalent,
   antigravityNativeToolRedirectReason,
@@ -578,6 +579,16 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
             input,
           }),
         );
+        // The host sees every bridge execution even when the CLI's own
+        // transcript shows only a dispatcher (execute / mcp_call_tool); the
+        // ledger is what critics verify against.
+        kory.recordBridgeToolExecution?.(sessionId, {
+          name: toolName,
+          input: redactSecretsInText(JSON.stringify(input), 300),
+          output: redactSecretsInText(result.output, 300),
+          isError: result.isError,
+          at: Date.now(),
+        });
         return {
           ok: true,
           output: result.output,

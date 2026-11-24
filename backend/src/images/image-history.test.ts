@@ -60,6 +60,33 @@ describe('image history', () => {
     expect(detail?.revisedPrompt).toBeUndefined();
   });
 
+  test('orders same-millisecond saves by insertion, not by random id', async () => {
+    // Regression: ordering by `ts DESC, id DESC` (random UUIDs) flipped rows
+    // saved in the same millisecond on Linux CI. Pin the clock so every save
+    // ties on ts; newest-first must still follow insertion order.
+    const realNow = Date.now;
+    const frozen = realNow();
+    Date.now = () => frozen;
+    try {
+      const ids: string[] = [];
+      for (let index = 0; index < 4; index += 1) {
+        const saved = await saveImageHistory({
+          imageBase64: 'dGllLQ==',
+          mimeType: 'image/png',
+          prompt: `Same-millisecond ${index}`,
+          provider: 'openai',
+          model: 'gpt-image-1',
+          mode: 'generate',
+        });
+        ids.push(saved!.id);
+      }
+      const list = await listImageHistory(4);
+      expect(list.map((entry) => entry.id)).toEqual([...ids].reverse());
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
   test('deletes the row and the image file together', async () => {
     const saved = await saveImageHistory({
       imageBase64: 'ZGVsZXRl',

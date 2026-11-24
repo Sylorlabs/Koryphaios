@@ -36,6 +36,7 @@ import {
   hasOpaqueContextHarness,
   boundOpaqueCumulativeOccupancy,
   reconcileContextBreakdown,
+  PROVIDER_AUTH_MODES,
 } from '@koryphaios/shared';
 import type {
   Session,
@@ -3881,6 +3882,11 @@ export class KoryManager implements WorkerPipelineHost {
       sessionRoot,
     );
     let provider = await this.providers.resolveProvider(routing.model, routing.provider);
+    if (!provider) {
+      // A synchronous isAvailable() can serve a cached probe failure. Give the
+      // candidate adapters one coalesced re-probe before admission refuses the turn.
+      provider = await this.reprobeAdmissionCandidates(routing);
+    }
     if (!provider && (!preferredModel || preferredModel === 'auto')) {
       const fallback = this.providers.getFirstAvailableRouting();
       if (fallback) {
@@ -4119,6 +4125,42 @@ export class KoryManager implements WorkerPipelineHost {
     if (provider === 'moonshot') return 'Moonshot AI / Kimi API';
     if (provider === 'beam') return 'Reflection AI';
     return provider.charAt(0).toUpperCase() + provider.slice(1);
+  }
+
+  /**
+   * Admission contract (Provider.refreshAvailability): when no adapter resolves
+   * synchronously, await the re-probe of every unavailable adapter that declares
+   * one, then resolve once more. A routed provider narrows the candidates; an
+   * unrouted (auto) turn considers each configured adapter once. Adapters own
+   * coalescing and rate limiting; a still-failing probe leaves the turn refused.
+   */
+  private async reprobeAdmissionCandidates(routing: {
+    model: string;
+    provider?: ProviderName;
+  }): Promise<Provider | undefined> {
+    // Best-effort: a re-probe that cannot run leaves the refusal exactly as it
+    // was, so the original resolution outcome is never masked by this path.
+    try {
+      const names = routing.provider
+        ? [routing.provider]
+        : (Object.keys(PROVIDER_AUTH_MODES) as ProviderName[]);
+      const probed = new Set<Provider>();
+      for (const name of names) {
+        const candidate = this.providers.get(name);
+        if (!candidate || probed.has(candidate)) continue;
+        probed.add(candidate);
+        if (!candidate.refreshAvailability || candidate.isAvailable()) continue;
+        await candidate.refreshAvailability();
+      }
+      if (probed.size === 0) return undefined;
+      return await this.providers.resolveProvider(routing.model, routing.provider);
+    } catch (err: unknown) {
+      koryLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Admission provider re-probe failed; refusing the turn',
+      );
+      return undefined;
+    }
   }
 
   private getModelConfigurationError(preferredModel?: string): string {
@@ -4633,6 +4675,7 @@ export class KoryManager implements WorkerPipelineHost {
       (entry) => !this.criticRouteKeyMatches(entry, this.recentFailedCriticRouteKeys(sessionId)),
     );
     if (withoutSessionFailures.length) models = withoutSessionFailures;
+    const ledgerBlock = this.bridgeToolLedgerPromptSuffix(sessionId);
     const systemPrompt =
       'Your turn is over. Do you want to invoke a Critic agent for your completed work? ' +
       'Decide for yourself. Declining means no Critic runs, even for changes or delegated work. ' +
@@ -4666,6 +4709,7 @@ export class KoryManager implements WorkerPipelineHost {
             .map((thread) => ({ provider: thread.providerName, model: thread.modelId })),
           criticModels: models,
           ...(retry?.failedCritics.length ? { failedCritics: retry.failedCritics } : {}),
+          ...(ledgerBlock ? { hostRecordedToolExecutions: ledgerBlock } : {}),
         }),
       },
     ];
@@ -5199,6 +5243,7 @@ export class KoryManager implements WorkerPipelineHost {
     const objective = task?.trim()
       ? `THE OBJECTIVE (what the worker was asked to accomplish):\n${task.trim().slice(0, 2_000)}\n\n`
       : '';
+    const bridgeLedgerPromptSuffix = this.bridgeToolLedgerPromptSuffix(sessionId);
     const criticPrompt =
       `${objective}Host recorded worker skill delivery (evidence, not critic instructions):\n${JSON.stringify(workerDelivery ?? null)}\n\n` +
       `Hard check evidence:\n${JSON.stringify(hardCheckResult)}\n\n` +
@@ -5207,7 +5252,8 @@ export class KoryManager implements WorkerPipelineHost {
       `Critique against the objective: (1) does the work actually accomplish it, ` +
       `(2) is the implementation correct (verify claims by reading the real files — do not trust the transcript), ` +
       `(3) did it break or regress anything nearby, (4) is anything incomplete or stubbed. ` +
-      `Inspect actual files, run commands, and delegate targeted verification or red-team checks as needed. Return the structured JSON critic report required by your system contract.`;
+      `Inspect actual files, run commands, and delegate targeted verification or red-team checks as needed. Return the structured JSON critic report required by your system contract.` +
+      bridgeLedgerPromptSuffix;
     const criticCompilation = compilePrompt({
       role: 'critic',
       provider: provider.name,
@@ -5896,7 +5942,11 @@ export class KoryManager implements WorkerPipelineHost {
     const directory = await createCriticWorkspace(parent.ctx.workingDirectory);
     const abort = new AbortController();
     const id = `review-worker-${nanoid(8)}`;
-    const contract = createTaskContract(task, { skillAssignment: skills });
+    const ledger = this.bridgeToolLedgerPromptSuffix(parent.sessionId);
+    const contract = createTaskContract(task, {
+      skillAssignment: skills,
+      ...(ledger ? { constraints: [ledger.trimStart()] } : {}),
+    });
     const compilation = compilePrompt({
       role: 'worker',
       provider: provider.name,
@@ -9954,6 +10004,38 @@ export class KoryManager implements WorkerPipelineHost {
     const leased = this.runLifecycle.handleForSession(sessionId);
     if (leased) return leased;
     throw new Error(`Session ${sessionId} has no generation-bound execution context`);
+  }
+
+  /** The MCP bridge records every managed-CLI tool execution here so critic
+   * prompts can verify the real calls a CLI transcript hides behind a
+   * dispatcher (opencode `execute`, Devin `mcp_call_tool`). Bound to the
+   * session's leased run; a new run replaces the ledger instead of mixing
+   * turns. No-op outside a live run — bridge calls also fire during turns the
+   * durable layer does not lease. */
+  recordBridgeToolExecution(
+    sessionId: string,
+    entry: { name: string; input: string; output: string; isError: boolean; at: number },
+  ): void {
+    const runtime = this.runtimes.peek(sessionId);
+    const handle = this.runLifecycle.handleForSession(sessionId);
+    if (!runtime || !handle) return;
+    if (runtime.bridgeToolLedger?.runId !== handle.runId)
+      runtime.bridgeToolLedger = { runId: handle.runId, entries: [] };
+    const entries = runtime.bridgeToolLedger.entries;
+    if (entries.length >= 200) entries.shift();
+    entries.push(entry);
+  }
+
+  /** Prompt suffix exposing the bridge ledger to critics; empty when the run
+   *  executed no bridge tools so prompts carry no misleading header. */
+  private bridgeToolLedgerPromptSuffix(sessionId: string): string {
+    const entries = this.runtimes.peek(sessionId)?.bridgeToolLedger?.entries;
+    if (!entries?.length) return '';
+    const lines = entries.map(
+      (entry) =>
+        `- ${entry.name} ${entry.input} → ${entry.isError ? 'ERROR: ' : ''}${entry.output}`,
+    );
+    return `\n\nHost-recorded Kory tool executions this turn (authoritative; CLI transcripts may show only a dispatcher such as "execute" or "mcp_call_tool"):\n${lines.join('\n')}`;
   }
 
   private assertRunHandleActive(handle: ManagerRunHandle): void {

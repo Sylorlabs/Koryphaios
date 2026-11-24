@@ -85,6 +85,16 @@ export class SessionRuntime {
    *  resolver. Resolves when the current wait finishes; never rejects. */
   questionQueue: Promise<void> = Promise.resolve();
 
+  /** Host-recorded MCP-bridge tool executions for the session's current run.
+   *  Managed CLIs call Kory tools through a dispatcher their transcript shows
+   *  only as `execute`/`mcp_call_tool`, so this ledger is the authoritative
+   *  list critics can verify against. Replaced when the leased run changes;
+   *  capped at 200 entries. */
+  bridgeToolLedger: {
+    runId: string;
+    entries: Array<{ name: string; input: string; output: string; isError: boolean; at: number }>;
+  } | null = null;
+
   /** Steering drain in flight per agent. Removed by the drain that created it. */
   steeringDrains = new Map<string, Promise<{ runId: string } | null>>();
 
@@ -215,6 +225,7 @@ export class SessionRuntime {
     this.usageRetryTimers.clear();
     this.steeringDrains.clear();
     this.questionQueue = Promise.resolve();
+    this.bridgeToolLedger = null;
     this.pendingSteerInputs.clear();
     this.abort = undefined;
     this.runClaimed = false;
