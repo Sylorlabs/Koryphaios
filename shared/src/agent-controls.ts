@@ -1,3 +1,5 @@
+import type { FallbackStep } from './fallback-chain';
+
 /**
  * Manager-visible control plane for live agents.
  *
@@ -7,11 +9,12 @@
  */
 export type AgentControlRole = 'manager' | 'worker' | 'critic';
 
-export interface AgentFallbackStep {
-  /** `provider:model`, or a bare model when the provider is unambiguous. */
-  model: string;
-  reasoningLevel?: string;
-}
+/**
+ * A worker or manager fallback step. Same shape as a chain step (see
+ * `fallback-chain.ts`): the per-agent `fallbacks` list and the project chains
+ * share one type. Legacy `{ model: 'provider:model' }` input is still accepted.
+ */
+export type AgentFallbackStep = FallbackStep;
 
 export interface AgentControlsSnapshot {
   agentId: string;

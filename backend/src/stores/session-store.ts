@@ -5,6 +5,7 @@ import type {
 } from '@koryphaios/shared';
 import { isCriticMode, isValidProvider } from '@koryphaios/shared';
 import { nanoid } from 'nanoid';
+import { normalizeFallbackStepsInput } from '../kory/fallback-chain-input';
 import { ID, SESSION } from '../constants';
 import { db, sessions, type Session as DbSession } from '../db';
 import { eq, and, desc, isNotNull, isNull, sql } from 'drizzle-orm';
@@ -26,20 +27,10 @@ function sanitizeManagerControls(
     if (!managerId || !raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
     const control = raw as Record<string, unknown>;
     if (typeof control.model !== 'string' || !control.model.trim()) continue;
-    const fallbacks: SessionManagerControl['fallbacks'] = [];
-    if (Array.isArray(control.fallbacks)) {
-      for (const step of control.fallbacks.slice(0, MAX_MANAGER_FALLBACKS)) {
-        if (!step || typeof step !== 'object' || Array.isArray(step)) continue;
-        const candidate = step as Record<string, unknown>;
-        if (typeof candidate.model !== 'string' || !candidate.model.trim()) continue;
-        fallbacks.push({
-          model: candidate.model.trim(),
-          ...(typeof candidate.reasoningLevel === 'string' && candidate.reasoningLevel
-            ? { reasoningLevel: candidate.reasoningLevel }
-            : {}),
-        });
-      }
-    }
+    const fallbacks: SessionManagerControl['fallbacks'] = normalizeFallbackStepsInput(
+      control.fallbacks,
+      MAX_MANAGER_FALLBACKS,
+    );
     controls[managerId] = {
       model: control.model.trim(),
       ...(typeof control.provider === 'string' &&

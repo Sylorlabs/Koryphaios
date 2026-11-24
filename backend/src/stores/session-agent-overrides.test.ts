@@ -51,7 +51,7 @@ describe('per-session agent overrides', () => {
             model: 'gpt-5',
             provider: 'openai',
             reasoningLevel: 'high',
-            fallbacks: [{ model: 'anthropic:sonnet', reasoningLevel: 'low' }],
+            fallbacks: [{ provider: 'anthropic', model: 'sonnet', reasoningLevel: 'low' }],
           },
           broken: { model: '', fallbacks: [] } as never,
         },
@@ -63,7 +63,7 @@ describe('per-session agent overrides', () => {
         model: 'gpt-5',
         provider: 'openai',
         reasoningLevel: 'high',
-        fallbacks: [{ model: 'anthropic:sonnet', reasoningLevel: 'low' }],
+        fallbacks: [{ provider: 'anthropic', model: 'sonnet', reasoningLevel: 'low' }],
       },
     });
   });

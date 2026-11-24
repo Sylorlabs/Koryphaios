@@ -252,6 +252,27 @@ import { evaluateAutoCompactPressure } from './auto-compact-pressure';
 import { automaticMemoryPrompt } from './settings-contract';
 import { isPersonalSkillPinnable, listSkills, resolveSkills } from './skills';
 import { isContextLimitFailureMessage } from '../providers/provider-diagnostics';
+import {
+  beginFallbackTurnState,
+  classifyFallbackFailure,
+  decideFallbackHop,
+  fallbackReasonEnabled,
+  FALLBACK_RESET_COOLDOWN_MS,
+  formatFallbackExhaustedSummary,
+  onFallbackChainExhausted,
+  resolveFallbackChain,
+  type FallbackHopRecord,
+  type FallbackTurnState,
+} from './fallback-chain';
+import { normalizeFallbackStepsInput } from './fallback-chain-input';
+import {
+  DEFAULT_FALLBACK_TRIGGERS,
+  fallbackStepKey,
+  type FallbackChain,
+  type FallbackChainRole,
+  type FallbackStep,
+  type SessionFallbackHopPayload,
+} from '@koryphaios/shared';
 import { collectProviderEvents, waitForProviderRetry } from '../providers/provider-retry';
 import {
   TOOL_CONTEXT_SUMMARY_MAX_CHARS,
@@ -449,6 +470,8 @@ interface AgentThreadState {
   sessionId: string;
   identity: AgentIdentity;
   kind: 'worker' | 'critic';
+  /** Hops this thread made during the current run (fallback chain). */
+  fallbackHops?: FallbackHopRecord[];
   status: AgentStatus;
   providerName: ProviderName;
   modelId: string;
@@ -520,6 +543,35 @@ const MAX_FINAL_ANSWER_CONTINUATIONS = 2;
 // Output-limit stops are resumable. Keep this bounded so a provider that
 // repeatedly exhausts its limit cannot create an unattended billing loop.
 const MAX_OUTPUT_LIMIT_CONTINUATIONS = 3;
+
+/** What a failed attempt means for the fallback chain. */
+type ManagerFallbackOutcome =
+  | { kind: 'hop'; model: string; provider: Provider; reasoningLevel?: string }
+  | { kind: 'exhausted'; summary: string };
+
+/** No text, reasoning or tool work reached the user: the same turn can be retried whole. */
+function turnProducedNoOutput(result: {
+  content?: string;
+  reasoningContent?: string;
+  completedToolCalls?: unknown[];
+  observedNativeTool?: boolean;
+}): boolean {
+  return (
+    !result.content &&
+    !result.reasoningContent &&
+    (result.completedToolCalls?.length ?? 0) === 0 &&
+    !result.observedNativeTool
+  );
+}
+
+/** No tool call is pending and no native CLI tool ran, so continuing on another model
+ *  cannot duplicate a side effect or leave a tool call without its result. */
+function atSafeHopBoundary(result: {
+  completedToolCalls?: unknown[];
+  observedNativeTool?: boolean;
+}): boolean {
+  return (result.completedToolCalls?.length ?? 0) === 0 && !result.observedNativeTool;
+}
 // Critic Auto decisions are retried when the deciding agent answers with
 // unusable output, and a failed Critic route is retried on another route
 // rather than being treated as a quality rejection.
@@ -6551,6 +6603,15 @@ export class KoryManager implements WorkerPipelineHost {
         provider = await this.providers.resolveProvider(routing.model, routing.provider);
       }
     }
+    // The chain's per-turn state starts here. A `never` or `after_reset` chain may
+    // begin on the step it last moved to, unless this request pinned a model.
+    const pinnedModel = preferredModel !== undefined && preferredModel !== 'auto';
+    const stickyRoute = this.beginManagerFallbackTurn(sessionId);
+    if (stickyRoute && !pinnedModel) {
+      routing = { model: stickyRoute.model, provider: stickyRoute.provider.name as ProviderName };
+      provider = stickyRoute.provider;
+      if (stickyRoute.reasoningLevel !== undefined) reasoningLevel = stickyRoute.reasoningLevel;
+    }
     if (!provider) throw new Error('No provider.');
     const providerName = provider.name as ProviderName;
     if (regenerationBranch && provider.supportsFreshConversation === false) {
@@ -6739,7 +6800,8 @@ export class KoryManager implements WorkerPipelineHost {
             messages,
             request: input,
             workingDirectory: directWorkingDirectory,
-            provider,
+            // A fallback hop can reassign this binding, so closures read the live value.
+            provider: provider!,
             model: routing.model,
             reasoningLevel,
             signal: abort.signal,
@@ -6852,7 +6914,7 @@ export class KoryManager implements WorkerPipelineHost {
           archiveId,
           turnCount: turn,
           settings: contextPolicySettings,
-          provider,
+          provider: provider!,
           model: routing.model,
           reasoningLevel,
           workingDirectory: directWorkingDirectory,
@@ -6963,6 +7025,33 @@ export class KoryManager implements WorkerPipelineHost {
         }
         reconcileUsage(result);
         turnFailure = result.failure;
+        if (turnFailure && !stoppedByUser && !abort.signal.aborted) {
+          // Output already reached the transcript: end this segment cleanly and
+          // continue on the next step as a continuation. Never a retry of the
+          // whole turn, which would repeat the text the user already read.
+          if (!turnProducedNoOutput(result) && atSafeHopBoundary(result)) {
+            const outcome = this.tryManagerFallbackHop(
+              sessionId,
+              { model: routing.model, provider: provider.name },
+              turnFailure,
+            );
+            if (outcome?.kind === 'hop') {
+              routing = { model: outcome.model, provider: outcome.provider.name as ProviderName };
+              provider = outcome.provider;
+              if (outcome.reasoningLevel !== undefined) reasoningLevel = outcome.reasoningLevel;
+              turnFailure = undefined;
+              messages.push({
+                role: 'system',
+                content:
+                  'HOST CONTINUE: The previous provider stopped before this response was complete and the chat continues on a fallback model. Continue exactly where the previous text stopped. Do not repeat text already written; finish the original request and provide the complete answer.',
+              });
+              continue;
+            }
+            if (outcome?.kind === 'exhausted') {
+              turnFailure = new Error(`${turnFailure.message}\n\n${outcome.summary}`);
+            }
+          }
+        }
         lastFinishReason = result.finishReason;
         if (result.finishReason === 'max_tokens' && result.content) {
           outputLimitSegments.push(result.content);
@@ -8652,6 +8741,36 @@ export class KoryManager implements WorkerPipelineHost {
       if (retried.success)
         this.runtimes.get(sessionId).contextShrinkHints.set(shrinkHintKey, shrink + 1);
       return retried;
+    }
+    // Fallback chain: a failure before any output retries this same turn on the
+    // next connected step. Nothing reached the transcript, so nothing duplicates.
+    if (failure && !signal?.aborted && turnProducedNoOutput(result)) {
+      const outcome = this.tryManagerFallbackHop(
+        sessionId,
+        { model: modelId, provider: provider.name },
+        failure,
+      );
+      if (outcome?.kind === 'hop') {
+        return await this.processManagerTurn(
+          sessionId,
+          outcome.model,
+          outcome.provider,
+          messages,
+          ctx,
+          signal,
+          outcome.reasoningLevel ?? reasoningLevel,
+          interactionMode,
+          fastMode,
+          speedTier,
+          modelParameters,
+          fusion,
+          providerConversationRevision,
+          forceFreshConversation,
+          shrink,
+          imageInputMode,
+        );
+      }
+      if (outcome?.kind === 'exhausted') failure = new Error(`${failure.message}\n\n${outcome.summary}`);
     }
     if (!failure && shrink > 0)
       this.runtimes.get(sessionId).contextShrinkHints.set(shrinkHintKey, shrink);
@@ -10815,21 +10934,11 @@ export class KoryManager implements WorkerPipelineHost {
       }
       if (options.fallbacks !== undefined) {
         fallbacks = [];
-        for (const step of options.fallbacks.slice(0, 20)) {
-          const requested = step.model.trim();
-          if (!requested) continue;
-          const parsed = splitProviderKey(requested);
-          const resolved = await this.providers.resolveProvider(
-            parsed.model,
-            parsed.provider as ProviderName,
-          );
-          if (!resolved) {
-            throw new Error(`Fallback model ${requested} is unavailable for the manager`);
+        for (const step of normalizeFallbackStepsInput(options.fallbacks)) {
+          if (!this.resolveFallbackStep(step)) {
+            throw new Error(`Fallback model ${fallbackStepKey(step)} is unavailable for the manager`);
           }
-          fallbacks.push({
-            model: requested,
-            ...(step.reasoningLevel ? { reasoningLevel: step.reasoningLevel } : {}),
-          });
+          fallbacks.push(step);
         }
       }
       const nextControl = { model, provider, reasoningLevel, fallbacks: [...fallbacks] };
@@ -10870,18 +10979,11 @@ export class KoryManager implements WorkerPipelineHost {
     }
     if (options.fallbacks !== undefined) {
       const normalized: AgentFallbackStep[] = [];
-      for (const step of options.fallbacks.slice(0, 20)) {
-        const requested = step.model.trim();
-        if (!requested) continue;
-        const { provider, model } = splitProviderKey(requested);
-        const resolved = await this.providers.resolveProvider(model, provider as ProviderName);
-        if (!resolved) {
-          throw new Error(`Fallback model ${requested} is unavailable for this worker`);
+      for (const step of normalizeFallbackStepsInput(options.fallbacks)) {
+        if (!this.resolveFallbackStep(step)) {
+          throw new Error(`Fallback model ${fallbackStepKey(step)} is unavailable for this worker`);
         }
-        normalized.push({
-          model: requested,
-          ...(step.reasoningLevel ? { reasoningLevel: step.reasoningLevel } : {}),
-        });
+        normalized.push(step);
       }
       thread.fallbacks = normalized;
     }
@@ -11355,20 +11457,7 @@ export class KoryManager implements WorkerPipelineHost {
     }
     if (action === 'set_controls') {
       const fallbacks = Array.isArray(input.fallbacks)
-        ? input.fallbacks
-            .filter(
-              (step): step is { model: string; reasoningLevel?: string } =>
-                typeof step === 'object' &&
-                step !== null &&
-                typeof (step as { model?: unknown }).model === 'string' &&
-                Boolean((step as { model: string }).model.trim()),
-            )
-            .map((step) => ({
-              model: step.model.trim(),
-              ...(typeof step.reasoningLevel === 'string'
-                ? { reasoningLevel: step.reasoningLevel }
-                : {}),
-            }))
+        ? normalizeFallbackStepsInput(input.fallbacks)
         : undefined;
       const updated = await this.updateAgentControls(sessionId, agentId, {
         model: typeof input.model === 'string' ? input.model : undefined,
@@ -11952,6 +12041,7 @@ export class KoryManager implements WorkerPipelineHost {
       let provider =
         providerOverride ??
         (await this.providers.resolveProvider(thread.modelId, thread.providerName));
+      thread.fallbackHops = [];
       let fallbackCursor = 0;
       if (!provider) {
         const fallback = await this.resolveAgentFallback(thread, fallbackCursor);
@@ -11988,8 +12078,19 @@ export class KoryManager implements WorkerPipelineHost {
           // rather than terminalizing the worker. Tool failures never reach
           // this branch; they are returned as tool results.
           if (thread.ctx.signal?.aborted) throw err;
-          const fallback = await this.resolveAgentFallback(thread, fallbackCursor);
-          if (!fallback) throw err;
+          const failure = err instanceof Error ? err : new Error(String(err));
+          const fallback = await this.resolveAgentFallback(thread, fallbackCursor, failure);
+          if (!fallback) {
+            const hops = thread.fallbackHops ?? [];
+            if (hops.length === 0) throw err;
+            // Summarize every hop this run tried so the failure names the whole route.
+            const summary = formatFallbackExhaustedSummary(
+              hops,
+              hops[0]!.fromModel,
+              this.agentFallbackStepCount(thread),
+            );
+            throw new Error(`${failure.message}\n\n${summary}`);
+          }
           provider = fallback.provider;
           fallbackCursor = fallback.cursor;
           this.discardIncompleteAgentTurn(thread);
@@ -12101,20 +12202,46 @@ export class KoryManager implements WorkerPipelineHost {
   /** Resolve the next configured fallback for an existing agent thread. The
    *  cursor is per run, so a later user follow-up starts again at the first
    *  fallback instead of inheriting a consumed chain. */
+  /** The chain a worker or critic thread walks: its own per-agent list when set,
+   *  otherwise the chat's role chain. */
+  private agentFallbackChain(thread: AgentThreadState): FallbackChain {
+    if (thread.fallbacks.length > 0) {
+      return {
+        steps: thread.fallbacks,
+        triggers: { ...DEFAULT_FALLBACK_TRIGGERS },
+        returnToPrimary: 'next_turn',
+      };
+    }
+    return this.fallbackChainFor(thread.sessionId, thread.kind);
+  }
+
+  private agentFallbackStepCount(thread: AgentThreadState): number {
+    return this.agentFallbackChain(thread).steps.length;
+  }
+
   private async resolveAgentFallback(
     thread: AgentThreadState,
     start: number,
+    failure?: Error,
   ): Promise<{ provider: Provider; cursor: number } | undefined> {
-    for (let index = start; index < thread.fallbacks.length; index++) {
-      const step = thread.fallbacks[index];
+    // A per-agent list is the agent's own chain; otherwise the role's chain applies.
+    const chain = this.agentFallbackChain(thread);
+    const steps = chain.steps;
+    const triggers = chain.triggers;
+    const reason = failure ? classifyFallbackFailure(failure) : undefined;
+    // Auth and disabled triggers never hop; the thread fails as it does without a chain.
+    if (failure && (!reason || !fallbackReasonEnabled(reason, triggers))) return undefined;
+    for (let index = start; index < steps.length; index++) {
+      const step = steps[index];
       if (!step) continue;
-      const { provider, model } = splitProviderKey(step.model);
-      const resolved = await this.providers.resolveProvider(model, provider as ProviderName);
+      const resolved = this.resolveFallbackStep(step);
       if (!resolved) continue;
-      thread.providerName = resolved.name;
-      thread.modelId = model;
-      thread.identity.provider = resolved.name;
-      thread.identity.model = model;
+      const fromModel = thread.modelId;
+      const fromProvider = thread.providerName;
+      thread.providerName = resolved.provider.name as ProviderName;
+      thread.modelId = resolved.model;
+      thread.identity.provider = resolved.provider.name as ProviderName;
+      thread.identity.model = resolved.model;
       if (step.reasoningLevel !== undefined) {
         thread.reasoningLevel = step.reasoningLevel;
       }
@@ -12126,7 +12253,48 @@ export class KoryManager implements WorkerPipelineHost {
         reasoningLevel: thread.reasoningLevel,
         fallbacks: [...thread.fallbacks],
       });
-      return { provider: resolved, cursor: index + 1 };
+      if (failure && reason) {
+        const hop: FallbackHopRecord = {
+          fromModel,
+          fromProvider,
+          toModel: resolved.model,
+          toProvider: resolved.provider.name,
+          reason,
+          stepIndex: index,
+          at: Date.now(),
+        };
+        thread.fallbackHops = [...(thread.fallbackHops ?? []), hop];
+        // Worker and critic hops are not folded into a manager turn, so the
+        // notice carries no turn messageId and the feed shows it as a system notice.
+        const payload: SessionFallbackHopPayload & { agentId: string } = {
+          sessionId: thread.sessionId,
+          messageId: '',
+          agentId: thread.identity.id,
+          fromModel,
+          toModel: resolved.model,
+          fromProvider,
+          toProvider: resolved.provider.name,
+          reason,
+          stepIndex: index,
+        };
+        this.emitWSMessage(thread.sessionId, 'session.fallback.hop', payload as unknown as WSMessage['payload']);
+      }
+      return { provider: resolved.provider, cursor: index + 1 };
+    }
+    if (failure && thread.fallbackHops?.length) {
+      const summary = formatFallbackExhaustedSummary(
+        thread.fallbackHops,
+        thread.fallbackHops[0]!.fromModel,
+        steps.length,
+      );
+      onFallbackChainExhausted(thread.sessionId, {
+        role: thread.kind,
+        hops: [...thread.fallbackHops],
+        lastReason: reason ?? 'provider_error',
+        lastError: failure.message,
+        stepCount: steps.length,
+        summary,
+      });
     }
     return undefined;
   }
@@ -12416,6 +12584,112 @@ export class KoryManager implements WorkerPipelineHost {
       if (changed) pruned++;
     }
     return pruned;
+  }
+
+  // ── Fallback chain ────────────────────────────────────────────────────────
+  // Policy lives in fallback-chain.ts; this block owns the provider lookups,
+  // the hop state on SessionRuntime, and the transcript notice.
+
+  /** The chain that applies to a role in this chat: chat override, role, default. */
+  private fallbackChainFor(sessionId: string, role: FallbackChainRole): FallbackChain {
+    return resolveFallbackChain({
+      sessionOverride: getSessionAgentOverrides(sessionId).fallbackChain,
+      roleChains: this.settingsForSession(sessionId).fallbackChains,
+      role,
+    });
+  }
+
+  /** A step's live route, or undefined when its provider cannot serve it now. */
+  private resolveFallbackStep(
+    step: FallbackStep,
+  ): { model: string; provider: Provider } | undefined {
+    const provider = step.provider
+      ? this.providers.resolveProvider(step.model, step.provider as ProviderName)
+      : this.providers.resolveProvider(step.model);
+    if (!provider) return undefined;
+    if (step.provider && provider.name !== step.provider) return undefined;
+    return { model: step.model, provider };
+  }
+
+  /** Start the manager's hop state for a turn. Returns the sticky route to begin
+   *  on when a `never` or `after_reset` chain still points at a fallback step. */
+  private beginManagerFallbackTurn(
+    sessionId: string,
+  ): { model: string; provider: Provider; reasoningLevel?: string } | undefined {
+    const runtime = this.runtimes.get(sessionId);
+    const chain = this.fallbackChainFor(sessionId, 'manager');
+    const began = beginFallbackTurnState({
+      role: 'manager',
+      chain,
+      sticky: runtime.fallbackSticky,
+      now: Date.now(),
+    });
+    runtime.fallbackTurn = began.state;
+    runtime.fallbackSticky = began.sticky;
+    if (began.state.activeIndex < 0) return undefined;
+    const step = chain.steps[began.state.activeIndex]!;
+    const resolved = this.resolveFallbackStep(step);
+    if (!resolved) {
+      // The sticky step is no longer connected, so this turn starts on the primary.
+      began.state.activeIndex = -1;
+      runtime.fallbackSticky = undefined;
+      return undefined;
+    }
+    return { ...resolved, reasoningLevel: step.reasoningLevel };
+  }
+
+  /**
+   * Apply the pure hop decision to this manager turn: store the new state, emit
+   * the notice on a hop, and fire the exhaustion hook when the chain runs out.
+   */
+  private tryManagerFallbackHop(
+    sessionId: string,
+    current: { model: string; provider: string },
+    failure: Error,
+  ): ManagerFallbackOutcome | undefined {
+    const runtime = this.runtimes.peek(sessionId);
+    const prior = runtime?.fallbackTurn;
+    if (!runtime || !prior) return undefined;
+    const decision = decideFallbackHop<Provider>({
+      state: prior,
+      sticky: runtime.fallbackSticky,
+      failure: { message: failure.message, name: failure.name },
+      current,
+      now: Date.now(),
+      resolve: (step) => {
+        const route = this.resolveFallbackStep(step);
+        return route && { model: route.model, provider: route.provider, providerName: route.provider.name };
+      },
+    });
+    runtime.fallbackTurn = decision.state;
+    if (decision.kind === 'none') return undefined;
+    if (decision.kind === 'exhausted') {
+      onFallbackChainExhausted(sessionId, decision.info);
+      return { kind: 'exhausted', summary: decision.info.summary };
+    }
+    runtime.fallbackSticky = decision.sticky;
+    const { hop, route } = decision;
+    const payload: SessionFallbackHopPayload = {
+      sessionId,
+      messageId: this.events.transcript.currentMessageId(sessionId) ?? '',
+      fromModel: hop.fromModel,
+      toModel: hop.toModel,
+      fromProvider: hop.fromProvider,
+      toProvider: hop.toProvider,
+      reason: hop.reason,
+      stepIndex: hop.stepIndex,
+    };
+    this.emitWSMessage(sessionId, 'session.fallback.hop', payload as unknown as WSMessage['payload']);
+    koryLog.warn(
+      { sessionId, from: `${hop.fromProvider}:${hop.fromModel}`, to: `${hop.toProvider}:${hop.toModel}`, reason: hop.reason, stepIndex: hop.stepIndex },
+      'Fallback chain hop',
+    );
+    return {
+      kind: 'hop',
+      model: route.model,
+      provider: route.provider,
+      reasoningLevel: decision.step.reasoningLevel,
+    };
   }
 
   private async processAgentThreadTurn(

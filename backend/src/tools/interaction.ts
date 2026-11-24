@@ -1,3 +1,4 @@
+import { normalizeFallbackStepsInput } from '../kory/fallback-chain-input';
 import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from './registry';
 import { serverLog } from '../logger';
 import { normalizeSkillAssignment } from '../kory/skill-assignment';
@@ -289,8 +290,10 @@ export class DelegateToWorkerTool implements Tool {
         items: {
           type: 'object',
           properties: {
-            model: { type: 'string', description: 'Fallback model, optionally provider:model.' },
+            provider: { type: 'string', description: 'Provider name, e.g. anthropic or openai.' },
+            model: { type: 'string', description: 'Fallback model id. A legacy provider:model string is also accepted.' },
             reasoningLevel: { type: 'string', enum: ['low', 'medium', 'high', 'xhigh'] },
+            label: { type: 'string', description: 'Optional display name for this step.' },
           },
           required: ['model'],
           additionalProperties: false,
@@ -314,21 +317,10 @@ export class DelegateToWorkerTool implements Tool {
       reasoningLevel?: string;
       worktree?: boolean;
     };
+    // Current `{provider, model, reasoningLevel, label}` steps and the legacy
+    // `{ model: 'provider:model' }` form both normalize to the chain step type.
     const fallbacks = Array.isArray(call.input.fallbacks)
-      ? call.input.fallbacks
-          .filter(
-            (step): step is { model: string; reasoningLevel?: string } =>
-              typeof step === 'object' &&
-              step !== null &&
-              typeof (step as { model?: unknown }).model === 'string' &&
-              Boolean((step as { model: string }).model.trim()),
-          )
-          .map((step) => ({
-            model: step.model.trim(),
-            ...(typeof step.reasoningLevel === 'string'
-              ? { reasoningLevel: step.reasoningLevel }
-              : {}),
-          }))
+      ? normalizeFallbackStepsInput(call.input.fallbacks)
       : undefined;
     if (!task || typeof task !== 'string' || !task.trim()) {
       return {

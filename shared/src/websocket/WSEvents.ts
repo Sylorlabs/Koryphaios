@@ -50,6 +50,8 @@ export type WSEventType =
   // created or its result is merged back into the source transcript.
   | 'session.forked'
   | 'session.merged'
+  // A manager turn moved to the next step of the user's fallback chain.
+  | 'session.fallback.hop'
   | 'run.state'
   // Provider work ended for a manager turn; follow-up work (critic, checkpoint, persistence) may still run.
   | 'turn.provider_completed'
@@ -268,6 +270,7 @@ export const SESSION_SCOPED_EVENT_TYPES: ReadonlySet<WSEventType> = new Set<WSEv
   'session.history_pruned',
   'session.forked',
   'session.merged',
+  'session.fallback.hop',
   'run.state',
   'turn.provider_completed',
   'run.settled',

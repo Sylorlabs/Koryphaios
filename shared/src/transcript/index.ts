@@ -3,6 +3,7 @@ export {
   reduceTurnEvents,
   legacyTurnParts,
   turnEventFromWSMessage,
+  fallbackHopNoticeText,
 } from './TranscriptParts';
 export type {
   TranscriptPart,
@@ -10,4 +11,5 @@ export type {
   SubagentTranscript,
   SubagentTurn,
   SubagentStub,
+  FallbackNoticeDetail,
 } from './TranscriptParts';

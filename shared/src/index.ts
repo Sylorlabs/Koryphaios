@@ -36,6 +36,7 @@ export * from './project-identity';
 export * from './remote-target';
 export * from './compute-delegation';
 export * from './agent-controls';
+export * from './fallback-chain';
 export * from './run/RunRefs';
 export * from './transcript';
 export * from './source-control';
