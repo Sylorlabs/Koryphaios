@@ -47,6 +47,16 @@ export interface KoryApiOperations {
     response: unknown;
     auth: 'local-bearer';
   };
+  'GET /api/agent/fallback-chain': {
+    input: undefined;
+    response: unknown;
+    auth: 'local-bearer';
+  };
+  'PUT /api/agent/fallback-chain': {
+    input: undefined;
+    response: unknown;
+    auth: 'local-bearer';
+  };
   'GET /api/agent/preferences': {
     input: undefined;
     response: unknown;
@@ -566,7 +576,9 @@ export interface KoryApiOperations {
       params: { agentId: string };
       body: {
         fallbacks?: {
+          label?: string;
           model: string;
+          provider?: string;
           reasoningLevel?: string;
         }[];
         model?: string;
@@ -3135,6 +3147,27 @@ export interface KoryApiOperations {
     response: unknown;
     auth: 'local-bearer';
   };
+  'DELETE /api/sessions/{id}/fallback-chain': {
+    input: {
+      params: { id: string };
+    };
+    response: unknown;
+    auth: 'local-bearer';
+  };
+  'GET /api/sessions/{id}/fallback-chain': {
+    input: {
+      params: { id: string };
+    };
+    response: unknown;
+    auth: 'local-bearer';
+  };
+  'PUT /api/sessions/{id}/fallback-chain': {
+    input: {
+      params: { id: string };
+    };
+    response: unknown;
+    auth: 'local-bearer';
+  };
   'GET /api/sessions/{id}/feed': {
     input: {
       params: { id: string };
@@ -3807,6 +3840,8 @@ export const KORY_API_ROUTES: Record<KoryApiOperationKey, { method: string; path
   'GET /api/agent/defaults': { method: 'GET', path: '/api/agent/defaults' },
   'POST /api/agent/delegate': { method: 'POST', path: '/api/agent/delegate' },
   'POST /api/agent/enforce': { method: 'POST', path: '/api/agent/enforce' },
+  'GET /api/agent/fallback-chain': { method: 'GET', path: '/api/agent/fallback-chain' },
+  'PUT /api/agent/fallback-chain': { method: 'PUT', path: '/api/agent/fallback-chain' },
   'GET /api/agent/preferences': { method: 'GET', path: '/api/agent/preferences' },
   'PUT /api/agent/preferences': { method: 'PUT', path: '/api/agent/preferences' },
   'POST /api/agent/preferences/init': { method: 'POST', path: '/api/agent/preferences/init' },
@@ -4319,6 +4354,18 @@ export const KORY_API_ROUTES: Record<KoryApiOperationKey, { method: string; path
   'POST /api/sessions/{id}/context/{archiveId}/visibility': {
     method: 'POST',
     path: '/api/sessions/{id}/context/{archiveId}/visibility',
+  },
+  'DELETE /api/sessions/{id}/fallback-chain': {
+    method: 'DELETE',
+    path: '/api/sessions/{id}/fallback-chain',
+  },
+  'GET /api/sessions/{id}/fallback-chain': {
+    method: 'GET',
+    path: '/api/sessions/{id}/fallback-chain',
+  },
+  'PUT /api/sessions/{id}/fallback-chain': {
+    method: 'PUT',
+    path: '/api/sessions/{id}/fallback-chain',
   },
   'GET /api/sessions/{id}/feed': { method: 'GET', path: '/api/sessions/{id}/feed' },
   'POST /api/sessions/{id}/feed/client-errors': {

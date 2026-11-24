@@ -277,6 +277,60 @@
         "x-koryphaios-auth": "local-bearer"
       }
     },
+    "/api/agent/fallback-chain": {
+      "get": {
+        "operationId": "getApiAgentFallbackChain",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "GET /api/agent/fallback-chain",
+        "tags": ["Agents"],
+        "x-koryphaios-auth": "local-bearer"
+      },
+      "put": {
+        "operationId": "putApiAgentFallbackChain",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "PUT /api/agent/fallback-chain",
+        "tags": ["Agents"],
+        "x-koryphaios-auth": "local-bearer"
+      }
+    },
     "/api/agent/preferences": {
       "get": {
         "operationId": "getApiAgentPreferences",
@@ -3490,7 +3544,13 @@
                   "fallbacks": {
                     "items": {
                       "properties": {
+                        "label": {
+                          "type": "string"
+                        },
                         "model": {
+                          "type": "string"
+                        },
+                        "provider": {
                           "type": "string"
                         },
                         "reasoningLevel": {
@@ -17503,6 +17563,116 @@
           }
         ],
         "summary": "POST /api/sessions/{id}/context/{archiveId}/visibility",
+        "tags": ["Sessions"],
+        "x-koryphaios-auth": "local-bearer"
+      }
+    },
+    "/api/sessions/{id}/fallback-chain": {
+      "delete": {
+        "operationId": "deleteApiSessionsByIdFallbackChain",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "DELETE /api/sessions/{id}/fallback-chain",
+        "tags": ["Sessions"],
+        "x-koryphaios-auth": "local-bearer"
+      },
+      "get": {
+        "operationId": "getApiSessionsByIdFallbackChain",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "GET /api/sessions/{id}/fallback-chain",
+        "tags": ["Sessions"],
+        "x-koryphaios-auth": "local-bearer"
+      },
+      "put": {
+        "operationId": "putApiSessionsByIdFallbackChain",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "PUT /api/sessions/{id}/fallback-chain",
         "tags": ["Sessions"],
         "x-koryphaios-auth": "local-bearer"
       }
