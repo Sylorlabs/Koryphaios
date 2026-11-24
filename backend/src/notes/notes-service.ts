@@ -1591,11 +1591,14 @@ export async function createVaultExport(projectRoot = PROJECT_ROOT): Promise<Vau
   const writer = new DeterministicTarWriter(archivePath);
   try {
     const manifestNotes = [] as Array<Record<string, unknown>>;
+    const noteBodies = new Map<string, string>();
     for (const row of snapshot.noteRows) {
       const key = archiveObjectKey(row.id);
       const extension = row.format === 'html' ? 'html' : 'md';
       const contentPath = `notes/${key}.${extension}`;
-      const content = Buffer.from(readNoteBody(row), 'utf8');
+      const body = readNoteBody(row);
+      noteBodies.set(row.id, body);
+      const content = Buffer.from(body, 'utf8');
       const contentSha256 = writer.addBuffer(contentPath, content);
       manifestNotes.push({
         id: row.id,
@@ -1619,12 +1622,62 @@ export async function createVaultExport(projectRoot = PROJECT_ROOT): Promise<Vau
       });
     }
 
+    // An untracked project document (synced or imported, never edited through
+    // Koryphaios) has no revision rows: its file is its only history. The
+    // validator requires every note's current revision, so the archive carries
+    // the current body as that revision, the same baseline the first Koryphaios
+    // edit would write. Export is read-only, so the source database is untouched.
+    type RevisionExport = {
+      row: Omit<typeof noteRevisions.$inferSelect, 'contentBlobId'> & {
+        contentBlobId: number | null;
+      };
+      content: () => string;
+    };
+    const presentRevisionKeys = new Set(
+      snapshot.revisionRows.map((row) => `${row.noteId}\0${row.revision}`),
+    );
+    const revisionExports: RevisionExport[] = snapshot.revisionRows.map((row) => ({
+      row,
+      content: () => readRevisionContent(row.contentBlobId),
+    }));
+    for (const note of snapshot.noteRows) {
+      if (presentRevisionKeys.has(`${note.id}\0${note.revision}`)) continue;
+      const body = noteBodies.get(note.id) ?? '';
+      revisionExports.push({
+        row: {
+          noteId: note.id,
+          revision: note.revision,
+          projectRoot: note.projectRoot ?? root,
+          operation: 'external_sync',
+          title: note.title,
+          contentBlobId: null,
+          contentBytes: Buffer.byteLength(body, 'utf8'),
+          folderPath: note.folderPath,
+          tags: note.tags,
+          pinned: note.pinned,
+          includeInContext: note.includeInContext,
+          format: note.format,
+          sourcePath: projectDocumentIdentity(note.id)?.sourcePath ?? null,
+          trashedAt: note.trashedAt,
+          trashReason: note.trashReason,
+          noteCreatedAt: note.createdAt,
+          noteUpdatedAt: note.updatedAt,
+          createdAt: note.updatedAt,
+        },
+        content: () => body,
+      });
+    }
+    revisionExports.sort(
+      (a, b) =>
+        stableStringCompare(a.row.noteId, b.row.noteId) || a.row.revision - b.row.revision,
+    );
+
     const manifestRevisions = [] as Array<Record<string, unknown>>;
-    for (const row of snapshot.revisionRows) {
+    for (const { row, content: readContent } of revisionExports) {
       const key = archiveObjectKey(row.noteId);
       const extension = row.format === 'html' ? 'html' : 'md';
       const contentPath = `revisions/${key}/${row.revision}.${extension}`;
-      const content = Buffer.from(readRevisionContent(row.contentBlobId), 'utf8');
+      const content = Buffer.from(readContent(), 'utf8');
       const contentSha256 = writer.addBuffer(contentPath, content);
       manifestRevisions.push({
         noteId: row.noteId,
