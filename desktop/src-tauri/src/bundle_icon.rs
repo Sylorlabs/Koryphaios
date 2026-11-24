@@ -3,16 +3,24 @@
 //! macOS 26 draws any bundle icon that is not a full-bleed squircle on a gray
 //! platter, in the Dock, Finder, Launchpad and Spotlight alike. A custom Finder
 //! icon (`<bundle>/Icon\r` plus the kHasCustomIcon Finder flag) is shown as
-//! drawn, so the app writes one from the same artwork as the bundle icon. It is
-//! not shipped in the bundle because it fails strict codesign verification, and
-//! every install path (a fresh copy into /Applications, the Tauri updater's
-//! bundle swap) produces a bundle without it, so it is (re)applied at launch.
+//! drawn, so the bundle carries one made from the same artwork as its icon.
+//!
+//! Local builds ship with it pre-applied: `scripts/build-desktop.ts` runs
+//! `desktop/scripts/apply-bundle-icon.ts` on the built `.app` and `.dmg`, so
+//! there is no platter even before the first launch. Distributed and CI
+//! artifacts are not baked: `Icon\r` and the bundle FinderInfo are unsealed
+//! bundle-root contents that strict codesign rejects and that Gatekeeper may
+//! reject on a quarantined download. Those bundles, and any copy that lost the
+//! icon (a copy without xattrs, the Tauri updater's bundle swap), rely on this
+//! module: the app re-applies the icon at launch and right after an in-app
+//! update, as the safety net for every install path.
 //!
 //! Applying is decided by content, not by existence: the icon is rewritten when
 //! `Icon\r` is missing or empty, when the Finder flag that makes it visible is
-//! missing, or when the marker recorded beside it names different artwork.
-//! After a write, LaunchServices and Finder are told the bundle changed so a
-//! non-running Dock tile drops the icon it cached before the write.
+//! missing, or when the marker recorded beside it names different artwork. The
+//! baker writes the same marker, so a baked bundle is left alone. After a write,
+//! LaunchServices and Finder are told the bundle changed so a non-running Dock
+//! tile drops the icon it cached before the write.
 
 /// Extended attribute on `<bundle>/Icon\r` naming the artwork it was made from.
 pub(crate) const ICON_MARKER_XATTR: &str = "com.sylorlabs.koryphaios.icon-art";
@@ -292,6 +300,9 @@ mod tests {
     fn art_fingerprint_is_stable_and_content_sensitive() {
         assert_eq!(art_fingerprint(b""), "fnv1a64:cbf29ce484222325:0");
         assert_eq!(art_fingerprint(b"a"), "fnv1a64:af63dc4c8601ec8c:1");
+        // Pinned in desktop/scripts/apply-bundle-icon.test.ts as well: the
+        // build-time baker must write the marker this check accepts.
+        assert_eq!(art_fingerprint(b"koryphaios"), "fnv1a64:864d0699d8a68e6a:10");
         assert_ne!(art_fingerprint(b"ab"), art_fingerprint(b"ba"));
     }
 }

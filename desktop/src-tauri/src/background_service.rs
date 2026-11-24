@@ -100,7 +100,7 @@ pub(crate) fn stop() -> Result<(), String> {
 }
 
 #[derive(Debug)]
-#[cfg_attr(windows, derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(windows, test), derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct ServiceSpec {
     pub executable: PathBuf,
     pub working_directory: PathBuf,
@@ -249,13 +249,79 @@ StandardOutput=append:{}\nStandardError=append:{}\n\n[Install]\nWantedBy=default
     ))
 }
 
+/// Replace the PATH environment value inside a generated manifest with a
+/// stable marker, so two manifests can be compared for changes that actually
+/// require a service restart. The generated formats are owned by
+/// `launch_agent`/`user_unit`, and their escaping (`xml`, `unit_quote`)
+/// guarantees the terminator can never appear inside a value, so the mask is
+/// exact for real inputs. A mask that terminates early on a pathological
+/// value only ever yields a false "differs" — never a missed restart.
+fn mask_env_path(manifest: &str) -> String {
+    // plist: <key>PATH</key><string>VALUE</string>   — value ends at '<'
+    // unit:  Environment="PATH=VALUE"\n              — value ends at '"'
+    const PLIST_MARKER: &str = "<key>PATH</key><string>";
+    const UNIT_MARKER: &str = "Environment=\"PATH=";
+    const MASK: &str = "__PATH_MASKED__";
+    for (marker, terminator) in [(PLIST_MARKER, '<'), (UNIT_MARKER, '"')] {
+        if let Some(start) = manifest.find(marker) {
+            let value_start = start + marker.len();
+            let value_end = manifest[value_start..]
+                .find(terminator)
+                .map(|i| value_start + i)
+                .unwrap_or(manifest.len());
+            return format!(
+                "{}{}{}",
+                &manifest[..value_start],
+                MASK,
+                &manifest[value_end..]
+            );
+        }
+    }
+    manifest.to_string()
+}
+
+/// True when the manifests differ in something a PATH update cannot explain.
+/// PATH is discovered per-launch by probing the login shell — a probe timeout,
+/// an rc-file edit, or a launch-context change must not kill in-flight turns.
+/// A PATH-only drift is staged in the manifest on disk and applied by the
+/// next restart that a real change requires.
+fn manifest_differs_beyond_path(previous: &str, desired: &str) -> bool {
+    mask_env_path(previous) != mask_env_path(desired)
+}
+
+/// Same comparison for the Windows spec manifest, which is serialized JSON
+/// rather than generated text — parse and drop the PATH entry structurally.
+#[cfg(any(windows, test))]
+fn spec_json_differs_beyond_path(previous: &str, desired: &str) -> bool {
+    fn without_path(json: &str) -> Option<serde_json::Value> {
+        let mut value: serde_json::Value = serde_json::from_str(json).ok()?;
+        value.get_mut("environment")?.as_object_mut()?.remove("PATH");
+        Some(value)
+    }
+    match (without_path(previous), without_path(desired)) {
+        (Some(a), Some(b)) => a != b,
+        // An unparseable spec means the comparison itself is unreliable —
+        // fall back to the raw compare so real changes always restart.
+        _ => previous != desired,
+    }
+}
+
 #[cfg(target_os = "macos")]
 pub(crate) fn ensure_running(spec: &ServiceSpec) -> Result<(), String> {
     let home = std::env::var_os("HOME").ok_or("HOME is not set")?;
     let manifest = PathBuf::from(home)
         .join("Library/LaunchAgents")
         .join(format!("{SERVICE_ID}.plist"));
-    let changed = write_private(&manifest, &launch_agent(spec)?)?;
+    let previous = std::fs::read_to_string(&manifest).ok();
+    let desired = launch_agent(spec)?;
+    let changed = write_private(&manifest, &desired)?;
+    // A PATH-only drift is staged by write_private but is not worth a bootout
+    // — the running service picks it up on the next real restart.
+    let restart_needed = changed
+        && previous
+            .as_deref()
+            .map(|old| manifest_differs_beyond_path(old, &desired))
+            .unwrap_or(true);
     let domain = format!("gui/{}", unsafe { libc::getuid() });
     let service = format!("{domain}/{SERVICE_ID}");
     let loaded = Command::new("launchctl")
@@ -264,11 +330,11 @@ pub(crate) fn ensure_running(spec: &ServiceSpec) -> Result<(), String> {
         .map_err(|e| e.to_string())?
         .status
         .success();
-    if loaded && changed {
+    if loaded && restart_needed {
         run(Command::new("launchctl").args(["bootout", &service]))?;
     }
     run(Command::new("launchctl").args(["enable", &service]))?;
-    if loaded && changed {
+    if loaded && restart_needed {
         // bootout above only initiated teardown: the label is still registered
         // until launchd cleans up, and bootstrapping into that window races it
         // (37 "Operation already in progress"). Wait for the unload, then
@@ -308,12 +374,20 @@ pub(crate) fn ensure_running(spec: &ServiceSpec) -> Result<(), String> {
         .ok_or("No user configuration directory is available")?;
     let unit_name = format!("{SERVICE_ID}.service");
     let manifest = config.join("systemd/user").join(&unit_name);
-    let changed = write_private(&manifest, &user_unit(spec)?)?;
+    let previous = std::fs::read_to_string(&manifest).ok();
+    let desired = user_unit(spec)?;
+    let changed = write_private(&manifest, &desired)?;
+    // PATH-only drift is staged, not restarted — see mask_env_path.
+    let restart_needed = changed
+        && previous
+            .as_deref()
+            .map(|old| manifest_differs_beyond_path(old, &desired))
+            .unwrap_or(true);
     run(Command::new("systemctl").args(["--user", "daemon-reload"]))?;
     run(Command::new("systemctl").args(["--user", "enable", &unit_name]))?;
     run(Command::new("systemctl").args([
         "--user",
-        if changed { "restart" } else { "start" },
+        if restart_needed { "restart" } else { "start" },
         &unit_name,
     ]))
 }
@@ -340,10 +414,15 @@ pub(crate) fn ensure_running(spec: &ServiceSpec) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
     let executable = std::env::current_exe().map_err(|e| e.to_string())?;
     let manifest = spec.working_directory.join("background-service.json");
-    let spec_changed = write_private(
-        &manifest,
-        &serde_json::to_string(spec).map_err(|e| e.to_string())?,
-    )?;
+    let previous = std::fs::read_to_string(&manifest).ok();
+    let desired_spec_json = serde_json::to_string(spec).map_err(|e| e.to_string())?;
+    let spec_changed = write_private(&manifest, &desired_spec_json)?;
+    // PATH-only drift is staged, not restarted — see spec_json_differs_beyond_path.
+    let spec_restart_needed = spec_changed
+        && previous
+            .as_deref()
+            .map(|old| spec_json_differs_beyond_path(old, &desired_spec_json))
+            .unwrap_or(true);
     let identity = Command::new("whoami")
         .creation_flags(0x0800_0000)
         .output()
@@ -359,7 +438,7 @@ pub(crate) fn ensure_running(spec: &ServiceSpec) -> Result<(), String> {
         .creation_flags(0x0800_0000)
         .args(["/Query", "/TN", SERVICE_ID]);
     let installed = query.output().map_err(|e| e.to_string())?.status.success();
-    if spec_changed || task_changed || !installed {
+    if spec_restart_needed || task_changed || !installed {
         if installed {
             let _ = Command::new("schtasks")
                 .creation_flags(0x0800_0000)
@@ -1099,5 +1178,68 @@ mod service_path_tests {
         let mut now = fake.now();
         let error = wait_for_service_unload(&mut is_loaded, &mut sleep, &mut now).unwrap_err();
         assert!(error.contains("did not unload"));
+    }
+
+    fn spec_with_path(path: &str) -> ServiceSpec {
+        let mut environment = std::collections::BTreeMap::new();
+        environment.insert("PATH".to_string(), path.to_string());
+        environment.insert("KORYPHAIOS_PORT".to_string(), "3000".to_string());
+        ServiceSpec {
+            executable: std::path::PathBuf::from("/cache/koryphaios-service-0.5.0-a"),
+            working_directory: std::path::PathBuf::from("/data"),
+            environment,
+            stdout: std::path::PathBuf::from("/logs/backend.log"),
+            stderr: std::path::PathBuf::from("/logs/backend.err.log"),
+        }
+    }
+
+    #[test]
+    fn plist_path_only_drift_is_not_restart_worthy() {
+        let previous = launch_agent(&spec_with_path("/usr/bin:/bin")).unwrap();
+        let desired = launch_agent(&spec_with_path("/usr/bin:/bin:/opt/homebrew/bin")).unwrap();
+        assert!(!manifest_differs_beyond_path(&previous, &desired));
+    }
+
+    #[test]
+    fn plist_executable_change_is_restart_worthy() {
+        let previous = launch_agent(&spec_with_path("/usr/bin:/bin")).unwrap();
+        let mut spec = spec_with_path("/usr/bin:/bin");
+        spec.executable = std::path::PathBuf::from("/cache/koryphaios-service-0.5.0-b");
+        let desired = launch_agent(&spec).unwrap();
+        assert!(manifest_differs_beyond_path(&previous, &desired));
+    }
+
+    #[test]
+    fn unit_path_only_drift_is_not_restart_worthy() {
+        let previous = user_unit(&spec_with_path("/usr/bin:/bin")).unwrap();
+        let desired = user_unit(&spec_with_path("/usr/bin:/bin:/usr/local/bin")).unwrap();
+        assert!(!manifest_differs_beyond_path(&previous, &desired));
+    }
+
+    #[test]
+    fn unit_env_change_is_restart_worthy() {
+        let previous = user_unit(&spec_with_path("/usr/bin:/bin")).unwrap();
+        let mut spec = spec_with_path("/usr/bin:/bin");
+        spec.environment
+            .insert("KORYPHAIOS_PORT".to_string(), "3001".to_string());
+        let desired = user_unit(&spec).unwrap();
+        assert!(manifest_differs_beyond_path(&previous, &desired));
+    }
+
+    #[test]
+    fn spec_json_path_only_drift_is_not_restart_worthy() {
+        let previous = serde_json::to_string(&spec_with_path("/usr/bin:/bin")).unwrap();
+        let desired =
+            serde_json::to_string(&spec_with_path("/usr/bin:/bin:/opt/homebrew/bin")).unwrap();
+        assert!(!spec_json_differs_beyond_path(&previous, &desired));
+    }
+
+    #[test]
+    fn spec_json_executable_change_is_restart_worthy() {
+        let previous = serde_json::to_string(&spec_with_path("/usr/bin:/bin")).unwrap();
+        let mut spec = spec_with_path("/usr/bin:/bin");
+        spec.executable = std::path::PathBuf::from("/cache/koryphaios-service-0.5.0-b");
+        let desired = serde_json::to_string(&spec).unwrap();
+        assert!(spec_json_differs_beyond_path(&previous, &desired));
     }
 }

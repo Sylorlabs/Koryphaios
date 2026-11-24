@@ -122,6 +122,45 @@ export function buildRequestsAppImage(
   return targets === 'all' || (Array.isArray(targets) && targets.includes('appimage'));
 }
 
+/** Local macOS builds bake the custom Finder icon into the artifacts; CI and
+ * distributed builds must not (strict codesign rejects bundle-root xattrs and
+ * `Icon\r`), and rely on the app's launch-time apply instead. */
+export function shouldBakeBundleIcon(
+  platform: NodeJS.Platform = process.platform,
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  return platform === 'darwin' && !env.CI;
+}
+
+/** The `bundle/` directory `tauri build <args>` writes into. */
+export function tauriBundleDir(args: readonly string[]): string {
+  let target: string | undefined;
+  args.forEach((arg, index) => {
+    if (arg === '--target' || arg === '-t') target = args[index + 1];
+    else if (arg.startsWith('--target=')) target = arg.slice('--target='.length);
+  });
+  const profile = args.includes('--debug') || args.includes('-d') ? 'debug' : 'release';
+  const targetDir = join(DESKTOP_DIR, 'src-tauri', 'target');
+  return target ? join(targetDir, target, profile, 'bundle') : join(targetDir, profile, 'bundle');
+}
+
+/** The built `.app` and `.dmg` artifacts in a bundle directory. */
+export function macosBundleArtifacts(bundleDir: string): string[] {
+  const appDir = join(bundleDir, 'macos');
+  const dmgDir = join(bundleDir, 'dmg');
+  const apps = existsSync(appDir)
+    ? readdirSync(appDir)
+        .filter((name) => name.endsWith('.app'))
+        .map((name) => join(appDir, name))
+    : [];
+  const dmgs = existsSync(dmgDir)
+    ? readdirSync(dmgDir)
+        .filter((name) => name.endsWith('.dmg'))
+        .map((name) => join(dmgDir, name))
+    : [];
+  return [...apps, ...dmgs];
+}
+
 function patchTauriConfig(disableUpdater: boolean): string {
   const original = readFileSync(TAURI_CONF, 'utf-8');
   if (!disableUpdater) return original;
@@ -286,6 +325,17 @@ function main() {
     if (!hasSigningKey && readFileSync(TAURI_CONF, 'utf-8') !== originalConfig) {
       writeFileSync(TAURI_CONF, originalConfig);
       console.log('[build-desktop] Restored original tauri.conf.json');
+    }
+  }
+
+  // 5. Bake the bare-hexagon custom icon into local macOS artifacts so neither
+  //    the .app nor the app copied out of the .dmg shows macOS 26's gray
+  //    platter before its first launch.
+  if (shouldBakeBundleIcon()) {
+    const artifacts = macosBundleArtifacts(tauriBundleDir(process.argv.slice(2)));
+    if (artifacts.length > 0) {
+      console.log('[build-desktop] Baking the custom app icon into local artifacts...');
+      run('bun', ['run', 'desktop/scripts/apply-bundle-icon.ts', ...artifacts]);
     }
   }
 
