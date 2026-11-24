@@ -232,3 +232,39 @@ describe('shortcut store voice binding', () => {
     expect(voice?.description).toMatch(/hold to talk, release to transcribe/i);
   });
 });
+
+describe('voice conductor binding', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  it('defaults to Mod+Shift+Space, distinct from dictation', async () => {
+    const store = await loadStore();
+    expect(store.keys('voice_conductor')).toEqual(['Mod', 'Shift', ' ']);
+    expect(store.matches('voice_conductor', chordKeyEvent(' ', true))).toBe(true);
+    expect(store.matches('voice_conductor', controlSpaceEvent())).toBe(false);
+    expect(store.matches('voice_mode', chordKeyEvent(' ', true))).toBe(false);
+  });
+
+  it('is merged into an older stored list', async () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([{ id: 'send', keys: ['Mod', 'Enter'], action: 'Send', description: 'x' }]),
+    );
+    const store = await loadStore();
+    expect(store.keys('voice_conductor')).toEqual(['Mod', 'Shift', ' ']);
+  });
+
+  it('keeps a rebound conductor chord when the server copy, which does not know it, is applied', async () => {
+    const store = await loadStore();
+    store.list = store.list.map((s) => (s.id === 'voice_conductor' ? { ...s, keys: ['Mod', 'Alt', 'J'] } : s));
+    store.applyRemote([
+      { id: 'send', keys: ['Mod', 'Enter'], action: 'Send message', description: 'Submit task' },
+    ]);
+    expect(store.keys('voice_conductor')).toEqual(['Mod', 'Alt', 'J']);
+    expect(store.keys('send')).toEqual(['Mod', 'Enter']);
+    // Defaults the server omitted are restored rather than dropped.
+    expect(store.keys('toggle_thinking')).toEqual(['Mod', 'T']);
+  });
+});

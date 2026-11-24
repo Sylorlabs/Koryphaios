@@ -83,6 +83,14 @@ const defaultShortcuts: Shortcut[] = [
     action: 'Voice mode',
     description: VOICE_DESCRIPTION,
   },
+  {
+    // Speak a command to the workspace instead of dictating into the composer.
+    // Hold to talk, like voice mode; the label comes from formatChord.
+    id: 'voice_conductor',
+    keys: ['Mod', 'Shift', ' '],
+    action: 'Voice conductor',
+    description: 'Hold to speak a command (stop, status, new chat…)',
+  },
   { id: 'close', keys: ['Esc'], action: 'Close dialogs', description: 'Back' },
 ];
 
@@ -165,7 +173,7 @@ function createShortcutStore() {
   }
 
   function applyRemote(next: DesktopShortcut[]) {
-    shortcuts = next.map((shortcut) => {
+    const remote = next.map((shortcut) => {
       const keys = [...shortcut.keys];
       if (shortcut.id !== 'voice_mode') return { ...shortcut, keys };
       return {
@@ -174,6 +182,16 @@ function createShortcutStore() {
         description: VOICE_DESCRIPTION,
       };
     });
+    // The server only stores the bindings it knows. A frontend-only binding
+    // (one added after the server's default list) keeps its local value
+    // instead of disappearing whenever the remote copy is applied.
+    const remoteIds = new Set(remote.map((shortcut) => shortcut.id));
+    const localOnly = shortcuts.filter((shortcut) => !remoteIds.has(shortcut.id));
+    const merged = [...remote, ...localOnly.map((shortcut) => ({ ...shortcut, keys: [...shortcut.keys] }))];
+    for (const def of defaultShortcuts) {
+      if (!merged.some((shortcut) => shortcut.id === def.id)) merged.push({ ...def, keys: [...def.keys] });
+    }
+    shortcuts = merged;
     persistLocal();
   }
 

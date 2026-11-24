@@ -7,6 +7,10 @@
 
 export type VoicePhase = 'idle' | 'recording' | 'transcribing';
 
+/** Dictation fills the composer; conductor speech is a workspace command and
+ *  is shown with its own colour and label so the two are never confused. */
+export type VoiceCaptureMode = 'dictation' | 'conductor';
+
 export interface VoiceRecorderState {
   phase: VoicePhase;
   /** The live tap, retained for the frozen frame during transcription. */
@@ -14,6 +18,7 @@ export interface VoiceRecorderState {
   elapsedMs: number;
   /** Transcript of the speech captured so far, updated while the user speaks. */
   partialText: string;
+  mode: VoiceCaptureMode;
 }
 
 const initial: VoiceRecorderState = {
@@ -21,6 +26,7 @@ const initial: VoiceRecorderState = {
   analyser: null,
   elapsedMs: 0,
   partialText: '',
+  mode: 'dictation',
 };
 
 let state = $state<VoiceRecorderState>({ ...initial });
@@ -36,7 +42,14 @@ export const voiceRecorder = {
   },
 
   begin(phase: VoicePhase, analyser: AnalyserNode | null, elapsedMs = 0) {
-    state = { phase, analyser, elapsedMs, partialText: '' };
+    state = { phase, analyser, elapsedMs, partialText: '', mode: state.mode };
+  },
+
+  /** Set what the current (or next) capture is for. Kept across the
+   *  recording → transcribing hand-off and reset by end(). */
+  setMode(mode: VoiceCaptureMode) {
+    if (state.mode === mode) return;
+    state = { ...state, mode };
   },
 
   /** Publish the live transcript of the audio captured so far. */

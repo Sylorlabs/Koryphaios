@@ -403,7 +403,9 @@ describe('voice mode toggling and microphone control', () => {
     const mic = await screen.findByRole('button', { name: /record a voice prompt/i });
     // The chord is composed the way the UI composes it, never hard-coded.
     expect(mic.getAttribute('title')).toBe(
-      `Click to record · hold ${voiceShortcutHint()} to talk`,
+      `Click to record · hold ${voiceShortcutHint()} to talk · hold ${formatChord(
+        ...shortcutStore.keys('voice_conductor'),
+      )} for a voice command`,
     );
     unmount();
   });
