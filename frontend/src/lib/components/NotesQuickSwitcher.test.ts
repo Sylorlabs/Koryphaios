@@ -176,3 +176,29 @@ describe('NotesQuickSwitcher interaction', () => {
     expect(handlers.onClose).toHaveBeenCalledOnce();
   });
 });
+
+describe('NotesQuickSwitcher rows', () => {
+  it("shows the note's own icon and never leads metadata with a separator", () => {
+    render(NotesQuickSwitcher, {
+      props: {
+        open: true,
+        notes: [
+          note('rocket', 'Launch plan', {
+            icon: { kind: 'emoji', value: '🚀', label: 'Rocket' },
+            folderPath: '/plans',
+            tags: ['q4'],
+          }),
+        ],
+        recentIds: [],
+        favoriteIds: [],
+        ...callbacks(),
+      },
+    });
+    const option = screen.getByRole('option', { name: /Launch plan/ });
+    expect(option.textContent).toContain('🚀');
+    const meta = option.querySelector('span.min-w-0.flex-1 > span:last-child');
+    expect(meta?.textContent?.trim().startsWith('·')).toBe(false);
+    expect(meta?.textContent).toContain('/plans');
+    expect(meta?.textContent).toContain('·');
+  });
+});

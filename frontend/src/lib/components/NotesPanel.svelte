@@ -48,6 +48,7 @@
   import { NOTE_WORKSPACE_TEMPLATES } from '@koryphaios/shared';
   import { selectProjectNavigation } from '$lib/utils/project-navigation';
   import { formatShortcut } from '$lib/utils/platform';
+  import { notePreviewText } from '$lib/utils/note-preview';
   import ClipboardCheck from 'lucide-svelte/icons/clipboard-check';
   import NotesQuickSwitcher from './NotesQuickSwitcher.svelte';
   import NotesNetworkWorkspace from './NotesNetworkWorkspace.svelte';
@@ -298,7 +299,11 @@
       await notesStore.setTagAppearance(target.tag, update);
     }
   }
-  function folderTint(path: string): string | undefined {
+  /** Folder segments of the open note, for the breadcrumb. */
+  let crumbFolders = $derived(
+    (notesStore.currentNote?.folderPath || '/').split('/').filter(Boolean),
+  );
+    function folderTint(path: string): string | undefined {
     return resolveNoteAppearanceColorCss(notesStore.folderAppearance(path)?.color);
   }
   function tagChipStyle(tag: string): string {
@@ -1988,12 +1993,7 @@
     {#if notesStore.notes.some((n) => n.tags.length > 0)}
       {@const allTags = [...new Set(notesStore.notes.flatMap((n) => n.tags))].slice(0, 15)}
       <div class="shrink-0 px-3 pb-2">
-        <div
-          class="text-[10px] font-semibold uppercase tracking-widest mb-1.5"
-          style="color: var(--color-text-muted);"
-        >
-          Tags
-        </div>
+        <div class="notes-section-label mb-1.5">Tags</div>
         <div class="flex flex-wrap gap-1">
           {#each allTags as tag (tag)}
             <button
@@ -2076,17 +2076,17 @@
               onclick={() => void openNote(note.id)}
             >
               <div class="flex items-start gap-2 min-w-0">
-                {#if note.icon}
-                  <NoteIcon icon={note.icon} size={14} />
-                {:else if note.pinned}
-                  <Pin size={10} class="mt-0.5 shrink-0" style="color: var(--color-accent);" />
-                {:else}
-                  <FileText
-                    size={10}
-                    class="mt-0.5 shrink-0 opacity-40"
-                    style="color: var(--color-text-muted);"
-                  />
-                {/if}
+                <!-- One fixed icon slot so emoji, image and default icons align
+                     and titles start on the same column. -->
+                <span class="note-row-icon" class:is-pinned={note.pinned && !note.icon}>
+                  {#if note.icon}
+                    <NoteIcon icon={note.icon} size={15} />
+                  {:else if note.pinned}
+                    <Pin size={12} />
+                  {:else}
+                    <FileText size={13} />
+                  {/if}
+                </span>
                 <div class="min-w-0 flex-1">
                   <div
                     class="truncate text-xs font-medium"
@@ -2094,12 +2094,12 @@
                   >
                     {note.title}
                   </div>
-                  {#if note.content}
+                  {#if note.content && notePreviewText(note.content, note.format, note.title)}
                     <div
                       class="truncate text-[11px] mt-0.5"
                       style="color: var(--color-text-muted);"
                     >
-                      {note.content.slice(0, 60).replace(/\n/g, ' ')}
+                      {notePreviewText(note.content, note.format, note.title)}
                     </div>
                   {/if}
                   {#if note.tags.length > 0}
@@ -2765,7 +2765,7 @@
         <div class="h-full overflow-y-auto" style="background: var(--color-surface-1);">
           <div
             bind:this={previewContainer}
-            class="note-markdown kory-document max-w-3xl mx-auto w-full px-8 py-8 text-sm leading-relaxed"
+            class="note-markdown kory-document note-reading-measure mx-auto w-full px-8 py-10"
             style="color: var(--color-text-primary);"
             use:previewLinks
           >
@@ -2796,6 +2796,27 @@
           {/if}
 
           <div class="note-document-page flex flex-col gap-4">
+            <!-- Breadcrumb: project › folders. Folder crumbs filter the list. -->
+            <nav class="note-breadcrumb" aria-label="Note location">
+              <button
+                type="button"
+                class="note-crumb"
+                title="Show all notes"
+                onclick={() => void notesStore.selectFolder('/')}
+              >{projectDisplayName(projectStore.currentPath) || 'Notes'}</button>
+              {#each crumbFolders as segment, index (index)}
+                {@const crumbPath = `/${crumbFolders.slice(0, index + 1).join('/')}`}
+                <ChevronRight size={12} class="note-crumb-sep" aria-hidden="true" />
+                <button
+                  type="button"
+                  class="note-crumb"
+                  title={`Show notes in ${crumbPath}`}
+                  onclick={() => void notesStore.selectFolder(crumbPath)}
+                >{segment}</button>
+              {/each}
+              <ChevronRight size={12} class="note-crumb-sep" aria-hidden="true" />
+              <span class="note-crumb-current" aria-current="page">{titleInput.trim() || 'Untitled'}</span>
+            </nav>
             <!-- Title -->
             <div class="flex items-center gap-3">
               <button type="button" class="shrink-0 rounded-lg p-1 hover:bg-[var(--color-surface-2)]"
@@ -2809,8 +2830,8 @@
               bind:this={titleInputEl}
               type="text"
               placeholder="Note title..."
-              class="w-full bg-transparent border-none outline-none text-2xl font-bold"
-              style="color: var(--color-text-primary); font-family: var(--font-family-sans, inherit);"
+              class="note-title-input w-full bg-transparent border-none outline-none"
+              style="color: var(--color-text-primary);"
               bind:value={titleInput}
               disabled={Boolean(currentNote.sourcePath)}
               oninput={scheduleAutosave}
@@ -2825,9 +2846,8 @@
               >
                 <FileText size={12} style="color: var(--color-accent);" />
                 <span class="font-mono truncate">{currentNote.sourcePath}</span>
-                <span
-                  class="ml-auto shrink-0 text-[10px] uppercase tracking-wider"
-                  style="color: var(--color-text-muted);">live project file</span
+                <span class="ml-auto shrink-0 text-[11px]" style="color: var(--color-text-muted);"
+                  >Live project file</span
                 >
               </div>
             {/if}
@@ -2968,8 +2988,8 @@
               <div class="relative">
               <textarea
                 bind:this={contentAreaEl}
-                class="note-source-input w-full min-h-[400px] bg-transparent border-none outline-none resize-none text-sm font-mono"
-                style="color: var(--color-text-primary); font-family: var(--font-mono, monospace);"
+                class="note-source-input w-full min-h-[400px] bg-transparent border-none outline-none resize-none"
+                style="color: var(--color-text-primary);"
                 placeholder="Capture your findings, ideas, or research…"
                 aria-label="Note content"
                 bind:value={contentInput}
@@ -2997,12 +3017,7 @@
                   role="listbox"
                   aria-label="Note link suggestions"
                 >
-                  <div
-                    class="px-3 py-1 text-[10px] uppercase tracking-wider"
-                    style="color: var(--color-text-muted);"
-                  >
-                    Link a note
-                  </div>
+                  <div class="notes-section-label px-3 pb-1 pt-1.5">Link a note</div>
                   {#each wikilinkSuggestions as sug, index (sug.id)}
                     <button
                       id={`note-wikilink-option-${sug.id}`}
@@ -3067,11 +3082,8 @@
             <!-- Attachments -->
             <div class="border-t pt-4" style="border-color: var(--color-border);">
               <div class="flex items-center justify-between mb-3">
-                <div
-                  class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest"
-                  style="color: var(--color-text-muted);"
-                >
-                  <Paperclip size={11} />
+                <div class="notes-section-label flex items-center gap-1.5">
+                  <Paperclip size={12} />
                   Attachments
                 </div>
                 <label
@@ -3207,31 +3219,25 @@
           </div>
         </div>
       {:else}
-        <!-- Empty state: no note selected -->
+        <!-- Empty state: no note selected. Offers the next action and the
+             keyboard routes, nothing more. -->
         <div
-          class="flex-1 flex flex-col items-center justify-center h-full"
+          class="flex-1 flex flex-col items-center justify-center h-full px-6"
           style="background: var(--color-surface-1);"
         >
-          <div class="text-center max-w-xs">
-            <StickyNote
-              size={48}
-              class="mx-auto mb-4 opacity-20"
-              style="color: var(--color-text-muted);"
-            />
-            <div class="text-sm font-medium mb-1" style="color: var(--color-text-secondary);">
-              No note selected
+          <div class="notes-empty">
+            <StickyNote size={28} class="notes-empty-icon" aria-hidden="true" />
+            <h3>Pick a note or start a new one</h3>
+            <p>Choose a note from the list, or jump to any note by name.</p>
+            <div class="notes-empty-actions">
+              <button type="button" class="notes-empty-primary" onclick={() => void createNewNote()}>
+                <Plus size={14} /> New note
+              </button>
+              <button type="button" class="notes-empty-secondary" onclick={() => (showQuickSwitcher = true)}>
+                <Search size={13} /> Open note…
+                <kbd>{formatShortcut('Mod+O')}</kbd>
+              </button>
             </div>
-            <div class="text-xs mb-4" style="color: var(--color-text-muted);">
-              Pick a note from the list or create a new one.
-            </div>
-            <button
-              type="button"
-              class="px-4 py-2 rounded-xl text-xs font-semibold transition-colors"
-              style="background: rgba(var(--color-accent-rgb), 0.12); color: var(--color-accent); border: 1px solid rgba(var(--color-accent-rgb), 0.25);"
-              onclick={() => void createNewNote()}
-            >
-              + New Note
-            </button>
           </div>
         </div>
       {/if}
@@ -3419,14 +3425,43 @@
   .notes-workspace { container: notes / inline-size; }
   .new-note-action { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; border-radius: 7px; background: var(--color-surface-3); color: var(--color-text-primary); font-size: 12px; font-weight: 600; }
   .new-note-action:hover { background: var(--color-surface-4); }
-  .note-document-page { width: calc(100% - 48px); max-width: 880px; margin: 24px auto; padding: 32px; }
+  /* Reading measure: ~72 characters of body text. The editor page and the
+     rendered preview share it so switching views never reflows the column. */
+  .note-document-page { width: calc(100% - 48px); max-width: 46rem; margin: 16px auto 48px; padding: 24px 32px 32px; }
+  .note-reading-measure { max-width: 46rem; font-size: 15px; line-height: 1.75; }
+  .note-title-input { font-size: 1.75rem; font-weight: 700; line-height: 1.2; letter-spacing: -0.015em; font-family: var(--font-sans); }
+  .note-title-input::placeholder { color: var(--color-text-muted); }
+  .note-breadcrumb { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; min-width: 0; font-size: 12px; color: var(--color-text-muted); }
+  .note-crumb { max-width: 14rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 6px; border-radius: 5px; color: var(--color-text-muted); }
+  .note-crumb:hover { background: var(--color-surface-2); color: var(--color-text-primary); }
+  .note-crumb:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+  .note-crumb-current { min-width: 0; max-width: 20rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 6px; color: var(--color-text-secondary); }
+  .note-breadcrumb :global(.note-crumb-sep) { flex-shrink: 0; opacity: 0.6; }
+  .notes-section-label { font-size: 12px; font-weight: 500; color: var(--color-text-muted); }
+  .note-row-icon { display: inline-flex; width: 16px; height: 18px; flex-shrink: 0; align-items: center; justify-content: center; color: var(--color-text-muted); opacity: 0.7; }
+  .note-row-icon:has(:global(.note-icon)) { opacity: 1; }
+  .note-row-icon.is-pinned { color: var(--color-accent); opacity: 1; }
+  .notes-empty { display: flex; max-width: 22rem; flex-direction: column; align-items: center; text-align: center; }
+  .notes-empty :global(.notes-empty-icon) { margin-bottom: 14px; color: var(--color-text-muted); opacity: 0.5; }
+  .notes-empty h3 { font-size: 14px; font-weight: 600; color: var(--color-text-primary); }
+  .notes-empty p { margin-top: 4px; font-size: 12.5px; line-height: 1.55; color: var(--color-text-muted); }
+  .notes-empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 18px; }
+  .notes-empty-primary, .notes-empty-secondary { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 12px; border-radius: 8px; font-size: 12.5px; font-weight: 500; }
+  .notes-empty-primary { background: var(--color-accent); color: var(--color-on-accent); }
+  .notes-empty-primary:hover { background: var(--color-accent-hover); }
+  .notes-empty-secondary { border: 1px solid var(--color-border); color: var(--color-text-secondary); }
+  .notes-empty-secondary:hover { background: var(--color-surface-2); color: var(--color-text-primary); }
+  .notes-empty-secondary kbd { margin-left: 4px; padding: 1px 5px; border-radius: 4px; background: var(--color-surface-3); color: var(--color-text-muted); font-family: var(--font-sans); font-size: 11px; }
+  .notes-empty-primary:focus-visible, .notes-empty-secondary:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
   .note-writing-surface { overflow: hidden; }
   .note-writing-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; border-bottom: 1px solid color-mix(in srgb, var(--color-text-muted) 12%, transparent); padding: 8px 4px; }
   .note-writing-toolbar button { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; min-height: 32px; border-radius: 6px; color: var(--color-text-secondary); }
   .note-writing-toolbar button:hover { background: var(--color-surface-3); color: var(--color-text-primary); }
   .note-writing-toolbar button:focus-visible, .new-note-action:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
   .note-toolbar-divider { width: 1px; height: 18px; margin: 0 4px; background: var(--color-border); }
-  .note-source-input { display: block; padding: 22px 4px; line-height: 1.9; }
+  /* Markdown source in the reading face, not a code font: notes are prose
+     first. Tab stops stay narrow for nested lists. */
+  .note-source-input { display: block; padding: 22px 4px; font-family: var(--font-sans); font-size: 15px; line-height: 1.75; tab-size: 4; }
   .note-source-input::placeholder { color: var(--color-text-muted); }
   @container notes (max-width: 640px) {
     .note-document-page { width: calc(100% - 24px); margin: 12px auto; padding: 12px; }
@@ -3434,30 +3469,58 @@
   }
   /* Rendered Markdown preview typography */
   .note-markdown :global(h1) {
-    font-size: 1.5rem;
+    font-size: 1.75rem;
     font-weight: 700;
-    margin: 0.6em 0 0.4em;
+    line-height: 1.2;
+    letter-spacing: -0.015em;
+    margin: 1.2em 0 0.5em;
     color: var(--color-text-primary);
   }
   .note-markdown :global(h2) {
-    font-size: 1.25rem;
-    font-weight: 700;
-    margin: 0.6em 0 0.4em;
+    font-size: 1.35rem;
+    font-weight: 650;
+    line-height: 1.25;
+    margin: 1.4em 0 0.45em;
     color: var(--color-text-primary);
   }
   .note-markdown :global(h3) {
-    font-size: 1.05rem;
+    font-size: 1.1rem;
     font-weight: 600;
-    margin: 0.6em 0 0.3em;
+    line-height: 1.3;
+    margin: 1.2em 0 0.35em;
     color: var(--color-text-primary);
   }
+  .note-markdown :global(h4),
+  .note-markdown :global(h5),
+  .note-markdown :global(h6) {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 1em 0 0.3em;
+    color: var(--color-text-secondary);
+  }
+  .note-markdown > :global(:first-child) {
+    margin-top: 0;
+  }
   .note-markdown :global(p) {
-    margin: 0.5em 0;
+    margin: 0.65em 0;
+  }
+  .note-markdown :global(strong) {
+    font-weight: 600;
+    color: var(--color-text-primary);
   }
   .note-markdown :global(ul),
   .note-markdown :global(ol) {
     margin: 0.5em 0;
     padding-left: 1.4em;
+  }
+  .note-markdown :global(ul) {
+    list-style: disc;
+  }
+  .note-markdown :global(ol) {
+    list-style: decimal;
+  }
+  .note-markdown :global(li::marker) {
+    color: var(--color-text-muted);
   }
   .note-markdown :global(li) {
     margin: 0.2em 0;
@@ -3498,8 +3561,18 @@
     color: var(--color-text-secondary);
   }
   .note-markdown :global(table) {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
     border-collapse: collapse;
-    margin: 0.7em 0;
+    margin: 0.9em 0;
+    font-size: 0.9em;
+  }
+  .note-markdown :global(th) {
+    background: var(--color-surface-2);
+    color: var(--color-text-secondary);
+    font-weight: 600;
+    text-align: left;
   }
 
   .note-markdown :global(.note-attachment-embed) {

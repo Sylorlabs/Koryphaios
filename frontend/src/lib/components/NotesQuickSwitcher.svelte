@@ -4,6 +4,8 @@
 
   export interface NotesQuickSwitcherNote {
     id: string;
+    /** The note's own emoji/image icon, shown in place of the generic glyph. */
+    icon?: import('@koryphaios/shared').NoteIcon;
     title: string;
     folderPath?: string | null;
     tags?: readonly string[];
@@ -143,6 +145,7 @@
   import Search from 'lucide-svelte/icons/search';
   import Star from 'lucide-svelte/icons/star';
   import X from 'lucide-svelte/icons/x';
+  import NoteIcon from './NoteIcon.svelte';
   import { formatChord, formatKey, formatShortcut } from '$lib/utils/platform';
 
   interface Props {
@@ -441,7 +444,11 @@
                   <span
                     class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text-secondary)]"
                   >
-                    <FileText size={16} aria-hidden="true" />
+                    {#if row.note.icon}
+                      <NoteIcon icon={row.note.icon} size={18} />
+                    {:else}
+                      <FileText size={16} aria-hidden="true" />
+                    {/if}
                   </span>
                   <span class="min-w-0 flex-1">
                     <span
@@ -457,11 +464,11 @@
                         <span class="shrink-0">Recent</span>
                       {/if}
                       {#if row.note.folderPath && row.note.folderPath !== '/'}
-                        <span aria-hidden="true">·</span>
+                        {#if recentIdSet.has(row.note.id)}<span aria-hidden="true">·</span>{/if}
                         <span class="truncate">{row.note.folderPath}</span>
                       {/if}
                       {#if row.note.tags?.length}
-                        <span aria-hidden="true">·</span>
+                        {#if (row.note.folderPath && row.note.folderPath !== '/') || recentIdSet.has(row.note.id)}<span aria-hidden="true">·</span>{/if}
                         <span class="truncate">#{row.note.tags.slice(0, 2).join(' #')}</span>
                       {/if}
                     </span>
