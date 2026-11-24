@@ -30,6 +30,7 @@ const MUTATING_TOOLS = [
   'record_work_note',
   'create_note',
   'set_note_property',
+  'set_note_icon',
   'update_note',
   'delete_note',
   'link_notes',

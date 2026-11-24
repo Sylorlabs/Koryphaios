@@ -62,3 +62,55 @@ it('resizes a custom upload into a compact PNG before saving', async () => {
   expect(drawImage).toHaveBeenCalledWith(expect.anything(), 0, 24, 96, 48);
   expect(revoke).toHaveBeenCalledWith('blob:icon-upload');
 });
+
+it('saves a free emoji after a live preview and the Use button', async () => {
+  const onclose = vi.fn();
+  render(NoteIconContextMenu, { noteId: 'alpha', x: 10, y: 20, onclose });
+  const input = screen.getByLabelText('Any emoji');
+  await fireEvent.input(input, { target: { value: '👩🏽‍💻' } });
+  expect(screen.getByText('👩🏽‍💻', { selector: '.emoji-preview' })).toBeTruthy();
+  expect(screen.queryByRole('alert')).toBeNull();
+  await fireEvent.click(screen.getByRole('button', { name: 'Use' }));
+  expect(mocks.setNoteIcon).toHaveBeenCalledWith('alpha', { kind: 'emoji', value: '👩🏽‍💻' });
+  await waitFor(() => expect(onclose).toHaveBeenCalled());
+});
+
+it('accepts flags and heart variation sequences from the keyboard', async () => {
+  render(NoteIconContextMenu, { noteId: 'alpha', x: 10, y: 20, onclose: vi.fn() });
+  const input = screen.getByLabelText('Any emoji');
+  await fireEvent.input(input, { target: { value: '🇯🇵' } });
+  await fireEvent.keyDown(input, { key: 'Enter' });
+  expect(mocks.setNoteIcon).toHaveBeenLastCalledWith('alpha', { kind: 'emoji', value: '🇯🇵' });
+  await fireEvent.input(input, { target: { value: '❤️' } });
+  await fireEvent.keyDown(input, { key: 'Enter' });
+  expect(mocks.setNoteIcon).toHaveBeenLastCalledWith('alpha', { kind: 'emoji', value: '❤️' });
+});
+
+it('shows invalid free input inline and never saves it', async () => {
+  render(NoteIconContextMenu, { noteId: 'alpha', x: 10, y: 20, onclose: vi.fn() });
+  const input = screen.getByLabelText('Any emoji');
+  await fireEvent.input(input, { target: { value: 'ab' } });
+  expect(await screen.findByRole('alert')).toHaveTextContent('Enter exactly one emoji');
+  expect(input).toHaveAttribute('aria-invalid', 'true');
+  expect(screen.getByRole('button', { name: 'Use' })).toBeDisabled();
+  await fireEvent.keyDown(input, { key: 'Enter' });
+  await fireEvent.input(input, { target: { value: '🙂🙂' } });
+  expect(await screen.findByRole('alert')).toHaveTextContent('Enter exactly one emoji');
+  expect(mocks.setNoteIcon).not.toHaveBeenCalled();
+});
+
+it('filters the searchable emoji grid and saves the chosen entry as an emoji icon', async () => {
+  const onclose = vi.fn();
+  render(NoteIconContextMenu, { noteId: 'alpha', x: 10, y: 20, onclose });
+  await fireEvent.input(screen.getByRole('searchbox', { name: 'Search emoji' }), { target: { value: 'light bulb' } });
+  expect(screen.queryByRole('menuitemradio', { name: 'turtle slow' })).toBeNull();
+  await fireEvent.click(screen.getByRole('menuitemradio', { name: 'idea light bulb' }));
+  expect(mocks.setNoteIcon).toHaveBeenCalledWith('alpha', { kind: 'emoji', value: '💡' });
+  await waitFor(() => expect(onclose).toHaveBeenCalled());
+});
+
+it('reports when no emoji matches the search', async () => {
+  render(NoteIconContextMenu, { noteId: 'alpha', x: 10, y: 20, onclose: vi.fn() });
+  await fireEvent.input(screen.getByRole('searchbox', { name: 'Search emoji' }), { target: { value: 'zzqq' } });
+  expect(screen.getByText(/No emoji match/)).toHaveTextContent('zzqq');
+});
