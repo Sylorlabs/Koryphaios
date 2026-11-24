@@ -67,6 +67,7 @@ export interface AgentSettings {
   autoRunTools: boolean;
   allowExternalPaths: boolean;
   managerModelAccess: Record<string, string[]>;
+  restrictDelegationToPools: boolean;
   managerNotes: Record<string, string>;
   agentMemoryEnabled: boolean;
   agentCanUpdatePreferences: boolean;
@@ -402,6 +403,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   autoRunTools: false,
   allowExternalPaths: false,
   managerModelAccess: {},
+  restrictDelegationToPools: false,
   managerNotes: {},
   agentMemoryEnabled: true,
   agentCanUpdatePreferences: false,

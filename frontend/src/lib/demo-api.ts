@@ -366,6 +366,7 @@ let demoAgentSettings = {
   autoRunTools: true,
   allowExternalPaths: false,
   managerModelAccess: {},
+  restrictDelegationToPools: false,
   managerNotes: {},
   agentMemoryEnabled: true,
   agentCanUpdatePreferences: false,

@@ -660,10 +660,13 @@ export const KORY_TOOLS: KoryToolDef[] = [
   // ── Interaction ──
   {
     name: 'kory__request_critic_review',
-    description: 'In Critic Auto mode, request an independent Critic review of your proposed answer.',
+    description: 'In Critic Auto mode, request an independent Critic review of your proposed answer. Pass compareGroupId to have the Critic rank a compare group.',
     inputSchema: {
       type: 'object',
-      properties: { reason: { type: 'string', minLength: 1, maxLength: 500 } },
+      properties: {
+        reason: { type: 'string', minLength: 1, maxLength: 500 },
+        compareGroupId: { type: 'string', minLength: 1, maxLength: 64 },
+      },
       required: ['reason'],
       additionalProperties: false,
     },
@@ -710,15 +713,35 @@ export const KORY_TOOLS: KoryToolDef[] = [
   {
     name: 'kory__delegate_to_worker',
     description:
-      'Delegate a task to a Koryphaios worker agent. Use this instead of native subagents. Set worktree false for read-only research and true for work that edits files; omit it to follow the chat setting.',
+      'Delegate a task to a Koryphaios worker agent. Use this instead of native subagents. Set worktree false for read-only research and true for work that edits files; omit it to follow the chat setting. model accepts any connected provider:model. wait:false returns an agentId at once and delivers the result later; compare.groupId groups attempts under different models for ranking.',
     inputSchema: {
       type: 'object',
       properties: {
         task: { type: 'string' },
         domain: { type: 'string' },
+        model: { type: 'string' },
         worktree: { type: 'boolean' },
+        wait: { type: 'boolean' },
+        compare: {
+          type: 'object',
+          properties: { groupId: { type: 'string', minLength: 1, maxLength: 64 } },
+          required: ['groupId'],
+        },
       },
       required: ['task'],
+    },
+    role: 'manager',
+  },
+  {
+    name: 'kory__wait_for_agents',
+    description:
+      'Join worker agents started with kory__delegate_to_worker wait:false. Omit agentIds to wait for every outstanding worker.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agentIds: { type: 'array', items: { type: 'string' }, maxItems: 50 },
+        timeoutSec: { type: 'number', minimum: 1, maximum: 1800 },
+      },
     },
     role: 'manager',
   },

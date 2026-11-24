@@ -49,7 +49,13 @@ export { WebSearchTool, WebFetchTool } from './web';
 export { ViewImageTool } from './image';
 export { GenerateVideoTool } from './video';
 export { ForgetTool, RecallTool, RememberTool } from './external-memory';
-export { AskUserTool, AskManagerTool, DelegateToWorkerTool, RequestCriticReviewTool } from './interaction';
+export {
+  AskUserTool,
+  AskManagerTool,
+  DelegateToWorkerTool,
+  RequestCriticReviewTool,
+  WaitForAgentsTool,
+} from './interaction';
 export { RenameSessionTool } from './session';
 export { ManageReviewAgentsTool } from './review-agents';
 export { ManageAgentsTool } from './manage-agents';

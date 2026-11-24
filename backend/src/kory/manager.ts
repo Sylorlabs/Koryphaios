@@ -190,6 +190,16 @@ import {
 import { ConflictError } from '../errors/types';
 import { agentSteeringStore } from '../stores/agent-steering-store';
 import {
+  renderAsyncChildEnvelope,
+  renderWaitResult,
+  type AsyncChildRecord,
+} from './async-children';
+import {
+  canDelegateAtDepth,
+  currentDelegationDepth,
+  runAtDelegationDepth,
+} from './delegation-depth';
+import {
   CRITIC_OUTPUT_TOKEN_LIMIT,
   MANAGER_OUTPUT_TOKEN_LIMIT,
   TOKEN_CHARS,
@@ -207,6 +217,7 @@ import {
   supportsKoryControlPlaneTools,
 } from '../providers/provider-harness';
 import { runAskUser } from '../tools/interaction';
+import type { DelegateToWorkerOptions } from '../tools/registry';
 import { collaborationManager } from '../collaboration/manager';
 import {
   assembleAgentContext,
@@ -676,6 +687,60 @@ export interface AdmittedWorkContext {
 interface AdmissionRecord {
   controller: AbortController;
   handle: ManagerRunHandle;
+}
+
+/** One delegate_to_worker request, from the manager or from a worker below the depth limit. */
+interface DelegatedWorkerRequest {
+  task: string;
+  domainHint?: string;
+  skills?: SkillAssignment;
+  workerModel?: string;
+  reasoningLevel?: string;
+  worktree?: boolean;
+  fallbacks?: AgentFallbackStep[];
+  /** The manager's own model pin for this turn (manager-level calls only). */
+  preferredModel?: string;
+  wait: boolean;
+  compareGroupId?: string;
+  signal?: AbortSignal;
+}
+
+const WORKER_DOMAIN_NAMES: readonly WorkerDomain[] = ['general', 'ui', 'backend', 'test', 'review'];
+
+function workerDomainOf(hint: string | undefined): WorkerDomain {
+  const normalized = hint === 'frontend' ? 'ui' : hint;
+  return normalized && (WORKER_DOMAIN_NAMES as readonly string[]).includes(normalized)
+    ? (normalized as WorkerDomain)
+    : 'general';
+}
+
+/** Finished workers in the order they completed, for a stable wait_for_agents result. */
+function byFinishOrder(a: AsyncChildRecord, b: AsyncChildRecord): number {
+  return (a.finishedAt ?? a.startedAt) - (b.finishedAt ?? b.startedAt) || a.agentId.localeCompare(b.agentId);
+}
+
+/** Resolve when every promise settles or the timeout (or abort) fires, whichever is first. */
+function waitForSettlement(
+  settled: readonly Promise<void>[],
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(done, timeoutMs);
+    function done(): void {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', done);
+      resolve();
+    }
+    signal?.addEventListener('abort', done, { once: true });
+    void Promise.all(settled).then(done);
+  });
+}
+
+/** Steering row ids for host continuations are `hoststeer_<sessionId>_<batchId>`. */
+function hostSteerBatchId(sessionId: string, rowId: string): string | undefined {
+  const prefix = `hoststeer_${sessionId}_`;
+  return rowId.startsWith(prefix) ? rowId.slice(prefix.length) : undefined;
 }
 
 export class KoryManager implements WorkerPipelineHost {
@@ -3258,6 +3323,11 @@ export class KoryManager implements WorkerPipelineHost {
     allowRecoveryRetry = true,
   ): Promise<SessionTurnSubmission> {
     if (!this.messages) throw new Error('Message store unavailable for session turn submission');
+    if (input.source === 'user') {
+      // A new user send ends a Stop's hold on finished worker results.
+      const held = this.runtimes.peek(input.sessionId);
+      if (held) held.asyncDeliveryHeld = false;
+    }
     const sourceId = input.sourceCommandId;
     const identity = deriveSessionTurnCommandIdentity({
       sessionId: input.sessionId,
@@ -4203,6 +4273,7 @@ export class KoryManager implements WorkerPipelineHost {
     signal?: AbortSignal,
     worktreeOverride?: boolean,
     fallbacks?: AgentFallbackStep[],
+    hooks?: { onRouted?: (label: string) => void },
   ): Promise<string> {
     const managerOwnsLifecycle = this.hasActiveSessionExecution(sessionId);
     // A bridge call that already holds the session mutation barrier (e.g. an
@@ -4242,24 +4313,26 @@ export class KoryManager implements WorkerPipelineHost {
         undefined,
         sessionRoot,
       );
-      const normalizedDomainHint = domainHint === 'frontend' ? 'ui' : domainHint;
-      const workerDomain =
-        normalizedDomainHint &&
-        ['general', 'ui', 'backend', 'test', 'review'].includes(normalizedDomainHint)
-          ? (normalizedDomainHint as WorkerDomain)
-          : 'general';
-      const workerRouting = this.resolveIndependentRouting(
-        managerRouting.model,
-        managerRouting.provider,
-        workerDomain,
-        [],
+      const workerDomain = workerDomainOf(domainHint);
+      const requestedWorkerModel = preferredWorkerModel?.trim();
+      // An explicit model may name any connected chat model; the pool is only
+      // the default when none is named (see ManagerRoutingService).
+      const workerRouting = this.managerRouting.resolveDelegatedWorkerRouting({
+        avoidModel: managerRouting.model,
+        avoidProvider: managerRouting.provider,
+        domain: workerDomain,
         task,
-        'worker',
-        sessionRoot,
-        preferredWorkerModel,
-      );
+        workingDirectory: sessionRoot,
+        requestedModel: requestedWorkerModel,
+      });
       const selectedWorkerRouting = workerRouting ?? managerRouting;
-      if (!workerRouting) {
+      if (requestedWorkerModel && requestedWorkerModel !== 'auto' && workerRouting) {
+        this.emitThought(
+          sessionId,
+          'delegating',
+          `Routing the ${workerDomain} subagent through ${workerRouting.provider ?? 'unknown'}:${workerRouting.model} as requested.`,
+        );
+      } else if (!workerRouting) {
         this.emitThought(
           sessionId,
           'delegating',
@@ -4275,6 +4348,7 @@ export class KoryManager implements WorkerPipelineHost {
       const workerChoice = selectedWorkerRouting.provider
         ? `${selectedWorkerRouting.provider}:${selectedWorkerRouting.model}`
         : selectedWorkerRouting.model;
+      hooks?.onRouted?.(workerChoice);
       let outcome: WorkerPipelineOutcome;
       try {
         outcome = await this.workerPipeline.runWorkerPipelineDetailed(
@@ -4313,6 +4387,302 @@ export class KoryManager implements WorkerPipelineHost {
     } finally {
       lifecycleLease?.release();
     }
+  }
+
+  // ─── Delegated workers: sync, async, and compare ──────────────────────────
+
+  /**
+   * One entry point for delegate_to_worker, from the manager and from a worker
+   * below the depth limit. The child's depth comes from the caller's async
+   * context, so it always runs exactly one level deeper than its caller.
+   */
+  private async delegateWorkerForCaller(
+    sessionId: string,
+    request: DelegatedWorkerRequest,
+  ): Promise<string> {
+    const childDepth = currentDelegationDepth() + 1;
+    const requestedModel = request.workerModel?.trim();
+    if (requestedModel && requestedModel !== 'auto') {
+      // Validate before any work starts: an unknown model is an immediate,
+      // actionable tool error even for a background worker.
+      this.managerRouting.resolveDelegatedWorkerRouting({
+        domain: workerDomainOf(request.domainHint),
+        task: request.task,
+        workingDirectory: await this.resolveSessionWorkingDirectory(sessionId),
+        requestedModel,
+      });
+    }
+    if (!request.wait) {
+      return this.startAsyncWorkerChild(sessionId, request, childDepth);
+    }
+    let routedLabel: string | undefined;
+    const text = await runAtDelegationDepth(childDepth, () =>
+      this.runWorkerPipeline(
+        sessionId,
+        request.task,
+        request.preferredModel,
+        request.reasoningLevel,
+        request.domainHint,
+        request.skills,
+        request.workerModel,
+        request.signal,
+        request.worktree,
+        request.fallbacks,
+        {
+          onRouted: (label) => {
+            routedLabel = label;
+          },
+        },
+      ),
+    );
+    if (!request.compareGroupId) return text;
+    const attempt = this.runtimes.get(sessionId).compareGroups.record(request.compareGroupId, {
+      agentId: `attempt-${nanoid(8)}`,
+      ...(routedLabel ? { model: routedLabel } : {}),
+      status: text.startsWith('WORKER_FAILED') ? 'failed' : 'completed',
+      result: text,
+    });
+    return `[compare ${request.compareGroupId} · attempt ${attempt} · ${routedLabel ?? 'pool model'}]\n${text}`;
+  }
+
+  /** Start a worker that outlives this call. Returns its handle at once; the
+   *  result is settled into the session's async ledger and delivered later. */
+  private startAsyncWorkerChild(
+    sessionId: string,
+    request: DelegatedWorkerRequest,
+    childDepth: number,
+  ): string {
+    const runtime = this.runtimes.get(sessionId);
+    const agentId = `child-${nanoid(10)}`;
+    const child = runtime.asyncChildren.start({
+      agentId,
+      task: request.task,
+      ...(request.workerModel ? { requestedModel: request.workerModel } : {}),
+      ...(request.compareGroupId ? { compareGroupId: request.compareGroupId } : {}),
+      abort: new AbortController(),
+    });
+    void runAtDelegationDepth(childDepth, () =>
+      this.runWorkerPipeline(
+        sessionId,
+        request.task,
+        request.preferredModel,
+        request.reasoningLevel,
+        request.domainHint,
+        request.skills,
+        request.workerModel,
+        child.abort.signal,
+        request.worktree,
+        request.fallbacks,
+        {
+          onRouted: (label) => {
+            child.routedModel = label;
+          },
+        },
+      ).then(
+        (text) => ({ text, failed: text.startsWith('WORKER_FAILED') }),
+        (error: unknown) => ({
+          text: `WORKER_FAILED: ${error instanceof Error ? error.message : String(error)}`,
+          failed: true,
+        }),
+      ).then(({ text, failed }) => {
+        const status = child.abort.signal.aborted ? 'cancelled' : failed ? 'failed' : 'completed';
+        this.settleAsyncChild(sessionId, agentId, status, text);
+      }),
+    ).catch((error: unknown) => {
+      koryLog.warn({ sessionId, agentId, error }, 'Async worker settlement failed');
+    });
+    const group = request.compareGroupId ? ` in compare group ${request.compareGroupId}` : '';
+    return `Started background worker ${agentId}${group}. It runs while you keep working, and its result arrives as a host message when it finishes. Call wait_for_agents with agentIds ["${agentId}"] to join it sooner.`;
+  }
+
+  /** Record a background worker's terminal outcome and schedule its delivery.
+   *  Cancelled workers are never auto-delivered: Stop means stop. */
+  private settleAsyncChild(
+    sessionId: string,
+    agentId: string,
+    status: 'completed' | 'failed' | 'cancelled',
+    text: string,
+  ): void {
+    const runtime = this.runtimes.peek(sessionId);
+    if (!runtime) return;
+    const record = runtime.asyncChildren.settle(agentId, { status, result: text });
+    if (!record) return;
+    if (record.compareGroupId) {
+      const model = record.routedModel ?? record.requestedModel;
+      runtime.compareGroups.record(record.compareGroupId, {
+        agentId,
+        ...(model ? { model } : {}),
+        status,
+        result: text,
+      });
+    }
+    if (status === 'cancelled') return;
+    void runAtDelegationDepth(0, () => this.scheduleAsyncChildDelivery(sessionId)).catch(
+      (error: unknown) => {
+        koryLog.warn({ sessionId, agentId, error }, 'Async worker result delivery failed');
+      },
+    );
+  }
+
+  /** Claim every finished, undelivered worker into one batch and deliver it as a
+   *  host-authored continuation: parked at the manager's next checkpoint while a
+   *  turn is live, otherwise admitted as an internal turn. */
+  private async scheduleAsyncChildDelivery(sessionId: string): Promise<void> {
+    const runtime = this.runtimes.peek(sessionId);
+    if (!runtime || runtime.asyncDeliveryHeld) return;
+    const batchId = `async-${nanoid(12)}`;
+    const claimed = runtime.asyncChildren.claimPending(batchId);
+    if (claimed.length === 0) return;
+    const input: SessionTurnCommandInput = {
+      sessionId,
+      source: 'internal',
+      sourceCommandId: batchId,
+      userMessage: renderAsyncChildEnvelope(claimed),
+    };
+    if (this.hasLiveManagerRun(sessionId)) {
+      await this.parkAsyncChildBatch(sessionId, batchId, input);
+      return;
+    }
+    await this.admitAsyncChildBatch(sessionId, batchId, input);
+  }
+
+  private async parkAsyncChildBatch(
+    sessionId: string,
+    batchId: string,
+    input: SessionTurnCommandInput,
+  ): Promise<void> {
+    const runtime = this.runtimes.get(sessionId);
+    const rowId = `hoststeer_${sessionId}_${batchId}`;
+    try {
+      await agentSteeringStore.enqueue({
+        id: rowId,
+        sessionId,
+        agentId: KORY_IDENTITY.id,
+        content: input.userMessage,
+      });
+    } catch (error: unknown) {
+      runtime.asyncChildren.releaseBatch(batchId);
+      koryLog.warn({ sessionId, batchId, error }, 'Could not park async worker results');
+      return;
+    }
+    // The pending input is what makes the turn loop yield at its next checkpoint.
+    runtime.pendingSteerInputs.set(rowId, input);
+    await this.publishAgentSteeringQueue(sessionId, KORY_IDENTITY.id).catch(() => undefined);
+    // The run may have released between the check and the enqueue; if so no
+    // release will drain the row, so drain it now.
+    if (!this.hasLiveManagerRun(sessionId)) this.drainSessionSteeringQueues(sessionId);
+  }
+
+  private async admitAsyncChildBatch(
+    sessionId: string,
+    batchId: string,
+    input: SessionTurnCommandInput,
+  ): Promise<void> {
+    const ledger = this.runtimes.get(sessionId).asyncChildren;
+    try {
+      const submission = await this.startSessionTurn(input);
+      if (submission.accepted === true) {
+        ledger.markBatchDelivered(batchId);
+        void submission.completion.catch(() => undefined);
+        return;
+      }
+    } catch (error: unknown) {
+      koryLog.warn({ sessionId, batchId, error }, 'Async worker result delivery was not admitted');
+    }
+    // Busy (another worker or a run owns the chat): the results stay pending
+    // and the next settlement or run release tries again.
+    ledger.releaseBatch(batchId);
+  }
+
+  private hasLiveManagerRun(sessionId: string): boolean {
+    const runtime = this.runtimes.peek(sessionId);
+    return !!runtime && (runtime.runClaimed === true || runtime.abort !== undefined);
+  }
+
+  /** Whether a parked steer should yield the turn loop. A host continuation
+   *  whose results were already claimed by wait_for_agents must not stop a turn. */
+  private hasYieldingSteer(sessionId: string): boolean {
+    const runtime = this.runtimes.peek(sessionId);
+    if (!runtime) return false;
+    for (const rowId of runtime.pendingSteerInputs.keys()) {
+      const batchId = hostSteerBatchId(sessionId, rowId);
+      if (batchId === undefined || runtime.asyncChildren.queuedBatch(batchId).length > 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** The host-authored turn for a parked batch, built from what is still queued. */
+  private hostBatchTurnInput(
+    sessionId: string,
+    batchId: string,
+  ): SessionTurnCommandInput | undefined {
+    const records = this.runtimes.peek(sessionId)?.asyncChildren.queuedBatch(batchId) ?? [];
+    if (records.length === 0) return undefined;
+    return {
+      sessionId,
+      source: 'internal',
+      sourceCommandId: batchId,
+      userMessage: renderAsyncChildEnvelope(records),
+    };
+  }
+
+  /** Remove parked host continuations whose results wait_for_agents has claimed. */
+  private async dropEmptyHostSteers(sessionId: string): Promise<void> {
+    const runtime = this.runtimes.peek(sessionId);
+    if (!runtime) return;
+    let changed = false;
+    for (const rowId of [...runtime.pendingSteerInputs.keys()]) {
+      const batchId = hostSteerBatchId(sessionId, rowId);
+      if (batchId === undefined || runtime.asyncChildren.queuedBatch(batchId).length > 0) continue;
+      runtime.pendingSteerInputs.delete(rowId);
+      changed = true;
+      const row = await agentSteeringStore.getById(rowId);
+      if (row?.status === 'queued') {
+        await agentSteeringStore.updateStatus(rowId, 'cancelled', 'results_claimed_by_wait');
+      }
+    }
+    if (changed) await this.publishAgentSteeringQueue(sessionId, KORY_IDENTITY.id).catch(() => undefined);
+  }
+
+  /** wait_for_agents: join the named workers (or every outstanding one). Finished
+   *  results are returned here and marked delivered so they are not repeated. */
+  private async waitForAsyncChildren(
+    sessionId: string,
+    input: { agentIds?: string[]; timeoutSec?: number; signal?: AbortSignal },
+  ): Promise<string> {
+    const runtime = this.runtimes.peek(sessionId);
+    if (!runtime) return renderWaitResult({ finished: [], running: [], unknown: [] });
+    const ledger = runtime.asyncChildren;
+    const { records, unknown } = ledger.selectForWait(input.agentIds);
+    const running = records.filter((record) => record.status === 'running');
+    if (running.length > 0) {
+      await waitForSettlement(
+        running.map((record) => record.settled),
+        (input.timeoutSec ?? 300) * 1000,
+        input.signal,
+      );
+    }
+    const finished = records
+      .filter((record) => record.status !== 'running')
+      .sort(byFinishOrder);
+    ledger.claimForWait(finished);
+    await this.dropEmptyHostSteers(sessionId);
+    return renderWaitResult({
+      finished,
+      running: records.filter((record) => record.status === 'running'),
+      unknown,
+    });
+  }
+
+  /** The compare group the manager asked the end-of-turn critic to rank, if any. */
+  private takePendingCompareReview(sessionId: string): string | undefined {
+    const runtime = this.runtimes.peek(sessionId);
+    if (!runtime) return undefined;
+    const group = runtime.pendingCompareReview;
+    runtime.pendingCompareReview = undefined;
+    return group && runtime.compareGroups.has(group) ? group : undefined;
   }
 
   /** Awaited before the first response. Concurrent callers share the same
@@ -4780,6 +5150,8 @@ export class KoryManager implements WorkerPipelineHost {
       decisionAnnounced?: boolean;
       autoDecisionMade?: boolean;
       criticModel?: string;
+      /** Compare group whose attempts the critic ranks in its report. */
+      compareGroupId?: string;
     },
   ): Promise<CriticGateResult> {
     const reviewContract =
@@ -5033,6 +5405,11 @@ export class KoryManager implements WorkerPipelineHost {
           workerDelivery,
           producerRouting,
           criticRouting,
+          compareSection: reviewOptions?.compareGroupId
+            ? this.runtimes.peek(sessionId)?.compareGroups.renderRankingSection(
+                reviewOptions.compareGroupId,
+              )
+            : undefined,
         });
         if (!result.infraFailure) {
           this.clearCriticRouteFailure(
@@ -5114,6 +5491,7 @@ export class KoryManager implements WorkerPipelineHost {
     workerDelivery?: SkillDeliveryEvidence;
     producerRouting: { model: string | undefined; provider: ProviderName | undefined };
     criticRouting: { model: string; provider: ProviderName | undefined };
+    compareSection?: string;
   }): Promise<
     CriticGateResult & {
       infraFailure?: { route: string; error: string; routeSpecific: boolean };
@@ -5129,6 +5507,7 @@ export class KoryManager implements WorkerPipelineHost {
       workerDelivery,
       producerRouting,
       criticRouting,
+      compareSection,
     } = input;
     const routeKey = `${criticRouting.provider ?? 'unknown'}:${criticRouting.model}`;
     let hardCheckResult = {
@@ -5206,7 +5585,8 @@ export class KoryManager implements WorkerPipelineHost {
       `Critique against the objective: (1) does the work actually accomplish it, ` +
       `(2) is the implementation correct (verify claims by reading the real files — do not trust the transcript), ` +
       `(3) did it break or regress anything nearby, (4) is anything incomplete or stubbed. ` +
-      `Inspect actual files, run commands, and delegate targeted verification or red-team checks as needed. Return the structured JSON critic report required by your system contract.`;
+      `Inspect actual files, run commands, and delegate targeted verification or red-team checks as needed. Return the structured JSON critic report required by your system contract.` +
+      (compareSection ? `\n\n${compareSection}` : '');
     const criticCompilation = compilePrompt({
       role: 'critic',
       provider: provider.name,
@@ -5323,7 +5703,9 @@ export class KoryManager implements WorkerPipelineHost {
           reviewSignal,
         ),
       delegateToWorker: (subtask, domain, skills) =>
-        this.spawnCriticSpecialist(criticId, subtask, domain, skills),
+        runAtDelegationDepth(currentDelegationDepth() + 1, () =>
+          this.spawnCriticSpecialist(criticId, subtask, domain, skills),
+        ),
       manageReviewAgents: (input) => this.manageCriticSpecialists(criticId, input),
       requestManagerInput: (question) => this.handleManagerInquiry(sessionId, criticId, question),
     };
@@ -6282,19 +6664,23 @@ export class KoryManager implements WorkerPipelineHost {
           workerReasoningLevel?: string,
           workerWorktree?: boolean,
           workerFallbacks?: AgentFallbackStep[],
+          options?: DelegateToWorkerOptions,
         ) =>
-          this.runWorkerPipeline(
-            sessionId,
+          this.delegateWorkerForCaller(sessionId, {
             task,
-            preferredModel,
-            workerReasoningLevel ?? this.getWorkerReasoningLevel(),
             domainHint,
             skills,
             workerModel,
-            abort.signal,
-            workerWorktree,
-            workerFallbacks,
-          ),
+            reasoningLevel: workerReasoningLevel ?? this.getWorkerReasoningLevel(),
+            worktree: workerWorktree,
+            fallbacks: workerFallbacks,
+            preferredModel,
+            wait: options?.wait !== false,
+            compareGroupId: options?.compareGroupId,
+            signal: abort.signal,
+          }),
+        waitForAgents: (input) =>
+          this.waitForAsyncChildren(sessionId, { ...input, signal: abort.signal }),
         manageAgents: (input) => this.manageAgentsForSession(sessionId, input),
         manageContext: (input) =>
           this.manageSessionContext({
@@ -6316,11 +6702,12 @@ export class KoryManager implements WorkerPipelineHost {
         manageSkillFeeding: (request) => this.manageSessionSkillFeeding(sessionId, request),
         renameSession: (title: string) => this.renameSession(sessionId, title),
         noteWorkspaceMutation: () => this.markWorkspaceMutatedThisTurn(sessionId),
-        requestCriticReview: (reason: string) => {
+        requestCriticReview: (reason: string, compareGroupId?: string) => {
           messages.push({
             role: 'system',
-            content: `Review concern to consider at the end of your turn: ${reason}`,
+            content: `Review concern to consider at the end of your turn: ${reason}${compareGroupId ? ` (compare group ${compareGroupId} attached for ranking)` : ''}`,
           });
+          if (compareGroupId) this.runtimes.get(sessionId).pendingCompareReview = compareGroupId;
         },
       } as ToolContext;
       this.installManagerSessionGetters(
@@ -6423,10 +6810,7 @@ export class KoryManager implements WorkerPipelineHost {
         // after the current tool call or provider turn, never mid-stream —
         // so in-flight work is never torn down mid-edit. The run ends
         // 'steered_by_user' and the drain admits the parked send next.
-        if (
-          (this.runtimes.peek(sessionId)?.pendingSteerInputs.size ?? 0) > 0 &&
-          !stoppedDueToLoop
-        ) {
+        if (this.hasYieldingSteer(sessionId) && !stoppedDueToLoop) {
           stoppedByUser = true;
           steeredByUser = true;
         }
@@ -6617,7 +7001,7 @@ export class KoryManager implements WorkerPipelineHost {
                 const sequential: Array<Awaited<ReturnType<typeof runTool>>> = [];
                 for (const tc of completedToolCalls) {
                   if (abort.signal.aborted) break;
-                  if ((this.runtimes.peek(sessionId)?.pendingSteerInputs.size ?? 0) > 0) {
+                  if (this.hasYieldingSteer(sessionId)) {
                     skippedCalls.push(tc);
                     continue;
                   }
@@ -6938,6 +7322,7 @@ export class KoryManager implements WorkerPipelineHost {
           message: `Critic Auto · review required: ${criticDecision.reason}`,
         });
       }
+      const compareReviewGroup = this.takePendingCompareReview(sessionId);
       if (!observeCancellation() && !turnFailure && content && criticDecision.review) {
         const maxReviews = Math.max(1, Math.min(10, settingsForGate.maxCriticIterations));
         for (let review = 0; review < maxReviews; review++) {
@@ -6967,6 +7352,7 @@ export class KoryManager implements WorkerPipelineHost {
               decisionAnnounced: true,
               autoDecisionMade: true,
               criticModel: autoCriticDecision?.model,
+              compareGroupId: compareReviewGroup,
             },
           );
           if (observeCancellation() || gate.passed) break;
@@ -9387,6 +9773,34 @@ export class KoryManager implements WorkerPipelineHost {
       waitForUserInput: (question, options, opts) =>
         this.waitForUserInputInternal(sessionId, question, options, opts),
       waitForToolApproval,
+      // A worker below the depth limit may delegate once more, synchronously so
+      // the sub-agent's result stays inside this worker's own turn.
+      ...(canDelegateAtDepth(currentDelegationDepth())
+        ? {
+            delegateToWorker: (
+              task: string,
+              domainHint?: string,
+              skills?: SkillAssignment,
+              workerModel?: string,
+              workerReasoningLevel?: string,
+              workerWorktree?: boolean,
+              workerFallbacks?: AgentFallbackStep[],
+              options?: DelegateToWorkerOptions,
+            ) =>
+              this.delegateWorkerForCaller(sessionId, {
+                task,
+                domainHint,
+                skills,
+                workerModel,
+                reasoningLevel: workerReasoningLevel,
+                worktree: workerWorktree,
+                fallbacks: workerFallbacks,
+                wait: true,
+                compareGroupId: options?.compareGroupId,
+                signal: abort.signal,
+              }),
+          }
+        : {}),
     } as ToolContext;
     // Workers inherit the delegating chat's posture, so the parent's per-chat
     // YOLO/guarded choice (not the project default) is what applies — approval
@@ -10134,6 +10548,15 @@ export class KoryManager implements WorkerPipelineHost {
     // line and the drain dispatches them in order once the blocker releases.
     if (!options?.preserveQueuedSteers) {
       const runtime = this.runtimes.peek(sessionId);
+      if (runtime) {
+        // Stop means stop: host continuations parked for steering are dropped,
+        // their finished results stay pending, and running workers are aborted.
+        for (const batchId of runtime.asyncChildren.queuedBatchIds()) {
+          runtime.asyncChildren.releaseBatch(batchId);
+        }
+        runtime.asyncChildren.abortRunning();
+        runtime.asyncDeliveryHeld = true;
+      }
       runtime?.pendingSteerInputs.clear();
       const parkedSteers = await agentSteeringStore.list(sessionId, KORY_IDENTITY.id);
       for (const steer of parkedSteers) {
@@ -11005,6 +11428,13 @@ export class KoryManager implements WorkerPipelineHost {
   /** Speculatively drain every idle agent's steering queue for this session.
    *  Called when a run releases; a still-busy session simply re-queues. */
   private drainSessionSteeringQueues(sessionId: string): void {
+    if (!this.runtimes.peek(sessionId)?.asyncDeliveryHeld) {
+      void runAtDelegationDepth(0, () => this.scheduleAsyncChildDelivery(sessionId)).catch(
+        (error) => {
+          koryLog.debug({ sessionId, error }, 'Async worker result delivery stopped');
+        },
+      );
+    }
     for (const [agentId, thread] of this.agentThreads) {
       if (thread.sessionId !== sessionId || thread.busy) continue;
       void this.drainAgentSteeringQueue(sessionId, agentId).catch((error) => {
@@ -11039,13 +11469,27 @@ export class KoryManager implements WorkerPipelineHost {
       if (!command) return null;
       await this.publishAgentSteeringQueue(sessionId, agentId);
       const runtime = this.runtimes.peek(sessionId);
+      const hostBatchId = hostSteerBatchId(sessionId, command.id);
       try {
         // The parked input carries full fidelity (attachments, model
         // parameters); a durable row surviving a restart is reconstructed
         // from what the queue itself records. Its message was persisted at
         // queue time either way, so inputAlreadyPersisted always holds.
+        const hostInput =
+          hostBatchId === undefined ? undefined : this.hostBatchTurnInput(sessionId, hostBatchId);
+        if (hostBatchId !== undefined && !hostInput) {
+          // Every result in this batch was claimed by wait_for_agents first.
+          runtime?.pendingSteerInputs.delete(command.id);
+          await agentSteeringStore.updateStatus(
+            command.id,
+            'cancelled',
+            'results_already_delivered',
+          );
+          await this.publishAgentSteeringQueue(sessionId, agentId);
+          return null;
+        }
         const parked = runtime?.pendingSteerInputs.get(command.id);
-        const input: SessionTurnCommandInput = parked ?? {
+        const input: SessionTurnCommandInput = hostInput ?? parked ?? {
           sessionId,
           source: 'user',
           sourceCommandId: command.id.startsWith(`usrsteer_${sessionId}_`)
@@ -11059,6 +11503,9 @@ export class KoryManager implements WorkerPipelineHost {
         const submission = await this.startSessionTurn(input);
         if (submission.accepted === true) {
           runtime?.pendingSteerInputs.delete(command.id);
+          if (hostBatchId !== undefined) {
+            this.runtimes.get(sessionId).asyncChildren.markBatchDelivered(hostBatchId);
+          }
           await agentSteeringStore.updateStatus(command.id, 'running');
           void submission.completion
             .then(async (result) => {
@@ -11105,10 +11552,16 @@ export class KoryManager implements WorkerPipelineHost {
           submission.result.reason ?? undefined,
         );
         runtime?.pendingSteerInputs.delete(command.id);
+        if (hostBatchId !== undefined) {
+          this.runtimes.get(sessionId).asyncChildren.releaseBatch(hostBatchId);
+        }
         await this.publishAgentSteeringQueue(sessionId, agentId);
         return null;
       } catch (error) {
         runtime?.pendingSteerInputs.delete(command.id);
+        if (hostBatchId !== undefined) {
+          this.runtimes.get(sessionId).asyncChildren.releaseBatch(hostBatchId);
+        }
         await agentSteeringStore.updateStatus(
           command.id,
           'failed',

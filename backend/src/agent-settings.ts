@@ -74,6 +74,12 @@ export interface AgentSettings {
    *  Empty/missing = all available models allowed. */
   managerModelAccess: Record<string, string[]>;
 
+  /** When true, delegate_to_worker may only use the configured category pool
+   *  (the pre-v2 gate). Default false: pools are the preferred default when no
+   *  model is named, and any connected, chat-capable provider:model can be
+   *  requested explicitly. */
+  restrictDelegationToPools: boolean;
+
   /** Per-group user notes injected into the manager's system prompt —
    *  standing guidance keyed by category (general, ui, backend, etc.). */
   managerNotes: Record<string, string>;
@@ -272,6 +278,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   preferencesEnabled: true,
   allowExternalPaths: false,
   managerModelAccess: {},
+  restrictDelegationToPools: false,
   managerNotes: {},
   criticGateEnabled: true,
   gateStrictness: 'strict',
