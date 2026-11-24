@@ -524,7 +524,7 @@
         aria-label="Trashed Bases"
       >
         <p
-          class="px-1 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]"
+          class="px-1 py-1 text-[11px] font-medium text-[var(--color-text-muted)]"
         >
           Trash
         </p>
@@ -553,7 +553,7 @@
       >
         <div class="flex items-end gap-3">
           <div class="min-w-0 flex-1">
-            <p class="mb-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-text-muted)]">
+            <p class="mb-1 text-[11px] font-medium text-[var(--color-text-muted)]">
               Base
             </p>
           <input
@@ -580,7 +580,7 @@
         </div>
 
         <div class="mt-5">
-          <p class="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-text-muted)]">
+          <p class="mb-2 text-[11px] font-medium text-[var(--color-text-muted)]">
             Rules
           </p>
           <NoteBaseFilterEditor
@@ -593,7 +593,7 @@
           />
         </div>
         <div class="mt-5 space-y-2" aria-label="Base sort order">
-          <p class="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-text-muted)]">
+          <p class="mb-2 text-[11px] font-medium text-[var(--color-text-muted)]">
             Sort order
           </p>
           {#each draftDefinition.sort as sort, index}

@@ -309,7 +309,7 @@
   function tagChipStyle(tag: string): string {
     const tint = resolveNoteAppearanceColorCss(notesStore.tagAppearance(tag)?.color);
     return tint
-      ? `background: color-mix(in srgb, ${tint} 16%, var(--color-surface-3)); color: ${tint};`
+      ? `background: color-mix(in srgb, ${tint} 16%, var(--color-surface-3)); color: color-mix(in srgb, ${tint} 70%, var(--color-text-primary));`
       : 'background: var(--color-surface-3); color: var(--color-text-secondary);';
   }
   let dragOver = $state(false);
@@ -1909,7 +1909,7 @@
     {#if notesStore.folderTree.length > 0}
       <div class="shrink-0 px-2 pb-1">
         <div
-          class="text-[10px] font-semibold uppercase tracking-widest px-2 mb-1"
+          class="text-[11px] font-medium px-2 mb-1"
           style="color: var(--color-text-muted);"
         >
           Folders in this project
@@ -1929,10 +1929,9 @@
           <div style="padding-left: {depth * 12}px;">
             <button
               type="button"
-              class="flex w-full items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors hover:bg-[var(--color-surface-3)]"
-              style="color: {notesStore.selectedFolder === node.path
-                ? 'var(--color-accent)'
-                : 'var(--color-text-secondary)'};"
+              class="notes-folder-row flex w-full items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors"
+              class:is-selected={notesStore.selectedFolder === node.path}
+              aria-current={notesStore.selectedFolder === node.path ? 'true' : undefined}
               onclick={() => {
                 void notesStore.selectFolder(node.path);
                 if (node.children.length > 0) toggleFolder(node.path);
@@ -1955,7 +1954,9 @@
               {/if}
               <span
                 class="truncate"
-                style={folderTint(node.path) ? `color: ${folderTint(node.path)};` : undefined}
+                style={folderTint(node.path)
+                  ? `color: color-mix(in srgb, ${folderTint(node.path)} 62%, var(--color-text-primary));`
+                  : undefined}
                 >{node.name}</span
               >
               {#if node.noteCount > 0}
@@ -1973,10 +1974,9 @@
         <!-- Root folder -->
         <button
           type="button"
-          class="flex w-full items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors hover:bg-[var(--color-surface-3)]"
-          style="color: {notesStore.selectedFolder === '/'
-            ? 'var(--color-accent)'
-            : 'var(--color-text-secondary)'};"
+          class="notes-folder-row flex w-full items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors"
+          class:is-selected={notesStore.selectedFolder === '/'}
+          aria-current={notesStore.selectedFolder === '/' ? 'true' : undefined}
           onclick={() => void notesStore.selectFolder('/')}
         >
           <Folder size={11} />
@@ -3193,7 +3193,7 @@
             {#if currentNote && currentNote.outlinks && currentNote.outlinks.length > 0}
               <div class="border-t pt-4 pb-8" style="border-color: var(--color-border);">
                 <div
-                  class="text-xs font-semibold uppercase tracking-widest mb-2"
+                  class="text-xs font-medium mb-2"
                   style="color: var(--color-text-muted);"
                 >
                   Outlinks ({currentNote.outlinks.length})
@@ -3437,6 +3437,12 @@
   .note-crumb:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
   .note-crumb-current { min-width: 0; max-width: 20rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 6px; color: var(--color-text-secondary); }
   .note-breadcrumb :global(.note-crumb-sep) { flex-shrink: 0; opacity: 0.6; }
+  .notes-folder-row { color: var(--color-text-secondary); }
+  .notes-folder-row:hover { background: var(--color-surface-3); }
+  /* Selected folder: a filled row with an accent edge, so a tinted folder name
+     never has to carry the selection on its own. */
+  .notes-folder-row.is-selected { background: var(--color-surface-3); color: var(--color-text-primary); box-shadow: inset 2px 0 0 var(--color-accent); }
+  .notes-folder-row:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
   .notes-section-label { font-size: 12px; font-weight: 500; color: var(--color-text-muted); }
   .note-row-icon { display: inline-flex; width: 16px; height: 18px; flex-shrink: 0; align-items: center; justify-content: center; color: var(--color-text-muted); opacity: 0.7; }
   .note-row-icon:has(:global(.note-icon)) { opacity: 1; }

@@ -77,7 +77,7 @@
 >
   <div class="flex items-center justify-between gap-2 mb-2">
     <div
-      class="text-xs font-semibold uppercase tracking-widest"
+      class="text-xs font-medium"
       style="color: var(--color-text-muted);"
     >
       Where this note appears
@@ -104,7 +104,7 @@
     {#if appearances.relationships.length > 0}
       <div class="mb-2">
         <div
-          class="px-3 pb-1 text-[10px] font-medium uppercase tracking-wider"
+          class="px-3 pb-1 text-[11px] font-medium"
           style="color: var(--color-text-muted);"
         >
           Relationships ({appearances.relationships.length})
@@ -136,7 +136,7 @@
     {#if linkOnlyBacklinks.length > 0}
       <div class="mb-2">
         <div
-          class="px-3 pb-1 text-[10px] font-medium uppercase tracking-wider"
+          class="px-3 pb-1 text-[11px] font-medium"
           style="color: var(--color-text-muted);"
         >
           Document links ({linkOnlyBacklinks.length})
@@ -161,7 +161,7 @@
     {#if appearances.canvases.length > 0}
       <div class="mb-2">
         <div
-          class="px-3 pb-1 text-[10px] font-medium uppercase tracking-wider"
+          class="px-3 pb-1 text-[11px] font-medium"
           style="color: var(--color-text-muted);"
         >
           Canvases ({appearances.canvases.length})
@@ -186,7 +186,7 @@
     {#if appearances.bases.length > 0}
       <div class="mb-2">
         <div
-          class="px-3 pb-1 text-[10px] font-medium uppercase tracking-wider"
+          class="px-3 pb-1 text-[11px] font-medium"
           style="color: var(--color-text-muted);"
         >
           Saved Bases ({appearances.bases.length})

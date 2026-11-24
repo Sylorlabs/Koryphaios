@@ -126,7 +126,7 @@
 <div
   bind:this={popoverEl}
   class="fixed z-50 w-72 rounded-xl border p-3 shadow-2xl"
-  style="left: {left}px; top: {top}px; background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text);"
+  style="left: {left}px; top: {top}px; background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-primary);"
   role="dialog"
   tabindex="-1"
   aria-modal="false"
@@ -135,9 +135,11 @@
   oncontextmenu={(event) => event.stopPropagation()}
 >
   <div class="mb-2 flex items-center gap-2">
+    <!-- Live preview, drawn the way the folder row or tag chip will look. -->
     <span
-      class="inline-flex min-w-0 items-center gap-1.5 truncate text-xs font-medium"
-      style="color: {previewColor};"
+      class="appearance-preview inline-flex min-w-0 items-center gap-1.5 truncate text-xs font-medium"
+      class:is-tag={target.kind === 'tag'}
+      style="--preview-tint: {previewColor}; color: {previewColor};"
     >
       {#if draftEmoji}<span aria-hidden="true">{draftEmoji}</span>{/if}
       <span class="truncate">{heading}</span>
@@ -153,7 +155,7 @@
     </button>
   </div>
 
-  <label class="mb-1 block text-[11px] uppercase tracking-wider" style="color: var(--color-text-muted);" for="note-appearance-emoji">
+  <label class="mb-1 block text-[11px]" style="color: var(--color-text-muted);" for="note-appearance-emoji">
     Emoji
   </label>
   <div class="mb-1 flex items-center gap-1.5">
@@ -164,7 +166,7 @@
       maxlength="32"
       placeholder="Pick or paste one emoji"
       class="min-w-0 flex-1 rounded-md border px-2 py-1 text-xs outline-none focus:border-[var(--color-accent)]"
-      style="background: var(--color-surface-1); border-color: var(--color-border); color: var(--color-text);"
+      style="background: var(--color-surface-1); border-color: var(--color-border); color: var(--color-text-primary);"
       value={draftEmoji ?? ''}
       oninput={(event) => {
         draftEmoji = (event.currentTarget as HTMLInputElement).value || undefined;
@@ -187,8 +189,7 @@
     {#each QUICK_EMOJI as quick (quick)}
       <button
         type="button"
-        class="h-6 w-6 rounded text-sm leading-none hover:bg-[var(--color-surface-3)]"
-        style={draftEmoji === quick ? 'background: var(--color-surface-3); outline: 1px solid var(--color-accent);' : ''}
+        class="appearance-emoji h-7 w-7 rounded-md text-base leading-none"
         aria-label="Use {quick}"
         aria-pressed={draftEmoji === quick}
         onclick={() => {
@@ -201,12 +202,11 @@
     {/each}
   </div>
 
-  <div class="mb-1 text-[11px] uppercase tracking-wider" style="color: var(--color-text-muted);">Color</div>
+  <div class="mb-1 text-[11px]" style="color: var(--color-text-muted);">Color</div>
   <div class="mb-2 flex flex-wrap items-center gap-1.5" role="group" aria-label="Color swatches">
     <button
       type="button"
-      class="h-5 w-5 rounded-full border text-[9px] leading-none"
-      style="border-color: var(--color-border); color: var(--color-text-muted);"
+      class="appearance-swatch appearance-swatch-none h-6 w-6 rounded-full border text-[10px] leading-none"
       aria-label="No color"
       aria-pressed={draftColor === undefined}
       onclick={() => pickColor(undefined)}
@@ -216,8 +216,8 @@
     {#each SWATCHES as swatch (swatch)}
       <button
         type="button"
-        class="h-5 w-5 rounded-full border-2"
-        style="background: {resolveNoteAppearanceColorCss(swatch)}; border-color: {draftColor === swatch ? 'var(--color-text)' : 'transparent'};"
+        class="appearance-swatch h-6 w-6 rounded-full"
+        style="background: {resolveNoteAppearanceColorCss(swatch)};"
         aria-label="Color {swatch}"
         aria-pressed={draftColor === swatch}
         title={swatch}
@@ -233,7 +233,7 @@
       placeholder="#rrggbb"
       aria-label="Custom hex color"
       class="min-w-0 flex-1 rounded-md border px-2 py-1 font-mono text-xs outline-none focus:border-[var(--color-accent)]"
-      style="background: var(--color-surface-1); border-color: var(--color-border); color: var(--color-text);"
+      style="background: var(--color-surface-1); border-color: var(--color-border); color: var(--color-text-primary);"
       bind:value={customColor}
     />
     <button
@@ -279,3 +279,40 @@
     </button>
   </div>
 </div>
+
+<style>
+  .appearance-preview {
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--preview-tint) 14%, var(--color-surface-3));
+  }
+  .appearance-emoji:hover {
+    background: var(--color-surface-3);
+  }
+  .appearance-emoji[aria-pressed='true'] {
+    background: var(--color-surface-3);
+    box-shadow: inset 0 0 0 1.5px var(--color-accent);
+  }
+  .appearance-swatch {
+    transition: transform var(--duration-fast) var(--ease-out);
+  }
+  .appearance-swatch:hover {
+    transform: scale(1.12);
+  }
+  .appearance-swatch-none {
+    border-color: var(--color-border);
+    color: var(--color-text-muted);
+  }
+  /* Selected swatch: a surface gap then a primary-text ring, visible on any
+     swatch color in light and dark themes. */
+  .appearance-swatch[aria-pressed='true'] {
+    box-shadow:
+      0 0 0 2px var(--color-surface-2),
+      0 0 0 3.5px var(--color-text-primary);
+  }
+  .appearance-swatch:focus-visible,
+  .appearance-emoji:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+</style>

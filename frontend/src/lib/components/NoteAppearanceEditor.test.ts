@@ -91,3 +91,15 @@ it('edits tag appearance with the tag heading', () => {
   renderEditor({ target: { kind: 'tag', tag: 'urgent' } });
   expect(screen.getByRole('dialog', { name: 'Appearance for #urgent' })).toBeTruthy();
 });
+
+it('previews the draft emoji and color live and uses only defined text tokens', async () => {
+  renderEditor({ target: { kind: 'tag', tag: 'spec' } });
+  const dialog = screen.getByRole('dialog', { name: 'Appearance for #spec' });
+  await fireEvent.click(screen.getByRole('button', { name: 'Use 🚀' }));
+  await fireEvent.click(screen.getByRole('button', { name: 'Color rose' }));
+  const preview = dialog.querySelector('.appearance-preview') as HTMLElement;
+  expect(preview.textContent).toContain('🚀');
+  expect(preview.getAttribute('style')).toContain('--preview-tint');
+  // `--color-text` is not a theme token; it silently fell back before.
+  expect(dialog.outerHTML).not.toMatch(/var\(--color-text\)/);
+});

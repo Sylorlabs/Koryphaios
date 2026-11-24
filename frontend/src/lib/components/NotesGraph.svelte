@@ -953,7 +953,7 @@
     </span>
     {#if performanceLayout}
       <span
-        class="rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider"
+        class="rounded-full border px-2 py-0.5 text-[11px] font-medium"
         style="border-color: var(--color-border); color: var(--color-success);"
         >Stable layout</span
       >
@@ -1039,7 +1039,7 @@
       "
     >
       <div
-        class="text-[10px] font-semibold uppercase tracking-widest mb-2"
+        class="text-[11px] font-medium mb-2"
         style="color: var(--color-text-muted);"
       >
         Vault folders
