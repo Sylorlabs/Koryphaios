@@ -1,4 +1,4 @@
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import type { Browser, BrowserContext, Page } from 'playwright';
 import { Logger } from '../utils/logger.js';
 
 export class PlaywrightManager {
@@ -14,6 +14,10 @@ export class PlaywrightManager {
 
   async initialize(): Promise<void> {
     if (!this.browser) {
+      // Loaded lazily so the bundled server still boots where the optional
+      // playwright dependency is absent (packaged installs); only the browser
+      // automation tools need it.
+      const { chromium } = await import('playwright');
       this.browser = await chromium.launch({ headless: true });
       this.logger.info('Playwright Chromium launched');
     }
@@ -51,13 +55,13 @@ export class PlaywrightManager {
       this.pages.set(sessionId, page);
 
       // Capture logs
-      page.on('console', (msg) => {
+      page.on('console', msg => {
         const logs = this.consoleLogs.get(sessionId) || [];
         logs.push(`[${msg.type()}] ${msg.text()}`);
         this.consoleLogs.set(sessionId, logs);
       });
 
-      page.on('pageerror', (err) => {
+      page.on('pageerror', err => {
         const logs = this.consoleLogs.get(sessionId) || [];
         logs.push(`[error] ${err.message}`);
         this.consoleLogs.set(sessionId, logs);

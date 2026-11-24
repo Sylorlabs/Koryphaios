@@ -47,6 +47,7 @@
     "build:frontend:static": "bun run desktop/scripts/build-frontend.ts",
     "build": "bun run write-compat-hash && bun run --filter '!desktop' build && bun run --filter desktop build",
     "build:desktop": "bun run scripts/build-desktop.ts",
+    "desktop:bake-icon": "bun run desktop/scripts/apply-bundle-icon.ts",
     "typecheck": "bun run --filter '*' typecheck",
     "typecheck:ci": "bun run --filter backend typecheck && bun run --filter frontend check",
     "test": "bun run --filter '*' test",

@@ -14,13 +14,7 @@
  *   KORY_RUN_LIVE_PROVIDER_TESTS=1 bun scripts/e2e-freebuff-live.ts
  */
 import { spawn, spawnSync, type Subprocess } from 'node:child_process';
-import {
-  existsSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
@@ -51,32 +45,35 @@ function emit(scenario: string, result: Record<string, unknown>): void {
 
 // ── PNG encoder (pure, no deps): white 5x7 bitmap glyphs on dark bg ──
 const FONT: Record<string, string[]> = {
-  '0': ['01110','10001','10011','10101','11001','10001','01110'],
-  '1': ['00100','01100','00100','00100','00100','00100','01110'],
-  '2': ['01110','10001','00001','00010','00100','01000','11111'],
-  '3': ['11110','00001','00001','01110','00001','00001','11110'],
-  '4': ['00010','00110','01010','10010','11111','00010','00010'],
-  '5': ['11111','10000','11110','00001','00001','10001','01110'],
-  '6': ['00110','01000','10000','11110','10001','10001','01110'],
-  '7': ['11111','00001','00010','00100','01000','01000','01000'],
-  '8': ['01110','10001','10001','01111','00001','00010','01100'],
-  '9': ['01110','10001','10001','01111','00001','00010','01100'],
-  A: ['01110','10001','10001','11111','10001','10001','10001'],
-  B: ['11110','10001','10001','11110','10001','10001','11110'],
-  C: ['01110','10001','10000','10000','10000','10001','01110'],
-  D: ['11100','10010','10001','10001','10001','10010','11100'],
-  E: ['11111','10000','10000','11110','10000','10000','11111'],
-  F: ['11111','10000','10000','11110','10000','10000','10000'],
-  K: ['10001','10010','10100','11000','10100','10010','10001'],
-  M: ['10001','11011','10101','10101','10001','10001','10001'],
-  N: ['10001','11001','10101','10011','10001','10001','10001'],
-  P: ['11110','10001','10001','11110','10000','10000','10000'],
-  R: ['11110','10001','10001','11110','10100','10010','10001'],
-  T: ['11111','00100','00100','00100','00100','00100','00100'],
-  X: ['10001','10001','01010','00100','01010','10001','10001'],
-  Z: ['11111','00001','00010','00100','01000','10000','11111'],
+  '0': ['01110', '10001', '10011', '10101', '11001', '10001', '01110'],
+  '1': ['00100', '01100', '00100', '00100', '00100', '00100', '01110'],
+  '2': ['01110', '10001', '00001', '00010', '00100', '01000', '11111'],
+  '3': ['11110', '00001', '00001', '01110', '00001', '00001', '11110'],
+  '4': ['00010', '00110', '01010', '10010', '11111', '00010', '00010'],
+  '5': ['11111', '10000', '11110', '00001', '00001', '10001', '01110'],
+  '6': ['00110', '01000', '10000', '11110', '10001', '10001', '01110'],
+  '7': ['11111', '00001', '00010', '00100', '01000', '01000', '01000'],
+  '8': ['01110', '10001', '10001', '01111', '00001', '00010', '01100'],
+  '9': ['01110', '10001', '10001', '01111', '00001', '00010', '01100'],
+  A: ['01110', '10001', '10001', '11111', '10001', '10001', '10001'],
+  B: ['11110', '10001', '10001', '11110', '10001', '10001', '11110'],
+  C: ['01110', '10001', '10000', '10000', '10000', '10001', '01110'],
+  D: ['11100', '10010', '10001', '10001', '10001', '10010', '11100'],
+  E: ['11111', '10000', '10000', '11110', '10000', '10000', '11111'],
+  F: ['11111', '10000', '10000', '11110', '10000', '10000', '10000'],
+  K: ['10001', '10010', '10100', '11000', '10100', '10010', '10001'],
+  M: ['10001', '11011', '10101', '10101', '10001', '10001', '10001'],
+  N: ['10001', '11001', '10101', '10011', '10001', '10001', '10001'],
+  P: ['11110', '10001', '10001', '11110', '10000', '10000', '10000'],
+  R: ['11110', '10001', '10001', '11110', '10100', '10010', '10001'],
+  T: ['11111', '00100', '00100', '00100', '00100', '00100', '00100'],
+  X: ['10001', '10001', '01010', '00100', '01010', '10001', '10001'],
+  Z: ['11111', '00001', '00010', '00100', '01000', '10000', '11111'],
 };
-const GLYPH_CHARS = Object.keys(FONT);
+// Only maximally-distinct glyphs: in a 5x7 bitmap font Z/2, 0/8/B, 1/7, P/F and
+// P/R are confusable even for paid vision tiers, which would make the
+// exact-match check test the font rather than the image pipeline.
+const GLYPH_CHARS = Object.keys(FONT).filter((char) => 'ACDEKNRTX'.includes(char));
 
 function crc32(buf: Buffer): number {
   const table = new Int32Array(256);
@@ -91,10 +88,12 @@ function crc32(buf: Buffer): number {
 }
 
 function pngWithCode(code: string): Buffer {
-  const scale = 14;
+  // Solid black-on-white block glyphs: dotted-matrix text is a hard OCR case
+  // for the free vision tier, not a pipeline defect.
+  const scale = 18;
   const w = 40 + code.length * 6 * scale;
   const h = 40 + 7 * scale;
-  const px = Buffer.alloc(w * h * 3, 0x12);
+  const px = Buffer.alloc(w * h * 3, 0xf0);
   for (let ci = 0; ci < code.length; ci++) {
     const glyph = FONT[code[ci]!]!;
     for (let gy = 0; gy < 7; gy++)
@@ -102,10 +101,12 @@ function pngWithCode(code: string): Buffer {
         if (glyph[gy]![gx] !== '1') continue;
         const x0 = 20 + (ci * 6 + gx) * scale;
         const y0 = 20 + gy * scale;
-        for (let dy = 0; dy < scale - 1; dy++)
-          for (let dx = 0; dx < scale - 1; dx++) {
+        for (let dy = 0; dy < scale; dy++)
+          for (let dx = 0; dx < scale; dx++) {
             const o = ((y0 + dy) * w + (x0 + dx)) * 3;
-            px[o] = 0xf0; px[o + 1] = 0xf0; px[o + 2] = 0xf0;
+            px[o] = 0x10;
+            px[o + 1] = 0x10;
+            px[o + 2] = 0x10;
           }
       }
   }
@@ -123,8 +124,10 @@ function pngWithCode(code: string): Buffer {
     return Buffer.concat([len, body, crc]);
   };
   const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4);
-  ihdr[8] = 8; ihdr[9] = 2; // 8-bit RGB
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2; // 8-bit RGB
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk('IHDR', ihdr),
@@ -204,7 +207,9 @@ async function connectWs(): Promise<void> {
         // The server terminates clients that don't answer its 10s heartbeat.
         if (ev.type === 'ping') ws!.send(JSON.stringify({ type: 'pong' }));
         onEvent(ev);
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     };
   });
 }
@@ -244,8 +249,7 @@ function armQuestionAnswerer(sessionId: string): void {
       ).catch(() => null);
       if (!ev) return;
       const payload = ev.payload as
-        | { questionId?: string; options?: Array<{ label?: string } | string> }
-        | undefined;
+        { questionId?: string; options?: Array<{ label?: string } | string> } | undefined;
       // Binary tool approvals reject on "Other"; pick the affirmative option.
       const options = (payload?.options ?? []).map((o) =>
         typeof o === 'string' ? o : (o.label ?? ''),
@@ -316,11 +320,7 @@ async function sendTurn(
     const snapshot = ev.payload?.snapshot as { phase?: string; terminalReason?: string };
     terminalReason = snapshot.terminalReason ?? '';
     outcome =
-      snapshot.phase === 'cancelled'
-        ? 'cancel'
-        : snapshot.phase === 'error'
-          ? 'fail'
-          : 'complete';
+      snapshot.phase === 'cancelled' ? 'cancel' : snapshot.phase === 'error' ? 'fail' : 'complete';
   } catch {
     outcome = 'timeout';
   }
@@ -352,7 +352,15 @@ async function sendTurn(
       .filter((e) => e.type === 'stream.tool_call')
       .map((e) => String((e.payload as { agentId?: string })?.agentId ?? '')),
   );
-  return { outcome, terminalReason, events, assistantText, permissionRequests, spawned, toolCallAgents };
+  return {
+    outcome,
+    terminalReason,
+    events,
+    assistantText,
+    permissionRequests,
+    spawned,
+    toolCallAgents,
+  };
 }
 
 const isFreebuffAgent = (a: SpawnedAgent) =>
@@ -367,7 +375,17 @@ async function main(): Promise<void> {
     if (b.status !== 0) throw new Error('backend bundle build failed');
   }
   git(['init', '-q']);
-  git(['-c', 'user.email=e2e@local', '-c', 'user.name=e2e', 'commit', '-q', '--allow-empty', '-m', 'init']);
+  git([
+    '-c',
+    'user.email=e2e@local',
+    '-c',
+    'user.name=e2e',
+    'commit',
+    '-q',
+    '--allow-empty',
+    '-m',
+    'init',
+  ]);
 
   backend = spawn('bun', [bundlePath], {
     cwd: backendDir,
@@ -390,14 +408,31 @@ async function main(): Promise<void> {
         token = body.data?.bearerToken ?? '';
         if (token) break;
       }
-    } catch { /* retry */ }
+    } catch {
+      /* retry */
+    }
     await Bun.sleep(1000);
   }
   if (!token) throw new Error('backend never became ready');
   await connectWs();
   // Connect the Freebuff provider: the connect probe discovers the CLI login
   // and ensures the isolated runtime (image is already built on this host).
-  await api('PUT', '/api/providers/freebuff', { authToken: 'cli:freebuff:detected' });
+  // The probe's in-container exec can be SIGKILLed (~8% observed); a failed
+  // status is re-probed on the next refresh, so one retry is enough.
+  {
+    let connected = false;
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3 && !connected; attempt += 1) {
+      try {
+        await api('PUT', '/api/providers/freebuff', { authToken: 'cli:freebuff:detected' });
+        connected = true;
+      } catch (error) {
+        lastError = error;
+        await Bun.sleep(11_000);
+      }
+    }
+    if (!connected) throw lastError;
+  }
 
   const FB = 'freebuff:freebuff/cli-default';
   const FB_CRITIC = 'freebuff:freebuff/catalog-m-096e75164d';
@@ -416,8 +451,7 @@ async function main(): Promise<void> {
     subscribe(s.id);
     return s.id;
   };
-  const setMode = (permissionMode: string) =>
-    api('PUT', '/api/agent/settings', { permissionMode });
+  const setMode = (permissionMode: string) => api('PUT', '/api/agent/settings', { permissionMode });
   // Route every worker domain AND the critic to Freebuff; the critic pool uses
   // a different Freebuff model because the critic gate refuses producer identity.
   const setAccess = () =>
@@ -436,10 +470,7 @@ async function main(): Promise<void> {
   await setAccess();
   const scenarioTimes: Record<string, number> = {};
   const results: Record<string, Record<string, unknown>> = {};
-  const timed = async (
-    id: string,
-    fn: () => Promise<Record<string, unknown>>,
-  ): Promise<void> => {
+  const timed = async (id: string, fn: () => Promise<Record<string, unknown>>): Promise<void> => {
     // Freebuff holds a server-side lease per TUI session; a turn that just
     // ended may not have released its slot yet, and the account's concurrent
     // limit terminates a fresh TUI admitted too quickly. Space the turns and
@@ -453,8 +484,7 @@ async function main(): Promise<void> {
     let attempts = 0;
     try {
       for (attempts = 1; attempts <= 2; attempts += 1) {
-        if (id !== 'S1' || attempts > 1)
-          await Bun.sleep(attempts > 1 ? 45_000 : 20_000);
+        if (id !== 'S1' || attempts > 1) await Bun.sleep(attempts > 1 ? 45_000 : 20_000);
         try {
           result = await fn();
         } catch (error) {
@@ -491,7 +521,6 @@ async function main(): Promise<void> {
       koryReadToolCall: eventBlob(t.events).includes('read_file'),
       managerSpawnedFreebuff: roleRan(t, 'manager'),
     };
-
   });
 
   // S2 — real Freebuff WORKER turn writes a file; approval granted.
@@ -517,7 +546,6 @@ async function main(): Promise<void> {
       fileWrittenExact: written,
       workerSpawnedFreebuff: roleRan(t, 'worker'),
     };
-
   });
 
   // S3 — real Freebuff WORKER turn write, approval denied.
@@ -541,7 +569,6 @@ async function main(): Promise<void> {
       denialRecorded: eventBlob(t.events).includes('Reject'),
       workerSpawnedFreebuff: roleRan(t, 'worker'),
     };
-
   });
 
   // S4 — guarded preset blocks a metacharacter shell.
@@ -567,7 +594,6 @@ async function main(): Promise<void> {
       fileAbsent: !existsSync(join(repoDir, file)),
       workerSpawnedFreebuff: roleRan(t, 'worker'),
     };
-
   });
 
   // S5 — Freebuff native tools cannot reach the real workspace.
@@ -589,7 +615,6 @@ async function main(): Promise<void> {
       fileAbsentFromRealWorkspace: !existsSync(join(repoDir, file)),
       workerSpawnedFreebuff: roleRan(t, 'worker'),
     };
-
   });
 
   // S6 — a real Freebuff CRITIC turn cannot write.
@@ -617,7 +642,6 @@ async function main(): Promise<void> {
       criticRan: anyRoleRan(t, 'critic'),
       fileAbsent: !existsSync(join(repoDir, file)),
     };
-
   });
 
   // S7 — image attachment + explicit vision model.
@@ -631,7 +655,7 @@ async function main(): Promise<void> {
     const png = pngWithCode(code).toString('base64');
     const t = await sendTurn(
       session,
-      'The attached image shows a six-character code in large letters. Reply with only the code.',
+      'What characters appear in large block letters in the attached image? List them in order.',
       FB_CRITIC,
       { attachments: [{ type: 'image', data: png, name: 'code.png', mimeType: 'image/png' }] },
     );
@@ -639,10 +663,12 @@ async function main(): Promise<void> {
       outcome: t.outcome,
       reason: t.terminalReason.slice(0, 120),
       completed: t.outcome === 'complete',
-      replyHasCode: t.assistantText.toUpperCase().includes(code),
+      replyHasCode: t.assistantText
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, '')
+        .includes(code),
       model: FB_CRITIC,
     };
-
   });
 
   // S8 — worker writes a Kory note; a real critic turn reads it back.
@@ -665,8 +691,7 @@ async function main(): Promise<void> {
     const summary = notes.find((m) => m.title === title);
     const detail = summary?.id
       ? ((await api('GET', `/api/notes/${summary.id}`).catch(() => undefined)) as
-          | { body?: string; content?: string; title?: string }
-          | undefined)
+          { body?: string; content?: string; title?: string } | undefined)
       : undefined;
     const noteExact = !!detail && JSON.stringify(detail).includes(n2);
     const criticSpawned = roleRan(t1, 'critic') || anyRoleRan(t1, 'critic');
@@ -681,7 +706,6 @@ async function main(): Promise<void> {
       criticRan: criticSpawned,
       criticReplyHasNonce: eventBlob(t1.events).includes(n2) && criticSpawned,
     };
-
   });
 
   // S9 — stability summary.
@@ -702,7 +726,9 @@ try {
 } finally {
   try {
     ws?.close();
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   if (backend) {
     backend.kill('SIGTERM');
     await Bun.sleep(1500);
