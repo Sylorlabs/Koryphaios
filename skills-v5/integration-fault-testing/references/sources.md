@@ -33,5 +33,5 @@
 
 - Prefer the protocol/specification and the actual dependency's versioned documentation over a test tool's convenience abstraction when deciding what behavior is possible.
 - A fault proxy proves behavior at the proxied transport boundary. It does not prove physical network, kernel, device, or provider behavior that the fixture did not reproduce.
-- Keep substitutes contract-faithful and inspectable. A mock that simply returns a chosen error is not equivalent to a real dependency failing after a commit or acknowledgement boundary.
+- Keep substitutes faithful to the contract and inspectable. A mock that simply returns a chosen error is not equivalent to a real dependency failing after a commit or acknowledgement boundary.
 - Preserve the exact fault placement, timing, runtime versions, and durable-state oracle with the result so the failure can become a regression case.
