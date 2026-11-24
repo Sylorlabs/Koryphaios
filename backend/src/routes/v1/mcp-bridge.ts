@@ -15,6 +15,7 @@
 //   POST /api/v1/mcp-bridge/hooks/session-start — SessionStart hook → register
 //   POST /api/v1/mcp-bridge/hooks/session-end   — SessionEnd hook → flush
 
+import { forkChatCoordinated } from '../../services/session-fork-coordinator';
 import { Elysia, t } from 'elysia';
 import { mcpProjectScope } from '../../mcp/project-scope';
 import { ensureProjectMcpServers } from '../../mcp/server-service';
@@ -55,6 +56,7 @@ import {
 } from '../../providers/bridge-grant';
 import type { SessionToken } from '../../auth/local-auth';
 import { safeProviderDiagnostic } from '../../providers/provider-diagnostics';
+import { redactSecretsInText } from '../../security';
 import {
   antigravityNativeToolEquivalent,
   antigravityNativeToolRedirectReason,
@@ -527,6 +529,18 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
           ...(normalizedRole === 'manager'
             ? {
                 renameSession: (title: string) => kory.renameSession(sessionId, title),
+                forkChat: async (input: { sessionId?: string; messageId?: string; title?: string }) => {
+                  const outcome = await forkChatCoordinated({
+                    sourceSessionId: input.sessionId ?? sessionId,
+                    messageId: input.messageId,
+                    title: input.title,
+                  });
+                  return {
+                    sessionId: outcome.session.id,
+                    title: outcome.session.title,
+                    copiedMessageCount: outcome.copiedMessageCount,
+                  };
+                },
                 delegateToWorker: (
                   task: string,
                   domain?: string,
@@ -565,6 +579,16 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
             input,
           }),
         );
+        // The host sees every bridge execution even when the CLI's own
+        // transcript shows only a dispatcher (execute / mcp_call_tool); the
+        // ledger is what critics verify against.
+        kory.recordBridgeToolExecution?.(sessionId, {
+          name: toolName,
+          input: redactSecretsInText(JSON.stringify(input), 300),
+          output: redactSecretsInText(result.output, 300),
+          isError: result.isError,
+          at: Date.now(),
+        });
         return {
           ok: true,
           output: result.output,

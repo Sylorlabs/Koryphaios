@@ -229,7 +229,7 @@ describe('V5 skill audit ledger', () => {
     expect(webInterface).toMatchObject({
       v5Status: 'candidate',
       freshness: 'fresh',
-      packageVersion: '5.0.6',
+      packageVersion: '5.0.7',
       routing: { positive: 5, negative: 5, ambiguous: 3, adversarial: 3 },
     });
     expect(webInterface.steward).toBe('ChatGPT web — web-interface');

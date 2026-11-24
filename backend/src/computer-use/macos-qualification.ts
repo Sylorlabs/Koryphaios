@@ -3,6 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildNativeInspectorBinaries } from '../kory/native-macos-document-inspector/qualification';
+import { isMac } from '../runtime/platform';
 import { createComputerPlatformAdapter } from './platform';
 import { stopComputerUse } from './control';
 import type { ComputerPlatformStatus, ComputerTarget } from '@koryphaios/shared';
@@ -37,7 +38,7 @@ function waitForReady(child: ChildProcessWithoutNullStreams): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  if (process.platform !== 'darwin') throw new Error('macOS computer-use qualification requires macOS');
+  if (!isMac()) throw new Error('macOS computer-use qualification requires macOS');
   const output = mkdtempSync(join(tmpdir(), 'kory-computer-use-macos-'));
   const build = buildNativeInspectorBinaries(output);
   const child = spawn(build.binaries.healthy, [], { stdio: ['pipe', 'pipe', 'pipe'] });

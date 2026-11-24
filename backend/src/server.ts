@@ -16,12 +16,12 @@ import { bootstrap } from './bootstrap';
 import { killOwnerDisplayProcesses } from './security/owner-display-guard';
 import { setContext } from './context';
 import { serverLog } from './logger';
-import { VERSION, ID, RATE_LIMIT, COMPAT, SECURITY } from './constants';
+import { VERSION, ID, RATE_LIMIT, SECURITY } from './constants';
 import { RateLimiter } from './security/rate-limit';
 import { addCorsOrigins } from './security';
 import { PROJECT_ROOT } from './runtime/paths';
+import { resumeInterruptedRunsEnabled } from './runs/resume-setting';
 import { clearStartupStatus, markStartupReady, reportStartupPhase } from './runtime/startup-status';
-import { resolveBundleHash, isBundleHashEnforced } from './config/compat';
 import { createWebSocketHandlers } from './server/websocket-handler';
 import { stopCatalogRefresh } from './providers/catalog-refresh';
 import { disposeMonitors } from './kory/services/monitor-service';
@@ -37,21 +37,26 @@ import { setDeviceWorkbenchHandler } from './devices/workbench';
 import { isContainedBy } from './runtime/platform';
 import { recordRequestPeer } from './auth/request-peer';
 import { deviceRoutes } from './routes/v1/devices';
+import { systemRoutes } from './routes/v1/system';
 
 // Routes
 import { sessionRoutes } from './routes/v1/sessions';
+import { scheduleRoutes } from './routes/v1/schedules';
 import { messageRoutes } from './routes/v1/messages';
 import { providerRoutes } from './routes/v1/providers';
+import { agentRoutes } from './routes/v1/agents';
 import { collaborationRoutes } from './routes/collaboration';
 import { authRoutes } from './routes/v1/auth';
 import { agentSettingsRoutes } from './routes/v1/agent-settings';
 import { createComputerUseRoutes } from './routes/v1/computer-use';
 import { gitRoutes } from './routes/v1/git';
+import { sessionReviewRoutes } from './routes/v1/session-review';
 import { memoryRoutes } from './routes/v1/memory';
 import { spendRoutes } from './routes/v1/spend';
 import { spendCapsRoutes } from './routes/v1/spend-caps';
 import { billingRoutes } from './routes/v1/billing';
 import { processRoutes } from './routes/v1/processes';
+import { terminalRoutes } from './routes/v1/terminals';
 import { notesRoutes } from './routes/v1/notes';
 import { workspaceRoutes } from './routes/v1/workspace';
 import { goalRoutes } from './routes/v1/goals';
@@ -68,59 +73,34 @@ import { feedRoutes } from './routes/v1/feed';
 import { agentMessageRoutes } from './routes/v1/agent-messages';
 import { appearanceRoutes } from './routes/v1/appearance';
 import { desktopUiRoutes } from './routes/v1/desktop-ui';
+import { runRoutes } from './routes/v1/runs';
 import { updateRoutes } from './routes/v1/updates';
 import { cliChatImportRoutes } from './routes/v1/cli-chat-import';
 import { errorHandlingMiddleware, errorHandler } from './middleware/error-handling';
 
-const SERVER_STARTED_AT = Date.now();
-const BACKEND_SERVICE_ID = 'koryphaios';
-
 // Define base Elysia App for export
 const baseApp = new Elysia()
-  .get('/api/health', () => ({
-    ok: true,
-    data: {
-      id: BACKEND_SERVICE_ID,
-      version: VERSION,
-      uptime: process.uptime(),
-      // Lets the desktop supervisor reject a stale process already bound to
-      // the configured port instead of mistaking it for the embedded service.
-      pid: process.pid,
-      // Frontend/backend compatibility contract. The frontend reads this and
-      // halts normal operation when its own version/bundle-hash falls outside
-      // the range the backend reports. Prevents a stale frontend from running
-      // silently against a fresh backend (or vice versa).
-      compat: {
-        minFrontend: COMPAT.minFrontend,
-        currentFrontend: COMPAT.currentFrontend,
-        bundleHash: resolveBundleHash(),
-        bundleHashEnforced: isBundleHashEnforced(),
-        serverStartedAt: SERVER_STARTED_AT,
-      },
-    },
-  }))
-  .get('/api/project', async () => {
-    const { basename } = await import('node:path');
-    const projectName = basename(PROJECT_ROOT);
-    return { ok: true, data: { projectName } };
-  })
-  .post('/api/debug/log-error', () => ({ ok: true }))
+  .use(systemRoutes)
   .onError(errorHandler)
   .use(sessionRoutes)
+  .use(scheduleRoutes)
   .use(feedRoutes)
   .use(messageRoutes)
   .use(providerRoutes)
+  .use(agentRoutes)
   .use(collaborationRoutes)
   .use(deviceRoutes)
   .use(authRoutes)
   .use(agentSettingsRoutes)
   .use(createComputerUseRoutes())
   .use(gitRoutes)
+  .use(sessionReviewRoutes)
   .use(memoryRoutes)
   .use(spendRoutes)
   .use(spendCapsRoutes)
   .use(billingRoutes)
   .use(processRoutes)
+  .use(terminalRoutes)
   .use(notesRoutes)
   .use(workspaceRoutes)
   .use(goalRoutes)
@@ -136,6 +116,7 @@ const baseApp = new Elysia()
   .use(agentMessageRoutes)
   .use(appearanceRoutes)
   .use(desktopUiRoutes)
+  .use(runRoutes)
   .use(updateRoutes)
   .use(cliChatImportRoutes);
 
@@ -551,7 +532,9 @@ async function main() {
       // Freeze local lifecycle writers first. Durable user/process waits survive
       // restart; only provider/compaction work that cannot survive is failed.
       await kory.shutdown();
-      await runs.recoverInterruptedRuns();
+      await runs.recoverInterruptedRuns({
+        resumeInterruptedRuns: resumeInterruptedRunsEnabled(PROJECT_ROOT),
+      });
       await runs.drainOutbox();
       runs.stopOutboxPump();
       await stopRemoteInstanceHost();

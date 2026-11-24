@@ -85,6 +85,24 @@ export function looksLikePath(command: string): boolean {
 }
 
 /**
+ * The interactive shell a user terminal starts.
+ *
+ * Unix: the account's login shell (`$SHELL`, else the platform default), started
+ * as a login shell so the user's profile loads exactly as in their own terminal.
+ * Windows: PowerShell when it is on PATH, otherwise `cmd.exe`, both hosted
+ * through ConPTY by the PTY layer.
+ */
+export function interactiveShell(): { command: string; args: string[] } {
+  if (isWindows()) {
+    const pwsh = findOnPath('pwsh') ?? findOnPath('powershell');
+    if (pwsh) return { command: pwsh, args: ['-NoLogo'] };
+    return { command: process.env.COMSPEC?.trim() || 'cmd.exe', args: [] };
+  }
+  const configured = process.env.SHELL?.trim();
+  return { command: configured || (isMac() ? '/bin/zsh' : '/bin/bash'), args: ['-l'] };
+}
+
+/**
  * Locate an executable on PATH without spawning a process.
  *
  * Probing the filesystem beats `which`/`where` because it works for stubbed

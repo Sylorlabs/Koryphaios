@@ -26,6 +26,7 @@ const DIRECT_SESSION_TABLES = [
   'user_inputs',
   'session_turn_commands',
   'agent_steering_commands',
+  'session_review_comments',
   // Only session-scoped checklists carry a session_id (the table's own CHECK
   // constraint guarantees it), so a `WHERE session_id = ?` delete removes the
   // lists that chat owned and leaves workspace- and project-scoped ones -- which

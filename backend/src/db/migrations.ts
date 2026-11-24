@@ -1077,6 +1077,32 @@ export const MIGRATIONS: Migration[] = [
       DROP INDEX IF EXISTS idx_sessions_active_updated;
     `,
   },
+  // ─── Version 0060: Chat fork lineage ──────────────────────────────────────
+  // A fork is a new chat whose copied history was taken from a source chat. The
+  // lineage is a durable record, so it is stored on the row rather than in the
+  // metadata blob: the source id and fork point are queryable, and a source that
+  // is later erased leaves the fork's record intact (no foreign key, like parent_id).
+  // `forked_base_message_id` is the fork's copy of its fork point; merge-back
+  // summarizes only the messages after it. `forked_merged_at` makes the merge a
+  // one-time, marked transition.
+  {
+    version: '0060',
+    description: 'Record chat fork lineage, the fork base, and merge-back state on sessions',
+    up: `
+      ALTER TABLE sessions ADD COLUMN forked_from_session_id TEXT;
+      ALTER TABLE sessions ADD COLUMN forked_from_message_id TEXT;
+      ALTER TABLE sessions ADD COLUMN forked_at INTEGER;
+      ALTER TABLE sessions ADD COLUMN forked_base_message_id TEXT;
+      ALTER TABLE sessions ADD COLUMN forked_merged_at INTEGER;
+      CREATE INDEX IF NOT EXISTS idx_sessions_forked_from
+        ON sessions(forked_from_session_id) WHERE forked_from_session_id IS NOT NULL;
+    `,
+    // SQLite cannot drop columns without rebuilding the authoritative session
+    // table. Lineage is retained on rollback, as with the 0036 archive marker.
+    down: `
+      DROP INDEX IF EXISTS idx_sessions_forked_from;
+    `,
+  },
   {
     version: '0037',
     description: 'Normalize durable process ownership for session-run continuations',
@@ -2183,6 +2209,85 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE notes DROP COLUMN content_hash;
     `,
   },
+  {
+    version: '0061',
+    description: 'Persist inline review comments on a chat diff',
+    up: `
+      CREATE TABLE IF NOT EXISTS session_review_comments (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        file_path TEXT NOT NULL,
+        line INTEGER NOT NULL CHECK (line >= 1),
+        side TEXT NOT NULL CHECK (side IN ('old', 'new')),
+        staged INTEGER NOT NULL CHECK (staged IN (0, 1)),
+        body TEXT NOT NULL CHECK (length(body) BETWEEN 1 AND 8000),
+        hunk_header TEXT,
+        status TEXT NOT NULL CHECK (status IN ('open', 'resolved')),
+        sent_batch_id TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        resolved_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_session_review_comments_session
+        ON session_review_comments(session_id, status, created_at);
+    `,
+    down: `
+      DROP INDEX IF EXISTS idx_session_review_comments_session;
+      DROP TABLE IF EXISTS session_review_comments;
+    `,
+  },
+  {
+    version: '0062',
+    description:
+      'Durable run resumption: interrupted-run continuation ledger and per-session pending usage-limit resumes',
+    up: `
+      -- One row per interrupted run that was considered for automatic
+      -- continuation. source_run_id is the primary key, so a run is resumed at
+      -- most once across any number of restarts.
+      CREATE TABLE IF NOT EXISTS session_run_resumes (
+        source_run_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('pending', 'admitted', 'skipped')),
+        command_key TEXT,
+        reason TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_session_run_resumes_state
+        ON session_run_resumes(state);
+
+      -- At most one pending usage-limit resume per session. The row is the
+      -- durable record a restart re-arms; clearing it is the user's "Cancel".
+      CREATE TABLE IF NOT EXISTS session_pending_resumes (
+        session_id TEXT PRIMARY KEY,
+        id TEXT NOT NULL UNIQUE,
+        reason TEXT NOT NULL CHECK (reason IN ('usage_limit')),
+        provider TEXT,
+        model TEXT,
+        resume_at INTEGER NOT NULL,
+        attempt INTEGER NOT NULL CHECK (attempt >= 0),
+        state TEXT NOT NULL CHECK (state IN ('scheduled', 'resuming')),
+        message TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+    `,
+    down: `
+      DROP TABLE IF EXISTS session_pending_resumes;
+      DROP INDEX IF EXISTS idx_session_run_resumes_state;
+      DROP TABLE IF EXISTS session_run_resumes;
+    `,
+  },
+  {
+    version: '0063',
+    description: 'Pending usage-limit resumes remember the stopped run whose output they continue',
+    up: `
+      ALTER TABLE session_pending_resumes ADD COLUMN source_run_id TEXT;
+    `,
+    down: `
+      ALTER TABLE session_pending_resumes DROP COLUMN source_run_id;
+    `,
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────────────
@@ -3094,6 +3199,23 @@ export class MigrationRunner {
     );
   }
 
+  private validateSessionForkSchema(): void {
+    this.requireColumns('sessions', {
+      forked_from_session_id: { type: 'TEXT', notNull: false },
+      forked_from_message_id: { type: 'TEXT', notNull: false },
+      forked_at: { type: 'INTEGER', notNull: false },
+      forked_base_message_id: { type: 'TEXT', notNull: false },
+      forked_merged_at: { type: 'INTEGER', notNull: false },
+    });
+    const sql = this.getSchemaSql('index', 'idx_sessions_forked_from');
+    const normalized = (sql ?? '').toLowerCase().replace(/["`\s]/g, '');
+    if (!normalized.includes('onsessions(forked_from_session_id)where')) {
+      throw new Error(
+        'Migration postcondition failed: index idx_sessions_forked_from has the wrong shape',
+      );
+    }
+  }
+
   private validateNotesDataTrustSchema(): void {
     this.requireColumns('notes', {
       trashed_at: { type: 'INTEGER', notNull: false },
@@ -3341,6 +3463,7 @@ export class MigrationRunner {
     if (migration.version === '0041') this.validateVaultRestoreCommitSchema();
     if (migration.version === '0042') this.validateFeedPersistenceSchema();
     if (migration.version === '0043') this.validateSessionTurnCommandSchema();
+    if (migration.version === '0060') this.validateSessionForkSchema();
     if (migration.version === '0056') {
       this.validateSessionTurnCommandSchema(['goal', 'collaboration', 'internal', 'user']);
     }

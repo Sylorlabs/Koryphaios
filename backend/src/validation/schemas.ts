@@ -326,3 +326,40 @@ export function validationErrorResponse(errors: z.ZodError): APIResponse {
     error: `Validation failed: ${messages.join(', ')}`,
   };
 }
+
+// ─── Fallback chain ──────────────────────────────────────────────────────────
+
+const FallbackReasoningLevelSchema = z.enum(['low', 'medium', 'high', 'xhigh']);
+
+export const FallbackStepSchema = z.object({
+  provider: z.string().trim().min(1, 'Each fallback step needs a provider').max(64),
+  model: z.string().trim().min(1, 'Each fallback step needs a model').max(200),
+  reasoningLevel: FallbackReasoningLevelSchema.optional(),
+  label: z.string().trim().max(80).optional(),
+});
+
+export const FallbackChainSchema = z.object({
+  steps: z.array(FallbackStepSchema).max(50, 'A fallback chain holds at most 50 steps'),
+  triggers: z
+    .object({
+      usageLimit: z.boolean(),
+      rateLimit: z.boolean(),
+      providerError: z.boolean(),
+      timeout: z.boolean(),
+    })
+    .optional(),
+  returnToPrimary: z.enum(['next_turn', 'after_reset', 'never']).optional(),
+});
+
+export const FallbackChainRoleSchema = z.enum(['default', 'manager', 'worker', 'critic']);
+
+/** PUT /api/agent/fallback-chain. A null chain clears that role. */
+export const AgentFallbackChainRequestSchema = z.object({
+  role: FallbackChainRoleSchema,
+  chain: FallbackChainSchema.nullable(),
+});
+
+/** PUT /api/sessions/:id/fallback-chain. */
+export const SessionFallbackChainRequestSchema = z.object({
+  chain: FallbackChainSchema,
+});

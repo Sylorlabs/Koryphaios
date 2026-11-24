@@ -42,6 +42,7 @@ const EXPOSURE_HINTS: Readonly<Record<string, string>> = Object.freeze({
   ask_user:
     'Ask the human whenever you are unsure; waits for the answer. params: question, options (2-4 short strings; a custom-answer box is always shown)',
   rename_session: 'Rename this chat as its topic evolves. params: title (3-6 descriptive words)',
+  fork_chat: 'Fork a chat into a new one from a finished point (default: latest). Original is unchanged. params: sessionId, messageId, title',
   request_manager_relay: 'Relay a message to the manager on another agent behalf.',
   send_agent_message: 'Send a message to another agent. params: body',
   fetch_context: 'Pull previously pruned context back into the window. params: id, query',
@@ -57,7 +58,8 @@ const EXPOSURE_HINTS: Readonly<Record<string, string>> = Object.freeze({
   'analyze-error': 'Explain one already-detected error. params: errorId',
   'detect-errors': 'Scan a source tree for errors. params: source, language, files',
   'suggest-fixes': 'Propose fixes for a detected error. params: errorId',
-  delegate_to_worker: 'Delegate to a local specialist worker. params: task, domain',
+  delegate_to_worker: 'Delegate to a local specialist worker. params: task, domain, model, wait, compare',
+  wait_for_agents: 'Join background workers started with wait:false. params: agentIds, timeoutSec',
   manage_agents: 'List or control spawned workers. params: action, agentId, message, model, reasoningLevel, keepRecent',
   ghost_commit: 'Commit work-in-progress locally. params: label',
   commit_and_create_pr: 'Commit, push, and open a pull request. params: taskDescription',
@@ -66,6 +68,8 @@ const EXPOSURE_HINTS: Readonly<Record<string, string>> = Object.freeze({
   git_switch:
     'Switch this chat only, requiring clean files and no workers. params: expectedHead, expectedBranch, target (kind, ref/number, branch?, expectedHash?)',
   get_resource_budget: 'Report remaining provider credit and rate limits.',
+  get_model_pricing: 'Read per-model prices before choosing a route. params: models, provider',
+  get_usage_summary: 'Read spend so far, spend caps and quota states. params: scope, sessionId',
   load_skill_detail: 'Load the full instructions for one skill. params: name',
   recall_notes: 'Load full bodies for selected notes. params: query, titles, ids',
   retrieve_note_context:

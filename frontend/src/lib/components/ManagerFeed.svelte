@@ -579,7 +579,9 @@
           class="h-full p-4 feed-scroll"
         >
           {#snippet row(entry, i)}
-            <div class="pb-3">
+            <!-- Rows share one centered reading column so prose never runs the
+                 full width of a wide window; wide tables and code scroll inside. -->
+            <div class="feed-reading-column pb-3">
               <FeedEntry
                 {entry}
                 isSelected={false}
@@ -640,112 +642,15 @@
     pointer-events: none;
   }
 
-  :global(.markdown-content) {
-    font-size: 14px;
-    line-height: 1.7;
-  }
-  :global(.markdown-content p) {
-    margin-bottom: 0.75em;
-  }
-  :global(.markdown-content p:last-child) {
-    margin-bottom: 0;
-  }
-  :global(.markdown-content pre) {
-    margin: 1em 0;
-  }
-  :global(.markdown-content code) {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 13px;
-  }
-  :global(.markdown-content :not(pre) > code) {
-    background: var(--color-surface-2);
-    padding: 0.2em 0.4em;
-    border-radius: 4px;
-    color: var(--color-accent);
-    font-size: 0.9em;
-  }
-  :global(.markdown-content ul, :global(.markdown-content ol)) {
-    margin-left: 1.5em;
-    margin-bottom: 0.75em;
-    list-style: disc;
-  }
-  :global(.markdown-content ol) {
-    list-style: decimal;
-  }
-  :global(.markdown-content blockquote) {
-    border-left: 4px solid var(--color-border);
-    padding-left: 1em;
-    color: var(--color-text-muted);
-    font-style: italic;
-    margin: 1em 0;
-  }
-  :global(.markdown-content a) {
-    color: var(--color-accent);
-    text-decoration: underline;
-    text-underline-offset: 2px;
-  }
-  :global(.markdown-content .kory-inline) {
-    font-size: inherit;
-  }
-  :global(.markdown-content .kory-mark) {
-    background: color-mix(in srgb, var(--color-accent) 24%, transparent);
-    color: inherit;
-    border-radius: 4px;
-    padding: 0.05em 0.25em;
-  }
-  :global(.markdown-content .kory-underline) {
-    text-decoration: underline;
-    text-underline-offset: 2px;
-  }
-  :global(.markdown-content .kory-external-link) {
-    color: var(--color-info);
-    text-decoration: underline;
-    text-underline-offset: 2px;
-  }
-  :global(.markdown-content .kory-external-link:hover) {
-    opacity: 0.85;
-  }
-  :global(.markdown-content .kory-link-favicon) {
-    display: inline-block;
-    width: 14px;
-    height: 14px;
-    margin-right: 4px;
-    border-radius: 3px;
-    vertical-align: text-bottom;
-  }
-  :global(:root[data-theme='dark'] .markdown-content .kory-link-favicon) {
-    mix-blend-mode: multiply;
-  }
-  :global(.markdown-content .kory-file-link),
-  :global(.markdown-content .kory-session-link) {
-    display: inline-flex;
-    align-items: baseline;
-    gap: 3px;
-    color: var(--color-text-primary);
-    font-weight: 500;
-    text-decoration: none;
-    border-bottom: 1.5px dotted color-mix(in srgb, var(--color-text-secondary) 65%, transparent);
-    padding-bottom: 1px;
-    cursor: pointer;
-  }
-  :global(.markdown-content .kory-file-link:hover),
-  :global(.markdown-content .kory-session-link:hover) {
-    color: var(--color-accent);
-    border-bottom-color: var(--color-accent);
-  }
-  :global(.markdown-content .kory-file-link-lines) {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.85em;
-    color: var(--color-text-muted);
-  }
-  :global(.markdown-content h1, :global(.markdown-content h2), :global(.markdown-content h3)) {
-    font-weight: 600;
-    margin-top: 1.5em;
-    margin-bottom: 0.75em;
-    color: var(--color-text-primary);
-  }
+  /* Rendered Markdown typography lives in $lib/utils/chat-markdown.css. */
   .feed-scroll {
     overscroll-behavior: contain;
+  }
+
+  .feed-reading-column {
+    width: 100%;
+    max-width: 54rem;
+    margin-inline: auto;
   }
 
   .zen-suggestion-card:hover,

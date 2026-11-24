@@ -8,6 +8,11 @@
   import Play from 'lucide-svelte/icons/play';
   import Square from 'lucide-svelte/icons/square';
   import Volume2 from 'lucide-svelte/icons/volume-2';
+  import AudioLines from 'lucide-svelte/icons/audio-lines';
+  import { conductorSettings } from '$lib/voice-conductor/settings.svelte';
+  import { DEFAULT_WAKE_PHRASE } from '$lib/voice-conductor/grammar';
+  import { shortcutStore } from '$lib/stores/shortcuts.svelte';
+  import { formatChord } from '$lib/utils/platform';
   import type { VoiceProviderDescriptor, VoiceSettings } from '@koryphaios/shared';
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
@@ -96,6 +101,10 @@
     }
   }
   let voiceVocabulary = $state(storedVocabulary());
+  let conductor = $derived(conductorSettings.current);
+  let conductorChord = $derived(formatChord(...shortcutStore.keys('voice_conductor')));
+  let dictationChord = $derived(formatChord(...shortcutStore.keys('voice_mode')));
+  let wakePhraseDraft = $state(conductorSettings.current.wakePhrase);
   function saveVoiceVocabulary(value: string) {
     voiceVocabulary = value;
     try {
@@ -675,6 +684,61 @@
         }}
         flat
       />
+    </section>
+
+    <section class="space-y-2" data-testid="voice-conductor-settings">
+      <h4
+        class="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]"
+      >
+        <AudioLines size={16} class="shrink-0 text-[var(--color-info)]" aria-hidden="true" />
+        Voice conductor
+      </h4>
+      <p class="text-xs leading-relaxed text-[var(--color-text-muted)]">
+        Speak to control the workspace instead of dictating: “status”, “stop worker two”, “tell
+        the manager to …”, “new chat about …”, “open notes”, “note that …”, “read the last reply”.
+        Stopping or deleting always asks you to confirm first.
+      </p>
+      <div class="divide-y divide-[var(--color-border)] border-y border-[var(--color-border)]">
+        <SettingsSwitch
+          checked={conductor.enabled}
+          label="Voice conductor"
+          description={conductorChord
+            ? `Hold ${conductorChord} to speak a command. ${dictationChord ? `${dictationChord} still dictates into the composer.` : ''}`
+            : 'Speak commands to the workspace.'}
+          onchange={() => conductorSettings.update({ enabled: !conductor.enabled })}
+          flat
+        />
+        <SettingsSwitch
+          checked={conductor.wakePhraseEnabled}
+          label="Wake phrase in dictation"
+          description={`Dictation that starts with “${conductor.wakePhrase},” or “Hey ${conductor.wakePhrase}” is treated as a command instead of composer text.`}
+          disabled={!conductor.enabled}
+          onchange={() =>
+            conductorSettings.update({ wakePhraseEnabled: !conductor.wakePhraseEnabled })}
+          flat
+        />
+      </div>
+      <label class="block text-xs text-[var(--color-text-muted)]">
+        Wake phrase
+        <input
+          class="mt-1 w-full max-w-xs rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-3)] px-2 py-1.5 text-sm text-[var(--color-text-primary)] disabled:opacity-55"
+          data-testid="voice-conductor-wake-phrase"
+          placeholder={DEFAULT_WAKE_PHRASE}
+          maxlength={40}
+          disabled={!conductor.enabled || !conductor.wakePhraseEnabled}
+          value={wakePhraseDraft}
+          oninput={(event) => (wakePhraseDraft = event.currentTarget.value)}
+          onchange={() => {
+            conductorSettings.update({ wakePhrase: wakePhraseDraft });
+            wakePhraseDraft = conductorSettings.current.wakePhrase;
+          }}
+        />
+      </label>
+      <p class="text-[11px] text-[var(--color-text-muted)]">
+        Conductor shortcut: <span class="font-mono">{conductorChord || 'not set'}</span> — change it
+        in Settings → Shortcuts under “Voice conductor”. Status answers are read aloud when “Read
+        final replies aloud” is on.
+      </p>
     </section>
 
     <section>

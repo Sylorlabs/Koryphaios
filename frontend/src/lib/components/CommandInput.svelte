@@ -32,7 +32,7 @@
   import Info from 'lucide-svelte/icons/info';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
-  import { formatChord, formatShortcut } from '$lib/utils/platform';
+  import { formatChord, formatShortcut, isMac } from '$lib/utils/platform';
   import { mergeTranscript, sliceAudioChunks, transcriptWords } from '$lib/utils/voice-transcript';
   import { toolbarCollapse } from '$lib/utils/toolbar-density';
   import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
@@ -128,6 +128,8 @@
   import MediaAttachment from './MediaAttachment.svelte';
   import { createVoiceTap, type VoiceTap } from '$lib/utils/voice-tap';
   import { voiceRecorder } from '$lib/stores/voice-recorder.svelte';
+  import { voiceConductor } from '$lib/voice-conductor/conductor.svelte';
+  import type { CaptureMode, DictationRouter } from '$lib/voice-conductor/router';
   import { chatMediaKind, chatMediaMimeType, MAX_CHAT_MEDIA_BYTES } from '@koryphaios/shared';
   import { loadLocalFormDraft, saveLocalFormDraft } from '$lib/utils/local-form-drafts';
   import { estimateCacheBreakImpact, formatCompactTokens } from '$lib/utils/cache-break-impact';
@@ -691,6 +693,7 @@
     sampleRate: number;
     language: string;
     tap: VoiceTap | null;
+    router: DictationRouter | null;
   };
   type LocalVoiceModelStatus = {
     installed: boolean;
@@ -713,6 +716,10 @@
   let liveTranscript: string[] = [];
   // True while the push-to-talk binding is physically held down.
   let voiceHeld = false;
+  // Which binding is held: dictation (voice_mode) or the conductor.
+  let heldCaptureMode: CaptureMode = 'dictation';
+  // Routes the current capture's transcript to the composer or the conductor.
+  let activeCaptureRouter: DictationRouter | null = null;
   let activeSpeechRecognition: BrowserSpeechRecognition | null = null;
   // Wall-clock ms the current recording has been running, for the timer.
   let recordingStartedAt = 0;
@@ -728,6 +735,7 @@
       .filter(Boolean)
       .join(' or '),
   );
+  let conductorShortcutHint = $derived(formatChord(...shortcutStore.keys('voice_conductor')));
   const pendingAttachmentReads = new Set<Promise<void>>();
   let referenceFileInputRef = $state<HTMLInputElement>();
   let referenceFolderInputRef = $state<HTMLInputElement>();
@@ -2534,6 +2542,7 @@
     samples: Float32Array,
     language: string,
     committed = '',
+    router: DictationRouter | null = null,
   ) {
     isTranscribing = true;
     try {
@@ -2546,7 +2555,8 @@
         : '';
       const transcript = mergeTranscript(committed, text);
       if (!transcript.trim()) throw new Error('No speech was detected');
-      appendTranscription(transcript);
+      deliverCaptureSegment(router, transcript);
+      finishCaptureRouting(router);
     } catch (error) {
       toastStore.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -2724,7 +2734,12 @@
       : Math.max(0, consumed16k - Math.floor(16_000 * LOCAL_PARTIAL_OVERLAP_SECONDS));
     if (transcribe && samples.length) {
       beginTranscriptionUi(waveformAnalyser, elapsedMs);
-      void transcribeLocalRecording(samples.slice(from), recorder.language, oneShot ? '' : committed);
+      void transcribeLocalRecording(
+        samples.slice(from),
+        recorder.language,
+        oneShot ? '' : committed,
+        recorder.router,
+      );
     } else {
       endRecordingUi();
     }
@@ -2768,6 +2783,7 @@
       sampleRate: context.sampleRate,
       language: settings.input.language || 'en',
       tap: tapped?.tap ?? null,
+      router: activeCaptureRouter,
     };
     isRecording = true;
     resetLiveTranscript();
@@ -2785,6 +2801,28 @@
       throw new Error(result.error || 'Could not load voice settings');
     voiceSettings = result.data;
     return voiceSettings!;
+  }
+
+  /** Start routing a new capture: dictation, or a conductor command. */
+  function beginCaptureRouting(mode: CaptureMode): DictationRouter {
+    const router = voiceConductor.createRouter(mode, (next) => voiceRecorder.setMode(next));
+    activeCaptureRouter = router;
+    voiceRecorder.setMode(router.mode);
+    return router;
+  }
+
+  /** Hand one final transcript segment to the router: dictation reaches the
+   *  composer, a conductor command is held until the capture ends. */
+  function deliverCaptureSegment(router: DictationRouter | null, transcript: string) {
+    const forComposer = router ? router.push(transcript) : transcript;
+    if (forComposer) appendTranscription(forComposer);
+  }
+
+  function finishCaptureRouting(router: DictationRouter | null) {
+    if (!router) return;
+    if (activeCaptureRouter === router) activeCaptureRouter = null;
+    const command = router.finish();
+    if (command !== null) void voiceConductor.handleUtterance(command);
   }
 
   function appendTranscription(transcript: string) {
@@ -2885,7 +2923,7 @@
     return `Speech recognition failed: ${readable}`;
   }
 
-  async function startSystemRecognition(settings: VoiceSettings) {
+  async function startSystemRecognition(settings: VoiceSettings, router: DictationRouter | null) {
     const speechWindow = window as typeof window & {
       SpeechRecognition?: BrowserSpeechRecognitionConstructor;
       webkitSpeechRecognition?: BrowserSpeechRecognitionConstructor;
@@ -2914,7 +2952,7 @@
         if (!result) continue;
         const transcript = result[0]?.transcript ?? '';
         if (result.isFinal) {
-          if (transcript.trim()) appendTranscription(transcript);
+          if (transcript.trim()) deliverCaptureSegment(router, transcript);
         } else {
           interim += transcript;
         }
@@ -2927,6 +2965,7 @@
     };
     recognition.onend = () => {
       releaseTap();
+      finishCaptureRouting(router);
       if (activeSpeechRecognition === recognition) activeSpeechRecognition = null;
       isRecording = false;
       endRecordingUi();
@@ -2943,7 +2982,12 @@
     beginRecordingUi(tapped?.tap ?? null, 'recording');
   }
 
-  async function transcribeRecording(blob: Blob, language: string, elapsedMs: number) {
+  async function transcribeRecording(
+    blob: Blob,
+    language: string,
+    elapsedMs: number,
+    router: DictationRouter | null = null,
+  ) {
     isTranscribing = true;
     try {
       const audioBase64 = await blobBase64(blob);
@@ -2955,7 +2999,8 @@
       const result = await response.json();
       if (!response.ok || !result.data?.text)
         throw new Error(result.error || 'Transcription failed');
-      appendTranscription(result.data.text);
+      deliverCaptureSegment(router, result.data.text);
+      finishCaptureRouting(router);
     } catch (error) {
       toastStore.error(error instanceof Error ? error.message : 'Transcription failed');
     } finally {
@@ -2999,14 +3044,16 @@
    * capture is stopped as soon as startup settles, so a tap cannot leave a
    * recorder running in the background.
    */
-  async function beginVoiceHold() {
+  async function beginVoiceHold(mode: CaptureMode = 'dictation') {
     if (voiceHeld) return;
+    if (mode === 'conductor' && !voiceConductor.enabled) return;
     if (disabled || imageAdmissionPending || configurationWarning || isTranscribing) return;
     if (isRecording || voiceStarting) return;
     voiceHeld = true;
+    heldCaptureMode = mode;
     voiceStarting = true;
     try {
-      await startRecording(true, () => voiceHeld);
+      await startRecording(true, () => voiceHeld, mode);
     } finally {
       voiceStarting = false;
     }
@@ -3026,7 +3073,12 @@
     stopRecording();
   }
 
-  async function startRecording(enableVoiceMode = false, stillWanted = () => true) {
+  async function startRecording(
+    enableVoiceMode = false,
+    stillWanted = () => true,
+    mode: CaptureMode = 'dictation',
+  ) {
+    const router = beginCaptureRouting(mode);
     try {
       let settings = await loadComposerVoiceSettings();
       if (!stillWanted()) return;
@@ -3065,7 +3117,7 @@
         return;
       }
       if (settings.input.provider === 'system') {
-        await startSystemRecognition(settings);
+        await startSystemRecognition(settings, router);
         return;
       }
       if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined')
@@ -3095,7 +3147,8 @@
           tapped.tap.release();
           void tapped.context.close();
         }
-        if (blob.size) void transcribeRecording(blob, settings.input.language || 'en', elapsedMs);
+        if (blob.size)
+          void transcribeRecording(blob, settings.input.language || 'en', elapsedMs, router);
       };
       recorder.start();
       isRecording = true;
@@ -3146,18 +3199,32 @@
       return keys.length === 1 && keys[0].toLowerCase() === 'fn';
     };
     const handleVoiceShortcutDown = (e: KeyboardEvent) => {
-      if (e.repeat || !shortcutStore.matches('voice_mode', e)) return;
+      if (e.repeat) return;
+      // The conductor chord is checked first: it is a superset of nothing the
+      // dictation chord uses by default, but a user may bind them close.
+      const conductor = voiceConductor.enabled && shortcutStore.matches('voice_conductor', e);
+      if (!conductor && !shortcutStore.matches('voice_mode', e)) return;
       if (voiceBlocked()) return;
       e.preventDefault();
-      void beginVoiceHold();
+      void beginVoiceHold(conductor ? 'conductor' : 'dictation');
+    };
+    /** True when a released key is part of the held binding. `Mod` is Meta on
+     *  macOS and Control elsewhere, so the modifier names are mapped here. */
+    const releasesHeldBinding = (e: KeyboardEvent) => {
+      const id = heldCaptureMode === 'conductor' ? 'voice_conductor' : 'voice_mode';
+      const keys = shortcutStore.keys(id).map((key) => key.toLowerCase());
+      const released = e.key.toLowerCase();
+      if (keys.includes(released)) return true;
+      if (released === 'control') return keys.includes('ctrl') || (!isMac() && keys.includes('mod'));
+      if (released === 'meta') return keys.includes('meta') || (isMac() && keys.includes('mod'));
+      return false;
     };
     // Releasing either half of the chord ends the hold. Requiring the exact
     // chord here would leave the capture running whenever the user let go of
     // the modifier before the target key.
     const handleVoiceShortcutUp = (e: KeyboardEvent) => {
       if (!voiceHeld) return;
-      const keys = shortcutStore.keys('voice_mode').map((key) => key.toLowerCase());
-      if (!keys.includes(e.key.toLowerCase())) return;
+      if (!releasesHeldBinding(e)) return;
       e.preventDefault();
       endVoiceHold();
     };
@@ -5403,7 +5470,7 @@
                   ? 'Transcribing…'
                   : isRecording
                     ? 'Stop recording and transcribe'
-                    : `Click to record${voiceShortcutHint ? ` · hold ${voiceShortcutHint} to talk` : ''}`}
+                    : `Click to record${voiceShortcutHint ? ` · hold ${voiceShortcutHint} to talk` : ''}${voiceConductor.enabled && conductorShortcutHint ? ` · hold ${conductorShortcutHint} for a voice command` : ''}`}
               >
                 <Mic size={16} class={isRecording || isTranscribing ? 'animate-pulse' : ''} />
               </button>

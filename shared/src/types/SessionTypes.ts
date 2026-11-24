@@ -40,6 +40,9 @@ export interface SessionAgentOverrides {
    *  (manage_skill_feeding). Durable so a block survives idle-runtime disposal
    *  and app restarts; dies with the chat row when it is deleted or erased. */
   blockedSkillFeeds?: string[];
+  /** Per-chat fallback chain. Overrides the role and default chains for this chat
+   *  when set. Absent means the chat uses the project chains. */
+  fallbackChain?: import('../fallback-chain').FallbackChain;
 }
 
 export interface Session {
@@ -52,6 +55,14 @@ export interface Session {
   /** Convenience projection derived from archivedAt. */
   status?: 'active' | 'archived';
   parentSessionId?: string;
+  /** Lineage of a forked chat. Absent for an original chat. */
+  forkedFromSessionId?: string;
+  /** The source message the fork was taken from (the source's own id). */
+  forkedFromMessageId?: string;
+  /** Epoch ms when the fork was created. */
+  forkedAt?: number;
+  /** Epoch ms when this fork's result was merged back into its source; absent until then. */
+  forkMergedAt?: number;
   /** Absolute path of the project folder this chat belongs to. Sessions without
    *  one are "global" (created before project scoping, or with no folder open). */
   workingDirectory?: string;
@@ -64,6 +75,9 @@ export interface Session {
   planNoteId?: string;
   /** Per-chat approval preset, agent mode, and critic toggle. */
   agentOverrides?: SessionAgentOverrides;
+  /** Set when another chat's agent created this chat (create_chat). Metadata
+   *  only: it records provenance and never grants the new chat any authority. */
+  createdByAgent?: { sessionId: string; agentId: string };
   messageCount: number;
   totalTokensIn: number;
   totalTokensOut: number;

@@ -27,6 +27,7 @@ const MCP_EXPOSED_TOOLS = new Set([
   'record_work_note',
   'create_note',
   'set_note_property',
+  'set_note_icon',
   'update_note',
   'read_note',
   'get_note_properties',

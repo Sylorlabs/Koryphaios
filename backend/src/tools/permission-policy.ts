@@ -204,6 +204,8 @@ const INTERACTION_TOOLS = new Set([
   'ask_user',
   'ask_manager',
   'rename_session',
+  // Creates a new chat from copied history. It never touches the workspace or the source.
+  'fork_chat',
   'request_critic_review',
   // Only reshapes what this chat's agent sees; never touches the workspace.
   'manage_context',
@@ -223,6 +225,7 @@ const INTERACTION_TOOLS = new Set([
  */
 const PLAN_MODE_ORCHESTRATION_TOOLS = new Set([
   'delegate_to_worker',
+  'wait_for_agents',
   'manage_agents',
   'manage_review_agents',
   'send_agent_message',
@@ -261,7 +264,12 @@ export const READ_ONLY_TOOLS = new Set([
   'fetch_context',
   'list_sessions',
   'read_session',
+  'search_chats',
+  'wait_for_chat',
+  'read_terminal',
   'get_resource_budget',
+  'get_model_pricing',
+  'get_usage_summary',
   'load_skill_detail',
   'list_notes',
   'search_notes',
@@ -293,7 +301,23 @@ export const FILE_EDIT_TOOLS = new Set([
  *  chat's work into the shared folder: in YOLO the merge runs without asking,
  *  in every other mode the user approves it first. Explicit block/ask/allow
  *  lists and Plan mode keep their existing precedence (checked earlier). */
-export const APPROVAL_UNLESS_YOLO_TOOLS = new Set(['merge_chat_back']);
+export const APPROVAL_UNLESS_YOLO_TOOLS = new Set([
+  'merge_chat_back',
+  // Agent actions on OTHER chats. An agent never approves these itself: the
+  // ask resolves through the user's approval channel.
+  'create_chat',
+  'send_to_chat',
+  'interrupt_chat',
+  'archive_chat',
+]);
+
+const APPROVAL_UNLESS_YOLO_REASONS: Record<string, string> = {
+  merge_chat_back: "Merging this chat's copy back into the folder needs your approval",
+  create_chat: 'Creating a chat for another agent needs your approval',
+  send_to_chat: 'Sending a message into another chat needs your approval',
+  interrupt_chat: 'Stopping another chat needs your approval',
+  archive_chat: 'Archiving another chat needs your approval',
+};
 
 const RISKY_TOOLS = new Set([
   'computer_click',
@@ -381,6 +405,13 @@ export function decideToolPermission(
     return { action: 'allow', reason: `Tool '${toolName}' is on the tool allowlist` };
   }
 
+  // Reading a shell's output is a per-use grant of the user's own terminal.
+  // Ask in every mode, YOLO included. An explicit allowlist entry or per-tier
+  // allow (handled above) is the user's standing consent and wins.
+  if (toolName === 'read_terminal') {
+    return { action: 'ask', reason: "Reading this terminal's output needs your approval" };
+  }
+
   // Chat organization is available in every mode, including Plan, without
   // granting file writes or bypassing explicit per-tool block/ask settings.
   if (toolName === 'rename_session') {
@@ -404,7 +435,7 @@ export function decideToolPermission(
   if (APPROVAL_UNLESS_YOLO_TOOLS.has(toolName)) {
     return {
       action: 'ask',
-      reason: "Merging this chat's copy back into the folder needs your approval",
+      reason: APPROVAL_UNLESS_YOLO_REASONS[toolName] ?? 'This action needs your approval',
     };
   }
   if (policy.mode === 'sub-agent-user') {

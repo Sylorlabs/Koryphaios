@@ -49,13 +49,28 @@ export { WebSearchTool, WebFetchTool } from './web';
 export { ViewImageTool } from './image';
 export { GenerateVideoTool } from './video';
 export { ForgetTool, RecallTool, RememberTool } from './external-memory';
-export { AskUserTool, AskManagerTool, DelegateToWorkerTool, RequestCriticReviewTool } from './interaction';
-export { RenameSessionTool } from './session';
+export {
+  AskUserTool,
+  AskManagerTool,
+  DelegateToWorkerTool,
+  RequestCriticReviewTool,
+  WaitForAgentsTool,
+} from './interaction';
+export { RenameSessionTool, ForkChatTool } from './session';
 export { ManageReviewAgentsTool } from './review-agents';
 export { ManageAgentsTool } from './manage-agents';
 export { SendAgentMessageTool, RequestManagerRelayTool, ListAgentMessagesTool } from './messaging';
 export { ListSessionsTool, ReadSessionTool } from './sessions-directory';
+export { ReadTerminalTool } from './terminal-read';
 export { IsolateChatTool, MergeChatBackTool } from './chat-isolation';
+export {
+  CreateChatTool,
+  SendToChatTool,
+  WaitForChatTool,
+  InterruptChatTool,
+  SearchChatsTool,
+  ArchiveChatTool,
+} from './chat-control';
 export { MCPDetectErrorsTool, MCPAnalyzeErrorTool, MCPSuggestFixesTool } from './mcp';
 export { ManageMcpServerTool } from './manage-mcp';
 export { ListMcpToolsTool, InvokeMcpTool } from './external-mcp';
@@ -70,6 +85,7 @@ export {
   CreateWorkflowDraftTool,
 } from './workflows';
 export { GetResourceBudgetTool } from './resource-budget';
+export { GetModelPricingTool, GetUsageSummaryTool } from './cost-awareness';
 export { ScheduleMonitorTool } from './monitors';
 export { registerGitTools } from './git';
 export { GhostCommitTool, registerCheckpointTools } from './checkpoint';

@@ -38,16 +38,27 @@ export type WSEventType =
   | 'session.actionable_waits'
   | 'session.actionable_waits.request'
   | 'session.timeline_rewritten'
+  // Inline diff review comments and linked pull request status
+  | 'session.review_comments'
+  | 'session.pull_request_status'
   // Ephemeral replay placeholder for a filtered durable sequence position.
   | 'session.replay_skipped'
   // Unsequenced control row: history through payload.throughSequence was
   // pruned and can never be replayed; clients advance past it.
   | 'session.history_pruned'
+  // Chat forks: emitted on the source chat (sessionId = source) when a fork is
+  // created or its result is merged back into the source transcript.
+  | 'session.forked'
+  | 'session.merged'
+  // A manager turn moved to the next step of the user's fallback chain.
+  | 'session.fallback.hop'
   | 'run.state'
   // Provider work ended for a manager turn; follow-up work (critic, checkpoint, persistence) may still run.
   | 'turn.provider_completed'
   // The run is terminal and every follow-up step has finished.
   | 'run.settled'
+  // A usage-limited chat has (or no longer has) an automatic resume scheduled.
+  | 'session.pending_resume'
   | 'compaction.started'
   | 'compaction.progress'
   | 'compaction.completed'
@@ -87,7 +98,10 @@ export type WSEventType =
   // App-wide checklists
   | 'checklists.updated'
   // Native CLI slash command output (attributed to a CLI provider harness)
-  | 'native.command';
+  | 'native.command'
+  // Integrated terminal (PTY). Session-scoped; live only, restored from scrollback.
+  | 'terminal.output'
+  | 'terminal.exit';
 
 export type RemoteProtocolOperationState =
   | 'queued'
@@ -149,7 +163,12 @@ export type WSMessagePayload =
   | KoryAskUserResolvedPayload
   | TurnProviderCompletedPayload
   | RunSettledPayload
+  | PendingResumePayload
   | StreamUsagePayload
+
+  // Terminal payloads
+  | TerminalOutputPayload
+  | TerminalExitPayload
 
   // Message payloads
   | MessagePendingPayload
@@ -174,6 +193,8 @@ export type WSMessagePayload =
   // System payloads
   | ErrorPayload
   | NotificationPayload;
+
+import type { TerminalExitPayload, TerminalOutputPayload } from '../terminal';
 
 // Re-export commonly used payload types
 import type {
@@ -207,6 +228,7 @@ import type {
   RateLimitPayload,
   TurnProviderCompletedPayload,
   RunSettledPayload,
+  PendingResumePayload,
 } from './WSPayloads';
 
 export type { ChangeSummary, StreamUsage } from './WSPayloads';
@@ -252,14 +274,20 @@ export const SESSION_SCOPED_EVENT_TYPES: ReadonlySet<WSEventType> = new Set<WSEv
   'session.changes',
   'session.changes_resolved',
   'session.accept_changes',
+  'session.review_comments',
+  'session.pull_request_status',
   'session.user_message',
   'session.idle',
   'session.timeline_rewritten',
   'session.replay_skipped',
   'session.history_pruned',
+  'session.forked',
+  'session.merged',
+  'session.fallback.hop',
   'run.state',
   'turn.provider_completed',
   'run.settled',
+  'session.pending_resume',
   // Compaction
   'compaction.started',
   'compaction.progress',
@@ -275,6 +303,9 @@ export const SESSION_SCOPED_EVENT_TYPES: ReadonlySet<WSEventType> = new Set<WSEv
   'kory.ask_user_resolved',
   'permission.request',
   'permission.response',
+  // Integrated terminal. Never persisted; see backend/src/terminal.
+  'terminal.output',
+  'terminal.exit',
 ]);
 
 /** A WebSocket message whose type is session-scoped. The sessionId is required. */

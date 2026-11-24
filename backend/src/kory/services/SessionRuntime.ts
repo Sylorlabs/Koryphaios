@@ -8,6 +8,9 @@
 import type { AgentFallbackStep, AgentStatus, ProviderName } from '@koryphaios/shared';
 import type { Provider } from '../../providers/types';
 import type { TaskContract } from '../prompts';
+import { AsyncChildLedger, CompareGroupLedger } from '../async-children';
+import type { FallbackStickyState, FallbackTurnState } from '../fallback-chain';
+import type { TerminalSession } from '../../terminal/terminal-session';
 
 export type SkillCollisionChoices = Record<string, 'personal' | 'project'>;
 
@@ -42,6 +45,11 @@ export class SessionRuntime {
 
   /** AbortController for the current manager run (so cancelSessionWorkers can abort the manager too). */
   abort?: AbortController;
+
+  /** Fallback-chain hop state for the manager turn in flight. Set at turn start. */
+  fallbackTurn?: FallbackTurnState;
+  /** Where a `never` or `after_reset` chain left the manager, carried across turns. */
+  fallbackSticky?: FallbackStickyState;
 
   /** Synchronous intent claim covering provider resolution, intent interviews
    *  and every other pre-controller await. */
@@ -85,6 +93,16 @@ export class SessionRuntime {
    *  resolver. Resolves when the current wait finishes; never rejects. */
   questionQueue: Promise<void> = Promise.resolve();
 
+  /** Host-recorded MCP-bridge tool executions for the session's current run.
+   *  Managed CLIs call Kory tools through a dispatcher their transcript shows
+   *  only as `execute`/`mcp_call_tool`, so this ledger is the authoritative
+   *  list critics can verify against. Replaced when the leased run changes;
+   *  capped at 200 entries. */
+  bridgeToolLedger: {
+    runId: string;
+    entries: Array<{ name: string; input: string; output: string; isError: boolean; at: number }>;
+  } | null = null;
+
   /** Steering drain in flight per agent. Removed by the drain that created it. */
   steeringDrains = new Map<string, Promise<{ runId: string } | null>>();
 
@@ -96,8 +114,21 @@ export class SessionRuntime {
    *  full input fidelity (attachments, model parameters) the row cannot. */
   pendingSteerInputs = new Map<string, import('../manager').SessionTurnCommandInput>();
 
+  /** Worker agents started with wait:false in this chat, and their delivery
+   *  state. Results reach the manager as host-authored continuations. */
+  asyncChildren = new AsyncChildLedger();
+  /** Attempts recorded under each compare group id in this chat. */
+  compareGroups = new CompareGroupLedger();
+  /** Set by Stop: finished async results are held and not auto-delivered until
+   *  the user sends again or wait_for_agents claims them. */
+  asyncDeliveryHeld = false;
+  /** Compare group the manager asked the end-of-turn critic to rank. */
+  pendingCompareReview?: string;
+
   /** Pending usage-retry timers. */
   usageRetryTimers = new Set<ReturnType<typeof setTimeout>>();
+  /** The one armed automatic resume after a provider usage limit (see UsageLimitResumeService). */
+  usageLimitResumeTimer?: ReturnType<typeof setTimeout>;
 
   /** Last visible prompt manifest hash; prevents repeated disclosure on tool-loop turns. */
   promptManifestHash?: string;
@@ -204,6 +235,10 @@ export class SessionRuntime {
    *  uncommitted in-place edits cannot move to the copy. Reset at run claim. */
   mutatedInPlaceThisTurn = false;
 
+  /** This chat's integrated terminals (PTY shells), keyed by terminal id.
+   *  Scoped to the chat by construction; dispose() kills them. */
+  terminals = new Map<string, TerminalSession>();
+
   /** Clears timers and drops per-session state. Aborts nothing: aborts belong
    *  to the operation that owns the controller (the manager clears the title
    *  run before calling dispose). */
@@ -213,9 +248,16 @@ export class SessionRuntime {
     this.heartbeatPhase = undefined;
     for (const timer of this.usageRetryTimers) clearTimeout(timer);
     this.usageRetryTimers.clear();
+    if (this.usageLimitResumeTimer !== undefined) clearTimeout(this.usageLimitResumeTimer);
+    this.usageLimitResumeTimer = undefined;
     this.steeringDrains.clear();
     this.questionQueue = Promise.resolve();
+    this.bridgeToolLedger = null;
     this.pendingSteerInputs.clear();
+    this.asyncChildren.dispose();
+    this.compareGroups.dispose();
+    this.asyncDeliveryHeld = false;
+    this.pendingCompareReview = undefined;
     this.abort = undefined;
     this.runClaimed = false;
     this.runClaimedAt = undefined;
@@ -252,6 +294,8 @@ export class SessionRuntime {
     this.workspaceEpoch += 1;
     this.workspaceRebindPending = undefined;
     this.mutatedInPlaceThisTurn = false;
+    for (const terminal of this.terminals.values()) terminal.dispose();
+    this.terminals.clear();
   }
 }
 

@@ -17,6 +17,10 @@ import {
   ValidationError,
 } from '../../errors/types';
 import { SESSION } from '../../constants';
+import { normalizeFallbackChain } from '@koryphaios/shared';
+import { SessionFallbackChainRequestSchema } from '../../validation/schemas';
+import { checkFallbackSteps } from '../../kory/fallback-chain-check';
+import { describeFallbackChain, runtimeFallbackLookup } from '../../kory/fallback-chain-lookup';
 import { sessionSettingsRoot } from '../../kory/session-workspace';
 import { listToolServerIdentities } from '../../mcp/server-service';
 import { koryMcpServerIdentity } from '../../providers/cli-bridges';
@@ -29,7 +33,11 @@ import {
   archiveSessionCoordinated,
   restoreSessionCoordinated,
 } from '../../services/session-archive-service';
-import { forkSessionAtMessage } from '../../services/session-fork-service';
+import {
+  forkChatCoordinated,
+  mergeForkCoordinated,
+} from '../../services/session-fork-coordinator';
+import { stopChatRun } from '../../services/chat-run-control';
 import { projectRootFromRequest } from '../../runtime/source-control-scope';
 import { sourceControlService } from '../../services/source-control-service';
 
@@ -150,6 +158,57 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     if (!session) throw new NotFoundError('Session', id);
     return { ok: true, data: session };
   })
+  // Per-chat fallback chain. It overrides the role and default chains for this
+  // chat only; DELETE returns the chat to the project chains.
+  .get('/:id/fallback-chain', async ({ request, params: { id } }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+    const session = await getContext().sessions.get(id);
+    if (!session) throw new NotFoundError('Session', id);
+    const chain = session.agentOverrides?.fallbackChain ?? null;
+    return {
+      ok: true,
+      data: {
+        chain: chain ? describeFallbackChain(chain, runtimeFallbackLookup()) : null,
+      },
+    };
+  })
+  .put(
+    '/:id/fallback-chain',
+    async ({ request, params: { id }, body }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+      const parsed = SessionFallbackChainRequestSchema.safeParse(body);
+      if (!parsed.success) {
+        throw new ValidationError(parsed.error.issues[0]?.message ?? 'Invalid fallback chain.');
+      }
+      const { sessions } = getContext();
+      const current = await sessions.get(id);
+      if (!current) throw new NotFoundError('Session', id);
+      const chain = normalizeFallbackChain(parsed.data.chain);
+      const check = checkFallbackSteps(chain.steps, runtimeFallbackLookup());
+      if (!check.ok) throw new ValidationError(check.error);
+      const updated = await sessions.update(id, {
+        agentOverrides: { ...current.agentOverrides, fallbackChain: chain },
+      });
+      if (!updated) throw new NotFoundError('Session', id);
+      if (updated.agentOverrides !== undefined) setSessionAgentOverrides(id, updated.agentOverrides);
+      return {
+        ok: true,
+        data: { chain: describeFallbackChain(chain, runtimeFallbackLookup()) },
+      };
+    },
+    { body: t.Any() },
+  )
+  .delete('/:id/fallback-chain', async ({ request, params: { id } }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+    const { sessions } = getContext();
+    const current = await sessions.get(id);
+    if (!current) throw new NotFoundError('Session', id);
+    const { fallbackChain: _cleared, ...rest } = current.agentOverrides ?? {};
+    const updated = await sessions.update(id, { agentOverrides: rest });
+    if (!updated) throw new NotFoundError('Session', id);
+    setSessionAgentOverrides(id, updated.agentOverrides ?? {});
+    return { ok: true, data: { chain: null } };
+  })
   .patch(
     '/:id',
     async ({ request, params: { id }, body }) => {
@@ -184,6 +243,10 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
         : {};
       if (current.agentOverrides?.blockedSkillFeeds) {
         preservedOverrides.blockedSkillFeeds = current.agentOverrides.blockedSkillFeeds;
+      }
+      // The per-chat fallback chain is owned by /fallback-chain, not the composer.
+      if (current.agentOverrides?.fallbackChain) {
+        preservedOverrides.fallbackChain = current.agentOverrides.fallbackChain;
       }
       const agentOverrides =
         body.agentOverrides === undefined
@@ -280,40 +343,71 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     '/:id/fork',
     async ({ request, params: { id }, body }) => {
       if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
-      const creationLease = tryAcquireSessionCreationLease();
-      if (!creationLease) {
-        throw new ConflictError(
-          'Session creation is temporarily blocked while delete-all is finishing.',
-        );
-      }
-      let result;
-      try {
-        result = forkSessionAtMessage({ sourceSessionId: id, messageId: body.messageId });
-      } finally {
-        creationLease.release();
-      }
-      const { session } = result;
-      try {
-        writeAllCliRulesAndSkills(session.id, '');
-      } catch (err: unknown) {
-        // Expected failure: CLI rules are supplementary, not request-critical.
-        serverLog.warn({ err, sessionId: session.id }, 'Failed to write CLI rules + skills');
-      }
-      if (session.agentOverrides) setSessionAgentOverrides(session.id, session.agentOverrides);
-      getContext().wsManager.broadcastEphemeral({
-        type: 'session.updated',
-        sessionId: session.id,
-        timestamp: Date.now(),
-        payload: { session },
+      const outcome = await forkChatCoordinated({
+        sourceSessionId: id,
+        messageId: body.messageId,
+        title: body.title,
       });
-      return { ok: true, data: session, copiedMessageCount: result.copiedMessageCount };
+      return {
+        ok: true,
+        data: outcome.session,
+        copiedMessageCount: outcome.copiedMessageCount,
+        forkMessageId: outcome.forkMessageId,
+      };
     },
     {
+      // Omitted messageId: fork at the source's latest finished point.
       body: t.Object({
-        messageId: t.String({ minLength: 1, maxLength: 256 }),
+        messageId: t.Optional(t.String({ minLength: 1, maxLength: 256 })),
+        title: t.Optional(t.String({ maxLength: 200 })),
       }),
     },
   )
+  .post(
+    '/:id/merge-fork',
+    async ({ request, params: { id }, body }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+      const outcome = await mergeForkCoordinated({ forkSessionId: id, mode: body.mode });
+      return {
+        ok: true,
+        data: {
+          fork: outcome.fork,
+          source: outcome.source,
+          messageId: outcome.messageId,
+          mode: outcome.mode,
+        },
+      };
+    },
+    {
+      body: t.Object({
+        mode: t.Union([t.Literal('summary'), t.Literal('messages')]),
+      }),
+    },
+  )
+  // Automatic resume after a provider usage limit. The pending record is durable;
+  // "Resume now" runs the same continuation a timer would, "Cancel" clears it.
+  .get('/:id/pending-resume', async ({ request, params: { id } }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+    const { kory } = getContext();
+    const record = kory.getPendingUsageLimitResume(id);
+    return { ok: true, pendingResume: record };
+  })
+  .post('/:id/resume-now', async ({ request, params: { id } }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+    const { kory } = getContext();
+    const outcome = await kory.resumePendingUsageLimit(id);
+    if (outcome === 'not_found') throw new NotFoundError('Pending resume', id);
+    if (outcome === 'already_running') throw new ConflictError('The automatic resume is already running.');
+    return { ok: true, status: outcome };
+  })
+  .delete('/:id/pending-resume', async ({ request, params: { id } }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+    const { kory } = getContext();
+    if (!kory.cancelPendingUsageLimit(id)) {
+      throw new NotFoundError('Pending resume', id);
+    }
+    return { ok: true };
+  })
   .delete('/:id', async ({ request, params: { id } }) => {
     if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
     const result = await eraseSessionsCoordinated({ kind: 'selected', sessionId: id });
@@ -332,34 +426,23 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     '/:id/cancel',
     async ({ request, params: { id }, body }) => {
       if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
-      const { kory, wsManager } = getContext();
-      const steering = body?.purpose === 'steer';
-      // Stop the turn first. Goal bookkeeping and queued-job cleanup are
-      // follow-up work; they must never delay the user's stop response.
-      await kory.cancelSessionWorkers(id);
-      void getContext()
-        .goalDriver.pauseForSession(id)
-        .catch(() => undefined);
-      void import('../../queue/workers/llm-worker')
-        .then(({ cancelLLMJobsForSession }) => cancelLLMJobsForSession(id))
-        .catch(() => undefined);
-      // A steer is an intentional cancel-and-continuation handoff. Do not put a
-      // visible "Session cancelled" banner between the partial response and the
-      // replacement instruction; the authoritative run.state still records the
-      // old run as cancelled before the new run is admitted.
-      if (!steering) {
-        wsManager.broadcastToSession(id, {
-          type: 'system.info',
-          payload: { message: 'Session cancelled' },
-          timestamp: Date.now(),
-          sessionId: id,
-        });
+      // Steering no longer cancels: a user send during a live run is queued
+      // server-side and admitted at the run's next checkpoint (see
+      // docs/architecture/transcript-integrity.md, "A live run is steered at a
+      // checkpoint"). Every cancel here is therefore a hard stop. Old clients
+      // may still send `purpose: 'steer'`; it is accepted and treated as a plain
+      // cancel, and logged so the stale caller shows up in diagnostics.
+      if (body?.purpose === 'steer') {
+        serverLog.info({ sessionId: id }, 'Legacy cancel purpose "steer" treated as a plain cancel');
       }
-      return { ok: true, message: steering ? 'Session ready for steering' : 'Session cancelled' };
+      // Shared with the agent interrupt_chat tool so both stops end the same work.
+      await stopChatRun(id);
+      return { ok: true, message: 'Session cancelled' };
     },
     {
       body: t.Optional(
         t.Object({
+          // Legacy only: pre-queue clients sent 'steer'. Accepted, never acted on.
           purpose: t.Optional(t.Literal('steer')),
         }),
       ),

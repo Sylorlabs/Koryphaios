@@ -31,3 +31,17 @@ test('accepts uploaded raster icons and rejects invalid, external, or cross-proj
   await expect(setNoteIcon(note.id, null, `${PROJECT_ROOT}/another-project`)).rejects.toThrow();
   expect((await getNote(note.id, PROJECT_ROOT))?.icon).toEqual(icon);
 });
+
+test('persists free emoji icons, including ZWJ, flag and keycap sequences, and rejects malformed ones', async () => {
+  const note = await createNote({ title: 'Emoji icon' }, PROJECT_ROOT);
+  for (const value of ['👩🏽‍💻', '🇯🇵', '❤️']) {
+    const icon = { kind: 'emoji' as const, value, label: 'Custom' };
+    await setNoteIcon(note.id, icon, PROJECT_ROOT);
+    expect((await getNote(note.id, PROJECT_ROOT))?.icon).toEqual(icon);
+  }
+  expect((await getNote(note.id, PROJECT_ROOT))?.revision).toBe(note.revision);
+  for (const value of ['ab', '🙂🙂', 'a🙂', '🙂\n', '👨' + '‍👨'.repeat(12)]) {
+    await expect(setNoteIcon(note.id, { kind: 'emoji', value }, PROJECT_ROOT)).rejects.toThrow('Invalid note icon');
+  }
+  expect((await getNote(note.id, PROJECT_ROOT))?.icon).toEqual({ kind: 'emoji', value: '❤️', label: 'Custom' });
+});

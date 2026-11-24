@@ -1,31 +1,196 @@
+/*
+ * Rendered chat Markdown — the one stylesheet for `.markdown-content`.
+ *
+ * Imported once from the root layout so the manager feed, sub-agent rows,
+ * linked-device chats and inline note renders all share one typography.
+ * Before this file was global, three components each carried a partial copy
+ * (two of them with malformed nested `:global()` selectors), so headings
+ * rendered at body size and nested lists lost their markers.
+ *
+ * Rhythm: 14px body on a 1.7 line box (≈24px). `estimate-row-height.ts`
+ * derives its virtual-list estimates from that line box — change both
+ * together. Block spacing is expressed in `em` so nested renders (notes
+ * inside a reply) keep proportion.
+ */
+
 .markdown-content {
   min-width: 0;
+  font-size: 14px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
 }
-.markdown-content pre {
-  background: var(--color-surface-1);
-  color: #000;
-  border: 1px solid color-mix(in srgb, var(--color-accent) 28%, var(--color-border));
-  border-radius: 14px;
-  padding: 14px 16px;
-  overflow-x: auto;
-  font-size: 13px;
-  line-height: 1.5;
-  box-shadow: 0 1px 0 color-mix(in srgb, var(--color-accent) 12%, transparent);
+
+/* ── Blocks ─────────────────────────────────────────────────────────────── */
+
+.markdown-content p {
+  margin: 0 0 0.75em;
 }
-:root[data-theme='dark'] .markdown-content pre {
-  color: #fff;
+.markdown-content > :first-child,
+.markdown-content p:first-child {
+  margin-top: 0;
 }
-.markdown-content pre code,
-.markdown-content pre code.hljs,
-.markdown-content .hljs {
-  background: transparent !important;
+.markdown-content > :last-child,
+.markdown-content p:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4,
+.markdown-content h5,
+.markdown-content h6 {
+  margin: 1.4em 0 0.5em;
+  color: var(--color-text-primary);
+  font-weight: var(--font-semibold, 600);
+  line-height: var(--leading-tight, 1.25);
+  letter-spacing: -0.005em;
+}
+.markdown-content h1 {
+  font-size: 1.43em; /* 20px */
+}
+.markdown-content h2 {
+  font-size: 1.22em; /* 17px */
+}
+.markdown-content h3 {
+  font-size: 1.07em; /* 15px */
+}
+.markdown-content h4 {
+  font-size: 1em;
+}
+.markdown-content h5,
+.markdown-content h6 {
+  font-size: 0.93em;
+  color: var(--color-text-secondary);
+}
+.markdown-content :is(h1, h2, h3, h4, h5, h6):first-child {
+  margin-top: 0;
+}
+
+.markdown-content strong {
+  font-weight: var(--font-semibold, 600);
+  color: var(--color-text-primary);
+}
+
+.markdown-content hr {
+  height: 0;
+  margin: 1.5em 0;
   border: 0;
-  padding: 0;
-  color: #000 !important;
+  border-top: 1px solid var(--color-border);
 }
-:root[data-theme='dark'] .markdown-content .hljs {
-  color: #fff !important;
+
+.markdown-content blockquote {
+  margin: 0.75em 0;
+  padding: 0.1em 0 0.1em 0.9em;
+  border-left: 3px solid color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
+  color: var(--color-text-secondary);
 }
+.markdown-content blockquote p {
+  margin-bottom: 0.4em;
+}
+
+/* ── Lists ──────────────────────────────────────────────────────────────── */
+
+.markdown-content ul,
+.markdown-content ol {
+  margin: 0.4em 0 0.75em;
+  padding-left: 1.5em;
+}
+.markdown-content ul {
+  list-style: disc;
+}
+.markdown-content ol {
+  list-style: decimal;
+}
+.markdown-content ul ul {
+  list-style: circle;
+}
+.markdown-content ul ul ul {
+  list-style: square;
+}
+.markdown-content li + li {
+  margin-top: 0.2em;
+}
+.markdown-content li > ul,
+.markdown-content li > ol {
+  margin: 0.2em 0 0.2em;
+}
+.markdown-content li > p {
+  margin-bottom: 0.3em;
+}
+.markdown-content li::marker {
+  color: var(--color-text-muted);
+}
+.markdown-content ol > li::marker {
+  font-variant-numeric: tabular-nums;
+}
+
+/* GFM task lists: the renderer emits a disabled `.kory-task-check` input. It is
+   a read-only status glyph, so it is drawn with theme tokens rather than the
+   browser's checkbox. */
+.markdown-content li:has(> .kory-task-check),
+.markdown-content li:has(> p > .kory-task-check) {
+  list-style: none;
+  margin-left: -1.25em;
+}
+.markdown-content .kory-task-check {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-grid;
+  place-content: center;
+  width: 14px;
+  height: 14px;
+  margin: 0 0.5em 0 0;
+  vertical-align: -2px;
+  border: 1.5px solid var(--color-border-bright);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--color-surface-1);
+  opacity: 1;
+}
+.markdown-content .kory-task-check:checked {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+}
+.markdown-content .kory-task-check:checked::after {
+  content: '';
+  width: 7px;
+  height: 4px;
+  margin-top: -2px;
+  border-left: 1.5px solid var(--color-on-accent, #000);
+  border-bottom: 1.5px solid var(--color-on-accent, #000);
+  transform: rotate(-45deg);
+}
+.markdown-content li:has(> .kory-task-check:checked) {
+  color: var(--color-text-muted);
+}
+
+/* ── Inline ─────────────────────────────────────────────────────────────── */
+
+.markdown-content code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+.markdown-content :not(pre) > code {
+  padding: 0.12em 0.38em;
+  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--color-surface-2);
+  /* Mixing toward the primary text keeps the accent readable on light themes,
+     where a raw gold accent falls below 3:1 on white. */
+  color: color-mix(in srgb, var(--color-accent) 58%, var(--color-text-primary));
+  overflow-wrap: anywhere;
+}
+
+.markdown-content a {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
+  text-underline-offset: 2px;
+}
+.markdown-content a:hover {
+  text-decoration-color: currentColor;
+}
+
 /* Agent inline styling. Custom colors/sizes arrive as validated inline
    styles on .kory-inline spans; everything else defaults to the user's
    theme accent so agents emphasize without re-theming the chat. */
@@ -33,24 +198,25 @@
   font-size: inherit;
 }
 .markdown-content .kory-mark {
+  padding: 0.05em 0.25em;
+  border-radius: var(--radius-sm, 4px);
   background: color-mix(in srgb, var(--color-accent) 24%, transparent);
   color: inherit;
-  border-radius: 4px;
-  padding: 0.05em 0.25em;
 }
 .markdown-content .kory-underline {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
-/* External links: accent-colored by default (the user's chosen accent),
-   with the destination site's icon beside the label. */
+
+/* External links carry the destination site's icon beside the label. */
 .markdown-content .kory-external-link {
-  color: #3b82f6;
+  color: var(--color-info);
   text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--color-info) 45%, transparent);
   text-underline-offset: 2px;
 }
 .markdown-content .kory-external-link:hover {
-  opacity: 0.85;
+  text-decoration-color: currentColor;
 }
 .markdown-content .kory-link-favicon {
   display: inline-block;
@@ -65,18 +231,19 @@
 :root[data-theme='dark'] .markdown-content .kory-link-favicon {
   mix-blend-mode: multiply;
 }
-/* T3-style local file/symbol & thread navigation links */
+
+/* Local file/symbol, thread and note navigation links. */
 .markdown-content .kory-file-link,
 .markdown-content .kory-session-link,
 .markdown-content .kory-note-link {
   display: inline-flex;
   align-items: baseline;
   gap: 3px;
-  color: var(--color-text-primary);
-  font-weight: 500;
-  text-decoration: none;
-  border-bottom: 1.5px dotted color-mix(in srgb, var(--color-text-secondary) 65%, transparent);
   padding-bottom: 1px;
+  border-bottom: 1.5px dotted color-mix(in srgb, var(--color-text-secondary) 65%, transparent);
+  color: var(--color-text-primary);
+  font-weight: var(--font-medium, 500);
+  text-decoration: none;
   cursor: pointer;
   transition:
     color 120ms ease,
@@ -89,10 +256,179 @@
   border-bottom-color: var(--color-accent);
 }
 .markdown-content .kory-file-link-lines {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.85em;
   color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.85em;
 }
+
+/* ── Code blocks ────────────────────────────────────────────────────────── */
+
+.markdown-content pre {
+  margin: 0.75em 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg, 10px);
+  background: var(--color-surface-1);
+  box-shadow: none;
+  color: var(--color-text-primary);
+  font-size: 12.5px;
+  line-height: 1.6;
+  tab-size: 2;
+}
+.markdown-content pre code,
+.markdown-content pre code.hljs,
+.markdown-content .hljs {
+  padding: 0;
+  border: 0;
+  background: transparent !important;
+  color: var(--color-text-primary) !important;
+  font-size: inherit;
+  overflow-wrap: normal;
+}
+
+/* Code block chrome: a language label and a copy button overlaid on the
+   block's top-right corner. Overlaid rather than stacked so a block streamed
+   as a bare <pre> and the finished, decorated block occupy the same height —
+   completing a reply never shifts the transcript. */
+.markdown-content .kory-code-block {
+  position: relative;
+  margin: 0.75em 0;
+}
+.markdown-content .kory-code-block > pre {
+  margin: 0;
+}
+/* Reserve the chrome's row on every fenced block, including a still-streaming
+   one (rendered as a bare `<pre><code class="language-…">`), so the finished
+   block keeps the same height. */
+.markdown-content .kory-code-block > pre,
+.markdown-content pre:has(> code[class*='language-']) {
+  padding-top: 28px;
+}
+.markdown-content .kory-code-tools {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-family: var(--font-sans);
+}
+.markdown-content .kory-code-lang {
+  padding: 0 6px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 20px;
+  user-select: none;
+}
+.markdown-content .kory-code-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0.7;
+  transition:
+    opacity var(--duration-fast, 100ms) ease,
+    background var(--duration-fast, 100ms) ease,
+    color var(--duration-fast, 100ms) ease;
+}
+.markdown-content .kory-code-block:hover .kory-code-copy,
+.markdown-content .kory-code-copy:focus-visible,
+.markdown-content .kory-code-copy[data-copied] {
+  opacity: 1;
+}
+.markdown-content .kory-code-copy:hover {
+  border-color: var(--color-border);
+  background: var(--color-surface-3);
+  color: var(--color-text-primary);
+}
+.markdown-content .kory-code-copy:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+.markdown-content .kory-code-copy[data-copied] {
+  color: var(--color-success);
+}
+@media (pointer: coarse) {
+  .markdown-content .kory-code-copy {
+    opacity: 1;
+  }
+}
+
+/* Syntax colors follow the active theme instead of a fixed dark palette, so a
+   light theme no longer paints pastel atom-one-dark tokens on white. Each
+   token mixes a semantic theme color toward the primary text, which darkens
+   it on light surfaces and lightens it on dark ones. */
+.markdown-content .hljs-keyword,
+.markdown-content .hljs-selector-tag,
+.markdown-content .hljs-literal,
+.markdown-content .hljs-doctag,
+.markdown-content .hljs-meta .hljs-keyword {
+  color: color-mix(in srgb, var(--color-accent) 58%, var(--color-text-primary));
+}
+.markdown-content .hljs-string,
+.markdown-content .hljs-regexp,
+.markdown-content .hljs-addition,
+.markdown-content .hljs-attribute,
+.markdown-content .hljs-meta .hljs-string,
+.markdown-content .hljs-template-tag {
+  color: color-mix(in srgb, var(--color-success) 60%, var(--color-text-primary));
+}
+.markdown-content .hljs-number,
+.markdown-content .hljs-symbol,
+.markdown-content .hljs-bullet,
+.markdown-content .hljs-variable.constant_,
+.markdown-content .hljs-selector-attr,
+.markdown-content .hljs-selector-pseudo {
+  color: color-mix(in srgb, var(--color-warning) 60%, var(--color-text-primary));
+}
+.markdown-content .hljs-title,
+.markdown-content .hljs-title.function_,
+.markdown-content .hljs-section,
+.markdown-content .hljs-name,
+.markdown-content .hljs-selector-id,
+.markdown-content .hljs-selector-class {
+  color: color-mix(in srgb, var(--color-info) 65%, var(--color-text-primary));
+}
+.markdown-content .hljs-built_in,
+.markdown-content .hljs-type,
+.markdown-content .hljs-title.class_,
+.markdown-content .hljs-class .hljs-title {
+  color: color-mix(in srgb, var(--color-info) 40%, var(--color-accent));
+}
+.markdown-content .hljs-attr,
+.markdown-content .hljs-property,
+.markdown-content .hljs-params,
+.markdown-content .hljs-variable,
+.markdown-content .hljs-template-variable,
+.markdown-content .hljs-subst {
+  color: var(--color-text-secondary);
+}
+.markdown-content .hljs-comment,
+.markdown-content .hljs-quote,
+.markdown-content .hljs-meta {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+.markdown-content .hljs-deletion {
+  color: color-mix(in srgb, var(--color-error) 70%, var(--color-text-primary));
+}
+.markdown-content .hljs-emphasis {
+  font-style: italic;
+}
+.markdown-content .hljs-strong {
+  font-weight: var(--font-semibold, 600);
+}
+
+/* ── Math ───────────────────────────────────────────────────────────────── */
+
 .markdown-content .katex-display {
   overflow-x: auto;
   overflow-y: hidden;
@@ -103,36 +439,43 @@
   font-size: 1.1em;
 }
 
+/* ── Tables ─────────────────────────────────────────────────────────────── */
+
+.markdown-content .kory-table-scroll {
+  width: 100%;
+  margin: 0.75em 0;
+  overflow-x: auto;
+}
 .markdown-content table {
   width: 100%;
   min-width: min(520px, 100%);
+  margin: 0.75em 0;
+  border: 1px solid var(--color-border);
   border-collapse: separate;
   border-spacing: 0;
-  margin: 1rem 0;
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg, 10px);
   background: var(--color-surface-1);
+  font-size: 13px;
+  line-height: 1.55;
 }
-.markdown-content .kory-table-scroll {
-  width: 100%;
-  overflow-x: auto;
+.markdown-content .kory-table-scroll > table {
+  margin: 0;
 }
 .markdown-content thead {
-  background: var(--color-surface-3);
+  background: var(--color-surface-2);
 }
 .markdown-content th {
-  color: var(--color-text-primary);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: var(--font-semibold, 600);
+  white-space: nowrap;
 }
 .markdown-content th,
 .markdown-content td {
-  padding: 10px 13px;
+  padding: 8px 12px;
   text-align: left;
   vertical-align: top;
-  border-right: 1px solid var(--color-border);
+  border-right: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
   border-bottom: 1px solid var(--color-border);
 }
 .markdown-content tr > :last-child {
@@ -141,9 +484,192 @@
 .markdown-content tbody tr:last-child td {
   border-bottom: 0;
 }
-.markdown-content tbody tr:nth-child(even) {
-  background: color-mix(in srgb, var(--color-surface-2) 55%, transparent);
+.markdown-content thead tr:first-child > :first-child {
+  border-top-left-radius: var(--radius-lg, 10px);
+}
+.markdown-content thead tr:first-child > :last-child {
+  border-top-right-radius: var(--radius-lg, 10px);
 }
 .markdown-content tbody tr:hover {
-  background: color-mix(in srgb, var(--color-accent) 8%, var(--color-surface-1));
+  background: color-mix(in srgb, var(--color-accent) 6%, var(--color-surface-1));
+}
+
+/* ── Rich blocks: charts, color swatches, sandboxed HTML ────────────────── */
+
+.markdown-content .kory-chart {
+  margin: 1rem 0;
+  padding: 16px;
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl, 14px);
+  background: var(--color-surface-1);
+}
+.markdown-content .kory-chart figcaption {
+  margin-bottom: 10px;
+  color: var(--color-text-primary);
+  font-weight: var(--font-semibold, 600);
+}
+.markdown-content .kory-chart svg {
+  display: block;
+  width: 100%;
+  min-width: 520px;
+  max-height: 360px;
+}
+.markdown-content .chart-grid {
+  stroke: var(--color-border);
+  stroke-width: 1;
+  opacity: 0.6;
+}
+.markdown-content .chart-axis {
+  stroke: var(--color-text-muted);
+  stroke-width: 1;
+}
+.markdown-content .chart-axis-label {
+  fill: var(--color-text-muted);
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+.markdown-content .chart-bar,
+.markdown-content .chart-slice {
+  transition: opacity 120ms ease;
+}
+.markdown-content .chart-bar:hover,
+.markdown-content .chart-slice:hover {
+  opacity: 0.72;
+}
+.markdown-content .chart-donut-hole {
+  fill: var(--color-surface-1);
+}
+.markdown-content .chart-pie-center-value {
+  fill: var(--color-text-primary);
+  font-size: 16px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+.markdown-content .chart-pie-center-label {
+  fill: var(--color-text-muted);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+}
+.markdown-content .kory-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 10px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+.markdown-content .kory-chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.markdown-content .kory-chart-legend i {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+}
+.markdown-content .kory-chart-pie {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+  margin: 0 auto;
+  overflow: visible;
+}
+.markdown-content .kory-chart-pie svg {
+  min-width: 0;
+  max-width: min(380px, 100%);
+  height: auto;
+}
+.markdown-content .kory-chart-pie-legend {
+  flex-direction: column;
+  margin: 0;
+}
+
+.markdown-content .kory-color {
+  margin: 1rem 0;
+}
+.markdown-content .kory-color-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+.markdown-content .kory-color-chip {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 84px;
+  padding: 10px 12px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg, 10px);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  transition: transform 120ms ease;
+}
+.markdown-content .kory-color-chip:hover {
+  transform: translateY(-2px);
+}
+.markdown-content .kory-color-chip-label {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+.markdown-content .kory-color-chip-value {
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  opacity: 0.85;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+.markdown-content .kory-html-frame {
+  display: block;
+  width: 100%;
+  height: 360px;
+  min-height: 160px;
+  margin: 1rem 0;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl, 14px);
+  background: var(--color-surface-1);
+  resize: vertical;
+}
+.markdown-content .kory-html-error {
+  margin: 1rem 0;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg, 10px);
+  color: var(--color-error);
+  font-size: 12px;
+}
+
+.markdown-content img {
+  max-width: 100%;
+  height: auto;
+}
+
+@media (max-width: 760px) {
+  .markdown-content .kory-chart-pie {
+    display: block;
+  }
+  .markdown-content .kory-chart-pie-legend {
+    flex-direction: row;
+    margin-top: 8px;
+  }
+  .markdown-content .kory-color-grid {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  }
+  .markdown-content .kory-html-frame {
+    height: 280px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .markdown-content .kory-color-chip:hover {
+    transform: none;
+  }
 }

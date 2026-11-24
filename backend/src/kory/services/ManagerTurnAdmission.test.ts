@@ -1325,4 +1325,103 @@ describe('KoryManager turn admission', () => {
       sqlite.close();
     }
   });
+
+  describe('background worker delivery', () => {
+    type Internal = {
+      runtimes: {
+        get(id: string): {
+          runClaimed: boolean;
+          pendingSteerInputs: Map<string, unknown>;
+          asyncChildren: {
+            get(id: string): { delivery: string; status: string; result?: string } | undefined;
+          };
+        };
+        peek(id: string): { runClaimed: boolean; pendingSteerInputs: Map<string, unknown> } | undefined;
+      };
+      runWorkerPipeline: (...args: unknown[]) => Promise<string>;
+      startSessionTurn: (input: { source: string; userMessage: string }) => Promise<unknown>;
+      delegateWorkerForCaller: (sessionId: string, request: Record<string, unknown>) => Promise<string>;
+      waitForAsyncChildren: (sessionId: string, input: Record<string, unknown>) => Promise<string>;
+    };
+
+    async function until(check: () => boolean): Promise<void> {
+      for (let attempt = 0; attempt < 200 && !check(); attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    }
+
+    test('a finished background worker is admitted as a host-authored internal turn when the chat is idle', async () => {
+      const sessionId = 'async-idle-delivery';
+      const { sqlite, coordinator } = createRunCoordinator(sessionId);
+      const { store } = createMessageStore();
+      const manager = createManager(coordinator, store);
+      const internal = manager as unknown as Internal;
+      const admitted: Array<{ source: string; userMessage: string }> = [];
+      internal.runWorkerPipeline = async () => 'Worker found the answer.';
+      internal.startSessionTurn = async (input) => {
+        admitted.push(input);
+        return { accepted: true, completion: Promise.resolve({ status: 'completed' }) };
+      };
+      try {
+        const handle = await internal.delegateWorkerForCaller(sessionId, {
+          task: 'Find the answer',
+          wait: false,
+        });
+        const agentId = /Started background worker (child-\S+?)\./.exec(handle)?.[1];
+        expect(agentId).toBeTruthy();
+        await until(() => admitted.length > 0);
+        expect(admitted).toHaveLength(1);
+        expect(admitted[0]!.source).toBe('internal');
+        expect(admitted[0]!.userMessage).toContain('[Host: background worker results]');
+        expect(admitted[0]!.userMessage).toContain(`Worker ${agentId} (completed).`);
+        expect(admitted[0]!.userMessage).toContain('Worker found the answer.');
+        expect(internal.runtimes.get(sessionId).asyncChildren.get(agentId!)?.delivery).toBe('delivered');
+      } finally {
+        await manager.shutdown();
+        sqlite.close();
+      }
+    });
+
+    test('results finished during a live run park as a steer, and wait_for_agents drops the parked continuation', async () => {
+      const sessionId = 'async-live-park';
+      const { sqlite, coordinator } = createRunCoordinator(sessionId);
+      const { store } = createMessageStore();
+      const manager = createManager(coordinator, store);
+      const internal = manager as unknown as Internal;
+      let finish: (text: string) => void = () => undefined;
+      internal.runWorkerPipeline = () =>
+        new Promise<string>((resolve) => {
+          finish = resolve;
+        });
+      const admitted: string[] = [];
+      internal.startSessionTurn = async (input) => {
+        admitted.push(input.userMessage);
+        return { accepted: true, completion: Promise.resolve({ status: 'completed' }) };
+      };
+      try {
+        internal.runtimes.get(sessionId).runClaimed = true;
+        const handle = await internal.delegateWorkerForCaller(sessionId, {
+          task: 'Slow check',
+          wait: false,
+        });
+        const agentId = /Started background worker (child-\S+?)\./.exec(handle)![1]!;
+        finish('Slow result.');
+        await until(() => internal.runtimes.get(sessionId).pendingSteerInputs.size > 0);
+        // Parked, not admitted: a live manager turn yields at its next checkpoint.
+        expect(internal.runtimes.get(sessionId).pendingSteerInputs.size).toBe(1);
+        expect(admitted).toHaveLength(0);
+
+        const joined = await internal.waitForAsyncChildren(sessionId, { agentIds: [agentId] });
+        expect(joined).toContain('Slow result.');
+        // The claimed result must not stop the turn or be delivered again.
+        expect(internal.runtimes.get(sessionId).pendingSteerInputs.size).toBe(0);
+        expect(internal.runtimes.get(sessionId).asyncChildren.get(agentId)?.delivery).toBe('delivered');
+        expect(admitted).toHaveLength(0);
+      } finally {
+        internal.runtimes.get(sessionId).runClaimed = false;
+        await manager.shutdown();
+        sqlite.close();
+      }
+    });
+  });
 });

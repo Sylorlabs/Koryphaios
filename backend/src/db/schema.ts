@@ -37,6 +37,15 @@ export const sessions = sqliteTable('sessions', {
    * archived but still fully recoverable; deletion remains a separate path. */
   archivedAt: integer('archived_at', { mode: 'timestamp_ms' }),
   parentId: text('parent_id'),
+  /** Fork lineage (migration 0060). A fork is a new chat whose history was copied from
+   * `forked_from_session_id` up to `forked_from_message_id`. Null for original chats. */
+  forkedFromSessionId: text('forked_from_session_id'),
+  forkedFromMessageId: text('forked_from_message_id'),
+  forkedAt: integer('forked_at', { mode: 'timestamp_ms' }),
+  /** The fork's own copy of its fork point. Merge-back covers messages after it. */
+  forkedBaseMessageId: text('forked_base_message_id'),
+  /** Set once the fork's result has been appended to its source. One merge per fork. */
+  forkedMergedAt: integer('forked_merged_at', { mode: 'timestamp_ms' }),
   messageCount: integer('message_count').default(0),
   tokensIn: integer('tokens_in').default(0),
   tokensOut: integer('tokens_out').default(0),
@@ -609,6 +618,29 @@ export const agentSteeringCommands = sqliteTable(
   (t) => ({
     queue: index('idx_agent_steering_queue').on(t.sessionId, t.agentId, t.status, t.position),
     recent: index('idx_agent_steering_recent').on(t.sessionId, t.agentId, t.updatedAt),
+  }),
+);
+
+/** Inline diff comments. Rows are session-owned and erased with the chat. */
+export const sessionReviewComments = sqliteTable(
+  'session_review_comments',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id').notNull(),
+    filePath: text('file_path').notNull(),
+    line: integer('line').notNull(),
+    side: text('side', { enum: ['old', 'new'] }).notNull(),
+    staged: integer('staged').notNull(),
+    body: text('body').notNull(),
+    hunkHeader: text('hunk_header'),
+    status: text('status', { enum: ['open', 'resolved'] }).notNull(),
+    sentBatchId: text('sent_batch_id'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+    resolvedAt: integer('resolved_at'),
+  },
+  (t) => ({
+    bySession: index('idx_session_review_comments_session').on(t.sessionId, t.status, t.createdAt),
   }),
 );
 

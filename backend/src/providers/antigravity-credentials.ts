@@ -1,3 +1,4 @@
+import { hostOS } from '../runtime/platform';
 import { execFile } from 'node:child_process';
 import {
   closeSync, constants, fstatSync, mkdtempSync, mkdirSync, openSync,
@@ -90,7 +91,7 @@ export async function readPortableAntigravityCredential(options: {
   } catch {
     options.signal?.throwIfAborted();
   }
-  if ((options.platform ?? process.platform) === 'darwin') {
+  if ((options.platform ?? hostOS()) === 'darwin') {
     try {
       return validateAntigravityCredential(await (options.readKeychain ?? readNativeKeychain)(options.signal));
     } catch { options.signal?.throwIfAborted(); }

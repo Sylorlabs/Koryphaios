@@ -1,0 +1,89 @@
+{
+  "number": 412,
+  "title": "Add review loop to chat diffs",
+  "url": "https://github.com/acme/widgets/pull/412",
+  "state": "OPEN",
+  "isDraft": false,
+  "headRefOid": "9f2c1b7a4e0d3c5b6a7f8e9d0c1b2a3f4e5d6c7b",
+  "reviewDecision": "CHANGES_REQUESTED",
+  "mergeable": "MERGEABLE",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "name": "unit",
+      "workflowName": "CI",
+      "status": "COMPLETED",
+      "conclusion": "FAILURE",
+      "detailsUrl": "https://github.com/acme/widgets/actions/runs/7710001/job/21000001",
+      "startedAt": "2026-11-23T10:00:00Z",
+      "completedAt": "2026-11-23T10:04:12Z"
+    },
+    {
+      "__typename": "CheckRun",
+      "name": "lint",
+      "workflowName": "CI",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/acme/widgets/actions/runs/7710001/job/21000002",
+      "startedAt": "2026-11-23T10:00:00Z",
+      "completedAt": "2026-11-23T10:01:03Z"
+    },
+    {
+      "__typename": "CheckRun",
+      "name": "e2e",
+      "workflowName": "E2E",
+      "status": "IN_PROGRESS",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/acme/widgets/actions/runs/7710050/job/21000050",
+      "startedAt": "2026-11-23T10:02:00Z",
+      "completedAt": null
+    },
+    {
+      "__typename": "CheckRun",
+      "name": "integration",
+      "workflowName": "CI",
+      "status": "COMPLETED",
+      "conclusion": "TIMED_OUT",
+      "detailsUrl": "https://github.com/acme/widgets/actions/runs/7710001/job/21000003",
+      "startedAt": "2026-11-23T10:00:00Z",
+      "completedAt": "2026-11-23T10:30:00Z"
+    },
+    {
+      "__typename": "StatusContext",
+      "context": "deploy/preview",
+      "state": "ERROR",
+      "targetUrl": "https://ci.example.test/builds/88"
+    },
+    {
+      "__typename": "StatusContext",
+      "context": "codecov/patch",
+      "state": "PENDING",
+      "targetUrl": "https://codecov.example.test/gh/acme/widgets/pull/412"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "PRR_kwDOA1",
+      "author": { "login": "alice" },
+      "state": "COMMENTED",
+      "body": "Nice start.",
+      "submittedAt": "2026-11-22T09:00:00Z"
+    },
+    {
+      "id": "PRR_kwDOA2",
+      "author": { "login": "bob" },
+      "state": "CHANGES_REQUESTED",
+      "body": "Please handle the stale-diff case before merging.",
+      "submittedAt": "2026-11-23T08:30:00Z"
+    }
+  ],
+  "comments": [
+    {
+      "id": "IC_kwDOB1",
+      "author": { "login": "carol" },
+      "body": "Does this work on Windows?",
+      "createdAt": "2026-11-23T11:00:00Z",
+      "url": "https://github.com/acme/widgets/pull/412#issuecomment-1"
+    }
+  ]
+}

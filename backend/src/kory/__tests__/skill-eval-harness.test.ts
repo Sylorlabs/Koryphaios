@@ -174,7 +174,7 @@ describe('V5 evaluation harness', () => {
     expect(gate.reasons).toContain(
       'Only infrastructure-failed runs are recorded; no skill outcome has been observed.',
     );
-  });
+  }, 120_000);
 
   test('reports pairwise adjacent-skill confusion from held-out routing observations', () => {
     const skill = listSkills(root).find((item) => item.name === 'skill-authoring-evaluation')!;
@@ -292,7 +292,10 @@ describe('V5 evaluation harness', () => {
       }
       expect(routingFailures).toEqual([]);
       expect(routingGateFailures).toEqual([]);
-    }, 30_000);
+      // Each batch resolves every held-out routing case through the real resolver;
+      // that sweep takes 2-15s unloaded and far longer under CPU contention, so the
+      // ceiling is sized for the sweep, not for a single assertion.
+    }, 120_000);
   }
 
   test('scores universal-router precision from expected and forbidden downstream skills', () => {

@@ -177,3 +177,22 @@ test('linked mobile workbench preserves binary downloads', async () => {
     body: 'AAEC/w==',
   });
 });
+
+test('linked devices can never reach the integrated terminal routes', async () => {
+  let reached = false;
+  setDeviceWorkbenchHandler(() => {
+    reached = true;
+    return Response.json({ ok: true });
+  });
+  for (const [path, method] of [
+    ['/api/terminals?sessionId=own-chat', 'GET'],
+    ['/api/terminals', 'POST'],
+    ['/api/terminals/abc/scrollback?sessionId=own-chat', 'GET'],
+    ['/api/terminals/abc?sessionId=own-chat', 'DELETE'],
+  ] as const) {
+    await expect(
+      executeDeviceWorkbench('own-chat', { path, method }, authorize),
+    ).rejects.toThrow('Terminals are never exposed through linked devices.');
+  }
+  expect(reached).toBe(false);
+});

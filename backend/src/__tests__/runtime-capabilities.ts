@@ -1,3 +1,4 @@
+import { isWindows } from '../runtime/platform';
 /**
  * Capabilities of the host running deterministic tests.
  *
@@ -22,7 +23,7 @@ export function canBindLoopback(): boolean {
 }
 
 export async function canUseBunStdioPipes(): Promise<boolean> {
-  if (process.platform === 'win32') return true;
+  if (isWindows()) return true;
   let child: Bun.Subprocess | undefined;
   try {
     child = Bun.spawn(

@@ -1,9 +1,12 @@
 import {
   NOTE_WORKSPACE_TOOL_DEFINITIONS,
   NOTE_PROPERTY_TYPES,
+  MAX_NOTE_ICON_DATA_LENGTH,
+  MAX_NOTE_ICON_LABEL_LENGTH,
   validateNoteCanvas,
   setNoteProperty,
   removeNoteProperty,
+  type NoteIcon,
   type NoteProperty,
   type NoteCanvasDocument,
 } from '@koryphaios/shared';
@@ -13,6 +16,7 @@ import { constants } from 'node:fs';
 import * as bases from '../notes/note-bases-service';
 import * as notes from '../notes/notes-service';
 import { listNoteAppearances } from '../notes/note-appearances';
+import { setFolderAppearance, setTagAppearance } from '../notes/notes-appearance';
 import { getNotePropertyProjection } from '../notes/note-properties-service';
 import { noteDraftService } from '../notes/note-draft-service';
 import { checkNoteToolPermission } from '../notes/notes-settings';
@@ -56,6 +60,9 @@ const patch = {
   },
   required: ['op', 'key'],
 };
+const nullableText = (maxLength: number) => ({
+  oneOf: [{ type: 'string', maxLength }, { type: 'null' }],
+});
 const schema = (properties: Record<string, unknown>, required: string[] = []) => ({
   type: 'object',
   additionalProperties: false,
@@ -117,6 +124,40 @@ export const NOTE_WORKSPACE_SCHEMAS: Record<string, Record<string, unknown>> = {
       patches: { type: 'array', minItems: 1, maxItems: 100, items: patch },
     },
     ['noteId', 'expectedRevision', 'patches'],
+  ),
+  set_note_icon: schema(
+    {
+      noteId: id,
+      icon: {
+        type: ['object', 'null'],
+        additionalProperties: false,
+        description:
+          'Icon to set, or null to clear. kind builtin (quick pick), emoji (any single emoji) or image (PNG/JPEG/GIF/WebP data URL).',
+        properties: {
+          kind: { type: 'string', enum: ['builtin', 'emoji', 'image'] },
+          value: { type: 'string', minLength: 1, maxLength: MAX_NOTE_ICON_DATA_LENGTH },
+          label: { type: 'string', minLength: 1, maxLength: MAX_NOTE_ICON_LABEL_LENGTH },
+        },
+        required: ['kind', 'value'],
+      },
+    },
+    ['noteId', 'icon'],
+  ),
+  set_folder_appearance: schema(
+    {
+      path: { type: 'string', minLength: 1, maxLength: 1000 },
+      emoji: nullableText(32),
+      color: nullableText(32),
+    },
+    ['path'],
+  ),
+  set_tag_appearance: schema(
+    {
+      tag: { type: 'string', minLength: 1, maxLength: 100 },
+      emoji: nullableText(32),
+      color: nullableText(32),
+    },
+    ['tag'],
   ),
   list_note_appearances: schema({ noteId: id }, ['noteId']),
   list_note_relationships: schema({
@@ -364,6 +405,24 @@ async function execute(
         properties: (await getNotePropertyProjection(noteId, root)).properties,
       };
     }
+    case 'set_note_icon': {
+      // Appearance only: never advances the document revision or rewrites the source file.
+      const icon = (input.icon ?? null) as NoteIcon | null;
+      await notes.setNoteIcon(noteId, icon, root);
+      return { noteId, icon };
+    }
+    case 'set_folder_appearance':
+      return setFolderAppearance(root, {
+        path: input.path as string,
+        emoji: input.emoji as string | null | undefined,
+        color: input.color as string | null | undefined,
+      });
+    case 'set_tag_appearance':
+      return setTagAppearance(root, {
+        tag: input.tag as string,
+        emoji: input.emoji as string | null | undefined,
+        color: input.color as string | null | undefined,
+      });
     case 'list_note_appearances':
       return listNoteAppearances(noteId, root);
     case 'list_note_relationships': {

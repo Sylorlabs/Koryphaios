@@ -43,17 +43,26 @@ import {
   WebFetchTool,
   AskUserTool,
   RenameSessionTool,
+  ForkChatTool,
   AskManagerTool,
   DelegateToWorkerTool,
+  WaitForAgentsTool,
   ManageReviewAgentsTool,
   ManageAgentsTool,
   SendAgentMessageTool,
   RequestManagerRelayTool,
   ListAgentMessagesTool,
   ListSessionsTool,
+  ReadTerminalTool,
   ReadSessionTool,
   IsolateChatTool,
   MergeChatBackTool,
+  CreateChatTool,
+  SendToChatTool,
+  WaitForChatTool,
+  InterruptChatTool,
+  SearchChatsTool,
+  ArchiveChatTool,
   MCPDetectErrorsTool,
   MCPAnalyzeErrorTool,
   MCPSuggestFixesTool,
@@ -70,6 +79,8 @@ import {
   UpdateWorkflowTool,
   CreateWorkflowDraftTool,
   GetResourceBudgetTool,
+  GetModelPricingTool,
+  GetUsageSummaryTool,
   ScheduleMonitorTool,
 } from './tools';
 import { initMCP } from './mcp/client';
@@ -191,7 +202,10 @@ export async function bootstrap(): Promise<AppContext> {
       'Failed closed orphaned authoritative session-run waits',
     );
   }
-  const interruptedRuns = await runs.recoverInterruptedRuns();
+  // Interrupted runs are marked durably; the continuation (if the user enabled
+  // resumeInterruptedRuns) is admitted once the manager exists, below.
+  const resumeInterruptedRuns = resumeInterruptedRunsEnabled(PROJECT_ROOT);
+  const interruptedRuns = await runs.recoverInterruptedRuns({ resumeInterruptedRuns });
   if (interruptedRuns > 0) {
     serverLog.warn({ count: interruptedRuns }, 'Recovered interrupted authoritative session runs');
   }
@@ -245,7 +259,20 @@ export async function bootstrap(): Promise<AppContext> {
   setContext(context);
   configureAgentMail({ kory, sessions });
   configureSessionsDirectory({ kory, sessions, messages });
+  configureTerminalReads((sessionId) => kory.peekSessionRuntime(sessionId)?.terminals);
   configureChatIsolation({ kory, sessions });
+  configureChatControl({
+    kory,
+    sessions,
+    messages,
+    runStatus: (sessionId) => {
+      if (!kory.isSessionRunning(sessionId)) return 'idle';
+      return runs.get(sessionId)?.status === 'waiting' ? 'waiting' : 'processing';
+    },
+    interruptChat: (sessionId, message) => stopChatRun(sessionId, { message }),
+    archiveChat: (sessionId) => archiveSessionCoordinated(sessionId),
+    createChat: (input) => createAgentChatSession(input),
+  });
   finishPhase('session-runtime');
   reportStartupPhase('process-and-goal-recovery');
   // Kory subscribed during construction; initialize only after the WebSocket
@@ -266,12 +293,51 @@ export async function bootstrap(): Promise<AppContext> {
     serverLog.info(recoveredQuestionHandoffs, 'Reconciled durable answered-question handoffs');
   }
   await goalDriver.recover();
+  // Admit one host-authored continuation per run a restart interrupted. Runs
+  // through the normal turn admission, so a busy chat defers it to the next boot.
+  const restartResumes = await admitPendingRunResumes(
+    runs,
+    (sessionId, sourceRunId) => kory.admitRestartContinuation(sessionId, sourceRunId),
+    { enabled: resumeInterruptedRuns },
+  );
+  if (restartResumes.admitted + restartResumes.skipped + restartResumes.deferred > 0) {
+    serverLog.info(restartResumes, 'Reconciled restart continuations of interrupted runs');
+  }
+  // Re-arm automatic resumes for chats that were paused on a usage limit.
+  const usageLimitResumesArmed = kory.recoverUsageLimitResumes();
+  if (usageLimitResumesArmed > 0) {
+    serverLog.info({ count: usageLimitResumesArmed }, 'Re-armed automatic usage-limit resumes');
+  }
   // Arm persisted monitors only after recovery has settled, so a due monitor
   // cannot race startup recovery with a new session turn.
   await configureMonitors({
     kory,
     sessions,
     storagePath: resolve(PROJECT_ROOT, config.dataDirectory, 'monitors.json'),
+    // A new-chat schedule opens its chat through the same path as POST /api/sessions.
+    createChat: async ({ workingDirectory, title }) => {
+      const lease = tryAcquireSessionCreationLease();
+      if (!lease) {
+        throw new Error('Session creation is temporarily blocked while delete-all is finishing.');
+      }
+      try {
+        const session = await sessions.create('local-user', title, undefined, workingDirectory);
+        try {
+          writeAllCliRulesAndSkills(session.id, '');
+        } catch (err: unknown) {
+          serverLog.warn({ err, sessionId: session.id }, 'Failed to write CLI rules + skills');
+        }
+        wsManager.broadcastEphemeral({
+          type: 'session.updated',
+          sessionId: session.id,
+          timestamp: Date.now(),
+          payload: { session },
+        });
+        return { id: session.id };
+      } finally {
+        lease.release();
+      }
+    },
   });
   finishPhase('process-and-goal-recovery');
   reportStartupPhase('background-services');
@@ -330,8 +396,17 @@ import { createComputerUseTools } from './computer-use/tools';
 import { checklistTools } from './tools/checklists';
 import { configureAgentMail } from './kory/services/agent-mail-service';
 import { configureSessionsDirectory } from './tools/sessions-directory';
+import { configureTerminalReads } from './tools/terminal-read';
 import { configureChatIsolation } from './tools/chat-isolation';
+import { configureChatControl } from './tools/chat-control';
+import { stopChatRun } from './services/chat-run-control';
+import { createAgentChatSession } from './services/agent-chat-service';
+import { archiveSessionCoordinated } from './services/session-archive-service';
 import { configureMonitors } from './kory/services/monitor-service';
+import { tryAcquireSessionCreationLease } from './services/session-erasure-service';
+import { writeAllCliRulesAndSkills } from './providers/cli-rules-skills';
+import { admitPendingRunResumes } from './runs/restart-resume';
+import { resumeInterruptedRunsEnabled } from './runs/resume-setting';
 
 /** Build the authoritative runtime tool registry without starting the backend. */
 export async function initTools(providers: ProviderRegistry) {
@@ -439,8 +514,10 @@ export async function initTools(providers: ProviderRegistry) {
     new AskUserTool(),
     new RequestCriticReviewTool(),
     new RenameSessionTool(),
+    new ForkChatTool(),
     new AskManagerTool(),
     new DelegateToWorkerTool(),
+    new WaitForAgentsTool(),
     new ManageReviewAgentsTool(),
     new ManageAgentsTool(),
     new SendAgentMessageTool(),
@@ -448,8 +525,15 @@ export async function initTools(providers: ProviderRegistry) {
     new ListAgentMessagesTool(),
     new ListSessionsTool(),
     new ReadSessionTool(),
+    new ReadTerminalTool(),
     new IsolateChatTool(),
     new MergeChatBackTool(),
+    new CreateChatTool(),
+    new SendToChatTool(),
+    new WaitForChatTool(),
+    new InterruptChatTool(),
+    new SearchChatsTool(),
+    new ArchiveChatTool(),
     new MCPDetectErrorsTool(),
     new MCPAnalyzeErrorTool(),
     new MCPSuggestFixesTool(),
@@ -469,6 +553,8 @@ export async function initTools(providers: ProviderRegistry) {
     new UpdateWorkflowTool(),
     new CreateWorkflowDraftTool(),
     new GetResourceBudgetTool(providers),
+    new GetModelPricingTool(providers),
+    new GetUsageSummaryTool(providers),
     new ScheduleMonitorTool(),
   ];
 

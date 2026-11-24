@@ -9,6 +9,15 @@ import { executeTool } from './execution-pipeline';
 export { deriveToolContext } from './execution-pipeline';
 export { roleIncludesTool } from './tool-roles';
 
+/** Per-call controls for delegate_to_worker beyond the model and worktree. */
+export interface DelegateToWorkerOptions {
+  /** false returns immediately with a handle; the result arrives later as a
+   *  host-authored continuation or through wait_for_agents. Default true. */
+  wait?: boolean;
+  /** Attempts sharing one group id are returned together and can be ranked. */
+  compareGroupId?: string;
+}
+
 export interface ToolContext {
   sessionId: string;
   /** Authenticated actor when known. Falls back to a session-scoped audit identity locally. */
@@ -126,11 +135,21 @@ export interface ToolContext {
     reasoningLevel?: string,
     worktree?: boolean,
     fallbacks?: import('@koryphaios/shared').AgentFallbackStep[],
+    options?: DelegateToWorkerOptions,
   ) => Promise<string>;
+  /** Join worker agents started with wait:false. Scoped to this session. */
+  waitForAgents?: (input: { agentIds?: string[]; timeoutSec?: number }) => Promise<string>;
   /** Manager-only metadata callback scoped to this session by the host. */
   renameSession?: (title: string) => Promise<string>;
-  /** Manager Auto-mode decision to hold its final answer for independent review. */
-  requestCriticReview?: (reason: string) => void;
+  /** Manager-only: fork a chat (default: this one) at a finished point, returning the new chat. */
+  forkChat?: (input: {
+    sessionId?: string;
+    messageId?: string;
+    title?: string;
+  }) => Promise<{ sessionId: string; title: string; copiedMessageCount: number }>;
+  /** Manager Auto-mode decision to hold its final answer for independent review.
+   *  A compare group id asks the end-of-turn critic to rank that group's attempts. */
+  requestCriticReview?: (reason: string, compareGroupId?: string) => void;
   /** Optional preflight hook called before a file-mutating tool runs. If the
    *  callback returns `{ allowed: false }`, the tool is blocked and its result
    *  is replaced with the reason. Used by autonomy limits to enforce approval

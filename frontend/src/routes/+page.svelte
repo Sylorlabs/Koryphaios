@@ -109,6 +109,8 @@
   import { runStateStore } from '$lib/stores/run-state.svelte';
   import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
   import { type SettingsTab } from '$lib/utils/settings-catalog';
+  import { voiceConductor } from '$lib/voice-conductor/conductor.svelte';
+  import { OPEN_PANEL_EVENT } from '$lib/voice-conductor/store-actions';
 
   let showSettings = $state(false);
   const showOnboarding = $derived(!isDemoMode && authStore.isAuthenticated && onboardingStore.shouldShow);
@@ -558,6 +560,30 @@
     window.addEventListener('kory:open-project-folder', openProjectFolderPicker);
     window.addEventListener('kory:workspace-new-chat', openWorkspaceNewChat);
 
+    // Voice conductor: panels it can ask for, and steering that uses the
+    // composer's model with the same checks a typed send gets.
+    const handleOpenPanel = (event: Event) => {
+      const panel = (event as CustomEvent<{ panel?: string }>).detail?.panel;
+      if (panel === 'notes') {
+        if (!notesStore.settings.enabled) return;
+        showNotes = true;
+      } else if (panel === 'settings' || panel === 'voice_settings') {
+        settingsInitialTab = panel === 'voice_settings' ? 'voice' : undefined;
+        settingsInitialAgentSection = undefined;
+        showSettings = true;
+      } else if (panel === 'agents') {
+        showAgents = true;
+        agentsDismissed = false;
+      } else {
+        // No terminal panel lives in this shell; leave the request unhandled
+        // so the conductor reports it instead of pretending.
+        return;
+      }
+      event.preventDefault();
+    };
+    window.addEventListener(OPEN_PANEL_EVENT, handleOpenPanel);
+    voiceConductor.setHost({ steerManager: conductorSteerManager });
+
     const handleWorkspaceSnapshot = (event: Event) => {
       const snapshot = (event as CustomEvent).detail as WorkspaceNavigationSnapshot | undefined;
       if (!snapshot) return;
@@ -611,6 +637,8 @@
       window.removeEventListener('kory:home-preset', handleHomePreset);
       window.removeEventListener('kory:open-project-folder', openProjectFolderPicker);
       window.removeEventListener('kory:workspace-new-chat', openWorkspaceNewChat);
+      window.removeEventListener(OPEN_PANEL_EVENT, handleOpenPanel);
+      voiceConductor.setHost(null);
       window.removeEventListener('kory-workspace-snapshot', handleWorkspaceSnapshot);
       window.removeEventListener('kory-workspace-refresh', handleWorkspaceRefresh);
       window.clearInterval(workspaceRefreshTimer);
@@ -1836,6 +1864,35 @@
       modelParameters,
       fusion,
     );
+  }
+
+  /** Steering spoken to the voice conductor. Always addresses the manager of
+   *  the chat the command was spoken in (never the rail's selected worker),
+   *  with the composer's model and the same configuration checks as a send. */
+  async function conductorSteerManager(sessionId: string, text: string): Promise<boolean> {
+    if (isDemoMode || !sessionId || !text.trim()) return false;
+    const model = activeComposerModel || undefined;
+    const reasoningLevel = activeComposerReasoning || undefined;
+    const configurationWarning = getModelConfigurationWarning(wsStore.providers, model);
+    if (configurationWarning) {
+      toastStore.error(configurationWarning);
+      return false;
+    }
+    const providerName =
+      parseProviderModelSelection(
+        model,
+        wsStore.providers.map((p) => p.name),
+      ).provider ?? '';
+    const remoteProvider = providerName
+      ? wsStore.providers.find((p) => p.name === providerName)
+      : undefined;
+    if (remoteProvider?.remoteAgentic && !agenticConsent.has(providerName)) {
+      toastStore.info('Send one message from the composer to approve the remote host first.');
+      return false;
+    }
+    return runStateStore.isRunning(sessionId)
+      ? wsStore.steerMessage(sessionId, text, model, reasoningLevel)
+      : wsStore.sendMessage(sessionId, text, model, reasoningLevel);
   }
 
   function handleStop() {

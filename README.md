@@ -17,38 +17,52 @@ agent gets it wrong.
 
 ## Install Koryphaios
 
-macOS and Linux:
+**macOS (recommended):** paste this into Terminal.
 
 ```bash
 curl -fsSL https://koryphaios.com/install | sh
 ```
 
-Windows PowerShell:
+It installs straight into Applications. The script downloads the build for your Mac,
+checks its checksum when one is published, copies `Koryphaios.app` into `/Applications`
+(or `~/Applications` if you decline the administrator prompt), clears the download
+quarantine flag on that installed copy only, and opens the app. If Koryphaios is already
+running, it asks before quitting it. Nothing is sent anywhere beyond the release download.
+
+**Linux x64:**
+
+```bash
+curl -fsSL https://koryphaios.com/install | sh
+```
+
+Installs the AppImage as `~/.local/bin/koryphaios` (or `$XDG_BIN_HOME/koryphaios`) and adds
+an application-menu launcher entry.
+
+**Windows x64 (PowerShell):**
 
 ```powershell
 curl.exe -fsSL https://koryphaios.com/install.ps1 | powershell.exe -NoProfile -ExecutionPolicy Bypass -Command -
 ```
 
-These commands resolve the latest published build for the supported target.
-On macOS, the script downloads a DMG to `~/Downloads`, opens it, and leaves the
-Applications drag-and-drop step to you. The macOS build is ad-hoc signed, not
-notarized. A download made by the install script is not quarantined, so it opens
-normally. A DMG downloaded in a browser is quarantined: macOS refuses the first
-launch, and on macOS 15 and later control-click → Open no longer bypasses that.
-Allow it once in **System Settings → Privacy & Security → Open Anyway**, or clear
-the quarantine flag yourself:
+Downloads and opens the setup executable; the installer adds the Start-menu entry.
+
+The macOS build is ad-hoc signed, not notarized, so macOS treats a DMG downloaded in a
+browser as quarantined and may refuse the first launch. Two ways past that prompt:
+
+- Use the terminal installer above (it does the quarantine step for you), or
+- Download the DMG and open the **"If macOS says the app can't be opened"** guide inside it.
+  The steps are in **System Settings → Privacy & Security → Open Anyway**.
+
+Manually clearing quarantine on an app you already copied is also possible:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Koryphaios.app
 ```
 
-In-app updates are not quarantined and need no further approval. On Windows x64, the script
-downloads and opens the setup executable; the installer adds the Start-menu
-entry. On Linux x64, the script installs the AppImage executable as
-`~/.local/bin/koryphaios` (or `$XDG_BIN_HOME/koryphaios`) and does not currently
-create a desktop-launcher entry. Unsupported architectures fail explicitly.
-You can inspect the [macOS/Linux](https://koryphaios.com/install) or
-[Windows](https://koryphaios.com/install.ps1) script before running it.
+In-app updates are not quarantined and need no further approval. Unsupported architectures
+fail with a clear message. Inspect the scripts before running them:
+[macOS/Linux](https://koryphaios.com/install) and [Windows](https://koryphaios.com/install.ps1)
+(source: [`scripts/install/`](scripts/install/)).
 
 ## See it in action
 

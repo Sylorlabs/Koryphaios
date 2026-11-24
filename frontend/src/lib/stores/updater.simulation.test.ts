@@ -391,8 +391,29 @@ describe('update simulation: manifest to user-visible state', () => {
 
     expect(await updater.checkForUpdates(true)).toBeNull();
     expect(updater.updateAvailable).toBe(false);
-    // launch-user/build flows surface this; a silent background check does not
+    // A silent background check does not write the dialog's error state.
+    expect(updater.error).toBeNull();
+
+    // A user-initiated check surfaces the failure.
+    expect(await updater.checkForUpdates(false)).toBeNull();
     expect(updater.error).toBe('network unreachable');
+  });
+
+  it('keeps an install error through a background check that fails', async () => {
+    invoke.mockImplementation(async (command: string) => {
+      if (command === 'should_auto_update_at_launch') return false;
+      if (command === 'check_for_updates') return { available: true, version: '0.6.0', notes: null, pub_date: null };
+      if (command === 'install_update') throw 'signature mismatch';
+      return undefined;
+    });
+    const { updater } = await loadStore();
+    await updater.checkForUpdates(true);
+    await updater.installUpdateAndRestart();
+    expect(updater.error).toBe('signature mismatch');
+
+    invoke.mockRejectedValueOnce(new Error('network unreachable'));
+    await updater.checkForUpdates(true);
+    expect(updater.error).toBe('signature mismatch');
   });
 });
 

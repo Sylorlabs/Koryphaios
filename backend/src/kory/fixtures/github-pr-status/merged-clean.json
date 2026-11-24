@@ -1,0 +1,30 @@
+{
+  "number": 398,
+  "title": "Tidy release notes",
+  "url": "https://github.com/acme/widgets/pull/398",
+  "state": "MERGED",
+  "isDraft": false,
+  "headRefOid": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d",
+  "reviewDecision": "APPROVED",
+  "mergeable": "UNKNOWN",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "name": "unit",
+      "workflowName": "CI",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/acme/widgets/actions/runs/7600001/job/20000001"
+    },
+    {
+      "__typename": "CheckRun",
+      "name": "docs",
+      "workflowName": "Docs",
+      "status": "COMPLETED",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/acme/widgets/actions/runs/7600002/job/20000002"
+    }
+  ],
+  "reviews": [],
+  "comments": []
+}

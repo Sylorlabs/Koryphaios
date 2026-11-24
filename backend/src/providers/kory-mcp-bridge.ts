@@ -660,10 +660,13 @@ export const KORY_TOOLS: KoryToolDef[] = [
   // ── Interaction ──
   {
     name: 'kory__request_critic_review',
-    description: 'In Critic Auto mode, request an independent Critic review of your proposed answer.',
+    description: 'In Critic Auto mode, request an independent Critic review of your proposed answer. Pass compareGroupId to have the Critic rank a compare group.',
     inputSchema: {
       type: 'object',
-      properties: { reason: { type: 'string', minLength: 1, maxLength: 500 } },
+      properties: {
+        reason: { type: 'string', minLength: 1, maxLength: 500 },
+        compareGroupId: { type: 'string', minLength: 1, maxLength: 64 },
+      },
       required: ['reason'],
       additionalProperties: false,
     },
@@ -676,6 +679,20 @@ export const KORY_TOOLS: KoryToolDef[] = [
       type: 'object',
       properties: { title: { type: 'string' } },
       required: ['title'],
+    },
+    role: 'manager',
+  },
+  {
+    name: 'kory__fork_chat',
+    description:
+      'Fork a chat into a new chat from a finished point of its history (default: the latest finished message). The original chat is not changed. Returns the new chat id.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string' },
+        messageId: { type: 'string' },
+        title: { type: 'string' },
+      },
     },
     role: 'manager',
   },
@@ -710,15 +727,35 @@ export const KORY_TOOLS: KoryToolDef[] = [
   {
     name: 'kory__delegate_to_worker',
     description:
-      'Delegate a task to a Koryphaios worker agent. Use this instead of native subagents. Set worktree false for read-only research and true for work that edits files; omit it to follow the chat setting.',
+      'Delegate a task to a Koryphaios worker agent. Use this instead of native subagents. Set worktree false for read-only research and true for work that edits files; omit it to follow the chat setting. model accepts any connected provider:model. wait:false returns an agentId at once and delivers the result later; compare.groupId groups attempts under different models for ranking.',
     inputSchema: {
       type: 'object',
       properties: {
         task: { type: 'string' },
         domain: { type: 'string' },
+        model: { type: 'string' },
         worktree: { type: 'boolean' },
+        wait: { type: 'boolean' },
+        compare: {
+          type: 'object',
+          properties: { groupId: { type: 'string', minLength: 1, maxLength: 64 } },
+          required: ['groupId'],
+        },
       },
       required: ['task'],
+    },
+    role: 'any',
+  },
+  {
+    name: 'kory__wait_for_agents',
+    description:
+      'Join worker agents started with kory__delegate_to_worker wait:false. Omit agentIds to wait for every outstanding worker.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agentIds: { type: 'array', items: { type: 'string' }, maxItems: 50 },
+        timeoutSec: { type: 'number', minimum: 1, maximum: 1800 },
+      },
     },
     role: 'manager',
   },
@@ -797,6 +834,20 @@ export const KORY_TOOLS: KoryToolDef[] = [
     role: 'any',
   },
   {
+    name: 'kory__read_terminal',
+    description:
+      "Read recent output from one of this chat's integrated terminals (by terminalId). Read-only; the user approves each read unless they have allowed it.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        terminalId: { type: 'string' },
+        lines: { type: 'number' },
+      },
+      required: ['terminalId'],
+    },
+    role: 'any',
+  },
+  {
     name: 'kory__read_session',
     description:
       "Read a chat's transcript by id, including archived chats. Returns the newest page of the active conversation; page older messages with the 'before' cursor.",
@@ -830,6 +881,78 @@ export const KORY_TOOLS: KoryToolDef[] = [
     inputSchema: {
       type: 'object',
       properties: { message: { type: 'string' } },
+    },
+    role: 'manager',
+  },
+
+  {
+    name: 'kory__create_chat',
+    description:
+      "Create a new chat in this project, optionally starting it with a first message (start: true). The new chat is marked as created by you. Requires user approval outside YOLO mode.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string' },
+        workingDirectory: { type: 'string' },
+        model: { type: 'string' },
+        initialMessage: { type: 'string' },
+        start: { type: 'boolean' },
+      },
+    },
+    role: 'manager',
+  },
+  {
+    name: 'kory__send_to_chat',
+    description:
+      "Send a message to another chat in this project. An idle chat starts a turn; a busy one queues the message on its steering queue. Delivered as coming from your agent, not the user. Requires user approval outside YOLO mode. Use kory__wait_for_chat for the reply.",
+    inputSchema: {
+      type: 'object',
+      properties: { sessionId: { type: 'string' }, message: { type: 'string' } },
+      required: ['sessionId', 'message'],
+    },
+    role: 'manager',
+  },
+  {
+    name: 'kory__wait_for_chat',
+    description:
+      'Wait for a run in another chat in this project to settle, up to timeoutSec (default 300, max 1800). Returns the final state and the last assistant reply.',
+    inputSchema: {
+      type: 'object',
+      properties: { sessionId: { type: 'string' }, timeoutSec: { type: 'number', minimum: 1, maximum: 1800 } },
+      required: ['sessionId'],
+    },
+    role: 'any',
+  },
+  {
+    name: 'kory__interrupt_chat',
+    description:
+      "Stop a run in another chat in this project, the same way the user's Stop does. Requires user approval outside YOLO mode. Give a reason; it appears in that chat's transcript.",
+    inputSchema: {
+      type: 'object',
+      properties: { sessionId: { type: 'string' }, reason: { type: 'string' } },
+      required: ['sessionId', 'reason'],
+    },
+    role: 'manager',
+  },
+  {
+    name: 'kory__search_chats',
+    description:
+      'Search the chats in this project by title or message text (case-insensitive). Returns chat ids, states and snippets. Read-only.',
+    inputSchema: {
+      type: 'object',
+      properties: { query: { type: 'string' }, limit: { type: 'number' } },
+      required: ['query'],
+    },
+    role: 'any',
+  },
+  {
+    name: 'kory__archive_chat',
+    description:
+      'Archive another idle chat in this project. Its history is kept and it can be restored. Requires user approval outside YOLO mode.',
+    inputSchema: {
+      type: 'object',
+      properties: { sessionId: { type: 'string' } },
+      required: ['sessionId'],
     },
     role: 'manager',
   },
@@ -1039,6 +1162,32 @@ export const KORY_TOOLS: KoryToolDef[] = [
     description:
       'Read provider-reported API balances and subscription quota windows. Missing data is unknown, never zero; no subscription dollar balance is inferred.',
     inputSchema: { type: 'object', properties: {} },
+    role: 'any',
+  },
+  {
+    name: 'kory__get_model_pricing',
+    description:
+      'Read per-model price facts before choosing a route: input, output and cache prices per 1M tokens, context window, and the price source (catalog, models.dev, provider-reported, openrouter-equivalent, or unknown). Pass models as provider:model ids, or a provider to list its catalog. Unknown prices are null, never zero.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        models: { type: 'array', items: { type: 'string' } },
+        provider: { type: 'string' },
+      },
+    },
+    role: 'any',
+  },
+  {
+    name: 'kory__get_usage_summary',
+    description:
+      'Read spend so far: USD where prices are known (tokens always), per provider and model, enforced spend caps and current windows, and subscription or balance states with freshness. scope: session (default), project, today or month; sessionId picks the chat. Unknown values are null, never zero.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scope: { type: 'string', enum: ['session', 'project', 'today', 'month'] },
+        sessionId: { type: 'string' },
+      },
+    },
     role: 'any',
   },
 

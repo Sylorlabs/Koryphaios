@@ -52,7 +52,7 @@ jobs:
         run: bun run --filter @koryphaios/mcp-server typecheck
 
       - name: Lint (format check)
-        run: bun run format:changed "$FORMAT_BASE"
+        run: bun run format:changed "$FORMAT_BASE" && bun run api:check
         env:
           FORMAT_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
 

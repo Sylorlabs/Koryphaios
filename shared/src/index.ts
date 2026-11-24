@@ -22,16 +22,22 @@ export * from './critic-mode';
 // ─────────────────────────────────────────────────────────────────────────────
 
 export * from './computer-use';
+export * from './terminal';
 export * from './git-workspace';
 export * from './chat-git';
+export * from './review-comments';
+export * from './git-hunks';
+export * from './pull-request-status';
 export * from './provider-execution';
 export * from './provider-permission-enforcement';
 export * from './desktop-ui-settings';
 export * from './notes/NoteIcons';
+export * from './notes/NoteIconEmojiCatalog';
 export * from './project-identity';
 export * from './remote-target';
 export * from './compute-delegation';
 export * from './agent-controls';
+export * from './fallback-chain';
 export * from './run/RunRefs';
 export * from './transcript';
 export * from './source-control';
@@ -102,6 +108,7 @@ export type {
   ModelQuota,
   ProviderConfig,
   ProviderStatus,
+  AcpAgentProviderConfig,
 } from './providers/ModelDefs';
 export type {
   ModelParameterKey,
@@ -279,6 +286,7 @@ export type {
   StreamCompletePayload,
   TurnProviderCompletedPayload,
   RunSettledPayload,
+  PendingResumePayload,
   RunSettledOutcome,
 } from './websocket/WSPayloads';
 
@@ -370,6 +378,7 @@ export * from './notes/NoteCanvas';
 export * from './notes/NoteWorkspaceTools';
 export * from './notes/NotePermissionPolicy';
 export * from './notes/NoteWorkspaceTemplates';
+export * from './notes/NoteAppearanceMeta';
 
 // ============== Voice Types ==============
 export type {

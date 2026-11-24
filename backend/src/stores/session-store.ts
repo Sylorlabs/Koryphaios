@@ -5,6 +5,7 @@ import type {
 } from '@koryphaios/shared';
 import { isCriticMode, isValidProvider } from '@koryphaios/shared';
 import { nanoid } from 'nanoid';
+import { normalizeFallbackStepsInput } from '../kory/fallback-chain-input';
 import { ID, SESSION } from '../constants';
 import { db, sessions, type Session as DbSession } from '../db';
 import { eq, and, desc, isNotNull, isNull, sql } from 'drizzle-orm';
@@ -26,20 +27,10 @@ function sanitizeManagerControls(
     if (!managerId || !raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
     const control = raw as Record<string, unknown>;
     if (typeof control.model !== 'string' || !control.model.trim()) continue;
-    const fallbacks: SessionManagerControl['fallbacks'] = [];
-    if (Array.isArray(control.fallbacks)) {
-      for (const step of control.fallbacks.slice(0, MAX_MANAGER_FALLBACKS)) {
-        if (!step || typeof step !== 'object' || Array.isArray(step)) continue;
-        const candidate = step as Record<string, unknown>;
-        if (typeof candidate.model !== 'string' || !candidate.model.trim()) continue;
-        fallbacks.push({
-          model: candidate.model.trim(),
-          ...(typeof candidate.reasoningLevel === 'string' && candidate.reasoningLevel
-            ? { reasoningLevel: candidate.reasoningLevel }
-            : {}),
-        });
-      }
-    }
+    const fallbacks: SessionManagerControl['fallbacks'] = normalizeFallbackStepsInput(
+      control.fallbacks,
+      MAX_MANAGER_FALLBACKS,
+    );
     controls[managerId] = {
       model: control.model.trim(),
       ...(typeof control.provider === 'string' &&
@@ -138,12 +129,21 @@ export interface ISessionStore {
   restore(id: string): Promise<SharedSession | undefined>;
 }
 
+function sanitizeCreatedByAgent(value: unknown): SharedSession['createdByAgent'] {
+  if (!value || typeof value !== 'object') return undefined;
+  const { sessionId, agentId } = value as { sessionId?: unknown; agentId?: unknown };
+  if (typeof sessionId !== 'string' || typeof agentId !== 'string') return undefined;
+  if (!sessionId.trim() || !agentId.trim()) return undefined;
+  return { sessionId, agentId };
+}
+
 function toSharedSession(s: DbSession): SharedSession {
   let metadata: {
     interactionMode?: 'act' | 'plan';
     planNoteId?: string;
     agentOverrides?: unknown;
     gitWorkspace?: SharedSession['gitWorkspace'];
+    createdByAgent?: unknown;
   } = {};
   try {
     metadata = s.metadata ? JSON.parse(s.metadata) : {};
@@ -160,11 +160,16 @@ function toSharedSession(s: DbSession): SharedSession {
     archivedAt: s.archivedAt?.getTime(),
     status: s.archivedAt ? 'archived' : 'active',
     parentSessionId: s.parentId ?? undefined,
+    forkedFromSessionId: s.forkedFromSessionId ?? undefined,
+    forkedFromMessageId: s.forkedFromMessageId ?? undefined,
+    forkedAt: s.forkedAt?.getTime(),
+    forkMergedAt: s.forkedMergedAt?.getTime(),
     workingDirectory: s.workingDirectory ?? undefined,
     gitWorkspace: metadata.gitWorkspace,
     interactionMode: metadata.interactionMode === 'plan' ? 'plan' : 'act',
     planNoteId: typeof metadata.planNoteId === 'string' ? metadata.planNoteId : undefined,
     agentOverrides: sanitizeSessionAgentOverrides(metadata.agentOverrides),
+    createdByAgent: sanitizeCreatedByAgent(metadata.createdByAgent),
     messageCount: s.messageCount ?? 0,
     totalTokensIn: s.tokensIn ?? 0,
     totalTokensOut: s.tokensOut ?? 0,
@@ -296,7 +301,8 @@ export class SessionStore implements ISessionStore {
       updates.interactionMode !== undefined ||
       updates.planNoteId !== undefined ||
       updates.agentOverrides !== undefined ||
-      updates.gitWorkspace !== undefined
+      updates.gitWorkspace !== undefined ||
+      updates.createdByAgent !== undefined
     ) {
       // Patch the row's current metadata in the UPDATE itself. Reading and
       // serializing it before an await lets concurrent settings writes erase a
@@ -308,6 +314,12 @@ export class SessionStore implements ISessionStore {
         metadata = sql`json_set(${metadata}, '$.interactionMode', ${updates.interactionMode})`;
       if (updates.planNoteId !== undefined)
         metadata = sql`json_set(${metadata}, '$.planNoteId', ${updates.planNoteId})`;
+      if (updates.createdByAgent !== undefined) {
+        const provenance = sanitizeCreatedByAgent(updates.createdByAgent);
+        metadata = provenance
+          ? sql`json_set(${metadata}, '$.createdByAgent', json(${JSON.stringify(provenance)}))`
+          : sql`json_remove(${metadata}, '$.createdByAgent')`;
+      }
       if (updates.gitWorkspace !== undefined)
         metadata =
           updates.gitWorkspace === null

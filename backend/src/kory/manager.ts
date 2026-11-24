@@ -4,6 +4,7 @@ import { validatedToolImages, withoutToolImages } from '../tools/tool-images';
 // The manager is the only agent the user talks to. Sub-agents (workers) run only when the manager
 // explicitly calls the delegate_to_worker tool; the code never auto-spawns workers.
 
+import { forkChatCoordinated } from '../services/session-fork-coordinator';
 import type {
   AgentIdentity,
   AgentStatus,
@@ -35,6 +36,7 @@ import {
   hasOpaqueContextHarness,
   boundOpaqueCumulativeOccupancy,
   reconcileContextBreakdown,
+  PROVIDER_AUTH_MODES,
 } from '@koryphaios/shared';
 import type {
   Session,
@@ -175,7 +177,21 @@ import {
   formatMessagesForCritic as formatMessagesForCriticUtil,
 } from './critic-util';
 import type { WorkerPipelineHost, WorkerPipelineOutcome } from './services/WorkerPipelineService';
-import type { SessionRunCoordinator } from '../runs/session-run-coordinator';
+import {
+  RESTART_RESUME_SOURCE_PREFIX,
+  type SessionRunCoordinator,
+} from '../runs/session-run-coordinator';
+import {
+  continuationMarkerText,
+  renderRestartContinuationPrompt,
+  renderUsageLimitContinuationPrompt,
+} from '../runs/continuation-prompt';
+import type { PendingResumeRecord } from '../runs/run-resumption-store';
+import {
+  isUsageLimitMessage,
+  UsageLimitResumeService,
+  type UsageLimitAdmitInput,
+} from './services/usage-limit-resume';
 import { ManagerRunLifecycle, type ManagerRunHandle } from './services/ManagerRunLifecycle';
 import { TurnRuntime } from './services/TurnRuntime';
 import type { OutputLoopDetection } from './output-loop-detector';
@@ -189,6 +205,16 @@ import {
 } from './services/TurnRuntime.types';
 import { ConflictError } from '../errors/types';
 import { agentSteeringStore } from '../stores/agent-steering-store';
+import {
+  renderAsyncChildEnvelope,
+  renderWaitResult,
+  type AsyncChildRecord,
+} from './async-children';
+import {
+  canDelegateAtDepth,
+  currentDelegationDepth,
+  runAtDelegationDepth,
+} from './delegation-depth';
 import {
   CRITIC_OUTPUT_TOKEN_LIMIT,
   MANAGER_OUTPUT_TOKEN_LIMIT,
@@ -207,6 +233,7 @@ import {
   supportsKoryControlPlaneTools,
 } from '../providers/provider-harness';
 import { runAskUser } from '../tools/interaction';
+import type { DelegateToWorkerOptions } from '../tools/registry';
 import { collaborationManager } from '../collaboration/manager';
 import {
   assembleAgentContext,
@@ -239,6 +266,27 @@ import { evaluateAutoCompactPressure } from './auto-compact-pressure';
 import { automaticMemoryPrompt } from './settings-contract';
 import { isPersonalSkillPinnable, listSkills, resolveSkills } from './skills';
 import { isContextLimitFailureMessage } from '../providers/provider-diagnostics';
+import {
+  beginFallbackTurnState,
+  classifyFallbackFailure,
+  decideFallbackHop,
+  fallbackReasonEnabled,
+  FALLBACK_RESET_COOLDOWN_MS,
+  formatFallbackExhaustedSummary,
+  onFallbackChainExhausted,
+  resolveFallbackChain,
+  type FallbackHopRecord,
+  type FallbackTurnState,
+} from './fallback-chain';
+import { normalizeFallbackStepsInput } from './fallback-chain-input';
+import {
+  DEFAULT_FALLBACK_TRIGGERS,
+  fallbackStepKey,
+  type FallbackChain,
+  type FallbackChainRole,
+  type FallbackStep,
+  type SessionFallbackHopPayload,
+} from '@koryphaios/shared';
 import { collectProviderEvents, waitForProviderRetry } from '../providers/provider-retry';
 import {
   TOOL_CONTEXT_SUMMARY_MAX_CHARS,
@@ -436,6 +484,8 @@ interface AgentThreadState {
   sessionId: string;
   identity: AgentIdentity;
   kind: 'worker' | 'critic';
+  /** Hops this thread made during the current run (fallback chain). */
+  fallbackHops?: FallbackHopRecord[];
   status: AgentStatus;
   providerName: ProviderName;
   modelId: string;
@@ -507,6 +557,35 @@ const MAX_FINAL_ANSWER_CONTINUATIONS = 2;
 // Output-limit stops are resumable. Keep this bounded so a provider that
 // repeatedly exhausts its limit cannot create an unattended billing loop.
 const MAX_OUTPUT_LIMIT_CONTINUATIONS = 3;
+
+/** What a failed attempt means for the fallback chain. */
+type ManagerFallbackOutcome =
+  | { kind: 'hop'; model: string; provider: Provider; reasoningLevel?: string }
+  | { kind: 'exhausted'; summary: string };
+
+/** No text, reasoning or tool work reached the user: the same turn can be retried whole. */
+function turnProducedNoOutput(result: {
+  content?: string;
+  reasoningContent?: string;
+  completedToolCalls?: unknown[];
+  observedNativeTool?: boolean;
+}): boolean {
+  return (
+    !result.content &&
+    !result.reasoningContent &&
+    (result.completedToolCalls?.length ?? 0) === 0 &&
+    !result.observedNativeTool
+  );
+}
+
+/** No tool call is pending and no native CLI tool ran, so continuing on another model
+ *  cannot duplicate a side effect or leave a tool call without its result. */
+function atSafeHopBoundary(result: {
+  completedToolCalls?: unknown[];
+  observedNativeTool?: boolean;
+}): boolean {
+  return (result.completedToolCalls?.length ?? 0) === 0 && !result.observedNativeTool;
+}
 // Critic Auto decisions are retried when the deciding agent answers with
 // unusable output, and a failed Critic route is retried on another route
 // rather than being treated as a quality rejection.
@@ -594,11 +673,22 @@ export interface SessionTurnResult {
   readonly reason: string | null;
 }
 
+/**
+ * Host-authored continuation. The instruction is sent to the provider as the
+ * turn's input, and the transcript records a system marker instead of a
+ * user-role row, so the continuation is never presented as something the user
+ * typed.
+ */
+export type HostContinuation =
+  | { kind: 'restart_resume'; interruptedRunId: string }
+  | { kind: 'usage_limit_resume'; pendingResumeId: string; attempt: number };
+
 export interface SessionTurnCommandInput extends AdmittedTaskInput {
   sessionId: string;
   source: 'goal' | 'collaboration' | 'internal' | 'user';
   /** Stable source-owned identity. Reusing it never replays an interrupted turn. */
   sourceCommandId: string;
+  hostContinuation?: HostContinuation;
 }
 
 /**
@@ -678,6 +768,60 @@ interface AdmissionRecord {
   handle: ManagerRunHandle;
 }
 
+/** One delegate_to_worker request, from the manager or from a worker below the depth limit. */
+interface DelegatedWorkerRequest {
+  task: string;
+  domainHint?: string;
+  skills?: SkillAssignment;
+  workerModel?: string;
+  reasoningLevel?: string;
+  worktree?: boolean;
+  fallbacks?: AgentFallbackStep[];
+  /** The manager's own model pin for this turn (manager-level calls only). */
+  preferredModel?: string;
+  wait: boolean;
+  compareGroupId?: string;
+  signal?: AbortSignal;
+}
+
+const WORKER_DOMAIN_NAMES: readonly WorkerDomain[] = ['general', 'ui', 'backend', 'test', 'review'];
+
+function workerDomainOf(hint: string | undefined): WorkerDomain {
+  const normalized = hint === 'frontend' ? 'ui' : hint;
+  return normalized && (WORKER_DOMAIN_NAMES as readonly string[]).includes(normalized)
+    ? (normalized as WorkerDomain)
+    : 'general';
+}
+
+/** Finished workers in the order they completed, for a stable wait_for_agents result. */
+function byFinishOrder(a: AsyncChildRecord, b: AsyncChildRecord): number {
+  return (a.finishedAt ?? a.startedAt) - (b.finishedAt ?? b.startedAt) || a.agentId.localeCompare(b.agentId);
+}
+
+/** Resolve when every promise settles or the timeout (or abort) fires, whichever is first. */
+function waitForSettlement(
+  settled: readonly Promise<void>[],
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(done, timeoutMs);
+    function done(): void {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', done);
+      resolve();
+    }
+    signal?.addEventListener('abort', done, { once: true });
+    void Promise.all(settled).then(done);
+  });
+}
+
+/** Steering row ids for host continuations are `hoststeer_<sessionId>_<batchId>`. */
+function hostSteerBatchId(sessionId: string, rowId: string): string | undefined {
+  const prefix = `hoststeer_${sessionId}_`;
+  return rowId.startsWith(prefix) ? rowId.slice(prefix.length) : undefined;
+}
+
 export class KoryManager implements WorkerPipelineHost {
   private memoryDir: string;
   private isProcessing = false;
@@ -702,6 +846,7 @@ export class KoryManager implements WorkerPipelineHost {
   private agentThreads = new Map<string, AgentThreadState>();
   /** Services */
   private events: EventEmitterService;
+  private usageLimitResumes: UsageLimitResumeService | undefined;
   private managerRouting: ManagerRoutingService;
   private workers: WorkerLifecycleService;
   private state: SessionStateService;
@@ -795,6 +940,20 @@ export class KoryManager implements WorkerPipelineHost {
 
     // Initialize services
     this.events = new EventEmitterService({ managerAgentId: KORY_IDENTITY.id });
+    if (this.runs) {
+      this.usageLimitResumes = new UsageLimitResumeService({
+        store: this.runs.resumptions,
+        setTimer: (sessionId, timer) => {
+          this.runtimes.get(sessionId).usageLimitResumeTimer = timer;
+        },
+        getTimer: (sessionId) => this.runtimes.peek(sessionId)?.usageLimitResumeTimer,
+        isSessionActive: async (sessionId) =>
+          !this.sessions || !!(await this.getActiveSession(sessionId)),
+        admit: (input) => this.admitUsageLimitContinuation(input),
+        emit: (sessionId, payload) =>
+          this.emitWSMessage(sessionId, 'session.pending_resume', payload),
+      });
+    }
     this.managerRouting = new ManagerRoutingService({
       config: this.config,
       providers: this.providers,
@@ -3258,6 +3417,11 @@ export class KoryManager implements WorkerPipelineHost {
     allowRecoveryRetry = true,
   ): Promise<SessionTurnSubmission> {
     if (!this.messages) throw new Error('Message store unavailable for session turn submission');
+    if (input.source === 'user') {
+      // A new user send ends a Stop's hold on finished worker results.
+      const held = this.runtimes.peek(input.sessionId);
+      if (held) held.asyncDeliveryHeld = false;
+    }
     const sourceId = input.sourceCommandId;
     const identity = deriveSessionTurnCommandIdentity({
       sessionId: input.sessionId,
@@ -3298,9 +3462,18 @@ export class KoryManager implements WorkerPipelineHost {
       fusion: input.fusion,
       imageInputMode: input.imageInputMode ?? 'reject',
       regenerationBranch: input.regenerationBranch ?? null,
+      // Absent for ordinary turns, so their canonical hash (and idempotent
+      // replay) is unchanged. A continuation binds its own identity.
+      ...(input.hostContinuation ? { hostContinuation: input.hostContinuation } : {}),
     });
+    // A host continuation's transcript row is a system marker; every other turn
+    // persists the user's own row.
+    const commandRole: StoredMessage['role'] = input.hostContinuation ? 'system' : 'user';
+    const commandContent = input.hostContinuation
+      ? continuationMarkerText(input.hostContinuation.kind === 'restart_resume' ? 'restart' : 'usage_limit')
+      : input.userMessage;
     const matchesCommandUser = (message: StoredMessage | undefined): boolean => {
-      if (!message || message.role !== 'user' || message.content !== input.userMessage)
+      if (!message || message.role !== commandRole || message.content !== commandContent)
         return false;
       const stored = message.attachments ?? [];
       const expected = commandAttachments ?? [];
@@ -3621,8 +3794,8 @@ export class KoryManager implements WorkerPipelineHost {
       const inserted = await this.messages.addIdempotent(input.sessionId, {
         id: command.userMessageId,
         sessionId: input.sessionId,
-        role: 'user',
-        content: input.userMessage,
+        role: commandRole,
+        content: commandContent,
         attachments: commandAttachments,
         createdAt: Date.now(),
       });
@@ -3646,9 +3819,12 @@ export class KoryManager implements WorkerPipelineHost {
       await this.rejectSessionTurn(admission, SESSION_TURN_INPUT_NOT_PERSISTED_REASON);
       throw error;
     }
+    // A continuation's instruction is not in the transcript (its marker row is),
+    // so the provider turn appends it as an input-only message, the same way an
+    // internal turn that persisted nothing does.
     const completion = this.dispatchAdmittedTask(admission, {
       ...input,
-      inputAlreadyPersisted: true,
+      inputAlreadyPersisted: input.hostContinuation ? false : true,
       responseMessageId: command.responseMessageId,
     });
     return {
@@ -3658,6 +3834,76 @@ export class KoryManager implements WorkerPipelineHost {
       userMessageId: command.userMessageId,
       completion,
     };
+  }
+
+  /**
+   * Admit the host-authored continuation of a run that a backend restart
+   * interrupted. The command id is derived from the interrupted run, so a
+   * repeated admission replays the same receipt instead of starting a second
+   * turn. The partial output is the interrupted turn's own persisted parts.
+   */
+  async admitRestartContinuation(
+    sessionId: string,
+    sourceRunId: string,
+  ): Promise<SessionTurnSubmission> {
+    const owner = this.runs?.getSessionTurnCommandForRun(sourceRunId) ?? null;
+    const partial =
+      owner && this.messages
+        ? await this.messages.getById(sessionId, owner.responseMessageId)
+        : undefined;
+    return this.startSessionTurn({
+      sessionId,
+      source: 'internal',
+      sourceCommandId: `${RESTART_RESUME_SOURCE_PREFIX}${sourceRunId}`,
+      userMessage: renderRestartContinuationPrompt(partial?.parts),
+      preferredModel: partial?.model,
+      hostContinuation: { kind: 'restart_resume', interruptedRunId: sourceRunId },
+    });
+  }
+
+  /** The chat's pending automatic usage-limit resume, if any. */
+  getPendingUsageLimitResume(sessionId: string): PendingResumeRecord | null {
+    return this.usageLimitResumes?.get(sessionId) ?? null;
+  }
+
+  /** The user's "Resume now". */
+  resumePendingUsageLimit(sessionId: string) {
+    if (!this.usageLimitResumes) return Promise.resolve('not_found' as const);
+    return this.usageLimitResumes.resumeNow(sessionId);
+  }
+
+  /** The user's "Cancel" on a pending usage-limit resume. */
+  cancelPendingUsageLimit(sessionId: string): boolean {
+    return this.usageLimitResumes?.cancel(sessionId) ?? false;
+  }
+
+  /** Re-arm durable usage-limit resumes after a restart. */
+  recoverUsageLimitResumes(): number {
+    return this.usageLimitResumes?.recover() ?? 0;
+  }
+
+  /** Admit a host-authored continuation after a provider usage limit reset. */
+  async admitUsageLimitContinuation(input: UsageLimitAdmitInput): Promise<SessionTurnSubmission> {
+    const owner =
+      input.sourceRunId && this.runs
+        ? this.runs.getSessionTurnCommandForRun(input.sourceRunId)
+        : null;
+    const partial =
+      owner && this.messages
+        ? await this.messages.getById(input.sessionId, owner.responseMessageId)
+        : undefined;
+    return this.startSessionTurn({
+      sessionId: input.sessionId,
+      source: 'internal',
+      sourceCommandId: `usage-resume-${input.pendingResumeId}-${input.attempt}`,
+      userMessage: renderUsageLimitContinuationPrompt(partial?.parts),
+      preferredModel: input.preferredModel ?? partial?.model,
+      hostContinuation: {
+        kind: 'usage_limit_resume',
+        pendingResumeId: input.pendingResumeId,
+        attempt: input.attempt,
+      },
+    });
   }
 
   async submitSessionTurn(input: SessionTurnCommandInput): Promise<SessionTurnResult> {
@@ -3880,6 +4126,11 @@ export class KoryManager implements WorkerPipelineHost {
       sessionRoot,
     );
     let provider = await this.providers.resolveProvider(routing.model, routing.provider);
+    if (!provider) {
+      // A synchronous isAvailable() can serve a cached probe failure. Give the
+      // candidate adapters one coalesced re-probe before admission refuses the turn.
+      provider = await this.reprobeAdmissionCandidates(routing);
+    }
     if (!provider && (!preferredModel || preferredModel === 'auto')) {
       const fallback = this.providers.getFirstAvailableRouting();
       if (fallback) {
@@ -4120,6 +4371,42 @@ export class KoryManager implements WorkerPipelineHost {
     return provider.charAt(0).toUpperCase() + provider.slice(1);
   }
 
+  /**
+   * Admission contract (Provider.refreshAvailability): when no adapter resolves
+   * synchronously, await the re-probe of every unavailable adapter that declares
+   * one, then resolve once more. A routed provider narrows the candidates; an
+   * unrouted (auto) turn considers each configured adapter once. Adapters own
+   * coalescing and rate limiting; a still-failing probe leaves the turn refused.
+   */
+  private async reprobeAdmissionCandidates(routing: {
+    model: string;
+    provider?: ProviderName;
+  }): Promise<Provider | undefined> {
+    // Best-effort: a re-probe that cannot run leaves the refusal exactly as it
+    // was, so the original resolution outcome is never masked by this path.
+    try {
+      const names = routing.provider
+        ? [routing.provider]
+        : (Object.keys(PROVIDER_AUTH_MODES) as ProviderName[]);
+      const probed = new Set<Provider>();
+      for (const name of names) {
+        const candidate = this.providers.get(name);
+        if (!candidate || probed.has(candidate)) continue;
+        probed.add(candidate);
+        if (!candidate.refreshAvailability || candidate.isAvailable()) continue;
+        await candidate.refreshAvailability();
+      }
+      if (probed.size === 0) return undefined;
+      return await this.providers.resolveProvider(routing.model, routing.provider);
+    } catch (err: unknown) {
+      koryLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Admission provider re-probe failed; refusing the turn',
+      );
+      return undefined;
+    }
+  }
+
   private getModelConfigurationError(preferredModel?: string): string {
     const statuses = this.providers.getStatus();
     const authenticated = statuses.filter((provider) => provider.adapterAvailable);
@@ -4203,6 +4490,7 @@ export class KoryManager implements WorkerPipelineHost {
     signal?: AbortSignal,
     worktreeOverride?: boolean,
     fallbacks?: AgentFallbackStep[],
+    hooks?: { onRouted?: (label: string) => void },
   ): Promise<string> {
     const managerOwnsLifecycle = this.hasActiveSessionExecution(sessionId);
     // A bridge call that already holds the session mutation barrier (e.g. an
@@ -4242,24 +4530,26 @@ export class KoryManager implements WorkerPipelineHost {
         undefined,
         sessionRoot,
       );
-      const normalizedDomainHint = domainHint === 'frontend' ? 'ui' : domainHint;
-      const workerDomain =
-        normalizedDomainHint &&
-        ['general', 'ui', 'backend', 'test', 'review'].includes(normalizedDomainHint)
-          ? (normalizedDomainHint as WorkerDomain)
-          : 'general';
-      const workerRouting = this.resolveIndependentRouting(
-        managerRouting.model,
-        managerRouting.provider,
-        workerDomain,
-        [],
+      const workerDomain = workerDomainOf(domainHint);
+      const requestedWorkerModel = preferredWorkerModel?.trim();
+      // An explicit model may name any connected chat model; the pool is only
+      // the default when none is named (see ManagerRoutingService).
+      const workerRouting = this.managerRouting.resolveDelegatedWorkerRouting({
+        avoidModel: managerRouting.model,
+        avoidProvider: managerRouting.provider,
+        domain: workerDomain,
         task,
-        'worker',
-        sessionRoot,
-        preferredWorkerModel,
-      );
+        workingDirectory: sessionRoot,
+        requestedModel: requestedWorkerModel,
+      });
       const selectedWorkerRouting = workerRouting ?? managerRouting;
-      if (!workerRouting) {
+      if (requestedWorkerModel && requestedWorkerModel !== 'auto' && workerRouting) {
+        this.emitThought(
+          sessionId,
+          'delegating',
+          `Routing the ${workerDomain} subagent through ${workerRouting.provider ?? 'unknown'}:${workerRouting.model} as requested.`,
+        );
+      } else if (!workerRouting) {
         this.emitThought(
           sessionId,
           'delegating',
@@ -4275,6 +4565,7 @@ export class KoryManager implements WorkerPipelineHost {
       const workerChoice = selectedWorkerRouting.provider
         ? `${selectedWorkerRouting.provider}:${selectedWorkerRouting.model}`
         : selectedWorkerRouting.model;
+      hooks?.onRouted?.(workerChoice);
       let outcome: WorkerPipelineOutcome;
       try {
         outcome = await this.workerPipeline.runWorkerPipelineDetailed(
@@ -4313,6 +4604,302 @@ export class KoryManager implements WorkerPipelineHost {
     } finally {
       lifecycleLease?.release();
     }
+  }
+
+  // ─── Delegated workers: sync, async, and compare ──────────────────────────
+
+  /**
+   * One entry point for delegate_to_worker, from the manager and from a worker
+   * below the depth limit. The child's depth comes from the caller's async
+   * context, so it always runs exactly one level deeper than its caller.
+   */
+  private async delegateWorkerForCaller(
+    sessionId: string,
+    request: DelegatedWorkerRequest,
+  ): Promise<string> {
+    const childDepth = currentDelegationDepth() + 1;
+    const requestedModel = request.workerModel?.trim();
+    if (requestedModel && requestedModel !== 'auto') {
+      // Validate before any work starts: an unknown model is an immediate,
+      // actionable tool error even for a background worker.
+      this.managerRouting.resolveDelegatedWorkerRouting({
+        domain: workerDomainOf(request.domainHint),
+        task: request.task,
+        workingDirectory: await this.resolveSessionWorkingDirectory(sessionId),
+        requestedModel,
+      });
+    }
+    if (!request.wait) {
+      return this.startAsyncWorkerChild(sessionId, request, childDepth);
+    }
+    let routedLabel: string | undefined;
+    const text = await runAtDelegationDepth(childDepth, () =>
+      this.runWorkerPipeline(
+        sessionId,
+        request.task,
+        request.preferredModel,
+        request.reasoningLevel,
+        request.domainHint,
+        request.skills,
+        request.workerModel,
+        request.signal,
+        request.worktree,
+        request.fallbacks,
+        {
+          onRouted: (label) => {
+            routedLabel = label;
+          },
+        },
+      ),
+    );
+    if (!request.compareGroupId) return text;
+    const attempt = this.runtimes.get(sessionId).compareGroups.record(request.compareGroupId, {
+      agentId: `attempt-${nanoid(8)}`,
+      ...(routedLabel ? { model: routedLabel } : {}),
+      status: text.startsWith('WORKER_FAILED') ? 'failed' : 'completed',
+      result: text,
+    });
+    return `[compare ${request.compareGroupId} · attempt ${attempt} · ${routedLabel ?? 'pool model'}]\n${text}`;
+  }
+
+  /** Start a worker that outlives this call. Returns its handle at once; the
+   *  result is settled into the session's async ledger and delivered later. */
+  private startAsyncWorkerChild(
+    sessionId: string,
+    request: DelegatedWorkerRequest,
+    childDepth: number,
+  ): string {
+    const runtime = this.runtimes.get(sessionId);
+    const agentId = `child-${nanoid(10)}`;
+    const child = runtime.asyncChildren.start({
+      agentId,
+      task: request.task,
+      ...(request.workerModel ? { requestedModel: request.workerModel } : {}),
+      ...(request.compareGroupId ? { compareGroupId: request.compareGroupId } : {}),
+      abort: new AbortController(),
+    });
+    void runAtDelegationDepth(childDepth, () =>
+      this.runWorkerPipeline(
+        sessionId,
+        request.task,
+        request.preferredModel,
+        request.reasoningLevel,
+        request.domainHint,
+        request.skills,
+        request.workerModel,
+        child.abort.signal,
+        request.worktree,
+        request.fallbacks,
+        {
+          onRouted: (label) => {
+            child.routedModel = label;
+          },
+        },
+      ).then(
+        (text) => ({ text, failed: text.startsWith('WORKER_FAILED') }),
+        (error: unknown) => ({
+          text: `WORKER_FAILED: ${error instanceof Error ? error.message : String(error)}`,
+          failed: true,
+        }),
+      ).then(({ text, failed }) => {
+        const status = child.abort.signal.aborted ? 'cancelled' : failed ? 'failed' : 'completed';
+        this.settleAsyncChild(sessionId, agentId, status, text);
+      }),
+    ).catch((error: unknown) => {
+      koryLog.warn({ sessionId, agentId, error }, 'Async worker settlement failed');
+    });
+    const group = request.compareGroupId ? ` in compare group ${request.compareGroupId}` : '';
+    return `Started background worker ${agentId}${group}. It runs while you keep working, and its result arrives as a host message when it finishes. Call wait_for_agents with agentIds ["${agentId}"] to join it sooner.`;
+  }
+
+  /** Record a background worker's terminal outcome and schedule its delivery.
+   *  Cancelled workers are never auto-delivered: Stop means stop. */
+  private settleAsyncChild(
+    sessionId: string,
+    agentId: string,
+    status: 'completed' | 'failed' | 'cancelled',
+    text: string,
+  ): void {
+    const runtime = this.runtimes.peek(sessionId);
+    if (!runtime) return;
+    const record = runtime.asyncChildren.settle(agentId, { status, result: text });
+    if (!record) return;
+    if (record.compareGroupId) {
+      const model = record.routedModel ?? record.requestedModel;
+      runtime.compareGroups.record(record.compareGroupId, {
+        agentId,
+        ...(model ? { model } : {}),
+        status,
+        result: text,
+      });
+    }
+    if (status === 'cancelled') return;
+    void runAtDelegationDepth(0, () => this.scheduleAsyncChildDelivery(sessionId)).catch(
+      (error: unknown) => {
+        koryLog.warn({ sessionId, agentId, error }, 'Async worker result delivery failed');
+      },
+    );
+  }
+
+  /** Claim every finished, undelivered worker into one batch and deliver it as a
+   *  host-authored continuation: parked at the manager's next checkpoint while a
+   *  turn is live, otherwise admitted as an internal turn. */
+  private async scheduleAsyncChildDelivery(sessionId: string): Promise<void> {
+    const runtime = this.runtimes.peek(sessionId);
+    if (!runtime || runtime.asyncDeliveryHeld) return;
+    const batchId = `async-${nanoid(12)}`;
+    const claimed = runtime.asyncChildren.claimPending(batchId);
+    if (claimed.length === 0) return;
+    const input: SessionTurnCommandInput = {
+      sessionId,
+      source: 'internal',
+      sourceCommandId: batchId,
+      userMessage: renderAsyncChildEnvelope(claimed),
+    };
+    if (this.hasLiveManagerRun(sessionId)) {
+      await this.parkAsyncChildBatch(sessionId, batchId, input);
+      return;
+    }
+    await this.admitAsyncChildBatch(sessionId, batchId, input);
+  }
+
+  private async parkAsyncChildBatch(
+    sessionId: string,
+    batchId: string,
+    input: SessionTurnCommandInput,
+  ): Promise<void> {
+    const runtime = this.runtimes.get(sessionId);
+    const rowId = `hoststeer_${sessionId}_${batchId}`;
+    try {
+      await agentSteeringStore.enqueue({
+        id: rowId,
+        sessionId,
+        agentId: KORY_IDENTITY.id,
+        content: input.userMessage,
+      });
+    } catch (error: unknown) {
+      runtime.asyncChildren.releaseBatch(batchId);
+      koryLog.warn({ sessionId, batchId, error }, 'Could not park async worker results');
+      return;
+    }
+    // The pending input is what makes the turn loop yield at its next checkpoint.
+    runtime.pendingSteerInputs.set(rowId, input);
+    await this.publishAgentSteeringQueue(sessionId, KORY_IDENTITY.id).catch(() => undefined);
+    // The run may have released between the check and the enqueue; if so no
+    // release will drain the row, so drain it now.
+    if (!this.hasLiveManagerRun(sessionId)) this.drainSessionSteeringQueues(sessionId);
+  }
+
+  private async admitAsyncChildBatch(
+    sessionId: string,
+    batchId: string,
+    input: SessionTurnCommandInput,
+  ): Promise<void> {
+    const ledger = this.runtimes.get(sessionId).asyncChildren;
+    try {
+      const submission = await this.startSessionTurn(input);
+      if (submission.accepted === true) {
+        ledger.markBatchDelivered(batchId);
+        void submission.completion.catch(() => undefined);
+        return;
+      }
+    } catch (error: unknown) {
+      koryLog.warn({ sessionId, batchId, error }, 'Async worker result delivery was not admitted');
+    }
+    // Busy (another worker or a run owns the chat): the results stay pending
+    // and the next settlement or run release tries again.
+    ledger.releaseBatch(batchId);
+  }
+
+  private hasLiveManagerRun(sessionId: string): boolean {
+    const runtime = this.runtimes.peek(sessionId);
+    return !!runtime && (runtime.runClaimed === true || runtime.abort !== undefined);
+  }
+
+  /** Whether a parked steer should yield the turn loop. A host continuation
+   *  whose results were already claimed by wait_for_agents must not stop a turn. */
+  private hasYieldingSteer(sessionId: string): boolean {
+    const runtime = this.runtimes.peek(sessionId);
+    if (!runtime) return false;
+    for (const rowId of runtime.pendingSteerInputs.keys()) {
+      const batchId = hostSteerBatchId(sessionId, rowId);
+      if (batchId === undefined || runtime.asyncChildren.queuedBatch(batchId).length > 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** The host-authored turn for a parked batch, built from what is still queued. */
+  private hostBatchTurnInput(
+    sessionId: string,
+    batchId: string,
+  ): SessionTurnCommandInput | undefined {
+    const records = this.runtimes.peek(sessionId)?.asyncChildren.queuedBatch(batchId) ?? [];
+    if (records.length === 0) return undefined;
+    return {
+      sessionId,
+      source: 'internal',
+      sourceCommandId: batchId,
+      userMessage: renderAsyncChildEnvelope(records),
+    };
+  }
+
+  /** Remove parked host continuations whose results wait_for_agents has claimed. */
+  private async dropEmptyHostSteers(sessionId: string): Promise<void> {
+    const runtime = this.runtimes.peek(sessionId);
+    if (!runtime) return;
+    let changed = false;
+    for (const rowId of [...runtime.pendingSteerInputs.keys()]) {
+      const batchId = hostSteerBatchId(sessionId, rowId);
+      if (batchId === undefined || runtime.asyncChildren.queuedBatch(batchId).length > 0) continue;
+      runtime.pendingSteerInputs.delete(rowId);
+      changed = true;
+      const row = await agentSteeringStore.getById(rowId);
+      if (row?.status === 'queued') {
+        await agentSteeringStore.updateStatus(rowId, 'cancelled', 'results_claimed_by_wait');
+      }
+    }
+    if (changed) await this.publishAgentSteeringQueue(sessionId, KORY_IDENTITY.id).catch(() => undefined);
+  }
+
+  /** wait_for_agents: join the named workers (or every outstanding one). Finished
+   *  results are returned here and marked delivered so they are not repeated. */
+  private async waitForAsyncChildren(
+    sessionId: string,
+    input: { agentIds?: string[]; timeoutSec?: number; signal?: AbortSignal },
+  ): Promise<string> {
+    const runtime = this.runtimes.peek(sessionId);
+    if (!runtime) return renderWaitResult({ finished: [], running: [], unknown: [] });
+    const ledger = runtime.asyncChildren;
+    const { records, unknown } = ledger.selectForWait(input.agentIds);
+    const running = records.filter((record) => record.status === 'running');
+    if (running.length > 0) {
+      await waitForSettlement(
+        running.map((record) => record.settled),
+        (input.timeoutSec ?? 300) * 1000,
+        input.signal,
+      );
+    }
+    const finished = records
+      .filter((record) => record.status !== 'running')
+      .sort(byFinishOrder);
+    ledger.claimForWait(finished);
+    await this.dropEmptyHostSteers(sessionId);
+    return renderWaitResult({
+      finished,
+      running: records.filter((record) => record.status === 'running'),
+      unknown,
+    });
+  }
+
+  /** The compare group the manager asked the end-of-turn critic to rank, if any. */
+  private takePendingCompareReview(sessionId: string): string | undefined {
+    const runtime = this.runtimes.peek(sessionId);
+    if (!runtime) return undefined;
+    const group = runtime.pendingCompareReview;
+    runtime.pendingCompareReview = undefined;
+    return group && runtime.compareGroups.has(group) ? group : undefined;
   }
 
   /** Awaited before the first response. Concurrent callers share the same
@@ -4632,6 +5219,7 @@ export class KoryManager implements WorkerPipelineHost {
       (entry) => !this.criticRouteKeyMatches(entry, this.recentFailedCriticRouteKeys(sessionId)),
     );
     if (withoutSessionFailures.length) models = withoutSessionFailures;
+    const ledgerBlock = this.bridgeToolLedgerPromptSuffix(sessionId);
     const systemPrompt =
       'Your turn is over. Do you want to invoke a Critic agent for your completed work? ' +
       'Decide for yourself. Declining means no Critic runs, even for changes or delegated work. ' +
@@ -4665,6 +5253,7 @@ export class KoryManager implements WorkerPipelineHost {
             .map((thread) => ({ provider: thread.providerName, model: thread.modelId })),
           criticModels: models,
           ...(retry?.failedCritics.length ? { failedCritics: retry.failedCritics } : {}),
+          ...(ledgerBlock ? { hostRecordedToolExecutions: ledgerBlock } : {}),
         }),
       },
     ];
@@ -4780,6 +5369,8 @@ export class KoryManager implements WorkerPipelineHost {
       decisionAnnounced?: boolean;
       autoDecisionMade?: boolean;
       criticModel?: string;
+      /** Compare group whose attempts the critic ranks in its report. */
+      compareGroupId?: string;
     },
   ): Promise<CriticGateResult> {
     const reviewContract =
@@ -5033,6 +5624,11 @@ export class KoryManager implements WorkerPipelineHost {
           workerDelivery,
           producerRouting,
           criticRouting,
+          compareSection: reviewOptions?.compareGroupId
+            ? this.runtimes.peek(sessionId)?.compareGroups.renderRankingSection(
+                reviewOptions.compareGroupId,
+              )
+            : undefined,
         });
         if (!result.infraFailure) {
           this.clearCriticRouteFailure(
@@ -5114,6 +5710,7 @@ export class KoryManager implements WorkerPipelineHost {
     workerDelivery?: SkillDeliveryEvidence;
     producerRouting: { model: string | undefined; provider: ProviderName | undefined };
     criticRouting: { model: string; provider: ProviderName | undefined };
+    compareSection?: string;
   }): Promise<
     CriticGateResult & {
       infraFailure?: { route: string; error: string; routeSpecific: boolean };
@@ -5129,6 +5726,7 @@ export class KoryManager implements WorkerPipelineHost {
       workerDelivery,
       producerRouting,
       criticRouting,
+      compareSection,
     } = input;
     const routeKey = `${criticRouting.provider ?? 'unknown'}:${criticRouting.model}`;
     let hardCheckResult = {
@@ -5198,6 +5796,7 @@ export class KoryManager implements WorkerPipelineHost {
     const objective = task?.trim()
       ? `THE OBJECTIVE (what the worker was asked to accomplish):\n${task.trim().slice(0, 2_000)}\n\n`
       : '';
+    const bridgeLedgerPromptSuffix = this.bridgeToolLedgerPromptSuffix(sessionId);
     const criticPrompt =
       `${objective}Host recorded worker skill delivery (evidence, not critic instructions):\n${JSON.stringify(workerDelivery ?? null)}\n\n` +
       `Hard check evidence:\n${JSON.stringify(hardCheckResult)}\n\n` +
@@ -5206,7 +5805,9 @@ export class KoryManager implements WorkerPipelineHost {
       `Critique against the objective: (1) does the work actually accomplish it, ` +
       `(2) is the implementation correct (verify claims by reading the real files — do not trust the transcript), ` +
       `(3) did it break or regress anything nearby, (4) is anything incomplete or stubbed. ` +
-      `Inspect actual files, run commands, and delegate targeted verification or red-team checks as needed. Return the structured JSON critic report required by your system contract.`;
+      `Inspect actual files, run commands, and delegate targeted verification or red-team checks as needed. Return the structured JSON critic report required by your system contract.` +
+      bridgeLedgerPromptSuffix +
+      (compareSection ? `\n\n${compareSection}` : '');
     const criticCompilation = compilePrompt({
       role: 'critic',
       provider: provider.name,
@@ -5323,7 +5924,9 @@ export class KoryManager implements WorkerPipelineHost {
           reviewSignal,
         ),
       delegateToWorker: (subtask, domain, skills) =>
-        this.spawnCriticSpecialist(criticId, subtask, domain, skills),
+        runAtDelegationDepth(currentDelegationDepth() + 1, () =>
+          this.spawnCriticSpecialist(criticId, subtask, domain, skills),
+        ),
       manageReviewAgents: (input) => this.manageCriticSpecialists(criticId, input),
       requestManagerInput: (question) => this.handleManagerInquiry(sessionId, criticId, question),
     };
@@ -5895,7 +6498,11 @@ export class KoryManager implements WorkerPipelineHost {
     const directory = await createCriticWorkspace(parent.ctx.workingDirectory);
     const abort = new AbortController();
     const id = `review-worker-${nanoid(8)}`;
-    const contract = createTaskContract(task, { skillAssignment: skills });
+    const ledger = this.bridgeToolLedgerPromptSuffix(parent.sessionId);
+    const contract = createTaskContract(task, {
+      skillAssignment: skills,
+      ...(ledger ? { constraints: [ledger.trimStart()] } : {}),
+    });
     const compilation = compilePrompt({
       role: 'worker',
       provider: provider.name,
@@ -6118,6 +6725,15 @@ export class KoryManager implements WorkerPipelineHost {
         provider = await this.providers.resolveProvider(routing.model, routing.provider);
       }
     }
+    // The chain's per-turn state starts here. A `never` or `after_reset` chain may
+    // begin on the step it last moved to, unless this request pinned a model.
+    const pinnedModel = preferredModel !== undefined && preferredModel !== 'auto';
+    const stickyRoute = this.beginManagerFallbackTurn(sessionId);
+    if (stickyRoute && !pinnedModel) {
+      routing = { model: stickyRoute.model, provider: stickyRoute.provider.name as ProviderName };
+      provider = stickyRoute.provider;
+      if (stickyRoute.reasoningLevel !== undefined) reasoningLevel = stickyRoute.reasoningLevel;
+    }
     if (!provider) throw new Error('No provider.');
     const providerName = provider.name as ProviderName;
     if (regenerationBranch && provider.supportsFreshConversation === false) {
@@ -6282,19 +6898,23 @@ export class KoryManager implements WorkerPipelineHost {
           workerReasoningLevel?: string,
           workerWorktree?: boolean,
           workerFallbacks?: AgentFallbackStep[],
+          options?: DelegateToWorkerOptions,
         ) =>
-          this.runWorkerPipeline(
-            sessionId,
+          this.delegateWorkerForCaller(sessionId, {
             task,
-            preferredModel,
-            workerReasoningLevel ?? this.getWorkerReasoningLevel(),
             domainHint,
             skills,
             workerModel,
-            abort.signal,
-            workerWorktree,
-            workerFallbacks,
-          ),
+            reasoningLevel: workerReasoningLevel ?? this.getWorkerReasoningLevel(),
+            worktree: workerWorktree,
+            fallbacks: workerFallbacks,
+            preferredModel,
+            wait: options?.wait !== false,
+            compareGroupId: options?.compareGroupId,
+            signal: abort.signal,
+          }),
+        waitForAgents: (input) =>
+          this.waitForAsyncChildren(sessionId, { ...input, signal: abort.signal }),
         manageAgents: (input) => this.manageAgentsForSession(sessionId, input),
         manageContext: (input) =>
           this.manageSessionContext({
@@ -6302,7 +6922,8 @@ export class KoryManager implements WorkerPipelineHost {
             messages,
             request: input,
             workingDirectory: directWorkingDirectory,
-            provider,
+            // A fallback hop can reassign this binding, so closures read the live value.
+            provider: provider!,
             model: routing.model,
             reasoningLevel,
             signal: abort.signal,
@@ -6315,12 +6936,25 @@ export class KoryManager implements WorkerPipelineHost {
         },
         manageSkillFeeding: (request) => this.manageSessionSkillFeeding(sessionId, request),
         renameSession: (title: string) => this.renameSession(sessionId, title),
+        forkChat: async (input) => {
+          const outcome = await forkChatCoordinated({
+            sourceSessionId: input.sessionId ?? sessionId,
+            messageId: input.messageId,
+            title: input.title,
+          });
+          return {
+            sessionId: outcome.session.id,
+            title: outcome.session.title,
+            copiedMessageCount: outcome.copiedMessageCount,
+          };
+        },
         noteWorkspaceMutation: () => this.markWorkspaceMutatedThisTurn(sessionId),
-        requestCriticReview: (reason: string) => {
+        requestCriticReview: (reason: string, compareGroupId?: string) => {
           messages.push({
             role: 'system',
-            content: `Review concern to consider at the end of your turn: ${reason}`,
+            content: `Review concern to consider at the end of your turn: ${reason}${compareGroupId ? ` (compare group ${compareGroupId} attached for ranking)` : ''}`,
           });
+          if (compareGroupId) this.runtimes.get(sessionId).pendingCompareReview = compareGroupId;
         },
       } as ToolContext;
       this.installManagerSessionGetters(
@@ -6402,7 +7036,7 @@ export class KoryManager implements WorkerPipelineHost {
           archiveId,
           turnCount: turn,
           settings: contextPolicySettings,
-          provider,
+          provider: provider!,
           model: routing.model,
           reasoningLevel,
           workingDirectory: directWorkingDirectory,
@@ -6423,10 +7057,7 @@ export class KoryManager implements WorkerPipelineHost {
         // after the current tool call or provider turn, never mid-stream —
         // so in-flight work is never torn down mid-edit. The run ends
         // 'steered_by_user' and the drain admits the parked send next.
-        if (
-          (this.runtimes.peek(sessionId)?.pendingSteerInputs.size ?? 0) > 0 &&
-          !stoppedDueToLoop
-        ) {
+        if (this.hasYieldingSteer(sessionId) && !stoppedDueToLoop) {
           stoppedByUser = true;
           steeredByUser = true;
         }
@@ -6516,6 +7147,33 @@ export class KoryManager implements WorkerPipelineHost {
         }
         reconcileUsage(result);
         turnFailure = result.failure;
+        if (turnFailure && !stoppedByUser && !abort.signal.aborted) {
+          // Output already reached the transcript: end this segment cleanly and
+          // continue on the next step as a continuation. Never a retry of the
+          // whole turn, which would repeat the text the user already read.
+          if (!turnProducedNoOutput(result) && atSafeHopBoundary(result)) {
+            const outcome = this.tryManagerFallbackHop(
+              sessionId,
+              { model: routing.model, provider: provider.name },
+              turnFailure,
+            );
+            if (outcome?.kind === 'hop') {
+              routing = { model: outcome.model, provider: outcome.provider.name as ProviderName };
+              provider = outcome.provider;
+              if (outcome.reasoningLevel !== undefined) reasoningLevel = outcome.reasoningLevel;
+              turnFailure = undefined;
+              messages.push({
+                role: 'system',
+                content:
+                  'HOST CONTINUE: The previous provider stopped before this response was complete and the chat continues on a fallback model. Continue exactly where the previous text stopped. Do not repeat text already written; finish the original request and provide the complete answer.',
+              });
+              continue;
+            }
+            if (outcome?.kind === 'exhausted') {
+              turnFailure = new Error(`${turnFailure.message}\n\n${outcome.summary}`);
+            }
+          }
+        }
         lastFinishReason = result.finishReason;
         if (result.finishReason === 'max_tokens' && result.content) {
           outputLimitSegments.push(result.content);
@@ -6617,7 +7275,7 @@ export class KoryManager implements WorkerPipelineHost {
                 const sequential: Array<Awaited<ReturnType<typeof runTool>>> = [];
                 for (const tc of completedToolCalls) {
                   if (abort.signal.aborted) break;
-                  if ((this.runtimes.peek(sessionId)?.pendingSteerInputs.size ?? 0) > 0) {
+                  if (this.hasYieldingSteer(sessionId)) {
                     skippedCalls.push(tc);
                     continue;
                   }
@@ -6938,6 +7596,7 @@ export class KoryManager implements WorkerPipelineHost {
           message: `Critic Auto · review required: ${criticDecision.reason}`,
         });
       }
+      const compareReviewGroup = this.takePendingCompareReview(sessionId);
       if (!observeCancellation() && !turnFailure && content && criticDecision.review) {
         const maxReviews = Math.max(1, Math.min(10, settingsForGate.maxCriticIterations));
         for (let review = 0; review < maxReviews; review++) {
@@ -6967,6 +7626,7 @@ export class KoryManager implements WorkerPipelineHost {
               decisionAnnounced: true,
               autoDecisionMade: true,
               criticModel: autoCriticDecision?.model,
+              compareGroupId: compareReviewGroup,
             },
           );
           if (observeCancellation() || gate.passed) break;
@@ -7184,7 +7844,20 @@ export class KoryManager implements WorkerPipelineHost {
           model: routing.model,
         });
       }
-      if (turnFailure && !stoppedByUser) throw turnFailure;
+      if (turnFailure && !stoppedByUser) {
+        // The turn is over with no fallback that succeeded. A usage limit is
+        // temporary, so the chat pauses and retries on its own instead of
+        // failing for good.
+        if (isUsageLimitMessage(turnFailure.message)) {
+          this.usageLimitResumes?.schedule(sessionId, {
+            message: turnFailure.message,
+            provider: String(routing.provider),
+            model: routing.model,
+            sourceRunId: handle.runId,
+          });
+        }
+        throw turnFailure;
+      }
       if (interactionMode === 'plan' && !stoppedByUser) {
         try {
           const noteId = await syncPlanNote(
@@ -8203,6 +8876,36 @@ export class KoryManager implements WorkerPipelineHost {
       if (retried.success)
         this.runtimes.get(sessionId).contextShrinkHints.set(shrinkHintKey, shrink + 1);
       return retried;
+    }
+    // Fallback chain: a failure before any output retries this same turn on the
+    // next connected step. Nothing reached the transcript, so nothing duplicates.
+    if (failure && !signal?.aborted && turnProducedNoOutput(result)) {
+      const outcome = this.tryManagerFallbackHop(
+        sessionId,
+        { model: modelId, provider: provider.name },
+        failure,
+      );
+      if (outcome?.kind === 'hop') {
+        return await this.processManagerTurn(
+          sessionId,
+          outcome.model,
+          outcome.provider,
+          messages,
+          ctx,
+          signal,
+          outcome.reasoningLevel ?? reasoningLevel,
+          interactionMode,
+          fastMode,
+          speedTier,
+          modelParameters,
+          fusion,
+          providerConversationRevision,
+          forceFreshConversation,
+          shrink,
+          imageInputMode,
+        );
+      }
+      if (outcome?.kind === 'exhausted') failure = new Error(`${failure.message}\n\n${outcome.summary}`);
     }
     if (!failure && shrink > 0)
       this.runtimes.get(sessionId).contextShrinkHints.set(shrinkHintKey, shrink);
@@ -9387,6 +10090,34 @@ export class KoryManager implements WorkerPipelineHost {
       waitForUserInput: (question, options, opts) =>
         this.waitForUserInputInternal(sessionId, question, options, opts),
       waitForToolApproval,
+      // A worker below the depth limit may delegate once more, synchronously so
+      // the sub-agent's result stays inside this worker's own turn.
+      ...(canDelegateAtDepth(currentDelegationDepth())
+        ? {
+            delegateToWorker: (
+              task: string,
+              domainHint?: string,
+              skills?: SkillAssignment,
+              workerModel?: string,
+              workerReasoningLevel?: string,
+              workerWorktree?: boolean,
+              workerFallbacks?: AgentFallbackStep[],
+              options?: DelegateToWorkerOptions,
+            ) =>
+              this.delegateWorkerForCaller(sessionId, {
+                task,
+                domainHint,
+                skills,
+                workerModel,
+                reasoningLevel: workerReasoningLevel,
+                worktree: workerWorktree,
+                fallbacks: workerFallbacks,
+                wait: true,
+                compareGroupId: options?.compareGroupId,
+                signal: abort.signal,
+              }),
+          }
+        : {}),
     } as ToolContext;
     // Workers inherit the delegating chat's posture, so the parent's per-chat
     // YOLO/guarded choice (not the project default) is what applies — approval
@@ -9943,6 +10674,38 @@ export class KoryManager implements WorkerPipelineHost {
     throw new Error(`Session ${sessionId} has no generation-bound execution context`);
   }
 
+  /** The MCP bridge records every managed-CLI tool execution here so critic
+   * prompts can verify the real calls a CLI transcript hides behind a
+   * dispatcher (opencode `execute`, Devin `mcp_call_tool`). Bound to the
+   * session's leased run; a new run replaces the ledger instead of mixing
+   * turns. No-op outside a live run — bridge calls also fire during turns the
+   * durable layer does not lease. */
+  recordBridgeToolExecution(
+    sessionId: string,
+    entry: { name: string; input: string; output: string; isError: boolean; at: number },
+  ): void {
+    const runtime = this.runtimes.peek(sessionId);
+    const handle = this.runLifecycle.handleForSession(sessionId);
+    if (!runtime || !handle) return;
+    if (runtime.bridgeToolLedger?.runId !== handle.runId)
+      runtime.bridgeToolLedger = { runId: handle.runId, entries: [] };
+    const entries = runtime.bridgeToolLedger.entries;
+    if (entries.length >= 200) entries.shift();
+    entries.push(entry);
+  }
+
+  /** Prompt suffix exposing the bridge ledger to critics; empty when the run
+   *  executed no bridge tools so prompts carry no misleading header. */
+  private bridgeToolLedgerPromptSuffix(sessionId: string): string {
+    const entries = this.runtimes.peek(sessionId)?.bridgeToolLedger?.entries;
+    if (!entries?.length) return '';
+    const lines = entries.map(
+      (entry) =>
+        `- ${entry.name} ${entry.input} → ${entry.isError ? 'ERROR: ' : ''}${entry.output}`,
+    );
+    return `\n\nHost-recorded Kory tool executions this turn (authoritative; CLI transcripts may show only a dispatcher such as "execute" or "mcp_call_tool"):\n${lines.join('\n')}`;
+  }
+
   private assertRunHandleActive(handle: ManagerRunHandle): void {
     const current = this.requireRunHandle(handle.sessionId);
     if (current.runId !== handle.runId) {
@@ -10134,6 +10897,15 @@ export class KoryManager implements WorkerPipelineHost {
     // line and the drain dispatches them in order once the blocker releases.
     if (!options?.preserveQueuedSteers) {
       const runtime = this.runtimes.peek(sessionId);
+      if (runtime) {
+        // Stop means stop: host continuations parked for steering are dropped,
+        // their finished results stay pending, and running workers are aborted.
+        for (const batchId of runtime.asyncChildren.queuedBatchIds()) {
+          runtime.asyncChildren.releaseBatch(batchId);
+        }
+        runtime.asyncChildren.abortRunning();
+        runtime.asyncDeliveryHeld = true;
+      }
       runtime?.pendingSteerInputs.clear();
       const parkedSteers = await agentSteeringStore.list(sessionId, KORY_IDENTITY.id);
       for (const steer of parkedSteers) {
@@ -10297,21 +11069,11 @@ export class KoryManager implements WorkerPipelineHost {
       }
       if (options.fallbacks !== undefined) {
         fallbacks = [];
-        for (const step of options.fallbacks.slice(0, 20)) {
-          const requested = step.model.trim();
-          if (!requested) continue;
-          const parsed = splitProviderKey(requested);
-          const resolved = await this.providers.resolveProvider(
-            parsed.model,
-            parsed.provider as ProviderName,
-          );
-          if (!resolved) {
-            throw new Error(`Fallback model ${requested} is unavailable for the manager`);
+        for (const step of normalizeFallbackStepsInput(options.fallbacks)) {
+          if (!this.resolveFallbackStep(step)) {
+            throw new Error(`Fallback model ${fallbackStepKey(step)} is unavailable for the manager`);
           }
-          fallbacks.push({
-            model: requested,
-            ...(step.reasoningLevel ? { reasoningLevel: step.reasoningLevel } : {}),
-          });
+          fallbacks.push(step);
         }
       }
       const nextControl = { model, provider, reasoningLevel, fallbacks: [...fallbacks] };
@@ -10352,18 +11114,11 @@ export class KoryManager implements WorkerPipelineHost {
     }
     if (options.fallbacks !== undefined) {
       const normalized: AgentFallbackStep[] = [];
-      for (const step of options.fallbacks.slice(0, 20)) {
-        const requested = step.model.trim();
-        if (!requested) continue;
-        const { provider, model } = splitProviderKey(requested);
-        const resolved = await this.providers.resolveProvider(model, provider as ProviderName);
-        if (!resolved) {
-          throw new Error(`Fallback model ${requested} is unavailable for this worker`);
+      for (const step of normalizeFallbackStepsInput(options.fallbacks)) {
+        if (!this.resolveFallbackStep(step)) {
+          throw new Error(`Fallback model ${fallbackStepKey(step)} is unavailable for this worker`);
         }
-        normalized.push({
-          model: requested,
-          ...(step.reasoningLevel ? { reasoningLevel: step.reasoningLevel } : {}),
-        });
+        normalized.push(step);
       }
       thread.fallbacks = normalized;
     }
@@ -10837,20 +11592,7 @@ export class KoryManager implements WorkerPipelineHost {
     }
     if (action === 'set_controls') {
       const fallbacks = Array.isArray(input.fallbacks)
-        ? input.fallbacks
-            .filter(
-              (step): step is { model: string; reasoningLevel?: string } =>
-                typeof step === 'object' &&
-                step !== null &&
-                typeof (step as { model?: unknown }).model === 'string' &&
-                Boolean((step as { model: string }).model.trim()),
-            )
-            .map((step) => ({
-              model: step.model.trim(),
-              ...(typeof step.reasoningLevel === 'string'
-                ? { reasoningLevel: step.reasoningLevel }
-                : {}),
-            }))
+        ? normalizeFallbackStepsInput(input.fallbacks)
         : undefined;
       const updated = await this.updateAgentControls(sessionId, agentId, {
         model: typeof input.model === 'string' ? input.model : undefined,
@@ -11005,6 +11747,13 @@ export class KoryManager implements WorkerPipelineHost {
   /** Speculatively drain every idle agent's steering queue for this session.
    *  Called when a run releases; a still-busy session simply re-queues. */
   private drainSessionSteeringQueues(sessionId: string): void {
+    if (!this.runtimes.peek(sessionId)?.asyncDeliveryHeld) {
+      void runAtDelegationDepth(0, () => this.scheduleAsyncChildDelivery(sessionId)).catch(
+        (error) => {
+          koryLog.debug({ sessionId, error }, 'Async worker result delivery stopped');
+        },
+      );
+    }
     for (const [agentId, thread] of this.agentThreads) {
       if (thread.sessionId !== sessionId || thread.busy) continue;
       void this.drainAgentSteeringQueue(sessionId, agentId).catch((error) => {
@@ -11039,13 +11788,27 @@ export class KoryManager implements WorkerPipelineHost {
       if (!command) return null;
       await this.publishAgentSteeringQueue(sessionId, agentId);
       const runtime = this.runtimes.peek(sessionId);
+      const hostBatchId = hostSteerBatchId(sessionId, command.id);
       try {
         // The parked input carries full fidelity (attachments, model
         // parameters); a durable row surviving a restart is reconstructed
         // from what the queue itself records. Its message was persisted at
         // queue time either way, so inputAlreadyPersisted always holds.
+        const hostInput =
+          hostBatchId === undefined ? undefined : this.hostBatchTurnInput(sessionId, hostBatchId);
+        if (hostBatchId !== undefined && !hostInput) {
+          // Every result in this batch was claimed by wait_for_agents first.
+          runtime?.pendingSteerInputs.delete(command.id);
+          await agentSteeringStore.updateStatus(
+            command.id,
+            'cancelled',
+            'results_already_delivered',
+          );
+          await this.publishAgentSteeringQueue(sessionId, agentId);
+          return null;
+        }
         const parked = runtime?.pendingSteerInputs.get(command.id);
-        const input: SessionTurnCommandInput = parked ?? {
+        const input: SessionTurnCommandInput = hostInput ?? parked ?? {
           sessionId,
           source: 'user',
           sourceCommandId: command.id.startsWith(`usrsteer_${sessionId}_`)
@@ -11059,6 +11822,9 @@ export class KoryManager implements WorkerPipelineHost {
         const submission = await this.startSessionTurn(input);
         if (submission.accepted === true) {
           runtime?.pendingSteerInputs.delete(command.id);
+          if (hostBatchId !== undefined) {
+            this.runtimes.get(sessionId).asyncChildren.markBatchDelivered(hostBatchId);
+          }
           await agentSteeringStore.updateStatus(command.id, 'running');
           void submission.completion
             .then(async (result) => {
@@ -11105,10 +11871,16 @@ export class KoryManager implements WorkerPipelineHost {
           submission.result.reason ?? undefined,
         );
         runtime?.pendingSteerInputs.delete(command.id);
+        if (hostBatchId !== undefined) {
+          this.runtimes.get(sessionId).asyncChildren.releaseBatch(hostBatchId);
+        }
         await this.publishAgentSteeringQueue(sessionId, agentId);
         return null;
       } catch (error) {
         runtime?.pendingSteerInputs.delete(command.id);
+        if (hostBatchId !== undefined) {
+          this.runtimes.get(sessionId).asyncChildren.releaseBatch(hostBatchId);
+        }
         await agentSteeringStore.updateStatus(
           command.id,
           'failed',
@@ -11404,6 +12176,7 @@ export class KoryManager implements WorkerPipelineHost {
       let provider =
         providerOverride ??
         (await this.providers.resolveProvider(thread.modelId, thread.providerName));
+      thread.fallbackHops = [];
       let fallbackCursor = 0;
       if (!provider) {
         const fallback = await this.resolveAgentFallback(thread, fallbackCursor);
@@ -11440,8 +12213,19 @@ export class KoryManager implements WorkerPipelineHost {
           // rather than terminalizing the worker. Tool failures never reach
           // this branch; they are returned as tool results.
           if (thread.ctx.signal?.aborted) throw err;
-          const fallback = await this.resolveAgentFallback(thread, fallbackCursor);
-          if (!fallback) throw err;
+          const failure = err instanceof Error ? err : new Error(String(err));
+          const fallback = await this.resolveAgentFallback(thread, fallbackCursor, failure);
+          if (!fallback) {
+            const hops = thread.fallbackHops ?? [];
+            if (hops.length === 0) throw err;
+            // Summarize every hop this run tried so the failure names the whole route.
+            const summary = formatFallbackExhaustedSummary(
+              hops,
+              hops[0]!.fromModel,
+              this.agentFallbackStepCount(thread),
+            );
+            throw new Error(`${failure.message}\n\n${summary}`);
+          }
           provider = fallback.provider;
           fallbackCursor = fallback.cursor;
           this.discardIncompleteAgentTurn(thread);
@@ -11553,20 +12337,46 @@ export class KoryManager implements WorkerPipelineHost {
   /** Resolve the next configured fallback for an existing agent thread. The
    *  cursor is per run, so a later user follow-up starts again at the first
    *  fallback instead of inheriting a consumed chain. */
+  /** The chain a worker or critic thread walks: its own per-agent list when set,
+   *  otherwise the chat's role chain. */
+  private agentFallbackChain(thread: AgentThreadState): FallbackChain {
+    if (thread.fallbacks.length > 0) {
+      return {
+        steps: thread.fallbacks,
+        triggers: { ...DEFAULT_FALLBACK_TRIGGERS },
+        returnToPrimary: 'next_turn',
+      };
+    }
+    return this.fallbackChainFor(thread.sessionId, thread.kind);
+  }
+
+  private agentFallbackStepCount(thread: AgentThreadState): number {
+    return this.agentFallbackChain(thread).steps.length;
+  }
+
   private async resolveAgentFallback(
     thread: AgentThreadState,
     start: number,
+    failure?: Error,
   ): Promise<{ provider: Provider; cursor: number } | undefined> {
-    for (let index = start; index < thread.fallbacks.length; index++) {
-      const step = thread.fallbacks[index];
+    // A per-agent list is the agent's own chain; otherwise the role's chain applies.
+    const chain = this.agentFallbackChain(thread);
+    const steps = chain.steps;
+    const triggers = chain.triggers;
+    const reason = failure ? classifyFallbackFailure(failure) : undefined;
+    // Auth and disabled triggers never hop; the thread fails as it does without a chain.
+    if (failure && (!reason || !fallbackReasonEnabled(reason, triggers))) return undefined;
+    for (let index = start; index < steps.length; index++) {
+      const step = steps[index];
       if (!step) continue;
-      const { provider, model } = splitProviderKey(step.model);
-      const resolved = await this.providers.resolveProvider(model, provider as ProviderName);
+      const resolved = this.resolveFallbackStep(step);
       if (!resolved) continue;
-      thread.providerName = resolved.name;
-      thread.modelId = model;
-      thread.identity.provider = resolved.name;
-      thread.identity.model = model;
+      const fromModel = thread.modelId;
+      const fromProvider = thread.providerName;
+      thread.providerName = resolved.provider.name as ProviderName;
+      thread.modelId = resolved.model;
+      thread.identity.provider = resolved.provider.name as ProviderName;
+      thread.identity.model = resolved.model;
       if (step.reasoningLevel !== undefined) {
         thread.reasoningLevel = step.reasoningLevel;
       }
@@ -11578,7 +12388,48 @@ export class KoryManager implements WorkerPipelineHost {
         reasoningLevel: thread.reasoningLevel,
         fallbacks: [...thread.fallbacks],
       });
-      return { provider: resolved, cursor: index + 1 };
+      if (failure && reason) {
+        const hop: FallbackHopRecord = {
+          fromModel,
+          fromProvider,
+          toModel: resolved.model,
+          toProvider: resolved.provider.name,
+          reason,
+          stepIndex: index,
+          at: Date.now(),
+        };
+        thread.fallbackHops = [...(thread.fallbackHops ?? []), hop];
+        // Worker and critic hops are not folded into a manager turn, so the
+        // notice carries no turn messageId and the feed shows it as a system notice.
+        const payload: SessionFallbackHopPayload & { agentId: string } = {
+          sessionId: thread.sessionId,
+          messageId: '',
+          agentId: thread.identity.id,
+          fromModel,
+          toModel: resolved.model,
+          fromProvider,
+          toProvider: resolved.provider.name,
+          reason,
+          stepIndex: index,
+        };
+        this.emitWSMessage(thread.sessionId, 'session.fallback.hop', payload as unknown as WSMessage['payload']);
+      }
+      return { provider: resolved.provider, cursor: index + 1 };
+    }
+    if (failure && thread.fallbackHops?.length) {
+      const summary = formatFallbackExhaustedSummary(
+        thread.fallbackHops,
+        thread.fallbackHops[0]!.fromModel,
+        steps.length,
+      );
+      onFallbackChainExhausted(thread.sessionId, {
+        role: thread.kind,
+        hops: [...thread.fallbackHops],
+        lastReason: reason ?? 'provider_error',
+        lastError: failure.message,
+        stepCount: steps.length,
+        summary,
+      });
     }
     return undefined;
   }
@@ -11868,6 +12719,112 @@ export class KoryManager implements WorkerPipelineHost {
       if (changed) pruned++;
     }
     return pruned;
+  }
+
+  // ── Fallback chain ────────────────────────────────────────────────────────
+  // Policy lives in fallback-chain.ts; this block owns the provider lookups,
+  // the hop state on SessionRuntime, and the transcript notice.
+
+  /** The chain that applies to a role in this chat: chat override, role, default. */
+  private fallbackChainFor(sessionId: string, role: FallbackChainRole): FallbackChain {
+    return resolveFallbackChain({
+      sessionOverride: getSessionAgentOverrides(sessionId).fallbackChain,
+      roleChains: this.settingsForSession(sessionId).fallbackChains,
+      role,
+    });
+  }
+
+  /** A step's live route, or undefined when its provider cannot serve it now. */
+  private resolveFallbackStep(
+    step: FallbackStep,
+  ): { model: string; provider: Provider } | undefined {
+    const provider = step.provider
+      ? this.providers.resolveProvider(step.model, step.provider as ProviderName)
+      : this.providers.resolveProvider(step.model);
+    if (!provider) return undefined;
+    if (step.provider && provider.name !== step.provider) return undefined;
+    return { model: step.model, provider };
+  }
+
+  /** Start the manager's hop state for a turn. Returns the sticky route to begin
+   *  on when a `never` or `after_reset` chain still points at a fallback step. */
+  private beginManagerFallbackTurn(
+    sessionId: string,
+  ): { model: string; provider: Provider; reasoningLevel?: string } | undefined {
+    const runtime = this.runtimes.get(sessionId);
+    const chain = this.fallbackChainFor(sessionId, 'manager');
+    const began = beginFallbackTurnState({
+      role: 'manager',
+      chain,
+      sticky: runtime.fallbackSticky,
+      now: Date.now(),
+    });
+    runtime.fallbackTurn = began.state;
+    runtime.fallbackSticky = began.sticky;
+    if (began.state.activeIndex < 0) return undefined;
+    const step = chain.steps[began.state.activeIndex]!;
+    const resolved = this.resolveFallbackStep(step);
+    if (!resolved) {
+      // The sticky step is no longer connected, so this turn starts on the primary.
+      began.state.activeIndex = -1;
+      runtime.fallbackSticky = undefined;
+      return undefined;
+    }
+    return { ...resolved, reasoningLevel: step.reasoningLevel };
+  }
+
+  /**
+   * Apply the pure hop decision to this manager turn: store the new state, emit
+   * the notice on a hop, and fire the exhaustion hook when the chain runs out.
+   */
+  private tryManagerFallbackHop(
+    sessionId: string,
+    current: { model: string; provider: string },
+    failure: Error,
+  ): ManagerFallbackOutcome | undefined {
+    const runtime = this.runtimes.peek(sessionId);
+    const prior = runtime?.fallbackTurn;
+    if (!runtime || !prior) return undefined;
+    const decision = decideFallbackHop<Provider>({
+      state: prior,
+      sticky: runtime.fallbackSticky,
+      failure: { message: failure.message, name: failure.name },
+      current,
+      now: Date.now(),
+      resolve: (step) => {
+        const route = this.resolveFallbackStep(step);
+        return route && { model: route.model, provider: route.provider, providerName: route.provider.name };
+      },
+    });
+    runtime.fallbackTurn = decision.state;
+    if (decision.kind === 'none') return undefined;
+    if (decision.kind === 'exhausted') {
+      onFallbackChainExhausted(sessionId, decision.info);
+      return { kind: 'exhausted', summary: decision.info.summary };
+    }
+    runtime.fallbackSticky = decision.sticky;
+    const { hop, route } = decision;
+    const payload: SessionFallbackHopPayload = {
+      sessionId,
+      messageId: this.events.transcript.currentMessageId(sessionId) ?? '',
+      fromModel: hop.fromModel,
+      toModel: hop.toModel,
+      fromProvider: hop.fromProvider,
+      toProvider: hop.toProvider,
+      reason: hop.reason,
+      stepIndex: hop.stepIndex,
+    };
+    this.emitWSMessage(sessionId, 'session.fallback.hop', payload as unknown as WSMessage['payload']);
+    koryLog.warn(
+      { sessionId, from: `${hop.fromProvider}:${hop.fromModel}`, to: `${hop.toProvider}:${hop.toModel}`, reason: hop.reason, stepIndex: hop.stepIndex },
+      'Fallback chain hop',
+    );
+    return {
+      kind: 'hop',
+      model: route.model,
+      provider: route.provider,
+      reasoningLevel: decision.step.reasoningLevel,
+    };
   }
 
   private async processAgentThreadTurn(
@@ -12625,6 +13582,17 @@ export class KoryManager implements WorkerPipelineHost {
    *  resolve a session's working directory without a private-method breach. */
   async resolveSessionWorkingDirectoryPublic(sessionId: string): Promise<string> {
     return this.resolveSessionWorkingDirectory(sessionId);
+  }
+
+  /** Per-chat runtime for session-bound services (integrated terminals). Creates
+   *  the runtime, so call it only for a chat that exists. */
+  sessionRuntimeFor(sessionId: string): SessionRuntime {
+    return this.runtimes.get(sessionId);
+  }
+
+  /** Read-only view of a chat's runtime. Never creates one. */
+  peekSessionRuntime(sessionId: string): SessionRuntime | undefined {
+    return this.runtimes.peek(sessionId);
   }
 
   /** The chat's workspace binding changed earlier this turn; mutating tools

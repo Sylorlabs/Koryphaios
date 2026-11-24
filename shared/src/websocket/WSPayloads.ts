@@ -270,6 +270,30 @@ export interface RunSettledPayload {
   settledAt: number;
 }
 
+/**
+ * A chat paused on a provider usage limit and will retry on its own. `null`
+ * means no pending resume remains for the session (resumed, cancelled, or
+ * exhausted). The UI renders "Paused until <resumeAt> · Resume now · Cancel".
+ */
+export interface PendingResumePayload {
+  pendingResume: {
+    id: string;
+    reason: 'usage_limit';
+    provider: string | null;
+    model: string | null;
+    /** Epoch ms of the next automatic attempt. */
+    resumeAt: number;
+    /** Automatic attempts already made (0 before the first retry). */
+    attempt: number;
+    maxAttempts: number;
+    state: 'scheduled' | 'resuming';
+    /** Why the chat paused, bounded and safe to show. */
+    message: string;
+  } | null;
+  /** Set when pendingResume is null. */
+  clearedReason?: 'resumed' | 'cancelled' | 'exhausted';
+}
+
 export interface SessionCreatedPayload {
   sessionId: string;
   title: string;
@@ -562,6 +586,24 @@ export interface NativeCommandPayload {
   /** True when the command could not run (e.g. binary missing, non-headless). */
   isError?: boolean;
   /** Stable id so the frontend can accumulate streaming chunks into one entry. */
+  messageId: string;
+}
+
+/** `session.forked`: published on the source chat (sessionId = source) when a
+ *  fork is created. `session` is the new fork; `copiedMessageCount` its history. */
+export interface SessionForkedPayload {
+  sourceSessionId: string;
+  forkMessageId: string;
+  copiedMessageCount: number;
+  session: import('../types/SessionTypes').Session;
+}
+
+/** `session.merged`: published on the source chat (sessionId = source) after a
+ *  fork's result was appended to its transcript. `messageId` is that entry. */
+export interface SessionMergedPayload {
+  sourceSessionId: string;
+  forkSessionId: string;
+  mode: 'summary' | 'messages';
   messageId: string;
 }
 

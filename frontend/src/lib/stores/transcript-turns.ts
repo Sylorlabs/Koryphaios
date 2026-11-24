@@ -146,6 +146,22 @@ export function partsToFeedEntries(input: PartsToFeedEntriesInput): FeedEntry[] 
           },
         };
       }
+      case 'notice':
+        // A host notice folded into the turn (e.g. a fallback-chain hop) renders
+        // as a system row at its position, never as manager text.
+        return {
+          ...base,
+          agentId: 'system',
+          agentName: '',
+          glowClass: '',
+          timestamp: part.startedAt,
+          type: 'system',
+          text: part.text,
+          metadata: {
+            ...rowMetadata,
+            ...(part.fallback ? { fallback: part.fallback } : {}),
+          },
+        };
     }
   });
 

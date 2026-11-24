@@ -42,17 +42,20 @@ mod native {
             })
             .map(|descriptor| quit_reason(descriptor.enumCodeValue()))
             .unwrap_or(Reason::Close);
-        if let Some(app) = APP.get() {
-            OS_PENDING.store(reason != Reason::Close, Ordering::SeqCst);
-            desktop_lifecycle::request(app, reason);
+        // A normal quit (Dock, Apple event) is cancelled here and decided by the
+        // shell, which quits at once or asks natively. Nothing waits on the webview.
+        if reason == Reason::Close {
+            if let Some(app) = APP.get() {
+                desktop_lifecycle::quit_requested(app, desktop_lifecycle::QuitEntry::AppleEvent);
+            }
+            return 0;
         }
         // AppKit waits for our reply without cancelling the original restart.
-        // A normal quit is cancelled immediately and handled by our close UI.
-        if reason == Reason::Close {
-            0
-        } else {
-            2
-        } // Cancel / Later
+        if let Some(app) = APP.get() {
+            OS_PENDING.store(true, Ordering::SeqCst);
+            desktop_lifecycle::request(app, reason);
+        }
+        2 // Cancel / Later
     }
 
     pub(super) fn install(app: &AppHandle) -> Result<(), String> {

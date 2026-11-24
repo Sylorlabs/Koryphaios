@@ -5,6 +5,8 @@
 // activity are ordered inside an assistant turn. The backend folds manager events
 // through it to persist `parts`; the frontend folds the same live events through it.
 
+import type { FallbackHopReason } from '../fallback-chain';
+
 export type TranscriptPart =
   | {
       kind: 'reasoning';
@@ -37,7 +39,23 @@ export type TranscriptPart =
        *  transcript on first expand. Never persisted, never produced by the
        *  reducer — set only at the serialization edge. */
       subagentStub?: SubagentStub;
+    }
+  | {
+      /** A visible host notice folded into the turn, e.g. a fallback-chain hop. */
+      kind: 'notice';
+      tone: 'info' | 'warning';
+      text: string;
+      startedAt: number;
+      fallback?: FallbackNoticeDetail;
     };
+
+/** Structured detail for a fallback-hop notice part. */
+export interface FallbackNoticeDetail {
+  fromModel: string;
+  toModel: string;
+  reason: FallbackHopReason;
+  stepIndex: number;
+}
 
 /**
  * A sub-agent's own conversation, nested under the tool call that started it.
@@ -107,7 +125,14 @@ export type TurnEvent =
       subagent?: SubagentTranscript;
     }
   | { type: 'clear_text'; timestamp: number }
-  | { type: 'complete'; timestamp: number };
+  | { type: 'complete'; timestamp: number }
+  | {
+      type: 'notice';
+      tone: 'info' | 'warning';
+      text: string;
+      timestamp: number;
+      fallback?: FallbackNoticeDetail;
+    };
 
 type ReasoningPart = Extract<TranscriptPart, { kind: 'reasoning' }>;
 type TextPart = Extract<TranscriptPart, { kind: 'text' }>;
@@ -269,6 +294,17 @@ export function reduceTurnParts(
       return parts.filter((part) => part.kind !== 'text');
     case 'complete':
       return closeOpenReasoning(parts, event.timestamp);
+    case 'notice': {
+      const closed = closeOpenReasoning(parts, event.timestamp);
+      const part: Extract<TranscriptPart, { kind: 'notice' }> = {
+        kind: 'notice',
+        tone: event.tone,
+        text: event.text,
+        startedAt: event.timestamp,
+      };
+      if (event.fallback) part.fallback = { ...event.fallback };
+      return [...closed, part];
+    }
     default:
       return parts.slice();
   }
@@ -367,7 +403,37 @@ export function turnEventFromWSMessage(msg: {
       return { type: 'clear_text', timestamp };
     case 'stream.complete':
       return { type: 'complete', timestamp };
+    case 'session.fallback.hop': {
+      if (typeof payload.fromModel !== 'string' || typeof payload.toModel !== 'string') return null;
+      if (typeof payload.reason !== 'string') return null;
+      const stepIndex = finiteNumber(payload.stepIndex) ?? 0;
+      const fallback: FallbackNoticeDetail = {
+        fromModel: payload.fromModel,
+        toModel: payload.toModel,
+        reason: payload.reason as FallbackHopReason,
+        stepIndex,
+      };
+      return {
+        type: 'notice',
+        tone: 'info',
+        text: fallbackHopNoticeText(fallback),
+        timestamp,
+        fallback,
+      };
+    }
     default:
       return null;
   }
+}
+
+const FALLBACK_REASON_LABELS: Record<FallbackHopReason, string> = {
+  usage_limit: 'usage limit reached',
+  rate_limit: 'rate limited',
+  provider_error: 'provider error',
+  timeout: 'timed out',
+};
+
+/** Human text for a fallback-hop notice. Shared so live and persisted rows read the same. */
+export function fallbackHopNoticeText(detail: FallbackNoticeDetail): string {
+  return `${detail.fromModel} ${FALLBACK_REASON_LABELS[detail.reason]}; continuing on ${detail.toModel} (fallback ${detail.stepIndex + 1}).`;
 }

@@ -140,7 +140,7 @@ function normalizeNotesSettings(input?: Partial<NotesSettings> | null): NotesSet
   };
 }
 
-function loadKoryphaiosConfig(projectRoot: string): Record<string, unknown> {
+export function loadKoryphaiosConfig(projectRoot: string): Record<string, unknown> {
   const configPath = join(projectRoot, 'koryphaios.json');
   if (!existsSync(configPath)) return {};
   try {
@@ -154,7 +154,7 @@ function loadKoryphaiosConfig(projectRoot: string): Record<string, unknown> {
   }
 }
 
-function saveKoryphaiosConfig(projectRoot: string, config: Record<string, unknown>): void {
+export function saveKoryphaiosConfig(projectRoot: string, config: Record<string, unknown>): void {
   const configPath = join(projectRoot, 'koryphaios.json');
   const tempPath = `${configPath}.${process.pid}.tmp`;
   config.updatedAt = Date.now();
@@ -267,6 +267,7 @@ export function buildNotesNetworkSystemHint(projectRoot: string): string {
           'record_work_note',
           'create_note',
           'set_note_property',
+          'set_note_icon',
           'update_note',
           'delete_note',
           'link_notes',
@@ -323,6 +324,10 @@ export function buildNotesNetworkSystemHint(projectRoot: string): string {
     [
       'set_note_property',
       'set_note_property({noteId, expectedRevision, key, type, value}) -> optimistically update one typed YAML property without overwriting a newer note revision',
+    ],
+    [
+      'set_note_icon',
+      'set_note_icon({noteId, icon: {kind: "emoji"|"builtin"|"image", value, label?} | null}) -> set or clear the note icon; any single emoji is valid; appearance only, never changes the note revision',
     ],
     [
       'update_note',

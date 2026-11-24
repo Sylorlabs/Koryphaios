@@ -227,13 +227,13 @@ async function waitForCancellation(sessionId: string, agentId?: string): Promise
   }
 }
 
-function cancelSession(sessionId: string, purpose: 'stop' | 'steer' = 'stop'): Promise<void> {
+function cancelSession(sessionId: string): Promise<void> {
   if (!sessionId) return Promise.resolve();
   return cancelWithKey(
     sessionCancellationKey(sessionId),
     `/api/sessions/${encodeURIComponent(sessionId)}/cancel`,
     'this session',
-    purpose === 'steer' ? { purpose } : undefined,
+    undefined,
     () => markSessionAgentsStopped(sessionId),
     () => runStateStore.clearUserStopped(sessionId),
   );
@@ -607,7 +607,10 @@ function handleMessage(msg: WSMessage) {
     case 'agent.spawned': {
       const sm = msg as SessionWSMessage;
       const p = msg.payload as AgentSpawnedPayload;
-      agentStore.spawnAgent(sm.sessionId, p.agent, p.task);
+      agentStore.spawnAgent(sm.sessionId, p.agent, p.task, {
+        parentAgentId: p.parentAgentId,
+        startedAt: msg.timestamp,
+      });
       {
         agentStore.ensureAgentThreadFeed(sm.sessionId, p.agent.id);
       }
@@ -727,7 +730,7 @@ function handleMessage(msg: WSMessage) {
       ) {
         break;
       }
-      agentStore.updateAgentStatus(sm.sessionId, p.agentId, p.status);
+      agentStore.updateAgentStatus(sm.sessionId, p.agentId, p.status, msg.timestamp);
       if (
         sm.sessionId &&
         p.agentId !== 'kory-manager' &&
@@ -743,7 +746,12 @@ function handleMessage(msg: WSMessage) {
             name: 'delegate_to_worker',
             output: `${agent?.identity.name ?? 'Agent'} ${p.status}`,
             isError: p.status === 'error',
-            durationMs: 0,
+            // Both stamps are server event timestamps, so this is the
+            // delegated agent's real run time, not a client-clock guess.
+            durationMs:
+              agent?.startedAt !== undefined && typeof msg.timestamp === 'number'
+                ? Math.max(0, msg.timestamp - agent.startedAt)
+                : 0,
           },
           msg.timestamp,
           { sessionId: sm.sessionId, source: 'agent.status' },

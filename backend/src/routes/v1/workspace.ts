@@ -9,7 +9,7 @@ import { getRequestProjectRoot, getRequestWorkspaceRoot } from '../../runtime/re
 import { IMAGE_MIME_TYPES } from '../../tools/image';
 import { existsSync, mkdirSync, realpathSync, readdirSync, statSync, readFileSync } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
-import { canonicalizePath, isContainedBy } from '../../runtime/platform';
+import { canonicalizePath, isContainedBy, isMac, isWindows } from '../../runtime/platform';
 import { getDb } from '../../db';
 import {
   validateWorkspaceRoot,
@@ -538,9 +538,9 @@ export const workspaceRoutes = new Elysia({ prefix: '/api/workspace' })
     }
 
     const platformOpener =
-      process.platform === 'darwin'
+      isMac()
         ? (['open', [canonical]] as const)
-        : process.platform === 'win32'
+        : isWindows()
           ? (['cmd', ['/c', 'start', '', canonical]] as const)
           : (['xdg-open', [canonical]] as const);
     if (await trySpawnEditor(platformOpener[0], [...platformOpener[1]])) {

@@ -128,10 +128,12 @@ echo "Bundle assembled: $APP_BUNDLE"
 SIGN_IDENTITY="${APPLE_SIGNING_IDENTITY:--}"
 echo "Code signing with identity: ${SIGN_IDENTITY}"
 
-codesign --force --deep --strict --sign "$SIGN_IDENTITY" \
-  --options runtime \
-  --entitlements - \
-  "$APP_BUNDLE" <<'ENTITLEMENTS'
+# codesign cannot read entitlements from stdin ("-" or /dev/stdin fail with
+# "cannot read entitlement data"), so write them to a file it can open.
+ENTITLEMENTS_DIR=$(mktemp -d)
+trap 'rm -rf "$ENTITLEMENTS_DIR"' EXIT
+ENTITLEMENTS_FILE="$ENTITLEMENTS_DIR/entitlements.plist"
+cat > "$ENTITLEMENTS_FILE" <<'ENTITLEMENTS'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -149,6 +151,11 @@ codesign --force --deep --strict --sign "$SIGN_IDENTITY" \
 </dict>
 </plist>
 ENTITLEMENTS
+
+codesign --force --deep --strict --sign "$SIGN_IDENTITY" \
+  --options runtime \
+  --entitlements "$ENTITLEMENTS_FILE" \
+  "$APP_BUNDLE"
 
 codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
 echo "Code signature verified."
@@ -175,6 +182,10 @@ rm -f "$DMG_NAME"
 DMG_STAGING=$(mktemp -d)
 ln -s /Applications "$DMG_STAGING/Applications"
 cp -R "$APP_BUNDLE" "$DMG_STAGING/"
+# Guidance for Gatekeeper prompts. Lives beside the .app, never inside it, so
+# the bundle's sealed contents (codesign --verify --strict) are unchanged.
+DMG_README_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/install/dmg-readme.txt"
+cp "$DMG_README_SRC" "$DMG_STAGING/If macOS says the app can't be opened.txt"
 
 # Create the DMG
 hdiutil create \

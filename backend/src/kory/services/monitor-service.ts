@@ -18,29 +18,55 @@ import { dirname } from 'node:path';
 import { serverLog } from '../../logger';
 import type { KoryManager } from '../manager';
 import type { SessionStore } from '../../stores/session-store';
+import {
+  assertValidSchedule,
+  nextRunAfter,
+  type MonitorSchedule,
+} from './monitor-schedule';
+
+/** `same_chat` wakes the originating chat. `new_chat` opens a fresh chat per run. */
+export type MonitorTarget = 'same_chat' | 'new_chat';
 
 export interface SessionMonitor {
   id: string;
+  /** The chat that created the monitor. Also the wake target for `same_chat`. */
   sessionId: string;
   workingDirectory: string;
   prompt: string;
+  schedule: MonitorSchedule;
+  target: MonitorTarget;
+  /** Interval in ms for interval schedules; 0 for clock and one-shot schedules. */
   intervalMs: number;
   createdAt: number;
   nextRunAt: number;
   lastRunAt?: number;
+  /** The chat the most recent run was delivered to (new_chat creates one per run). */
+  lastChatId?: string;
+  /** A new chat created for an in-flight run, reused if that run is retried. */
+  pendingChatId?: string;
   runCount: number;
-  status: 'active' | 'cancelled';
+  status: 'active' | 'cancelled' | 'completed';
 }
 
 export interface CreateMonitorInput {
   sessionId: string;
   workingDirectory: string;
   prompt: string;
-  intervalMs: number;
+  /** Preferred. A clock or one-shot schedule, or an interval. */
+  schedule?: MonitorSchedule;
+  /** Back-compat: an interval in ms when no schedule is given. */
+  intervalMs?: number;
+  target?: MonitorTarget;
 }
 
+/** Creates a chat through the same path the HTTP route uses. */
+export type CreateChat = (input: {
+  workingDirectory: string;
+  title: string;
+}) => Promise<{ id: string }>;
+
 interface MonitorFile {
-  version: 1;
+  version: 2;
   monitors: SessionMonitor[];
 }
 
@@ -48,9 +74,11 @@ interface MonitorConfig {
   kory: KoryManager;
   sessions: SessionStore;
   storagePath: string;
+  /** Needed only for `new_chat` monitors. */
+  createChat?: CreateChat;
 }
 
-const FILE_VERSION = 1;
+const FILE_VERSION = 2;
 const MAX_PROMPT_LENGTH = 8_000;
 /** A busy chat retries soon without changing the monitor's cadence. */
 const BUSY_RETRY_MS = 15_000;
@@ -116,12 +144,51 @@ export function renderMonitorPrompt(monitor: SessionMonitor): string {
   ].join('\n');
 }
 
+/**
+ * The chat a run is delivered to. `same_chat` must still be active; a `new_chat`
+ * run opens a chat once and reuses it if this run is retried after a crash.
+ */
+async function resolveTargetChat(monitor: SessionMonitor): Promise<string | null> {
+  if (!config) return null;
+  if (monitor.target === 'same_chat') {
+    const session = await config.sessions.getActive(monitor.sessionId);
+    return session ? monitor.sessionId : null;
+  }
+  if (monitor.pendingChatId) {
+    const existing = await config.sessions.getActive(monitor.pendingChatId);
+    if (existing) return monitor.pendingChatId;
+  }
+  if (!config.createChat) throw new Error('New-chat monitors need a chat factory');
+  const created = await config.createChat({
+    workingDirectory: monitor.workingDirectory,
+    title: `Scheduled: ${monitor.prompt.slice(0, 60)}`,
+  });
+  monitor.pendingChatId = created.id;
+  await persist();
+  return created.id;
+}
+
+/** The next run after a fire, computed from the fire time (missed runs are not backfilled). */
+function nextAfterFire(monitor: SessionMonitor, firedAt: number): void {
+  if (monitor.schedule.kind === 'once') {
+    // A one-shot runs exactly once, however late it fires.
+    monitor.status = 'completed';
+    return;
+  }
+  const next = nextRunAfter(monitor.schedule, firedAt);
+  if (next === null) {
+    monitor.status = 'completed';
+    return;
+  }
+  monitor.nextRunAt = next;
+}
+
 async function fire(monitor: SessionMonitor): Promise<void> {
   if (!config || firing.has(monitor.id) || monitor.status !== 'active') return;
   firing.add(monitor.id);
   try {
-    const session = await config.sessions.getActive(monitor.sessionId);
-    if (!session) {
+    const chatId = await resolveTargetChat(monitor);
+    if (!chatId) {
       monitor.status = 'cancelled';
       await persist();
       serverLog.info(
@@ -132,7 +199,7 @@ async function fire(monitor: SessionMonitor): Promise<void> {
     }
 
     const submission = await config.kory.startSessionTurn({
-      sessionId: monitor.sessionId,
+      sessionId: chatId,
       source: 'internal',
       // Stable across retries: an accepted turn that crashes before this file is
       // updated is replayed idempotently rather than duplicated.
@@ -158,8 +225,12 @@ async function fire(monitor: SessionMonitor): Promise<void> {
 
     const firedAt = Date.now();
     monitor.lastRunAt = firedAt;
+    monitor.lastChatId = chatId;
+    monitor.pendingChatId = undefined;
     monitor.runCount += 1;
-    monitor.nextRunAt = firedAt + monitor.intervalMs;
+    // Run once on wake, never backfill: the next run is the next occurrence
+    // after now, however many scheduled times were missed while asleep.
+    nextAfterFire(monitor, firedAt);
     await persist();
   } catch (error: unknown) {
     serverLog.warn(
@@ -193,6 +264,31 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+/** Parse a persisted schedule. A v1 record has only `intervalMs`, which reads as an interval. */
+function parseSchedule(value: unknown, intervalMs: number): MonitorSchedule | null {
+  if (isRecord(value)) {
+    if (value.kind === 'interval' && typeof value.intervalMs === 'number') {
+      return value.intervalMs >= MIN_INTERVAL_MS
+        ? { kind: 'interval', intervalMs: value.intervalMs }
+        : null;
+    }
+    if (value.kind === 'daily' && typeof value.time === 'string') {
+      const weekdays = Array.isArray(value.weekdays)
+        ? value.weekdays.filter((day): day is number => typeof day === 'number')
+        : undefined;
+      return { kind: 'daily', time: value.time, ...(weekdays ? { weekdays } : {}) };
+    }
+    if (value.kind === 'cron' && typeof value.expression === 'string') {
+      return { kind: 'cron', expression: value.expression };
+    }
+    if (value.kind === 'once' && typeof value.at === 'number') {
+      return { kind: 'once', at: value.at };
+    }
+    return null;
+  }
+  return intervalMs >= MIN_INTERVAL_MS ? { kind: 'interval', intervalMs } : null;
+}
+
 function parseMonitor(value: unknown): SessionMonitor | null {
   if (!isRecord(value)) return null;
   const id = typeof value.id === 'string' ? value.id : '';
@@ -202,14 +298,16 @@ function parseMonitor(value: unknown): SessionMonitor | null {
   const createdAt = typeof value.createdAt === 'number' ? value.createdAt : 0;
   const nextRunAt = typeof value.nextRunAt === 'number' ? value.nextRunAt : 0;
   const runCount = typeof value.runCount === 'number' ? value.runCount : 0;
-  const status = value.status === 'cancelled' ? 'cancelled' : 'active';
+  const schedule = parseSchedule(value.schedule, intervalMs);
+  const target: MonitorTarget = value.target === 'new_chat' ? 'new_chat' : 'same_chat';
+  const status: SessionMonitor['status'] =
+    value.status === 'cancelled' ? 'cancelled' : value.status === 'completed' ? 'completed' : 'active';
   if (
     !id.startsWith('mon-') ||
     !sessionId ||
     !prompt.trim() ||
     prompt.length > MAX_PROMPT_LENGTH ||
-    !Number.isFinite(intervalMs) ||
-    intervalMs < MIN_INTERVAL_MS ||
+    !schedule ||
     !Number.isFinite(createdAt) ||
     !Number.isFinite(nextRunAt) ||
     !Number.isFinite(runCount)
@@ -221,10 +319,14 @@ function parseMonitor(value: unknown): SessionMonitor | null {
     sessionId,
     workingDirectory: typeof value.workingDirectory === 'string' ? value.workingDirectory : '',
     prompt,
-    intervalMs,
+    schedule,
+    target,
+    intervalMs: schedule.kind === 'interval' ? schedule.intervalMs : 0,
     createdAt,
     nextRunAt,
     ...(typeof value.lastRunAt === 'number' ? { lastRunAt: value.lastRunAt } : {}),
+    ...(typeof value.lastChatId === 'string' ? { lastChatId: value.lastChatId } : {}),
+    ...(typeof value.pendingChatId === 'string' ? { pendingChatId: value.pendingChatId } : {}),
     runCount,
     status,
   };
@@ -284,18 +386,26 @@ export async function createMonitor(input: CreateMonitorInput): Promise<SessionM
   if (prompt.length > MAX_PROMPT_LENGTH) {
     throw new Error(`A monitor prompt cannot exceed ${MAX_PROMPT_LENGTH} characters`);
   }
-  if (!Number.isFinite(input.intervalMs) || input.intervalMs < MIN_INTERVAL_MS) {
-    throw new Error('A monitor interval must be at least one second');
-  }
+  const schedule: MonitorSchedule =
+    input.schedule ?? { kind: 'interval', intervalMs: Math.round(input.intervalMs ?? 0) };
   const now = Date.now();
+  assertValidSchedule(schedule, now);
+  const target = input.target ?? 'same_chat';
+  if (target === 'new_chat' && !config.createChat) {
+    throw new Error('New-chat monitors are not available in this runtime');
+  }
+  const first = nextRunAfter(schedule, now);
+  if (first === null) throw new Error('This schedule has no future run');
   const monitor: SessionMonitor = {
     id: `mon-${randomUUID()}`,
     sessionId: input.sessionId,
     workingDirectory: input.workingDirectory,
     prompt,
-    intervalMs: Math.round(input.intervalMs),
+    schedule,
+    target,
+    intervalMs: schedule.kind === 'interval' ? schedule.intervalMs : 0,
     createdAt: now,
-    nextRunAt: now + Math.round(input.intervalMs),
+    nextRunAt: first,
     runCount: 0,
     status: 'active',
   };
@@ -311,6 +421,13 @@ export function listMonitors(sessionId: string, includeCancelled = false): Sessi
       (monitor) =>
         monitor.sessionId === sessionId && (includeCancelled || monitor.status === 'active'),
     )
+    .sort((a, b) => a.createdAt - b.createdAt);
+}
+
+/** Every schedule the host knows about, for the schedules UI. */
+export function listAllMonitors(includeInactive = false): SessionMonitor[] {
+  return [...monitors.values()]
+    .filter((monitor) => includeInactive || monitor.status === 'active')
     .sort((a, b) => a.createdAt - b.createdAt);
 }
 

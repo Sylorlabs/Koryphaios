@@ -436,5 +436,6 @@ export const providerLog = createLogger('providers');
 export const koryLog = createLogger('kory');
 export const toolLog = createLogger('tools');
 export const mcpLog = createLogger('mcp');
+export const terminalLog = createLogger('terminal');
 export const authLog = createLogger('auth');
 export const routingLog = createLogger('routing');

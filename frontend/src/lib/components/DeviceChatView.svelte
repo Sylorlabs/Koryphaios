@@ -5,7 +5,6 @@
   import { deviceSessionKey } from '$lib/stores/device-routing.svelte';
   import { capturedClick, capturedSubmit } from '$lib/utils/captured-click';
   import { renderChatMarkdown } from '$lib/utils/chat-markdown';
-  import '$lib/utils/chat-markdown.css';
   import Monitor from 'lucide-svelte/icons/monitor';
   import ArrowLeft from 'lucide-svelte/icons/arrow-left';
   import Send from 'lucide-svelte/icons/send';
@@ -80,11 +79,11 @@
               ? 'Kory'
               : message.role}</span
         >
-        <div class="chat-markdown">{@html renderChatMarkdown(message.content)}</div>
+        <div class="chat-markdown markdown-content">{@html renderChatMarkdown(message.content)}</div>
       </article>{/each}
     {#each Object.entries(deviceStore.drafts) as [agent, text] (agent)}{#if text}<article>
           <span class="who">{agent === 'kory-manager' ? 'Kory' : agent} · live</span>
-          <div class="chat-markdown">{@html renderChatMarkdown(text)}</div>
+          <div class="chat-markdown markdown-content">{@html renderChatMarkdown(text)}</div>
         </article>{/if}{/each}
     {#if snapshot && !snapshot.messages.length && !Object.keys(deviceStore.drafts).length}<div
         class="loading"

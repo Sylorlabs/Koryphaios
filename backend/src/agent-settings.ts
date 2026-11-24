@@ -17,6 +17,8 @@ import {
   DEFAULT_MESSAGING_PERMISSIONS,
   type MessagingPermissionsByTier,
   type MessagingTierKey,
+  type FallbackChainSettings,
+  normalizeFallbackChainSettings,
 } from '@koryphaios/shared';
 import { mergeComputerUseSettings, normalizeComputerUseSettings } from './computer-use/settings';
 import { MIN_SKILL_CONTEXT_BUDGET } from './kory/skills';
@@ -63,9 +65,17 @@ export interface AgentSettings {
   /** Whether to use preferences.md for workflow guidance */
   preferencesEnabled: boolean;
 
+  /** Fallback chains: a `default` for every role plus optional per-role chains
+   *  (manager, worker, critic). A per-chat override lives on the session. */
+  fallbackChains: FallbackChainSettings;
+
   /** Allow the image renderer/tools to serve files OUTSIDE the home directory
    *  (external drives, mounted volumes). Off by default. */
   allowExternalPaths: boolean;
+
+  /** After a backend restart interrupts a running turn, admit one host-authored
+   *  continuation of it. Stopped-by-user turns never resume. */
+  resumeInterruptedRuns: boolean;
 
   /** Per-category model allowlist for the manager's routing. Key = worker
    *  domain ('general' | 'ui' | 'frontend' | 'backend' | 'review' | 'test'
@@ -73,6 +83,12 @@ export interface AgentSettings {
    *  that category.
    *  Empty/missing = all available models allowed. */
   managerModelAccess: Record<string, string[]>;
+
+  /** When true, delegate_to_worker may only use the configured category pool
+   *  (the pre-v2 gate). Default false: pools are the preferred default when no
+   *  model is named, and any connected, chat-capable provider:model can be
+   *  requested explicitly. */
+  restrictDelegationToPools: boolean;
 
   /** Per-group user notes injected into the manager's system prompt —
    *  standing guidance keyed by category (general, ui, backend, etc.). */
@@ -271,8 +287,11 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   worktreeMode: 'auto',
   preferencesEnabled: true,
   allowExternalPaths: false,
+  resumeInterruptedRuns: true,
   managerModelAccess: {},
+  restrictDelegationToPools: false,
   managerNotes: {},
+  fallbackChains: {},
   criticGateEnabled: true,
   gateStrictness: 'strict',
   intentInterview: 'adaptive',
@@ -584,6 +603,7 @@ export function loadAgentSettings(projectRoot: string): AgentSettings {
           ? 'never'
           : 'auto',
     sandbox: mergeSandboxSettings(DEFAULT_AGENT_SETTINGS.sandbox, persistedSettings?.sandbox),
+    fallbackChains: normalizeFallbackChainSettings(persistedSettings?.fallbackChains),
     computerUse: effectiveComputerPolicy(
       projectRoot,
       normalizeComputerUseSettings(persistedSettings?.computerUse),
@@ -805,6 +825,10 @@ export function mergeAgentSettings(current: AgentSettings, patch: unknown): Agen
         (next.sandbox as SandboxSettings) ?? DEFAULT_AGENT_SETTINGS.sandbox,
         value as Partial<SandboxSettings>,
       );
+      continue;
+    }
+    if (typedKey === 'fallbackChains') {
+      next.fallbackChains = normalizeFallbackChainSettings(value);
       continue;
     }
     if (typedKey === 'managerModelAccess') {

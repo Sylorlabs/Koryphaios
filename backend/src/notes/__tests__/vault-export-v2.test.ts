@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { NoteBaseDefinition } from '../note-bases-service';
@@ -10,10 +10,12 @@ process.env.SESSION_TOKEN_SECRET =
 const databaseDirectory = mkdtempSync(join(tmpdir(), 'kory-vault-export-v2-db-'));
 process.env.DATABASE_URL = `sqlite://${join(databaseDirectory, 'vault-export.sqlite')}`;
 
-const { initDb } = await import('../../db');
+const { getDb, initDb } = await import('../../db');
 const { createNoteBase, trashNoteBase, updateNoteBase } = await import('../note-bases-service');
 const { noteDraftService } = await import('../note-draft-service');
-const { createNote, createVaultExport } = await import('../notes-service');
+const { createNote, createVaultExport, listNotes, syncProjectDocuments } = await import(
+  '../notes-service'
+);
 const { parseVaultArchive } = await import('../vault-archive');
 
 let fixtureRoot = '';
@@ -214,5 +216,32 @@ describe('whole-vault export v2', () => {
       expect(record).not.toHaveProperty('projectRoot');
     }
     expect(JSON.stringify(basePayload)).not.toContain(project);
+  });
+  test('untracked project documents export their file body as the current revision without writing history', async () => {
+    // Synced files start untracked (no revision rows). Vault validation needs
+    // every note's current revision, so export must supply it from the file.
+    const project = realpathSync(mkdtempSync(join(fixtureRoot, 'untracked-project-')));
+    const body = '# Plain\n\nNever edited in Koryphaios.\n';
+    writeFileSync(join(project, 'plain.md'), body);
+    await syncProjectDocuments(project);
+    const note = (await listNotes(undefined, project)).find((n) => n.title === 'plain')!;
+    const revisionRowCount = () =>
+      getDb()
+        .query<{ count: number }, [string]>(
+          'SELECT COUNT(*) AS count FROM note_revisions WHERE note_id = ?',
+        )
+        .get(note.id)!.count;
+    expect(revisionRowCount()).toBe(0);
+
+    const artifact = await createVaultExport(project);
+    const archive = await parseVaultArchive(await readArtifact(artifact.body));
+    expect(revisionRowCount()).toBe(0);
+    const revision = archive.manifest.revisions.find((entry) => entry.noteId === note.id)!;
+    expect(revision).toMatchObject({
+      revision: note.revision,
+      operation: 'external_sync',
+      sourcePath: 'plain.md',
+    });
+    expect(archive.readEntry(String(revision.contentPath)).toString('utf8')).toBe(body);
   });
 });

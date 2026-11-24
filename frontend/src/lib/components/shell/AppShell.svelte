@@ -8,6 +8,8 @@
   import SessionSidebar from '$lib/components/SessionSidebar.svelte';
   import FileEditPreview from '$lib/components/FileEditPreview.svelte';
   import VoiceWaveform from '$lib/components/VoiceWaveform.svelte';
+  import VoiceConductorHud from '$lib/components/VoiceConductorHud.svelte';
+  import AudioLines from 'lucide-svelte/icons/audio-lines';
   import { voiceRecorder } from '$lib/stores/voice-recorder.svelte';
   import type { RecentProject } from '$lib/utils/projectManager';
   import { hydrateDesktopUiSettings } from '$lib/stores/desktop-ui-settings-sync';
@@ -490,10 +492,21 @@
             : 'padding-top: 0; padding-bottom: 0;'}"
           data-testid="voice-waveform-strip"
           data-state={voiceRecorder.state.phase}
+          data-mode={voiceRecorder.state.mode}
           aria-hidden={!voiceRecorder.active}
         >
           {#if voiceRecorder.active}
             <div class="flex items-center gap-3">
+              {#if voiceRecorder.state.mode === 'conductor'}
+                <!-- A conductor capture is a command, not dictation: its own
+                     icon, colour and label so the two cannot be confused. -->
+                <AudioLines
+                  size={14}
+                  class="shrink-0"
+                  style="color: var(--color-info);"
+                  aria-hidden="true"
+                />
+              {/if}
               <span
                 class="shrink-0 font-mono text-[11px] tabular-nums"
                 style="color: var(--color-text-muted);"
@@ -506,10 +519,19 @@
               />
               <span
                 class="shrink-0 text-[11px]"
-                style="color: {voiceRecorder.state.phase === 'recording'
-                  ? 'var(--color-error)'
-                  : 'var(--color-text-muted)'};"
-                >{voiceRecorder.state.phase === 'recording' ? 'Recording' : 'Transcribing'}</span
+                data-testid="voice-capture-label"
+                style="color: {voiceRecorder.state.phase !== 'recording'
+                  ? 'var(--color-text-muted)'
+                  : voiceRecorder.state.mode === 'conductor'
+                    ? 'var(--color-info)'
+                    : 'var(--color-error)'};"
+                >{voiceRecorder.state.mode === 'conductor'
+                  ? voiceRecorder.state.phase === 'recording'
+                    ? 'Listening for a command'
+                    : 'Understanding command'
+                  : voiceRecorder.state.phase === 'recording'
+                    ? 'Recording'
+                    : 'Transcribing'}</span
               >
             </div>
             {#if voiceRecorder.state.partialText}
@@ -525,12 +547,18 @@
             {/if}
             <span class="sr-only" aria-live="polite">
               {voiceRecorder.state.partialText ||
-                (voiceRecorder.state.phase === 'recording'
-                  ? 'Recording a voice prompt'
-                  : 'Transcribing the recording')}
+                (voiceRecorder.state.mode === 'conductor'
+                  ? voiceRecorder.state.phase === 'recording'
+                    ? 'Listening for a voice command'
+                    : 'Understanding the voice command'
+                  : voiceRecorder.state.phase === 'recording'
+                    ? 'Recording a voice prompt'
+                    : 'Transcribing the recording')}
             </span>
           {/if}
         </div>
+
+        <VoiceConductorHud />
 
         {@render contextBar?.()}
 

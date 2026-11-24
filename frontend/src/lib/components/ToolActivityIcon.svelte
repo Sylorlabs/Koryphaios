@@ -95,6 +95,11 @@
     align-items: center;
     justify-content: center;
   }
+  /* Same light-theme deepening as AnimatedStatusIcon: the per-tool hues are
+     400-weight colours that wash out against white surfaces. */
+  :global([data-theme='light']) .activity-icon:not(.failed) {
+    filter: brightness(0.72) saturate(1.3);
+  }
   /* Carve a clean gap around the badge so the glyph's bottom-right corner
      reads like its bottom-left. */
   .has-badge > :global(svg:first-child) {

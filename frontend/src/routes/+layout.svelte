@@ -1,5 +1,6 @@
 <script lang="ts">
   import '../app.css';
+  import '$lib/utils/chat-markdown.css';
   import { loadFont, loadMonoFont } from '$lib/fonts';
   import { theme } from '$lib/stores/theme.svelte';
   import { onMount } from 'svelte';
@@ -22,6 +23,7 @@
   import DesktopExitDialog from '$lib/components/DesktopExitDialog.svelte';
   import DOMPurify from 'dompurify';
   import { dispatchNoteLinkClick } from '$lib/utils/kory-link-favicon';
+  import { handleCodeCopyClick } from '$lib/utils/code-block';
 
   let { children } = $props();
   let showInitialLoad = $state(true);
@@ -175,6 +177,13 @@
     };
 
     window.addEventListener('click', handleExternalLinks);
+    // Code block copy buttons live inside sanitized Markdown, so one capture
+    // listener serves every transcript; capture runs before the feed row's own
+    // click (selection) handler, which the copy click must not trigger.
+    const handleCodeCopy = (e: MouseEvent) => {
+      handleCodeCopyClick(e);
+    };
+    window.addEventListener('click', handleCodeCopy, true);
 
     // Global copy handler: the feed uses a virtual list with position:absolute
     // items, which can fragment the browser's native selection → copy pipeline.
@@ -206,6 +215,7 @@
 
     return () => {
       window.removeEventListener('click', handleExternalLinks);
+      window.removeEventListener('click', handleCodeCopy, true);
       document.removeEventListener('copy', handleCopy);
     };
   });

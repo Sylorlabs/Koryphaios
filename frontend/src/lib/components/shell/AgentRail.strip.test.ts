@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentRole, AgentStatus } from '@koryphaios/shared';
 
@@ -80,5 +80,41 @@ describe('AgentRail segmented strip', () => {
       props: { rail: rail([agent('w1', 'thinking', 'UI Worker')]), visible: false },
     });
     expect(document.querySelectorAll('.seg-divider').length).toBe(1);
+  });
+
+  it('keeps a failed worker in the strip until dismissed, and drops a finished one', () => {
+    render(AgentRail, {
+      props: {
+        rail: rail([agent('w1', 'error', 'Broken Worker'), agent('w2', 'done', 'Finished Worker')]),
+        visible: false,
+      },
+    });
+    const list = screen.getByRole('tablist');
+    expect(within(list).getByText('Broken Worker')).toBeTruthy();
+    expect(within(list).queryByText('Finished Worker')).toBeNull();
+  });
+
+  it('jumps to the first and last tab with Home and End', async () => {
+    render(AgentRail, {
+      props: {
+        rail: rail([agent('w1', 'thinking', 'One'), agent('w2', 'thinking', 'Two')]),
+        visible: false,
+      },
+    });
+    const main = screen.getByRole('tab', { name: 'Main chat' });
+    main.focus();
+    await fireEvent.keyDown(main, { key: 'End' });
+    expect(document.activeElement?.getAttribute('data-seg-id')).toBe('w2');
+    await fireEvent.keyDown(document.activeElement!, { key: 'Home' });
+    expect(document.activeElement).toBe(main);
+  });
+
+  it('keeps each divider inside its segment so it leaves with it', () => {
+    render(AgentRail, {
+      props: { rail: rail([agent('w1', 'thinking', 'UI Worker'), agent('w2', 'thinking', 'API')]), visible: false },
+    });
+    for (const divider of document.querySelectorAll('.seg-divider')) {
+      expect(divider.nextElementSibling?.classList.contains('agent-seg')).toBe(true);
+    }
   });
 });

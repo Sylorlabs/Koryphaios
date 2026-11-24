@@ -67,7 +67,7 @@ function clampLimit(raw: unknown, fallback: number, max: number): number {
 
 /** Canonical form for folder comparisons; realpath fails on missing paths, so
  *  fall back to a resolved path instead of dropping the chat from the result. */
-function canonicalDir(dir: string | undefined): string | undefined {
+export function canonicalDir(dir: string | undefined): string | undefined {
   if (!dir) return undefined;
   try {
     return canonicalizePath(dir);
@@ -161,7 +161,7 @@ export class ListSessionsTool implements Tool {
  *  array into text — `content` is never raw JSON). Attachments land outside
  *  `content`, so they render as markers; an image-only user message is not
  *  blank. */
-function messageText(message: StoredMessage): string {
+export function messageText(message: StoredMessage): string {
   let text: string;
   if (message.parts && message.parts.length > 0) {
     const joined = message.parts

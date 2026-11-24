@@ -23,6 +23,7 @@ data/*.db-*
 # Local / scratch
 .devin/
 .gemini/
+.embedded-contract-tests-*/
 typecheck_output*.txt
 *.AppImage
 test-results/

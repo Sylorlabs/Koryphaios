@@ -48,6 +48,14 @@ import {
 } from '../../notes/note-bases-service';
 import { broadcastNotesNetworkUpdate, type NotesMutationOrigin } from '../../notes/notes-events';
 import {
+  deleteFolderAppearance,
+  deleteTagAppearance,
+  listNotesAppearance,
+  renameNoteFolder,
+  setFolderAppearance,
+  setTagAppearance,
+} from '../../notes/notes-appearance';
+import {
   loadNotesAgentPermissions,
   saveNotesAgentPermissions,
   resetNotesAgentPermissions,
@@ -555,6 +563,75 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
     return { ok: true, data: tree };
   })
 
+  // ── Folder and tag appearance (emoji + color), project scoped ────────────
+  .get('/appearance', async ({ request }) => ({
+    ok: true,
+    data: listNotesAppearance(getRequestProjectRoot(request)),
+  }))
+
+  .put(
+    '/appearance/folders',
+    async ({ request, body }) => {
+      const data = setFolderAppearance(getRequestProjectRoot(request), body);
+      broadcastNotesNetworkUpdate('update', undefined, undefined, mutationOrigin(request));
+      return { ok: true, data };
+    },
+    {
+      body: t.Object({
+        path: t.String(),
+        emoji: t.Optional(t.Union([t.String(), t.Null()])),
+        color: t.Optional(t.Union([t.String(), t.Null()])),
+      }),
+    },
+  )
+
+  .delete(
+    '/appearance/folders',
+    async ({ request, query }) => {
+      const removed = deleteFolderAppearance(getRequestProjectRoot(request), query.path);
+      broadcastNotesNetworkUpdate('update', undefined, undefined, mutationOrigin(request));
+      return { ok: true, data: { removed } };
+    },
+    { query: t.Object({ path: t.String() }) },
+  )
+
+  .put(
+    '/appearance/tags',
+    async ({ request, body }) => {
+      const data = setTagAppearance(getRequestProjectRoot(request), body);
+      broadcastNotesNetworkUpdate('update', undefined, undefined, mutationOrigin(request));
+      return { ok: true, data };
+    },
+    {
+      body: t.Object({
+        tag: t.String(),
+        emoji: t.Optional(t.Union([t.String(), t.Null()])),
+        color: t.Optional(t.Union([t.String(), t.Null()])),
+      }),
+    },
+  )
+
+  .delete(
+    '/appearance/tags',
+    async ({ request, query }) => {
+      const removed = deleteTagAppearance(getRequestProjectRoot(request), query.tag);
+      broadcastNotesNetworkUpdate('update', undefined, undefined, mutationOrigin(request));
+      return { ok: true, data: { removed } };
+    },
+    { query: t.Object({ tag: t.String() }) },
+  )
+
+  // Renaming a folder moves its notes and carries its appearance along.
+  .post(
+    '/folders/rename',
+    async ({ request, body }) => {
+      const data = await renameNoteFolder(getRequestProjectRoot(request), body.from, body.to);
+      broadcastNotesNetworkUpdate('update', undefined, undefined, mutationOrigin(request));
+      return { ok: true, data };
+    },
+    { body: t.Object({ from: t.String(), to: t.String() }) },
+  )
+
   // ── Full-text search ──────────────────────────────────────────────────────
   .get('/search', async ({ request, query }) => {
     const resultLimit = 50;
@@ -962,8 +1039,9 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
     return { ok: true, data: icon };
   }, {
     body: t.Object({ icon: t.Union([t.Null(), t.Object({
-      kind: t.Union([t.Literal('builtin'), t.Literal('image')]),
+      kind: t.Union([t.Literal('builtin'), t.Literal('emoji'), t.Literal('image')]),
       value: t.String({ maxLength: 500000 }),
+      label: t.Optional(t.String({ maxLength: 48 })),
     })]) }),
   })
 
