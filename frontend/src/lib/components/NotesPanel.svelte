@@ -56,6 +56,8 @@
   import NotesRecoveryDialog, { type NotesRecoveryTab } from './NotesRecoveryDialog.svelte';
   import NotePropertiesPanel from './NotePropertiesPanel.svelte';
   import NoteIconContextMenu from './NoteIconContextMenu.svelte';
+  import NoteAppearanceEditor, { type NoteAppearanceTarget, type NoteAppearanceUpdate } from './NoteAppearanceEditor.svelte';
+  import { resolveNoteAppearanceColorCss } from '@koryphaios/shared';
   import NoteIcon from './NoteIcon.svelte';
   import VirtualList from './VirtualList.svelte';
   import { Marked } from 'marked';
@@ -267,6 +269,44 @@
   let recoveryError = $state<string | null>(null);
   let recoveryGeneration = 0;
   let expandedFolders = $state<Set<string>>(new Set(['/']));
+
+  // ── Folder and tag appearance (emoji + color) ────────────────────────────
+  let appearanceEditor = $state<{ target: NoteAppearanceTarget; x: number; y: number } | null>(
+    null,
+  );
+  function openAppearanceEditor(event: MouseEvent, target: NoteAppearanceTarget): void {
+    event.preventDefault();
+    event.stopPropagation();
+    appearanceEditor = { target, x: event.clientX, y: event.clientY };
+  }
+  function storedAppearance(target: NoteAppearanceTarget): { emoji?: string; color?: string } {
+    return target.kind === 'folder'
+      ? (notesStore.folderAppearance(target.path) ?? {})
+      : (notesStore.tagAppearance(target.tag) ?? {});
+  }
+  async function saveAppearanceUpdate(
+    target: NoteAppearanceTarget,
+    update: NoteAppearanceUpdate,
+  ): Promise<void> {
+    const clear = update.emoji === null && update.color === null;
+    if (target.kind === 'folder') {
+      if (clear) await notesStore.clearFolderAppearance(target.path);
+      else await notesStore.setFolderAppearance(target.path, update);
+    } else if (clear) {
+      await notesStore.clearTagAppearance(target.tag);
+    } else {
+      await notesStore.setTagAppearance(target.tag, update);
+    }
+  }
+  function folderTint(path: string): string | undefined {
+    return resolveNoteAppearanceColorCss(notesStore.folderAppearance(path)?.color);
+  }
+  function tagChipStyle(tag: string): string {
+    const tint = resolveNoteAppearanceColorCss(notesStore.tagAppearance(tag)?.color);
+    return tint
+      ? `background: color-mix(in srgb, ${tint} 16%, var(--color-surface-3)); color: ${tint};`
+      : 'background: var(--color-surface-3); color: var(--color-text-secondary);';
+  }
   let dragOver = $state(false);
   let editorAreaEl = $state<HTMLDivElement | undefined>(undefined);
   let titleInputEl = $state<HTMLInputElement | undefined>(undefined);
@@ -1849,6 +1889,17 @@
       {/if}
     </div>
 
+    {#if appearanceEditor}
+      <NoteAppearanceEditor
+        target={appearanceEditor.target}
+        emoji={storedAppearance(appearanceEditor.target).emoji}
+        color={storedAppearance(appearanceEditor.target).color}
+        x={appearanceEditor.x}
+        y={appearanceEditor.y}
+        onSave={(update) => saveAppearanceUpdate(appearanceEditor!.target, update)}
+        onClose={() => (appearanceEditor = null)}
+      />
+    {/if}
     <!-- Folder tree -->
     {#if notesStore.folderTree.length > 0}
       <div class="shrink-0 px-2 pb-1">
@@ -1858,6 +1909,17 @@
         >
           Folders in this project
         </div>
+        {#snippet folderGlyph(path: string, open: boolean)}
+          {#if notesStore.folderAppearance(path)?.emoji}
+            <span class="w-[11px] text-center text-[11px] leading-none" aria-hidden="true"
+              >{notesStore.folderAppearance(path)?.emoji}</span
+            >
+          {:else if open}
+            <FolderOpen size={11} style={folderTint(path) ? `color: ${folderTint(path)};` : undefined} />
+          {:else}
+            <Folder size={11} style={folderTint(path) ? `color: ${folderTint(path)};` : undefined} />
+          {/if}
+        {/snippet}
         {#snippet folderNode(node: (typeof notesStore.folderTree)[0], depth: number)}
           <div style="padding-left: {depth * 12}px;">
             <button
@@ -1870,20 +1932,27 @@
                 void notesStore.selectFolder(node.path);
                 if (node.children.length > 0) toggleFolder(node.path);
               }}
+              oncontextmenu={(event) =>
+                openAppearanceEditor(event, { kind: 'folder', path: node.path })}
+              title="Right-click to change folder icon and color"
             >
               {#if node.children.length > 0}
                 {#if expandedFolders.has(node.path)}
                   <ChevronDown size={10} />
-                  <FolderOpen size={11} />
+                  {@render folderGlyph(node.path, true)}
                 {:else}
                   <ChevronRight size={10} />
-                  <Folder size={11} />
+                  {@render folderGlyph(node.path, false)}
                 {/if}
               {:else}
                 <span class="w-[10px]"></span>
-                <Folder size={11} />
+                {@render folderGlyph(node.path, false)}
               {/if}
-              <span class="truncate">{node.name}</span>
+              <span
+                class="truncate"
+                style={folderTint(node.path) ? `color: ${folderTint(node.path)};` : undefined}
+                >{node.name}</span
+              >
               {#if node.noteCount > 0}
                 <span class="ml-auto text-[11px] opacity-50">{node.noteCount}</span>
               {/if}
@@ -1932,8 +2001,9 @@
               class="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] transition-colors hover:bg-[var(--color-surface-4)]"
               style={searchQuery === tag
                 ? 'background: var(--color-accent); color: var(--color-on-accent);'
-                : 'background: var(--color-surface-3); color: var(--color-text-secondary);'}
+                : tagChipStyle(tag)}
               aria-pressed={searchQuery === tag}
+              oncontextmenu={(event) => openAppearanceEditor(event, { kind: 'tag', tag })}
               onclick={() => {
                 if (searchQuery === tag) {
                   searchInput = '';
@@ -1946,7 +2016,11 @@
                 }
               }}
             >
-              <Tag size={8} />
+              {#if notesStore.tagAppearance(tag)?.emoji}
+                <span aria-hidden="true">{notesStore.tagAppearance(tag)?.emoji}</span>
+              {:else}
+                <Tag size={8} />
+              {/if}
               {tag}
             </button>
           {/each}
@@ -2033,7 +2107,7 @@
                       {#each note.tags.slice(0, 3) as tag (tag)}
                         <span
                           class="rounded px-1 py-0 text-[11px]"
-                          style="background: var(--color-surface-3); color: var(--color-text-muted);"
+                          style={tagChipStyle(tag)}
                           >{tag}</span
                         >
                       {/each}
@@ -2762,7 +2836,25 @@
             <div class="flex flex-wrap items-center gap-3">
               <!-- Folder path -->
               <div class="relative flex items-center gap-1.5">
-                <Folder size={12} style="color: var(--color-text-muted);" />
+                <span
+                  class="inline-flex items-center"
+                  role="group"
+                  aria-label="Folder icon and color"
+                  oncontextmenu={(event) =>
+                    openAppearanceEditor(event, { kind: 'folder', path: currentNote.folderPath })}
+                  title="Right-click to change folder icon and color"
+                >
+                  {#if notesStore.folderAppearance(currentNote.folderPath)?.emoji}
+                    <span class="text-xs leading-none" aria-hidden="true"
+                      >{notesStore.folderAppearance(currentNote.folderPath)?.emoji}</span
+                    >
+                  {:else}
+                    <Folder
+                      size={12}
+                      style="color: {folderTint(currentNote.folderPath) ?? 'var(--color-text-muted)'};"
+                    />
+                  {/if}
+                </span>
                 <input
                   type="text"
                   placeholder="/"
@@ -2817,8 +2909,14 @@
                 {#each tags as tag (tag)}
                   <span
                     class="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px]"
-                    style="background: var(--color-surface-3); color: var(--color-text-secondary);"
+                    style={tagChipStyle(tag)}
+                    role="group"
+                    aria-label="Tag {tag}"
+                    oncontextmenu={(event) => openAppearanceEditor(event, { kind: 'tag', tag })}
                   >
+                    {#if notesStore.tagAppearance(tag)?.emoji}<span aria-hidden="true"
+                        >{notesStore.tagAppearance(tag)?.emoji}</span
+                      >{/if}
                     {tag}
                     <button
                       type="button"

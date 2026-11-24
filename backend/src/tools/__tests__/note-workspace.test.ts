@@ -241,6 +241,29 @@ describe('Notes workspace tools', () => {
     ).toHaveLength(0);
   });
 
+  test('folder and tag appearance tools set, clear and validate through the note permission path', async () => {
+    reset();
+    expect(
+      await run('set_folder_appearance', { path: '/Research/', emoji: '🔬', color: 'violet' }),
+    ).toEqual({ path: '/Research', emoji: '🔬', color: 'violet' });
+    expect(await run('set_folder_appearance', { path: '/Research', emoji: null })).toEqual({
+      path: '/Research',
+      color: 'violet',
+    });
+    expect(await run('set_tag_appearance', { tag: 'blocked', color: '#FF0000' })).toEqual({
+      tag: 'blocked',
+      color: '#ff0000',
+    });
+    expect(await run('set_tag_appearance', { tag: 'blocked', color: null })).toBeNull();
+    await expect(run('set_folder_appearance', { path: '/x', emoji: 'two 🔬🔬' })).rejects.toThrow(
+      /emoji/i,
+    );
+    await expect(run('set_tag_appearance', { tag: 'x', color: 'red' })).rejects.toThrow(/Color/);
+    saveNotesAgentPermissions(root, { preset: 'custom', tools: { set_tag_appearance: 'block' } });
+    await expect(run('set_tag_appearance', { tag: 'x', color: 'accent' })).rejects.toThrow();
+    reset();
+  });
+
   test('refreshes stale evidence as a new proposal without losing history or accepting it', async () => {
     reset();
     const a = await notes.createNote({ title: 'Evidence A' }, root),

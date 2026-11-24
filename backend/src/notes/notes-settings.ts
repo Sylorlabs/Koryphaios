@@ -140,7 +140,7 @@ function normalizeNotesSettings(input?: Partial<NotesSettings> | null): NotesSet
   };
 }
 
-function loadKoryphaiosConfig(projectRoot: string): Record<string, unknown> {
+export function loadKoryphaiosConfig(projectRoot: string): Record<string, unknown> {
   const configPath = join(projectRoot, 'koryphaios.json');
   if (!existsSync(configPath)) return {};
   try {
@@ -154,7 +154,7 @@ function loadKoryphaiosConfig(projectRoot: string): Record<string, unknown> {
   }
 }
 
-function saveKoryphaiosConfig(projectRoot: string, config: Record<string, unknown>): void {
+export function saveKoryphaiosConfig(projectRoot: string, config: Record<string, unknown>): void {
   const configPath = join(projectRoot, 'koryphaios.json');
   const tempPath = `${configPath}.${process.pid}.tmp`;
   config.updatedAt = Date.now();

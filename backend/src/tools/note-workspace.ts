@@ -16,6 +16,7 @@ import { constants } from 'node:fs';
 import * as bases from '../notes/note-bases-service';
 import * as notes from '../notes/notes-service';
 import { listNoteAppearances } from '../notes/note-appearances';
+import { setFolderAppearance, setTagAppearance } from '../notes/notes-appearance';
 import { getNotePropertyProjection } from '../notes/note-properties-service';
 import { noteDraftService } from '../notes/note-draft-service';
 import { checkNoteToolPermission } from '../notes/notes-settings';
@@ -59,6 +60,9 @@ const patch = {
   },
   required: ['op', 'key'],
 };
+const nullableText = (maxLength: number) => ({
+  oneOf: [{ type: 'string', maxLength }, { type: 'null' }],
+});
 const schema = (properties: Record<string, unknown>, required: string[] = []) => ({
   type: 'object',
   additionalProperties: false,
@@ -138,6 +142,22 @@ export const NOTE_WORKSPACE_SCHEMAS: Record<string, Record<string, unknown>> = {
       },
     },
     ['noteId', 'icon'],
+  ),
+  set_folder_appearance: schema(
+    {
+      path: { type: 'string', minLength: 1, maxLength: 1000 },
+      emoji: nullableText(32),
+      color: nullableText(32),
+    },
+    ['path'],
+  ),
+  set_tag_appearance: schema(
+    {
+      tag: { type: 'string', minLength: 1, maxLength: 100 },
+      emoji: nullableText(32),
+      color: nullableText(32),
+    },
+    ['tag'],
   ),
   list_note_appearances: schema({ noteId: id }, ['noteId']),
   list_note_relationships: schema({
@@ -391,6 +411,18 @@ async function execute(
       await notes.setNoteIcon(noteId, icon, root);
       return { noteId, icon };
     }
+    case 'set_folder_appearance':
+      return setFolderAppearance(root, {
+        path: input.path as string,
+        emoji: input.emoji as string | null | undefined,
+        color: input.color as string | null | undefined,
+      });
+    case 'set_tag_appearance':
+      return setTagAppearance(root, {
+        tag: input.tag as string,
+        emoji: input.emoji as string | null | undefined,
+        color: input.color as string | null | undefined,
+      });
     case 'list_note_appearances':
       return listNoteAppearances(noteId, root);
     case 'list_note_relationships': {
