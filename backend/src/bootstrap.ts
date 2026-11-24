@@ -290,6 +290,30 @@ export async function bootstrap(): Promise<AppContext> {
     kory,
     sessions,
     storagePath: resolve(PROJECT_ROOT, config.dataDirectory, 'monitors.json'),
+    // A new-chat schedule opens its chat through the same path as POST /api/sessions.
+    createChat: async ({ workingDirectory, title }) => {
+      const lease = tryAcquireSessionCreationLease();
+      if (!lease) {
+        throw new Error('Session creation is temporarily blocked while delete-all is finishing.');
+      }
+      try {
+        const session = await sessions.create('local-user', title, undefined, workingDirectory);
+        try {
+          writeAllCliRulesAndSkills(session.id, '');
+        } catch (err: unknown) {
+          serverLog.warn({ err, sessionId: session.id }, 'Failed to write CLI rules + skills');
+        }
+        wsManager.broadcastEphemeral({
+          type: 'session.updated',
+          sessionId: session.id,
+          timestamp: Date.now(),
+          payload: { session },
+        });
+        return { id: session.id };
+      } finally {
+        lease.release();
+      }
+    },
   });
   finishPhase('process-and-goal-recovery');
   reportStartupPhase('background-services');
@@ -350,6 +374,8 @@ import { configureAgentMail } from './kory/services/agent-mail-service';
 import { configureSessionsDirectory } from './tools/sessions-directory';
 import { configureChatIsolation } from './tools/chat-isolation';
 import { configureMonitors } from './kory/services/monitor-service';
+import { tryAcquireSessionCreationLease } from './services/session-erasure-service';
+import { writeAllCliRulesAndSkills } from './providers/cli-rules-skills';
 import { admitPendingRunResumes } from './runs/restart-resume';
 import { resumeInterruptedRunsEnabled } from './runs/resume-setting';
 

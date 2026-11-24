@@ -41,6 +41,7 @@ import { deviceRoutes } from './routes/v1/devices';
 
 // Routes
 import { sessionRoutes } from './routes/v1/sessions';
+import { scheduleRoutes } from './routes/v1/schedules';
 import { messageRoutes } from './routes/v1/messages';
 import { providerRoutes } from './routes/v1/providers';
 import { collaborationRoutes } from './routes/collaboration';
@@ -108,6 +109,7 @@ const baseApp = new Elysia()
   .post('/api/debug/log-error', () => ({ ok: true }))
   .onError(errorHandler)
   .use(sessionRoutes)
+  .use(scheduleRoutes)
   .use(feedRoutes)
   .use(messageRoutes)
   .use(providerRoutes)
