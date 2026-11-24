@@ -40,6 +40,11 @@ describe('remote target contract', () => {
     expect(remoteRouteDescriptor('/api/messages', 'POST')?.id).toBe('messages');
     expect(remoteRouteDescriptor('/api/notes/note-1', 'GET')?.capability).toBe('notes');
     expect(remoteRouteDescriptor('/api/providers', 'GET')).toBeUndefined();
+    // Integrated terminals are a shell on the host: never a remote route.
+    expect(remoteRouteDescriptor('/api/terminals', 'GET')).toBeUndefined();
+    expect(remoteRouteDescriptor('/api/terminals', 'POST')).toBeUndefined();
+    expect(remoteRouteDescriptor('/api/terminals/abc/scrollback', 'GET')).toBeUndefined();
+    expect(remoteRouteDescriptor('/api/terminals/abc', 'DELETE')).toBeUndefined();
     expect(remoteRouteDescriptor('/api/messages', 'DELETE')).toBeUndefined();
   });
 

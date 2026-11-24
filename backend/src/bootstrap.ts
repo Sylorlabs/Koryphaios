@@ -51,6 +51,7 @@ import {
   RequestManagerRelayTool,
   ListAgentMessagesTool,
   ListSessionsTool,
+  ReadTerminalTool,
   ReadSessionTool,
   IsolateChatTool,
   MergeChatBackTool,
@@ -245,6 +246,7 @@ export async function bootstrap(): Promise<AppContext> {
   setContext(context);
   configureAgentMail({ kory, sessions });
   configureSessionsDirectory({ kory, sessions, messages });
+  configureTerminalReads((sessionId) => kory.peekSessionRuntime(sessionId)?.terminals);
   configureChatIsolation({ kory, sessions });
   finishPhase('session-runtime');
   reportStartupPhase('process-and-goal-recovery');
@@ -330,6 +332,7 @@ import { createComputerUseTools } from './computer-use/tools';
 import { checklistTools } from './tools/checklists';
 import { configureAgentMail } from './kory/services/agent-mail-service';
 import { configureSessionsDirectory } from './tools/sessions-directory';
+import { configureTerminalReads } from './tools/terminal-read';
 import { configureChatIsolation } from './tools/chat-isolation';
 import { configureMonitors } from './kory/services/monitor-service';
 
@@ -448,6 +451,7 @@ export async function initTools(providers: ProviderRegistry) {
     new ListAgentMessagesTool(),
     new ListSessionsTool(),
     new ReadSessionTool(),
+    new ReadTerminalTool(),
     new IsolateChatTool(),
     new MergeChatBackTool(),
     new MCPDetectErrorsTool(),

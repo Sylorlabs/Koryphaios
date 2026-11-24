@@ -12627,6 +12627,17 @@ export class KoryManager implements WorkerPipelineHost {
     return this.resolveSessionWorkingDirectory(sessionId);
   }
 
+  /** Per-chat runtime for session-bound services (integrated terminals). Creates
+   *  the runtime, so call it only for a chat that exists. */
+  sessionRuntimeFor(sessionId: string): SessionRuntime {
+    return this.runtimes.get(sessionId);
+  }
+
+  /** Read-only view of a chat's runtime. Never creates one. */
+  peekSessionRuntime(sessionId: string): SessionRuntime | undefined {
+    return this.runtimes.peek(sessionId);
+  }
+
   /** The chat's workspace binding changed earlier this turn; mutating tools
    *  must wait for the next turn's fresh context (pipeline deny gate). */
   isWorkspaceRebindPending(sessionId: string): boolean {

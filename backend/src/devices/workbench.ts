@@ -31,6 +31,11 @@ export async function executeDeviceWorkbench(
   if (url.origin !== 'http://127.0.0.1' || /%2f|%5c|\.\.|\\/i.test(url.pathname))
     throw new Error('Invalid target workbench route.');
   const path = decodeURIComponent(url.pathname);
+  // A linked device can never open a shell on this host. There is no terminal
+  // grant in the device store, so this is a hard deny rather than a capability
+  // check; the route registry also omits these routes (deny by default).
+  if (/^\/api\/terminals(?:\/|$)/.test(path))
+    throw new Error('Terminals are never exposed through linked devices.');
   const method = String(input.method ?? 'GET').toUpperCase();
   if (!['GET', 'POST', 'PATCH', 'PUT', 'DELETE'].includes(method))
     throw new Error('Invalid workbench method.');
