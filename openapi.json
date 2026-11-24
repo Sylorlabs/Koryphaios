@@ -4003,6 +4003,215 @@
         "x-koryphaios-auth": "local-bearer"
       }
     },
+    "/api/agents/custom": {
+      "post": {
+        "operationId": "postApiAgentsCustom",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "args": {
+                    "items": {
+                      "maxLength": 1024,
+                      "type": "string"
+                    },
+                    "maxItems": 32,
+                    "type": "array"
+                  },
+                  "command": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "cwdPolicy": {
+                    "anyOf": [
+                      {
+                        "const": "workspace",
+                        "type": "string"
+                      },
+                      {
+                        "const": "private",
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "env": {
+                    "patternProperties": {
+                      "^(.*)$": {
+                        "maxLength": 8192,
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "id": {
+                    "maxLength": 48,
+                    "minLength": 1,
+                    "pattern": "^[a-z0-9][a-z0-9-]{0,47}$",
+                    "type": "string"
+                  },
+                  "label": {
+                    "maxLength": 80,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "permissionProfile": {
+                    "anyOf": [
+                      {
+                        "const": "bridge-only",
+                        "type": "string"
+                      },
+                      {
+                        "const": "read-only",
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "probe": {
+                    "type": "boolean"
+                  },
+                  "registryId": {
+                    "maxLength": 128,
+                    "type": "string"
+                  }
+                },
+                "required": ["label", "command"],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "POST /api/agents/custom",
+        "tags": ["Agent"],
+        "x-koryphaios-auth": "local-bearer"
+      }
+    },
+    "/api/agents/custom/{id}": {
+      "delete": {
+        "operationId": "deleteApiAgentsCustomById",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "DELETE /api/agents/custom/{id}",
+        "tags": ["Agent"],
+        "x-koryphaios-auth": "local-bearer"
+      }
+    },
+    "/api/agents/registry": {
+      "get": {
+        "operationId": "getApiAgentsRegistry",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "GET /api/agents/registry",
+        "tags": ["Agent"],
+        "x-koryphaios-auth": "local-bearer"
+      }
+    },
+    "/api/agents/{id}/probe": {
+      "post": {
+        "operationId": "postApiAgentsByIdProbe",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "POST /api/agents/{id}/probe",
+        "tags": ["Agent"],
+        "x-koryphaios-auth": "local-bearer"
+      }
+    },
     "/api/appearance": {
       "get": {
         "operationId": "getApiAppearance",
@@ -16743,6 +16952,120 @@
         "x-koryphaios-auth": "local-bearer"
       }
     },
+    "/api/runs/active-count": {
+      "get": {
+        "operationId": "getApiRunsActiveCount",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "GET /api/runs/active-count",
+        "tags": ["Run"],
+        "x-koryphaios-auth": "local-bearer"
+      }
+    },
+    "/api/schedules": {
+      "get": {
+        "operationId": "getApiSchedules",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "sessionId",
+            "required": false,
+            "schema": {
+              "maxLength": 256,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "includeInactive",
+            "required": false,
+            "schema": {
+              "maxLength": 8,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "GET /api/schedules",
+        "tags": ["Schedule"],
+        "x-koryphaios-auth": "local-bearer"
+      }
+    },
+    "/api/schedules/{id}": {
+      "delete": {
+        "operationId": "deleteApiSchedulesById",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "DELETE /api/schedules/{id}",
+        "tags": ["Schedule"],
+        "x-koryphaios-auth": "local-bearer"
+      }
+    },
     "/api/sessions": {
       "delete": {
         "operationId": "deleteApiSessions",
@@ -17912,6 +18235,309 @@
         "x-koryphaios-auth": "local-bearer"
       }
     },
+    "/api/sessions/{id}/git/hunks": {
+      "get": {
+        "operationId": "getApiSessionsByIdGitHunks",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "file",
+            "required": true,
+            "schema": {
+              "maxLength": 1024,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "staged",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "const": "true",
+                  "type": "string"
+                },
+                {
+                  "const": "false",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [],
+        "summary": "GET /api/sessions/{id}/git/hunks",
+        "tags": ["Session Review"],
+        "x-koryphaios-auth": "none"
+      }
+    },
+    "/api/sessions/{id}/git/hunks/revert": {
+      "post": {
+        "operationId": "postApiSessionsByIdGitHunksRevert",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "file": {
+                    "maxLength": 1024,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "hunkHeader": {
+                    "maxLength": 300,
+                    "minLength": 4,
+                    "type": "string"
+                  },
+                  "hunkIndex": {
+                    "anyOf": [
+                      {
+                        "default": 0,
+                        "format": "integer",
+                        "type": "string"
+                      },
+                      {
+                        "maximum": 100000,
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    ],
+                    "maximum": 100000,
+                    "minimum": 0
+                  },
+                  "revision": {
+                    "maxLength": 128,
+                    "minLength": 8,
+                    "type": "string"
+                  }
+                },
+                "required": ["file", "hunkIndex", "hunkHeader", "revision"],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [],
+        "summary": "POST /api/sessions/{id}/git/hunks/revert",
+        "tags": ["Session Review"],
+        "x-koryphaios-auth": "none"
+      }
+    },
+    "/api/sessions/{id}/git/hunks/stage": {
+      "post": {
+        "operationId": "postApiSessionsByIdGitHunksStage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "file": {
+                    "maxLength": 1024,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "hunkHeader": {
+                    "maxLength": 300,
+                    "minLength": 4,
+                    "type": "string"
+                  },
+                  "hunkIndex": {
+                    "anyOf": [
+                      {
+                        "default": 0,
+                        "format": "integer",
+                        "type": "string"
+                      },
+                      {
+                        "maximum": 100000,
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    ],
+                    "maximum": 100000,
+                    "minimum": 0
+                  },
+                  "revision": {
+                    "maxLength": 128,
+                    "minLength": 8,
+                    "type": "string"
+                  }
+                },
+                "required": ["file", "hunkIndex", "hunkHeader", "revision"],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [],
+        "summary": "POST /api/sessions/{id}/git/hunks/stage",
+        "tags": ["Session Review"],
+        "x-koryphaios-auth": "none"
+      }
+    },
+    "/api/sessions/{id}/git/hunks/unstage": {
+      "post": {
+        "operationId": "postApiSessionsByIdGitHunksUnstage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "file": {
+                    "maxLength": 1024,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "hunkHeader": {
+                    "maxLength": 300,
+                    "minLength": 4,
+                    "type": "string"
+                  },
+                  "hunkIndex": {
+                    "anyOf": [
+                      {
+                        "default": 0,
+                        "format": "integer",
+                        "type": "string"
+                      },
+                      {
+                        "maximum": 100000,
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    ],
+                    "maximum": 100000,
+                    "minimum": 0
+                  },
+                  "revision": {
+                    "maxLength": 128,
+                    "minLength": 8,
+                    "type": "string"
+                  }
+                },
+                "required": ["file", "hunkIndex", "hunkHeader", "revision"],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [],
+        "summary": "POST /api/sessions/{id}/git/hunks/unstage",
+        "tags": ["Session Review"],
+        "x-koryphaios-auth": "none"
+      }
+    },
     "/api/sessions/{id}/merge-fork": {
       "post": {
         "operationId": "postApiSessionsByIdMergeFork",
@@ -18087,6 +18713,95 @@
         "x-koryphaios-auth": "local-bearer"
       }
     },
+    "/api/sessions/{id}/pull-request/send-failures": {
+      "post": {
+        "operationId": "postApiSessionsByIdPullRequestSendFailures",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [],
+        "summary": "POST /api/sessions/{id}/pull-request/send-failures",
+        "tags": ["Session Review"],
+        "x-koryphaios-auth": "none"
+      }
+    },
+    "/api/sessions/{id}/pull-request/status": {
+      "get": {
+        "operationId": "getApiSessionsByIdPullRequestStatus",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "const": "true",
+                  "type": "string"
+                },
+                {
+                  "const": "false",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [],
+        "summary": "GET /api/sessions/{id}/pull-request/status",
+        "tags": ["Session Review"],
+        "x-koryphaios-auth": "none"
+      }
+    },
     "/api/sessions/{id}/restore": {
       "post": {
         "operationId": "postApiSessionsByIdRestore",
@@ -18161,6 +18876,283 @@
         "summary": "POST /api/sessions/{id}/resume-now",
         "tags": ["Sessions"],
         "x-koryphaios-auth": "local-bearer"
+      }
+    },
+    "/api/sessions/{id}/review-comments": {
+      "get": {
+        "operationId": "getApiSessionsByIdReviewComments",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "const": "open",
+                  "type": "string"
+                },
+                {
+                  "const": "resolved",
+                  "type": "string"
+                },
+                {
+                  "const": "all",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [],
+        "summary": "GET /api/sessions/{id}/review-comments",
+        "tags": ["Session Review"],
+        "x-koryphaios-auth": "none"
+      },
+      "post": {
+        "operationId": "postApiSessionsByIdReviewComments",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "body": {
+                    "maxLength": 8000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "filePath": {
+                    "maxLength": 1024,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "hunkHeader": {
+                    "maxLength": 300,
+                    "type": "string"
+                  },
+                  "line": {
+                    "anyOf": [
+                      {
+                        "default": 0,
+                        "format": "integer",
+                        "type": "string"
+                      },
+                      {
+                        "maximum": 10000000,
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    ],
+                    "maximum": 10000000,
+                    "minimum": 1
+                  },
+                  "side": {
+                    "anyOf": [
+                      {
+                        "const": "old",
+                        "type": "string"
+                      },
+                      {
+                        "const": "new",
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "staged": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["filePath", "line", "side", "body"],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [],
+        "summary": "POST /api/sessions/{id}/review-comments",
+        "tags": ["Session Review"],
+        "x-koryphaios-auth": "none"
+      }
+    },
+    "/api/sessions/{id}/review-comments/send": {
+      "post": {
+        "operationId": "postApiSessionsByIdReviewCommentsSend",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [],
+        "summary": "POST /api/sessions/{id}/review-comments/send",
+        "tags": ["Session Review"],
+        "x-koryphaios-auth": "none"
+      }
+    },
+    "/api/sessions/{id}/review-comments/{commentId}": {
+      "delete": {
+        "operationId": "deleteApiSessionsByIdReviewCommentsByCommentId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "commentId",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [],
+        "summary": "DELETE /api/sessions/{id}/review-comments/{commentId}",
+        "tags": ["Session Review"],
+        "x-koryphaios-auth": "none"
+      }
+    },
+    "/api/sessions/{id}/review-comments/{commentId}/resolve": {
+      "post": {
+        "operationId": "postApiSessionsByIdReviewCommentsByCommentIdResolve",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "commentId",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [],
+        "summary": "POST /api/sessions/{id}/review-comments/{commentId}/resolve",
+        "tags": ["Session Review"],
+        "x-koryphaios-auth": "none"
       }
     },
     "/api/sessions/{id}/rewind": {
@@ -18804,6 +19796,234 @@
         "summary": "GET /api/spend/status",
         "tags": ["Spend"],
         "x-koryphaios-auth": "local-bearer"
+      }
+    },
+    "/api/terminals": {
+      "get": {
+        "operationId": "getApiTerminals",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "sessionId",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [],
+        "summary": "GET /api/terminals",
+        "tags": ["Terminal"],
+        "x-koryphaios-auth": "none"
+      },
+      "post": {
+        "operationId": "postApiTerminals",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "cols": {
+                    "type": "number"
+                  },
+                  "name": {
+                    "maxLength": 60,
+                    "type": "string"
+                  },
+                  "rows": {
+                    "type": "number"
+                  },
+                  "scope": {
+                    "anyOf": [
+                      {
+                        "const": "chat",
+                        "type": "string"
+                      },
+                      {
+                        "const": "project",
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "sessionId": {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": ["sessionId"],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [],
+        "summary": "POST /api/terminals",
+        "tags": ["Terminal"],
+        "x-koryphaios-auth": "none"
+      }
+    },
+    "/api/terminals/{id}": {
+      "delete": {
+        "operationId": "deleteApiTerminalsById",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sessionId",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [],
+        "summary": "DELETE /api/terminals/{id}",
+        "tags": ["Terminal"],
+        "x-koryphaios-auth": "none"
+      },
+      "get": {
+        "operationId": "getApiTerminalsById",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sessionId",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [],
+        "summary": "GET /api/terminals/{id}",
+        "tags": ["Terminal"],
+        "x-koryphaios-auth": "none"
+      }
+    },
+    "/api/terminals/{id}/scrollback": {
+      "get": {
+        "operationId": "getApiTerminalsByIdScrollback",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sessionId",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [],
+        "summary": "GET /api/terminals/{id}/scrollback",
+        "tags": ["Terminal"],
+        "x-koryphaios-auth": "none"
       }
     },
     "/api/updates/status": {
@@ -21341,6 +22561,9 @@
   ],
   "tags": [
     {
+      "name": "Agent"
+    },
+    {
       "name": "Agent messages"
     },
     {
@@ -21410,6 +22633,15 @@
       "name": "Providers"
     },
     {
+      "name": "Run"
+    },
+    {
+      "name": "Schedule"
+    },
+    {
+      "name": "Session Review"
+    },
+    {
       "name": "Session feed"
     },
     {
@@ -21423,6 +22655,9 @@
     },
     {
       "name": "System"
+    },
+    {
+      "name": "Terminal"
     },
     {
       "name": "Updates"

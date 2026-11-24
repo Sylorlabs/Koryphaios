@@ -666,6 +666,42 @@ export interface KoryApiOperations {
     response: unknown;
     auth: 'local-bearer';
   };
+  'POST /api/agents/custom': {
+    input: {
+      body: {
+        args?: string[];
+        command: string;
+        cwdPolicy?: 'workspace' | 'private';
+        env?: Record<string, unknown>;
+        id?: string;
+        label: string;
+        permissionProfile?: 'bridge-only' | 'read-only';
+        probe?: boolean;
+        registryId?: string;
+      };
+    };
+    response: unknown;
+    auth: 'local-bearer';
+  };
+  'DELETE /api/agents/custom/{id}': {
+    input: {
+      params: { id: string };
+    };
+    response: unknown;
+    auth: 'local-bearer';
+  };
+  'GET /api/agents/registry': {
+    input: undefined;
+    response: unknown;
+    auth: 'local-bearer';
+  };
+  'POST /api/agents/{id}/probe': {
+    input: {
+      params: { id: string };
+    };
+    response: unknown;
+    auth: 'local-bearer';
+  };
   'GET /api/appearance': {
     input: undefined;
     response: {
@@ -2997,6 +3033,28 @@ export interface KoryApiOperations {
     response: unknown;
     auth: 'local-bearer';
   };
+  'GET /api/runs/active-count': {
+    input: undefined;
+    response: unknown;
+    auth: 'local-bearer';
+  };
+  'GET /api/schedules': {
+    input?: {
+      query?: {
+        includeInactive?: string;
+        sessionId?: string;
+      };
+    };
+    response: unknown;
+    auth: 'local-bearer';
+  };
+  'DELETE /api/schedules/{id}': {
+    input: {
+      params: { id: string };
+    };
+    response: unknown;
+    auth: 'local-bearer';
+  };
   'DELETE /api/sessions': {
     input: undefined;
     response: unknown;
@@ -3208,6 +3266,56 @@ export interface KoryApiOperations {
     response: unknown;
     auth: 'local-bearer';
   };
+  'GET /api/sessions/{id}/git/hunks': {
+    input: {
+      params: { id: string };
+      query: {
+        file: string;
+        staged?: 'true' | 'false';
+      };
+    };
+    response: unknown;
+    auth: 'none';
+  };
+  'POST /api/sessions/{id}/git/hunks/revert': {
+    input: {
+      params: { id: string };
+      body: {
+        file: string;
+        hunkHeader: string;
+        hunkIndex: string | number;
+        revision: string;
+      };
+    };
+    response: unknown;
+    auth: 'none';
+  };
+  'POST /api/sessions/{id}/git/hunks/stage': {
+    input: {
+      params: { id: string };
+      body: {
+        file: string;
+        hunkHeader: string;
+        hunkIndex: string | number;
+        revision: string;
+      };
+    };
+    response: unknown;
+    auth: 'none';
+  };
+  'POST /api/sessions/{id}/git/hunks/unstage': {
+    input: {
+      params: { id: string };
+      body: {
+        file: string;
+        hunkHeader: string;
+        hunkIndex: string | number;
+        revision: string;
+      };
+    };
+    response: unknown;
+    auth: 'none';
+  };
   'POST /api/sessions/{id}/merge-fork': {
     input: {
       params: { id: string };
@@ -3239,6 +3347,23 @@ export interface KoryApiOperations {
     response: unknown;
     auth: 'local-bearer';
   };
+  'POST /api/sessions/{id}/pull-request/send-failures': {
+    input: {
+      params: { id: string };
+    };
+    response: unknown;
+    auth: 'none';
+  };
+  'GET /api/sessions/{id}/pull-request/status': {
+    input: {
+      params: { id: string };
+      query?: {
+        refresh?: 'true' | 'false';
+      };
+    };
+    response: unknown;
+    auth: 'none';
+  };
   'POST /api/sessions/{id}/restore': {
     input: {
       params: { id: string };
@@ -3252,6 +3377,52 @@ export interface KoryApiOperations {
     };
     response: unknown;
     auth: 'local-bearer';
+  };
+  'GET /api/sessions/{id}/review-comments': {
+    input: {
+      params: { id: string };
+      query?: {
+        status?: 'open' | 'resolved' | 'all';
+      };
+    };
+    response: unknown;
+    auth: 'none';
+  };
+  'POST /api/sessions/{id}/review-comments': {
+    input: {
+      params: { id: string };
+      body: {
+        body: string;
+        filePath: string;
+        hunkHeader?: string;
+        line: string | number;
+        side: 'old' | 'new';
+        staged?: boolean;
+      };
+    };
+    response: unknown;
+    auth: 'none';
+  };
+  'POST /api/sessions/{id}/review-comments/send': {
+    input: {
+      params: { id: string };
+    };
+    response: unknown;
+    auth: 'none';
+  };
+  'DELETE /api/sessions/{id}/review-comments/{commentId}': {
+    input: {
+      params: { id: string; commentId: string };
+    };
+    response: unknown;
+    auth: 'none';
+  };
+  'POST /api/sessions/{id}/review-comments/{commentId}/resolve': {
+    input: {
+      params: { id: string; commentId: string };
+    };
+    response: unknown;
+    auth: 'none';
   };
   'POST /api/sessions/{id}/rewind': {
     input: {
@@ -3359,6 +3530,58 @@ export interface KoryApiOperations {
     };
     response: unknown;
     auth: 'local-bearer';
+  };
+  'GET /api/terminals': {
+    input: {
+      query: {
+        sessionId: string;
+      };
+    };
+    response: unknown;
+    auth: 'none';
+  };
+  'POST /api/terminals': {
+    input: {
+      body: {
+        cols?: number;
+        name?: string;
+        rows?: number;
+        scope?: 'chat' | 'project';
+        sessionId: string;
+      };
+    };
+    response: unknown;
+    auth: 'none';
+  };
+  'DELETE /api/terminals/{id}': {
+    input: {
+      params: { id: string };
+      query: {
+        sessionId: string;
+      };
+    };
+    response: unknown;
+    auth: 'none';
+  };
+  'GET /api/terminals/{id}': {
+    input: {
+      params: { id: string };
+      query: {
+        sessionId: string;
+      };
+    };
+    response: unknown;
+    auth: 'none';
+  };
+  'GET /api/terminals/{id}/scrollback': {
+    input: {
+      params: { id: string };
+      query: {
+        sessionId: string;
+      };
+    };
+    response: unknown;
+    auth: 'none';
   };
   'GET /api/updates/status': {
     input: undefined;
@@ -3977,6 +4200,10 @@ export const KORY_API_ROUTES: Record<KoryApiOperationKey, { method: string; path
     path: '/api/agent/{agentId}/steering/{commandId}',
   },
   'GET /api/agent/{agentId}/thread': { method: 'GET', path: '/api/agent/{agentId}/thread' },
+  'POST /api/agents/custom': { method: 'POST', path: '/api/agents/custom' },
+  'DELETE /api/agents/custom/{id}': { method: 'DELETE', path: '/api/agents/custom/{id}' },
+  'GET /api/agents/registry': { method: 'GET', path: '/api/agents/registry' },
+  'POST /api/agents/{id}/probe': { method: 'POST', path: '/api/agents/{id}/probe' },
   'GET /api/appearance': { method: 'GET', path: '/api/appearance' },
   'PUT /api/appearance': { method: 'PUT', path: '/api/appearance' },
   'GET /api/auth/me': { method: 'GET', path: '/api/auth/me' },
@@ -4357,6 +4584,9 @@ export const KORY_API_ROUTES: Record<KoryApiOperationKey, { method: string; path
   'GET /api/providers/{name}/quota': { method: 'GET', path: '/api/providers/{name}/quota' },
   'POST /api/providers/{name}/refresh': { method: 'POST', path: '/api/providers/{name}/refresh' },
   'POST /api/providers/{name}/rotate': { method: 'POST', path: '/api/providers/{name}/rotate' },
+  'GET /api/runs/active-count': { method: 'GET', path: '/api/runs/active-count' },
+  'GET /api/schedules': { method: 'GET', path: '/api/schedules' },
+  'DELETE /api/schedules/{id}': { method: 'DELETE', path: '/api/schedules/{id}' },
   'DELETE /api/sessions': { method: 'DELETE', path: '/api/sessions' },
   'GET /api/sessions': { method: 'GET', path: '/api/sessions' },
   'POST /api/sessions': { method: 'POST', path: '/api/sessions' },
@@ -4398,6 +4628,19 @@ export const KORY_API_ROUTES: Record<KoryApiOperationKey, { method: string; path
     path: '/api/sessions/{id}/feed/visibility',
   },
   'POST /api/sessions/{id}/fork': { method: 'POST', path: '/api/sessions/{id}/fork' },
+  'GET /api/sessions/{id}/git/hunks': { method: 'GET', path: '/api/sessions/{id}/git/hunks' },
+  'POST /api/sessions/{id}/git/hunks/revert': {
+    method: 'POST',
+    path: '/api/sessions/{id}/git/hunks/revert',
+  },
+  'POST /api/sessions/{id}/git/hunks/stage': {
+    method: 'POST',
+    path: '/api/sessions/{id}/git/hunks/stage',
+  },
+  'POST /api/sessions/{id}/git/hunks/unstage': {
+    method: 'POST',
+    path: '/api/sessions/{id}/git/hunks/unstage',
+  },
   'POST /api/sessions/{id}/merge-fork': { method: 'POST', path: '/api/sessions/{id}/merge-fork' },
   'DELETE /api/sessions/{id}/pending-resume': {
     method: 'DELETE',
@@ -4408,8 +4651,36 @@ export const KORY_API_ROUTES: Record<KoryApiOperationKey, { method: string; path
     path: '/api/sessions/{id}/pending-resume',
   },
   'GET /api/sessions/{id}/processes': { method: 'GET', path: '/api/sessions/{id}/processes' },
+  'POST /api/sessions/{id}/pull-request/send-failures': {
+    method: 'POST',
+    path: '/api/sessions/{id}/pull-request/send-failures',
+  },
+  'GET /api/sessions/{id}/pull-request/status': {
+    method: 'GET',
+    path: '/api/sessions/{id}/pull-request/status',
+  },
   'POST /api/sessions/{id}/restore': { method: 'POST', path: '/api/sessions/{id}/restore' },
   'POST /api/sessions/{id}/resume-now': { method: 'POST', path: '/api/sessions/{id}/resume-now' },
+  'GET /api/sessions/{id}/review-comments': {
+    method: 'GET',
+    path: '/api/sessions/{id}/review-comments',
+  },
+  'POST /api/sessions/{id}/review-comments': {
+    method: 'POST',
+    path: '/api/sessions/{id}/review-comments',
+  },
+  'POST /api/sessions/{id}/review-comments/send': {
+    method: 'POST',
+    path: '/api/sessions/{id}/review-comments/send',
+  },
+  'DELETE /api/sessions/{id}/review-comments/{commentId}': {
+    method: 'DELETE',
+    path: '/api/sessions/{id}/review-comments/{commentId}',
+  },
+  'POST /api/sessions/{id}/review-comments/{commentId}/resolve': {
+    method: 'POST',
+    path: '/api/sessions/{id}/review-comments/{commentId}/resolve',
+  },
   'POST /api/sessions/{id}/rewind': { method: 'POST', path: '/api/sessions/{id}/rewind' },
   'POST /api/sessions/{id}/rewind/preview': {
     method: 'POST',
@@ -4428,6 +4699,11 @@ export const KORY_API_ROUTES: Record<KoryApiOperationKey, { method: string; path
   'GET /api/spend-caps/status': { method: 'GET', path: '/api/spend-caps/status' },
   'POST /api/spend/reset-session': { method: 'POST', path: '/api/spend/reset-session' },
   'GET /api/spend/status': { method: 'GET', path: '/api/spend/status' },
+  'GET /api/terminals': { method: 'GET', path: '/api/terminals' },
+  'POST /api/terminals': { method: 'POST', path: '/api/terminals' },
+  'DELETE /api/terminals/{id}': { method: 'DELETE', path: '/api/terminals/{id}' },
+  'GET /api/terminals/{id}': { method: 'GET', path: '/api/terminals/{id}' },
+  'GET /api/terminals/{id}/scrollback': { method: 'GET', path: '/api/terminals/{id}/scrollback' },
   'GET /api/updates/status': { method: 'GET', path: '/api/updates/status' },
   'GET /api/usage': { method: 'GET', path: '/api/usage' },
   'GET /api/usage/daily': { method: 'GET', path: '/api/usage/daily' },
