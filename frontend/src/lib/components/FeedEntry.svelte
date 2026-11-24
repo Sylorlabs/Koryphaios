@@ -68,6 +68,7 @@
   import xml from 'highlight.js/lib/languages/xml';
   import yaml from 'highlight.js/lib/languages/yaml';
   import 'highlight.js/styles/atom-one-dark.css';
+  import { wrapCodeBlock } from '$lib/utils/code-block';
   import type { FeedEntryLocal, FeedEntryType } from '$lib/types';
   import type { Note } from '@koryphaios/shared';
   import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
@@ -157,7 +158,10 @@ import {
     const highlighted = language
       ? hljs.highlight(text, { language }).value
       : hljs.highlightAuto(text).value;
-    return `<pre><code class="hljs language-${language ?? 'plaintext'}">${highlighted}</code></pre>`;
+    return wrapCodeBlock(
+      `<pre><code class="hljs language-${language ?? 'plaintext'}">${highlighted}</code></pre>`,
+      requestedLanguage || language,
+    );
   };
   /** For view_image tool results: the viewed image's absolute path, or null. */
   function viewImagePath(meta?: Record<string, unknown>): string | null {
@@ -882,7 +886,7 @@ import {
   function getEntryColor(type: FeedEntryType): string {
     switch (type) {
       case 'user_message':
-        return 'text-accent font-medium';
+        return 'feed-user-text font-medium';
       case 'thought':
         return 'text-[var(--color-warning)]';
       case 'content':
@@ -1783,6 +1787,12 @@ import {
 {/if}
 
 <style>
+  /* The user's own turns keep the accent identity, mixed toward the primary
+     text so a pale accent stays legible on light themes. */
+  :global(.feed-user-text) {
+    color: color-mix(in srgb, var(--color-accent) 62%, var(--color-text-primary));
+  }
+
   .agent-chat-button {
     display: inline-flex;
     align-items: center;
@@ -1871,264 +1881,8 @@ import {
     outline: 2px solid var(--color-accent);
     outline-offset: -2px;
   }
-  :global(.markdown-content table) {
-    width: 100%;
-    min-width: 520px;
-    border-collapse: separate;
-    border-spacing: 0;
-    margin: 1rem 0;
-    border: 1px solid var(--color-border);
-    border-radius: 12px;
-    background: var(--color-surface-1);
-  }
-  :global(.markdown-content .kory-table-scroll) {
-    width: 100%;
-    overflow-x: auto;
-  }
-  :global(.markdown-content thead) {
-    background: var(--color-surface-3);
-  }
-  :global(.markdown-content th) {
-    color: var(--color-text-primary);
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-  }
-  :global(.markdown-content th),
-  :global(.markdown-content td) {
-    padding: 10px 13px;
-    text-align: left;
-    vertical-align: top;
-    border-right: 1px solid var(--color-border);
-    border-bottom: 1px solid var(--color-border);
-  }
-  :global(.markdown-content tr > :last-child) {
-    border-right: 0;
-  }
-  :global(.markdown-content tbody tr:last-child td) {
-    border-bottom: 0;
-  }
-  :global(.markdown-content tbody tr:nth-child(even)) {
-    background: color-mix(in srgb, var(--color-surface-2) 55%, transparent);
-  }
-  :global(.markdown-content tbody tr:hover) {
-    background: color-mix(in srgb, var(--color-accent) 8%, var(--color-surface-1));
-  }
-  :global(.markdown-content .kory-chart) {
-    margin: 1rem 0;
-    padding: 16px;
-    overflow-x: auto;
-    border: 1px solid var(--color-border);
-    border-radius: 14px;
-    background: linear-gradient(145deg, var(--color-surface-2), var(--color-surface-1));
-  }
-  :global(.markdown-content .kory-chart figcaption) {
-    margin-bottom: 10px;
-    color: var(--color-text-primary);
-    font-weight: 700;
-  }
-  :global(.markdown-content .kory-chart svg) {
-    display: block;
-    width: 100%;
-    min-width: 520px;
-    max-height: 360px;
-  }
-  :global(.markdown-content .kory-chart-pie svg) {
-    min-width: 0;
-    max-width: 380px;
-  }
-  :global(.markdown-content .chart-grid) {
-    stroke: var(--color-border);
-    stroke-width: 1;
-    opacity: 0.6;
-  }
-  :global(.markdown-content .chart-axis) {
-    stroke: var(--color-text-muted);
-    stroke-width: 1;
-  }
-  :global(.markdown-content .chart-axis-label) {
-    fill: var(--color-text-muted);
-    font-size: 11px;
-    font-family: 'JetBrains Mono', monospace;
-  }
-  :global(.markdown-content .chart-bar),
-  :global(.markdown-content .chart-slice) {
-    transition: opacity 120ms ease;
-  }
-  :global(.markdown-content .chart-bar:hover),
-  :global(.markdown-content .chart-slice:hover) {
-    opacity: 0.72;
-  }
-  :global(.markdown-content .chart-donut-hole) {
-    fill: var(--color-surface-2);
-  }
-  :global(.markdown-content .chart-pie-center-value) {
-    fill: var(--color-text-primary);
-    font-size: 16px;
-    font-weight: 700;
-    font-family: 'JetBrains Mono', monospace;
-  }
-  :global(.markdown-content .chart-pie-center-label) {
-    fill: var(--color-text-muted);
-    font-size: 10px;
-    font-family: 'JetBrains Mono', monospace;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-  }
-  :global(.markdown-content .kory-chart-legend) {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 16px;
-    margin-top: 10px;
-    color: var(--color-text-secondary);
-    font-size: 11px;
-  }
-  :global(.markdown-content .kory-chart-legend span) {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
-  :global(.markdown-content .kory-chart-legend i) {
-    width: 9px;
-    height: 9px;
-    border-radius: 3px;
-  }
-  :global(.markdown-content .kory-chart-pie) {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    max-width: 100%;
-    margin: 0 auto;
-    overflow: visible;
-  }
-  :global(.markdown-content .kory-chart-pie svg) {
-    max-width: 100%;
-    height: auto;
-  }
-  :global(.markdown-content .kory-chart-pie-legend) {
-    flex-direction: column;
-    margin: 0;
-  }
-
-  /* Color swatch grid (fenced `color` / `kory-color` blocks). */
-  :global(.markdown-content .kory-color) {
-    margin: 1rem 0;
-  }
-  :global(.markdown-content .kory-color-grid) {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    gap: 10px;
-  }
-  :global(.markdown-content .kory-color-chip) {
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-end;
-    min-height: 84px;
-    padding: 10px 12px;
-    border-radius: 12px;
-    border: 1px solid var(--color-border);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
-    overflow: hidden;
-    transition: transform 120ms ease;
-  }
-  :global(.markdown-content .kory-color-chip:hover) {
-    transform: translateY(-2px);
-  }
-  :global(.markdown-content .kory-color-chip-label) {
-    font-size: 12px;
-    font-weight: 700;
-    line-height: 1.2;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
-  }
-  :global(.markdown-content .kory-color-chip-value) {
-    margin-top: 2px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    opacity: 0.85;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
-  }
-
-  /* Agent inline styling: validated spans carry their own inline styles;
-     defaults (highlight, links) track the user's theme accent. */
-  :global(.markdown-content .kory-inline) {
-    font-size: inherit;
-  }
-  :global(.markdown-content .kory-mark) {
-    background: color-mix(in srgb, var(--color-accent) 24%, transparent);
-    color: inherit;
-    border-radius: 4px;
-    padding: 0.05em 0.25em;
-  }
-  :global(.markdown-content .kory-underline) {
-    text-decoration: underline;
-    text-underline-offset: 2px;
-  }
-  /* External links: accent-colored with the destination site's icon. */
-  :global(.markdown-content .kory-external-link) {
-    color: var(--color-info);
-    text-decoration: underline;
-    text-underline-offset: 2px;
-  }
-  :global(.markdown-content .kory-external-link:hover) {
-    opacity: 0.85;
-  }
-  :global(.markdown-content .kory-link-favicon) {
-    display: inline-block;
-    width: 14px;
-    height: 14px;
-    margin-right: 4px;
-    border-radius: 3px;
-    vertical-align: text-bottom;
-  }
-  :global(:root[data-theme='dark'] .markdown-content .kory-link-favicon) {
-    mix-blend-mode: multiply;
-  }
-  :global(.markdown-content .kory-file-link),
-  :global(.markdown-content .kory-session-link) {
-    display: inline-flex;
-    align-items: baseline;
-    gap: 3px;
-    color: var(--color-text-primary);
-    font-weight: 500;
-    text-decoration: none;
-    border-bottom: 1.5px dotted color-mix(in srgb, var(--color-text-secondary) 65%, transparent);
-    padding-bottom: 1px;
-    cursor: pointer;
-  }
-  :global(.markdown-content .kory-file-link:hover),
-  :global(.markdown-content .kory-session-link:hover) {
-    color: var(--color-accent);
-    border-bottom-color: var(--color-accent);
-  }
-  :global(.markdown-content .kory-file-link-lines) {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.85em;
-    color: var(--color-text-muted);
-  }
-
-  /* Sandboxed HTML iframe (fenced `html` / `kory-html` blocks). */
-  :global(.markdown-content .kory-html-frame) {
-    display: block;
-    width: 100%;
-    height: 360px;
-    min-height: 160px;
-    margin: 1rem 0;
-    border: 1px solid var(--color-border);
-    border-radius: 14px;
-    background: var(--color-surface-1);
-    resize: vertical;
-    overflow: auto;
-  }
-  :global(.markdown-content .kory-html-error) {
-    margin: 1rem 0;
-    padding: 10px 12px;
-    border: 1px solid var(--color-border);
-    border-radius: 10px;
-    color: var(--color-error);
-    font-size: 12px;
-  }
+  /* Rendered Markdown (tables, charts, swatches, sandboxed HTML, links)
+     is styled by $lib/utils/chat-markdown.css, imported by the root layout. */
 
   /* Streaming text: each arriving chunk starts translucent and settles to
      full opacity — the newest words read as "landing" smoothly. */
@@ -2152,19 +1906,4 @@ import {
     }
   }
 
-  @media (max-width: 760px) {
-    :global(.markdown-content .kory-chart-pie) {
-      display: block;
-    }
-    :global(.markdown-content .kory-chart-pie-legend) {
-      flex-direction: row;
-      margin-top: 8px;
-    }
-    :global(.markdown-content .kory-color-grid) {
-      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-    }
-    :global(.markdown-content .kory-html-frame) {
-      height: 280px;
-    }
-  }
 </style>

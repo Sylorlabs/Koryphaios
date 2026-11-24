@@ -262,27 +262,20 @@ code {
 
 pre {
   background: var(--color-surface-1);
-  color: #000;
-  border: 1px solid color-mix(in srgb, var(--color-accent) 28%, var(--color-border));
-  border-radius: var(--radius-xl);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
   padding: var(--space-md);
   overflow: hidden auto;
   font-size: 13px;
   line-height: 1.5;
-  box-shadow: 0 1px 0 color-mix(in srgb, var(--color-accent) 12%, transparent);
-}
-[data-theme='dark'] pre {
-  color: #fff;
 }
 pre code,
 pre code.hljs,
 .hljs {
   background: transparent !important;
   border: 0;
-  color: #000 !important;
-}
-[data-theme='dark'] .hljs {
-  color: #fff !important;
+  color: var(--color-text-primary) !important;
 }
 
 /* Drawer / Modal Backdrop */
