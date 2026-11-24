@@ -17705,9 +17705,75 @@
                     "maxLength": 256,
                     "minLength": 1,
                     "type": "string"
+                  },
+                  "title": {
+                    "maxLength": 200,
+                    "type": "string"
                   }
                 },
-                "required": ["messageId"],
+                "type": "object"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "POST /api/sessions/{id}/fork",
+        "tags": ["Sessions"],
+        "x-koryphaios-auth": "local-bearer"
+      }
+    },
+    "/api/sessions/{id}/merge-fork": {
+      "post": {
+        "operationId": "postApiSessionsByIdMergeFork",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "mode": {
+                    "anyOf": [
+                      {
+                        "const": "summary",
+                        "type": "string"
+                      },
+                      {
+                        "const": "messages",
+                        "type": "string"
+                      }
+                    ]
+                  }
+                },
+                "required": ["mode"],
                 "type": "object"
               }
             }
@@ -17734,7 +17800,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "POST /api/sessions/{id}/fork",
+        "summary": "POST /api/sessions/{id}/merge-fork",
         "tags": ["Sessions"],
         "x-koryphaios-auth": "local-bearer"
       }

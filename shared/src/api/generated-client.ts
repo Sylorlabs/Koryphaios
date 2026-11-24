@@ -3167,8 +3167,19 @@ export interface KoryApiOperations {
   'POST /api/sessions/{id}/fork': {
     input: {
       params: { id: string };
+      body?: {
+        messageId?: string;
+        title?: string;
+      };
+    };
+    response: unknown;
+    auth: 'local-bearer';
+  };
+  'POST /api/sessions/{id}/merge-fork': {
+    input: {
+      params: { id: string };
       body: {
-        messageId: string;
+        mode: 'summary' | 'messages';
       };
     };
     response: unknown;
@@ -4319,6 +4330,7 @@ export const KORY_API_ROUTES: Record<KoryApiOperationKey, { method: string; path
     path: '/api/sessions/{id}/feed/visibility',
   },
   'POST /api/sessions/{id}/fork': { method: 'POST', path: '/api/sessions/{id}/fork' },
+  'POST /api/sessions/{id}/merge-fork': { method: 'POST', path: '/api/sessions/{id}/merge-fork' },
   'GET /api/sessions/{id}/processes': { method: 'GET', path: '/api/sessions/{id}/processes' },
   'POST /api/sessions/{id}/restore': { method: 'POST', path: '/api/sessions/{id}/restore' },
   'POST /api/sessions/{id}/rewind': { method: 'POST', path: '/api/sessions/{id}/rewind' },
