@@ -150,7 +150,7 @@
                 <div class="truncate text-xs font-medium text-[var(--color-text-primary)]">
                   {property.key}
                 </div>
-                <div class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+                <div class="text-[11px] text-[var(--color-text-muted)]">
                   {property.type}
                 </div>
               </div>

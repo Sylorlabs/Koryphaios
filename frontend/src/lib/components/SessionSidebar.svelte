@@ -65,6 +65,7 @@
     type SessionLifecycleAction,
   } from '$lib/utils/session-lifecycle-warning';
   import { goalProgress, type AgentStatus, type Session } from '@koryphaios/shared';
+  import { ChatUnreadTracker } from '$lib/utils/chat-unread';
 
   interface ProjectSessionGroup {
     key: string;
@@ -239,6 +240,20 @@
    *  means "no metered spend" rather than "not loaded yet". */
   let sessionBillingLoaded = $state(false);
   let hoveredCostSessionId = $state('');
+
+  // "New activity" markers for chats whose turn settled while another chat
+  // was open. View state only; opening the chat clears it.
+  const unreadTracker = new ChatUnreadTracker();
+  let unreadSessionIds = $state<ReadonlySet<string>>(new Set());
+  $effect(() => {
+    const openId = collaborationStore.activeJoinedSession ? null : sessionStore.activeSessionId;
+    let changed = unreadTracker.retain(sessionStore.sessions.map((session) => session.id));
+    for (const session of sessionStore.sessions) {
+      const status = wsStore.getManagerStatusForSession(session.id);
+      if (unreadTracker.observe(session.id, status, session.id === openId)) changed = true;
+    }
+    if (changed) unreadSessionIds = new Set(unreadTracker.unread);
+  });
   /** Viewport coordinates for the fixed tracked-spend popover. */
   let costPopoverAnchor = $state<{ left: number; top: number } | null>(null);
   let statusPopoverAnchor = $state<{ left: number; top: number } | null>(null);
@@ -1370,10 +1385,28 @@
         type="text"
         placeholder="Find a chat or folder"
         aria-label="Search chats and folders"
-        class="sidebar-search h-8 w-full rounded-lg border-0 bg-[var(--color-surface-2)] pl-8 pr-2 text-xs outline-none transition-colors"
+        class="sidebar-search h-8 w-full rounded-lg border-0 bg-[var(--color-surface-2)] pl-8 pr-7 text-xs outline-none transition-colors"
         style="color: var(--color-text-primary);"
         bind:value={sessionStore.searchQuery}
+        onkeydown={(event) => {
+          if (event.key === 'Escape' && sessionStore.searchQuery) {
+            event.preventDefault();
+            event.stopPropagation();
+            sessionStore.searchQuery = '';
+          }
+        }}
       />
+      {#if sessionStore.searchQuery}
+        <button
+          type="button"
+          class="sidebar-search-clear absolute right-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md"
+          aria-label="Clear search"
+          title="Clear search"
+          onclick={() => (sessionStore.searchQuery = '')}
+        >
+          <X size={12} />
+        </button>
+      {/if}
     </div>
     <div class="relative shrink-0">
       <button
@@ -1411,7 +1444,7 @@
         {#if projectStore.workspaceRoot || recentProjects.length > 0}
           <div class="my-1 border-t border-[var(--color-border)]"></div>
           <div
-            class="px-3 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]"
+            class="px-3 pb-1 pt-1.5 sidebar-section-label text-[var(--color-text-muted)]"
           >
             Recent
           </div>
@@ -1634,10 +1667,19 @@
                           {:else}
                             <span
                               class="min-w-0 flex-1 truncate text-xs font-medium"
+                              class:session-title-unread={unreadSessionIds.has(session.id)}
                               style="color: var(--color-text-primary);"
                             >
                               {session.title}
                             </span>
+                            {#if unreadSessionIds.has(session.id)}
+                              <span
+                                class="session-unread-dot shrink-0"
+                                role="img"
+                                aria-label="New activity"
+                                title="Finished while you were away"
+                              ></span>
+                            {/if}
                           {/if}
                           {#if needsApproval && sessionStore.activeSessionId !== session.id}
                             <span
@@ -1793,7 +1835,7 @@
                               </span>
                             </button>
                           {/if}
-                          <span class="min-w-0 shrink-0 truncate">{session.messageCount} msgs</span>
+                          <span class="min-w-0 shrink-0 truncate">{session.messageCount} {session.messageCount === 1 ? 'msg' : 'msgs'}</span>
                         </div>
                       </div>
 
@@ -1846,7 +1888,7 @@
     <div class="mb-3">
       <div class="mb-1 flex items-center gap-2 px-2.5 py-1.5">
         <span
-          class="text-[10px] font-semibold uppercase tracking-[0.14em]"
+          class="sidebar-section-label"
           style="color: var(--color-text-muted);"
         >
           Pinned chats
@@ -1876,7 +1918,7 @@
     {#if deviceStore.chats.length}
       <div class="mb-3 px-2">
         <p
-          class="flex items-center gap-2 px-2 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]"
+          class="flex items-center gap-2 px-2 py-2 sidebar-section-label text-[var(--color-text-muted)]"
         >
           <Monitor size={13} /> Micah’s agents
         </p>
@@ -1908,7 +1950,7 @@
       <div class="mb-3">
         <div class="flex items-center justify-between px-3 py-2">
           <span
-            class="text-xs font-semibold uppercase tracking-[0.14em]"
+            class="sidebar-section-label"
             style="color:var(--color-text-muted)">Team workspaces</span
           ><span
             class="rounded-full px-2 py-0.5 text-[11px]"
@@ -1922,7 +1964,7 @@
     {/if}
     <div class="mb-1 flex items-center justify-between gap-2 px-2.5 py-1.5">
       <span
-        class="text-[10px] font-semibold uppercase tracking-[0.14em]"
+        class="sidebar-section-label"
         style="color: var(--color-text-muted);"
       >
         {projectStore.workspaceRoot ? 'Workspace' : 'Projects'}
@@ -2371,17 +2413,18 @@
   }
 
   .sidebar-search {
-    box-shadow: 0 2px 8px color-mix(in srgb, var(--color-surface-0) 16%, transparent);
+    box-shadow: inset 0 0 0 1px transparent;
   }
 
   .sidebar-search:hover {
-    box-shadow: 0 2px 10px color-mix(in srgb, var(--color-accent) 12%, transparent);
+    box-shadow: inset 0 0 0 1px var(--color-border);
   }
 
   .sidebar-search:focus {
+    background: var(--color-surface-2);
     box-shadow:
-      0 0 0 3px color-mix(in srgb, var(--color-accent) 12%, transparent),
-      0 3px 12px color-mix(in srgb, var(--color-surface-0) 20%, transparent);
+      inset 0 0 0 1px var(--color-border-bright),
+      0 0 0 3px color-mix(in srgb, var(--color-accent) 12%, transparent);
   }
 
   /* Tracked-price card. It is portalled to <body> (so no ancestor stacking
@@ -2426,14 +2469,33 @@
     color: var(--color-text-muted);
   }
 
-  .sidebar-search:hover {
-    border-color: var(--color-border-bright);
+  .sidebar-search-clear {
+    color: var(--color-text-muted);
   }
 
-  .sidebar-search:focus {
-    border-color: var(--color-border-bright);
-    background: var(--color-surface-2);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 9%, transparent);
+  .sidebar-search-clear:hover {
+    background: var(--color-surface-3);
+    color: var(--color-text-primary);
+  }
+
+  /* Section headings read as quiet sentence-case labels, not tiny shouted caps. */
+  :global(.sidebar-section-label) {
+    color: var(--color-text-muted);
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    letter-spacing: 0;
+  }
+
+  .session-title-unread {
+    font-weight: var(--font-semibold);
+  }
+
+  .session-unread-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: var(--radius-full);
+    background: var(--color-accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 18%, transparent);
   }
 
   .project-row .project-folder-icon {
@@ -2764,9 +2826,9 @@
   .session-row:hover,
   .session-row:focus-within {
     z-index: 1;
+    /* Hover is a quiet fill only; the accent edge is reserved for the open
+       chat so the two states never read alike. */
     background: color-mix(in srgb, var(--color-accent) 4%, var(--color-surface-2));
-    border-color: color-mix(in srgb, var(--color-accent) 24%, transparent);
-    box-shadow: inset 2px 0 0 color-mix(in srgb, var(--color-accent) 38%, transparent);
   }
 
   .session-row.active-session {
