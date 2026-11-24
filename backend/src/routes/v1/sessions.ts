@@ -33,6 +33,7 @@ import {
   forkChatCoordinated,
   mergeForkCoordinated,
 } from '../../services/session-fork-coordinator';
+import { stopChatRun } from '../../services/chat-run-control';
 import { projectRootFromRequest } from '../../runtime/source-control-scope';
 import { sourceControlService } from '../../services/source-control-service';
 
@@ -342,7 +343,6 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     '/:id/cancel',
     async ({ request, params: { id }, body }) => {
       if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
-      const { kory, wsManager } = getContext();
       // Steering no longer cancels: a user send during a live run is queued
       // server-side and admitted at the run's next checkpoint (see
       // docs/architecture/transcript-integrity.md, "A live run is steered at a
@@ -352,21 +352,8 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
       if (body?.purpose === 'steer') {
         serverLog.info({ sessionId: id }, 'Legacy cancel purpose "steer" treated as a plain cancel');
       }
-      // Stop the turn first. Goal bookkeeping and queued-job cleanup are
-      // follow-up work; they must never delay the user's stop response.
-      await kory.cancelSessionWorkers(id);
-      void getContext()
-        .goalDriver.pauseForSession(id)
-        .catch(() => undefined);
-      void import('../../queue/workers/llm-worker')
-        .then(({ cancelLLMJobsForSession }) => cancelLLMJobsForSession(id))
-        .catch(() => undefined);
-      wsManager.broadcastToSession(id, {
-        type: 'system.info',
-        payload: { message: 'Session cancelled' },
-        timestamp: Date.now(),
-        sessionId: id,
-      });
+      // Shared with the agent interrupt_chat tool so both stops end the same work.
+      await stopChatRun(id);
       return { ok: true, message: 'Session cancelled' };
     },
     {

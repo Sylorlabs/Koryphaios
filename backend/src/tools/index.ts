@@ -56,6 +56,14 @@ export { ManageAgentsTool } from './manage-agents';
 export { SendAgentMessageTool, RequestManagerRelayTool, ListAgentMessagesTool } from './messaging';
 export { ListSessionsTool, ReadSessionTool } from './sessions-directory';
 export { IsolateChatTool, MergeChatBackTool } from './chat-isolation';
+export {
+  CreateChatTool,
+  SendToChatTool,
+  WaitForChatTool,
+  InterruptChatTool,
+  SearchChatsTool,
+  ArchiveChatTool,
+} from './chat-control';
 export { MCPDetectErrorsTool, MCPAnalyzeErrorTool, MCPSuggestFixesTool } from './mcp';
 export { ManageMcpServerTool } from './manage-mcp';
 export { ListMcpToolsTool, InvokeMcpTool } from './external-mcp';

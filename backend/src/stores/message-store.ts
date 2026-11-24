@@ -484,7 +484,64 @@ function writeActiveBoundary(
   `);
 }
 
+export interface ChatTextMatch {
+  sessionId: string;
+  messageId: string;
+  role: StoredMessage['role'];
+  createdAt: number;
+  /** Visible text of the message (parsed content, not the raw JSON block array). */
+  text: string;
+}
+
 export class MessageStore implements IMessageStore {
+  /**
+   * Case-insensitive substring search over the visible text of user and
+   * assistant messages in the given chats, newest first. Matching runs in SQL
+   * on the stored content and the visible text is re-checked in JS, so JSON
+   * escaping can never produce a false positive. Callers choose the chats.
+   */
+  async searchSessionMessages(
+    sessionIds: string[],
+    query: string,
+    limit: number,
+  ): Promise<ChatTextMatch[]> {
+    const needle = query.trim().toLowerCase();
+    if (!needle || sessionIds.length === 0) return [];
+    const escaped = needle.replace(/[\\%_]/g, (char) => `\\${char}`);
+    const rows = await db
+      .select({
+        id: messages.id,
+        sessionId: messages.sessionId,
+        role: messages.role,
+        content: messages.content,
+        createdAt: messages.createdAt,
+      })
+      .from(messages)
+      .where(
+        and(
+          inArray(messages.sessionId, sessionIds),
+          inArray(messages.role, ['user', 'assistant']),
+          sql`lower(${messages.content}) LIKE ${`%${escaped}%`} ESCAPE '\\'`,
+        ),
+      )
+      .orderBy(sql`${messages.createdAt} DESC`)
+      .limit(Math.max(limit * 4, limit));
+    const matches: ChatTextMatch[] = [];
+    for (const row of rows) {
+      const text = parseStoredContent(row.content).text;
+      if (!text.toLowerCase().includes(needle)) continue;
+      matches.push({
+        sessionId: row.sessionId,
+        messageId: row.id,
+        role: row.role as StoredMessage['role'],
+        createdAt: row.createdAt.getTime(),
+        text,
+      });
+      if (matches.length >= limit) break;
+    }
+    return matches;
+  }
+
   private getActiveLineageIds(
     sessionId: string,
     limit: number,

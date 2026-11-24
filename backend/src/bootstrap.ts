@@ -55,6 +55,12 @@ import {
   ReadSessionTool,
   IsolateChatTool,
   MergeChatBackTool,
+  CreateChatTool,
+  SendToChatTool,
+  WaitForChatTool,
+  InterruptChatTool,
+  SearchChatsTool,
+  ArchiveChatTool,
   MCPDetectErrorsTool,
   MCPAnalyzeErrorTool,
   MCPSuggestFixesTool,
@@ -249,6 +255,18 @@ export async function bootstrap(): Promise<AppContext> {
   configureAgentMail({ kory, sessions });
   configureSessionsDirectory({ kory, sessions, messages });
   configureChatIsolation({ kory, sessions });
+  configureChatControl({
+    kory,
+    sessions,
+    messages,
+    runStatus: (sessionId) => {
+      if (!kory.isSessionRunning(sessionId)) return 'idle';
+      return runs.get(sessionId)?.status === 'waiting' ? 'waiting' : 'processing';
+    },
+    interruptChat: (sessionId, message) => stopChatRun(sessionId, { message }),
+    archiveChat: (sessionId) => archiveSessionCoordinated(sessionId),
+    createChat: (input) => createAgentChatSession(input),
+  });
   finishPhase('session-runtime');
   reportStartupPhase('process-and-goal-recovery');
   // Kory subscribed during construction; initialize only after the WebSocket
@@ -334,6 +352,10 @@ import { checklistTools } from './tools/checklists';
 import { configureAgentMail } from './kory/services/agent-mail-service';
 import { configureSessionsDirectory } from './tools/sessions-directory';
 import { configureChatIsolation } from './tools/chat-isolation';
+import { configureChatControl } from './tools/chat-control';
+import { stopChatRun } from './services/chat-run-control';
+import { createAgentChatSession } from './services/agent-chat-service';
+import { archiveSessionCoordinated } from './services/session-archive-service';
 import { configureMonitors } from './kory/services/monitor-service';
 
 /** Build the authoritative runtime tool registry without starting the backend. */
@@ -454,6 +476,12 @@ export async function initTools(providers: ProviderRegistry) {
     new ReadSessionTool(),
     new IsolateChatTool(),
     new MergeChatBackTool(),
+    new CreateChatTool(),
+    new SendToChatTool(),
+    new WaitForChatTool(),
+    new InterruptChatTool(),
+    new SearchChatsTool(),
+    new ArchiveChatTool(),
     new MCPDetectErrorsTool(),
     new MCPAnalyzeErrorTool(),
     new MCPSuggestFixesTool(),

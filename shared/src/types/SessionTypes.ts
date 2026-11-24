@@ -72,6 +72,9 @@ export interface Session {
   planNoteId?: string;
   /** Per-chat approval preset, agent mode, and critic toggle. */
   agentOverrides?: SessionAgentOverrides;
+  /** Set when another chat's agent created this chat (create_chat). Metadata
+   *  only: it records provenance and never grants the new chat any authority. */
+  createdByAgent?: { sessionId: string; agentId: string };
   messageCount: number;
   totalTokensIn: number;
   totalTokensOut: number;
