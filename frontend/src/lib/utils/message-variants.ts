@@ -1,4 +1,4 @@
-import type { TranscriptPart } from '@koryphaios/shared';
+import type { ImportedTokenUsage, TranscriptPart } from '@koryphaios/shared';
 
 export interface DisplayMessageAttachment {
   type: 'image' | 'file';
@@ -27,6 +27,8 @@ export interface DisplayMessage {
   parts?: TranscriptPart[];
   /** The row's source recorded no time; `createdAt` only orders it. */
   timeUnknown?: true;
+  /** Token usage the source CLI recorded for an imported row. Display-only. */
+  importedUsage?: ImportedTokenUsage;
 }
 
 export interface MessageDisplayBoundary {
@@ -111,7 +113,21 @@ function parseMessage(value: unknown, activeLineageIds: ReadonlySet<string>): Di
       value.isActive === true || value.isActiveBranch === true || activeLineageIds.has(value.id),
     parts: Array.isArray(value.parts) ? parseTranscriptParts(value.parts) : undefined,
     ...(value.timeUnknown === true ? { timeUnknown: true as const } : {}),
+    ...(parseImportedUsage(value.importedUsage)
+      ? { importedUsage: parseImportedUsage(value.importedUsage) }
+      : {}),
   };
+}
+
+function parseImportedUsage(value: unknown): ImportedTokenUsage | undefined {
+  if (!isRecord(value)) return undefined;
+  const usage: ImportedTokenUsage = {};
+  for (const key of ['input', 'output', 'cacheRead', 'cacheWrite'] as const) {
+    const n = value[key];
+    if (typeof n === 'number' && Number.isFinite(n) && n >= 0) usage[key] = Math.floor(n);
+  }
+  if (value.estimated === true) usage.estimated = true;
+  return Object.keys(usage).length > 0 ? usage : undefined;
 }
 
 function parseTranscriptParts(value: readonly unknown[]): TranscriptPart[] {

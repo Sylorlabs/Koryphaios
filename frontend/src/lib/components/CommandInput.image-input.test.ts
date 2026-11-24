@@ -93,12 +93,13 @@ async function attachMedia(file: File) {
   const readFinished = new Promise<void>((resolve) => {
     finishRead = resolve;
   });
-  const read = vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(
-    function (this: FileReader, blob) {
-      this.addEventListener('loadend', finishRead, { once: true });
-      readAsDataURL.call(this, blob);
-    },
-  );
+  const read = vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(function (
+    this: FileReader,
+    blob,
+  ) {
+    this.addEventListener('loadend', finishRead, { once: true });
+    readAsDataURL.call(this, blob);
+  });
   try {
     await act(async () => {
       await fireEvent.change(screen.getByLabelText('Attach images, audio, or video'), {
@@ -255,7 +256,7 @@ describe('composer image capability correction', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: /Free Freebuff model/ }));
 
-    expect(screen.getByText('0x')).toBeTruthy();
+    expect(screen.getByText('Free')).toBeTruthy();
     expect(screen.queryByText(/h left$/)).toBeNull();
   });
 

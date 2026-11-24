@@ -5,7 +5,11 @@
   // through partsToFeedEntries (the one parts expansion), reasoning through
   // ThinkingBlock, text through the chat markdown renderer and tools through
   // ToolActivity — which renders a nested sub-agent recursively.
-  import type { SubagentTranscript, SubagentTurn, TranscriptPart } from '@koryphaios/shared';
+  //
+  // Large transcripts are not shipped in the message payload: the API sends a
+  // `stub` (name/model/turn count plus the path of the transcript inside the
+  // stored message) and the full turns are fetched on first expand.
+  import type { SubagentStub, SubagentTranscript, SubagentTurn, TranscriptPart } from '@koryphaios/shared';
   import ChevronRight from 'lucide-svelte/icons/chevron-right';
   import ThinkingBlock from './ThinkingBlock.svelte';
   import ToolActivity from './ToolActivity.svelte';
@@ -13,16 +17,20 @@
   import { partsToFeedEntries } from '$lib/stores/transcript-turns';
   import { renderChatMarkdown } from '$lib/utils/chat-markdown';
   import { requestReaderResize } from '$lib/utils/expand-anchor';
+  import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
+  import { apiUrl } from '$lib/utils/api-url';
 
   interface Props {
-    subagent: SubagentTranscript;
+    subagent?: SubagentTranscript | null;
+    /** Set when the transcript was stripped from the list payload for size. */
+    stub?: SubagentStub | null;
     /** Session the parent row belongs to; nested rows carry it like any row. */
     sessionId: string;
     /** Stable id of the owning tool row, used to derive nested row ids. */
     ownerId: string;
   }
 
-  let { subagent, sessionId, ownerId }: Props = $props();
+  let { subagent, stub, sessionId, ownerId }: Props = $props();
 
   /** Turns rendered per page; a huge transcript reveals itself progressively. */
   const PAGE_SIZE = 50;
@@ -31,11 +39,49 @@
   let trigger = $state<HTMLButtonElement>();
   let expanded = $state(false);
   let visibleCount = $state(PAGE_SIZE);
+  let fetched = $state<SubagentTranscript | undefined>();
+  let loading = $state(false);
+  let loadError = $state(false);
 
-  const turns = $derived(Array.isArray(subagent.turns) ? subagent.turns : []);
-  const turnCount = $derived(turns.length);
+  const transcript = $derived(fetched ?? subagent ?? undefined);
+  const turns = $derived(
+    transcript && Array.isArray(transcript.turns) ? transcript.turns : [],
+  );
+  // Before the fetch lands, the stub's turn count still labels the row.
+  const turnCount = $derived(transcript ? turns.length : (stub?.turnCount ?? 0));
+  const name = $derived(transcript?.name ?? stub?.name ?? 'Sub-agent');
+  const model = $derived(transcript?.model ?? stub?.model);
+  const task = $derived(transcript?.task ?? stub?.task);
   const visibleTurns = $derived(turns.slice(0, visibleCount));
-  const remaining = $derived(Math.max(0, turnCount - visibleCount));
+  const remaining = $derived(Math.max(0, turns.length - visibleCount));
+
+  function isTranscript(value: unknown): value is SubagentTranscript {
+    const v = value as SubagentTranscript | undefined;
+    return !!v && typeof v === 'object' && typeof v.name === 'string' && Array.isArray(v.turns);
+  }
+
+  async function load() {
+    if (!stub || transcript || loading) return;
+    loading = true;
+    loadError = false;
+    try {
+      const res = await apiFetch(
+        apiUrl(
+          `/api/messages/${encodeURIComponent(sessionId)}/subagent/${encodeURIComponent(stub.ref.messageId)}?path=${stub.ref.path.join(',')}`,
+        ),
+      );
+      const result = await parseJsonResponse<{ ok?: boolean; data?: { subagent?: unknown } }>(res);
+      if (result.ok && isTranscript(result.data?.subagent)) {
+        fetched = result.data.subagent;
+      } else {
+        loadError = true;
+      }
+    } catch {
+      loadError = true;
+    } finally {
+      loading = false;
+    }
+  }
 
   function toggle(event: MouseEvent) {
     event.stopPropagation();
@@ -43,6 +89,7 @@
     // keeps its screen position while the nested transcript opens or closes.
     requestReaderResize(trigger);
     expanded = !expanded;
+    if (expanded) void load();
   }
 
   function showMore(event: MouseEvent) {
@@ -71,7 +118,7 @@
       sessionId,
       messageId: `${ownerId}-sub-${index}`,
       parts: settled(Array.isArray(turn.parts) ? turn.parts : []),
-      agentName: subagent.name,
+      agentName: name,
       glowClass: '',
     });
   }
@@ -95,21 +142,29 @@
     <ChevronRight size={12} class={`disclosure ${expanded ? 'expanded' : ''}`} />
     <span class="subagent-kind">Sub-agent</span>
     <span class="sep">·</span>
-    <span class="subagent-name">{subagent.name}</span>
+    <span class="subagent-name">{name}</span>
     <span class="sep">·</span>
     <span class="subagent-count">{turnCount} {turnCount === 1 ? 'turn' : 'turns'}</span>
-    {#if subagent.model}
+    {#if model}
       <span class="sep">·</span>
-      <span class="subagent-model">{subagent.model}</span>
+      <span class="subagent-model">{model}</span>
     {/if}
   </button>
 
   {#if expanded}
-    <div id={id} class="subagent-transcript" role="region" aria-label={`${subagent.name} sub-agent transcript`}>
-      {#if subagent.task}
+    <div id={id} class="subagent-transcript" role="region" aria-label={`${name} sub-agent transcript`}>
+      {#if loading}
+        <p class="empty">Loading sub-agent transcript…</p>
+      {:else if loadError}
+        <p class="empty">
+          Couldn't load the sub-agent transcript.
+          <button type="button" class="show-more" onclick={(e) => { e.stopPropagation(); void load(); }}>Retry</button>
+        </p>
+      {:else}
+      {#if task}
         <div class="subagent-task">
           <div class="turn-label">Task</div>
-          <p class="plain-text">{subagent.task}</p>
+          <p class="plain-text">{task}</p>
         </div>
       {/if}
       {#if turnCount === 0}
@@ -119,7 +174,7 @@
           {#each visibleTurns as turn, index (index)}
             <li class="turn" data-role={turn.role}>
               <div class="turn-meta">
-                <span class="turn-label">{turn.role === 'user' ? 'User' : subagent.name}</span>
+                <span class="turn-label">{turn.role === 'user' ? 'User' : name}</span>
                 <span class="turn-time tabular-nums">{clock(turn.createdAt)}</span>
               </div>
               {#if turn.role === 'user'}
@@ -151,6 +206,7 @@
             Show {Math.min(PAGE_SIZE, remaining)} more {Math.min(PAGE_SIZE, remaining) === 1 ? 'turn' : 'turns'} ({remaining} remaining)
           </button>
         {/if}
+      {/if}
       {/if}
     </div>
   {/if}

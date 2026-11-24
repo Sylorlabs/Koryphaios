@@ -1414,7 +1414,7 @@
             <SettingsSwitch
               checked={memoryStore.settings?.maxContextTokensEnabled ?? true}
               label="Limit injected memory"
-              description="Off still applies the 100,000-token safety ceiling"
+              description="Off injects enabled sources without a token cap"
               onchange={() => toggleSetting('maxContextTokensEnabled')}
               flat
             />

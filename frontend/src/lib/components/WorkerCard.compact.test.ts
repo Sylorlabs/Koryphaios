@@ -39,16 +39,17 @@ describe('sub-agent cards are a single compact row', () => {
     // A worker card is a glanceable chip, not a panel: the rail budget goes to
     // how many agents are live, not to restating each one's whole transcript.
     expect(container.textContent?.trim()).toBe('Critic');
-    expect(container.querySelector('.status-icon-container')).not.toBeNull();
+    expect(container.querySelector('.seg-icon')).not.toBeNull();
     expect(container.querySelectorAll('button')).toHaveLength(1);
   });
 
   it('is one fixed-height row rather than a stacked card', () => {
     const { container } = card(agent());
-    const root = container.querySelector('.agent-card')!;
+    const root = container.querySelector('.agent-seg')!;
 
-    expect(root.getAttribute('style')).toContain('height: 24px');
-    expect(root.getAttribute('style')).toContain('max-width: 220px');
+    expect(root.getAttribute('role')).toBe('tab');
+    expect(root.querySelectorAll('.seg-name')).toHaveLength(1);
+    expect(root.querySelector('.agent-card')).toBeNull();
   });
 
   it('does not render provider, task, context percentage or tool chips inline', () => {
@@ -65,7 +66,7 @@ describe('sub-agent cards are a single compact row', () => {
 
   it('keeps only provider, model and context in the tooltip', () => {
     const { container } = card(agent());
-    const details = container.querySelector('.agent-card')!.getAttribute('title')!;
+    const details = container.querySelector('.agent-seg')!.getAttribute('title')!;
 
     // The hover card answers "which model is this, and how full is it".
     // Anything more turns every pass of the rail into a paragraph of text.
@@ -74,7 +75,7 @@ describe('sub-agent cards are a single compact row', () => {
 
   it('keeps the status, task and steering hint out of the tooltip', () => {
     const { container } = card(agent({ toolCalls: [{ name: 'bash' }, { name: 'grep' }] }), true);
-    const details = container.querySelector('.agent-card')!.getAttribute('title')!;
+    const details = container.querySelector('.agent-seg')!.getAttribute('title')!;
 
     expect(details).not.toContain('Thinking…');
     expect(details).not.toContain('Review delegated work');
@@ -85,7 +86,7 @@ describe('sub-agent cards are a single compact row', () => {
 
   it('drops the context line when the provider has no trusted window', () => {
     const { container } = card(agent({ contextKnown: false, contextMax: 0, tokensUsed: 0 }));
-    const details = container.querySelector('.agent-card')!.getAttribute('title')!;
+    const details = container.querySelector('.agent-seg')!.getAttribute('title')!;
 
     expect(details).toBe('Commandcode xiaomi/mimo-v2.6-pro');
   });

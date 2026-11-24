@@ -92,8 +92,10 @@ export function partsToFeedEntries(input: PartsToFeedEntriesInput): FeedEntry[] 
       case 'tool': {
         const toolCall = { id: part.callId, name: part.name, input: part.input };
         const toolMetadata: Record<string, unknown> = { ...rowMetadata, toolCall };
-        // Display data only: the sub-agent's own conversation rides on its row.
+        // Display data only: the sub-agent's own conversation rides on its row —
+        // or, for imported chats, a stub whose transcript loads on first expand.
         if (part.subagent) toolMetadata.subagent = part.subagent;
+        if (part.subagentStub) toolMetadata.subagentStub = part.subagentStub;
         const durationUnknown = part.timeUnknown ? { durationUnknown: true as const } : {};
         if (part.endedAt === undefined) {
           return {
@@ -116,7 +118,13 @@ export function partsToFeedEntries(input: PartsToFeedEntriesInput): FeedEntry[] 
             text: toolResultText(output, isError, 0),
             metadata: {
               ...toolMetadata,
-              toolResult: { callId: part.callId, name: part.name, output, isError, timeUnknown: true },
+              toolResult: {
+                callId: part.callId,
+                name: part.name,
+                output,
+                isError,
+                timeUnknown: true,
+              },
             },
           };
         }

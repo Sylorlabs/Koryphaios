@@ -1,7 +1,10 @@
 <script lang="ts">
   import type { FreebuffAccountSnapshot } from '@koryphaios/shared';
   import { freebuffBaseRate, freebuffHoursFromFreebucks } from '$lib/utils/freebuff-pricing';
-  let { account }: { account?: FreebuffAccountSnapshot } = $props();
+  let {
+    account,
+    variant = 'full',
+  }: { account?: FreebuffAccountSnapshot; variant?: 'full' | 'compact' } = $props();
   const format = (value: number) => value.toLocaleString(undefined, { maximumFractionDigits: 2 });
   let balance = $derived(account?.hours);
   // The live rate table decides whether these numbers are hours or Freebucks:
@@ -25,6 +28,43 @@
   );
 </script>
 
+{#if variant === 'compact' && balance}
+  <div
+    class="flex items-center gap-2 text-[11px]"
+    role="meter"
+    aria-label="Daily hours remaining"
+    aria-valuemin={0}
+    aria-valuemax={dailyLimit ?? balance.daily.limit}
+    aria-valuenow={dailyRemaining ?? balance.daily.remaining}
+    title={`${format(dailyRemaining ?? balance.daily.remaining)} of ${format(
+      dailyLimit ?? balance.daily.limit,
+    )} daily ${unit} remaining${account?.status === 'stale' ? ' (stale)' : ''}`}
+  >
+    <span class="shrink-0 whitespace-nowrap font-mono text-[var(--color-text-secondary)]">
+      {format(dailyRemaining ?? balance.daily.remaining)}/{format(
+        dailyLimit ?? balance.daily.limit,
+      )}
+      {unit} left
+    </span>
+    {#if balance.daily.limit > 0}
+      <div class="h-1.5 min-w-12 flex-1 overflow-hidden rounded-full bg-[var(--color-surface-3)]">
+        <div
+          class="h-full rounded-full bg-[var(--color-accent)] transition-[width] duration-300"
+          style:width={`${remainingPercent}%`}
+        ></div>
+      </div>
+    {/if}
+    {#if account?.status === 'stale'}
+      <span class="shrink-0 text-[10px] text-[var(--color-text-muted)]">stale</span>
+    {/if}
+  </div>
+{:else if variant === 'compact'}
+  {#if account?.note || account}
+    <p class="text-[11px] text-[var(--color-text-muted)]">
+      {account?.note ?? 'Hours unavailable'}
+    </p>
+  {/if}
+{:else}
 <section
   aria-label="Freebuff hours"
   class="space-y-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-3 text-[11px]"
@@ -116,3 +156,4 @@
     </p>
   {/if}
 </section>
+{/if}

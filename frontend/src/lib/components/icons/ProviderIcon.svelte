@@ -47,7 +47,6 @@
     logfare: ['logfare'],
     apinex: ['apinex'],
     gwarden: ['gwarden'],
-    vyceai: ['vyceai'],
     tokenrouter: ['tokenrouter'],
     groq: ['groq'],
     digitalocean: ['digitalocean'],
@@ -171,11 +170,7 @@
     '/provider-icons/experientiallabs-color.svg',
   ]);
 
-  // Vyce AI's bundled mark is a full-color SVG (gradients + strokes) that
-  // happens to live at the monochrome-shaped path. It must never be inverted
-  // in dark mode, otherwise the logo collapses to a white blob.
   const nonAdaptiveIconPaths = new Set([
-    '/provider-icons/vyceai.svg',
     // CrowLLM's favicon is a full-color crow on a dark tile; inverting it in
     // dark mode would turn the mark into a white blob.
     '/provider-icons/crowllm.svg',

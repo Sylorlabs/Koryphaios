@@ -213,10 +213,7 @@ let groupRebuildHold = 0;
 let groupRebuildDirty = false;
 
 function rebuildGroupedFeedCache(): void {
-  if (
-    groupRebuildHold > 0 ||
-    (feedSessionId !== '' && replayQuietTimers.has(feedSessionId))
-  ) {
+  if (groupRebuildHold > 0 || (feedSessionId !== '' && replayQuietTimers.has(feedSessionId))) {
     groupRebuildDirty = true;
     return;
   }
@@ -555,7 +552,8 @@ function latestToolEntryForSession(sessionId: string): FeedEntry | undefined {
   for (let i = lane.length - 1; i >= 0; i--) {
     const entry = lane[i];
     if (entry.type === 'user_message') return undefined;
-    if (entry.type === 'tool_call' || entry.type === 'tool_result' || entry.type === 'tool_group') return entry;
+    if (entry.type === 'tool_call' || entry.type === 'tool_result' || entry.type === 'tool_group')
+      return entry;
   }
   return undefined;
 }
@@ -640,7 +638,10 @@ function nextFeedId(prefix: string): string {
 /** A reasoning delta continues a reasoning row, but any other row closes the
  *  current reasoning segment so the next thinking delta opens a new row at its
  *  real position in the event stream. */
-function closeReasoningSegment(sessionId: string, entry: Pick<FeedEntry, 'type' | 'agentId'>): void {
+function closeReasoningSegment(
+  sessionId: string,
+  entry: Pick<FeedEntry, 'type' | 'agentId'>,
+): void {
   if (entry.type === 'thinking') return;
   const lane = `${sessionId}::${entry.agentId}`;
   feedStreamTargets.delete(continuationTargetKey(lane, 'thinking', false));
@@ -928,12 +929,15 @@ function upsertCompaction(
     (entry) => entry.type === 'compaction' && entry.metadata?.compactionId === payload.compactionId,
   );
   const metadata = { ...payload, ...eventMetadata } as unknown as Record<string, unknown>;
-  const nextText = (payload.raw ?? payload.summary ?? payload.text ?? payload.message).replace(/\u2014/g, ', ').replace(/\u2013/g, '-');
+  const nextText = (payload.raw ?? payload.summary ?? payload.text ?? payload.message)
+    .replace(/\u2014/g, ', ')
+    .replace(/\u2013/g, '-');
   if (existing) {
     existing.text = nextText;
     existing.timestamp = Date.now();
     existing.metadata = metadata;
-    if (displayed) patchGroupedFeedEntry(existing.id, existing.text, existing.timestamp, { metadata });
+    if (displayed)
+      patchGroupedFeedEntry(existing.id, existing.text, existing.timestamp, { metadata });
     streamingRevision++;
     return;
   }
@@ -1065,7 +1069,13 @@ export function applyManagerTurnEvent(sessionId: string, msg: WSMessage): boolea
   const sequence = Number.isSafeInteger(msg.sequence) ? Number(msg.sequence) : undefined;
 
   let turn = liveTurns.get(key);
-  if (turn && epoch !== undefined && sequence !== undefined && turn.lastEpoch !== undefined && turn.lastSequence !== undefined) {
+  if (
+    turn &&
+    epoch !== undefined &&
+    sequence !== undefined &&
+    turn.lastEpoch !== undefined &&
+    turn.lastSequence !== undefined
+  ) {
     const folded =
       epoch < turn.lastEpoch || (epoch === turn.lastEpoch && sequence <= turn.lastSequence);
     if (folded) return false;
@@ -1091,13 +1101,21 @@ export function applyManagerTurnEvent(sessionId: string, msg: WSMessage): boolea
  *  sealed by the reader's stop, a terminal state or the next action. The turn
  *  is closed with the same timestamp, so the rows and the parts agree. A null
  *  end (local stop) freezes at the last observed server timestamp. */
-function sealLiveTurnReasoning(sessionId: string, agentId: string | undefined, endedAt: number | null): void {
+function sealLiveTurnReasoning(
+  sessionId: string,
+  agentId: string | undefined,
+  endedAt: number | null,
+): void {
   if (agentId && agentId !== 'kory-manager') return;
   const prefix = `${sessionId}::`;
   for (const [key, turn] of liveTurns) {
     if (!key.startsWith(prefix)) continue;
-    if (!turn.parts.some((part) => part.kind === 'reasoning' && part.endedAt === undefined)) continue;
-    turn.parts = reduceTurnParts(turn.parts, { type: 'complete', timestamp: endedAt ?? turn.lastTimestamp });
+    if (!turn.parts.some((part) => part.kind === 'reasoning' && part.endedAt === undefined))
+      continue;
+    turn.parts = reduceTurnParts(turn.parts, {
+      type: 'complete',
+      timestamp: endedAt ?? turn.lastTimestamp,
+    });
     publishLiveTurn(turn);
   }
 }
@@ -1118,7 +1136,9 @@ function isRowPersistedIn(entry: FeedEntry, loadedMessageIds: ReadonlySet<string
   if (typeof turnMessageId === 'string' && loadedMessageIds.has(turnMessageId)) return true;
   const messageId = entry.metadata?.messageId;
   return (
-    entry.type === 'user_message' && typeof messageId === 'string' && loadedMessageIds.has(messageId)
+    entry.type === 'user_message' &&
+    typeof messageId === 'string' &&
+    loadedMessageIds.has(messageId)
   );
 }
 
@@ -1158,7 +1178,8 @@ function sealThinkingInLane(
     if (measured) {
       const startedAt =
         e.thinkingStartedAt ?? activeThinkingStartedAt.get(feedTurnKey(sessionId, e.agentId));
-      if (startedAt !== undefined) e.durationMs = frozenThinkingDuration(e.durationMs, startedAt, endedAt);
+      if (startedAt !== undefined)
+        e.durationMs = frozenThinkingDuration(e.durationMs, startedAt, endedAt);
     } else {
       // Leaving the chat: the start timestamp's origin is no longer visible, so
       // freeze at the last server timestamp observed rather than differencing
@@ -1482,7 +1503,11 @@ function removeEntries(sessionId: string, ids: Set<string>) {
   if (!sessionId || ids.size === 0) return;
   if (!isDisplayedLane(sessionId)) {
     const cached = sessionFeedCache.get(sessionId);
-    if (cached) sessionFeedCache.set(sessionId, cached.filter((e) => !ids.has(e.id)));
+    if (cached)
+      sessionFeedCache.set(
+        sessionId,
+        cached.filter((e) => !ids.has(e.id)),
+      );
     return;
   }
   feed = feed.filter((e) => !ids.has(e.id));
@@ -1829,11 +1854,14 @@ function persistedTurnParts(message: DisplayMessage): TranscriptPart[] | null {
 
 /** Time windows (previous message, assistant message] of assistant turns that
  *  have persisted tool parts. Archived tool rows inside a window duplicate parts. */
-function turnPartsWindows(messages: readonly DisplayMessage[]): Array<{ from: number; to: number }> {
+function turnPartsWindows(
+  messages: readonly DisplayMessage[],
+): Array<{ from: number; to: number }> {
   const sorted = [...messages].sort((a, b) => a.createdAt - b.createdAt);
   const windows: Array<{ from: number; to: number }> = [];
   sorted.forEach((message, index) => {
-    if (message.role !== 'assistant' || !message.parts?.some((part) => part.kind === 'tool')) return;
+    if (message.role !== 'assistant' || !message.parts?.some((part) => part.kind === 'tool'))
+      return;
     const previous = sorted[index - 1];
     // Without a loaded predecessor the turn's start is unknown; keep its archive rows.
     if (!previous) return;
@@ -1884,8 +1912,7 @@ async function loadSessionMessages(
   // A full load owns the reveal. Two refreshes can overlap (a timeline
   // rewrite racing the normal history fetch); only the newest may drop the
   // spinner, or the older one reveals a half-merged transcript.
-  const loadToken =
-    options.loadAncillary === false ? sessionLoadToken : ++sessionLoadToken;
+  const loadToken = options.loadAncillary === false ? sessionLoadToken : ++sessionLoadToken;
   try {
     return await loadSessionMessagesImpl(sessionId, messages, { ...options, loadToken });
   } finally {
@@ -1917,10 +1944,8 @@ async function loadSessionMessagesImpl(
   // flashing back into view and restores explicit client errors alongside
   // server-originated evidence.
   await loadFeedPersistence(sessionId, options.signal);
-  if (
-    sessionRemovalGeneration !== removalGeneration ||
-    !ownsFeed(sessionId, options.generation)
-  ) return false;
+  if (sessionRemovalGeneration !== removalGeneration || !ownsFeed(sessionId, options.generation))
+    return false;
   const boundary: MessageDisplayBoundary = sessionStore.getMessageDisplayBoundary?.(messages) ?? {
     activeMessageId: null,
     conversationRevision: null,
@@ -1990,7 +2015,10 @@ async function loadSessionMessagesImpl(
     (oldest, message) => Math.min(oldest, message.createdAt),
     Number.POSITIVE_INFINITY,
   );
-  const newestCreatedAt = messages.reduce((newest, message) => Math.max(newest, message.createdAt), 0);
+  const newestCreatedAt = messages.reduce(
+    (newest, message) => Math.max(newest, message.createdAt),
+    0,
+  );
   const contextSince = Number.isFinite(oldestCreatedAt)
     ? Math.max(0, oldestCreatedAt - Math.max(newestCreatedAt - oldestCreatedAt, 5 * 60_000))
     : undefined;
@@ -2020,7 +2048,8 @@ async function loadSessionMessagesImpl(
         !result.ok ||
         sessionRemovalGeneration !== removalGeneration ||
         !ownsFeed(sessionId, options.generation)
-      ) return;
+      )
+        return;
       contextData = result;
       if (Array.isArray(result.mcpServers)) setSessionMcpToolRegistry(sessionId, result.mcpServers);
       if (Object.prototype.hasOwnProperty.call(result, 'lastUsage')) {
@@ -2047,10 +2076,8 @@ async function loadSessionMessagesImpl(
   // The user may have switched to another session while the timeline
   // fetch was in flight; writing this (now stale) history would show the
   // wrong chat's messages in the current chat.
-  if (
-    sessionRemovalGeneration !== removalGeneration ||
-    !ownsFeed(sessionId, options.generation)
-  ) return false;
+  if (sessionRemovalGeneration !== removalGeneration || !ownsFeed(sessionId, options.generation))
+    return false;
 
   const variantsByGroup = new Map<string, DisplayMessage[]>();
   for (const message of messages) {
@@ -2104,13 +2131,19 @@ async function loadSessionMessagesImpl(
         : m.role === 'user' || m.role === 'system'
           ? ''
           : 'glow-kory',
-      text: isCompaction ? m.content.replace(/^\[KORY_COMPACTION\]\n?/, '').replace(/\u2014/g, ', ').replace(/\u2013/g, '-') : m.content,
+      text: isCompaction
+        ? m.content
+            .replace(/^\[KORY_COMPACTION\]\n?/, '')
+            .replace(/\u2014/g, ', ')
+            .replace(/\u2013/g, '-')
+        : m.content,
       isCollapsed: isCompaction,
       metadata: {
         sessionId,
         model: m.model,
         provider: m.provider,
         cost: m.cost,
+        ...(m.importedUsage ? { importedUsage: m.importedUsage } : {}),
         messageId: m.id,
         variantGroupId: m.variantGroupId,
         activeVariantId: variantChoice?.activeVariantId,
@@ -2235,7 +2268,8 @@ async function loadSessionMessagesImpl(
     options.signal?.aborted ||
     sessionRemovalGeneration !== removalGeneration ||
     !ownsFeed(sessionId, options.generation)
-  ) return true;
+  )
+    return true;
   if (timelineResult.status === 'fulfilled' && timelineResult.value.ok) {
     timeline = timelineResult.value.data?.timeline ?? [];
   }
@@ -2260,34 +2294,36 @@ async function loadSessionMessagesImpl(
       options.onUsage?.(contextData.lastUsage ?? null);
     }
     if (Array.isArray(contextData.data)) {
-      toolHistory = contextData.data.filter((e) => !coveredByParts.some((window) => e.ts > window.from && e.ts <= window.to)).map((e) => {
-        const name = e.label.split(' ')[0] || 'tool';
-        const input = parseArchivedToolInput(e.toolInput ?? e.label.slice(name.length + 1));
-        return {
-          id: `arch-${e.id}`,
-          timestamp: e.ts,
-          type: 'tool_result' as const,
-          agentId: 'kory-manager',
-          agentName: 'Kory',
-          glowClass: '',
-          text: e.content || e.label,
-          agentHidden: e.prunedForAgent,
-          metadata: {
-            sessionId,
-            ...(e.runRef ? { runRef: e.runRef } : {}),
-            ...(input && { toolCall: { id: e.id, name, input } }),
-            ...(!input && e.toolInput && { toolInputPreview: e.toolInput }),
-            toolResult: {
-              callId: e.id,
-              name,
-              output: e.content,
-              isError: e.isError === true,
-              durationMs: 0,
-              archiveId: e.id,
+      toolHistory = contextData.data
+        .filter((e) => !coveredByParts.some((window) => e.ts > window.from && e.ts <= window.to))
+        .map((e) => {
+          const name = e.label.split(' ')[0] || 'tool';
+          const input = parseArchivedToolInput(e.toolInput ?? e.label.slice(name.length + 1));
+          return {
+            id: `arch-${e.id}`,
+            timestamp: e.ts,
+            type: 'tool_result' as const,
+            agentId: 'kory-manager',
+            agentName: 'Kory',
+            glowClass: '',
+            text: e.content || e.label,
+            agentHidden: e.prunedForAgent,
+            metadata: {
+              sessionId,
+              ...(e.runRef ? { runRef: e.runRef } : {}),
+              ...(input && { toolCall: { id: e.id, name, input } }),
+              ...(!input && e.toolInput && { toolInputPreview: e.toolInput }),
+              toolResult: {
+                callId: e.id,
+                name,
+                output: e.content,
+                isError: e.isError === true,
+                durationMs: 0,
+                archiveId: e.id,
+              },
             },
-          },
-        };
-      });
+          };
+        });
     }
   } catch (err: unknown) {
     /* archive unavailable — text history still loads */
@@ -2296,10 +2332,8 @@ async function loadSessionMessagesImpl(
       err instanceof Error ? err.message : String(err),
     );
   }
-  if (
-    sessionRemovalGeneration !== removalGeneration ||
-    !ownsFeed(sessionId, options.generation)
-  ) return false;
+  if (sessionRemovalGeneration !== removalGeneration || !ownsFeed(sessionId, options.generation))
+    return false;
 
   const enrichedHistory = history.map((entry) => ({
     ...entry,
@@ -2379,7 +2413,8 @@ async function loadOlderSessionMessages(sessionId: string): Promise<boolean> {
       sessionRemovalGeneration !== removalGeneration ||
       sessionId !== sessionStore.activeSessionId ||
       feedSessionId !== sessionId
-    ) return false;
+    )
+      return false;
     const pageInfo = sessionStore.getMessagePageInfo?.(older);
     const existing = new Set(current.map((message) => message.id));
     const combined = [...older.filter((message) => !existing.has(message.id)), ...current];

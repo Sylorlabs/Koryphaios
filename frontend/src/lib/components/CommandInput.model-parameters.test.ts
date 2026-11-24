@@ -22,6 +22,15 @@ const SEED: ModelParameterDef = {
   step: 1,
   description: 'Test seed.',
 };
+const MAX_TOKENS: ModelParameterDef = {
+  key: 'max_tokens',
+  label: 'Max output tokens',
+  kind: 'integer',
+  min: 1,
+  max: 128_000,
+  step: 1,
+  description: 'Test max output tokens.',
+};
 const VERBOSITY: ModelParameterDef = {
   key: 'verbosity',
   label: 'Verbosity',
@@ -116,9 +125,7 @@ describe('composer model-settings control', () => {
     const { rerender } = composer();
     await screen.findByTestId('composer-model-params-control');
     await rerender({ selectedModel: 'openrouter:other/model' });
-    await waitFor(() =>
-      expect(screen.queryByTestId('composer-model-params-control')).toBeNull(),
-    );
+    await waitFor(() => expect(screen.queryByTestId('composer-model-params-control')).toBeNull());
   });
 
   it('opens the panel, lists each parameter, and a change persists per provider:model', async () => {
@@ -142,9 +149,7 @@ describe('composer model-settings control', () => {
     );
     // The launcher always keeps its name after a parameter is overridden.
     const launcher = screen.getByRole('button', { name: 'Model settings' });
-    expect(launcher.querySelector('.composer-control-label')?.textContent).toBe(
-      'Model settings',
-    );
+    expect(launcher.querySelector('.composer-control-label')?.textContent).toBe('Model settings');
     expect(launcher.querySelector('.rounded-full')).toBeNull();
   });
 
@@ -157,8 +162,35 @@ describe('composer model-settings control', () => {
       expect(loadComposerPreference(model).modelParameters).toEqual({ temperature: 2 }),
     );
     await fireEvent.click(screen.getByRole('button', { name: 'Reset all' }));
+    await waitFor(() => expect(loadComposerPreference(model).modelParameters ?? {}).toEqual({}));
+  });
+
+  it('shows ∞ for max output tokens until Force max is on, then reveals the limit slider', async () => {
+    catalog.parameters = [MAX_TOKENS];
+    composer();
+    await screen.findByLabelText('Model settings');
+    await fireEvent.click(screen.getByLabelText('Model settings'));
+    const panel = await screen.findByRole('dialog');
+
+    // Off by default: no override, no slider, and the real default is ∞ rather
+    // than a misleading "1".
+    expect(panel.textContent).toContain('∞');
+    expect(screen.queryByRole('slider')).toBeNull();
+    const toggle = screen.getByRole('switch', { name: 'Force max' });
+    expect(toggle.getAttribute('aria-checked')).toBe('false');
+
+    await fireEvent.click(toggle);
     await waitFor(() =>
-      expect(loadComposerPreference(model).modelParameters ?? {}).toEqual({}),
+      expect(loadComposerPreference(model).modelParameters).toEqual({ max_tokens: 128_000 }),
+    );
+    expect(screen.getByRole('slider')).not.toBeNull();
+    expect(panel.textContent).not.toContain('∞');
+
+    await fireEvent.click(screen.getByRole('switch', { name: 'Force max' }));
+    await waitFor(() => expect(loadComposerPreference(model).modelParameters ?? {}).toEqual({}));
+    expect(screen.queryByRole('slider')).toBeNull();
+    expect(screen.getByRole('switch', { name: 'Force max' }).getAttribute('aria-checked')).toBe(
+      'false',
     );
   });
 
@@ -181,9 +213,7 @@ describe('composer model-settings control', () => {
     expect(radios[2]!.getAttribute('aria-checked')).toBe('true');
     // Clicking the active segment clears the override.
     await fireEvent.click(radios[2]!);
-    await waitFor(() =>
-      expect(loadComposerPreference(model).modelParameters ?? {}).toEqual({}),
-    );
+    await waitFor(() => expect(loadComposerPreference(model).modelParameters ?? {}).toEqual({}));
     expect(radios[2]!.getAttribute('aria-checked')).toBe('false');
   });
 

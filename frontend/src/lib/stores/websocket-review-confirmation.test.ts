@@ -5,25 +5,41 @@ import type { WSMessage } from '@koryphaios/shared';
 import type { DeviceChat } from '@koryphaios/shared/src/devices';
 
 const state = vi.hoisted(() => ({
-  activeSessionId: '', selectionGeneration: 0, demo: false, origin: '',
+  activeSessionId: '',
+  selectionGeneration: 0,
+  demo: false,
+  origin: '',
   request: null as null | ((path: string, init?: RequestInit) => Promise<any>),
   demoResult: undefined as Promise<void> | undefined,
 }));
-vi.mock('./sessions.svelte', () => ({ sessionStore: {
-  get activeSessionId() { return state.activeSessionId; },
-  set activeSessionId(id: string) {
-    if (id !== state.activeSessionId) state.selectionGeneration += 1;
-    state.activeSessionId = id;
+vi.mock('./sessions.svelte', () => ({
+  sessionStore: {
+    get activeSessionId() {
+      return state.activeSessionId;
+    },
+    set activeSessionId(id: string) {
+      if (id !== state.activeSessionId) state.selectionGeneration += 1;
+      state.activeSessionId = id;
+    },
+    get selectionGeneration() {
+      return state.selectionGeneration;
+    },
+    attachDeviceSession: vi.fn(),
+    getMessageDisplayBoundary: () => undefined,
+    fetchSessions: vi.fn(),
   },
-  get selectionGeneration() { return state.selectionGeneration; },
-  attachDeviceSession: vi.fn(), getMessageDisplayBoundary: () => undefined,
-  fetchSessions: vi.fn(),
-} }));
+}));
 vi.mock('./auth.svelte', () => ({ authStore: { ensureSession: async () => true, token: 'test' } }));
-vi.mock('$lib/utils/api-url', () => ({ apiUrl: (path: string) => state.origin + path, getWsUrl: () => 'ws://localhost/ws' }));
+vi.mock('$lib/utils/api-url', () => ({
+  apiUrl: (path: string) => state.origin + path,
+  getWsUrl: () => 'ws://localhost/ws',
+}));
 vi.mock('$lib/api.svelte', () => ({
-  apiFetch: vi.fn(async (path: string, init?: RequestInit) => state.request ? state.request(path, init) :
-    { ok: true, json: async () => ({ ok: true, data: [] }) }),
+  apiFetch: vi.fn(async (path: string, init?: RequestInit) =>
+    state.request
+      ? state.request(path, init)
+      : { ok: true, json: async () => ({ ok: true, data: [] }) },
+  ),
   parseJsonResponse: async (response: any) => response.json(),
 }));
 vi.mock('./providers.svelte', () => ({ providersStore: {}, loadProvidersFromApi: vi.fn() }));
@@ -31,12 +47,25 @@ vi.mock('./notes.svelte', () => ({ notesStore: {} }));
 vi.mock('./goals.svelte', () => ({ goalStore: {} }));
 vi.mock('./checklists.svelte', () => ({ checklistStore: {} }));
 vi.mock('./toast.svelte', () => ({ toastStore: { error: vi.fn(), success: vi.fn() } }));
-vi.mock('./run-state.svelte', () => ({ runStateStore: {
-  states: new Map(), applyEvent: () => true, startRun: vi.fn(), markUserStopped: vi.fn(), clearUserStopped: vi.fn(), getAgentStatusForSession: () => 'idle',
-  markAgentStopped: vi.fn(),
-  isRunning: () => false, isWaiting: () => false, isBusy: () => false,
-} }));
-vi.mock('$lib/demo-flags', () => ({ get isDemoMode() { return state.demo; } }));
+vi.mock('./run-state.svelte', () => ({
+  runStateStore: {
+    states: new Map(),
+    applyEvent: () => true,
+    startRun: vi.fn(),
+    markUserStopped: vi.fn(),
+    clearUserStopped: vi.fn(),
+    getAgentStatusForSession: () => 'idle',
+    markAgentStopped: vi.fn(),
+    isRunning: () => false,
+    isWaiting: () => false,
+    isBusy: () => false,
+  },
+}));
+vi.mock('$lib/demo-flags', () => ({
+  get isDemoMode() {
+    return state.demo;
+  },
+}));
 vi.mock('$lib/demo-api', () => ({ resolveDemoReview: vi.fn(() => state.demoResult) }));
 vi.mock('$lib/utils/chat-markdown', () => ({ renderChatMarkdown: (text: string) => text }));
 
@@ -54,35 +83,65 @@ import DeviceChatView from '$lib/components/DeviceChatView.svelte';
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason: Error) => void;
-  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  const promise = new Promise<T>((yes, no) => {
+    resolve = yes;
+    reject = no;
+  });
   return { promise, resolve, reject };
 }
 function response(data: unknown, ok = true, status = 200) {
-  return { ok: status < 400, json: async () => ({ ok, data, ...(!ok ? { error: 'Target refused the request' } : {}) }) };
+  return {
+    ok: status < 400,
+    json: async () => ({ ok, data, ...(!ok ? { error: 'Target refused the request' } : {}) }),
+  };
 }
 function review(revision = 'revision-1') {
-  return { reviewId: 'review-1', reviewRevision: revision,
-    changes: [{ path: 'src/app.ts', operation: 'edit' as const, linesAdded: 2, linesDeleted: 1 }] };
+  return {
+    reviewId: 'review-1',
+    reviewRevision: revision,
+    changes: [{ path: 'src/app.ts', operation: 'edit' as const, linesAdded: 2, linesDeleted: 1 }],
+  };
 }
-function question(id = 'question-1') { return { questionId: id, question: 'Proceed?', options: ['Yes', 'No'] }; }
+function question(id = 'question-1') {
+  return { questionId: id, question: 'Proceed?', options: ['Yes', 'No'] };
+}
 function emit(type: WSMessage['type'], payload: unknown, sessionId = state.activeSessionId) {
   wsStore.ingestLinkedMessage({ type, payload, sessionId, timestamp: Date.now() });
 }
 function linkedEvent(chat: DeviceChat, type: WSMessage['type'], payload: unknown) {
-  window.dispatchEvent(new CustomEvent('kory:device-event', {
-    detail: { deviceId: chat.deviceId, sessionId: chat.id,
-      event: { type, sessionId: chat.id, timestamp: Date.now(), payload } },
-  }));
+  window.dispatchEvent(
+    new CustomEvent('kory:device-event', {
+      detail: {
+        deviceId: chat.deviceId,
+        sessionId: chat.id,
+        event: { type, sessionId: chat.id, timestamp: Date.now(), payload },
+      },
+    }),
+  );
 }
 function chat(id: string, deviceId = 'host-1'): DeviceChat {
-  return { id, deviceId, deviceName: deviceId, title: id, workspaceName: 'Workspace' } as DeviceChat;
+  return {
+    id,
+    deviceId,
+    deviceName: deviceId,
+    title: id,
+    workspaceName: 'Workspace',
+  } as DeviceChat;
 }
 function snapshot(chat: DeviceChat, overrides: Record<string, unknown> = {}) {
-  return { chat, messages: [], question: null, review: null,
-    run: { phase: 'idle', status: 'idle', revision: 1 }, ...overrides };
+  return {
+    chat,
+    messages: [],
+    question: null,
+    review: null,
+    run: { phase: 'idle', status: 'idle', revision: 1 },
+    ...overrides,
+  };
 }
 function rpcBodies() {
-  return vi.mocked(apiFetch).mock.calls.flatMap(([, init]) => init?.body ? [JSON.parse(String(init.body))] : []);
+  return vi
+    .mocked(apiFetch)
+    .mock.calls.flatMap(([, init]) => (init?.body ? [JSON.parse(String(init.body))] : []));
 }
 class TestWebSocket {
   static OPEN = 1;
@@ -93,7 +152,10 @@ class TestWebSocket {
   onclose: (() => void) | null = null;
   send = vi.fn();
   close = vi.fn();
-  open() { this.readyState = 1; this.onopen?.(); }
+  open() {
+    this.readyState = 1;
+    this.onopen?.();
+  }
 }
 async function connect() {
   wsStore.connect();
@@ -128,13 +190,24 @@ describe('displayed review submission and confirmation', () => {
     const displayed = wsStore.captureReview(state.activeSessionId)!;
     await wsStore.respondToChanges(state.activeSessionId, true, displayed);
     await wsStore.respondToChanges(state.activeSessionId, false, displayed);
-    const commands = socket.send.mock.calls.map(([data]) => JSON.parse(data))
+    const commands = socket.send.mock.calls
+      .map(([data]) => JSON.parse(data))
       .filter((data) => ['session.accept_changes', 'session.reject_changes'].includes(data.type));
-    expect(commands).toEqual([expect.objectContaining({ type: 'session.accept_changes',
-      reviewId: 'review-1', reviewRevision: 'revision-1', sessionId: state.activeSessionId })]);
+    expect(commands).toEqual([
+      expect.objectContaining({
+        type: 'session.accept_changes',
+        reviewId: 'review-1',
+        reviewRevision: 'revision-1',
+        sessionId: state.activeSessionId,
+      }),
+    ]);
     expect(wsStore.sessionReviews.get(state.activeSessionId)).toBe(displayed.review);
     expect(wsStore.reviewResponses.get(state.activeSessionId)?.phase).toBe('awaiting_confirmation');
-    emit('session.changes_resolved', { reviewId: 'review-1', reviewRevision: 'revision-1', status: 'accepted' });
+    emit('session.changes_resolved', {
+      reviewId: 'review-1',
+      reviewRevision: 'revision-1',
+      status: 'accepted',
+    });
     expect(wsStore.sessionChanges.has(state.activeSessionId)).toBe(false);
     expect(wsStore.reviewResponses.has(state.activeSessionId)).toBe(false);
   });
@@ -144,11 +217,15 @@ describe('displayed review submission and confirmation', () => {
     const displayed = wsStore.captureReview(state.activeSessionId)!;
     await wsStore.respondToChanges(state.activeSessionId, false, displayed);
     expect(wsStore.sessionReviews.get(state.activeSessionId)).toBe(displayed.review);
-    expect(wsStore.reviewResponses.get(state.activeSessionId)).toMatchObject({ phase: 'failed', error: expect.stringContaining('Connection lost') });
+    expect(wsStore.reviewResponses.get(state.activeSessionId)).toMatchObject({
+      phase: 'failed',
+      error: expect.stringContaining('Connection lost'),
+    });
   });
 
   it.each([
-    { status: 'accepted' }, { status: 'not_pending', reviewId: null },
+    { status: 'accepted' },
+    { status: 'not_pending', reviewId: null },
     { status: 'not_pending', reviewRevision: 'revision-1' },
     { status: 'accepted', reviewId: 'review-1' },
     { status: 'accepted', reviewId: 'review-1', reviewRevision: null },
@@ -177,10 +254,18 @@ describe('displayed review submission and confirmation', () => {
     const current = wsStore.captureReview(state.activeSessionId)!;
     await wsStore.respondToChanges(state.activeSessionId, false, old);
     expect(wsStore.reviewResponses.has(state.activeSessionId)).toBe(false);
-    emit('session.changes_resolved', { reviewId: 'review-1', reviewRevision: 'revision-1', status: 'accepted' });
+    emit('session.changes_resolved', {
+      reviewId: 'review-1',
+      reviewRevision: 'revision-1',
+      status: 'accepted',
+    });
     await wsStore.respondToChanges(state.activeSessionId, false, current);
-    expect(socket.send.mock.calls.map(([data]) => JSON.parse(data)).filter((data) => data.reviewRevision).map((data) => data.reviewRevision))
-      .toEqual(['revision-1', 'revision-2']);
+    expect(
+      socket.send.mock.calls
+        .map(([data]) => JSON.parse(data))
+        .filter((data) => data.reviewRevision)
+        .map((data) => data.reviewRevision),
+    ).toEqual(['revision-1', 'revision-2']);
   });
 
   it('invalidates callbacks across session A→B→A and host changes', async () => {
@@ -193,7 +278,11 @@ describe('displayed review submission and confirmation', () => {
     const current = wsStore.captureReview(state.activeSessionId)!;
     state.origin = 'https://another-host.example';
     await wsStore.respondToChanges(state.activeSessionId, true, current);
-    expect(socket.send.mock.calls.map(([data]) => JSON.parse(data)).filter((data) => data.reviewRevision)).toHaveLength(0);
+    expect(
+      socket.send.mock.calls
+        .map(([data]) => JSON.parse(data))
+        .filter((data) => data.reviewRevision),
+    ).toHaveLength(0);
   });
 
   it('does not substitute a new publication for a button clicked before Svelte commits it', async () => {
@@ -204,12 +293,18 @@ describe('displayed review submission and confirmation', () => {
     emit('session.changes', review('revision-2'));
     button.click();
     await tick();
-    expect(socket.send.mock.calls.map(([data]) => JSON.parse(data)).filter((data) => data.reviewRevision)).toHaveLength(0);
+    expect(
+      socket.send.mock.calls
+        .map(([data]) => JSON.parse(data))
+        .filter((data) => data.reviewRevision),
+    ).toHaveLength(0);
     ui.getByRole('button', { name: 'Keep All' }).click();
     await tick();
-    expect(socket.send.mock.calls.map(([data]) => JSON.parse(data)).filter((data) => data.reviewRevision)).toEqual([
-      expect.objectContaining({ reviewRevision: 'revision-2' }),
-    ]);
+    expect(
+      socket.send.mock.calls
+        .map(([data]) => JSON.parse(data))
+        .filter((data) => data.reviewRevision),
+    ).toEqual([expect.objectContaining({ reviewRevision: 'revision-2' })]);
   });
 
   it('keeps the submission lock and waiting feedback when the review component remounts', async () => {
@@ -247,7 +342,8 @@ describe('displayed review submission and confirmation', () => {
 describe('Stop then Send cancellation handoff', () => {
   it('coalesces repeated session stops and holds the next send until cancellation settles', async () => {
     const cancellation = deferred<any>();
-    state.request = async (path) => path.includes('/cancel') ? cancellation.promise : response({ messageId: 'message-1' });
+    state.request = async (path) =>
+      path.includes('/cancel') ? cancellation.promise : response({ messageId: 'message-1' });
 
     const first = wsStore.cancelSession(state.activeSessionId);
     const second = wsStore.cancelSession(state.activeSessionId);
@@ -264,7 +360,11 @@ describe('Stop then Send cancellation handoff', () => {
     expect(vi.mocked(apiFetch)).toHaveBeenCalledTimes(1);
 
     cancellation.resolve(response({ accepted: true }));
-    await expect(Promise.all([first, second, sending])).resolves.toEqual([undefined, undefined, true]);
+    await expect(Promise.all([first, second, sending])).resolves.toEqual([
+      undefined,
+      undefined,
+      true,
+    ]);
     expect(runStateStore.markUserStopped).toHaveBeenCalledWith(state.activeSessionId);
     expect(vi.mocked(apiFetch).mock.calls.map(([path]) => path)).toEqual([
       `/api/sessions/${state.activeSessionId}/cancel`,
@@ -273,10 +373,12 @@ describe('Stop then Send cancellation handoff', () => {
     expect(wsStore.isCancellationPending(state.activeSessionId)).toBe(false);
   });
 
-  it('steers by cancelling the active run before admitting the replacement message', async () => {
-    const cancellation = deferred<any>();
-    state.request = async (path) =>
-      path.includes('/cancel') ? cancellation.promise : response({ messageId: 'steer-message' });
+  it('steers without a client-side cancel: the backend parks the replacement behind the live run', async () => {
+    // Steering is a checkpoint handoff, not a mid-flight cancel. The client
+    // posts the replacement and the backend parks it (agent_steering_commands)
+    // until the running stack yields at a safe boundary, so no /cancel request
+    // is issued and the old run cannot race the new one.
+    state.request = async () => response({ messageId: 'steer-message', status: 'queued' });
 
     const steering = wsStore.steerMessage(
       state.activeSessionId,
@@ -285,24 +387,15 @@ describe('Stop then Send cancellation handoff', () => {
       'high',
     );
 
-    expect(vi.mocked(apiFetch)).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(apiFetch).mock.calls[0]?.[0]).toBe(
-      `/api/sessions/${state.activeSessionId}/cancel`,
-    );
-
-    cancellation.resolve(response({ accepted: true }));
     await expect(steering).resolves.toBe(true);
-    expect(vi.mocked(apiFetch).mock.calls.map(([path]) => path)).toEqual([
-      `/api/sessions/${state.activeSessionId}/cancel`,
-      '/api/messages',
-    ]);
+    expect(vi.mocked(apiFetch).mock.calls.map(([path]) => path)).toEqual(['/api/messages']);
+    expect(wsStore.isCancellationPending(state.activeSessionId)).toBe(false);
   });
 
   it('reports an HTTP or JSON failure and does not optimistically add a message', async () => {
     const cancellation = deferred<any>();
-    state.request = async (path) => path.includes('/cancel')
-      ? cancellation.promise
-      : response({ messageId: 'should-not-send' });
+    state.request = async (path) =>
+      path.includes('/cancel') ? cancellation.promise : response({ messageId: 'should-not-send' });
     const before = wsStore.feed.length;
 
     const stop = wsStore.cancelSession(state.activeSessionId);
@@ -315,7 +408,9 @@ describe('Stop then Send cancellation handoff', () => {
     // restores the authoritative fence instead of leaving a false stopped run.
     expect(runStateStore.markUserStopped).toHaveBeenCalledWith(state.activeSessionId);
     expect(runStateStore.clearUserStopped).toHaveBeenCalledWith(state.activeSessionId);
-    expect(toastStore.error).toHaveBeenCalledWith(expect.stringContaining('Could not stop this session'));
+    expect(toastStore.error).toHaveBeenCalledWith(
+      expect.stringContaining('Could not stop this session'),
+    );
     expect(wsStore.feed).toHaveLength(before);
     expect(vi.mocked(apiFetch).mock.calls.map(([path]) => path)).toEqual([
       `/api/sessions/${state.activeSessionId}/cancel`,
@@ -324,7 +419,8 @@ describe('Stop then Send cancellation handoff', () => {
 
   it('isolates agent cancellation by session and coalesces only the same agent turn', async () => {
     const cancellation = deferred<any>();
-    state.request = async (path) => path.includes('/cancel') ? cancellation.promise : response({ ok: true });
+    state.request = async (path) =>
+      path.includes('/cancel') ? cancellation.promise : response({ ok: true });
 
     const stopA = wsStore.cancelAgent('session-a', 'agent-1');
     const repeatA = wsStore.cancelAgent('session-a', 'agent-1');
@@ -346,7 +442,10 @@ describe('Stop then Send cancellation handoff', () => {
 });
 
 describe('linked review execution and snapshot ordering', () => {
-  async function open(target = chat(`linked-${sequence}`), data = snapshot(target, { review: review(), question: question() })) {
+  async function open(
+    target = chat(`linked-${sequence}`),
+    data = snapshot(target, { review: review(), question: question() }),
+  ) {
     state.request = async () => response(data);
     await deviceStore.openChat(target);
     return target;
@@ -362,22 +461,43 @@ describe('linked review execution and snapshot ordering', () => {
     expect(wsStore.reviewResponses.get(key)?.phase).toBe('submitting');
     await wsStore.respondToChanges(key, true, displayed);
     expect(rpcBodies().filter((body) => body.operation === 'review')).toEqual([
-      { operation: 'review', input: { sessionId: target.id, accept: false, reviewId: 'review-1', reviewRevision: 'revision-1' } },
+      {
+        operation: 'review',
+        input: {
+          sessionId: target.id,
+          accept: false,
+          reviewId: 'review-1',
+          reviewRevision: 'revision-1',
+        },
+      },
     ]);
-    pending.resolve(response({ reviewed: true, reviewId: 'review-1', reviewRevision: 'revision-1', status: 'rejected' }));
+    pending.resolve(
+      response({
+        reviewed: true,
+        reviewId: 'review-1',
+        reviewRevision: 'revision-1',
+        status: 'rejected',
+      }),
+    );
     await submitting;
     expect(deviceStore.snapshot?.review).toBeNull();
   });
 
-  it.each([response({}, true), response({ reviewed: true, reviewId: 'review-1', reviewRevision: 'old', status: 'accepted' }), response({}, false)])
-    ('preserves a linked review when transport success lacks a valid execution result', async (result) => {
+  it.each([
+    response({}, true),
+    response({ reviewed: true, reviewId: 'review-1', reviewRevision: 'old', status: 'accepted' }),
+    response({}, false),
+  ])(
+    'preserves a linked review when transport success lacks a valid execution result',
+    async (result) => {
       const target = await open();
       state.request = async () => result;
       const key = deviceSessionKey(target);
       await wsStore.respondToChanges(key, true, wsStore.captureReview(key)!);
       expect(deviceStore.snapshot?.review?.reviewRevision).toBe('revision-1');
       expect(wsStore.reviewResponses.get(key)?.phase).toBe('uncertain');
-    });
+    },
+  );
 
   it('does not let a late RPC response resolve a same-ID replacement review', async () => {
     const target = await open();
@@ -386,7 +506,14 @@ describe('linked review execution and snapshot ordering', () => {
     state.request = () => pending.promise;
     const submitting = wsStore.respondToChanges(key, true, wsStore.captureReview(key)!);
     linkedEvent(target, 'session.changes', review('revision-2'));
-    pending.resolve(response({ reviewed: true, reviewId: 'review-1', reviewRevision: 'revision-1', status: 'accepted' }));
+    pending.resolve(
+      response({
+        reviewed: true,
+        reviewId: 'review-1',
+        reviewRevision: 'revision-1',
+        status: 'accepted',
+      }),
+    );
     await submitting;
     expect(deviceStore.snapshot?.review?.reviewRevision).toBe('revision-2');
     expect(wsStore.reviewResponses.has(key)).toBe(false);
@@ -423,7 +550,8 @@ describe('linked review execution and snapshot ordering', () => {
     const target = await open();
     linkedEvent(target, 'session.changes_resolved', { status: 'accepted', reviewId: 'review-1' });
     linkedEvent(target, 'kory.ask_user_resolved', { status: 'answered', questionId: 'other' });
-    state.request = async () => response({ chat: target, review: { changes: null }, question: undefined });
+    state.request = async () =>
+      response({ chat: target, review: { changes: null }, question: undefined });
     await deviceStore.refreshChat();
     expect(deviceStore.snapshot?.review?.reviewRevision).toBe('revision-1');
     expect(deviceStore.snapshot?.question?.questionId).toBe('question-1');
@@ -441,12 +569,26 @@ describe('linked review execution and snapshot ordering', () => {
     state.request = () => (++calls === 1 ? older.promise : newer.promise);
     const first = deviceStore.refreshChat();
     const second = deviceStore.refreshChat();
-    newer.resolve(response(snapshot(target, { review: review('newer'), run: { phase: 'working', status: 'active', revision: 20 } })));
+    newer.resolve(
+      response(
+        snapshot(target, {
+          review: review('newer'),
+          run: { phase: 'working', status: 'active', revision: 20 },
+        }),
+      ),
+    );
     await second;
     linkedEvent(target, 'stream.delta', { agentId: 'kory-manager', content: 'working' });
-    older.resolve(response(snapshot(target, { review: null, run: { phase: 'done', status: 'terminal', revision: 2 } })));
+    older.resolve(
+      response(
+        snapshot(target, { review: null, run: { phase: 'done', status: 'terminal', revision: 2 } }),
+      ),
+    );
     await first;
-    linkedEvent(target, 'run.state', { snapshot: { phase: 'done', status: 'terminal', revision: 3 }, transition: null });
+    linkedEvent(target, 'run.state', {
+      snapshot: { phase: 'done', status: 'terminal', revision: 3 },
+      transition: null,
+    });
     expect(deviceStore.snapshot?.run?.revision).toBe(20);
     expect(deviceStore.snapshot?.review?.reviewRevision).toBe('newer');
     expect(deviceStore.drafts['kory-manager']).toBe('working');
@@ -485,7 +627,9 @@ describe('linked review execution and snapshot ordering', () => {
     keep.click();
     answer.click();
     await tick();
-    expect(rpcBodies().filter((body) => ['review', 'answer'].includes(body.operation))).toHaveLength(0);
+    expect(
+      rpcBodies().filter((body) => ['review', 'answer'].includes(body.operation)),
+    ).toHaveLength(0);
   });
 
   it('keeps linked component submission locks after remount and snapshot replay', async () => {
@@ -501,7 +645,14 @@ describe('linked review execution and snapshot ordering', () => {
     linkedEvent(target, 'session.changes', review());
     await tick();
     expect(second.getByRole('button', { name: 'Reject changes' })).toBeDisabled();
-    pending.resolve(response({ reviewed: true, reviewId: 'review-1', reviewRevision: 'revision-1', status: 'accepted' }));
+    pending.resolve(
+      response({
+        reviewed: true,
+        reviewId: 'review-1',
+        reviewRevision: 'revision-1',
+        status: 'accepted',
+      }),
+    );
     await waitFor(() => expect(second.queryByRole('button', { name: 'Keep changes' })).toBeNull());
   });
 
@@ -541,10 +692,20 @@ describe('linked review execution and snapshot ordering', () => {
     const pending = deferred<any>();
     state.request = () => pending.promise;
     wsStore.subscribeToSession(deviceSessionKey(target));
-    await waitFor(() => expect(rpcBodies().filter((body) => body.operation === 'open_chat').length).toBeGreaterThan(1));
-    linkedEvent(target, 'session.changes_resolved', { reviewId: 'review-1', reviewRevision: 'revision-1', status: 'accepted' });
+    await waitFor(() =>
+      expect(rpcBodies().filter((body) => body.operation === 'open_chat').length).toBeGreaterThan(
+        1,
+      ),
+    );
+    linkedEvent(target, 'session.changes_resolved', {
+      reviewId: 'review-1',
+      reviewRevision: 'revision-1',
+      status: 'accepted',
+    });
     linkedEvent(target, 'kory.ask_user', question('new-question'));
-    pending.resolve(response(snapshot(target, { review: review(), question: question('old-question') })));
+    pending.resolve(
+      response(snapshot(target, { review: review(), question: question('old-question') })),
+    );
     await tick();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(deviceStore.snapshot?.review).toBeNull();

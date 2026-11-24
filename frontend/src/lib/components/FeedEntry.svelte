@@ -313,6 +313,52 @@ import {
   let variantIdentityAuthoritative = $derived(
     entry.metadata?.variantIdentityAuthoritative === true,
   );
+  // Token usage for an imported row: recorded by the source CLI when it kept
+  // it, otherwise estimated by Koryphaios at import (chars/4). Display-only:
+  // it is never part of spend caps or analytics.
+  let importedUsage = $derived(
+    entry.metadata?.importedUsage as
+      | {
+          input?: number;
+          output?: number;
+          cacheRead?: number;
+          cacheWrite?: number;
+          estimated?: boolean;
+        }
+      | undefined,
+  );
+  let importedUsageLabel = $derived.by(() => {
+    if (!importedUsage) return null;
+    const total =
+      (importedUsage.input ?? 0) +
+      (importedUsage.output ?? 0) +
+      (importedUsage.cacheRead ?? 0) +
+      (importedUsage.cacheWrite ?? 0);
+    if (total <= 0) return null;
+    const rounded = total >= 1000 ? `${(total / 1000).toFixed(1).replace(/\.0$/, '')}k` : `${total}`;
+    return `${importedUsage.estimated ? '~' : ''}${rounded} tok`;
+  });
+  let importedUsageTitle = $derived.by(() => {
+    if (!importedUsage) return null;
+    const parts: string[] = [];
+    if (importedUsage.input) parts.push(`${importedUsage.input.toLocaleString()} in`);
+    if (importedUsage.output) parts.push(`${importedUsage.output.toLocaleString()} out`);
+    const cached = (importedUsage.cacheRead ?? 0) + (importedUsage.cacheWrite ?? 0);
+    if (cached) parts.push(`${cached.toLocaleString()} cached`);
+    if (parts.length === 0) return null;
+    const source = importedUsage.estimated
+      ? 'estimated by Koryphaios (the source CLI recorded no usage)'
+      : 'recorded by the source CLI';
+    return `${parts.join(' · ')} tokens ${source} — not counted toward usage limits`;
+  });
+  let gutterTitle = $derived(
+    [
+      entry.timeUnknown ? 'The source recorded no time for this message' : null,
+      importedUsageTitle,
+    ]
+      .filter(Boolean)
+      .join('\n') || undefined,
+  );
   let isImageResponse = $derived(
     Array.isArray(currentAttachments) &&
       currentAttachments.some((a) => (a as { type?: string }).type === 'image'),
@@ -322,8 +368,12 @@ import {
   // message. It is operational telemetry, not a human answer, and it was the
   // source of the giant “Task … finished with output” blocks in the feed.
   let rawTaskTranscript = $derived(
-    /^Task\s+[\w-]+\/task-\d+\s+finished with output:/i.test(currentText.trim()) ||
-      /^Created At:.*(?:Task:|Task logs are available)/ims.test(currentText.trim()),
+    /^Task\s+[\w-]+\/task-\d+\s+finished with output:/i.test(
+      typeof currentText === 'string' ? currentText.trim() : '',
+    ) ||
+      /^Created At:.*(?:Task:|Task logs are available)/ims.test(
+        typeof currentText === 'string' ? currentText.trim() : '',
+      ),
   );
 
   // Sub-agent rows in the manager feed are a progress log, not a transcript.
@@ -983,14 +1033,14 @@ import {
           : 'whitespace-nowrap leading-6'}"
         style="color: var(--feed-chrome-fg, var(--color-text-muted))"
         aria-hidden={isToolActivity}
-        title={entry.timeUnknown && !isToolActivity ? 'The source recorded no time for this message' : undefined}
+        title={isToolActivity ? undefined : gutterTitle}
       >
         <!-- An imported row whose source recorded no time: its timestamp only
              orders it, so it must not claim a clock time. -->
         {#if !isToolActivity}{#if entry.timeUnknown}Time unknown{:else}{new Date(entry.timestamp).toLocaleTimeString([], {
           hour: '2-digit',
           minute: '2-digit',
-        })}{/if}{/if}
+        })}{/if}{#if importedUsageLabel}<span class="block text-[10px] leading-tight opacity-80 whitespace-nowrap">{importedUsageLabel}</span>{/if}{/if}
       </span>
 
       {#if entry.type === 'user_message'}

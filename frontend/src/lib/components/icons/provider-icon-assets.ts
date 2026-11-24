@@ -856,7 +856,6 @@ export const EXISTING_PROVIDER_ICON_PATHS = new Set<string>([
   '/provider-icons/numes.svg',
   '/provider-icons/radeon.svg',
   '/provider-icons/runcrate-color.png',
-  '/provider-icons/vyceai.svg',
   '/provider-icons/openrouter-color.svg',
   '/provider-icons/unorouter-color.svg',
   '/provider-icons/ovhcloud-color.svg',

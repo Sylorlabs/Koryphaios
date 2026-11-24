@@ -97,6 +97,7 @@
   // the last backend-reported value, so it moves smoothly between supervisor
   // events rather than jumping in ~5s steps.
   const STARTING_PHASE_LABELS: Record<string, string> = {
+    launching: 'Loading the backend',
     configuration: 'Loading configuration',
     'database-and-erasure-recovery': 'Opening and migrating the database',
     'database-migrations': 'Applying database migrations',

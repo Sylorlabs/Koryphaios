@@ -4,7 +4,12 @@
   import FolderOpen from 'lucide-svelte/icons/folder-open';
   import Layers from 'lucide-svelte/icons/layers';
   import MonitorSmartphone from 'lucide-svelte/icons/monitor-smartphone';
-  import { projectDisplayName, projectStore } from '$lib/stores/project.svelte';
+  import {
+    currentProjectIdentity,
+    projectDisplayName,
+    projectIdentityFor,
+    projectStore,
+  } from '$lib/stores/project.svelte';
   import { deviceStore } from '$lib/stores/devices.svelte';
   import { selectProjectNavigation } from '$lib/utils/project-navigation';
   import { toastStore } from '$lib/stores/toast.svelte';
@@ -38,24 +43,32 @@
   }: Props = $props();
 
   let openMenu = $state<'project' | 'environment' | null>(null);
-  let projectScopeMode = $state<'all' | 'project'>(
+  // Scope comes straight from the store so a snapshot or a selection made in
+  // another view cannot leave this menu reporting a stale mode.
+  const projectScopeMode = $derived(
     projectStore.currentPath && projectStore.scope === 'project' ? 'project' : 'all',
   );
 
   const availableProjects = $derived.by(() => {
     const map = new Map<string, { path: string; name: string }>();
     for (const p of projectStore.workspaceProjects) {
-      map.set(p.path, { path: p.path, name: p.name || projectDisplayName(p.path) });
+      map.set(p.path, { path: p.path, name: projectIdentityFor(p).name });
     }
     for (const path of projectStore.openProjects) {
       if (!map.has(path)) {
-        map.set(path, { path, name: projectDisplayName(path) });
+        map.set(path, {
+          path,
+          name:
+            path === projectStore.currentPath
+              ? (currentProjectIdentity()?.name ?? projectDisplayName(path))
+              : projectDisplayName(path),
+        });
       }
     }
     if (projectStore.currentPath && !map.has(projectStore.currentPath)) {
       map.set(projectStore.currentPath, {
         path: projectStore.currentPath,
-        name: projectDisplayName(projectStore.currentPath),
+        name: currentProjectIdentity()?.name ?? projectDisplayName(projectStore.currentPath),
       });
     }
     return [...map.values()];
@@ -68,7 +81,7 @@
     // Notes always reads the current project's collection, so a concrete name
     // is the honest label even when the workspace scope is "all".
     if (showProjectName && projectStore.currentPath) {
-      return projectDisplayName(projectStore.currentPath) || projectLabel;
+      return currentProjectIdentity()?.name || projectLabel;
     }
     if (projectScopeMode === 'all' || !projectStore.currentPath) {
       return `All ${projectLabel.toLowerCase()}s`;
@@ -100,16 +113,18 @@
   async function selectProjectOption(path: string | null) {
     openMenu = null;
     if (path === null) {
-      projectScopeMode = 'all';
       projectStore.setScope('all');
       return;
     }
-    projectScopeMode = 'project';
     projectStore.setScope('project');
     if (path !== projectStore.currentPath) {
-      const res = await selectProjectNavigation(path);
-      if (!res.ok) {
-        toastStore.error(res.error);
+      try {
+        const res = await selectProjectNavigation(path);
+        if (!res.ok) {
+          toastStore.error(res.error);
+        }
+      } catch (error) {
+        toastStore.error(error instanceof Error ? error.message : 'Could not switch project');
       }
     }
   }

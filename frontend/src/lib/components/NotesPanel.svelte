@@ -3282,7 +3282,7 @@
           <SettingsSwitch
             checked={notesStore.settings.maxContextTokensEnabled}
             label="Context budget"
-            description="Off still applies the 100,000-token safety ceiling"
+            description="Off includes all selected notes without a token cap"
             onchange={() => {
               void notesStore.updateSettings({
                 maxContextTokensEnabled: !notesStore.settings.maxContextTokensEnabled,

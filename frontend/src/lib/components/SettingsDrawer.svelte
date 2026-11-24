@@ -1,7 +1,13 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from 'svelte';
   import { fade, fly } from 'svelte/transition';
-  import { providerCapabilityKinds, type ProviderCapabilityKind } from '@koryphaios/shared';
+  import {
+    NOTE_TOOL_DEFINITIONS,
+    providerCapabilityKinds,
+    type NotePermissionLevel,
+    type NotesPermissionPreset,
+    type ProviderCapabilityKind,
+  } from '@koryphaios/shared';
   import { providersStore } from '$lib/stores/providers.svelte';
   import { theme } from '$lib/stores/theme.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
@@ -102,6 +108,7 @@
   import Layers from 'lucide-svelte/icons/layers';
   import SkillsWorkspace from './SkillsWorkspace.svelte';
   import KnowledgeScope from './KnowledgeScope.svelte';
+  import SegmentedChoice from './agent-settings/SegmentedChoice.svelte';
   import ProjectIdentitySettings from './settings/ProjectIdentitySettings.svelte';
   import ProviderIconContextMenu from './ProviderIconContextMenu.svelte';
   import UsageAnalyticsDashboard from './settings/UsageAnalyticsDashboard.svelte';
@@ -401,6 +408,55 @@
     }
   });
 
+  const notePermissionLevelOptions = [
+    { value: 'auto', label: 'Auto', description: 'Runs without asking' },
+    { value: 'ask', label: 'Ask', description: 'Needs your approval' },
+    { value: 'block', label: 'Block', description: 'Hidden from agents' },
+  ];
+
+  const notePermissionPresetOptions = $derived.by(() => {
+    const options: { value: string; label: string; description: string; disabled?: boolean }[] = [
+      {
+        value: 'default',
+        label: 'Recommended',
+        description: 'Reads run freely; writes ask first',
+      },
+      {
+        value: 'allow_all',
+        label: 'Allow all',
+        description: 'Every note tool runs without approval',
+      },
+      {
+        value: 'ask_all',
+        label: 'Ask first',
+        description: 'Every note tool needs your approval',
+      },
+      {
+        value: 'block_all',
+        label: 'Block all',
+        description: 'Agents cannot use note tools',
+      },
+    ];
+    if (notesStore.agentPermissions.preset === 'custom') {
+      options.push({
+        value: 'custom',
+        label: 'Custom',
+        description: 'Your mixed per-tool policy',
+        disabled: true,
+      });
+    }
+    return options;
+  });
+
+  const notePermissionGroups = $derived.by(() =>
+    (['read', 'write'] as const)
+      .map((category) => ({
+        title: category === 'read' ? 'Read tools' : 'Write tools',
+        tools: NOTE_TOOL_DEFINITIONS.filter((tool) => tool.category === category),
+      }))
+      .filter((group) => group.tools.length > 0),
+  );
+
   function handleKeydown(e: KeyboardEvent) {
     if (!open || e.defaultPrevented) return;
     if (e.key === 'Escape') {
@@ -584,6 +640,32 @@
     }
   });
 
+  // Freebuff account-hour snapshots shown on the provider card itself — the
+  // billing dashboard's cliUsage feed only loads on the billing tab, so the
+  // card fetches the dedicated account endpoint when this section opens.
+  let freebuffAccountRows = $state<
+    Array<{ accountId: string; label?: string; snapshot?: import('@koryphaios/shared').FreebuffAccountSnapshot }>
+  >([]);
+
+  async function loadFreebuffAccountRows() {
+    try {
+      const res = await apiFetch(apiUrl('/api/providers/freebuff/account'), {}, 15_000);
+      const body = await parseJsonResponse<{ data?: typeof freebuffAccountRows }>(res);
+      freebuffAccountRows = Array.isArray(body?.data) ? body.data : [];
+    } catch {
+      freebuffAccountRows = [];
+    }
+  }
+
+  // The hour rows are fetched lazily on card expansion rather than inside
+  // loadProviderSection: a throw in an upstream loader there must never starve
+  // this fetch, and expanding is exactly when the balance is visible.
+  $effect(() => {
+    if (open && expandedProvider === 'freebuff' && freebuffAccountRows.length === 0) {
+      void loadFreebuffAccountRows();
+    }
+  });
+
   async function loadProviderSection() {
     providersLoading = true;
     try {
@@ -601,6 +683,7 @@
       if (providersStore.availableProviderTypes.length === 0) await loadAvailableProviders();
       await loadProvidersFromApi({ forceRefreshModels: true });
       await loadDetectedClis();
+      await loadFreebuffAccountRows();
     } finally {
       providersLoading = false;
     }
@@ -2662,6 +2745,11 @@
                               <div class="text-xs leading-relaxed text-[var(--color-text-muted)]">
                                 Not connected.
                               </div>
+                            {/if}
+                            {#if prov.key === 'freebuff'}
+                              {#each freebuffAccountRows as row (`freebuff-hours:${row.accountId}`)}
+                                <FreebuffBalance account={row.snapshot} variant="compact" />
+                              {/each}
                             {/if}
                           {:else if configurationBlocked}
                             <div
@@ -4893,6 +4981,7 @@
               <KnowledgeScope
                 compact
                 scope="Project"
+                showProjectName
                 description="Notes belong to the selected project folder. Subfolders organize its collection. Markdown and HTML files can appear as live documents. Pinning changes list order; inclusion in agent context is a separate choice."
               />
             {/snippet}
@@ -5039,7 +5128,7 @@
                   <p>
                     {(notesStore.settings.maxContextTokensEnabled ?? true)
                       ? 'Maximum tokens from explicitly selected notes.'
-                      : 'Custom limit off · the 100,000-token ceiling still applies.'}
+                      : 'No token cap — selected notes are included in full.'}
                   </p>
                 </div>
                 <div class="notes-row-controls">
@@ -5073,6 +5162,77 @@
                   />
                 </div>
               </div>
+              <div class="notes-setting-row">
+                <div>
+                  <span class="notes-row-label">Note tool preset</span>
+                  <p>Baseline approval for every note tool. Tune individual tools below.</p>
+                </div>
+                <div class="notes-profile-control">
+                  <KorySelect
+                    compact
+                    value={notesStore.agentPermissions.preset}
+                    options={notePermissionPresetOptions}
+                    label="Note tool permission preset"
+                    disabled={!notesStore.agentPermissionsLoaded ||
+                      notesStore.agentPermissionsSaving}
+                    onchange={(value) => {
+                      if (value !== 'custom') {
+                        void notesStore.applyAgentPermissionPreset(
+                          value as Exclude<NotesPermissionPreset, 'custom'>,
+                        );
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+              <details class="notes-disclosure">
+                <summary
+                  ><div>
+                    <h4>Per-tool permissions</h4>
+                    <p>Approve, automate, or hide each note tool.</p>
+                  </div>
+                  <ChevronDown size={14} /></summary
+                >
+                <div class="notes-disclosure-body">
+                  {#if notesStore.agentPermissionsLoaded}
+                    {#each notePermissionGroups as group (group.title)}
+                      <h5 class="notes-permission-group">{group.title}</h5>
+                      {#each group.tools as tool (tool.name)}
+                        <div class="notes-permission-row">
+                          <span
+                            class="notes-permission-label"
+                            data-kory-tooltip={tool.description}>{tool.label}</span
+                          >
+                          <span class="notes-permission-controls">
+                            <SegmentedChoice
+                              label={`${tool.label} permission`}
+                              value={notesStore.agentPermissions.tools[tool.name]}
+                              options={notePermissionLevelOptions}
+                              hideDescription
+                              disabled={notesStore.agentPermissionsSaving}
+                              onchange={(value) =>
+                                void notesStore.setAgentToolPermission(
+                                  tool.name,
+                                  value as NotePermissionLevel,
+                                )}
+                            />
+                          </span>
+                        </div>
+                      {/each}
+                    {/each}
+                    <button
+                      type="button"
+                      class="notes-text-action"
+                      onclick={() => void notesStore.resetAgentPermissions()}
+                      >Reset to defaults</button
+                    >
+                  {:else}
+                    <p class="notes-permission-empty">
+                      Note tool permissions load with the selected project.
+                    </p>
+                  {/if}
+                </div>
+              </details>
             </section>
 
             <!-- Graph tuning is secondary to everyday Notes setup. -->
@@ -5608,6 +5768,41 @@
     border-color: transparent;
     border-radius: 7px;
     background: var(--color-surface-2);
+  }
+  .notes-permission-group {
+    margin: 14px 0 2px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+  }
+  .notes-permission-group:first-child {
+    margin-top: 0;
+  }
+  .notes-permission-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    min-height: 44px;
+    padding: 4px 0;
+  }
+  .notes-permission-label {
+    min-width: 0;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--color-text-primary);
+    cursor: help;
+  }
+  .notes-permission-controls {
+    flex-shrink: 0;
+  }
+  .notes-permission-empty {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--color-text-muted);
   }
   .notes-text-action {
     display: inline-flex;

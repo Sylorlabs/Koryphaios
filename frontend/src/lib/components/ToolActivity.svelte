@@ -7,7 +7,7 @@
   import ToolActivityIcon from './ToolActivityIcon.svelte';
   import SubagentSection from './SubagentSection.svelte';
   import type { FeedEntryLocal } from '$lib/types';
-  import type { SubagentTranscript } from '@koryphaios/shared';
+  import type { SubagentStub, SubagentTranscript } from '@koryphaios/shared';
   import { toolPresentation } from '$lib/utils/tool-presentation';
   import { copyText } from '$lib/utils/clipboard';
   import { sessionStore } from '$lib/stores/sessions.svelte';
@@ -50,6 +50,7 @@
   // duration at all rather than a ticking clock or "0 ms".
   const durationUnknown = $derived(isDurationUnknown(entry));
   const subagent = $derived(subagentOf(entry));
+  const subagentStub = $derived(subagentStubOf(entry));
   const subagentSessionId = $derived(typeof entry.metadata?.sessionId === 'string' ? entry.metadata.sessionId : '');
   const toolComplete = $derived(tool.complete || (grouped && steps.length > 0 && steps.every((s) => s.type === 'tool_result')));
   let now = $state(Date.now());
@@ -149,6 +150,16 @@
   function subagentOf(row: FeedEntryLocal): SubagentTranscript | null {
     const value = row.metadata?.subagent as SubagentTranscript | undefined;
     if (!value || typeof value !== 'object' || typeof value.name !== 'string' || !Array.isArray(value.turns)) return null;
+    return value;
+  }
+
+  function subagentStubOf(row: FeedEntryLocal): SubagentStub | null {
+    const value = row.metadata?.subagentStub as SubagentStub | undefined;
+    if (
+      !value || typeof value !== 'object' || typeof value.name !== 'string' ||
+      typeof value.turnCount !== 'number' || typeof value.ref !== 'object' || value.ref === null ||
+      typeof value.ref.messageId !== 'string' || !Array.isArray(value.ref.path)
+    ) return null;
     return value;
   }
 
@@ -275,8 +286,8 @@
     <ChevronRight size={12} class={`disclosure ${open ? 'expanded' : ''}`} />
   </button>
 
-  {#if subagent && !grouped}
-    <SubagentSection {subagent} sessionId={subagentSessionId} ownerId={entry.id} />
+  {#if (subagent || subagentStub) && !grouped}
+    <SubagentSection {subagent} stub={subagentStub} sessionId={subagentSessionId} ownerId={entry.id} />
   {/if}
 
   {#if open}

@@ -19,12 +19,12 @@ describe('settings scope visibility', () => {
   it('keeps scope controls at the contextual settings boundaries', () => {
     expect(agentSource).toContain('projectLabel="Project"');
     expect(agentSource).toContain('projectSelector="current"');
-    expect(knowledgeSource).toContain('<SettingsScopeBar {compact} {projectLabel} />');
+    expect(knowledgeSource).toContain(
+      '<SettingsScopeBar {compact} {projectLabel} {showProjectName} />',
+    );
     expect(knowledgeSource).not.toContain('projectDisplayName(projectStore.currentPath)');
     expect(knowledgeSource).toContain("scope.split(' · ')[0] || scope");
-    expect(knowledgeSource).toContain(
-      "scopeLabel !== 'Personal' && scopeLabel !== 'Session'",
-    );
+    expect(knowledgeSource).toContain("scopeLabel !== 'Personal' && scopeLabel !== 'Session'");
   });
 
   it('does not render an environment switcher without a real change handler', () => {

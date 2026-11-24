@@ -38,15 +38,23 @@ export function latestPlanText(entries: FeedEntry[]): string {
       .reverse()
       .find(
         (entry) =>
-          entry.type === 'content' && entry.agentId !== 'user' && entry.text.trim().length > 0,
+          entry.type === 'content' &&
+          entry.agentId !== 'user' &&
+          typeof entry.text === 'string' &&
+          entry.text.trim().length > 0,
       )
-      ?.text.trim() ?? ''
+      ?.text?.trim() ?? ''
   );
 }
 
 export function originalPlanRequest(entries: FeedEntry[], fallback: string): string {
   return (
-    entries.find((entry) => entry.type === 'user_message' && entry.text.trim())?.text.trim() ??
+    entries
+      .find(
+        (entry) =>
+          entry.type === 'user_message' && typeof entry.text === 'string' && entry.text.trim(),
+      )
+      ?.text?.trim() ??
     fallback.trim() ??
     'Complete the approved plan'
   );

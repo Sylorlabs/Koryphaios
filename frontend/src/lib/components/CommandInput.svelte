@@ -29,6 +29,7 @@
   import Pencil from 'lucide-svelte/icons/pencil';
   import MessageCircleQuestion from 'lucide-svelte/icons/message-circle-question';
   import SlidersHorizontal from 'lucide-svelte/icons/sliders-horizontal';
+  import Info from 'lucide-svelte/icons/info';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
   import { formatChord, formatShortcut } from '$lib/utils/platform';
@@ -45,6 +46,7 @@
   import BrainIcon from '$lib/components/icons/BrainIcon.svelte';
   import ProviderIcon from '$lib/components/icons/ProviderIcon.svelte';
   import ImageInputFallbackDialog from './ImageInputFallbackDialog.svelte';
+  import SettingsSwitch from './SettingsSwitch.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import {
     forgetTrustedImageModel,
@@ -394,6 +396,13 @@
       accountId: string;
       label: string;
       snapshot: FreebuffAccountSnapshot;
+      turn?: {
+        accountId: string;
+        sessionId: string;
+        role: string;
+        startedAt: number;
+        deadlineAt: number;
+      } | null;
     }>
   >([]);
   let freebuffAccountRefreshTimer: ReturnType<typeof setInterval> | null = null;
@@ -409,6 +418,7 @@
     composerUnmounted = true;
     contextPreviewAbortController?.abort();
     if (freebuffAccountRefreshTimer) clearInterval(freebuffAccountRefreshTimer);
+    if (freebuffTickTimer) clearInterval(freebuffTickTimer);
   });
 
   async function refreshFreebuffAccount(): Promise<void> {
@@ -422,7 +432,18 @@
         const response = await apiFetch(apiUrl('/api/providers/freebuff/account'));
         const payload = (await response.json()) as {
           ok?: boolean;
-          data?: Array<{ accountId: string; label: string; snapshot: FreebuffAccountSnapshot }>;
+          data?: Array<{
+            accountId: string;
+            label: string;
+            snapshot: FreebuffAccountSnapshot;
+            turn?: {
+              accountId: string;
+              sessionId: string;
+              role: string;
+              startedAt: number;
+              deadlineAt: number;
+            } | null;
+          }>;
         };
         if (response.ok && payload.ok === true && Array.isArray(payload.data)) {
           freebuffAccountRows = payload.data;
@@ -442,6 +463,41 @@
     // first fresh snapshot promptly without forcing extra provider requests.
     freebuffAccountRefreshTimer = setInterval(() => void refreshFreebuffAccount(), 15_000);
   });
+
+  // Live countdown for this session's active Freebuff turn. The backend stamps
+  // the real abort deadline; the 15s poll picks the row up and the 1s tick
+  // keeps the label honest. The row disappears on terminal state because the
+  // provider drops it when the slot is released.
+  let freebuffTickNow = $state(Date.now());
+  let freebuffTickTimer: ReturnType<typeof setInterval> | null = null;
+  const freebuffActiveTurn = $derived(
+    freebuffAccountRows
+      .map((row) => row.turn)
+      .find(
+        (turn) =>
+          turn != null &&
+          turn.sessionId === sessionStore.activeSessionId &&
+          turn.deadlineAt > freebuffTickNow,
+      ) ?? null,
+  );
+  $effect(() => {
+    if (freebuffActiveTurn && !freebuffTickTimer) {
+      freebuffTickNow = Date.now();
+      freebuffTickTimer = setInterval(() => (freebuffTickNow = Date.now()), 1_000);
+    } else if (!freebuffActiveTurn && freebuffTickTimer) {
+      clearInterval(freebuffTickTimer);
+      freebuffTickTimer = null;
+    }
+  });
+  function formatFreebuffTurnRemaining(ms: number): string {
+    const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+    return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, '0')}`;
+  }
+  const freebuffTurnCountdown = $derived(
+    freebuffActiveTurn
+      ? formatFreebuffTurnRemaining(freebuffActiveTurn.deadlineAt - freebuffTickNow)
+      : null,
+  );
 
   function currentDraftKey(): string {
     return draftKey.trim() || 'welcome';
@@ -1494,6 +1550,9 @@
           | undefined;
         if (catalog && catalog.length > 0) {
           for (const m of catalog) {
+            // 'cli-default' is the CLI's managed-selection policy, not a model.
+            // The backend keeps it valid for existing sessions; the picker hides it.
+            if (p.name === 'freebuff' && m.id === 'freebuff/cli-default') continue;
             if (enabledIds.size === 0 || enabledIds.has(m.id)) {
               models.push({
                 label: `(${providerLabel(p.name)}) ${m.name}`,
@@ -1663,8 +1722,36 @@
   function formatFreebuffProviderRate(value: number | undefined): string | undefined {
     const multiplier = freebuffRateMultiplier(value, freebuffRateBase());
     if (multiplier === undefined) return undefined;
+    if (multiplier === 0) return 'Free';
     const rounded = Math.round(multiplier * 10) / 10;
     return `${formatFreebucks(rounded)}x`;
+  }
+
+  /** Facts the freebuff account catalog reported per model — context window,
+   * reasoning levels and vision. Absent data stays absent; never invented. */
+  function freebuffModelDetailLine(model: {
+    contextWindow?: number;
+    reasoningLevels?: string[];
+    vision?: boolean;
+  }): string {
+    const parts: string[] = [];
+    if (
+      typeof model.contextWindow === 'number' &&
+      Number.isFinite(model.contextWindow) &&
+      model.contextWindow > 0
+    ) {
+      const context =
+        model.contextWindow >= 1_000_000
+          ? `${Math.round(model.contextWindow / 100_000) / 10}M`
+          : model.contextWindow >= 1_000
+            ? `${Math.round(model.contextWindow / 1_000)}K`
+            : String(model.contextWindow);
+      parts.push(`${context} context`);
+    }
+    if (model.reasoningLevels?.length)
+      parts.push(`reasoning: ${model.reasoningLevels.join('/')}`);
+    if (model.vision === true) parts.push('vision');
+    return parts.join(' · ');
   }
 
   let selectedModelLabel = $derived.by(() => {
@@ -3368,6 +3455,21 @@
     return def.kind === 'float' ? v.toFixed(2) : String(Math.round(v));
   }
 
+  /** Hover copy for parameters whose names are easy to confuse (verbosity vs
+   *  reasoning effort) or whose unset state is not obvious. */
+  function modelParameterHint(def: ModelParameterDef): string {
+    switch (def.key) {
+      case 'max_tokens':
+        return "Caps how many tokens the model may generate in one reply. With Force max off, the model's own maximum is used (∞).";
+      case 'seed':
+        return 'Makes sampling repeatable: the same prompt and seed tend to produce the same output. Some providers ignore it.';
+      case 'verbosity':
+        return 'Controls how long and detailed replies are. It is not reasoning effort: verbosity changes the answer, while thinking controls how much the model deliberates before answering.';
+      default:
+        return def.description;
+    }
+  }
+
   function reasoningLabel(value: string): string {
     const config = effectiveReasoningConfig(currentProvider, currentModel);
     if (config) {
@@ -4237,6 +4339,14 @@
                             >
                               <span class="min-w-0 flex-1 truncate">
                                 {model.name}
+                                {#if model.provider === 'freebuff' && freebuffModelDetailLine(model)}
+                                  <span
+                                    class="block truncate text-[11px] font-normal"
+                                    style="color: var(--color-text-muted);"
+                                  >
+                                    {freebuffModelDetailLine(model)}
+                                  </span>
+                                {/if}
                                 {#if model.fusion}
                                   <span
                                     class="block truncate text-[11px] font-normal"
@@ -4790,7 +4900,69 @@
                     class="px-4 py-2"
                     style="border-bottom: 1px solid color-mix(in srgb, var(--color-border) 45%, transparent);"
                   >
-                    {#if bounded}
+                    {#if def.key === 'max_tokens'}
+                      <div class="flex items-center gap-3">
+                        <div class="shrink-0">
+                          <SettingsSwitch
+                            checked={overridden}
+                            label="Force max"
+                            description="Force an explicit maximum output-token limit."
+                            minimal
+                            compact
+                            quiet
+                            onchange={() =>
+                              overridden
+                                ? resetModelParameter(def.key)
+                                : setModelParameter(def.key, def.max ?? 1)}
+                          />
+                        </div>
+                        <div class="flex min-w-0 flex-1 items-center gap-1.5">
+                          <span
+                            class="text-xs font-medium {overridden
+                              ? 'text-[var(--color-accent)]'
+                              : 'text-[var(--color-text-primary)]'}">{def.label}</span
+                          >
+                          <span
+                            class="inline-flex shrink-0 cursor-help items-center text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text-primary)]"
+                            role="img"
+                            aria-label={modelParameterHint(def)}
+                            title={modelParameterHint(def)}
+                          >
+                            <Info size={12} />
+                          </span>
+                          <span
+                            class="font-mono text-xs tabular-nums {overridden
+                              ? 'text-[var(--color-accent)]'
+                              : 'text-[var(--color-text-muted)]'}"
+                          >
+                            {overridden ? modelParameterFormattedValue(def) : '∞'}
+                          </span>
+                        </div>
+                      </div>
+                      <div
+                        class="mt-1 text-[11px] leading-snug line-clamp-2"
+                        style="color: var(--color-text-muted);"
+                      >
+                        {def.description}
+                      </div>
+                      {#if overridden}
+                        <div class="mt-2">
+                          <KorySlider
+                            id={`model-param-${def.key}`}
+                            label="Limit"
+                            description=""
+                            displayValue={modelParameterFormattedValue(def)}
+                            valueTone="accent"
+                            value={modelParameterNumber(def)}
+                            min={def.min!}
+                            max={def.max!}
+                            step={def.step ?? 1}
+                            onchange={(v) => setModelParameter(def.key, v)}
+                            compact
+                          />
+                        </div>
+                      {/if}
+                    {:else if bounded}
                       <KorySlider
                         id={`model-param-${def.key}`}
                         label={def.label}
@@ -4806,11 +4978,19 @@
                       />
                     {:else if def.kind === 'enum'}
                       <div
-                        class="text-xs font-medium {overridden
+                        class="flex items-center gap-1.5 text-xs font-medium {overridden
                           ? 'text-[var(--color-accent)]'
                           : 'text-[var(--color-text-primary)]'}"
                       >
-                        {def.label}
+                        <span>{def.label}</span>
+                        <span
+                          class="inline-flex shrink-0 cursor-help items-center text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text-primary)]"
+                          role="img"
+                          aria-label={modelParameterHint(def)}
+                          title={modelParameterHint(def)}
+                        >
+                          <Info size={12} />
+                        </span>
                       </div>
                       <div
                         class="mt-1.5 flex rounded-lg p-0.5"
@@ -4849,11 +5029,19 @@
                     {:else}
                       <div class="flex items-center justify-between gap-3">
                         <span
-                          class="shrink-0 whitespace-nowrap text-xs font-medium {overridden
+                          class="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs font-medium {overridden
                             ? 'text-[var(--color-accent)]'
                             : 'text-[var(--color-text-primary)]'}"
                         >
-                          {def.label}
+                          <span>{def.label}</span>
+                          <span
+                            class="inline-flex shrink-0 cursor-help items-center text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text-primary)]"
+                            role="img"
+                            aria-label={modelParameterHint(def)}
+                            title={modelParameterHint(def)}
+                          >
+                            <Info size={12} />
+                          </span>
                         </span>
                         <NumberStepper
                           value={modelParameterNumber(def)}
@@ -4877,10 +5065,7 @@
                 {/each}
               </div>
               {#if modelParameterOverrideCount > 0}
-                <div
-                  class="flex items-center justify-end px-4 py-2"
-                  style="border-top: 1px solid var(--color-border);"
-                >
+                <div class="flex items-center justify-end px-4 py-2">
                   <button
                     type="button"
                     class="text-xs font-medium transition-colors hover:brightness-125"
@@ -5053,6 +5238,14 @@
         {#if value.length > 0}
           <span class="text-xs text-[var(--color-text-muted)]" data-collapse-rank="1"
             >{value.length} chars</span
+          >
+        {/if}
+        {#if freebuffTurnCountdown}
+          <span
+            class="min-w-[5rem] shrink-0 whitespace-nowrap text-right text-xs tabular-nums text-[var(--color-text-muted)]"
+            data-collapse-rank="2"
+            title="Freebuff session time remaining"
+            data-testid="freebuff-turn-countdown">{freebuffTurnCountdown} left</span
           >
         {/if}
         <div class="flex shrink-0 items-center gap-0.5 reference-picker">

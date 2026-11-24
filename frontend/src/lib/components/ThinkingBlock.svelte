@@ -29,7 +29,7 @@
 
   // Providers often terminate thoughts with several newlines. With pre-wrap,
   // those become empty line boxes even after the thought has finished.
-  const reasoningText = $derived(text.trim());
+  const reasoningText = $derived((typeof text === 'string' ? text : '').trim());
   // svelte-ignore state_referenced_locally
   let expanded = $state(defaultExpanded);
   let panelEl = $state<HTMLDivElement>();
