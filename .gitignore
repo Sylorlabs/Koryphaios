@@ -92,3 +92,15 @@ koryphaios.json
 # Crash dumps and scratch build output (not source)
 /outputs/skill-library-finish-plan/at-runtime/core
 /.kory-tmp/**/target/
+
+# Generated evaluation evidence, run markers and screenshots (not source).
+# Keep outputs/skill-library-finish-plan/skill-gate.ts tracked; the overnight
+# campaign logs and pair/blind-review trees are reproducible artifacts.
+/outputs/skill-v5-pairs/
+/outputs/skill-v5-blind-review/
+/outputs/skill-library-finish-plan/overnight/
+/outputs/*.pid
+/outputs/source-refresh-*.json
+/freebuff-picker-e2e.png
+/freebuff-card-hours.png
+/flash-fast-badge.png
