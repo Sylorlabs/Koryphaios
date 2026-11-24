@@ -96,7 +96,10 @@ export type WSEventType =
   // App-wide checklists
   | 'checklists.updated'
   // Native CLI slash command output (attributed to a CLI provider harness)
-  | 'native.command';
+  | 'native.command'
+  // Integrated terminal (PTY). Session-scoped; live only, restored from scrollback.
+  | 'terminal.output'
+  | 'terminal.exit';
 
 export type RemoteProtocolOperationState =
   | 'queued'
@@ -160,6 +163,10 @@ export type WSMessagePayload =
   | RunSettledPayload
   | StreamUsagePayload
 
+  // Terminal payloads
+  | TerminalOutputPayload
+  | TerminalExitPayload
+
   // Message payloads
   | MessagePendingPayload
   | MessageDeltaPayload
@@ -183,6 +190,8 @@ export type WSMessagePayload =
   // System payloads
   | ErrorPayload
   | NotificationPayload;
+
+import type { TerminalExitPayload, TerminalOutputPayload } from '../terminal';
 
 // Re-export commonly used payload types
 import type {
@@ -289,6 +298,9 @@ export const SESSION_SCOPED_EVENT_TYPES: ReadonlySet<WSEventType> = new Set<WSEv
   'kory.ask_user_resolved',
   'permission.request',
   'permission.response',
+  // Integrated terminal. Never persisted; see backend/src/terminal.
+  'terminal.output',
+  'terminal.exit',
 ]);
 
 /** A WebSocket message whose type is session-scoped. The sessionId is required. */

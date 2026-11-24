@@ -54,6 +54,7 @@ import { spendRoutes } from './routes/v1/spend';
 import { spendCapsRoutes } from './routes/v1/spend-caps';
 import { billingRoutes } from './routes/v1/billing';
 import { processRoutes } from './routes/v1/processes';
+import { terminalRoutes } from './routes/v1/terminals';
 import { notesRoutes } from './routes/v1/notes';
 import { workspaceRoutes } from './routes/v1/workspace';
 import { goalRoutes } from './routes/v1/goals';
@@ -96,6 +97,7 @@ const baseApp = new Elysia()
   .use(spendCapsRoutes)
   .use(billingRoutes)
   .use(processRoutes)
+  .use(terminalRoutes)
   .use(notesRoutes)
   .use(workspaceRoutes)
   .use(goalRoutes)

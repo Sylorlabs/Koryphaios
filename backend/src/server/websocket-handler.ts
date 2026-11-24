@@ -12,6 +12,7 @@ import type {
 } from '@koryphaios/shared';
 import { turnEventFromWSMessage } from '@koryphaios/shared';
 import type { ServerWebSocket } from 'bun';
+import { terminalService } from '../terminal/terminal-service';
 import type { WSManager } from '../ws/ws-manager';
 import type { ISessionStore } from '../stores/session-store';
 import type { IMessageStore } from '../stores/message-store';
@@ -381,6 +382,33 @@ export async function handleWSMessage(
           payload,
           timestamp: Date.now(),
         });
+        break;
+      }
+
+      case 'terminal.input':
+      case 'terminal.resize': {
+        // Keystrokes and resizes reach a shell only from a socket that is
+        // subscribed to the terminal's chat. The shell lookup is per chat.
+        const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : '';
+        const terminalId = typeof msg.terminalId === 'string' ? msg.terminalId : '';
+        if (!sessionId || !terminalId || !wsManager.isClientSubscribedTo(ws.data.id, sessionId)) {
+          serverLog.warn({ clientId: ws.data.id, type: msg.type }, 'Terminal command without chat subscription');
+          break;
+        }
+        const table = kory.peekSessionRuntime(sessionId)?.terminals;
+        if (!table) break;
+        try {
+          if (msg.type === 'terminal.input') {
+            terminalService.write(table, terminalId, msg.data);
+          } else {
+            terminalService.resize(table, terminalId, Number(msg.cols), Number(msg.rows));
+          }
+        } catch (err) {
+          serverLog.warn(
+            { clientId: ws.data.id, terminalId, error: err instanceof Error ? err.message : String(err) },
+            'Terminal command rejected',
+          );
+        }
         break;
       }
 

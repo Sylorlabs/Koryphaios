@@ -266,6 +266,7 @@ export const READ_ONLY_TOOLS = new Set([
   'read_session',
   'search_chats',
   'wait_for_chat',
+  'read_terminal',
   'get_resource_budget',
   'get_model_pricing',
   'get_usage_summary',
@@ -402,6 +403,13 @@ export function decideToolPermission(
   // runs without asking (but the sandbox/bash validator still applies).
   if (policy.toolAllowlist?.includes(toolName)) {
     return { action: 'allow', reason: `Tool '${toolName}' is on the tool allowlist` };
+  }
+
+  // Reading a shell's output is a per-use grant of the user's own terminal.
+  // Ask in every mode, YOLO included. An explicit allowlist entry or per-tier
+  // allow (handled above) is the user's standing consent and wins.
+  if (toolName === 'read_terminal') {
+    return { action: 'ask', reason: "Reading this terminal's output needs your approval" };
   }
 
   // Chat organization is available in every mode, including Plan, without

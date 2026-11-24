@@ -10,6 +10,7 @@ import type { Provider } from '../../providers/types';
 import type { TaskContract } from '../prompts';
 import { AsyncChildLedger, CompareGroupLedger } from '../async-children';
 import type { FallbackStickyState, FallbackTurnState } from '../fallback-chain';
+import type { TerminalSession } from '../../terminal/terminal-session';
 
 export type SkillCollisionChoices = Record<string, 'personal' | 'project'>;
 
@@ -232,6 +233,10 @@ export class SessionRuntime {
    *  uncommitted in-place edits cannot move to the copy. Reset at run claim. */
   mutatedInPlaceThisTurn = false;
 
+  /** This chat's integrated terminals (PTY shells), keyed by terminal id.
+   *  Scoped to the chat by construction; dispose() kills them. */
+  terminals = new Map<string, TerminalSession>();
+
   /** Clears timers and drops per-session state. Aborts nothing: aborts belong
    *  to the operation that owns the controller (the manager clears the title
    *  run before calling dispose). */
@@ -285,6 +290,8 @@ export class SessionRuntime {
     this.workspaceEpoch += 1;
     this.workspaceRebindPending = undefined;
     this.mutatedInPlaceThisTurn = false;
+    for (const terminal of this.terminals.values()) terminal.dispose();
+    this.terminals.clear();
   }
 }
 

@@ -48,6 +48,9 @@ const TERMINAL_EVENT_TYPES = new Set<string>([
   'kory.ask_user_resolved',
   'turn.provider_completed',
   'run.settled',
+  // A shell exiting must reach the UI even under backpressure; output may be dropped
+  // because the client resynchronizes from the scrollback by sequence.
+  'terminal.exit',
 ]);
 
 // Lifecycle events that stop the UI spinner. Under backpressure they are never
@@ -692,6 +695,24 @@ export class WSManager {
     const client = this.clients.get(clientId);
     if (!client) return false;
     return this.deliverToClient(client, message, JSON.stringify(message));
+  }
+
+  /** Live, non-replayed session traffic (terminal output). Delivered only to
+   *  clients subscribed to the session. Never persisted, so a reconnecting client
+   *  restores from the terminal's scrollback instead of replaying the stream. */
+  broadcastEphemeralToSession(sessionId: string, message: WSMessage): void {
+    if (this.erasedSessions.has(sessionId)) return;
+    const stamped = { ...message, sessionId };
+    const data = JSON.stringify(stamped);
+    for (const client of this.clients.values()) {
+      if (client.subscribedSessions.has(sessionId)) this.deliverToClient(client, stamped, data);
+    }
+  }
+
+  /** True when this socket has subscribed to the session and it is not erased. */
+  isClientSubscribedTo(clientId: string, sessionId: string): boolean {
+    const client = this.clients.get(clientId);
+    return !!client && client.subscribedSessions.has(sessionId) && !this.erasedSessions.has(sessionId);
   }
 
   /** Drop subscriptions and queued payloads, then reject stale post-delete events. */

@@ -22,6 +22,7 @@ export * from './critic-mode';
 // ─────────────────────────────────────────────────────────────────────────────
 
 export * from './computer-use';
+export * from './terminal';
 export * from './git-workspace';
 export * from './chat-git';
 export * from './review-comments';

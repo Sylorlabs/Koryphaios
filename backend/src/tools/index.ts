@@ -61,6 +61,7 @@ export { ManageReviewAgentsTool } from './review-agents';
 export { ManageAgentsTool } from './manage-agents';
 export { SendAgentMessageTool, RequestManagerRelayTool, ListAgentMessagesTool } from './messaging';
 export { ListSessionsTool, ReadSessionTool } from './sessions-directory';
+export { ReadTerminalTool } from './terminal-read';
 export { IsolateChatTool, MergeChatBackTool } from './chat-isolation';
 export {
   CreateChatTool,

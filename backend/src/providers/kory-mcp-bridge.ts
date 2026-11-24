@@ -834,6 +834,20 @@ export const KORY_TOOLS: KoryToolDef[] = [
     role: 'any',
   },
   {
+    name: 'kory__read_terminal',
+    description:
+      "Read recent output from one of this chat's integrated terminals (by terminalId). Read-only; the user approves each read unless they have allowed it.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        terminalId: { type: 'string' },
+        lines: { type: 'number' },
+      },
+      required: ['terminalId'],
+    },
+    role: 'any',
+  },
+  {
     name: 'kory__read_session',
     description:
       "Read a chat's transcript by id, including archived chats. Returns the newest page of the active conversation; page older messages with the 'before' cursor.",
