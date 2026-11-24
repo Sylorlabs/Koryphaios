@@ -667,7 +667,7 @@ Write \`.kory-eval/pipeline-cdc.json\` with partition-local event identity/order
 };
 
 const pipelineCdcScorer: SkillEvalDeterministicScorer = {
-  id: 'data-pipeline-engineering/idempotent-cdc-backfill-scorer@3',
+  id: 'data-pipeline-engineering/idempotent-cdc-backfill-scorer@4',
   scenarioIds: [PIPELINE_CDC],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
@@ -722,7 +722,12 @@ test('hidden: event identity spans accepted and quarantined dispositions',()=>{
       /data-analysis/u.test(body) &&
       /analytics-engineering/u.test(body) &&
       /downstream|not owned|not selected|boundary/u.test(body) &&
-      !/arr|funnel|business metric/u.test(body);
+      // Negative guard targets analytics-drift vocabulary (ARR, funnels, business
+      // metrics). It must match the standalone token, not the substring: ordinary
+      // CDC language such as "a backfill arrives later" contains "arr" and must
+      // not fail the boundary criterion. (Scorer @3 failed every report that used
+      // the fixture's own "arrives" phrasing.)
+      !/\barr\b|funnel|business metric/u.test(body);
     const passed =
       hidden.passed && regression && Boolean(artifact) && contract && evidenceBoundary && boundary;
     return {

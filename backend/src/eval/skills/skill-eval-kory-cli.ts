@@ -458,7 +458,11 @@ export const KORY_CLI_SUBSTITUTE_MODEL = 'opencode/opencode/deepseek-v4.1-flash-
 /** Second measured substitute, used when the deepseek free tier is itself rate limited. */
 export const KORY_CLI_SUBSTITUTE_MODEL_FALLBACK = 'opencode/opencode/hy4-flash-free';
 
+/** Operator-named paired subject for the skill qualification campaign (served by the devin CLI provider). */
+export const KORY_CLI_DEVIN_MODEL = 'devin/swe-2';
+
 export const KORY_CLI_APPROVED_MODELS = [
+  KORY_CLI_DEVIN_MODEL,
   KORY_CLI_DEFAULT_MODEL,
   KORY_CLI_FALLBACK_MODEL,
   KORY_CLI_OPERATOR_GLM_MODEL,

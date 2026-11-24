@@ -1364,7 +1364,7 @@ test('candidate may clean generated analysis output', () => {
     )!;
 
     expect(materializer.id).toBe('data-pipeline-engineering/idempotent-cdc-backfill@3');
-    expect(scorer.id).toBe('data-pipeline-engineering/idempotent-cdc-backfill-scorer@3');
+    expect(scorer.id).toBe('data-pipeline-engineering/idempotent-cdc-backfill-scorer@4');
     expect(scenario.prompt).toContain('one Kafka partition (p0)');
     expect(scenario.prompt).toContain(
       'Schema-evolution behavior is exercised separately by scenario 2',
