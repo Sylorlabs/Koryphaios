@@ -138,12 +138,21 @@ export interface ISessionStore {
   restore(id: string): Promise<SharedSession | undefined>;
 }
 
+function sanitizeCreatedByAgent(value: unknown): SharedSession['createdByAgent'] {
+  if (!value || typeof value !== 'object') return undefined;
+  const { sessionId, agentId } = value as { sessionId?: unknown; agentId?: unknown };
+  if (typeof sessionId !== 'string' || typeof agentId !== 'string') return undefined;
+  if (!sessionId.trim() || !agentId.trim()) return undefined;
+  return { sessionId, agentId };
+}
+
 function toSharedSession(s: DbSession): SharedSession {
   let metadata: {
     interactionMode?: 'act' | 'plan';
     planNoteId?: string;
     agentOverrides?: unknown;
     gitWorkspace?: SharedSession['gitWorkspace'];
+    createdByAgent?: unknown;
   } = {};
   try {
     metadata = s.metadata ? JSON.parse(s.metadata) : {};
@@ -165,6 +174,7 @@ function toSharedSession(s: DbSession): SharedSession {
     interactionMode: metadata.interactionMode === 'plan' ? 'plan' : 'act',
     planNoteId: typeof metadata.planNoteId === 'string' ? metadata.planNoteId : undefined,
     agentOverrides: sanitizeSessionAgentOverrides(metadata.agentOverrides),
+    createdByAgent: sanitizeCreatedByAgent(metadata.createdByAgent),
     messageCount: s.messageCount ?? 0,
     totalTokensIn: s.tokensIn ?? 0,
     totalTokensOut: s.tokensOut ?? 0,
@@ -296,7 +306,8 @@ export class SessionStore implements ISessionStore {
       updates.interactionMode !== undefined ||
       updates.planNoteId !== undefined ||
       updates.agentOverrides !== undefined ||
-      updates.gitWorkspace !== undefined
+      updates.gitWorkspace !== undefined ||
+      updates.createdByAgent !== undefined
     ) {
       // Patch the row's current metadata in the UPDATE itself. Reading and
       // serializing it before an await lets concurrent settings writes erase a
@@ -308,6 +319,12 @@ export class SessionStore implements ISessionStore {
         metadata = sql`json_set(${metadata}, '$.interactionMode', ${updates.interactionMode})`;
       if (updates.planNoteId !== undefined)
         metadata = sql`json_set(${metadata}, '$.planNoteId', ${updates.planNoteId})`;
+      if (updates.createdByAgent !== undefined) {
+        const provenance = sanitizeCreatedByAgent(updates.createdByAgent);
+        metadata = provenance
+          ? sql`json_set(${metadata}, '$.createdByAgent', json(${JSON.stringify(provenance)}))`
+          : sql`json_remove(${metadata}, '$.createdByAgent')`;
+      }
       if (updates.gitWorkspace !== undefined)
         metadata =
           updates.gitWorkspace === null

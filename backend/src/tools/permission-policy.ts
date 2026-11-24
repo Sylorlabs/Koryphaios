@@ -261,6 +261,8 @@ export const READ_ONLY_TOOLS = new Set([
   'fetch_context',
   'list_sessions',
   'read_session',
+  'search_chats',
+  'wait_for_chat',
   'get_resource_budget',
   'load_skill_detail',
   'list_notes',
@@ -293,7 +295,23 @@ export const FILE_EDIT_TOOLS = new Set([
  *  chat's work into the shared folder: in YOLO the merge runs without asking,
  *  in every other mode the user approves it first. Explicit block/ask/allow
  *  lists and Plan mode keep their existing precedence (checked earlier). */
-export const APPROVAL_UNLESS_YOLO_TOOLS = new Set(['merge_chat_back']);
+export const APPROVAL_UNLESS_YOLO_TOOLS = new Set([
+  'merge_chat_back',
+  // Agent actions on OTHER chats. An agent never approves these itself: the
+  // ask resolves through the user's approval channel.
+  'create_chat',
+  'send_to_chat',
+  'interrupt_chat',
+  'archive_chat',
+]);
+
+const APPROVAL_UNLESS_YOLO_REASONS: Record<string, string> = {
+  merge_chat_back: "Merging this chat's copy back into the folder needs your approval",
+  create_chat: 'Creating a chat for another agent needs your approval',
+  send_to_chat: 'Sending a message into another chat needs your approval',
+  interrupt_chat: 'Stopping another chat needs your approval',
+  archive_chat: 'Archiving another chat needs your approval',
+};
 
 const RISKY_TOOLS = new Set([
   'computer_click',
@@ -404,7 +422,7 @@ export function decideToolPermission(
   if (APPROVAL_UNLESS_YOLO_TOOLS.has(toolName)) {
     return {
       action: 'ask',
-      reason: "Merging this chat's copy back into the folder needs your approval",
+      reason: APPROVAL_UNLESS_YOLO_REASONS[toolName] ?? 'This action needs your approval',
     };
   }
   if (policy.mode === 'sub-agent-user') {

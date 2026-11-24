@@ -30,6 +30,7 @@ import {
   restoreSessionCoordinated,
 } from '../../services/session-archive-service';
 import { forkSessionAtMessage } from '../../services/session-fork-service';
+import { stopChatRun } from '../../services/chat-run-control';
 import { projectRootFromRequest } from '../../runtime/source-control-scope';
 import { sourceControlService } from '../../services/source-control-service';
 
@@ -332,29 +333,11 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     '/:id/cancel',
     async ({ request, params: { id }, body }) => {
       if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
-      const { kory, wsManager } = getContext();
       const steering = body?.purpose === 'steer';
-      // Stop the turn first. Goal bookkeeping and queued-job cleanup are
-      // follow-up work; they must never delay the user's stop response.
-      await kory.cancelSessionWorkers(id);
-      void getContext()
-        .goalDriver.pauseForSession(id)
-        .catch(() => undefined);
-      void import('../../queue/workers/llm-worker')
-        .then(({ cancelLLMJobsForSession }) => cancelLLMJobsForSession(id))
-        .catch(() => undefined);
-      // A steer is an intentional cancel-and-continuation handoff. Do not put a
-      // visible "Session cancelled" banner between the partial response and the
-      // replacement instruction; the authoritative run.state still records the
-      // old run as cancelled before the new run is admitted.
-      if (!steering) {
-        wsManager.broadcastToSession(id, {
-          type: 'system.info',
-          payload: { message: 'Session cancelled' },
-          timestamp: Date.now(),
-          sessionId: id,
-        });
-      }
+      // A steer is an intentional cancel-and-continuation handoff: no visible
+      // "Session cancelled" banner between the partial response and the
+      // replacement instruction. Shared with the agent interrupt_chat tool.
+      await stopChatRun(id, { steering });
       return { ok: true, message: steering ? 'Session ready for steering' : 'Session cancelled' };
     },
     {
