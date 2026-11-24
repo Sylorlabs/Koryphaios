@@ -4,6 +4,10 @@ import type { AgentIdentity, AgentStatus } from '@koryphaios/shared';
 
 import WorkerCard from './WorkerCard.svelte';
 
+vi.mock('$lib/stores/agents.svelte', () => ({
+  agentStore: { getAgentSteeringQueue: () => [], getAgentCurrentTool: () => undefined },
+}));
+
 function agent(overrides: Record<string, unknown> = {}) {
   return {
     identity: {
@@ -108,5 +112,21 @@ describe('sub-agent cards are a single compact row', () => {
 
     expect(screen.getByRole('button', { name: 'Close Critic' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Stop and close/ })).toBeNull();
+  });
+
+  it('is announced by name and status, while the model stays in the tooltip', () => {
+    const { container } = card(agent());
+    const tab = container.querySelector('.agent-seg')!;
+
+    // The accessible name used to be the provider/model tooltip, so a screen
+    // reader heard "Commandcode xiaomi/…" and never the agent's name.
+    expect(tab.getAttribute('aria-label')).toBe('Critic, Thinking');
+    expect(tab.getAttribute('aria-label')).not.toContain('xiaomi');
+    expect(tab.getAttribute('data-status')).toBe('thinking');
+  });
+
+  it('says Stopped, not Done, for a worker the user cancelled', () => {
+    const { container } = card(agent({ status: 'done', stopReason: 'cancelled' }));
+    expect(container.querySelector('.agent-seg')!.getAttribute('aria-label')).toBe('Critic, Stopped');
   });
 });

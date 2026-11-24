@@ -4,6 +4,7 @@
   import { fly } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import { tick } from 'svelte';
+  import { prefersReducedMotion } from 'svelte/motion';
   import type { AgentRailState } from './useAgentRail.svelte';
 
   let {
@@ -26,9 +27,13 @@
   let hasActiveAgents = $derived(
     rail.sessionAgentChats.some((agent) => !['done', 'idle', 'error'].includes(agent.status)),
   );
+  // The strip holds what still needs attention: live and parked workers, and
+  // failed ones until the user dismisses them. A failure that vanished from
+  // the strip the moment it happened was only discoverable in Activity.
   let activeAgentChats = $derived(
-    rail.sessionAgentChats.filter((agent) => !['done', 'idle', 'error'].includes(agent.status)),
+    rail.sessionAgentChats.filter((agent) => !['done', 'idle'].includes(agent.status)),
   );
+  const motion = (duration: number) => (prefersReducedMotion.current ? 0 : duration);
   let selectedId = $derived(rail.selectedAgentId ?? '__main');
 
   $effect(() => {
@@ -43,9 +48,38 @@
   let stripEl = $state<HTMLDivElement | undefined>();
   let hlStyle = $state('opacity:0');
 
+  // Only fade the edges that actually have hidden segments behind them. A
+  // permanent mask faded the "Main chat" label even when nothing scrolled.
+  let overflowLeft = $state(false);
+  let overflowRight = $state(false);
+  /** Agent tabs entirely past the right edge: counted so a crowded strip says
+   *  how much is hidden instead of silently clipping it under a fade. */
+  let hiddenRight = $state(0);
+  function syncOverflow() {
+    if (!stripEl) return;
+    const max = stripEl.scrollWidth - stripEl.clientWidth;
+    overflowLeft = stripEl.scrollLeft > 1;
+    overflowRight = max - stripEl.scrollLeft > 1;
+    const edge = stripEl.getBoundingClientRect().right;
+    hiddenRight = overflowRight
+      ? [...stripEl.querySelectorAll<HTMLElement>('[data-seg-id]')].filter(
+          (seg) => seg.getBoundingClientRect().left >= edge - 8,
+        ).length
+      : 0;
+  }
+
+  function revealHidden() {
+    if (!stripEl) return;
+    stripEl.scrollBy({
+      left: stripEl.clientWidth * 0.8,
+      behavior: prefersReducedMotion.current ? 'auto' : 'smooth',
+    });
+  }
+
   async function syncHighlight() {
     await tick();
     if (!stripEl) return;
+    syncOverflow();
     const seg =
       selectedId === '__main'
         ? stripEl.querySelector<HTMLElement>('[data-seg-main]')
@@ -68,12 +102,30 @@
     void syncHighlight();
   });
 
+  // A segment changes width without the selection changing: a queue badge
+  // appears, a name is renamed, a fly-in finishes. Follow its geometry so the
+  // highlight never sits half off the tab it marks.
+  $effect(() => {
+    const el = stripEl;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => void syncHighlight());
+    observer.observe(el);
+    for (const seg of el.querySelectorAll('[role="tab"]')) observer.observe(seg);
+    void activeAgentChats.length;
+    return () => observer.disconnect();
+  });
+
   function onStripKeydown(event: KeyboardEvent) {
     const tabs = stripEl
       ? [...stripEl.querySelectorAll<HTMLElement>('[role="tab"]')]
       : [];
     const idx = tabs.indexOf(document.activeElement as HTMLElement);
     if (idx < 0) return;
+    if (event.key === 'Home' || event.key === 'End') {
+      event.preventDefault();
+      (event.key === 'Home' ? tabs[0] : tabs[tabs.length - 1])?.focus();
+      return;
+    }
     if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
       event.preventDefault();
       const next =
@@ -109,6 +161,9 @@
         data-testid="active-agent-tabs"
         bind:this={stripEl}
         onkeydown={onStripKeydown}
+        onscroll={syncOverflow}
+        data-overflow-left={overflowLeft || undefined}
+        data-overflow-right={overflowRight || undefined}
       >
         <div class="seg-highlight" style={hlStyle} aria-hidden="true"></div>
         <button
@@ -122,18 +177,20 @@
           onclick={() => rail.clearSelection()}
           title="Return to the manager chat and review the full session"
           aria-label="Main chat"
-          in:fly={{ x: -28, duration: 380, easing: cubicOut }}
+          in:fly={{ x: -28, duration: motion(380), easing: cubicOut }}
         >
           <span class="seg-name">Main chat</span>
         </button>
 
         {#each activeAgentChats as agent, i (agent.identity.id)}
-          <span class="seg-divider" aria-hidden="true"></span>
+          <!-- The divider travels with its segment: left outside, it stayed
+               behind as an orphan bar while the segment flew out. -->
           <div
-            class="contents-fly flex shrink-0 h-full"
-            in:fly={{ x: -28, duration: 280, delay: i * 60, easing: cubicOut }}
-            out:fly={{ x: -12, duration: 180, easing: cubicOut }}
+            class="contents-fly flex shrink-0 h-full items-center"
+            in:fly={{ x: -28, duration: motion(280), delay: motion(Math.min(i, 5) * 60), easing: cubicOut }}
+            out:fly={{ x: -12, duration: motion(180), easing: cubicOut }}
           >
+            <span class="seg-divider" aria-hidden="true"></span>
             <WorkerCard
               {agent}
               status={agent.status}
@@ -147,6 +204,15 @@
         {/each}
       </div>
 
+      {#if hiddenRight > 0}
+        <button
+          type="button"
+          class="more-tabs tabular-nums"
+          onclick={revealHidden}
+          aria-label={`Scroll to ${hiddenRight} more ${hiddenRight === 1 ? 'agent' : 'agents'}`}
+          title={`${hiddenRight} more ${hiddenRight === 1 ? 'agent' : 'agents'}`}
+        >+{hiddenRight}</button>
+      {/if}
       <AgentActivity {rail} expanded={visible} />
     </div>
   </div>
@@ -165,21 +231,29 @@
     background: var(--color-surface-2);
     overflow-x: auto;
     scrollbar-width: none;
-    /* Soft fades at the scroll edges. */
+    --fade-left: 0px;
+    --fade-right: 0px;
+    /* Soft fades only on an edge with hidden segments behind it. */
     mask-image: linear-gradient(
       to right,
       transparent 0,
-      #000 14px,
-      #000 calc(100% - 14px),
+      #000 var(--fade-left),
+      #000 calc(100% - var(--fade-right)),
       transparent 100%
     );
     -webkit-mask-image: linear-gradient(
       to right,
       transparent 0,
-      #000 14px,
-      #000 calc(100% - 14px),
+      #000 var(--fade-left),
+      #000 calc(100% - var(--fade-right)),
       transparent 100%
     );
+  }
+  .agent-strip[data-overflow-left] {
+    --fade-left: 18px;
+  }
+  .agent-strip[data-overflow-right] {
+    --fade-right: 18px;
   }
   .agent-strip::-webkit-scrollbar {
     display: none;
@@ -209,8 +283,10 @@
     cursor: pointer;
     white-space: nowrap;
   }
+  /* Accent alone is a pale gold on the light theme; mixing it toward the
+     text colour keeps the selected label legible in both. */
   .agent-seg.selected {
-    color: var(--color-accent);
+    color: color-mix(in srgb, var(--color-accent) 70%, var(--color-text-primary));
   }
   .agent-seg:focus-visible {
     outline: 2px solid var(--color-accent);
@@ -219,6 +295,20 @@
   }
   .seg-name {
     font-weight: 600;
+  }
+  .more-tabs {
+    flex-shrink: 0;
+    min-width: 26px;
+    height: 22px;
+    padding: 0 6px;
+    border-radius: var(--radius-sm);
+    color: var(--color-text-secondary);
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .more-tabs:hover {
+    background: var(--color-surface-2);
+    color: var(--color-text-primary);
   }
   .seg-divider {
     width: 1px;

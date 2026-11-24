@@ -485,8 +485,8 @@
           <span
             class="text-xs font-medium leading-none whitespace-nowrap"
             style="color: var(--color-text-secondary);"
-            >{activeAgents.length}<span class="titlebar-wide-label">
-              agent{activeAgents.length !== 1 ? 's' : ''}</span
+            >{activeAgents.length}<span class="titlebar-wide-label"
+              >{' '}agent{activeAgents.length !== 1 ? 's' : ''}</span
             ></span
           >
           <ChevronDown
