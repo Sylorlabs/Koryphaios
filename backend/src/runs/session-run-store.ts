@@ -162,6 +162,10 @@ export interface SessionTurnCommandRecord extends SessionTurnCommandIdentity {
  * durably written. Such a command had no provider side effect, so a retry with
  * the same canonical input may reclaim the receipt instead of replaying the failure.
  */
+/** Terminal reason a run carries when a backend restart cut it off. Frontend
+ *  surfaces key the Resume row on this exact string. */
+export const BACKEND_RESTART_INTERRUPTED_REASON = 'backend_restarted_during_active_run';
+
 export const SESSION_TURN_INPUT_NOT_PERSISTED_REASON = 'command_input_persistence_failed';
 
 export function isSessionTurnInputNotPersistedFailure(command: SessionTurnCommandRecord): boolean {
@@ -1434,6 +1438,28 @@ export class SessionRunStore {
 
   listActive(): SessionRunSnapshot[] {
     return this.listByStatus('active');
+  }
+
+  /** Runs terminalized by a backend restart (the durable interrupted record). */
+  listInterruptedRuns(limit = 100): SessionRunSnapshot[] {
+    return this.sqlite
+      .query<SessionRunRow, [string, number]>(
+        `SELECT * FROM session_runs
+         WHERE status = 'terminal' AND terminal_reason = ?
+         ORDER BY updated_at DESC LIMIT ?`,
+      )
+      .all(BACKEND_RESTART_INTERRUPTED_REASON, handoffLimit(limit))
+      .map(fromRow);
+  }
+
+  /** The command ledger row that owns a run, if the run was admitted through one. */
+  getSessionTurnCommandByRunId(runId: string): SessionTurnCommandRecord | null {
+    const row = this.sqlite
+      .query<SessionTurnCommandRow, [string]>(
+        'SELECT * FROM session_turn_commands WHERE run_id = ?',
+      )
+      .get(runId);
+    return row ? sessionTurnCommandFromRow(row) : null;
   }
 
   listWaiting(phase?: SessionRunWaitingPhase): SessionRunSnapshot[] {

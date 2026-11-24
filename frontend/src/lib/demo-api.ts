@@ -365,6 +365,7 @@ let demoAgentSettings = {
   confirmRuleViolations: true,
   autoRunTools: true,
   allowExternalPaths: false,
+  resumeInterruptedRuns: true,
   managerModelAccess: {},
   managerNotes: {},
   agentMemoryEnabled: true,

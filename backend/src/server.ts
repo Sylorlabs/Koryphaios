@@ -20,6 +20,7 @@ import { VERSION, ID, RATE_LIMIT, COMPAT, SECURITY } from './constants';
 import { RateLimiter } from './security/rate-limit';
 import { addCorsOrigins } from './security';
 import { PROJECT_ROOT } from './runtime/paths';
+import { resumeInterruptedRunsEnabled } from './runs/resume-setting';
 import { clearStartupStatus, markStartupReady, reportStartupPhase } from './runtime/startup-status';
 import { resolveBundleHash, isBundleHashEnforced } from './config/compat';
 import { createWebSocketHandlers } from './server/websocket-handler';
@@ -551,7 +552,9 @@ async function main() {
       // Freeze local lifecycle writers first. Durable user/process waits survive
       // restart; only provider/compaction work that cannot survive is failed.
       await kory.shutdown();
-      await runs.recoverInterruptedRuns();
+      await runs.recoverInterruptedRuns({
+        resumeInterruptedRuns: resumeInterruptedRunsEnabled(PROJECT_ROOT),
+      });
       await runs.drainOutbox();
       runs.stopOutboxPump();
       await stopRemoteInstanceHost();

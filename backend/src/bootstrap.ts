@@ -191,7 +191,10 @@ export async function bootstrap(): Promise<AppContext> {
       'Failed closed orphaned authoritative session-run waits',
     );
   }
-  const interruptedRuns = await runs.recoverInterruptedRuns();
+  // Interrupted runs are marked durably; the continuation (if the user enabled
+  // resumeInterruptedRuns) is admitted once the manager exists, below.
+  const resumeInterruptedRuns = resumeInterruptedRunsEnabled(PROJECT_ROOT);
+  const interruptedRuns = await runs.recoverInterruptedRuns({ resumeInterruptedRuns });
   if (interruptedRuns > 0) {
     serverLog.warn({ count: interruptedRuns }, 'Recovered interrupted authoritative session runs');
   }
@@ -266,6 +269,16 @@ export async function bootstrap(): Promise<AppContext> {
     serverLog.info(recoveredQuestionHandoffs, 'Reconciled durable answered-question handoffs');
   }
   await goalDriver.recover();
+  // Admit one host-authored continuation per run a restart interrupted. Runs
+  // through the normal turn admission, so a busy chat defers it to the next boot.
+  const restartResumes = await admitPendingRunResumes(
+    runs,
+    (sessionId, sourceRunId) => kory.admitRestartContinuation(sessionId, sourceRunId),
+    { enabled: resumeInterruptedRuns },
+  );
+  if (restartResumes.admitted + restartResumes.skipped + restartResumes.deferred > 0) {
+    serverLog.info(restartResumes, 'Reconciled restart continuations of interrupted runs');
+  }
   // Arm persisted monitors only after recovery has settled, so a due monitor
   // cannot race startup recovery with a new session turn.
   await configureMonitors({
@@ -332,6 +345,8 @@ import { configureAgentMail } from './kory/services/agent-mail-service';
 import { configureSessionsDirectory } from './tools/sessions-directory';
 import { configureChatIsolation } from './tools/chat-isolation';
 import { configureMonitors } from './kory/services/monitor-service';
+import { admitPendingRunResumes } from './runs/restart-resume';
+import { resumeInterruptedRunsEnabled } from './runs/resume-setting';
 
 /** Build the authoritative runtime tool registry without starting the backend. */
 export async function initTools(providers: ProviderRegistry) {

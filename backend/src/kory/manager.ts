@@ -175,7 +175,15 @@ import {
   formatMessagesForCritic as formatMessagesForCriticUtil,
 } from './critic-util';
 import type { WorkerPipelineHost, WorkerPipelineOutcome } from './services/WorkerPipelineService';
-import type { SessionRunCoordinator } from '../runs/session-run-coordinator';
+import {
+  RESTART_RESUME_SOURCE_PREFIX,
+  type SessionRunCoordinator,
+} from '../runs/session-run-coordinator';
+import {
+  continuationMarkerText,
+  renderRestartContinuationPrompt,
+  renderUsageLimitContinuationPrompt,
+} from '../runs/continuation-prompt';
 import { ManagerRunLifecycle, type ManagerRunHandle } from './services/ManagerRunLifecycle';
 import { TurnRuntime } from './services/TurnRuntime';
 import type { OutputLoopDetection } from './output-loop-detector';
@@ -594,11 +602,22 @@ export interface SessionTurnResult {
   readonly reason: string | null;
 }
 
+/**
+ * Host-authored continuation. The instruction is sent to the provider as the
+ * turn's input, and the transcript records a system marker instead of a
+ * user-role row, so the continuation is never presented as something the user
+ * typed.
+ */
+export type HostContinuation =
+  | { kind: 'restart_resume'; interruptedRunId: string }
+  | { kind: 'usage_limit_resume'; pendingResumeId: string; attempt: number };
+
 export interface SessionTurnCommandInput extends AdmittedTaskInput {
   sessionId: string;
   source: 'goal' | 'collaboration' | 'internal' | 'user';
   /** Stable source-owned identity. Reusing it never replays an interrupted turn. */
   sourceCommandId: string;
+  hostContinuation?: HostContinuation;
 }
 
 /**
@@ -3298,9 +3317,18 @@ export class KoryManager implements WorkerPipelineHost {
       fusion: input.fusion,
       imageInputMode: input.imageInputMode ?? 'reject',
       regenerationBranch: input.regenerationBranch ?? null,
+      // Absent for ordinary turns, so their canonical hash (and idempotent
+      // replay) is unchanged. A continuation binds its own identity.
+      ...(input.hostContinuation ? { hostContinuation: input.hostContinuation } : {}),
     });
+    // A host continuation's transcript row is a system marker; every other turn
+    // persists the user's own row.
+    const commandRole: StoredMessage['role'] = input.hostContinuation ? 'system' : 'user';
+    const commandContent = input.hostContinuation
+      ? continuationMarkerText(input.hostContinuation.kind === 'restart_resume' ? 'restart' : 'usage_limit')
+      : input.userMessage;
     const matchesCommandUser = (message: StoredMessage | undefined): boolean => {
-      if (!message || message.role !== 'user' || message.content !== input.userMessage)
+      if (!message || message.role !== commandRole || message.content !== commandContent)
         return false;
       const stored = message.attachments ?? [];
       const expected = commandAttachments ?? [];
@@ -3621,8 +3649,8 @@ export class KoryManager implements WorkerPipelineHost {
       const inserted = await this.messages.addIdempotent(input.sessionId, {
         id: command.userMessageId,
         sessionId: input.sessionId,
-        role: 'user',
-        content: input.userMessage,
+        role: commandRole,
+        content: commandContent,
         attachments: commandAttachments,
         createdAt: Date.now(),
       });
@@ -3646,9 +3674,12 @@ export class KoryManager implements WorkerPipelineHost {
       await this.rejectSessionTurn(admission, SESSION_TURN_INPUT_NOT_PERSISTED_REASON);
       throw error;
     }
+    // A continuation's instruction is not in the transcript (its marker row is),
+    // so the provider turn appends it as an input-only message, the same way an
+    // internal turn that persisted nothing does.
     const completion = this.dispatchAdmittedTask(admission, {
       ...input,
-      inputAlreadyPersisted: true,
+      inputAlreadyPersisted: input.hostContinuation ? false : true,
       responseMessageId: command.responseMessageId,
     });
     return {
@@ -3658,6 +3689,57 @@ export class KoryManager implements WorkerPipelineHost {
       userMessageId: command.userMessageId,
       completion,
     };
+  }
+
+  /**
+   * Admit the host-authored continuation of a run that a backend restart
+   * interrupted. The command id is derived from the interrupted run, so a
+   * repeated admission replays the same receipt instead of starting a second
+   * turn. The partial output is the interrupted turn's own persisted parts.
+   */
+  async admitRestartContinuation(
+    sessionId: string,
+    sourceRunId: string,
+  ): Promise<SessionTurnSubmission> {
+    const owner = this.runs?.getSessionTurnCommandForRun(sourceRunId) ?? null;
+    const partial =
+      owner && this.messages
+        ? await this.messages.getById(sessionId, owner.responseMessageId)
+        : undefined;
+    return this.startSessionTurn({
+      sessionId,
+      source: 'internal',
+      sourceCommandId: `${RESTART_RESUME_SOURCE_PREFIX}${sourceRunId}`,
+      userMessage: renderRestartContinuationPrompt(partial?.parts),
+      preferredModel: partial?.model,
+      hostContinuation: { kind: 'restart_resume', interruptedRunId: sourceRunId },
+    });
+  }
+
+  /** Admit a host-authored continuation after a provider usage limit reset. */
+  async admitUsageLimitContinuation(input: {
+    sessionId: string;
+    pendingResumeId: string;
+    attempt: number;
+    responseMessageId?: string;
+    preferredModel?: string;
+  }): Promise<SessionTurnSubmission> {
+    const partial =
+      input.responseMessageId && this.messages
+        ? await this.messages.getById(input.sessionId, input.responseMessageId)
+        : undefined;
+    return this.startSessionTurn({
+      sessionId: input.sessionId,
+      source: 'internal',
+      sourceCommandId: `usage-resume-${input.pendingResumeId}-${input.attempt}`,
+      userMessage: renderUsageLimitContinuationPrompt(partial?.parts),
+      preferredModel: input.preferredModel ?? partial?.model,
+      hostContinuation: {
+        kind: 'usage_limit_resume',
+        pendingResumeId: input.pendingResumeId,
+        attempt: input.attempt,
+      },
+    });
   }
 
   async submitSessionTurn(input: SessionTurnCommandInput): Promise<SessionTurnResult> {

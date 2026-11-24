@@ -67,6 +67,10 @@ export interface AgentSettings {
    *  (external drives, mounted volumes). Off by default. */
   allowExternalPaths: boolean;
 
+  /** After a backend restart interrupts a running turn, admit one host-authored
+   *  continuation of it. Stopped-by-user turns never resume. */
+  resumeInterruptedRuns: boolean;
+
   /** Per-category model allowlist for the manager's routing. Key = worker
    *  domain ('general' | 'ui' | 'frontend' | 'backend' | 'review' | 'test'
    *  | 'critic'); value = provider:model identities the manager may pick for
@@ -271,6 +275,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   worktreeMode: 'auto',
   preferencesEnabled: true,
   allowExternalPaths: false,
+  resumeInterruptedRuns: true,
   managerModelAccess: {},
   managerNotes: {},
   criticGateEnabled: true,
